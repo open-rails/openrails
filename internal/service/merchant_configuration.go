@@ -76,6 +76,9 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 	if params.ExpectedRevision != nil && *params.ExpectedRevision < 0 {
 		return nil, apperr.Invalidf("expected_revision must not be negative").WithParam("expected_revision")
 	}
+	if err := s.refuseUsageSettings(params.MerchantSettings); err != nil {
+		return nil, err
+	}
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err

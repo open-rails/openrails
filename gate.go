@@ -34,6 +34,9 @@ type Gate struct {
 
 	mu     sync.Mutex
 	closed bool
+	// noStore is the server's event_store_required: every later Admit fails
+	// with it.
+	noStore error
 }
 
 // GateDeps is what a Gate keeps beyond its process. Nothing tunes timing,
@@ -73,11 +76,15 @@ func newLeaseID() billing.LeaseID { return billing.LeaseID(uuid.Must(uuid.NewV7(
 
 // NewGate starts a gate over c, a remote or embedded merchant handle acting
 // as itself: a gate serves every request, so a handle made with ActingFor is
-// refused. Its lease is created on the first sync.
+// refused. Its lease is created on the first sync. An engine without the
+// event store (Deps.ClickHouse) is billing.ErrEventStoreRequired; over HTTP
+// the first sync's event_store_required fails every Admit.
 func NewGate(c *Client, deps GateDeps) (*Gate, error) {
 	switch {
 	case c == nil:
 		return nil, fmt.Errorf("openrails: NewGate needs a merchant handle")
+	case c.engine != nil && c.engine.App.Runtime.EventStore == nil:
+		return nil, billing.ErrEventStoreRequired
 	case c.invoker != nil:
 		return nil, fmt.Errorf("openrails: NewGate needs the merchant's own handle, not one made with ActingFor")
 	}
@@ -87,6 +94,25 @@ func NewGate(c *Client, deps GateDeps) (*Gate, error) {
 		g.g.ensureStarted()
 	}
 	return g, nil
+}
+
+// keepNoStore keeps err when it is event_store_required, and returns it.
+func (g *Gate) keepNoStore(err error) error {
+	if errors.Is(err, billing.ErrEventStoreRequired) {
+		g.mu.Lock()
+		if g.noStore == nil {
+			g.noStore = err
+		}
+		g.mu.Unlock()
+	}
+	return err
+}
+
+// keptNoStore is the event_store_required a sync answered, or nil.
+func (g *Gate) keptNoStore() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.noStore
 }
 
 func (g *Gate) isClosed() bool {
@@ -105,10 +131,14 @@ func (g *Gate) Admit(ctx context.Context, p billing.AdmitParams) (*Ticket, error
 	if g.isClosed() {
 		return nil, errGateClosed
 	}
+	if err := g.keptNoStore(); err != nil {
+		return nil, err
+	}
 	if err := normalizeGateAdmit(&p); err != nil {
 		return nil, err
 	}
-	return g.g.admit(ctx, g, p)
+	t, err := g.g.admit(ctx, g, p)
+	return t, g.keepNoStore(err)
 }
 
 // Consume admits a request whose cost is known and captures it at once with

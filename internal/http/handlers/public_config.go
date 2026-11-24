@@ -87,7 +87,7 @@ func GetCustomerConfig(r *httprequest.Request) {
 // PublicConfigDocument is GET /v1/config on a mount reporting capabilities:
 // the configuration every merchant of the deployment shares.
 func PublicConfigDocument(rt *app.Runtime, capabilities billing.Capabilities) billing.PublicConfig {
-	doc := billing.PublicConfig{Capabilities: capabilities, Currencies: catalog.Currencies(), Rails: merchants.RailDefinitions()}
+	doc := billing.PublicConfig{Capabilities: capabilities, Currencies: catalog.Currencies(), Rails: merchants.RailDefinitions(), Usage: rt != nil && rt.EventStore != nil}
 	if rt != nil && rt.Config != nil && config.CaptchaEnabled(rt.Config.Captcha) {
 		cfg := rt.Config.Captcha
 		doc.Captcha = &billing.CaptchaConfig{

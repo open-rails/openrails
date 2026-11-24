@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 )
 
@@ -34,6 +35,9 @@ type CatalogApplyOptions struct {
 	Manifest             []byte
 	// Force overwrites the fields an edit set and takes them.
 	Force bool
+	// EventStore is the deployment's; nil refuses meters, limits and rate
+	// cards.
+	EventStore *eventstore.Store
 }
 
 // ApplyMerchantCatalog applies opts' document to opts.Merchant with local

@@ -277,6 +277,9 @@ func (m *model) operation(r routes.Route) *obj {
 	if r.When != routes.Always {
 		op.set("x-openrails-mounted-when", string(r.When))
 	}
+	if r.EventStore {
+		op.set("x-openrails-event-store", true)
+	}
 	if r.CatalogUpdate() {
 		op.set("x-openrails-catalog-update", true)
 	}

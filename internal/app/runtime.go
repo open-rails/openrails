@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/vaultconn"
@@ -84,6 +85,9 @@ type Runtime struct {
 
 	StripeClients *stripeapi.Factory
 	DB            *db.DB
+	// EventStore is the ClickHouse event store (Deps.ClickHouse); nil turns
+	// usage, limits and admissions off (RequireEventStore).
+	EventStore *eventstore.Store
 	// leaseDB is the small pool idempotency lease renewals use (#1099).
 	leaseDB     *db.DB
 	RedisClient redis.UniversalClient

@@ -224,10 +224,27 @@ func (e *Env) gates(route Route) []router.Middleware {
 	default:
 		panic(MountError{Route: route.Key(), Reason: "declares no auth tier"})
 	}
+	if route.EventStore {
+		mw = append(mw, e.eventStore(route))
+	}
 	if route.Query != nil {
 		mw = append(mw, queryMW(route))
 	}
 	return mw
+}
+
+// eventStore answers event_store_required, after the route's gates, on a
+// deployment without the event store.
+func (e *Env) eventStore(route Route) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if err := e.Runtime.RequireEventStore(route.Key()); err != nil {
+				r.AbortAPIError(api.Coded(billing.CodeEventStoreRequired, err.Error()))
+				return
+			}
+			next(r)
+		}
+	}
 }
 
 // cardAttack is the captcha of a merchant under a card-testing attack, on
