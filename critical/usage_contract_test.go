@@ -283,22 +283,26 @@ func TestUsageContracts(t *testing.T) {
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_locks WHERE locktype = 'relation' AND relation = to_regclass($1::text) AND mode = 'ShareRowExclusiveLock'",
 			pgx.Identifier{w.schema, "usage_daily"}.Sanitize()).Scan(&tableLocks))
 		require.Zero(t, tableLocks, "the correction does not lock usage_daily")
-		// Alpha's own settlement of the meter waits on the fence.
+		// Alpha's own settlement waits for the correction's transaction (its
+		// lease sync first reads the merchant row the correction holds for its
+		// catalog revision, before it would reach the fence).
+		fence := "openrails.usage_activity:" + w.alpha.MerchantID().UUID().String() + ":compute"
+		var correction int
+		require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted
+			AND classid::bigint = (hashtextextended($1, 0) >> 32) & 4294967295 AND objid::bigint = hashtextextended($1, 0) & 4294967295`, fence).Scan(&correction))
 		settled := make(chan error, 1)
 		go func() {
 			_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usageInput(own, "alpha-during-correction", 2))})
 			settled <- err
 		}()
-		fence := "openrails.usage_activity:" + w.alpha.MerchantID().UUID().String() + ":compute"
 		require.Eventually(t, func() bool {
 			var waiting int
-			require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
-				AND classid::bigint = (hashtextextended($1, 0) >> 32) & 4294967295 AND objid::bigint = hashtextextended($1, 0) & 4294967295`, fence).Scan(&waiting))
-			return waiting == 1
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))", correction).Scan(&waiting))
+			return waiting > 0
 		}, 20*time.Second, 20*time.Millisecond, "alpha's settlement waits for its own merchant's correction")
 		select {
 		case err := <-settled:
-			t.Fatalf("alpha's settlement finished while its correction held the fence: %v", err)
+			t.Fatalf("alpha's settlement finished while its correction was open: %v", err)
 		default:
 		}
 		// Beta settles usage while alpha's correction is open.
