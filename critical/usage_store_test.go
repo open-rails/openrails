@@ -327,7 +327,8 @@ func TestUsageStore(t *testing.T) {
 		nextMonth(w)
 		closeMonths(t, fleet)
 		require.EqualValues(t, 200, owed(t, w.alpha, customer))
-		w.clock.Advance(19 * 24 * time.Hour)
+		// Late, and still within the 35-day ingest window of its occurrence.
+		w.clock.Advance(2 * 24 * time.Hour)
 		late := usageInput(customer, "late", 1)
 		late.OccurredAt = occurred
 		settleUsage(t, w.alpha, lease, numbered(2, late)...)

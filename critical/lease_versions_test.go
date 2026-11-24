@@ -407,7 +407,10 @@ func TestLeaseVersions(t *testing.T) {
 		// next finds nothing left.
 		require.True(t, leaseAdmit(t, w, lease, work("crossing", 5)).Allowed())
 		requireDenied(t, leaseAdmit(t, w, lease, work("after", 1)), billing.DenyLimitReached)
-		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, spentOn(customer, "crossing", "crossing-use", 5)), Views: []billing.ViewParams{workView(customer)}})
+		// The capture reports the admitted event type.
+		use := workReport(customer, "crossing-use", 5)
+		use.RequestID = ptr("crossing")
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, use), Views: []billing.ViewParams{workView(customer)}})
 		require.Empty(t, out.Usage.Refused)
 		require.EqualValues(t, -3, lineOf(t, viewOf(t, out, customer), "quota").Remaining, "the crossing request settles in full")
 	})
