@@ -22,7 +22,7 @@ import (
 
 // GetBalance returns a customer's money in one currency.
 func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, currency string) (*billing.Balance, error) {
-	currency, err := s.registryCurrency(ctx, "currency", currency)
+	currency, err := s.balanceCurrency(ctx, "currency", currency)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,14 @@ func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, 
 		out, err = s.moneyService().PublicBalance(ctx, bal, billing.BillingMode(settings.BillingMode), owed)
 		return err
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	one := []billing.Balance{*out}
+	if err := s.withUnits(ctx, one); err != nil {
+		return nil, err
+	}
+	return &one[0], nil
 }
 
 // UsagePage is a usage report's page size.
@@ -73,15 +80,12 @@ type usageReport struct {
 	after    *usageCursor
 }
 
-// readUsageParams reads a usage report request. A cursor reads the rest of
-// its own report: a window the request leaves out is the cursor's, and
-// without a cursor it ends now and starts a month before.
+// readUsageParams reads a usage report request, its currency already checked.
+// A cursor reads the rest of its own report: a window the request leaves out
+// is the cursor's, and without a cursor it ends now and starts a month before.
 func readUsageParams(params billing.GetUsageParams, now func() time.Time) (usageReport, error) {
-	currency, err := requireCurrency(string(params.Currency))
-	if err != nil {
-		return usageReport{}, err
-	}
-	out := usageReport{currency: currency, groupBy: cmp.Or(params.GroupBy, billing.UsageByEventType), from: params.From.UTC(), to: params.To.UTC()}
+	var err error
+	out := usageReport{currency: string(params.Currency), groupBy: cmp.Or(params.GroupBy, billing.UsageByEventType), from: params.From.UTC(), to: params.To.UTC()}
 	switch out.groupBy {
 	case billing.UsageByEventType, billing.UsageByInvoker, billing.UsageByMeter:
 	default:
@@ -126,6 +130,11 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 	if customer.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
+	currency, err := s.balanceCurrency(ctx, "currency", string(params.Currency))
+	if err != nil {
+		return nil, err
+	}
+	params.Currency = catalog.Currency(currency)
 	report, err := readUsageParams(params, s.now)
 	if err != nil {
 		return nil, err

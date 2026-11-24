@@ -17,7 +17,7 @@ var (
 	orderReadErrors   = codes("resource_not_found", "service_unavailable")
 	orderLineErrors   = codes("already_owned", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable")
 	orderPayErrors    = codes("card_attempts_blocked", "card_declined", "customer_action_required", "customer_email_required", "entitlement_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable")
-	orderCreateErrors = codes(append(append([]billing.ErrorCode{}, orderPayErrors...), "already_owned", "embed_origins_required", "customer_session_required", "pay_url_unavailable", "order_line_unavailable", "quantity_not_allowed")...)
+	orderCreateErrors = codes(append(append([]billing.ErrorCode{}, orderPayErrors...), "already_owned", "embed_origins_required", "customer_session_required", "insufficient_credits", "pay_url_unavailable", "order_line_unavailable", "quantity_not_allowed")...)
 	usageActionErrors = codes("order_action_not_allowed", "resource_not_found", "service_unavailable")
 )
 
@@ -62,10 +62,11 @@ var ordersRoutes = []Route{
 		Responses: []Reply{{200, billing.OrderPaymentAttempt{}}}, Errors: codes("idempotency_key_required", "invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetOrderPaymentAttempt)},
 	{Method: POST, Path: "/v1/app/orders", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "CreateOrder", IdempotencyKey: true,
 		Doc: "CreateOrder creates a merchant order: an unpaid order for one customer, which they pay on your site " +
-			"(POST /v1/me/orders/{id}/pay, or billing-ui's OrderPayURL). It never charges. idempotencyKey is " +
-			"required: a retry with it answers the same order.",
+			"(POST /v1/me/orders/{id}/pay, or billing-ui's OrderPayURL). It never charges a card. An order in one of " +
+			"the merchant's own units is paid from the customer's balance in it as it is created (insufficient_credits " +
+			"when the balance does not cover it). idempotencyKey is required: a retry with it answers the same order.",
 		Request: billing.CreateOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}},
-		Errors: codes("already_owned", "embed_origins_required", "entitlement_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreateMerchantOrder)},
+		Errors: codes("already_owned", "embed_origins_required", "entitlement_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "insufficient_credits", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreateMerchantOrder)},
 	{Method: POST, Path: "/v1/app/orders/{id}/cancel", Group: App, Auth: AuthApplication, Permission: needOrders, Name: "CancelOrder",
 		Args:      []any{billing.OrderID{}},
 		Doc:       "CancelOrder withdraws an open order you created.",

@@ -243,6 +243,7 @@
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
+          "insufficient_credits",
           "invalid_param",
           "order_line_unavailable",
           "order_not_payable",
@@ -951,7 +952,7 @@
           "app"
         ],
         "operationId": "CreateOrder",
-        "description": "CreateOrder creates a merchant order: an unpaid order for one customer, which they pay on your site (POST /v1/me/orders/{id}/pay, or billing-ui's OrderPayURL). It never charges. idempotencyKey is required: a retry with it answers the same order.",
+        "description": "CreateOrder creates a merchant order: an unpaid order for one customer, which they pay on your site (POST /v1/me/orders/{id}/pay, or billing-ui's OrderPayURL). It never charges a card. An order in one of the merchant's own units is paid from the customer's balance in it as it is created (insufficient_credits when the balance does not cover it). idempotencyKey is required: a retry with it answers the same order.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -1021,6 +1022,7 @@
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
+          "insufficient_credits",
           "invalid_param",
           "order_line_unavailable",
           "quantity_not_allowed",
@@ -1611,8 +1613,8 @@
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "catalog_revision_conflict",
+          "currency_unsupported",
           "event_store_required",
-          "merchant_unit_unsupported",
           "price_not_sellable",
           "product_not_found",
           "product_tier_group_conflict",
@@ -1835,6 +1837,7 @@
         "x-openrails-event-store": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
+          "currency_unsupported",
           "default_rate_card_not_found",
           "meter_in_use",
           "meter_rate_card_conflict",
@@ -1959,6 +1962,7 @@
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
+          "currency_unsupported",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2244,6 +2248,7 @@
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
+          "currency_unsupported",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2372,7 +2377,7 @@
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
-          "merchant_unit_unsupported",
+          "currency_unsupported",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -5859,7 +5864,6 @@
           "currency_unsupported",
           "idempotency_key_reused",
           "invalid_param",
-          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6312,7 +6316,6 @@
           "currency_unsupported",
           "invalid_cursor",
           "invalid_customer_id",
-          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6382,7 +6385,6 @@
         "x-openrails-errors": [
           "currency_unsupported",
           "invalid_customer_id",
-          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6547,8 +6549,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "currency_unsupported",
-          "invalid_cursor",
-          "merchant_unit_unsupported"
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -15180,6 +15181,16 @@
           "currency": {
             "type": "string"
           },
+          "unit": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MerchantCurrency"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "billing_mode": {
             "type": "string",
             "enum": [
@@ -15230,6 +15241,7 @@
         "required": [
           "customer_id",
           "currency",
+          "unit",
           "billing_mode",
           "balance_amount",
           "held_amount",

@@ -28,6 +28,7 @@ migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc
 migration 0030_stripe_fees.up.sql sha256:9eaf00b0f211b60fe71ab2d91e59e5303c3cb0488c211d66865199d8d79c91b0
 migration 0031_credit_books.up.sql sha256:43b97e4cf3684cce22e027d3264dfb68739a8eb421167cc98ba2244c96b97ba4
 migration 0032_run_leases.up.sql sha256:dffb969002908c162478fb3e9a3e0ceafa0072e528a70b48719c70d8b52427a3
+migration 0033_merchant_unit_spending.up.sql sha256:dd34eca4ad7958bbf2a0a3e51086d800637e7edccacbf7b416ffe37b1f1dcd93
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -314,6 +315,7 @@ table billing.credit_grants
   constraint credit_grants_paid_amount_check CHECK ((paid_amount > 0))
   constraint credit_grants_paid_check CHECK (((paid_amount IS NULL) = (paid_currency IS NULL)))
   constraint credit_grants_paid_currency_check CHECK ((paid_currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint credit_grants_paid_currency_registry_check CHECK (((paid_currency IS NULL) OR (paid_currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint credit_grants_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
   constraint credit_grants_pkey PRIMARY KEY (merchant_id, id)
   constraint credit_grants_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
@@ -994,6 +996,7 @@ table billing.ledger_accounts
   constraint ledger_accounts_general_currency_check CHECK (((book = 'units'::text) OR (currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint ledger_accounts_general_sign_check CHECK (((book = 'units'::text) OR ((debits_must_not_exceed_credits = (account_type = ANY (ARRAY['allowance_doubtful'::text, 'unapplied_cash'::text, 'deferred_revenue'::text, 'deferred_revenue_credit'::text]))) AND (credits_must_not_exceed_debits = (account_type = 'usage_receivable'::text)))))
   constraint ledger_accounts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint ledger_accounts_owed_currency_check CHECK (((account_type <> 'customer_owed'::text) OR (currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint ledger_accounts_pkey PRIMARY KEY (merchant_id, id)
   constraint ledger_accounts_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
   constraint ledger_accounts_scope_check CHECK ( CASE WHEN (account_type = ANY (ARRAY['customer_units'::text, 'customer_owed'::text, 'usage_receivable'::text, 'deferred_revenue_credit'::text])) THEN ((customer_id IS NOT NULL) AND (psp_id IS NULL)) WHEN (account_type = 'cash_clearing'::text) THEN ((customer_id IS NULL) AND (psp_id IS NOT NULL)) ELSE ((customer_id IS NULL) AND (psp_id IS NULL)) END)
@@ -1104,6 +1107,19 @@ table billing.ledger_type_totals
   index CREATE UNIQUE INDEX ledger_type_totals_account_type_key ON billing.ledger_type_totals USING btree (merchant_id, book, currency, account_type, psp_id) NULLS NOT DISTINCT
   trigger CREATE TRIGGER guard_ledger_type_totals BEFORE INSERT OR DELETE OR UPDATE ON billing.ledger_type_totals FOR EACH ROW EXECUTE FUNCTION billing.guard_ledger_rollups()
   trigger CREATE TRIGGER immutable_ledger_type_totals_truncate BEFORE TRUNCATE ON billing.ledger_type_totals FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.ledger_units
+  column merchant_id uuid NOT NULL
+  column unit text NOT NULL
+  column scale integer NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint ledger_units_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint ledger_units_pkey PRIMARY KEY (merchant_id, unit)
+  constraint ledger_units_scale_check CHECK (((scale >= 0) AND (scale <= 6)))
+  constraint ledger_units_unit_check CHECK (((unit ~ '^[A-Z][A-Z0-9]{3,11}$'::text) AND (unit <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
+  index CREATE UNIQUE INDEX ledger_units_pkey ON billing.ledger_units USING btree (merchant_id, unit)
+  trigger CREATE TRIGGER immutable_ledger_units BEFORE DELETE OR UPDATE ON billing.ledger_units FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_ledger_units_truncate BEFORE TRUNCATE ON billing.ledger_units FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.limit_adjustments
   column merchant_id uuid NOT NULL
@@ -1944,7 +1960,7 @@ table billing.orders
   constraint orders_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text])))
   constraint orders_collection_owner_check CHECK ((collection_owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint orders_complete_check CHECK (((status = 'complete'::text) = ((number IS NOT NULL) AND (completed_at IS NOT NULL))))
-  constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL) OR (origin = 'usage'::text) OR (collection_owner <> 'engine'::text)))
+  constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL) OR (origin = 'usage'::text) OR (collection_owner <> 'engine'::text) OR (currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint orders_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint orders_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint orders_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
@@ -3577,14 +3593,19 @@ table billing.usage_postings
   column lines jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column ingested_through timestamp with time zone NOT NULL
+  column forgiven bigint NOT NULL
+  column forgiven_lines jsonb
   constraint usage_postings_amount_check CHECK (((amount <> 0) AND ((reason = 'reversal'::text) = (amount < 0))))
   constraint usage_postings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_postings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint usage_postings_forgiven_check CHECK (((forgiven = 0) OR ((currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text])) AND (((reason <> 'reversal'::text) AND (forgiven > 0) AND (forgiven <= amount)) OR ((reason = 'reversal'::text) AND (forgiven < 0) AND (forgiven >= amount))))))
+  constraint usage_postings_forgiven_lines_check CHECK ((((forgiven = 0) = (forgiven_lines IS NULL)) AND ((forgiven_lines IS NULL) OR ((jsonb_typeof(forgiven_lines) = 'array'::text) AND (octet_length((forgiven_lines)::text) <= 262144)))))
   constraint usage_postings_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
   constraint usage_postings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint usage_postings_period_ends_at_check CHECK ((period_ends_at > period_starts_at))
   constraint usage_postings_pkey PRIMARY KEY (merchant_id, id)
   constraint usage_postings_reason_check CHECK ((reason = ANY (ARRAY['close'::text, 'movement'::text, 'reversal'::text])))
+  index CREATE INDEX usage_postings_forgiven_idx ON billing.usage_postings USING btree (merchant_id, cut_at) WHERE (forgiven <> 0)
   index CREATE INDEX usage_postings_period_idx ON billing.usage_postings USING btree (merchant_id, customer_id, currency, period_starts_at)
   index CREATE UNIQUE INDEX usage_postings_pkey ON billing.usage_postings USING btree (merchant_id, id)
 
@@ -4678,6 +4699,7 @@ function billing.guard_billing_restore_receipt()
                     'ledger_rollup_pending',
                     'ledger_transfers',
                     'ledger_type_totals',
+                    'ledger_units',
                     'limit_adjustments',
                     'limit_hold_parts',
                     'limit_holds',

@@ -55,11 +55,20 @@ RETURNING customer_id, currency, since_at;
 
 -- name: InsertUsagePosting :one
 INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines,
-    ingested_through, created_at)
+    ingested_through, forgiven, forgiven_lines, created_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(period_starts_at)::timestamptz,
     sqlc.arg(period_ends_at)::timestamptz, sqlc.arg(cut_at)::timestamptz, sqlc.arg(reason)::text, sqlc.arg(amount)::bigint,
-    sqlc.arg(lines)::jsonb, sqlc.arg(ingested_through)::timestamptz, sqlc.arg(now)::timestamptz)
+    sqlc.arg(lines)::jsonb, sqlc.arg(ingested_through)::timestamptz, sqlc.arg(forgiven)::bigint, sqlc.narg(forgiven_lines)::jsonb,
+    sqlc.arg(now)::timestamptz)
 RETURNING *;
+
+-- name: ListForgivenUsagePostings :many
+-- The merchant's postings that forgave usage or took forgiveness back, cut
+-- after one instant and through another.
+SELECT * FROM billing.usage_postings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND forgiven <> 0
+  AND cut_at > sqlc.arg(cut_after)::timestamptz AND cut_at <= sqlc.arg(cut_through)::timestamptz
+ORDER BY cut_at, id;
 
 -- name: ListUsagePostings :many
 -- A customer's postings in a currency of the periods from one start on.

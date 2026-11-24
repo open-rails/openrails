@@ -195,7 +195,7 @@ type BillingCreditGrant struct {
 	Units int64
 	// purchase and recurring were paid (a one-off order line, or a recurring price's cycle); grant and promotion were given; import came from another system and may declare what was paid.
 	FundingSource string
-	// What was paid for the lot, in paid_currency (a registry currency); NULL for a gift.
+	// What was paid for the lot, in paid_currency (a registry currency); NULL for a gift. A pack of a merchant's unit is paid in any currency: its rate is paid_amount over units, bonus units included.
 	PaidAmount   *int64
 	PaidCurrency *string
 	// The label the funding named, part of its once-only key.
@@ -799,6 +799,14 @@ type BillingLedgerTypeTotal struct {
 	PspID         *uuid.UUID
 	CreditsPosted int64
 	DebitsPosted  int64
+}
+
+// A merchant's own unit as the units book first counted it: written when a catalog write first names it or the book first holds it, under the units lock a settings change takes, with the scale its document in the file or Vault then declared. Loading a configuration that rescales or removes it serves this scale instead, with a finding. Retention: permanent, never pruned.
+type BillingLedgerUnit struct {
+	MerchantID uuid.UUID
+	Unit       string
+	Scale      int32
+	CreatedAt  time.Time
 }
 
 // One staff adjustment of a customer's limit window, so a retry with its source_id adds nothing again; the capacity it added is the window's adjusted. Retention: rows are deleted 61 days after created_at.
@@ -2532,6 +2540,10 @@ type BillingUsagePosting struct {
 	CreatedAt time.Time
 	// The latest ingestion among the usage the posting read before its cut, or an earlier posting's when later: a later posting counts usage that occurred before cut_at and was ingested by then at no less than what posted.
 	IngestedThrough time.Time
+	// Of amount, what the ledger did not take: usage in a merchant's unit its lots could not cover, never owed (positive); a reversal's share that took back forgiveness rather than credit (negative). Zero in a registry currency.
+	Forgiven int64
+	// How forgiven is shared, as the posting computed it: [{invoker, event_type, meter_key, cell, amount}], by what the period charged each before the cut, to the largest remainder; a reversal takes back from the period's shares the same way. NULL when nothing was forgiven.
+	ForgivenLines []byte
 }
 
 // A customer whose usage in a currency the ledger has not taken in full: the event store holds it, its balance reads it there, and the month-end close or the next movement of the balance posts it. Intake writes the row in the transaction that commits the usage, and a posting locks it; a posting that leaves nothing to post deletes it.

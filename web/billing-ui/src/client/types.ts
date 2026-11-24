@@ -854,6 +854,18 @@ export const customerConfigSchema = z.object({
     .string()
     .nullish()
     .transform((v) => v ?? ""),
+  /** The merchant's own units (credits, tokens, an in-game currency) and their scales. */
+  currencies: z
+    .array(
+      z.object({
+        code: z.string(),
+        name: z.string(),
+        symbol: z.string().nullish(),
+        scale: z.number().int(),
+      })
+    )
+    .nullish()
+    .transform((v) => v ?? []),
 })
 export type CustomerConfig = z.infer<typeof customerConfigSchema>
 

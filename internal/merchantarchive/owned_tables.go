@@ -50,6 +50,7 @@ var ownedTables = []string{
 	"ledger_rollup_pending",
 	"ledger_transfers",
 	"ledger_type_totals",
+	"ledger_units",
 	"limit_adjustments",
 	"limit_hold_parts",
 	"limit_holds",

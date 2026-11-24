@@ -3,6 +3,7 @@ package money
 import (
 	"fmt"
 
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -26,6 +27,10 @@ func normalizeCurrency(c string) string {
 func NormalizeCurrency(c string) string {
 	return normalizeCurrency(c)
 }
+
+// IsMerchantUnit reports whether code is a merchant's own unit, not a
+// registry currency: prepaid, never owed or converted.
+func IsMerchantUnit(code string) bool { return currency.IsUnitCode(code) }
 
 // RequireBillingCurrency validates a currency against the supported registry.
 func RequireBillingCurrency(code string) error {

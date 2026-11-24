@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -61,7 +62,7 @@ func (t RenewalTerms) Validate() error {
 	if err := t.CreditGrant.Validate(); err != nil {
 		return err
 	}
-	if credit := t.CreditGrant; credit != nil && (credit.Currency != t.Currency || !credit.StartsAt.IsZero() || credit.ExpiresAt != nil) {
+	if credit := t.CreditGrant; credit != nil && (credit.Currency != t.Currency && !currency.IsUnitCode(credit.Currency) || !credit.StartsAt.IsZero() || credit.ExpiresAt != nil) {
 		return errors.New("renewal credit promise contradicts its currency or already has delivery dates")
 	}
 	if t.RecurringIntervalMonths != nil {
@@ -197,16 +198,8 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		return terms, fmt.Errorf("prepare renewal product: %w", err)
 	}
 	terms.ProductName = product.DisplayName
-	terms.CreditGrant = nil
-	if policy := product.CreditGrant; policy != nil {
-		amount, days := price.Amount, 365
-		if policy.Amount != nil {
-			amount = *policy.Amount
-		}
-		if policy.ExpiresAfterDays != nil {
-			days = *policy.ExpiresAfterDays
-		}
-		terms.CreditGrant = &models.CreditGrantSnapshot{Amount: amount, Currency: string(policy.Currency), ExpiresAfterDays: days}
+	if terms.CreditGrant, err = models.AcceptCreditGrant(product.CreditGrant, price.Currency, price.Amount); err != nil {
+		return terms, fmt.Errorf("prepare renewal credit: %w", err)
 	}
 	return terms, terms.Validate()
 }

@@ -114,6 +114,53 @@ export function formatNativeAmount(
     : formatUnits(amount, currency, scale)
 }
 
+// UnitScales are the merchant's own units' scales, by code.
+export type UnitScales = Record<string, number>
+
+// unitScales are the units a customer's balances name.
+export function unitScales(
+  balances: { currency: string; unit: { scale: number } | null }[]
+): UnitScales {
+  return Object.fromEntries(
+    balances.flatMap((b) =>
+      b.unit ? [[b.currency.toUpperCase(), b.unit.scale]] : []
+    )
+  )
+}
+
+// declaredUnits are the scales of the units a merchant declares.
+export function declaredUnits(
+  currencies: { code: string; scale: number }[] | undefined
+): UnitScales {
+  return Object.fromEntries(
+    (currencies ?? []).map((u) => [u.code.toUpperCase(), u.scale])
+  )
+}
+
+// formatScaledAmount formats an amount at its currency's scale: one of the
+// merchant's units in units, else the registry's.
+export function formatScaledAmount(
+  amount: MoneyAmount,
+  currency: string,
+  units: UnitScales
+): string {
+  const scale = units[currency.trim().toUpperCase()]
+  return scale === undefined
+    ? formatNativeAmount(amount, currency)
+    : formatUnits(amount, currency, scale)
+}
+
+// formatBalanceAmount formats one of a balance's amounts: at its unit's scale
+// when it counts one of the merchant's own units.
+export function formatBalanceAmount(
+  amount: MoneyAmount,
+  balance: { currency: string; unit: { scale: number } | null }
+): string {
+  return balance.unit
+    ? formatUnits(amount, balance.currency, balance.unit.scale)
+    : formatNativeAmount(amount, balance.currency)
+}
+
 // Canonical monetary wire input: an exact signed int64 decimal string.
 export function amountFromInput(
   major: string,
