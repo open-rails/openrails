@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 476,
+  "scenario_count": 479,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2127,6 +2127,21 @@
       "id": "OR-J22-S09",
       "journey": "J22",
       "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
+    },
+    {
+      "id": "OR-J22-S10",
+      "journey": "J22",
+      "name": "A credit lot's view equals its ledger counters after spend, expiry, revocation, refund and restore, and the ledger audit names a lot whose counters drift"
+    },
+    {
+      "id": "OR-J22-S11",
+      "journey": "J22",
+      "name": "A refunded credit pack's lot reads refunded and raises no refunded-source grant finding"
+    },
+    {
+      "id": "OR-J40-S04",
+      "journey": "J40",
+      "name": "A credit lot whose deposit did not post is not spendable until convergence posts it once"
     },
     {
       "id": "OR-J28-S09",

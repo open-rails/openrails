@@ -1290,6 +1290,15 @@
     "OR-J22-S09": [
       "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-goes-to-a-refund-that-found-none"
     ],
+    "OR-J22-S10": [
+      "TestCreditLotCounters/OR-J22-S10/lot-view-equals-ledger-counters"
+    ],
+    "OR-J22-S11": [
+      "TestCreditLotCounters/OR-J22-S11/refunded-credit-pack-raises-no-refunded-grant-finding"
+    ],
+    "OR-J40-S04": [
+      "TestCreditLotCounters/OR-J40-S04/unposted-deposit-is-not-spendable"
+    ],
     "OR-J37-S10": [
       "TestFXRates/OR-J37-S10/a-published-rate-far-from-the-held-one-prices-nothing"
     ],
