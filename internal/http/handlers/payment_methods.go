@@ -120,6 +120,9 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 	defer req.Card.Zero()
+	if refuseCardNumber(r, req) {
+		return
+	}
 	key := strings.TrimSpace(r.Header("Idempotency-Key"))
 	if key == "" {
 		savePaymentMethod(r, user, req)
@@ -241,12 +244,6 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 				r.APIError(api.Coded(billing.CodeInvalidParam, "platform card setup requires an available NMI PSP").WithParam("psp_id"))
 				return
 			}
-			for _, value := range append(billingDetailStrings(req.BillingDetails), req.Token) {
-				if cardguard.ContainsPAN(value) {
-					r.ErrorCode(billing.CodeInvalidParam, "card details must be entered in the custodian fields")
-					return
-				}
-			}
 			if refuseBlockedCardAttempt(r, user.ID) {
 				return
 			}
@@ -270,12 +267,6 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 			custodianKind = custodian.Kind
 		}
 		if custodianKind == models.CustodianHyperSwitch {
-			for _, value := range billingDetailStrings(req.BillingDetails) {
-				if cardguard.ContainsPAN(value) {
-					r.ErrorCode(billing.CodeInvalidParam, "card details must be entered in the custodian fields")
-					return
-				}
-			}
 			if r.State.OrderAttemptService == nil {
 				r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 				return
@@ -288,7 +279,7 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 		}
 	}
 	if req.Card != nil {
-		if !cardFieldAdmitted(r, strings.TrimSpace(req.Token) != "", billingDetailStrings(req.BillingDetails)...) {
+		if !cardFieldAdmitted(r, strings.TrimSpace(req.Token) != "") {
 			return
 		}
 	} else if strings.TrimSpace(req.Token) == "" {
@@ -412,7 +403,7 @@ func ConfirmPaymentMethod(r *httprequest.Request) {
 		return
 	}
 	var req billing.ConfirmPaymentMethodParams
-	if r.Request.ContentLength != 0 && !r.BindJSON(&req) {
+	if r.Request.ContentLength != 0 && !r.BindJSON(&req) || refuseCardNumber(r, req) {
 		return
 	}
 	if method.Custodian == models.CustodianHyperSwitch {
@@ -773,11 +764,6 @@ func (in billingInput) metadata() map[string]any {
 		}
 	}
 	return out
-}
-
-func billingDetailStrings(d *billing.BillingDetails) []string {
-	in := billingDetailsInput(d)
-	return []string{in.Name, in.Email, in.Phone, in.Line1, in.Line2, in.City, in.State, in.PostalCode, in.Country}
 }
 
 func billingDetailsFromMetadata(metadata map[string]any) *billing.BillingDetails {

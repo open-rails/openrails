@@ -85,15 +85,7 @@ verifies, then executes. Only on the provider's confirmation is the row
 
 ### Card-number firewall
 
-`cardguard.ContainsPAN` is the one detector: 13 to 19 digits in a plausible
-grouping, Luhn-valid and in an issued range. Unknown request fields are
-refused, and named fields are scanned: billing details on custodian saves and
-server-entered cards, tokens, idempotency keys, external transaction ids and
-declared books. The typed `card` field (`cardguard.Card`) is admitted only on a
-`card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the
-merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is
-read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last
-four and expiry are kept.
+`cardguard.ContainsPAN` is the one detector: 13 to 19 digits in a plausible grouping, Luhn-valid and in an issued range. Unknown request fields are refused, and every field of a card save, edit or confirmation and of an order create or payment is scanned before anything else (`refuseCardNumber`, `cardguard.PANField`; `400 invalid_param` naming the field), as are idempotency keys, external transaction ids and declared books. The typed `card` field (`cardguard.Card`), the one field a card number belongs in, is admitted only on a `card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last four and expiry are kept.
 
 Tables owned: `payment_methods`, `payment_method_versions`, `mandates`,
 `custodians`, `psp_customers`, `stored_card_checks`.
@@ -201,6 +193,7 @@ The firewall above refuses card numbers.
 Checks:
 - OR-J12-S12 and OR-J38-S36: the detector's ranges, and numeric references that are not cards.
 - OR-J12-S05: no card number, security code or secret in outputs or logs.
+- OR-J12-S14: a card number in any billing detail of a token save or an order payment, in a token, a return URL or a token symbol is refused, and NMI sees nothing.
 - `CreatePaymentMethod` calls `refuseBlockedCardAttempt` before every provider call except in its HyperSwitch branch (the gap below).
 
 ### 9. Destructive-action safeguards
@@ -218,7 +211,7 @@ Checks:
 
 ## Tests
 
-- J12: OR-J12-S01 to S04 (`TestPaymentMethodContracts`), S05 (`TestFinancialFailures`), S06 (`TestMerchantOwnedBasisTheoryCardLifecycle`), S07, S71 (`TestMerchantCardRemoval`), S08 to S11, S30 (`TestStoredCardRefresh`), S12 (`TestCardGuard`), S13 (`TestStripeCustomerPerAccount`), S70 (`TestOrderExpiryClock`).
+- J12: OR-J12-S01 to S04 (`TestPaymentMethodContracts`), S05 (`TestFinancialFailures`), S06 (`TestMerchantOwnedBasisTheoryCardLifecycle`), S07, S71 (`TestMerchantCardRemoval`), S08 to S11, S30 (`TestStoredCardRefresh`), S12, S14 (`TestCardGuard`), S13 (`TestStripeCustomerPerAccount`), S70 (`TestOrderExpiryClock`).
 - Custody and imports: OR-J06-S06 (`TestMerchantCustodyConfiguration`), OR-J38-S36 (`TestCardGuard`).
 - Agreements: OR-J14-S06 (`TestRenewalAgreements`), OR-J17-S04 (`TestCancellationRecoveryContracts`), OR-J26-S58 (`TestUsageBillingContracts`), OR-J16-S02 (`TestDunning`: a healthy card does not revive a terminal decline).
 
@@ -229,4 +222,3 @@ Gaps:
 - No scenario covers HyperSwitch, `card_entry: server` (`nmi_card_vault`), NMI Account Updater notices, Stripe card-updater events, re-consent after a brand change, or card edits.
 - No test asserts the stored-credential fields NMI receives (`initiated_by`, `stored_credential_indicator`, `initial_transaction_id`), though `nmimock` records them.
 - A HyperSwitch save skips the card-testing ledger; the ledger, the `payment` bucket and the customer-action budget have no scenario here.
-- OR-J12-S05 sends an unknown field, which strict decoding refuses before any scan, so a card number in a declared field such as billing details is untested.

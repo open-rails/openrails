@@ -12,8 +12,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,6 +50,72 @@ func TestCardGuard(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) { require.Equal(t, tc.blocked, cardguard.ContainsPAN(tc.value)) })
 		}
+	})
+	t.Run("OR-J12-S14/a-card-number-in-any-field-of-a-card-save-or-order-payment-is-refused", func(t *testing.T) {
+		// Each refusal below is its own purchase request; the purchase limit is
+		// not under test.
+		a, journal := newNMIWorld(t, func(w *world) {
+			w.cfg.RateLimits = openrails.RateLimitsConfig{"payment": {RequestsPerMinute: 40}}
+		})
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		psp := psps.Items[0].ID
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "firewalled", DisplayName: "Firewalled"})
+		require.NoError(t, err)
+		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD"})
+		require.NoError(t, err)
+		order := func(payment billing.OrderPaymentParams, reusable *bool) billing.CreateMyOrderParams {
+			return billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &payment, Reusable: reusable}
+		}
+		const pan = "4111 1111 1111 1111"
+		holding := func(field string) *billing.BillingDetails {
+			details, address := &billing.BillingDetails{}, &billing.BillingAddress{}
+			*map[string]**string{"name": &details.Name, "email": &details.Email, "phone": &details.Phone,
+				"address.line1": &address.Line1, "address.line2": &address.Line2, "address.city": &address.City,
+				"address.state": &address.State, "address.postal_code": &address.PostalCode, "address.country": &address.Country}[field] = ptr(pan)
+			if *address != (billing.BillingAddress{}) {
+				details.Address = address
+			}
+			return details
+		}
+		refused := func(path string, body any, param string, headers ...map[string]string) {
+			t.Helper()
+			status, raw := a.request(t, http.MethodPost, path, a.aliceToken, body, headers...)
+			require.Equal(t, http.StatusBadRequest, status, "%s: %s", param, raw)
+			var answer struct {
+				Error struct {
+					Code  billing.ErrorCode `json:"code"`
+					Param *string           `json:"param"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &answer))
+			require.Equal(t, billing.CodeInvalidParam, answer.Error.Code, param)
+			require.Equal(t, ptr(param), answer.Error.Param)
+			require.NotContains(t, string(raw), "4111", "the refusal never echoes the number")
+		}
+		calls := len(journal.core.Calls())
+		// A token save carries no card, and an order payment names a token:
+		// neither exempts any billing detail.
+		for _, field := range []string{"name", "email", "phone", "address.line1", "address.line2", "address.city", "address.state", "address.postal_code", "address.country"} {
+			token := journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})
+			refused("/v1/me/payment-methods", billing.CreatePaymentMethodParams{PSPID: psp, Token: token, BillingDetails: holding(field)}, "billing_details."+field)
+			refused("/v1/me/orders", order(billing.OrderPaymentParams{Token: token, BillingDetails: holding(field)}, ptr(false)), "payment.billing_details."+field, map[string]string{"Idempotency-Key": "firewall-" + field})
+		}
+		refused("/v1/me/payment-methods", billing.CreatePaymentMethodParams{PSPID: psp, Token: "4111111111111111"}, "token")
+		refused("/v1/me/orders", order(billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/return?card=4111111111111111"}, nil), "payment.return_url", map[string]string{"Idempotency-Key": "firewall-return-url"})
+		refused("/v1/me/orders", order(billing.OrderPaymentParams{TokenSymbol: pan}, nil), "payment.token_symbol", map[string]string{"Idempotency-Key": "firewall-token-symbol"})
+
+		require.Len(t, journal.core.Calls(), calls, "nothing reached NMI")
+		require.Empty(t, journal.core.Vaults())
+		status, raw := a.request(t, http.MethodGet, "/v1/me/payment-methods", a.aliceToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var methods billing.ListPage[billing.PaymentMethod]
+		require.NoError(t, json.Unmarshal(raw, &methods))
+		require.Empty(t, methods.Items, "nothing was stored")
+		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		require.NoError(t, err)
+		require.Empty(t, orders.Items)
 	})
 	t.Run("OR-J38-S36/ccbill-references-import-and-export-unchanged", func(t *testing.T) {
 		iw := bootImportWorld(t, "ccbill")
