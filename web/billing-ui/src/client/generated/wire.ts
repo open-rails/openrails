@@ -223,6 +223,7 @@ export type AskCatalogParams = {
 export type Balance = {
   customer_id: string
   currency: string
+  unit: MerchantCurrency | null
   billing_mode: "arrears" | "prepaid"
   balance_amount: string
   held_amount: string
@@ -2449,6 +2450,10 @@ export type Refusal = {
   limit: string | null
   resets_at: string | null
   retry_after_seconds: number | null
+}
+
+export type ReinstateCreditGrantParams = {
+  reason?: string
 }
 
 export type ReleaseAdmissionBatchParams = {

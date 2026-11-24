@@ -25,8 +25,12 @@ migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c
 migration 0027_mrr_at_risk.up.sql sha256:e2fdd4b8664adc64b11d71405c1b8be66ac173c5d761f2afb15c3c6437c654d6
 migration 0028_usage_posting_watermark.up.sql sha256:0e646875e208f9c138878ffbd7d01cf52d7212b8f6817c33904a5a39d5d6b392
 migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc3092fb10211ba49b2f43c3627121c7a
-migration 0030_reporting_mrr.up.sql sha256:48ccdb8021defb3661c20572e66c532a158ce8ba97aeb47c119969320e96879e
-migration 0031_dashboard_retired_mrr_measures.up.sql sha256:51fd4f28c5c9beb058121664bc24cb3738ea51761a3c87eaeafd9fec7c8fe7b3
+migration 0030_stripe_fees.up.sql sha256:9eaf00b0f211b60fe71ab2d91e59e5303c3cb0488c211d66865199d8d79c91b0
+migration 0031_credit_books.up.sql sha256:43b97e4cf3684cce22e027d3264dfb68739a8eb421167cc98ba2244c96b97ba4
+migration 0032_run_leases.up.sql sha256:dffb969002908c162478fb3e9a3e0ceafa0072e528a70b48719c70d8b52427a3
+migration 0033_merchant_unit_spending.up.sql sha256:dd34eca4ad7958bbf2a0a3e51086d800637e7edccacbf7b416ffe37b1f1dcd93
+migration 0034_reporting_mrr.up.sql sha256:1ce46f787d8c7f33c7cf5c6d169911e87e22b135ea4ca9b15b1c295f0caba4d0
+migration 0035_dashboard_retired_mrr_measures.up.sql sha256:51fd4f28c5c9beb058121664bc24cb3738ea51761a3c87eaeafd9fec7c8fe7b3
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -260,14 +264,17 @@ table billing.credit_grant_events
   column reason text
   column actor text
   column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column request_key text
   constraint credit_grant_events_actor_check CHECK (((octet_length(actor) >= 1) AND (octet_length(actor) <= 255)))
   constraint credit_grant_events_credit_grant_id_fkey FOREIGN KEY (merchant_id, credit_grant_id) REFERENCES billing.credit_grants(merchant_id, id)
   constraint credit_grant_events_event_check CHECK ((event = ANY (ARRAY['revoke'::text, 'reinstate'::text])))
   constraint credit_grant_events_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint credit_grant_events_pkey PRIMARY KEY (merchant_id, id)
   constraint credit_grant_events_reason_check CHECK ((reason <> ''::text))
+  constraint credit_grant_events_request_key_check CHECK (((octet_length(request_key) >= 1) AND (octet_length(request_key) <= 200)))
   index CREATE INDEX credit_grant_events_credit_grant_id_idx ON billing.credit_grant_events USING btree (merchant_id, credit_grant_id, created_at)
   index CREATE UNIQUE INDEX credit_grant_events_pkey ON billing.credit_grant_events USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX credit_grant_events_request_key_key ON billing.credit_grant_events USING btree (merchant_id, credit_grant_id, request_key) WHERE (request_key IS NOT NULL)
   trigger CREATE TRIGGER immutable_credit_grant_events BEFORE DELETE OR UPDATE ON billing.credit_grant_events FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER immutable_credit_grant_events_truncate BEFORE TRUNCATE ON billing.credit_grant_events FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER trg_credit_grant_events_apply AFTER INSERT ON billing.credit_grant_events FOR EACH ROW EXECUTE FUNCTION billing.credit_grant_events_apply()
@@ -296,8 +303,11 @@ table billing.credit_grants
   column units_debited bigint NOT NULL DEFAULT 0
   column units_reserved bigint NOT NULL DEFAULT 0
   column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column deferred_credited bigint NOT NULL DEFAULT 0
+  column deferred_debited bigint NOT NULL DEFAULT 0
   constraint credit_grants_account_id_fkey FOREIGN KEY (merchant_id, customer_id, unit, account_id) REFERENCES billing.ledger_accounts(merchant_id, customer_id, currency, id)
   constraint credit_grants_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint credit_grants_deferred_check CHECK (((deferred_debited >= 0) AND (deferred_debited <= deferred_credited)))
   constraint credit_grants_description_check CHECK ((description <> ''::text))
   constraint credit_grants_funding_check CHECK ((((funding_source = ANY (ARRAY['purchase'::text, 'recurring'::text])) = (paid_amount IS NOT NULL)) OR (funding_source = 'import'::text)))
   constraint credit_grants_funding_source_check CHECK ((funding_source = ANY (ARRAY['purchase'::text, 'recurring'::text, 'grant'::text, 'promotion'::text, 'import'::text])))
@@ -307,9 +317,11 @@ table billing.credit_grants
   constraint credit_grants_paid_amount_check CHECK ((paid_amount > 0))
   constraint credit_grants_paid_check CHECK (((paid_amount IS NULL) = (paid_currency IS NULL)))
   constraint credit_grants_paid_currency_check CHECK ((paid_currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint credit_grants_paid_currency_registry_check CHECK (((paid_currency IS NULL) OR (paid_currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint credit_grants_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
   constraint credit_grants_pkey PRIMARY KEY (merchant_id, id)
   constraint credit_grants_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
+  constraint credit_grants_require_books TRIGGER DEFERRABLE INITIALLY DEFERRED
   constraint credit_grants_source_check CHECK (((octet_length(source) >= 1) AND (octet_length(source) <= 512)))
   constraint credit_grants_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 512)))
   constraint credit_grants_unit_check CHECK ((unit ~ '^[A-Z0-9]{3,12}$'::text))
@@ -328,6 +340,7 @@ table billing.credit_grants
   index CREATE INDEX credit_grants_reserved_idx ON billing.credit_grants USING btree (merchant_id, customer_id, unit) WHERE (units_reserved > 0)
   index CREATE INDEX credit_grants_revoked_idx ON billing.credit_grants USING btree (merchant_id, customer_id) WHERE ((revoked_at IS NOT NULL) AND (units_credited > units_debited))
   index CREATE INDEX credit_grants_unposted_idx ON billing.credit_grants USING btree (merchant_id, created_at, id) WHERE (units_credited = 0)
+  trigger CREATE CONSTRAINT TRIGGER credit_grants_require_books AFTER INSERT ON billing.credit_grants DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.credit_grants_require_books()
   trigger CREATE TRIGGER guard_credit_grant_facts BEFORE INSERT OR DELETE OR UPDATE ON billing.credit_grants FOR EACH ROW EXECUTE FUNCTION billing.guard_credit_grant_facts()
   trigger CREATE TRIGGER immutable_credit_grants_truncate BEFORE TRUNCATE ON billing.credit_grants FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
@@ -704,6 +717,7 @@ table billing.disputes
   index CREATE UNIQUE INDEX disputes_psp_id_provider_ref_key ON billing.disputes USING btree (merchant_id, psp_id, provider_ref)
   index CREATE INDEX disputes_waiting_idx ON billing.disputes USING btree (merchant_id, id) WHERE ((kind = 'chargeback'::text) AND (responded_at IS NULL))
   trigger CREATE TRIGGER disputes_network_activity AFTER INSERT OR DELETE OR UPDATE OF kind, chargeback_at, network, reason, amount, currency ON billing.disputes FOR EACH ROW EXECUTE FUNCTION billing.dispute_network_activity()
+  trigger CREATE TRIGGER disputes_queue_stripe_fee_read AFTER INSERT OR UPDATE OF status ON billing.disputes FOR EACH ROW EXECUTE FUNCTION billing.queue_stripe_fee_read()
 
 table billing.event_store
   column singleton boolean NOT NULL
@@ -985,6 +999,7 @@ table billing.ledger_accounts
   constraint ledger_accounts_general_currency_check CHECK (((book = 'units'::text) OR (currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint ledger_accounts_general_sign_check CHECK (((book = 'units'::text) OR ((debits_must_not_exceed_credits = (account_type = ANY (ARRAY['allowance_doubtful'::text, 'unapplied_cash'::text, 'deferred_revenue'::text, 'deferred_revenue_credit'::text]))) AND (credits_must_not_exceed_debits = (account_type = 'usage_receivable'::text)))))
   constraint ledger_accounts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint ledger_accounts_owed_currency_check CHECK (((account_type <> 'customer_owed'::text) OR (currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint ledger_accounts_pkey PRIMARY KEY (merchant_id, id)
   constraint ledger_accounts_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
   constraint ledger_accounts_scope_check CHECK ( CASE WHEN (account_type = ANY (ARRAY['customer_units'::text, 'customer_owed'::text, 'usage_receivable'::text, 'deferred_revenue_credit'::text])) THEN ((customer_id IS NOT NULL) AND (psp_id IS NULL)) WHEN (account_type = 'cash_clearing'::text) THEN ((customer_id IS NULL) AND (psp_id IS NOT NULL)) ELSE ((customer_id IS NULL) AND (psp_id IS NULL)) END)
@@ -1066,7 +1081,7 @@ table billing.ledger_transfers
   index CREATE INDEX ledger_transfers_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, created_at)
   index CREATE INDEX ledger_transfers_credit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_account_id)
   index CREATE INDEX ledger_transfers_credit_grant_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_grant_id) WHERE (credit_grant_id IS NOT NULL)
-  index CREATE UNIQUE INDEX ledger_transfers_credit_grant_id_transfer_type_key ON billing.ledger_transfers USING btree (merchant_id, credit_grant_id, transfer_type) WHERE ((credit_grant_id IS NOT NULL) AND (transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_expire'::text, 'credit_revoke'::text])))
+  index CREATE UNIQUE INDEX ledger_transfers_credit_grant_id_transfer_type_key ON billing.ledger_transfers USING btree (merchant_id, credit_grant_id, transfer_type) WHERE ((credit_grant_id IS NOT NULL) AND (transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_expire'::text])))
   index CREATE INDEX ledger_transfers_customer_id_currency_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, created_at DESC) WHERE (customer_id IS NOT NULL)
   index CREATE UNIQUE INDEX ledger_transfers_customer_id_currency_id_key ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, id)
   index CREATE INDEX ledger_transfers_debit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, debit_account_id)
@@ -1077,6 +1092,7 @@ table billing.ledger_transfers
   trigger CREATE TRIGGER immutable_ledger_transfers_truncate BEFORE TRUNCATE ON billing.ledger_transfers FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER trg_ledger_transfers_apply_counters AFTER INSERT ON billing.ledger_transfers FOR EACH ROW EXECUTE FUNCTION billing.ledger_transfers_apply_counters()
   trigger CREATE TRIGGER trg_ledger_transfers_apply_lot_counters AFTER INSERT ON billing.ledger_transfers FOR EACH ROW WHEN ((new.credit_grant_id IS NOT NULL)) EXECUTE FUNCTION billing.ledger_transfers_apply_lot_counters()
+  trigger CREATE TRIGGER trg_ledger_transfers_apply_lot_deferred AFTER INSERT ON billing.ledger_transfers FOR EACH ROW WHEN (((new.book = 'general'::text) AND (new.credit_grant_id IS NOT NULL))) EXECUTE FUNCTION billing.ledger_transfers_apply_lot_deferred()
   trigger CREATE TRIGGER trg_ledger_transfers_book_rules BEFORE INSERT ON billing.ledger_transfers FOR EACH ROW EXECUTE FUNCTION billing.ledger_transfers_book_rules()
   trigger CREATE TRIGGER trg_ledger_transfers_rollups AFTER INSERT ON billing.ledger_transfers FOR EACH ROW EXECUTE FUNCTION billing.ledger_transfers_queue_rollups()
 
@@ -1094,6 +1110,19 @@ table billing.ledger_type_totals
   index CREATE UNIQUE INDEX ledger_type_totals_account_type_key ON billing.ledger_type_totals USING btree (merchant_id, book, currency, account_type, psp_id) NULLS NOT DISTINCT
   trigger CREATE TRIGGER guard_ledger_type_totals BEFORE INSERT OR DELETE OR UPDATE ON billing.ledger_type_totals FOR EACH ROW EXECUTE FUNCTION billing.guard_ledger_rollups()
   trigger CREATE TRIGGER immutable_ledger_type_totals_truncate BEFORE TRUNCATE ON billing.ledger_type_totals FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.ledger_units
+  column merchant_id uuid NOT NULL
+  column unit text NOT NULL
+  column scale integer NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint ledger_units_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint ledger_units_pkey PRIMARY KEY (merchant_id, unit)
+  constraint ledger_units_scale_check CHECK (((scale >= 0) AND (scale <= 6)))
+  constraint ledger_units_unit_check CHECK (((unit ~ '^[A-Z][A-Z0-9]{3,11}$'::text) AND (unit <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
+  index CREATE UNIQUE INDEX ledger_units_pkey ON billing.ledger_units USING btree (merchant_id, unit)
+  trigger CREATE TRIGGER immutable_ledger_units BEFORE DELETE OR UPDATE ON billing.ledger_units FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_ledger_units_truncate BEFORE TRUNCATE ON billing.ledger_units FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.limit_adjustments
   column merchant_id uuid NOT NULL
@@ -1294,6 +1323,17 @@ table billing.merchant_destructive_policy
   constraint merchant_destructive_policy_pkey PRIMARY KEY (merchant_id)
   index CREATE UNIQUE INDEX merchant_destructive_policy_pkey ON billing.merchant_destructive_policy USING btree (merchant_id)
   trigger CREATE TRIGGER merchant_destructive_policy_wake_dispute_responses AFTER INSERT OR UPDATE OF destructive_actions_enabled, enforce_armed_at ON billing.merchant_destructive_policy FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
+
+table billing.merchant_leases
+  column merchant_id uuid NOT NULL
+  column kind text NOT NULL
+  column holder uuid NOT NULL
+  column expires_at timestamp with time zone NOT NULL
+  column claimed_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint merchant_leases_kind_check CHECK ((kind = 'pull'::text))
+  constraint merchant_leases_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+  constraint merchant_leases_pkey PRIMARY KEY (merchant_id, kind)
+  index CREATE UNIQUE INDEX merchant_leases_pkey ON billing.merchant_leases USING btree (merchant_id, kind)
 
 table billing.merchant_slug_aliases
   column slug text NOT NULL
@@ -1967,7 +2007,7 @@ table billing.orders
   constraint orders_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text])))
   constraint orders_collection_owner_check CHECK ((collection_owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint orders_complete_check CHECK (((status = 'complete'::text) = ((number IS NOT NULL) AND (completed_at IS NOT NULL))))
-  constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL) OR (origin = 'usage'::text) OR (collection_owner <> 'engine'::text)))
+  constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL) OR (origin = 'usage'::text) OR (collection_owner <> 'engine'::text) OR (currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint orders_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint orders_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint orders_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
@@ -2387,6 +2427,7 @@ table billing.payments
   index CREATE INDEX payments_subscription_id_idx ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   trigger CREATE TRIGGER payments_enqueue_settlement_event AFTER INSERT OR UPDATE OF status ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.enqueue_payment_settlement_event()
   trigger CREATE TRIGGER payments_network_activity AFTER INSERT OR DELETE OR UPDATE OF status, amount, currency, deleted_at, card_brand, purchased_at, psp_id, money_movement ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.payment_network_activity()
+  trigger CREATE TRIGGER payments_queue_stripe_fee_read AFTER INSERT OR UPDATE OF status, money_movement ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.queue_stripe_fee_read()
 
 table billing.periodic_leases
   column kind text NOT NULL
@@ -3087,6 +3128,7 @@ table billing.reconciliation_findings
   index CREATE INDEX reconciliation_findings_proposals_idx ON billing.reconciliation_findings USING btree (merchant_id, status, source, psp_id) WHERE (finding_type ~~ 'pull.%'::text)
   index CREATE INDEX reconciliation_findings_pull_id_idx ON billing.reconciliation_findings USING btree (merchant_id, pull_id) WHERE (pull_id IS NOT NULL)
   index CREATE INDEX reconciliation_findings_resolved_idx ON billing.reconciliation_findings USING btree (merchant_id, GREATEST(resolved_at, last_seen_at)) WHERE (resolved_at IS NOT NULL)
+  trigger CREATE TRIGGER reconciliation_findings_requeue_stripe_fee_read AFTER UPDATE OF status ON billing.reconciliation_findings FOR EACH ROW EXECUTE FUNCTION billing.requeue_stripe_fee_read()
 
 table billing.reconciliation_state
   column merchant_id uuid NOT NULL
@@ -3327,6 +3369,24 @@ table billing.stored_card_checks
   constraint stored_card_checks_pkey PRIMARY KEY (merchant_id, payment_method_id)
   index CREATE INDEX stored_card_checks_due_at_idx ON billing.stored_card_checks USING btree (due_at)
   index CREATE UNIQUE INDEX stored_card_checks_pkey ON billing.stored_card_checks USING btree (merchant_id, payment_method_id)
+
+table billing.stripe_fee_reads
+  column merchant_id uuid NOT NULL
+  column psp_id uuid NOT NULL
+  column ref text NOT NULL
+  column kind text NOT NULL
+  column due_at timestamp with time zone NOT NULL
+  column attempts integer NOT NULL DEFAULT 0
+  column last_error text
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint stripe_fee_reads_attempts_check CHECK ((attempts >= 0))
+  constraint stripe_fee_reads_kind_check CHECK ((kind = ANY (ARRAY['payment'::text, 'refund'::text, 'dispute'::text])))
+  constraint stripe_fee_reads_last_error_check CHECK ((last_error <> ''::text))
+  constraint stripe_fee_reads_pkey PRIMARY KEY (merchant_id, psp_id, ref)
+  constraint stripe_fee_reads_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
+  constraint stripe_fee_reads_ref_check CHECK ((ref <> ''::text))
+  index CREATE INDEX stripe_fee_reads_due_at_idx ON billing.stripe_fee_reads USING btree (due_at, merchant_id, psp_id, ref)
+  index CREATE UNIQUE INDEX stripe_fee_reads_pkey ON billing.stripe_fee_reads USING btree (merchant_id, psp_id, ref)
 
 table billing.subscription_billing_changes
   column merchant_id uuid NOT NULL
@@ -3596,14 +3656,19 @@ table billing.usage_postings
   column lines jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column ingested_through timestamp with time zone NOT NULL
+  column forgiven bigint NOT NULL
+  column forgiven_lines jsonb
   constraint usage_postings_amount_check CHECK (((amount <> 0) AND ((reason = 'reversal'::text) = (amount < 0))))
   constraint usage_postings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_postings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint usage_postings_forgiven_check CHECK (((forgiven = 0) OR ((currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text])) AND (((reason <> 'reversal'::text) AND (forgiven > 0) AND (forgiven <= amount)) OR ((reason = 'reversal'::text) AND (forgiven < 0) AND (forgiven >= amount))))))
+  constraint usage_postings_forgiven_lines_check CHECK ((((forgiven = 0) = (forgiven_lines IS NULL)) AND ((forgiven_lines IS NULL) OR ((jsonb_typeof(forgiven_lines) = 'array'::text) AND (octet_length((forgiven_lines)::text) <= 262144)))))
   constraint usage_postings_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
   constraint usage_postings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint usage_postings_period_ends_at_check CHECK ((period_ends_at > period_starts_at))
   constraint usage_postings_pkey PRIMARY KEY (merchant_id, id)
   constraint usage_postings_reason_check CHECK ((reason = ANY (ARRAY['close'::text, 'movement'::text, 'reversal'::text])))
+  index CREATE INDEX usage_postings_forgiven_idx ON billing.usage_postings USING btree (merchant_id, cut_at) WHERE (forgiven <> 0)
   index CREATE INDEX usage_postings_period_idx ON billing.usage_postings USING btree (merchant_id, customer_id, currency, period_starts_at)
   index CREATE UNIQUE INDEX usage_postings_pkey ON billing.usage_postings USING btree (merchant_id, id)
 
@@ -3952,11 +4017,18 @@ function billing.check_billing_restore_credit_grants(uuid)
           CROSS JOIN LATERAL (SELECT COALESCE(sum(t.amount) FILTER (WHERE t.credit_account_id = g.account_id), 0) AS credited,
                                      COALESCE(sum(t.amount) FILTER (WHERE t.debit_account_id = g.account_id), 0) AS debited
               FROM billing.ledger_transfers t WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id) l
+          CROSS JOIN LATERAL (SELECT COALESCE(sum(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0) AS credited,
+                                     COALESCE(sum(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0) AS debited
+              FROM billing.ledger_transfers t
+              JOIN billing.ledger_accounts a ON a.merchant_id = t.merchant_id AND a.id IN (t.debit_account_id, t.credit_account_id)
+                  AND a.account_type = 'deferred_revenue_credit' AND a.customer_id = g.customer_id AND a.currency = COALESCE(g.paid_currency, g.unit)
+              WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.book = 'general') m
           LEFT JOIN LATERAL (SELECT e.event, e.effective_at FROM billing.credit_grant_events e
               WHERE e.merchant_id = g.merchant_id AND e.credit_grant_id = g.id
               ORDER BY e.created_at DESC, e.id DESC LIMIT 1) e ON true
           WHERE g.merchant_id = p_merchant
             AND (g.units_credited <> l.credited OR g.units_debited <> l.debited
+                 OR g.deferred_credited <> m.credited OR g.deferred_debited <> m.debited
                  OR g.revoked_at IS DISTINCT FROM CASE WHEN e.event = 'revoke' THEN e.effective_at END)) THEN
           RAISE EXCEPTION 'billing restore credit grant integrity mismatch' USING ERRCODE = '23514';
       END IF;
@@ -4167,11 +4239,36 @@ function billing.credit_grant_reservation(uuid,uuid)
           CROSS JOIN LATERAL (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
               WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
                 AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending
-          CROSS JOIN LATERAL (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric AS amount
+          CROSS JOIN LATERAL (SELECT COALESCE(sum(CASE
+                  WHEN t.book = 'units' AND t.transfer_type = 'credit_refund_cash' THEN t.amount
+                  WHEN t.book = 'units' AND t.transfer_type = 'credit_refund_cash_restore' THEN -t.amount
+                  WHEN t.book = 'general' AND c.account_type IN ('cash_clearing', 'external_receipts') THEN t.amount
+                  WHEN t.book = 'general' AND d.account_type IN ('cash_clearing', 'external_receipts') THEN -t.amount
+                  ELSE 0 END), 0)::numeric AS amount
               FROM billing.ledger_transfers t
+              JOIN billing.ledger_accounts d ON d.merchant_id = t.merchant_id AND d.id = t.debit_account_id
+              JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
               WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund') returned
           WHERE g.merchant_id = p_merchant AND g.id = p_lot AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
             AND pending.amount > 0), 0)
+  $function$
+
+function billing.credit_grants_require_books()
+  CREATE OR REPLACE FUNCTION billing.credit_grants_require_books()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) OR NEW.paid_amount IS NULL THEN RETURN NULL; END IF;
+      IF NOT EXISTS (SELECT 1 FROM billing.ledger_transfers
+          WHERE merchant_id = NEW.merchant_id AND credit_grant_id = NEW.id AND book = 'general' AND operation = 'credit_issue')
+         AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings
+          WHERE merchant_id = NEW.merchant_id AND finding_type = 'books.credit.unapplied' AND subject_key = 'credit_grant:' || NEW.id) THEN
+          RAISE EXCEPTION 'credit_books_unposted: paid credit lot % has no general-ledger issue', NEW.id USING ERRCODE = '23514';
+      END IF;
+      RETURN NULL;
+  END;
   $function$
 
 function billing.current_merchant_id()
@@ -4541,6 +4638,7 @@ function billing.finish_billing_restore(uuid,text,bigint)
           RAISE EXCEPTION 'invalid billing restore finalization' USING ERRCODE='23514';
       END IF;
       SET CONSTRAINTS billing.ledger_rollups_settle IMMEDIATE;
+      SET CONSTRAINTS billing.credit_grants_require_books IMMEDIATE;
       UPDATE billing.maintenance_runs SET status='completed',finished_at=now(),summary=jsonb_build_object('digest',p_digest,'rows',p_rows)
           WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('openrails.billing_restore_id',true);
   END;
@@ -4701,6 +4799,7 @@ function billing.guard_billing_restore_receipt()
                     'ledger_rollup_pending',
                     'ledger_transfers',
                     'ledger_type_totals',
+                    'ledger_units',
                     'limit_adjustments',
                     'limit_hold_parts',
                     'limit_holds',
@@ -4708,6 +4807,7 @@ function billing.guard_billing_restore_receipt()
                     'maintenance_runs',
                     'mandates',
                     'merchant_destructive_policy',
+                    'merchant_leases',
                     'money_settings',
                     'mrr_cohort_flows',
                     'mrr_customer_flows',
@@ -4764,6 +4864,7 @@ function billing.guard_billing_restore_receipt()
                     'solana_pay_references',
                     'solana_subscriptions',
                     'stored_card_checks',
+                    'stripe_fee_reads',
                     'subscription_billing_changes',
                     'subscription_cancellations',
                     'subscription_mrr',
@@ -4817,18 +4918,20 @@ function billing.guard_credit_grant_facts()
   AS $function$
   BEGIN
       IF TG_OP = 'INSERT' THEN
-          IF (NEW.units_credited <> 0 OR NEW.units_debited <> 0 OR NEW.units_reserved <> 0 OR NEW.revoked_at IS NOT NULL)
+          IF (NEW.units_credited <> 0 OR NEW.units_debited <> 0 OR NEW.units_reserved <> 0 OR NEW.revoked_at IS NOT NULL
+              OR NEW.deferred_credited <> 0 OR NEW.deferred_debited <> 0)
              AND NOT billing.billing_restore_active(NEW.merchant_id) THEN
-              RAISE EXCEPTION 'a credit grant starts with no posted, reserved or revoked units' USING ERRCODE = '23514';
+              RAISE EXCEPTION 'a credit grant starts with no posted, reserved, deferred or revoked units' USING ERRCODE = '23514';
           END IF;
           RETURN NEW;
       END IF;
       -- Only a nested trigger moves the counters and revoked_at: the transfer
       -- and event inserts are their writers. units_reserved is state.
       IF TG_OP = 'DELETE'
-         OR (to_jsonb(NEW) - ARRAY['units_credited', 'units_debited', 'units_reserved', 'revoked_at']) IS DISTINCT FROM
-            (to_jsonb(OLD) - ARRAY['units_credited', 'units_debited', 'units_reserved', 'revoked_at'])
-         OR (pg_trigger_depth() < 2 AND (NEW.units_credited, NEW.units_debited, NEW.revoked_at) IS DISTINCT FROM (OLD.units_credited, OLD.units_debited, OLD.revoked_at)) THEN
+         OR (to_jsonb(NEW) - ARRAY['units_credited', 'units_debited', 'units_reserved', 'revoked_at', 'deferred_credited', 'deferred_debited']) IS DISTINCT FROM
+            (to_jsonb(OLD) - ARRAY['units_credited', 'units_debited', 'units_reserved', 'revoked_at', 'deferred_credited', 'deferred_debited'])
+         OR (pg_trigger_depth() < 2 AND (NEW.units_credited, NEW.units_debited, NEW.revoked_at, NEW.deferred_credited, NEW.deferred_debited)
+             IS DISTINCT FROM (OLD.units_credited, OLD.units_debited, OLD.revoked_at, OLD.deferred_credited, OLD.deferred_debited)) THEN
           RAISE EXCEPTION 'credit grant facts are immutable; its ledger transfers and events keep its counters' USING ERRCODE = '23514';
       END IF;
       RETURN NEW;
@@ -5232,6 +5335,25 @@ function billing.ledger_transfers_apply_lot_counters()
   END;
   $function$
 
+function billing.ledger_transfers_apply_lot_deferred()
+  CREATE OR REPLACE FUNCTION billing.ledger_transfers_apply_lot_deferred()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
+      UPDATE billing.credit_grants g
+      SET deferred_credited = g.deferred_credited + CASE WHEN a.id = NEW.credit_account_id THEN NEW.amount ELSE 0 END,
+          deferred_debited = g.deferred_debited + CASE WHEN a.id = NEW.debit_account_id THEN NEW.amount ELSE 0 END
+      FROM billing.ledger_accounts a
+      WHERE g.merchant_id = NEW.merchant_id AND g.id = NEW.credit_grant_id
+        AND a.merchant_id = NEW.merchant_id AND a.id IN (NEW.debit_account_id, NEW.credit_account_id)
+        AND a.account_type = 'deferred_revenue_credit' AND a.customer_id = g.customer_id AND a.currency = COALESCE(g.paid_currency, g.unit);
+      RETURN NEW;
+  END;
+  $function$
+
 function billing.ledger_transfers_book_rules()
   CREATE OR REPLACE FUNCTION billing.ledger_transfers_book_rules()
    RETURNS trigger
@@ -5601,6 +5723,42 @@ function billing.queue_mrr_risk(uuid,uuid,timestamp with time zone)
   INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at) VALUES (p_merchant, p_customer, p_at)
   $function$
 
+function billing.queue_stripe_fee_read()
+  CREATE OR REPLACE FUNCTION billing.queue_stripe_fee_read()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE fresh boolean;
+  BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NULL; END IF;
+      IF TG_TABLE_NAME = 'payments' THEN
+          IF NEW.rail IS DISTINCT FROM 'stripe' OR NEW.psp_id IS NULL OR NEW.money_movement <> 'rail' OR NEW.status <> 'succeeded'
+             OR NEW.amount = 0 OR NEW.deleted_at IS NOT NULL OR NEW.transaction_id = ''
+             OR coalesce(NEW.reversal_kind IN ('chargeback', 'dispute_reversal'), false)
+             OR NEW.reversal_kind = 'refund' AND NEW.transaction_id !~ '^(re|pyr)_'
+             OR TG_OP = 'UPDATE' AND OLD.status = 'succeeded' AND OLD.money_movement = 'rail' THEN
+              RETURN NULL;
+          END IF;
+          INSERT INTO billing.stripe_fee_reads (merchant_id, psp_id, ref, kind, due_at)
+          VALUES (NEW.merchant_id, NEW.psp_id, NEW.transaction_id, CASE WHEN NEW.reversal_kind = 'refund' THEN 'refund' ELSE 'payment' END, now())
+          ON CONFLICT DO NOTHING;
+      ELSIF NEW.rail = 'stripe' AND NEW.provider_ref <> '' THEN
+          fresh := TG_OP = 'INSERT';
+          IF NOT fresh THEN
+              fresh := OLD.status IS DISTINCT FROM NEW.status;
+          END IF;
+          INSERT INTO billing.stripe_fee_reads AS r (merchant_id, psp_id, ref, kind, due_at)
+          VALUES (NEW.merchant_id, NEW.psp_id, NEW.provider_ref, 'dispute', now())
+          ON CONFLICT (merchant_id, psp_id, ref) DO UPDATE SET kind = 'dispute',
+              due_at = CASE WHEN fresh THEN now() ELSE r.due_at END,
+              attempts = CASE WHEN fresh THEN 0 ELSE r.attempts END,
+              last_error = CASE WHEN fresh THEN NULL ELSE r.last_error END;
+      END IF;
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.rail_subscription_key(text,text)
   CREATE OR REPLACE FUNCTION billing.rail_subscription_key(rail text, ref text)
    RETURNS text
@@ -5840,6 +5998,24 @@ function billing.release_inactive_default()
           UPDATE billing.money_settings SET default_payment_method_id = NULL, updated_at = now()
           WHERE merchant_id = NEW.merchant_id AND customer_id = NEW.customer_id AND default_payment_method_id = NEW.id;
       END IF;
+      RETURN NULL;
+  END;
+  $function$
+
+function billing.requeue_stripe_fee_read()
+  CREATE OR REPLACE FUNCTION billing.requeue_stripe_fee_read()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF NEW.finding_type <> 'books.fee.unread' OR NEW.status NOT IN ('fixed', 'auto_fixed')
+         OR OLD.status NOT IN ('reconcile_required', 'requires_review') THEN
+          RETURN NULL;
+      END IF;
+      UPDATE billing.stripe_fee_reads SET due_at = now(), attempts = 0, last_error = NULL
+       WHERE merchant_id = NEW.merchant_id AND psp_id::text = split_part(NEW.subject_key, '/', 1)
+         AND ref = substr(NEW.subject_key, length(split_part(NEW.subject_key, '/', 1)) + 2) AND due_at = 'infinity';
       RETURN NULL;
   END;
   $function$

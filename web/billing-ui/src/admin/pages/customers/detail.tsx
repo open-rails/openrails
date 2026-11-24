@@ -52,11 +52,13 @@ import {
   TableRow,
 } from "#orck/admin/components/ui/table"
 import {
+  formatBalanceAmount,
   formatCard,
   formatCardExpiry,
   formatDate,
   formatNativeAmount,
   shortId,
+  unitScales,
 } from "#orck/admin/lib/format"
 import type { CustomerContact } from "#orck/client/generated/wire"
 
@@ -161,13 +163,13 @@ export function CustomerDetailPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-lg font-semibold">
-                  {formatNativeAmount(b.balance_amount, b.currency)}
+                  {formatBalanceAmount(b.balance_amount, b)}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   <AdminMessage id={"held "} />
-                  {formatNativeAmount(b.held_amount, b.currency)}
+                  {formatBalanceAmount(b.held_amount, b)}
                   <AdminMessage id={" · owed"} />{" "}
-                  {formatNativeAmount(b.owed_amount, b.currency)}
+                  {formatBalanceAmount(b.owed_amount, b)}
                 </p>
               </CardContent>
             </Card>
@@ -192,6 +194,7 @@ export function CustomerDetailPage() {
         <CustomerCreditSupportSection
           customerId={customerId}
           currencies={customer.balances.map((balance) => balance.currency)}
+          units={unitScales(customer.balances)}
         />
       )}
       {sells?.usage && (

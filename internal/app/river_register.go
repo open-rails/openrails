@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/money/fees"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/pull"
@@ -242,11 +243,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
 		// Cancellations at period end leave MRR at their end.
 		riverjobs.Scan{Kind: riverjobs.KindMRRDue, Run: (&riverjobs.MRRDueWorker{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
+		// Stripe's fees on the charges, refunds and disputes recorded since.
+		riverjobs.Scan{Kind: riverjobs.KindStripeFees, Run: (&fees.StripeReader{DB: r.DB, Rails: r.RailConfigs, Stripe: r.StripeClients, Log: r.Log}).Pass},
 	)
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)
 	}
-	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Scans: scans, Clock: clock, Log: r.Log}); err != nil {
+	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Leases: r.leaseDB, Scans: scans, Clock: clock, Log: r.Log}); err != nil {
 		return fmt.Errorf("add billing pass worker: %w", err)
 	}
 	r.riverCompositionMu.Lock()
@@ -475,6 +478,7 @@ func (r *Runtime) refreshWorkers(clock clockwork.Clock) (*riverjobs.ProviderRefr
 	refresh := &riverjobs.ProviderRefreshWorker{
 		StripeClients:  r.StripeClients,
 		DB:             r.DB,
+		Leases:         r.leaseDB,
 		Config:         r.Config,
 		Clock:          clock,
 		Merchants:      r.Merchants, // per-merchant store-armed pulls

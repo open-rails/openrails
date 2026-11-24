@@ -49,9 +49,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) Â
 
 ## Hourly billing scans
 
-Each `openrails.billing_pass` job runs these scans in order within its own River
-row. Usage billing also has a registered kind for threshold wakes and page
-continuations. The other scan names label work inside the pass.
+Each `openrails.billing_pass` job runs these scans in order within its own River row. Usage billing also has a registered kind for threshold wakes and page continuations. The other scan names label work inside the pass. A pass that starts while another runs, on any fleet, exits: the running pass holds a lease in `periodic_leases`, renewed while it runs and lapsing within two minutes of its holder dying.
 [Scan registration](../internal/app/river_register.go) Â·
 [Pass execution](../internal/river/jobs_billing_pass.go)
 
@@ -71,6 +69,7 @@ continuations. The other scan names label work inside the pass.
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
 | `openrails.operation_wakes` | Live provider operations more than an hour overdue that need another wake. [Source](../internal/river/jobs_operation_wakes.go) |
 | `openrails.mrr_due` | Subscriptions canceled at period end whose end has come: each leaves MRR, dated at its end. The read is indexed on the change instant. [Source](../internal/river/jobs_mrr_due.go) |
+| `openrails.stripe_fees` | Stripe charges, refunds and disputes whose processor fees the general ledger has yet to read (`stripe_fee_reads`, indexed on `due_at`): each object's balance transactions are read and each fee posts once. A failed read waits and is read again; after eight failures it waits for its `books.fee.unread` finding to be fixed. [Source](../internal/modules/money/fees/stripe.go) |
 
 ## Inspect a running deployment
 

@@ -11,15 +11,23 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
 // Spend consumes amount from the customer's live lots, soonest expiry first:
 // one credit_spend per lot drawn, each at the caller's coordinate (its
-// idempotency key) and naming its lot. A lot gives what pending refunds do
-// not reserve. Nothing is applied unless the lots cover amount; compose
-// inside a transaction.
+// idempotency key) and naming its lot, and its money recognised as usage
+// revenue at the lot's rate. A lot gives what pending refunds do not
+// reserve. Nothing is applied unless the lots cover amount; compose inside a
+// transaction.
 func (l *Lots) Spend(ctx context.Context, customer uuid.UUID, unit string, amount int64, invoker, resource string, coord ledger.Coord) (applied bool, err error) {
+	return l.SpendInto(ctx, customer, unit, amount, invoker, resource, coord, nil)
+}
+
+// SpendInto is Spend paying an order line priced in the lot's unit: the
+// money goes to that line's deferred revenue (books.Line). nil is usage.
+func (l *Lots) SpendInto(ctx context.Context, customer uuid.UUID, unit string, amount int64, invoker, resource string, coord ledger.Coord, into *books.Line) (applied bool, err error) {
 	if amount <= 0 {
 		return false, fmt.Errorf("credits: spend amount must be positive, got %d", amount)
 	}
@@ -35,6 +43,11 @@ func (l *Lots) Spend(ctx context.Context, customer uuid.UUID, unit string, amoun
 	}
 	if total < amount {
 		return false, fmt.Errorf("%w (need %d, have %d %s)", ErrInsufficientCredits, amount, total, unit)
+	}
+	// The units book's legs of a line's spend name its order, in the unit.
+	var order *uuid.UUID
+	if into != nil && into.Order != uuid.Nil {
+		order = &into.Order
 	}
 	balance, err := l.money.EnsureCustomerBalance(ctx, customer, unit)
 	if err != nil {
@@ -54,12 +67,15 @@ func (l *Lots) Spend(ctx context.Context, customer uuid.UUID, unit string, amoun
 			continue
 		}
 		id, c, inv, res := lot.ID, customer, invoker, resource
-		_, lotApplied, err := l.money.ApplyIdempotent(ctx, ledger.Transfer{
+		leg, lotApplied, err := l.money.ApplyIdempotent(ctx, ledger.Transfer{
 			Debit: balance, Credit: revenue, Amount: take, Currency: unit, Type: ledger.CreditSpend,
-			Coord: coord, CreditGrantID: &id, Customer: &c, Invoker: &inv, Resource: &res,
+			Coord: coord, CreditGrantID: &id, Customer: &c, Invoker: &inv, Resource: &res, Order: order,
 		})
 		if err != nil {
 			return applied, fmt.Errorf("credits: spend from lot %s: %w", lot.ID, err)
+		}
+		if err := l.move(ctx, lot.ID, books.CreditSpent, leg, into); err != nil {
+			return applied, err
 		}
 		// One leg per lot: any leg that inserted moved money now; all legs
 		// replaying means the spend was committed at this coordinate.
@@ -122,8 +138,9 @@ func (l *Lots) settleUsage(ctx context.Context, customer uuid.UUID, unit string,
 }
 
 // ExpireLapsed moves the units left on every lot past its expiry to
-// units_expired, one transfer per lot, and returns the total. Idempotent:
-// an expired lot has none left. It takes the customer's lock.
+// units_expired, one transfer per lot, and their money to breakage, and
+// returns the total. Idempotent: an expired lot has none left. It takes the
+// customer's lock.
 func (l *Lots) ExpireLapsed(ctx context.Context, customer uuid.UUID, unit string) (int64, error) {
 	return l.ExpireLapsedBy(ctx, customer, unit, l.now())
 }
@@ -164,12 +181,16 @@ func (l *Lots) ExpireLapsedBy(ctx context.Context, customer uuid.UUID, unit stri
 			continue
 		}
 		id, c := lot.ID, customer
-		if _, err := l.money.Apply(ctx, ledger.Transfer{
+		leg, err := l.money.Apply(ctx, ledger.Transfer{
 			Debit: balance, Credit: expiredAccount, Amount: remaining, Currency: unit, Type: ledger.CreditExpire,
 			Coord:         ledger.Coord{Operation: ledger.OpCreditExpire, Source: "credit_expiry", SourceID: lot.ID.String()},
 			CreditGrantID: &id, Customer: &c,
-		}); err != nil {
+		})
+		if err != nil {
 			return expired, fmt.Errorf("credits: expire lot %s: %w", lot.ID, err)
+		}
+		if err := l.move(ctx, lot.ID, books.CreditExpired, leg, nil); err != nil {
+			return expired, err
 		}
 		expired += remaining
 	}

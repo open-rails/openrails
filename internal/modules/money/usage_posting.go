@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/retention"
@@ -238,6 +239,20 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 		}
 	}
 	slices.SortFunc(periods, func(a, b time.Time) int { return a.Compare(b) })
+	forgiven := map[time.Time]map[forgivenKey]int64{}
+	for _, p := range postings {
+		lines, err := decodeForgivenLines(p.ForgivenLines)
+		if err != nil {
+			return false, fmt.Errorf("usage posting %s: %w", p.ID, err)
+		}
+		period := p.PeriodStartsAt.UTC()
+		for _, l := range lines {
+			if forgiven[period] == nil {
+				forgiven[period] = map[forgivenKey]int64{}
+			}
+			forgiven[period][l.key()] += l.Amount
+		}
+	}
 	var since, due time.Time
 	keep := func(s, d time.Time) {
 		if since.IsZero() || s.Before(since) {
@@ -268,7 +283,7 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 			}
 			moved = true
 		case amount < 0 && !now.Before(end.Add(retention.UsageIngestWindow)):
-			if err := s.reversePeriod(ctx, q, merchantID, customer, currency, period, end, cut, ingested, amount, lines); err != nil {
+			if err := s.reversePeriod(ctx, q, merchantID, customer, currency, period, end, cut, ingested, amount, forgiven[period], lines); err != nil {
 				return moved, err
 			}
 			moved = true
@@ -455,7 +470,8 @@ func postingDelta(target, posted map[lineKey]*PostingLine) ([]PostingLine, int64
 
 // postPeriod posts what a period's usage adds: balance first, the rest owed,
 // split by meter and dated when the usage occurred but never before the end
-// of the customer's last usage order.
+// of the customer's last usage order. In a merchant's unit, never owed, what
+// the lots live before the cut cannot take is forgiven.
 func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut, ingested time.Time,
 	reason string, amount int64, lines []PostingLine, billed time.Time) error {
 	encoded, err := json.Marshal(lines)
@@ -463,10 +479,34 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 		return err
 	}
 	now := instant(s.now())
+	posting := *s
+	posting.clock = clockwork.NewFakeClockAt(now)
+	posting.posting = &runningChargePosting{through: cut}
+	var forgiven int64
+	var split []byte
+	if IsMerchantUnit(currency) {
+		covered, err := posting.spendableUnits(ctx, q, merchantID, customer, currency)
+		if err != nil {
+			return err
+		}
+		if forgiven = max(amount-covered, 0); forgiven > 0 {
+			lines, err := s.forgivenLines(ctx, q, merchantID, customer, currency, period, cut, forgiven)
+			if err != nil {
+				return err
+			}
+			if split, err = json.Marshal(lines); err != nil {
+				return err
+			}
+		}
+	}
 	row, err := q.InsertUsagePosting(ctx, gen.InsertUsagePostingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency,
-		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: reason, Amount: amount, Lines: encoded, IngestedThrough: ingested, Now: now})
+		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: reason, Amount: amount, Forgiven: forgiven, ForgivenLines: split, Lines: encoded,
+		IngestedThrough: ingested, Now: now})
 	if err != nil {
 		return err
+	}
+	if forgiven == amount {
+		return nil
 	}
 	byMeter := map[string]int64{}
 	var meters []string
@@ -484,35 +524,50 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 	for _, m := range meters {
 		owed = append(owed, owedShare{meter: m, weight: byMeter[m]})
 	}
-	posting := *s
-	posting.clock = clockwork.NewFakeClockAt(now)
 	posting.posting = &runningChargePosting{through: cut, owed: owed, usagePosted: true,
 		owedAt: later(earlier(earlier(end, cut).Add(-time.Microsecond), now), billed)}
 	key := MustIdempotencyKey(OpUsagePosting, usagePostingSourcePrefix+row.ID.String(), "1")
 	payer := identity.CustomerID(customer)
-	_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
+	_, accrued, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount-forgiven, true)
 	if err != nil {
 		return err
 	}
 	if !applied {
 		return fmt.Errorf("usage posting %s: the ledger already held it", row.ID)
 	}
-	return nil
+	// What it left owed is usage revenue receivable, dated as its owed is.
+	return books.New(q, merchantID).AccrueUsage(ctx, customer, currency, accrued, key.Coord(), posting.posting.owedAt, nil)
 }
 
 // reversePeriod credits what a period posted beyond its price, as a lot that
-// never lapses.
+// never lapses. What the period forgave is taken back first, from its stored
+// shares: only what the ledger took is credited.
 func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut, ingested time.Time,
-	amount int64, lines []PostingLine) error {
+	amount int64, forgave map[forgivenKey]int64, lines []PostingLine) error {
 	encoded, err := json.Marshal(lines)
 	if err != nil {
 		return err
 	}
 	now := instant(s.now())
+	var total int64
+	for _, v := range forgave {
+		total += max(v, 0)
+	}
+	unforgiven := -min(-amount, total)
+	var split []byte
+	if unforgiven != 0 {
+		if split, err = json.Marshal(takeBackForgiven(forgave, unforgiven)); err != nil {
+			return err
+		}
+	}
 	row, err := q.InsertUsagePosting(ctx, gen.InsertUsagePostingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency,
-		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: usagePostingReversal, Amount: amount, Lines: encoded, IngestedThrough: ingested, Now: now})
+		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: usagePostingReversal, Amount: amount, Forgiven: unforgiven, ForgivenLines: split,
+		Lines: encoded, IngestedThrough: ingested, Now: now})
 	if err != nil {
 		return err
+	}
+	if amount -= unforgiven; amount == 0 {
+		return nil
 	}
 	l := ledger.New(q, merchantID)
 	account, err := l.EnsureCustomerBalance(ctx, customer, currency)
@@ -527,6 +582,13 @@ func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, mercha
 	}
 	coord := ledger.Coord{Operation: OpUsagePosting, Source: usagePostingSourcePrefix + row.ID.String(), SourceID: "1"}
 	if _, err := l.ReverseUsage(ctx, customer, currency, -amount, coord, lot.ID); err != nil {
+		return err
+	}
+	// The revenue it took back is the lot's, deferred at face.
+	if lot, err = q.GetCreditLot(ctx, gen.GetCreditLotParams{MerchantID: merchantID, ID: lot.ID}); err != nil {
+		return err
+	}
+	if err := books.New(q, merchantID).ReverseUsage(ctx, books.CreditLotOf(lot), coord, now); err != nil {
 		return err
 	}
 	return ledger.WatchChange(ctx, q, merchantID, customer, currency, true, now)

@@ -351,7 +351,7 @@ at purchase; devnet and testnet price at $1.00 parity.
 Without rules: stripe, nmi, ccbill, solana, the first that can serve the price.
 Fallback is pre-charge only: a decline never moves to a second processor.
 
-`currencies` declares the merchant's own units (`billing.MerchantCurrency`: credits, API tokens, an in-game currency), at most 32: a `code` of 4 to 12 upper-case letters or digits starting with a letter that is not in OpenRails' registry (three-letter codes are ISO 4217's), a `name`, a `symbol` without a currency sign (the code when omitted) and a `scale` from 0 (whole units, the default) to 6, so `{code: GOLD, name: Gold coins, symbol: 🪙}` counts whole coins. A unit joins the registry for that merchant alone; `GET /v1/me/config` lists it beside `GET /v1/config`'s registry. It is never money: `CreatePrice`, a catalog's credit grants and rate cards, credit grants, balances, admissions and the money settings above refuse it with `merchant_unit_unsupported`, a catalog document cannot price in it, so nothing is charged or paid in it, and a declaration that names a registry currency or breaks these rules is refused like any other invalid settings.
+`currencies` declares the merchant's own units (`billing.MerchantCurrency`: credits, API tokens, an in-game currency), at most 32: a `code` of 4 to 12 upper-case letters or digits starting with a letter that is not in OpenRails' registry (three-letter codes are ISO 4217's), a `name`, a `symbol` without a currency sign (the code when omitted) and a `scale` from 0 (whole units, the default) to 6, so `{code: GOLD, name: Gold coins, symbol: 🪙}` counts whole coins. A unit joins the registry for that merchant alone; `GET /v1/me/config` lists it beside `GET /v1/config`'s registry, and a balance in it names it in its `unit`. It is bought, given and spent ([credits](#credits)) but never money: the money settings above refuse it with `merchant_unit_unsupported`, a credit limit or running charge in it is `currency_unsupported`, and a declaration that names a registry currency or breaks these rules is refused like any other invalid settings. Once a balance, price, credit grant or rate card counts a unit, an edit may neither remove it nor change its scale.
 
 ## Catalog
 
@@ -718,11 +718,16 @@ grants what was paid, with a `customer_amount` price whose amount the buyer name
 on the order line. A recurring price with a `credit_grant` grants its credit after
 each paid renewal. A voluntary refund needs the lot unused and unheld.
 
+A `credit_grant` may count one of the merchant's own units (`settings.currencies`) instead of money: it then names its `amount` (never `from_payment`), and every price of the product buys that many units, in whatever currency the price is in, so a $50 pack of 55 credits is a product beside a $20 pack of 20. Each lot records its units, what was paid and in what currency. `CreateCreditGrants` gives units, and a recurring price's `credit_grant` in a unit is a plan's allowance, delivered each paid cycle. Units are spent by usage a rate card prices in the unit, by admissions in it, and by a one-off price in it: `POST /v1/me/orders` (with an `Idempotency-Key` and no `payment`) or `CreateOrder` pays such an order from the customer's balance as it is created, soonest-expiring lot first, or refuses it with `insufficient_credits`. A unit is never owed: an admission holds its estimate against the unit balance, and one that holds nothing is refused once the balance is all held. Usage in a unit is reported by capturing an admission (a gate's views and lease syncs take registry currencies). Its posting takes what the lots hold and forgives the rest, shown as `usage_charged` with `charge: forgiven`. `GET /v1/me/usage` reads usage in a unit at its price. Refunding a pack's payment takes the lot's share of its units, those left first. The amount shorthand (`50 GOLD`) cannot know a unit's scale: a price in a unit names `currency` and `unit_amount` in native units.
+
+A bought lot's price is deferred revenue, recognised at the lot's rate (paid ÷ credits, a pack's bonus included) as its credit is spent; what lapses or is revoked is breakage, and a reinstatement reverses it. Granted credit is promotional: spending it counts as usage revenue offset by promotional credit. See [prepaid credits](architecture/prepaid-credits.md).
+
 | Method | Use it to |
 |---|---|
 | `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
 | `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
-| `RevokeCreditGrant` | take back what remains of a lot |
+| `RevokeCreditGrant` | take back what remains of a lot; a retry under the same idempotency key replays, even after a reinstatement |
+| `ReinstateCreditGrant` | reverse a revocation: what it took returns to the balance; a retry under the same idempotency key replays, even after a later revocation |
 
 ```go guide:credit-grant
 _, err := shop.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{{

@@ -153,7 +153,7 @@ func TestAdmissionBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, admitted[0].Allowed())
 		reason := billing.RevokeCreditGrantParams{Reason: "Revoke only unused credit"}
-		_, err = w.alpha.RevokeCreditGrant(t.Context(), grant.ID, reason)
+		_, err = w.alpha.RevokeCreditGrant(t.Context(), "", grant.ID, reason)
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
 		require.Equal(t, billing.CodeCreditGrantHeld, held.Code)
@@ -178,7 +178,7 @@ func TestAdmissionBoundaries(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			result, err := w.alpha.RevokeCreditGrant(t.Context(), grant.ID, reason)
+			result, err := w.alpha.RevokeCreditGrant(t.Context(), "", grant.ID, reason)
 			rch <- revokeResult{result, err}
 		}()
 		close(start)
