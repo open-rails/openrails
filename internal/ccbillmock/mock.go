@@ -1,12 +1,13 @@
 // Package ccbillmock is a stateful CCBill DataLink for tests and disposable
-// sandbox stacks: the ACTIVEMEMBERS roster, REBILL transaction exports and
-// the subscription-management (SMS) status and cancel actions. Point
+// sandbox stacks: the ACTIVEMEMBERS roster, REBILL and CANCELLATION
+// transaction exports and the subscription-management (SMS) status and
+// cancel actions. Point
 // Config.ProviderSandbox.CCBillDataLinkURL at URL. Only tests and sandbox
 // commands may import it.
 //
 // Times are written as CCBill's DataLink guide writes them: a roster row's
-// transaction timestamp as YYYYMMDDHHMMSS, a REBILL row's and every rebill
-// and expire date as YYYY-MM-DD. CCBill names no zone for them; they are UTC,
+// transaction timestamp as YYYYMMDDHHMMSS, a REBILL row's and every rebill,
+// expire and cancel date as YYYY-MM-DD. CCBill names no zone for them; they are UTC,
 // the zone OpenRails reads them in.
 //
 // As CCBill's guide says, DataLink answers a live account (no testMode=1) one
@@ -17,8 +18,8 @@
 // Known differences from real CCBill: credentials are checked only after
 // RequireCredentials; members carry no amount (DataLink's roster names none);
 // exports honor startTime and endTime (CCBill's MST clock), refuse a range
-// over 24 hours as CCBill does, and list only rebills. A refused request does
-// not restart the hour.
+// over 24 hours as CCBill does, and list only rebills and cancellations. A
+// refused request does not restart the hour.
 package ccbillmock
 
 import (
@@ -49,6 +50,13 @@ type Rebill struct {
 	Amount                        string
 }
 
+// Cancellation is one CANCELLATION row: a member who stopped rebilling at
+// At and keeps access until Expires.
+type Cancellation struct {
+	SubscriptionID string
+	At, Expires    time.Time
+}
+
 // Call is one SMS action CCBill received.
 type Call struct {
 	Path string
@@ -68,18 +76,19 @@ type Request struct {
 
 // Mock is a running fake DataLink. Its methods are safe for concurrent use.
 type Mock struct {
-	server   *httptest.Server
-	mu       sync.Mutex
-	seq      int
-	members  []Member
-	rebills  []Rebill
-	cancels  map[string]int
-	calls    []Call
-	requests []Request
-	lastLive map[string]time.Time
-	clock    func() time.Time
-	odd      []string
-	auth     *credentials
+	server        *httptest.Server
+	mu            sync.Mutex
+	seq           int
+	members       []Member
+	rebills       []Rebill
+	cancellations []Cancellation
+	cancels       map[string]int
+	calls         []Call
+	requests      []Request
+	lastLive      map[string]time.Time
+	clock         func() time.Time
+	odd           []string
+	auth          *credentials
 }
 
 // credentials are the only DataLink login answered; refused says how others
@@ -132,6 +141,13 @@ func (m *Mock) AddRebill(r Rebill) string {
 	}
 	m.rebills = append(m.rebills, r)
 	return r.TransactionID
+}
+
+// AddCancellation records a member's cancellation.
+func (m *Mock) AddCancellation(c Cancellation) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cancellations = append(m.cancellations, c)
 }
 
 // RequireCredentials makes DataLink answer only username and password. Any
@@ -261,6 +277,16 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				rows = append(rows, fmt.Sprintf(`"REBILL","999999","0000","%s","%s","%s","%s"`, rb.SubscriptionID, date(&rb.At), rb.TransactionID, rb.Amount))
+			}
+		}
+		if strings.Contains(r.Form.Get("transactionTypes"), "CANCELLATION") {
+			for _, c := range m.cancellations {
+				if at := c.At.Truncate(time.Second); at.Before(start) || at.After(end) {
+					continue
+				}
+				// The guide's default CANCELLATION fields after the type and
+				// account: subscription id, expire date, cancel date, batched.
+				rows = append(rows, fmt.Sprintf(`"CANCELLATION","999999","0000","%s","%s","%s","N"`, c.SubscriptionID, date(&c.Expires), date(&c.At)))
 			}
 		}
 		_, _ = io.WriteString(w, strings.Join(rows, "\n"))

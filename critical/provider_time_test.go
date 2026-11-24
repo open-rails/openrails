@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -90,6 +91,42 @@ func ccbillRebills(t *testing.T, w *world, dataLink *ccbillmock.Mock, times []ti
 // liveDataLink makes a sandbox CCBill PSP's DataLink clients ask as a live
 // account's do: no live PSP is declared beside a fake DataLink.
 func liveDataLink(dl *ccbill.DataLinkClient) { dl.DevMode = false }
+
+// liveCCBillRefresh is the refresh of alpha's one CCBill PSP with its
+// DataLink asking as a live account's: the merchant's pass, and the PSP's
+// paced pass, run as their workers run them.
+func liveCCBillRefresh(t *testing.T, w *world) (uuid.UUID, func() error, func() error) {
+	t.Helper()
+	rt := embedded.Graph(w.engine).Runtime
+	refresh := &riverjobs.ProviderRefreshWorker{DB: rt.DB, Config: rt.Config, Clock: w.clock, Merchants: rt.Merchants, Contacts: rt.Contacts,
+		StripeClients: rt.StripeClients, NMIClients: rt.NMIClients, DataLinkPacing: rt.DataLinkPacing(), WireDataLink: liveDataLink, Log: slog.Default()}
+	psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+	require.NoError(t, err)
+	require.Len(t, psps.Items, 1)
+	psp, mid := psps.Items[0].ID.UUID(), w.alpha.MerchantID().UUID()
+	paced := &riverjobs.PacedProviderRefreshWorker{Refresh: refresh}
+	return psp, func() error {
+			return refresh.Work(t.Context(), &river.Job[riverjobs.ProviderRefreshRequestArgs]{JobRow: &rivertype.JobRow{}, Args: riverjobs.ProviderRefreshRequestArgs{MerchantID: mid}})
+		}, func() error {
+			return paced.Work(t.Context(), &river.Job[riverjobs.PacedProviderRefreshArgs]{JobRow: &rivertype.JobRow{}, Args: riverjobs.PacedProviderRefreshArgs{MerchantID: mid, PSPID: psp}})
+		}
+}
+
+// drainPaced runs a paced refresh until it is done, advancing the clock over
+// each snooze, and answers how many requests it waited between.
+func drainPaced(t *testing.T, w *world, run func() error) int {
+	t.Helper()
+	passes := 0
+	for err := run(); err != nil; err = run() {
+		var snooze *rivertype.JobSnoozeError
+		require.ErrorAs(t, err, &snooze)
+		require.Equal(t, ccbill.DataLinkInterval, snooze.Duration)
+		passes++
+		require.Less(t, passes, 200, "the backlog catches up")
+		w.clock.Advance(snooze.Duration)
+	}
+	return passes
+}
 
 // liveRequestsAnHourApart requires the live requests DataLink answered an
 // hour apart, and answers them.
@@ -237,23 +274,10 @@ func TestProviderTime(t *testing.T) {
 		now := w.clock.Now().Truncate(time.Second)
 		times := []time.Time{now.Add(-50 * time.Hour), now.Add(-27 * time.Hour), now.Add(-3 * time.Hour)}
 		members, _ := ccbillRebills(t, w, dataLink, times)
-		rt := embedded.Graph(w.engine).Runtime
-		refresh := &riverjobs.ProviderRefreshWorker{DB: rt.DB, Config: rt.Config, Clock: w.clock, Merchants: rt.Merchants, Contacts: rt.Contacts,
-			StripeClients: rt.StripeClients, NMIClients: rt.NMIClients, DataLinkPacing: rt.DataLinkPacing(), WireDataLink: liveDataLink, Log: slog.Default()}
-		psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
-		require.NoError(t, err)
-		require.Len(t, psps.Items, 1)
-		psp := psps.Items[0].ID.UUID()
-		mid := w.alpha.MerchantID().UUID()
-		paced := &riverjobs.PacedProviderRefreshWorker{Refresh: refresh}
-		run := func() error {
-			return paced.Work(t.Context(), &river.Job[riverjobs.PacedProviderRefreshArgs]{JobRow: &rivertype.JobRow{},
-				Args: riverjobs.PacedProviderRefreshArgs{MerchantID: mid, PSPID: psp}})
-		}
+		psp, merchantPass, run := liveCCBillRefresh(t, w)
 		// The merchant's refresh hands the live account to a refresh of its
 		// own, which reads DataLink a request per hour.
-		require.NoError(t, refresh.Work(t.Context(), &river.Job[riverjobs.ProviderRefreshRequestArgs]{JobRow: &rivertype.JobRow{},
-			Args: riverjobs.ProviderRefreshRequestArgs{MerchantID: mid}}))
+		require.NoError(t, merchantPass())
 		require.Empty(t, liveRequestsAnHourApart(t, dataLink), "the merchant's refresh reads no DataLink")
 		jobs, err := hostFleet(t, w).JobList(t.Context(), river.NewJobListParams().Kinds(riverjobs.KindPacedProviderRefresh))
 		require.NoError(t, err)
@@ -276,14 +300,7 @@ func TestProviderTime(t *testing.T) {
 		w.clock.Advance(snooze.Duration)
 
 		// A day of transactions an hour, from 90 days back, then the roster.
-		passes := 0
-		for err := run(); err != nil; err = run() {
-			require.ErrorAs(t, err, &snooze)
-			require.Equal(t, ccbill.DataLinkInterval, snooze.Duration)
-			passes++
-			require.Less(t, passes, 200, "the backlog catches up")
-			w.clock.Advance(snooze.Duration)
-		}
+		passes := drainPaced(t, w, run)
 		for txn, customer := range members {
 			require.EqualValues(t, 10_000_000, ccbillPayments(t, w, customer)[txn], "the paced refresh records rebill %s", txn)
 		}
@@ -338,5 +355,51 @@ func TestProviderTime(t *testing.T) {
 		}
 		require.GreaterOrEqual(t, passes, 4, "the roster, then each day, an hour apart")
 		liveRequestsAnHourApart(t, iw.ccbill)
+	})
+
+	t.Run("OR-J38-S47/a-missed-ccbill-cancellation-read-on-a-paced-day-keeps-the-paid-period", func(t *testing.T) {
+		dataLink := ccbillmock.New()
+		t.Cleanup(dataLink.Close)
+		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
+		w := newWorld(t, func(w *world) {
+			declareCCBillAccount(w, account, dataLink.URL())
+			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		})
+		// Lifecycle repairs are armed: what keeps the paid period is the
+		// cancellation's meaning, not a held write.
+		armWorldDestructive(t, w, true)
+		dataLink.SetClock(w.clock.Now)
+		now := w.clock.Now().Truncate(time.Second)
+		price := ccbillMemberPrice(t, w.alpha)
+		customer := billing.CustomerID(uuid.New())
+		sub, start, paid := "0223344556600000777", now.Add(-20*24*time.Hour), now.Add(10*24*time.Hour)
+		res, err := w.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"},
+			Customers: []billing.DeclaredCustomer{{Customer: customer}},
+			Subscriptions: []billing.DeclaredSubscription{{SourceID: "ccbill-member", Customer: customer, Price: price, Rail: "ccbill", RailSubscriptionID: sub, StartedAt: start, PaidThrough: &paid,
+				AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: sub, Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: paid}}},
+			Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: sub, TransactionID: "0812233445500000777", Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start}}})
+		require.NoError(t, err)
+		require.Empty(t, res.Blocked, "%+v", res.Reasons)
+		require.True(t, entitledTo(t, w.alpha, customer, "ccbill:member"))
+		// The member stopped rebilling three hours ago; its webhook never came.
+		dataLink.AddMember(ccbillmock.Member{SubscriptionID: sub, Username: "member", Email: "member@critical.invalid", Signup: start, Expiry: &paid})
+		dataLink.AddCancellation(ccbillmock.Cancellation{SubscriptionID: sub, At: now.Add(-3 * time.Hour), Expires: paid})
+		psp, _, run := liveCCBillRefresh(t, w)
+		database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+		require.NoError(t, err)
+		require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), w.alpha.MerchantID()), func(ctx context.Context) error {
+			return database.Gen(ctx).UpsertPSPRefreshWatermark(ctx, gen.UpsertPSPRefreshWatermarkParams{MerchantID: w.alpha.MerchantID().UUID(), PspID: psp, WatermarkAt: now.Add(-30 * time.Hour)})
+		}))
+
+		// Days of transactions only, no roster: the CANCELLATION row alone
+		// tells the pull, which keeps the paid period.
+		require.Positive(t, drainPaced(t, w, run))
+		after := onlySubscription(t, w.alpha, customer)
+		require.NotNil(t, after.CanceledAt, "the cancellation is mirrored: status %s", after.Status)
+		require.NotNil(t, after.CurrentPeriodEndsAt)
+		require.True(t, after.CurrentPeriodEndsAt.Equal(paid), "paid through %s", after.CurrentPeriodEndsAt)
+		require.True(t, entitledTo(t, w.alpha, customer, "ccbill:member"), "the time paid for is kept")
+		require.Len(t, liveRequestsAnHourApart(t, dataLink), 3, "two days of transactions, then the roster")
+		require.Empty(t, dataLink.Unexpected())
 	})
 }

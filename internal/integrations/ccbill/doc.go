@@ -36,6 +36,9 @@
 // the subscription through the lifecycle machine: BillingDateChange never
 // moves the paid period, UserReactivation resumes only inside one
 // (life.ccbill.reactivation_unapplied), and a roster absence is not evidence.
+// A pull reads CCBill the same way: a CANCELLATION row, or a status read
+// answering 1, only stops rebilling and keeps the paid period; an EXPIRE row
+// ends it.
 // Subscription ids match with leading zeros ignored; the first CCBill read
 // rewrites the stored id to CCBill's spelling.
 //

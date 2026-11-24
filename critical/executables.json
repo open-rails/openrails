@@ -1366,6 +1366,9 @@
     "OR-J38-S46": [
       "TestProviderTime/OR-J38-S46/a-live-ccbill-import-reads-a-day-an-hour-and-resumes-each-time"
     ],
+    "OR-J38-S47": [
+      "TestProviderTime/OR-J38-S47/a-missed-ccbill-cancellation-read-on-a-paced-day-keeps-the-paid-period"
+    ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],

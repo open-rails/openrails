@@ -131,12 +131,14 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 			at = now
 		}
 		switch {
-		case d.RemoteGone && subscriptions.OwnerOf(cur) == lifecycle.Provider:
+		case d.RemoteGone && !d.KeepsPaidTime && subscriptions.OwnerOf(cur) == lifecycle.Provider:
 			// A provider that owns the schedule decides its access: its
 			// confirmed end is immediate.
 			return lifecycle.Cancel{Kind: lifecycle.CancelProvider, Immediate: true, At: at}
 		case d.RemoteGone:
-			return lifecycle.ProviderCanceled{At: at} // NMI ended the schedule; paid time is kept
+			// The schedule ended (NMI), or only its rebilling (a CCBill
+			// cancellation): paid time is kept.
+			return lifecycle.ProviderCanceled{At: at}
 		case d.Certainty == collection.CertaintyNonRetryableDecline:
 			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.NonRecoverable, At: at}
 		default:

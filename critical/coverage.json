@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 464,
+  "scenario_count": 465,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2147,6 +2147,11 @@
       "id": "OR-J38-S46",
       "journey": "J38",
       "name": "A live CCBill PSP import reads its roster, then a day of history an hour, waiting between requests and resuming where it stopped until it is pulled"
+    },
+    {
+      "id": "OR-J38-S47",
+      "journey": "J38",
+      "name": "A CCBill cancellation whose webhook was missed, read from a paced day of transactions with no roster, cancels at the period end and keeps the time paid for"
     },
     {
       "id": "OR-J39-S01",

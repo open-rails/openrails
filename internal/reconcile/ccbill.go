@@ -127,6 +127,9 @@ func CCBillRemoteSubscription(rec ccbill.CCBillRecord) RemoteSubscription {
 	return sub
 }
 
+// normalizeCCBillTermination is a CANCELLATION or EXPIRE export row. A
+// cancellation only stops rebilling: the member keeps the time paid for, so it
+// never ends access now. An expiry does.
 func normalizeCCBillTermination(row ccbill.DataLinkExportRow) RemoteSubscription {
 	status := SubscriptionStatusCanceled
 	if row.TransactionType == ccbill.DataLinkTxnExpire {
@@ -138,6 +141,18 @@ func normalizeCCBillTermination(row ccbill.DataLinkExportRow) RemoteSubscription
 		RawStatus:          string(row.TransactionType),
 		Raw:                ccbillRowRaw(row),
 	}
+}
+
+// ccbillStatusNotRebilling is a status read's subscriptionStatus for an
+// active subscription with no further rebill.
+const ccbillStatusNotRebilling = "1"
+
+// stoppedRebillingOnly reports a canceled remote whose provider only stopped
+// rebilling, its member keeping the time paid for: a CCBill CANCELLATION row,
+// or a CCBill status read answering 1.
+func stoppedRebillingOnly(provider Provider, r *RemoteSubscription) bool {
+	return provider == ProviderCCBill && r != nil && r.Status == SubscriptionStatusCanceled &&
+		(r.RawStatus == string(ccbill.DataLinkTxnCancellation) || r.RawStatus == ccbillStatusNotRebilling)
 }
 
 // CCBillRemoteTransaction is one rebill, refund or chargeback export row.
