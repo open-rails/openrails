@@ -26,6 +26,10 @@ import (
 // ErrDisarmed refuses a provider mutation before any bytes are sent.
 var ErrDisarmed = errors.New("PSP disarmed: provider posture is not verified")
 
+// ErrPending refuses, with ErrDisarmed, a mutation whose credential has no
+// verdict from its PSP's load yet: a later attempt may pass.
+var ErrPending = errors.New("provider posture not verified yet")
+
 // Verdict is what a provider's authoritative signal says about a credential.
 type Verdict uint8
 
@@ -128,6 +132,10 @@ type entry struct {
 	retryAt  time.Time
 	// flight is closed when the running check has recorded its verdict.
 	flight chan struct{}
+	// check is the check Verify last ran, and checked is closed once Verify
+	// has named one: RequireVerified checks with nothing else.
+	check   Check
+	checked chan struct{}
 }
 
 // VerdictTTL is how long an arming verdict stands. An account's environment
@@ -192,7 +200,7 @@ func (r *Registry) entry(k Key) *entry {
 	}
 	e := r.entries[k]
 	if e == nil {
-		e = &entry{}
+		e = &entry{checked: make(chan struct{})}
 		r.entries[k] = e
 	}
 	return e
@@ -201,7 +209,42 @@ func (r *Registry) entry(k Key) *entry {
 // Verify checks k now (joining a check already running) and records the
 // verdict, replacing any prior one.
 func (r *Registry) Verify(ctx context.Context, k Key, check Check) Status {
+	e := r.entry(k)
+	e.mu.Lock()
+	e.check = check
+	select {
+	case <-e.checked:
+	default:
+		close(e.checked)
+	}
+	e.mu.Unlock()
 	return r.resolve(ctx, k, check, true)
+}
+
+// RequireVerified is Require for a credential only its PSP's load can check
+// (a Stripe key's declared account is not in the request using it): it never
+// checks with a check of its own. Until Verify has named the key's check it
+// waits, at most wait, then refuses with ErrPending; after that a stale or
+// Unknown verdict is checked again with Verify's check, as Require would.
+func (r *Registry) RequireVerified(ctx context.Context, k Key, wait time.Duration) error {
+	e := r.entry(k)
+	select {
+	case <-e.checked:
+	default:
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-e.checked:
+		case <-timer.C:
+			return fmt.Errorf("%w: %s: %w", ErrDisarmed, k, ErrPending)
+		case <-ctx.Done():
+			return fmt.Errorf("%w: %s: %w: %w", ErrDisarmed, k, ErrPending, ctx.Err())
+		}
+	}
+	e.mu.Lock()
+	check := e.check
+	e.mu.Unlock()
+	return r.resolve(ctx, k, check, false).Error()
 }
 
 // Require returns nil only for an armed key. An unseen key is verified, an

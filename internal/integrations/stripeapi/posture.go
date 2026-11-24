@@ -133,8 +133,11 @@ func (f *Factory) WriteDisarmed(secretKey string) error {
 
 // requirePosture gates a mutation on its key's verdict: a live key's live mode
 // and a test key's test mode, proven against the declared account when the
-// PSP loaded. A live key never reaches a fake provider (an injected transport
-// or a literal loopback IP); a test key's mutation there is a fixture's.
+// PSP loaded (VerifyPosture). A write waits for that first verdict, at most
+// providerposture.DefaultTimeout, and is refused while it is pending
+// (ErrPending, an ErrDisarmed); later re-checks reuse the load's check. A live
+// key never reaches a fake provider (an injected transport or a literal
+// loopback IP); a test key's mutation there is a fixture's.
 func (t *guardTransport) requirePosture(req *http.Request) error {
 	secretKey := requestSecret(req)
 	if t.fixture || loopbackDestination(req) {
@@ -145,7 +148,7 @@ func (t *guardTransport) requirePosture(req *http.Request) error {
 	}
 	endpoint := req.URL.Scheme + "://" + req.URL.Host
 	account := req.Header.Get("Stripe-Account")
-	return providerposture.Process().Require(req.Context(), PostureKey(secretKey, endpoint, account), PostureCheck(t.transport(), secretKey, account, ""))
+	return providerposture.Process().RequireVerified(req.Context(), PostureKey(secretKey, endpoint, account), providerposture.DefaultTimeout)
 }
 
 // loopbackDestination reports a request to a literal loopback IP: a fixture.
