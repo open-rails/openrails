@@ -732,6 +732,11 @@
     "OR-J31-S40": [
       "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers"
     ],
+    "OR-J31-S15": [
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/moves-every-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-lot-drawn-before-its-deposit",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders"
+    ],
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
     ],

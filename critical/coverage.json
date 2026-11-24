@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 481,
+  "scenario_count": 482,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -957,6 +957,11 @@
       "id": "OR-J31-S40",
       "journey": "J31",
       "name": "A merchant's notification adoption export holds back no other merchant and its own producers commit after its snapshot"
+    },
+    {
+      "id": "OR-J31-S15",
+      "journey": "J31",
+      "name": "Credit lots move out of grants with their ids and the remainders and pending-refund shares the old formulas gave, and a lot drawn before its deposit refuses the migration"
     },
     {
       "id": "OR-J31-S09",
