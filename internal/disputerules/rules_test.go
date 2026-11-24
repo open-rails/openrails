@@ -157,19 +157,29 @@ func TestMinimumsAreActualCounts(t *testing.T) {
 	}
 }
 
-// A program's ratio is drawn against its levels as they stand.
+// A program's ratio is drawn against the levels in force in each month:
+// VAMP's excessive level fell from 2.2% to 1.5% on 1 April 2026.
 func TestProgramLines(t *testing.T) {
-	got := map[billing.DisputeProgram]map[float64]string{}
-	for _, id := range []billing.DisputeProgram{billing.ProgramVisaVAMP, billing.ProgramMastercardECP} {
-		got[id] = map[float64]string{}
+	inForce := func(id billing.DisputeProgram, month time.Time) map[float64]string {
+		out := map[float64]string{}
 		for _, l := range ProgramLines(id) {
-			got[id][l.Value] = l.Label
+			if (l.From == nil || !month.Before(*l.From)) && (l.Until == nil || month.Before(*l.Until)) {
+				out[l.Value] = l.Label
+			}
 		}
+		return out
 	}
-	if !maps.Equal(got[billing.ProgramVisaVAMP], map[float64]string{0.005: "warning", 0.015: "excessive"}) {
-		t.Errorf("VAMP lines %v", got[billing.ProgramVisaVAMP])
+	march, april := time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
+	if got := inForce(billing.ProgramVisaVAMP, march); !maps.Equal(got, map[float64]string{0.005: "warning", 0.022: "excessive"}) {
+		t.Errorf("VAMP lines in March 2026 %v", got)
 	}
-	if !maps.Equal(got[billing.ProgramMastercardECP], map[float64]string{0.01: "warning", 0.015: "excessive", 0.03: "high excessive"}) {
-		t.Errorf("ECM lines %v", got[billing.ProgramMastercardECP])
+	if got := inForce(billing.ProgramVisaVAMP, april); !maps.Equal(got, map[float64]string{0.005: "warning", 0.015: "excessive"}) {
+		t.Errorf("VAMP lines in April 2026 %v", got)
+	}
+	if got := inForce(billing.ProgramVisaVAMP, time.Date(2025, time.May, 1, 0, 0, 0, 0, time.UTC)); len(got) != 0 {
+		t.Errorf("VAMP lines before VAMP %v", got)
+	}
+	if got := inForce(billing.ProgramMastercardECP, april); !maps.Equal(got, map[float64]string{0.01: "warning", 0.015: "excessive", 0.03: "high excessive"}) {
+		t.Errorf("ECM lines %v", got)
 	}
 }

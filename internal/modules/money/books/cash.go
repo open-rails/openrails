@@ -69,3 +69,26 @@ func ReceivePayment(ctx context.Context, q *gen.Queries, p gen.BillingPayment) e
 	}
 	return New(q, p.MerchantID).Receive(ctx, r)
 }
+
+// CashAccount is where a payment's cash sits, by ReceiptOf's rule: its PSP's
+// clearing account, or external_receipts for money that came outside
+// OpenRails. A reversal returns cash from, and a recovery restores it to,
+// the account its payment's receipt debited.
+func CashAccount(p gen.BillingPayment) Ref {
+	if p.PspID != nil && p.Channel != "manual" && p.MoneyMovement == "rail" {
+		psp := *p.PspID
+		return Ref{Type: CashClearing, PSP: &psp}
+	}
+	return Ref{Type: ExternalReceipts}
+}
+
+// Started records, once, that the merchant's books started: when a payment
+// writer first booked a receipt, by its clock. Every writer that books a
+// receipt calls it; a later receipt, or a booking of an older payment, never
+// moves it.
+func Started(ctx context.Context, q *gen.Queries, merchant uuid.UUID, currency string, now time.Time) error {
+	if CheckCurrency(currency) != nil {
+		return nil
+	}
+	return q.RecordBooksStart(ctx, gen.RecordBooksStartParams{MerchantID: merchant, StartedAt: now.UTC().Truncate(time.Microsecond)})
+}

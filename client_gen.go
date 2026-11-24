@@ -48,8 +48,10 @@ func (c *Client) GetOrderPaymentAttempt(ctx context.Context, idempotencyKey stri
 
 // CreateOrder creates a merchant order: an unpaid order for one customer,
 // which they pay on your site (POST /v1/me/orders/{id}/pay, or billing-ui's
-// OrderPayURL). It never charges. idempotencyKey is required: a retry with
-// it answers the same order.
+// OrderPayURL). It never charges a card. An order in one of the merchant's
+// own units is paid from the customer's balance in it as it is created
+// (insufficient_credits when the balance does not cover it). idempotencyKey
+// is required: a retry with it answers the same order.
 func (c *Client) CreateOrder(ctx context.Context, idempotencyKey string, params billing.CreateOrderParams) (*billing.Order, error) {
 	var out billing.Order
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/orders", idempotencyKey: idempotencyKey, body: params}, &out); err != nil {
@@ -534,10 +536,24 @@ func (c *Client) GetCreditGrant(ctx context.Context, id billing.CreditGrantID) (
 }
 
 // RevokeCreditGrant revokes a grant's unspent remainder. Revoking a revoked
-// grant returns it with Replayed set.
-func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.RevokeCreditGrantParams) (*billing.CreditGrant, error) {
+// grant returns it with Replayed set, as does a retry under the same
+// idempotencyKey, even after the grant was reinstated. Without a key,
+// revoking a reinstated grant revokes it again.
+func (c *Client) RevokeCreditGrant(ctx context.Context, idempotencyKey string, id billing.CreditGrantID, params billing.RevokeCreditGrantParams) (*billing.CreditGrant, error) {
 	var out billing.CreditGrant
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/credit-grants/{id}/revoke", args: []string{id.String()}, body: params}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/credit-grants/{id}/revoke", idempotencyKey: idempotencyKey, args: []string{id.String()}, body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ReinstateCreditGrant reverses a grant's revocation: the units it froze
+// return to the balance. Reinstating a live grant returns it with Replayed
+// set, as does a retry under the same idempotencyKey, even after a later
+// revocation; a lapsed grant is refused.
+func (c *Client) ReinstateCreditGrant(ctx context.Context, idempotencyKey string, id billing.CreditGrantID, params billing.ReinstateCreditGrantParams) (*billing.CreditGrant, error) {
+	var out billing.CreditGrant
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/credit-grants/{id}/reinstate", idempotencyKey: idempotencyKey, args: []string{id.String()}, body: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

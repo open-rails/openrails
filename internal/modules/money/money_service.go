@@ -143,7 +143,7 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -184,7 +184,7 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 		return fmt.Errorf("admission capacity callback required")
 	}
 	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return err
 	}
 	tid, err := merchant.Require(ctx)
@@ -283,7 +283,7 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 		return AdmissionCapacity{}, fmt.Errorf("money service not initialized")
 	}
 	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return AdmissionCapacity{}, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -356,7 +356,7 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 		return page, nil
 	}
 	cur := normalizeCurrency(string(params.Currency))
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return page, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -447,6 +447,9 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 
 	var trx *models.MoneyTransaction
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := countDepositUnits(ctx, gen.New(tx), params); err != nil {
+			return err
+		}
 		var terr error
 		trx, terr = s.depositTx(ctx, s.db.NewWithPgxTx(tx), params)
 		return terr
@@ -491,6 +494,9 @@ func (s *MoneyService) DepositBatch(ctx context.Context, items []DepositParams) 
 	sort.SliceStable(order, func(a, b int) bool { return lockKey(order[a]) < lockKey(order[b]) })
 	out := make([]*models.MoneyTransaction, len(items))
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := countDepositUnits(ctx, gen.New(tx), items...); err != nil {
+			return err
+		}
 		d := s.db.NewWithPgxTx(tx)
 		for _, i := range order {
 			trx, err := s.depositTx(ctx, d, items[i])
@@ -505,6 +511,21 @@ func (s *MoneyService) DepositBatch(ctx context.Context, items []DepositParams) 
 		return nil, err
 	}
 	return out, nil
+}
+
+// countDepositUnits counts the merchant's units the deposits are in before
+// any customer is locked: a first use takes the units lock first, so two
+// batches never wait on each other's locks in opposite orders.
+func countDepositUnits(ctx context.Context, q *gen.Queries, items ...DepositParams) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	codes := make([]string, 0, len(items))
+	for _, item := range items {
+		codes = append(codes, normalizeCurrency(item.Currency))
+	}
+	return ledger.New(q, mid.UUID()).CountUnits(ctx, codes...)
 }
 
 // ensureCustomer upserts the billing.customers row for a payable customer id
@@ -536,7 +557,7 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 		return nil, err
 	}
 	cur := normalizeCurrency(params.Currency)
-	if _, err := CurrencyDecimals(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)

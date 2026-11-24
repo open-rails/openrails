@@ -269,6 +269,9 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 			PSP: &receipt.psp, Amount: charged, Currency: order.Currency, At: facts.PaidAt}); err != nil {
 			return err
 		}
+		if err := books.Started(ctx, q, mid.UUID(), order.Currency, s.now()); err != nil {
+			return err
+		}
 		transfer, err := ledger.New(q, mid.UUID()).PayOwed(ctx, order.CustomerID, order.Currency, due, ledger.Coord{Operation: ledger.OpOrderPayment, Source: "observed_invoice_payment", SourceID: key}, &orderID)
 		if err != nil {
 			return err
@@ -276,16 +279,20 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 		if transfer.OrderID == nil || *transfer.OrderID != orderID || transfer.Amount != due {
 			return fmt.Errorf("%w: recovered ledger identity conflicts", ErrUsageRecoveryHeld)
 		}
+		var change *models.MoneyTransaction
 		if surplus := charged - due; surplus > 0 {
 			payer := identity.CustomerID(order.CustomerID)
 			roundingKey := "invoice-observed-rounding:" + key
 			description := "Rounding credit from recovered order " + billing.OrderID(orderID).String()
-			if _, err := s.depositTx(ctx, s.db.NewWithPgxTx(tx), DepositParams{CustomerID: &payer, Invoker: payer.String(), Currency: order.Currency, Amount: surplus,
+			if change, err = s.depositTx(ctx, s.db.NewWithPgxTx(tx), DepositParams{CustomerID: &payer, Invoker: payer.String(), Currency: order.Currency, Amount: surplus,
 				Source: "invoice_rounding_purchase", SourceID: &roundingKey, Description: &description, Funding: credits.Purchase}); err != nil {
 				return err
 			}
 		}
 		if err = q.InsertOrderPayment(ctx, gen.InsertOrderPaymentParams{ID: paymentID, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: orderID, LedgerTransferID: transfer.ID, Currency: order.Currency, Amount: charged, Channel: string(models.ChannelRail), Rail: new("nmi"), TransactionID: facts.Sale.TransactionID, PspID: &receipt.psp, PaidAt: facts.PaidAt, Now: s.now(), TokenType: new(charge.TokenTypePSPToken)}); err != nil {
+			return err
+		}
+		if err := s.fundChange(ctx, q, mid.UUID(), change, paymentID); err != nil {
 			return err
 		}
 		settled, err := usage.Pay(ctx, s.db.NewWithPgxTx(tx), mid.UUID(), orderID, due, &paymentID, nil, facts.PaidAt)

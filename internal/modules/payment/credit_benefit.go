@@ -2,7 +2,6 @@ package payment
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
 )
@@ -17,21 +16,5 @@ func acceptedCreditGrant(product *models.Product, price *models.Price) (*models.
 	if price.IsRecurring() {
 		return nil, fmt.Errorf("recurring credit benefits are not supported")
 	}
-	policy := product.CreditGrant
-	currency := strings.ToUpper(strings.TrimSpace(string(policy.Currency)))
-	if currency != strings.ToUpper(strings.TrimSpace(price.Currency)) {
-		return nil, fmt.Errorf("purchased credit currency must match payment currency")
-	}
-	amount := price.Amount
-	if policy.Amount != nil {
-		amount = *policy.Amount
-	} else if !policy.FromPayment {
-		return nil, fmt.Errorf("credit benefit requires an amount or from_payment")
-	}
-	days := 365
-	if policy.ExpiresAfterDays != nil {
-		days = *policy.ExpiresAfterDays
-	}
-	out := &models.CreditGrantSnapshot{Amount: amount, Currency: currency, ExpiresAfterDays: days}
-	return out, out.Validate()
+	return models.AcceptCreditGrant(product.CreditGrant, price.Currency, price.Amount)
 }

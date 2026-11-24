@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 var (
@@ -69,9 +68,9 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		default:
 			return nil, apperr.Invalidf("funding_source must be grant, promotion or import").WithParam(param("funding_source"))
 		}
-		currency := moneyutil.NormalizeCurrency(strings.TrimSpace(string(item.Currency)))
-		if err := moneyutil.ValidateCurrency(currency); err != nil {
-			return nil, s.currencyRefusal(ctx, param("currency"), currency)
+		currency, err := s.balanceCurrency(ctx, param("currency"), string(item.Currency))
+		if err != nil {
+			return nil, err
 		}
 		key, err := money.NewIdempotencyKey(money.OpDeposit, item.Source, item.SourceID)
 		if err != nil {
@@ -141,14 +140,26 @@ func (s *Service) GetCreditGrant(ctx context.Context, id billing.CreditGrantID) 
 	return s.moneyService().GetCreditGrant(ctx, id.UUID())
 }
 
-// RevokeCreditGrant revokes a grant's unspent remainder on actor's behalf.
-func (s *Service) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, reason, actor string) (*billing.CreditGrant, error) {
+// RevokeCreditGrant revokes a grant's unspent remainder on actor's behalf,
+// once per idempotencyKey when one is given.
+func (s *Service) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, reason, idempotencyKey, actor string) (*billing.CreditGrant, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	return s.moneyService().RevokeCreditGrant(ctx, id.UUID(), reason, actor)
+	return s.moneyService().RevokeCreditGrant(ctx, id.UUID(), reason, idempotencyKey, actor)
+}
+
+// ReinstateCreditGrant reverses a grant's revocation on actor's behalf, once
+// per idempotencyKey when one is given.
+func (s *Service) ReinstateCreditGrant(ctx context.Context, id billing.CreditGrantID, reason, idempotencyKey, actor string) (*billing.CreditGrant, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return s.moneyService().ReinstateCreditGrant(ctx, id.UUID(), reason, idempotencyKey, actor)
 }
 
 // ListBalanceTransactions lists a customer's ledger in one currency, newest
@@ -160,7 +171,7 @@ func (s *Service) ListBalanceTransactions(ctx context.Context, customer identity
 	}
 	defer release()
 	if params.IDs == nil {
-		currency, err := s.registryCurrency(ctx, "currency", string(params.Currency))
+		currency, err := s.balanceCurrency(ctx, "currency", string(params.Currency))
 		if err != nil {
 			return billing.ListPage[billing.BalanceTransaction]{}, err
 		}

@@ -88,7 +88,8 @@ type Runtime struct {
 	// EventStore is the ClickHouse event store (Deps.ClickHouse); nil turns
 	// usage, limits and admissions off (RequireEventStore).
 	EventStore *eventstore.Store
-	// leaseDB is the small pool idempotency lease renewals use (#1099).
+	// leaseDB is the small pool lease renewals use: idempotency claims, the
+	// billing pass and merchant pulls.
 	leaseDB     *db.DB
 	RedisClient redis.UniversalClient
 	Config      *config.Config

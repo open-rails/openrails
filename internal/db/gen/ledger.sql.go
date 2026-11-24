@@ -257,6 +257,23 @@ func (q *Queries) GetLedgerTransferByCoords(ctx context.Context, arg GetLedgerTr
 	return i, err
 }
 
+const getLedgerUnitScale = `-- name: GetLedgerUnitScale :one
+SELECT scale FROM billing.ledger_units WHERE merchant_id = $1::uuid AND unit = $2::text
+`
+
+type GetLedgerUnitScaleParams struct {
+	MerchantID uuid.UUID
+	Unit       string
+}
+
+// The scale the units book counts a merchant's unit at, once it counts it.
+func (q *Queries) GetLedgerUnitScale(ctx context.Context, arg GetLedgerUnitScaleParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getLedgerUnitScale, arg.MerchantID, arg.Unit)
+	var scale int32
+	err := row.Scan(&scale)
+	return scale, err
+}
+
 const insertGeneralLedgerTransfer = `-- name: InsertGeneralLedgerTransfer :one
 INSERT INTO billing.ledger_transfers (
     merchant_id, book, debit_account_id, credit_account_id, amount, currency, transfer_type,
@@ -491,6 +508,24 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		&i.RevenueScheduleID,
 	)
 	return i, err
+}
+
+const insertLedgerUnit = `-- name: InsertLedgerUnit :exec
+INSERT INTO billing.ledger_units (merchant_id, unit, scale)
+VALUES ($1::uuid, $2::text, $3::int)
+ON CONFLICT (merchant_id, unit) DO NOTHING
+`
+
+type InsertLedgerUnitParams struct {
+	MerchantID uuid.UUID
+	Unit       string
+	Scale      int32
+}
+
+// Records a merchant's unit as the units book first counts it.
+func (q *Queries) InsertLedgerUnit(ctx context.Context, arg InsertLedgerUnitParams) error {
+	_, err := q.db.Exec(ctx, insertLedgerUnit, arg.MerchantID, arg.Unit, arg.Scale)
+	return err
 }
 
 const ledgerAccountBalance = `-- name: LedgerAccountBalance :one
@@ -1063,6 +1098,36 @@ func (q *Queries) ListLedgerTypeTotalDrifts(ctx context.Context, merchantID uuid
 			&i.StoredDebits,
 			&i.LoggedDebits,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLedgerUnits = `-- name: ListLedgerUnits :many
+SELECT unit, scale FROM billing.ledger_units WHERE merchant_id = $1::uuid ORDER BY unit
+`
+
+type ListLedgerUnitsRow struct {
+	Unit  string
+	Scale int32
+}
+
+// The merchant's units the units book counts, and their scales.
+func (q *Queries) ListLedgerUnits(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerUnitsRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerUnits, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerUnitsRow
+	for rows.Next() {
+		var i ListLedgerUnitsRow
+		if err := rows.Scan(&i.Unit, &i.Scale); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

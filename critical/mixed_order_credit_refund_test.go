@@ -24,7 +24,7 @@ import (
 func TestMixedOrderCreditRefunds(t *testing.T) {
 	t.Run("OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot", mixedPendingRefund)
 	t.Run("OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first", mixedReversals)
-	t.Run("OR-J22-S09/won-dispute-credit-goes-to-a-refund-that-found-none", mixedDisputeAroundRefund)
+	t.Run("OR-J22-S09/won-dispute-credit-stays-when-a-refund-found-none", mixedDisputeAroundRefund)
 }
 
 type mixedSale struct {
@@ -166,6 +166,9 @@ func mixedPendingRefund(t *testing.T) {
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
 		" WHERE merchant_id = $1 AND operation = 'purchased_credit_refund' AND source = 'consumed_credit'", a.alpha.MerchantID().UUID()).Scan(&losses))
 	require.Zero(t, losses, "no refunded credit was spent")
+	lot := paymentLot(t, a.alpha, m.customer, payment)
+	require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "refund_deferred"), "its 25 unspent credits were worth the line's $10")
+	require.Empty(t, lotLegs(t, a.world, lot, "refund_recognized"))
 }
 
 func mixedReversals(t *testing.T) {
@@ -184,6 +187,12 @@ func mixedReversals(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentRefunded, charge.Status)
 		require.EqualValues(t, 100_000_000, charge.AmountRefunded)
+		// The line's $10 leaves deferral; the toolkit's $90 is not the lot's.
+		lot := paymentLot(t, a.alpha, m.customer, payment)
+		require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "cash_applied"))
+		require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "refund_deferred"))
+		deferred, released := lotMoney(t, a.world, lot)
+		require.Equal(t, deferred, released)
 	})
 
 	t.Run("credit-line-first-then-the-rest", func(t *testing.T) {
@@ -222,12 +231,17 @@ func mixedReversals(t *testing.T) {
 		require.Len(t, read.Refunds, 2, "the won dispute is recorded")
 		// The recovered $100 restores what the chargeback took from the lot.
 		balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
+		lot := paymentLot(t, a.alpha, m.customer, payment)
+		require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "chargeback_deferred"))
+		require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "dispute_won"), "its money returns to deferral")
+		deferred, released := lotMoney(t, a.world, lot)
+		require.EqualValues(t, 10_000_000, deferred-released)
 	})
 }
 
-// A $10 chargeback takes the credit line; a $90 refund then finds none to take.
-// When the dispute is won, the refunds still net $90, which covers the line:
-// the credit the recovery restores goes to that refund at once.
+// A $10 chargeback takes the credit line; a $90 refund then finds none to take
+// and refunds the toolkit. Its share was decided when it settled: the credit
+// the won dispute restores stays with the customer.
 func mixedDisputeAroundRefund(t *testing.T) {
 	m := newMixedSale(t)
 	a := m.a
@@ -249,9 +263,15 @@ func mixedDisputeAroundRefund(t *testing.T) {
 	read, err := a.alpha.GetPayment(t.Context(), payment)
 	require.NoError(t, err)
 	require.Len(t, read.Refunds, 3, "the chargeback, the refund and the won dispute are recorded")
-	balance(t, a.alpha, m.customer, 0, 0, 0)
+	balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
 	var withdrawals int
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
-		" WHERE merchant_id = $1 AND operation = 'purchased_credit_refund' AND transfer_type = 'credit_refund' AND source_id = $2", a.alpha.MerchantID().UUID(), refund.ID.UUID().String()).Scan(&withdrawals))
-	require.Equal(t, 1, withdrawals, "the refund withdrew the restored credit")
+		" WHERE merchant_id = $1 AND operation = 'purchased_credit_refund' AND source_id = $2", a.alpha.MerchantID().UUID(), refund.ID.UUID().String()).Scan(&withdrawals))
+	require.Zero(t, withdrawals, "the refund took none of the restored credit")
+	lot := paymentLot(t, a.alpha, m.customer, payment)
+	require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "chargeback_deferred"))
+	require.Equal(t, []int64{10_000_000}, lotLegs(t, a.world, lot, "dispute_won"))
+	require.Empty(t, lotLegs(t, a.world, lot, "refund_deferred"))
+	deferred, released := lotMoney(t, a.world, lot)
+	require.EqualValues(t, 10_000_000, deferred-released, "the restored credit's money is deferred again")
 }

@@ -508,6 +508,9 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			PSP: &p.Instrument.PSPID, Amount: chargedAmount, Currency: currency, At: now}); err != nil {
 			return err
 		}
+		if err := books.Started(ctx, q, intent.MerchantID, currency, now); err != nil {
+			return err
+		}
 		coord := ledger.Coord{Operation: ledger.OpOrderPayment, Source: "invoice_charge", SourceID: intent.IdempotencyKey}
 		transfer, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, Currency: currency,
@@ -520,12 +523,13 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		if err != nil {
 			return err
 		}
+		var change *models.MoneyTransaction
 		if excess := chargedAmount - p.Amount; excess > 0 {
 			payer := identity.CustomerIDFromString(p.CustomerID.String())
 			key := "invoice-rounding:" + intent.ID.String()
 			reason := "Rounding credit from order " + billing.OrderID(p.OrderID).String()
 			// Change the card paid beyond the order is credit bought at face.
-			_, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
+			change, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
 				CustomerID: &payer, Invoker: payer.String(), Currency: currency, Amount: excess,
 				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason, Funding: credits.Purchase,
 			})
@@ -539,6 +543,9 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			Amount: chargedAmount, Currency: currency, PaidAt: now, Now: now, TokenType: optionalString(payments.DefaultTokenType(rail, p.Instrument.Custodian)),
 		}); err != nil {
 			return fmt.Errorf("record order payment: %w", err)
+		}
+		if err := NewMoneyService(h.DB, h.Clock).fundChange(ctx, q, intent.MerchantID, change, p.PaymentID); err != nil {
+			return err
 		}
 		if err := recordCollectionAttempt(ctx, q, intent, p, rail, attempts.Attempt{Approved: true, TransactionID: transactionID}, now); err != nil {
 			return err

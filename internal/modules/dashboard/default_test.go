@@ -18,7 +18,11 @@ func TestDefaultWidgetsValidateForEveryProfile(t *testing.T) {
 		if verr := ValidateWidgets(widgets); verr != nil {
 			t.Errorf("%+v: %v", p, verr)
 		}
-		if widgets[0].Query.Measures[0] != "cash" {
+		first := "cash"
+		if p.Subscriptions || Empty(p) {
+			first = "mrr"
+		}
+		if widgets[0].Query.Measures[0] != first {
 			t.Errorf("%+v: the overview starts with %s", p, widgets[0].ID)
 		}
 	}

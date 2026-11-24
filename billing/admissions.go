@@ -206,10 +206,12 @@ func (p CaptureAdmissionBatchParams) Validate() error {
 }
 
 // CaptureReceipt is the result of settling one admitted request: Amount is
-// what it charged, the sum of Charges. The charge accrues to the customer's
-// day of usage, which posts to the ledger once the day ends or before the
-// balance next moves: BalanceTransactionID is that posting's first leg, null
-// until it posts and when the capture charged nothing.
+// what its usage costs, the sum of Charges, priced in full as it is taken in.
+// The usage posts to the ledger with the customer's other usage at the end of
+// the month or before the balance next moves: BalanceTransactionID is that
+// posting's first leg, null until it posts and when no leg takes it. In a
+// merchant's own unit the posting takes what the lots hold, and forgives the
+// rest, which is never owed.
 type CaptureReceipt struct {
 	RequestID            string                `json:"request_id"`
 	CustomerID           CustomerID            `json:"customer_id"`

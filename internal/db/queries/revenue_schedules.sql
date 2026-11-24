@@ -4,14 +4,15 @@
 INSERT INTO billing.revenue_schedules (
     merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id,
     product_id, price_id, method, revenue_account, funded, recognized_net,
-    service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements
+    service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, forfeited
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text,
     sqlc.arg(order_id)::uuid, sqlc.arg(order_line_id)::uuid, sqlc.narg(subscription_id)::uuid, sqlc.narg(product_access_id)::uuid,
     sqlc.narg(product_id)::uuid, sqlc.narg(price_id)::uuid, sqlc.arg(method)::text, sqlc.arg(revenue_account)::text,
     sqlc.arg(funded)::bigint, sqlc.arg(recognized_net)::bigint,
     sqlc.arg(service_starts_at)::timestamptz, sqlc.arg(service_ends_at)::timestamptz, sqlc.narg(service_months)::int,
-    sqlc.narg(ended_at)::timestamptz, sqlc.arg(recognized_through_at)::timestamptz, sqlc.narg(next_recognition_at)::timestamptz, 0
+    sqlc.narg(ended_at)::timestamptz, sqlc.arg(recognized_through_at)::timestamptz, sqlc.narg(next_recognition_at)::timestamptz, 0,
+    sqlc.arg(forfeited)::bigint
 )
 ON CONFLICT (merchant_id, order_line_id) DO NOTHING
 RETURNING *;
@@ -29,6 +30,7 @@ SET recognized_net = sqlc.arg(recognized_net)::bigint,
     recognized_through_at = sqlc.arg(recognized_through_at)::timestamptz,
     next_recognition_at = sqlc.narg(next_recognition_at)::timestamptz,
     reinstatements = sqlc.arg(reinstatements)::int,
+    forfeited = sqlc.arg(forfeited)::bigint,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
@@ -78,7 +80,9 @@ ORDER BY starts_at, id
 LIMIT 1;
 
 -- name: ListOverappliedPayments :many
--- A payment whose cash the general ledger applied beyond what it received.
+-- A payment whose cash the general ledger applied beyond what it received:
+-- to its bill's lines at (application, payment, id) and to the credit lot it
+-- bought at (credit_issue, payment, id).
 SELECT source_id AS payment_id, currency,
        COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
        COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
@@ -117,10 +121,9 @@ SELECT EXISTS (
 -- A completed bill's line that sells revenue (not credit or usage) but has no
 -- revenue schedule: a provider's tax and shipping line among them, which is
 -- never scheduled. before_books is a line whose order was made and completed
--- before the merchant's general ledger took its first transfer.
+-- before the merchant's books started.
 WITH started AS (
-    SELECT min(created_at) AS at FROM billing.ledger_transfers
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general'
+    SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = sqlc.arg(merchant_id)::uuid) AS at
 )
 SELECT l.order_id, l.id AS order_line_id, o.currency, l.amount,
        (l.source IS NOT DISTINCT FROM 'provider_adjustment')::boolean AS adjustment,

@@ -309,15 +309,15 @@ function DailyReport({ range }: { range: DashboardRange }) {
   )
   return (
     <ReportCard
-      title={adminText("Daily subscriptions")}
+      title={adminText("Daily subscribers")}
       description={adminText(
-        "Subscriptions started and canceled each day in the accounting timezone, newest first."
+        "Customers who gained recurring revenue (new or back) and who lost all of it each day in the accounting timezone, newest first."
       )}
       canDownload={rows.length > 0}
       onDownload={() => {
         const csv = dailyCsv(rows)
         downloadCsv(
-          `daily-subscriptions-${suffix(range)}.csv`,
+          `daily-subscribers-${suffix(range)}.csv`,
           csv.header,
           csv.rows
         )
@@ -344,10 +344,10 @@ function DailyReport({ range }: { range: DashboardRange }) {
                 <AdminMessage id={"Date"} />
               </TableHead>
               <TableHead className="text-right">
-                <AdminMessage id={"New"} />
+                <AdminMessage id={"Gained"} />
               </TableHead>
               <TableHead className="text-right">
-                <AdminMessage id={"Canceled"} />
+                <AdminMessage id={"Lost"} />
               </TableHead>
               <TableHead className="text-right">
                 <AdminMessage id={"Net change"} />
@@ -406,7 +406,7 @@ function MonthlyReport({ range }: { range: DashboardRange }) {
     <ReportCard
       title={adminText("Monthly renewals")}
       description={adminText(
-        "Renewal payments, cancellations and churn each calendar month in the accounting timezone; churn is the month's cancellations over the subscriptions it began with."
+        "Renewal payments, cancellations and subscriber churn each calendar month in the accounting timezone; churn is the customers who lost all recurring revenue in the month over those who had some when it began."
       )}
       canDownload={rows.length > 0}
       onDownload={() => {

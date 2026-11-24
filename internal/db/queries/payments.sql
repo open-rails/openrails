@@ -134,9 +134,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- name: CompleteRefundReservation :execrows
 -- The rail confirmed and named the reversal: the row records real (negative)
--- money movement.
+-- money movement, settled when the rail confirmed it.
 UPDATE billing.payments
-SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail'
+SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail', purchased_at = sqlc.arg(settled_at)::timestamptz
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND refunded_payment_id IS NOT NULL
   AND amount < 0

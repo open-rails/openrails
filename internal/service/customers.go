@@ -53,6 +53,9 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 	out := make([]billing.Customer, len(rows))
 	for i, row := range rows {
 		m := money[row.ID]
+		if err := s.withUnits(ctx, m.Balances); err != nil {
+			return nil, err
+		}
 		out[i] = billing.Customer{
 			ID: billing.CustomerID(row.ID), CreatedAt: row.CreatedAt.UTC(), LastSeenAt: row.LastSeenAt.UTC(),
 			Settings: settings[row.ID], Balances: m.Balances, DefaultPaymentMethods: m.Defaults,
@@ -189,6 +192,9 @@ func (s *Service) GetCustomerAccount(ctx context.Context, customer identity.Cust
 		return nil, err
 	}
 	m := money[customer.UUID()]
+	if err := s.withUnits(ctx, m.Balances); err != nil {
+		return nil, err
+	}
 	currencies := make([]string, 0, len(m.Balances))
 	for _, b := range m.Balances {
 		currencies = append(currencies, string(b.Currency))

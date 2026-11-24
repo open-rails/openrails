@@ -130,10 +130,11 @@ pkg openrails, method (*Client) PreviewSubscriptionChange(context.Context, billi
 pkg openrails, method (*Client) QueryMetrics(context.Context, billing.QueryMetricsParams) (*billing.MetricsResult, error)
 pkg openrails, method (*Client) RecordExternalPayment(context.Context, billing.RecordExternalPaymentParams) (*billing.Payment, error)
 pkg openrails, method (*Client) RefundPayment(context.Context, string, billing.PaymentID, billing.RefundPaymentParams) (*billing.Payment, error)
+pkg openrails, method (*Client) ReinstateCreditGrant(context.Context, string, billing.CreditGrantID, billing.ReinstateCreditGrantParams) (*billing.CreditGrant, error)
 pkg openrails, method (*Client) ReleaseAdmissions(context.Context, []string) ([]billing.AdmissionResult, error)
 pkg openrails, method (*Client) ResolveFinding(context.Context, billing.FindingID, billing.ResolveFindingParams) (*billing.FindingResolution, error)
 pkg openrails, method (*Client) ResumeSubscription(context.Context, billing.SubscriptionID) (*billing.Subscription, error)
-pkg openrails, method (*Client) RevokeCreditGrant(context.Context, billing.CreditGrantID, billing.RevokeCreditGrantParams) (*billing.CreditGrant, error)
+pkg openrails, method (*Client) RevokeCreditGrant(context.Context, string, billing.CreditGrantID, billing.RevokeCreditGrantParams) (*billing.CreditGrant, error)
 pkg openrails, method (*Client) RevokeProductAccess(context.Context, billing.ProductAccessID, billing.RevokeProductAccessParams) error
 pkg openrails, method (*Client) SetCustodian(context.Context, string, billing.SetCustodianParams) (*billing.Custodian, error)
 pkg openrails, method (*Client) SetDashboard(context.Context, billing.SetDashboardParams) (*billing.Dashboard, error)
@@ -1518,6 +1519,7 @@ pkg openrails/billing, type Balance struct, CustomerID CustomerID `json:"custome
 pkg openrails/billing, type Balance struct, DepletesAt *time.Time `json:"depletes_at"`
 pkg openrails/billing, type Balance struct, HeldAmount int64 `json:"held_amount,string"`
 pkg openrails/billing, type Balance struct, OwedAmount int64 `json:"owed_amount,string"`
+pkg openrails/billing, type Balance struct, Unit *MerchantCurrency `json:"unit"`
 pkg openrails/billing, type BalanceHostEvent struct
 pkg openrails/billing, type BalanceHostEvent struct, AccrualRatePerHour int64 `json:"accrual_rate_per_hour,string"`
 pkg openrails/billing, type BalanceHostEvent struct, AsOf time.Time `json:"as_of"`
@@ -2894,6 +2896,7 @@ pkg openrails/billing, type MetricsMeasure struct, Formula string `json:"formula
 pkg openrails/billing, type MetricsMeasure struct, Group MetricsGroup `json:"group"`
 pkg openrails/billing, type MetricsMeasure struct, Money bool `json:"money,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Name string `json:"name"`
+pkg openrails/billing, type MetricsMeasure struct, Program DisputeProgram `json:"program,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Thresholds []MetricsThreshold `json:"thresholds"`
 pkg openrails/billing, type MetricsMeasure struct, UTCDays bool `json:"utc_days,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Unit string `json:"unit"`
@@ -2904,6 +2907,7 @@ pkg openrails/billing, type MetricsOrder struct, Measure string `json:"measure,o
 pkg openrails/billing, type MetricsRange struct
 pkg openrails/billing, type MetricsRange struct, From string `json:"from,omitempty"`
 pkg openrails/billing, type MetricsRange struct, Last string `json:"last,omitempty"`
+pkg openrails/billing, type MetricsRange struct, Next string `json:"next,omitempty"`
 pkg openrails/billing, type MetricsRange struct, To string `json:"to,omitempty"`
 pkg openrails/billing, type MetricsResult struct
 pkg openrails/billing, type MetricsResult struct, Columns []MetricsColumn `json:"columns"`
@@ -2926,7 +2930,9 @@ pkg openrails/billing, type MetricsSchema struct, Limits MetricsLimits `json:"li
 pkg openrails/billing, type MetricsSchema struct, Measures []MetricsMeasure `json:"measures"`
 pkg openrails/billing, type MetricsSchema struct, QueryShape string `json:"query_shape"`
 pkg openrails/billing, type MetricsThreshold struct
+pkg openrails/billing, type MetricsThreshold struct, From *time.Time `json:"from,omitempty"`
 pkg openrails/billing, type MetricsThreshold struct, Label string `json:"label"`
+pkg openrails/billing, type MetricsThreshold struct, Until *time.Time `json:"until,omitempty"`
 pkg openrails/billing, type MetricsThreshold struct, Value float64 `json:"value"`
 pkg openrails/billing, type MigrationFallback string
 pkg openrails/billing, type MyOrderPayURLParams struct
@@ -3827,6 +3833,8 @@ pkg openrails/billing, type Refusal struct, DenyCode DenyCode `json:"deny_code"`
 pkg openrails/billing, type Refusal struct, Limit *string `json:"limit"`
 pkg openrails/billing, type Refusal struct, ResetsAt *time.Time `json:"resets_at"`
 pkg openrails/billing, type Refusal struct, RetryAfterSeconds *int64 `json:"retry_after_seconds"`
+pkg openrails/billing, type ReinstateCreditGrantParams struct
+pkg openrails/billing, type ReinstateCreditGrantParams struct, Reason string `json:"reason"`
 pkg openrails/billing, type ReleaseAdmissionBatchParams struct
 pkg openrails/billing, type ReleaseAdmissionBatchParams struct, RequestIDs []string `json:"request_ids"`
 pkg openrails/billing, type RenameMerchantParams struct

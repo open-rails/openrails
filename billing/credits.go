@@ -171,6 +171,14 @@ type RevokeCreditGrantParams struct {
 	Reason string `json:"reason"`
 }
 
+// ReinstateCreditGrantParams reverses a grant's revocation: the units it
+// froze return to the balance. Reinstating a live grant returns it
+// (Replayed), as does a retry under the same idempotency key; a lapsed grant
+// is not reinstated (credit_grant_unavailable).
+type ReinstateCreditGrantParams struct {
+	Reason string `json:"reason"`
+}
+
 // BalanceTransactionType is what a balance movement did.
 type BalanceTransactionType string
 
@@ -243,17 +251,20 @@ type GetBalanceParams struct {
 // reaches zero at that rate, counting each credit lot's expiry; null with no
 // running charge.
 type Balance struct {
-	CustomerID         CustomerID       `json:"customer_id"`
-	Currency           catalog.Currency `json:"currency"`
-	BillingMode        BillingMode      `json:"billing_mode"`
-	BalanceAmount      int64            `json:"balance_amount,string"`
-	HeldAmount         int64            `json:"held_amount,string"`
-	AccruedAmount      int64            `json:"accrued_amount,string"`
-	AvailableAmount    int64            `json:"available_amount,string"`
-	OwedAmount         int64            `json:"owed_amount,string"`
-	AccrualRatePerHour int64            `json:"accrual_rate_per_hour,string"`
-	AsOf               time.Time        `json:"as_of"`
-	DepletesAt         *time.Time       `json:"depletes_at"`
+	CustomerID CustomerID       `json:"customer_id"`
+	Currency   catalog.Currency `json:"currency"`
+	// Unit is the merchant's own unit Currency is, with the name, symbol and
+	// scale its amounts show at; null for a currency of OpenRails' registry.
+	Unit               *MerchantCurrency `json:"unit"`
+	BillingMode        BillingMode       `json:"billing_mode"`
+	BalanceAmount      int64             `json:"balance_amount,string"`
+	HeldAmount         int64             `json:"held_amount,string"`
+	AccruedAmount      int64             `json:"accrued_amount,string"`
+	AvailableAmount    int64             `json:"available_amount,string"`
+	OwedAmount         int64             `json:"owed_amount,string"`
+	AccrualRatePerHour int64             `json:"accrual_rate_per_hour,string"`
+	AsOf               time.Time         `json:"as_of"`
+	DepletesAt         *time.Time        `json:"depletes_at"`
 }
 
 // BudgetWindow caps spend at Limit per WindowSeconds, in Currency (the
@@ -393,8 +404,9 @@ type MerchantSettings struct {
 	BillingPolicyBindings             []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
 	DelegatedInvokerWastedSpendLimits []BudgetWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 	// Currencies are the merchant's own units (MerchantCurrency), at most 32.
-	// They join the currency registry for this merchant alone; operations
-	// that move money refuse them (merchant_unit_unsupported).
+	// They join the currency registry for this merchant alone: balances,
+	// credit lots, prices, credit grants and rate cards may count them; the
+	// money settings refuse them (merchant_unit_unsupported).
 	Currencies []MerchantCurrency `json:"currencies,omitempty"`
 }
 

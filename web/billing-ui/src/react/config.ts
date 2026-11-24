@@ -136,16 +136,21 @@ export function useCustomerConfig(): ConfigState<CustomerConfig> {
 }
 
 /**
- * Currency scales: the server's registry, under the client's pinned copy and
- * host overrides, which stand alone until the registry loads.
+ * Currency scales: the server's registry and the customer's merchant's own
+ * units, under the client's pinned copy and host overrides, which stand alone
+ * until they load.
  */
 export function useCurrencyScales(): CurrencyScales {
   const { client } = useBillingContext()
   const { config } = useConfig()
+  const { config: customer } = useCustomerConfig()
   return useMemo(() => {
     const served = Object.fromEntries(
       (config?.currencies ?? []).map((c) => [c.code.toUpperCase(), c.decimals])
     )
-    return { ...served, ...client.currencies }
-  }, [config, client])
+    const units = Object.fromEntries(
+      (customer?.currencies ?? []).map((u) => [u.code.toUpperCase(), u.scale])
+    )
+    return { ...served, ...units, ...client.currencies }
+  }, [config, customer, client])
 }

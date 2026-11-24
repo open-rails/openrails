@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -157,7 +159,12 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if err := s.rt.Merchants.CheckCardVault(ctx, mid, next, set.PSPs); err != nil {
 			return nil, err
 		}
-		set, err = cache.PutMerchant(ctx, mid, next, cas)
+		put := func(ctx context.Context) (merchantdocs.Set, error) { return cache.PutMerchant(ctx, mid, next, cas) }
+		if changed := merchantconfig.ChangedUnits(held.Value.MerchantSettings.Currencies, settings.Currencies); len(changed) > 0 {
+			set, err = s.putUnitChange(ctx, mid, changed, put)
+		} else {
+			set, err = put(ctx)
+		}
 		if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
 			if params.ExpectedRevision != nil || attempt >= 2 {
 				return nil, ErrRevisionMismatch
@@ -170,6 +177,9 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		s.rt.MerchantChanged(mid)
 		if why, refused := set.Rejected[merchantdocs.MerchantDoc]; refused {
 			return nil, apperr.Conflictf("the configuration was written but is not served: %s", why)
+		}
+		if why, kept := set.Rejected[merchantconfig.UnitsDoc]; kept {
+			return nil, apperr.Conflictf("the configuration was written, but %s", why)
 		}
 		return s.configurationState(ctx, mid, set)
 	}
@@ -192,6 +202,31 @@ func (s *Service) refuseAssignedPolicyRemoval(ctx context.Context, mid billing.M
 		}
 		return apperr.Invalidf("billing policy %q is assigned to customers; reassign them first", missing).WithParam("settings.billing_policies")
 	})
+}
+
+// putUnitChange writes settings that remove or rescale units under the
+// units lock every catalog write takes, refusing them while a balance, price,
+// credit policy or rate card counts one of changed.
+func (s *Service) putUnitChange(ctx context.Context, mid billing.MerchantID, changed []string, put func(context.Context) (merchantdocs.Set, error)) (merchantdocs.Set, error) {
+	var set merchantdocs.Set
+	err := s.rt.DB.MerchantTx(ctx, func(txCtx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := q.LockCatalogKey(txCtx, ledger.UnitsLock(mid.UUID())); err != nil {
+			return err
+		}
+		inUse, err := merchantconfig.UnitsInUse(txCtx, q, mid.UUID())
+		if err != nil {
+			return err
+		}
+		for _, code := range changed {
+			if slices.Contains(inUse, code) {
+				return apperr.Invalidf("unit %s counts balances, prices, credit or rate cards: it cannot be removed or rescaled", code).WithParam("settings.currencies")
+			}
+		}
+		set, err = put(ctx)
+		return err
+	})
+	return set, err
 }
 
 func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.MerchantSettings {

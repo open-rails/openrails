@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 )
@@ -20,7 +21,8 @@ import (
 // no order claims yet. An order whose collection is in flight keeps its
 // claim and its amount. Every leg is an owed_repayment transfer on the lot at
 // the funding's coordinate, so the funding's own once-only deposit makes the
-// repayment once-only too. It returns the amount repaid.
+// repayment once-only too; the general ledger repays the receivable at face
+// (books.RepayFromCredit). It returns the amount repaid.
 func Repay(ctx context.Context, d *db.DB, merchantID uuid.UUID, lot gen.BillingCreditGrant, funded int64, now time.Time) (int64, error) {
 	q := d.Gen(ctx)
 	if funded <= 0 {
@@ -28,6 +30,19 @@ func Repay(ctx context.Context, d *db.DB, merchantID uuid.UUID, lot gen.BillingC
 	}
 	currency, customer := lot.Unit, lot.CustomerID
 	l := ledger.New(q, merchantID)
+	gl := books.New(q, merchantID)
+	repay := func(amount int64, coord ledger.Coord, order *uuid.UUID) error {
+		leg, err := l.RepayOwed(ctx, customer, currency, amount, coord, lot.ID, order)
+		if err != nil {
+			return err
+		}
+		current, err := q.GetCreditLot(ctx, gen.GetCreditLotParams{MerchantID: merchantID, ID: lot.ID})
+		if err != nil {
+			return err
+		}
+		return gl.RepayFromCredit(ctx, books.CreditLotOf(current), leg.Amount,
+			books.Coord{Operation: books.Operation(leg.Operation), Source: leg.Source, SourceID: leg.SourceID}, leg.EffectiveAt)
+	}
 	owed, err := l.OutstandingOwed(ctx, customer, currency)
 	if err != nil || owed <= 0 {
 		return 0, err
@@ -62,7 +77,7 @@ func Repay(ctx context.Context, d *db.DB, merchantID uuid.UUID, lot gen.BillingC
 		legCoord := coord
 		legCoord.SourceID = lot.ID.String() + ":" + order.String()
 		// The repayment moves no money: its transfer is the order's record.
-		if _, err := l.RepayOwed(ctx, customer, currency, amount, legCoord, lot.ID, &order); err != nil {
+		if err := repay(amount, legCoord, &order); err != nil {
 			return 0, err
 		}
 		if _, err := usage.Pay(ctx, d, merchantID, order, amount, nil, nil, now); err != nil {
@@ -72,7 +87,7 @@ func Repay(ctx context.Context, d *db.DB, merchantID uuid.UUID, lot gen.BillingC
 		repaid += amount
 	}
 	if amount := min(remaining, max(owed-billed, 0)); amount > 0 {
-		if _, err := l.RepayOwed(ctx, customer, currency, amount, coord, lot.ID, nil); err != nil {
+		if err := repay(amount, coord, nil); err != nil {
 			return 0, err
 		}
 		repaid += amount

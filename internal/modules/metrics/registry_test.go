@@ -44,7 +44,7 @@ func TestRegistry(t *testing.T) {
 
 func TestRemovedNamesNameTheirReplacement(t *testing.T) {
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
-	_, verr := ValidateAt(&Query{Measures: []string{"net_revenue", "nmi_history_refused", "nrr"}, Range: &QueryRange{Last: "30d"},
+	_, verr := ValidateAt(&Query{Measures: []string{"net_revenue", "nmi_history_refused", "trials"}, Range: &QueryRange{Last: "30d"},
 		Filters: map[string][]string{"attempt_kind": {"renewal"}}}, now)
 	if verr == nil {
 		t.Fatal("removed names were accepted")
@@ -60,7 +60,7 @@ func TestRemovedNamesNameTheirReplacement(t *testing.T) {
 		t.Errorf("nmi_history_refused: %+v", fe)
 	}
 	if fe := got["measures[2]"]; !strings.Contains(fe.Message, "planned") {
-		t.Errorf("nrr: %+v", fe)
+		t.Errorf("trials: %+v", fe)
 	}
 	if fe := got["filters.attempt_kind"]; fe.DidYouMean != "kind" {
 		t.Errorf("attempt_kind: %+v", fe)

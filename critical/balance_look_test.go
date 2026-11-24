@@ -131,7 +131,7 @@ func TestBalanceLooks(t *testing.T) {
 			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 300, Source: "critical", SourceID: "kept"}})
 			require.NoError(t, err)
 			before := looks(t, fleet, customer)
-			_, err = w.alpha.RevokeCreditGrant(t.Context(), lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
+			_, err = w.alpha.RevokeCreditGrant(t.Context(), "", lot, billing.RevokeCreditGrantParams{Reason: "critical adjustment"})
 			require.NoError(t, err)
 			require.Equal(t, before+1, looks(t, fleet, customer), "the revocation committed the look with its debit")
 			notified(t, w, customer)

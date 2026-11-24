@@ -116,7 +116,7 @@ Go. Libraries never read the environment.
 | `ProviderWriteMode` | Required. `ProviderWritesFull`, `ProviderWritesLimited` (OpenRails initiates no provider writes; customers still buy) or `ProviderWritesReadOnly` (nothing is written to any provider). |
 | `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
 | `UsageBillingEnabled` | Bills owed usage automatically ([usage](client.md#usage-and-running-charges)). Deploy every worker first. |
-| `Database` | `DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews idempotency leases (default 4), part of your connection budget. |
+| `Database` | `DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
 | `ClickHouse` | `ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)). |
 | `PublicBillingBaseURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
@@ -283,23 +283,18 @@ and no sticky session.
   and clocks within five minutes, and share periodic passes through leases in
   `periodic_leases`.
 
-Size PostgreSQL `max_connections` for every pool, plus `DatabaseConfig.LeaseConns`
-per instance, plus one per instance for each listener: customer messages, dispute responses and, with Vault configuration, configuration edits.
+Size PostgreSQL `max_connections` for every pool, plus `DatabaseConfig.LeaseConns` per instance, plus each instance's direct sessions:
+
+- **Listeners**, held while the instance runs: five on an instance running workers (unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes), and on every instance one for configuration edits with Vault configuration.
+- **Short session locks**: one while a usage policy write runs, one while a billing import lands, and `New`'s migration pool while it migrates.
+
+The billing pass and a merchant's pulls hold no session: each holds a lease row, renewed on the lease pool while it runs and lapsing within two minutes of its holder dying.
 
 ## PgBouncer
 
-With transaction pooling, give `Postgres` the PgBouncer pool and set
-`poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe` on
-it; set `PostgresSession` to a `pgxpool.ParseConfig` result for the same database
-and role through PostgreSQL's direct endpoint. OpenRails scopes the merchant to
-each transaction and uses direct sessions for migrations, listeners and session
-locks. Its own River workers poll in this mode; a host fleet on the PgBouncer
-pool sets `river.Config.PollOnly`.
+With transaction pooling, give `Postgres` the PgBouncer pool and set `poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe` on it; set `PostgresSession` to a `pgxpool.ParseConfig` result for the same database and role through PostgreSQL's direct endpoint. OpenRails scopes the merchant to each transaction, and everything else it runs, leases included, goes through the pooler. `PostgresSession` serves only the listeners and short session locks above: each instance's direct floor is five sessions with workers, one more with Vault configuration. Its own River workers poll in this mode; a host fleet on the PgBouncer pool sets `river.Config.PollOnly`.
 
-`LISTEN` needs a session: a transaction-pooled connection drops its
-notifications. Without `PostgresSession` the listeners (customer messages,
-dispute responses, configuration edits) run on the `Postgres` pool, so behind
-PgBouncer that pool must be in session mode.
+`LISTEN` needs a session: a transaction-pooled connection drops its notifications. Without `PostgresSession` the listeners dial with the `Postgres` pool's settings, so behind PgBouncer that pool must be in session mode.
 
 ## Routes
 

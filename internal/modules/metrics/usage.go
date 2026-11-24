@@ -35,9 +35,41 @@ func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*g
 	if len(leaves) == 0 {
 		return nil
 	}
-	rows, err := money.NewMoneyService(s.db).UsageHistory(ctx, eventstore.HistoryFilter{From: plan.From, To: plan.To})
+	svc := money.NewMoneyService(s.db)
+	rows, err := svc.UsageHistory(ctx, eventstore.HistoryFilter{From: plan.From, To: plan.To})
 	if err != nil {
 		return err
+	}
+	// Usage a merchant's unit forgave at posting moves from charged to
+	// forgiven.
+	if seen["usage_charged"] {
+		forgiven, err := svc.UsageForgiveness(ctx, plan.From, plan.To)
+		if err != nil {
+			return err
+		}
+		for _, r := range forgiven {
+			var bucket time.Time
+			if plan.HasTime {
+				bucket = truncGrain(r.BucketAt, plan.Grain, plan.zone())
+			}
+			values := map[string]string{"currency": r.Currency, "customer": r.CustomerID.String(), "invoker": r.Invoker,
+				"outcome": string(r.Outcome), "rate_card": r.EventType}
+			for _, charge := range usageCharges {
+				values["charge"] = charge
+				dims, ok := usageDimsOf(plan, values)
+				if !ok {
+					continue
+				}
+				g := ensureGroup(groups, bucket, dims)
+				v := g.vals["usage_charged"]
+				if charge == "forgiven" {
+					v.n += r.Forgiven
+				} else {
+					v.n += r.Amount
+				}
+				g.vals["usage_charged"] = v
+			}
+		}
 	}
 	distinct := map[string]map[uuid.UUID]bool{}
 	for _, r := range rows {
