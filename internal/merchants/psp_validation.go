@@ -72,7 +72,9 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 			DataLinkPassword: password,
 			Sandbox:          p.Environment == config.EnvironmentSandbox,
 		})
-		client.Pacing = s.DataLinkPacing
+		if s.dataLinkURL != "" {
+			client.BaseURL, client.LoopbackFixture = s.dataLinkURL, true
+		}
 		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
 		defer cancel()
 		if err := client.ProbeCredentials(probeCtx); err != nil {

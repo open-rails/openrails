@@ -410,4 +410,29 @@ func TestProviderTime(t *testing.T) {
 		require.Len(t, liveRequestsAnHourApart(t, dataLink), 3, "two days of transactions, then the roster")
 		require.Empty(t, dataLink.Unexpected())
 	})
+
+	t.Run("OR-J28-S11/a-ccbill-account-another-merchant-declares-is-refused-before-a-probe", func(t *testing.T) {
+		dataLink := ccbillmock.New()
+		t.Cleanup(dataLink.Close)
+		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
+		a, _ := newPSPWorld(t, func(w *world) {
+			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+		})
+		dataLink.SetClock(a.clock.Now)
+		create := func(client *openrails.Client, subacc string) error {
+			_, err := client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "ccbill", Rail: billing.RailCCBill, Environment: billing.EnvironmentSandbox,
+				PSPAccount:  billing.PSPAccount{ClientAccnum: account, ClientSubacc: subacc},
+				Credentials: map[string]string{"salt": "critical-ccbill-salt", "datalink_username": "critical-datalink", "datalink_password": "critical-datalink-password"}})
+			return err
+		}
+		require.NoError(t, create(a.alphaRemote, "0001"), "alpha proves the account")
+		probed := len(dataLink.Requests())
+		require.Positive(t, probed)
+		// Another subaccount of alpha's CCBill account: DataLink's credentials
+		// and its hour are the account's, so beta's claim is refused unread.
+		status, code := refusalCode(t, create(a.betaRemote, "0002"))
+		require.Equal(t, http.StatusConflict, status)
+		require.Equal(t, billing.CodePSPExists, code)
+		require.Len(t, dataLink.Requests(), probed, "beta's claim reached no DataLink")
+	})
 }

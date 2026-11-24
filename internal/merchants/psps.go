@@ -266,6 +266,9 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	} else if err != nil {
 		return billing.PSP{}, err
 	}
+	if err := s.refuseCCBillAccountElsewhere(ctx, id, rail, accountID); err != nil {
+		return billing.PSP{}, err
+	}
 	if err := s.verifyNMIEnvironment(ctx, id, doc); err != nil {
 		return billing.PSP{}, err
 	}
@@ -345,6 +348,9 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 		return billing.PSP{}, err
 	}
 	defer finishEdit()
+	// The credentials are probed once: an attempt lost to a concurrent edit
+	// writes the same credentials again.
+	probed, probedOnce := false, false
 	for attempt := 0; ; attempt++ {
 		j, err := s.load(ctx, id)
 		if err != nil {
@@ -365,7 +371,7 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 			cas = *req.ExpectedRevision
 		}
 		next := clonePSP(held.Value)
-		probed, rotated := false, false
+		rotated := false
 		if req.Archived {
 			if next.Archived {
 				if _, err := s.config.PutPSP(ctx, id, scope.Key, next, cas); err != nil {
@@ -405,8 +411,11 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 				if err := s.verifyNMIEnvironment(ctx, id, next); err != nil {
 					return billing.PSP{}, err
 				}
-				if probed, err = s.probePaymentProviderCredentials(ctx, id, next); err != nil {
-					return billing.PSP{}, err
+				if !probedOnce {
+					if probed, err = s.probePaymentProviderCredentials(ctx, id, next); err != nil {
+						return billing.PSP{}, err
+					}
+					probedOnce = true
 				}
 			}
 		}
@@ -597,6 +606,27 @@ func (s *Service) normalizeCredentials(ctx context.Context, rail string, in map[
 		out[normalized] = value
 	}
 	return out, nil
+}
+
+// refuseCCBillAccountElsewhere refuses a CCBill account another merchant
+// declares, in any subaccount, before its credentials are probed: DataLink's
+// credentials and its hourly limit are the account's.
+func (s *Service) refuseCCBillAccountElsewhere(ctx context.Context, id billing.MerchantID, rail, accountID string) error {
+	if rail != "ccbill" {
+		return nil
+	}
+	accnum, _, err := config.SplitCCBillAccountID(accountID)
+	if err != nil {
+		return nil // the probe refuses the account id
+	}
+	declared, err := gen.New(s.pool).CCBillAccountDeclaredElsewhere(ctx, gen.CCBillAccountDeclaredElsewhereParams{MerchantID: id.UUID(), ClientAccnum: accnum})
+	if err != nil {
+		return err
+	}
+	if declared {
+		return fmt.Errorf("PSP %s:%s: %w", rail, accountID, ErrPSPExists)
+	}
+	return nil
 }
 
 // claimNeedsProof lists rails whose inbound events route by account id.

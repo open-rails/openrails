@@ -12,6 +12,31 @@ import (
 	"github.com/google/uuid"
 )
 
+const cCBillAccountDeclaredElsewhere = `-- name: CCBillAccountDeclaredElsewhere :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.psps
+    WHERE rail = 'ccbill'
+      AND merchant_id <> $1::uuid
+      AND split_part(account_id, '-', 1) = $2::text
+      AND superseded_at IS NULL
+)
+`
+
+type CCBillAccountDeclaredElsewhereParams struct {
+	MerchantID   uuid.UUID
+	ClientAccnum string
+}
+
+// CROSS-MERCHANT: whether another merchant declares a CCBill PSP on the
+// client account, in any subaccount: DataLink's credentials and its hourly
+// limit are the account's.
+func (q *Queries) CCBillAccountDeclaredElsewhere(ctx context.Context, arg CCBillAccountDeclaredElsewhereParams) (bool, error) {
+	row := q.db.QueryRow(ctx, cCBillAccountDeclaredElsewhere, arg.MerchantID, arg.ClientAccnum)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const clearPSPCredentialDuplicate = `-- name: ClearPSPCredentialDuplicate :exec
 UPDATE billing.psps SET credential_duplicate_at = NULL
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND credential_duplicate_at IS NOT NULL

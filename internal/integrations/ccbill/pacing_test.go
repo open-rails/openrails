@@ -58,6 +58,19 @@ func TestLiveDataLinkTakesOneRequestAnHour(t *testing.T) {
 	if _, err := client(true).FetchActiveMembers(t.Context()); err != nil {
 		t.Fatalf("test mode is not paced: %v", err)
 	}
+	// Proving credentials reads in test mode: no slot taken, none refused.
+	if err := live.ProbeCredentials(t.Context()); err != nil {
+		t.Fatalf("a credential probe inside the hour: %v", err)
+	}
+	if last := dataLink.Requests()[len(dataLink.Requests())-1]; last.Live {
+		t.Fatal("the probe asked as a live account")
+	}
+	dataLink.RequireCredentials("u", "p", false)
+	stranger := client(false)
+	stranger.Password = "wrong"
+	if err := stranger.ProbeCredentials(t.Context()); !errors.Is(err, ccbill.ErrDataLinkAuth) {
+		t.Fatalf("wrong credentials probed = %v", err)
+	}
 	now = now.Add(time.Hour)
 	if _, err := live.FetchTransactionExport(t.Context(), now.Add(-time.Hour), now, ccbill.AllDataLinkTxnTypes); err != nil {
 		t.Fatalf("the next hour's request: %v", err)
