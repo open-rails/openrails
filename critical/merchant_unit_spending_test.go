@@ -816,9 +816,10 @@ func unitReversalsAsSettled(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
+	// The chargeback's $15 counts already: R1 has settled at $30.
 	require.Eventually(t, func() bool {
 		read, err := a.alpha.GetPayment(t.Context(), payment)
-		return err == nil && read.AmountRefunded == 15_000_000
+		return err == nil && read.AmountRefunded == 30_000_000
 	}, 20*time.Second, 20*time.Millisecond)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 0, 0, 0)
 	lot := lots(t, a.alpha, s.alice, "GOLD")[0]
