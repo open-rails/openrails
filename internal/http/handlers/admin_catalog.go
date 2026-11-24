@@ -117,11 +117,15 @@ func DeleteProduct(r *httprequest.Request) {
 	if !ok {
 		return
 	}
+	var params billing.DeleteProductParams
+	if !r.BindQuery(&params) {
+		return
+	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	if err := svc.DeleteProduct(r.Request.Context(), id); err != nil {
+	if err := svc.DeleteProduct(r.Request.Context(), id, params); err != nil {
 		writeCatalogError(r, err)
 		return
 	}

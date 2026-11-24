@@ -45,7 +45,7 @@ pkg openrails, method (*Client) CreateTestMessage(context.Context, billing.Creat
 pkg openrails, method (*Client) DeleteAlertWebhook(context.Context, billing.AlertWebhookID) error
 pkg openrails, method (*Client) DeletePSPImport(context.Context, billing.PSPImportID) error
 pkg openrails, method (*Client) DeletePaymentMethod(context.Context, billing.CustomerID, billing.PaymentMethodID) error
-pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID) error
+pkg openrails, method (*Client) DeleteProduct(context.Context, billing.ProductID, billing.DeleteProductParams) error
 pkg openrails, method (*Client) DeleteProvisioningToken(context.Context, billing.ProvisioningTokenID) error
 pkg openrails, method (*Client) DismissProposals(context.Context, billing.DismissProposalsParams) (*billing.ProposalResults, error)
 pkg openrails, method (*Client) EventReader() eventlog.Reader
@@ -2053,6 +2053,8 @@ pkg openrails/billing, type DeclineReason string
 pkg openrails/billing, type DefaultPaymentMethod struct
 pkg openrails/billing, type DefaultPaymentMethod struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type DefaultPaymentMethod struct, PaymentMethodID PaymentMethodID `json:"payment_method_id"`
+pkg openrails/billing, type DeleteProductParams struct
+pkg openrails/billing, type DeleteProductParams struct, ExpectedRevision *int64 `form:"expected_revision"`
 pkg openrails/billing, type DelinquencyHostEvent struct
 pkg openrails/billing, type DelinquencyHostEvent struct, AmountFloor int64 `json:"amount_floor,string"`
 pkg openrails/billing, type DelinquencyHostEvent struct, Currency catalog.Currency `json:"currency"`

@@ -77,8 +77,9 @@ var catalogRoutes = []Route{
 		Doc: "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and " +
 			"creating its key again revives it. A product a purchase, subscription, grant, access, purchase, " +
 			"migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code " +
-			"product_in_use): archive it with UpdateProduct instead.",
-		Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeProductInUse, "product_not_found"), Handler: h(handlers.DeleteProduct)},
+			"product_in_use): archive it with UpdateProduct instead. A stale ExpectedRevision is refused with " +
+			"revision_mismatch.",
+		Query: billing.DeleteProductParams{}, Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeProductInUse, "product_not_found", "revision_mismatch"), Handler: h(handlers.DeleteProduct)},
 	{Method: POST, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreatePrice", Level: LevelUpdate,
 		Doc: "CreatePrice creates a price on the product named by exactly one of ProductID, ProductKey and " +
 			"ProductData. A price's terms never change; selling on other terms means another price.",

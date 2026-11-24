@@ -2257,7 +2257,7 @@
           "catalog"
         ],
         "operationId": "DeleteProduct",
-        "description": "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and creating its key again revives it. A product a purchase, subscription, grant, access, purchase, migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code product_in_use): archive it with UpdateProduct instead.",
+        "description": "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and creating its key again revives it. A product a purchase, subscription, grant, access, purchase, migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code product_in_use): archive it with UpdateProduct instead. A stale ExpectedRevision is refused with revision_mismatch.",
         "parameters": [
           {
             "name": "id",
@@ -2265,6 +2265,13 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "expected_revision",
+            "in": "query",
+            "schema": {
+              "type": "integer"
             }
           },
           {
@@ -2298,10 +2305,12 @@
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "product_in_use",
-          "product_not_found"
+          "product_not_found",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },

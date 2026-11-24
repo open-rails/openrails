@@ -185,9 +185,10 @@ func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params
 // reads leave it out, and creating its key again revives it. A product a
 // purchase, subscription, grant, access, purchase, migration, provider
 // write, PSP link or rate card refers to is refused (billing.ErrConflict,
-// code product_in_use): archive it with UpdateProduct instead.
-func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID) error {
-	return c.send(ctx, routeCall{method: http.MethodDelete, path: "/v1/catalog/products/{id}", args: []string{id.String()}}, nil)
+// code product_in_use): archive it with UpdateProduct instead. A stale
+// ExpectedRevision is refused with revision_mismatch.
+func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID, params billing.DeleteProductParams) error {
+	return c.send(ctx, routeCall{method: http.MethodDelete, path: "/v1/catalog/products/{id}", args: []string{id.String()}, query: params}, nil)
 }
 
 // CreatePrice creates a price on the product named by exactly one of

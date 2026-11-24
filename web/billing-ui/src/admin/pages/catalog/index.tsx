@@ -177,6 +177,9 @@ function ProductsTab() {
                   <AdminMessage id={"Entitlements"} />
                 </TableHead>
                 <TableHead className="text-muted-foreground">
+                  <AdminMessage id={"Revision"} />
+                </TableHead>
+                <TableHead className="text-muted-foreground">
                   <AdminMessage id={"State"} />
                 </TableHead>
                 <TableHead />
@@ -189,7 +192,7 @@ function ProductsTab() {
               {!data?.data?.length && (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="h-24 text-center text-muted-foreground"
                   >
                     <AdminMessage id={"No products yet."} />
@@ -252,6 +255,9 @@ function ProductRow({ product }: { product: Product }) {
             </Badge>
           ))}
         </span>
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground tabular-nums">
+        {product.revision}
       </TableCell>
       <TableCell>
         {product.archived ? (

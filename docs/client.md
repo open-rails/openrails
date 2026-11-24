@@ -451,7 +451,7 @@ return nil
 |---|---|
 | `ApplyCatalog` | apply a document (`catalog.ReadFile`, `catalog.ParseApplicationYAML`); `Force` overrides conflicts |
 | `ListProducts`, `GetProduct` | products with their current prices; filter by `Keys`, `Entitlements`, `ForSale`, `Archived` |
-| `CreateProduct`, `UpdateProduct`, `DeleteProduct` | edit products; delete only one nothing ever referred to (else `409 product_in_use`: archive it) |
+| `CreateProduct`, `UpdateProduct`, `DeleteProduct` | edit products; `ExpectedRevision` refuses an edit or delete of a product changed since it was read (`409 revision_mismatch`); delete only one nothing ever referred to (else `409 product_in_use`: archive it) |
 | `ListPrices`, `GetPrice`, `ListPriceHistory` | prices and the movements of a price key |
 | `VerifyPrice` | a price with each linked PSP's copy read and drift reported (`GET /v1/catalog/prices/{id}/verification`) |
 | `CreatePrice`, `UpdatePrice` | edit prices; `ProductData` creates the product in the same call |
