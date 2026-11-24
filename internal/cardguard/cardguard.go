@@ -7,6 +7,8 @@ package cardguard
 const (
 	minPANDigits = 13
 	maxPANDigits = 19
+	// maxE164Digits is the longest phone number E.164 allows.
+	maxE164Digits = 15
 )
 
 // ContainsPAN reports whether s contains a payment card number. A candidate is
@@ -19,7 +21,8 @@ const (
 //     an identifier's digit groups always do.
 //  3. Luhn: the check digit passes.
 //  4. Range: its leading digits and length are an issued range (issuedRange).
-//  5. Not a phone: a run directly after a + (E.164) starts none.
+//  5. Not a phone: one unseparated run of at most 15 digits right after a +
+//     (E.164) is none; a longer or separated one still is.
 //
 // Rules 1 and 2 exclude UUIDs exactly; rule 4 excludes 13/16/19-digit epoch
 // keys starting with 1. An unseparated 13-19 digit run is a candidate wherever
@@ -32,9 +35,6 @@ func ContainsPAN(s string) bool {
 	digits := make([]byte, 0, maxPANDigits)
 	lens := make([]int, 0, maxPANDigits)
 	for i := range groups {
-		if groups[i].plusBefore {
-			continue
-		}
 		digits, lens = digits[:0], lens[:0]
 		for j := i; j < len(groups); j++ {
 			if j > i && !groups[j].joined {
@@ -45,7 +45,7 @@ func ContainsPAN(s string) bool {
 			}
 			digits = append(digits, groups[j].digits...)
 			lens = append(lens, len(groups[j].digits))
-			if len(digits) < minPANDigits {
+			if len(digits) < minPANDigits || j == i && groups[i].plusBefore && len(digits) <= maxE164Digits {
 				continue
 			}
 			// Rule 2 applies to separated candidates only: an unseparated run
