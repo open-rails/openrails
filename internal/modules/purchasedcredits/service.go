@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -50,7 +51,7 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		return uuid.Nil, fmt.Errorf("purchased credit requires payment, product, customer, positive amounts and accepted start time")
 	}
 	p.Currency = strings.ToUpper(strings.TrimSpace(p.Currency))
-	if err := moneyutil.ValidateCurrency(p.Currency); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(p.Currency); err != nil {
 		return uuid.Nil, err
 	}
 	p.StartsAt = p.StartsAt.UTC().Truncate(time.Microsecond)
@@ -76,7 +77,10 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		if err != nil {
 			return fmt.Errorf("load credit funding payment: %w", err)
 		}
-		if payment.CustomerID != p.CustomerID.UUID() || payment.Currency != p.Currency || payment.Status != "succeeded" || payment.RefundedPaymentID != nil {
+		// A lot is in its payment's currency, or is a pack of a merchant's
+		// unit that payment bought.
+		inUnit := payment.Currency != p.Currency
+		if payment.CustomerID != p.CustomerID.UUID() || inUnit && !currency.IsUnitCode(p.Currency) || payment.Status != "succeeded" || payment.RefundedPaymentID != nil {
 			return fmt.Errorf("credit funding does not match completed payment")
 		}
 		line, err := q.GetOrderLine(ctx, gen.GetOrderLineParams{MerchantID: mid.UUID(), ID: p.OrderLineID})
@@ -119,9 +123,12 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		if err != nil {
 			return err
 		}
-		// Only the paid part repays debt; promotional value never does.
-		if _, err := owed.Repay(ctx, s.db.NewWithPgxTx(tx), mid.UUID(), grant, min(p.Amount, p.PaidAmount), s.now()); err != nil {
-			return err
+		// Only the paid part repays debt; promotional value never does. Nothing
+		// is owed in a merchant's unit.
+		if !inUnit {
+			if _, err := owed.Repay(ctx, s.db.NewWithPgxTx(tx), mid.UUID(), grant, min(p.Amount, p.PaidAmount), s.now()); err != nil {
+				return err
+			}
 		}
 		result = grant.ID
 		return nil

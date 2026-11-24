@@ -27,3 +27,12 @@ SELECT billing_policy::text FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id) AND billing_policy IS NOT NULL
   AND NOT (billing_policy = ANY(COALESCE(sqlc.arg(names)::text[], '{}')))
 LIMIT 1;
+
+-- name: MerchantUnitInUse :one
+-- Whether a merchant's unit counts anything: a balance (whose deposit made a
+-- system account in it), a price, a product's credit or a rate card. A
+-- settings change may not remove or rescale it then.
+SELECT EXISTS (SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id IS NULL AND a.currency = sqlc.arg(unit)::text)
+    OR EXISTS (SELECT 1 FROM billing.prices p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.currency = sqlc.arg(unit)::text)
+    OR EXISTS (SELECT 1 FROM billing.products p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.credit_grant ->> 'currency' = sqlc.arg(unit)::text)
+    OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards c WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.price ->> 'currency' = sqlc.arg(unit)::text) AS in_use;

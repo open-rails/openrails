@@ -218,6 +218,7 @@ export type AskCatalogParams = {
 export type Balance = {
   customer_id: string
   currency: string
+  unit: MerchantCurrency | null
   billing_mode: "arrears" | "prepaid"
   balance_amount: string
   held_amount: string

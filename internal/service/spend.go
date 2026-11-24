@@ -23,7 +23,7 @@ import (
 
 // GetBalance returns a customer's money in one currency.
 func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, currency string) (*billing.Balance, error) {
-	currency, err := s.registryCurrency(ctx, "currency", currency)
+	currency, err := s.balanceCurrency(ctx, "currency", currency)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,14 @@ func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, 
 		out, err = s.moneyService().PublicBalance(ctx, bal, billing.BillingMode(settings.BillingMode), owed)
 		return err
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	one := []billing.Balance{*out}
+	if err := s.withUnits(ctx, one); err != nil {
+		return nil, err
+	}
+	return &one[0], nil
 }
 
 // UsagePage is a usage report's page size.

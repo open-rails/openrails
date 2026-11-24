@@ -50,7 +50,7 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if additional <= 0 {
 			return fmt.Errorf("invalid credit refund amount: %w", billing.ErrInvalid)
 		}
-		net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: mid.UUID(), CreditGrantID: grant.ID})
+		returned, err := returnedCash(ctx, q, grant, paid)
 		if err != nil {
 			return err
 		}
@@ -58,7 +58,7 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if err != nil {
 			return err
 		}
-		open, err := openCreditCash(paid, net.Cash)
+		open, err := openCreditCash(paid, returned)
 		if err != nil {
 			return err
 		}
@@ -104,6 +104,10 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			return nil
 		}
 		if err != nil {
+			return err
+		}
+		if g.PaidCurrency != nil && *g.PaidCurrency != g.Unit {
+			posted, err = s.applyUnitReversal(ctx, q, mid.UUID(), g, reversalID)
 			return err
 		}
 		currency := g.Unit
@@ -313,10 +317,167 @@ func openCreditCash(paid, reversed int64) (int64, error) {
 }
 
 func fundingAmount(lot gen.BillingCreditGrant) (int64, error) {
-	if lot.PaidAmount == nil || *lot.PaidAmount <= 0 || lot.PaidCurrency == nil || *lot.PaidCurrency != lot.Unit {
-		return 0, fmt.Errorf("purchased credit lacks its payment funding in its own currency")
+	if lot.PaidAmount == nil || *lot.PaidAmount <= 0 || lot.PaidCurrency == nil {
+		return 0, fmt.Errorf("purchased credit lacks its payment funding")
 	}
 	return *lot.PaidAmount, nil
+}
+
+// returnedCash is what of a purchased lot's paid amount settled reversals
+// returned: its cash legs for credit in its payment's currency. A pack of a
+// merchant's unit has no cash leg: the credit line takes its payment's net
+// reversals first, up to what it paid.
+func returnedCash(ctx context.Context, q *gen.Queries, lot gen.BillingCreditGrant, paid int64) (int64, error) {
+	if *lot.PaidCurrency == lot.Unit {
+		net, err := q.GetPurchasedCreditRefundState(ctx, gen.GetPurchasedCreditRefundStateParams{MerchantID: lot.MerchantID, CreditGrantID: lot.ID})
+		return net.Cash, err
+	}
+	settled, err := q.GetPurchasedCreditSettledReversals(ctx, gen.GetPurchasedCreditSettledReversalsParams{MerchantID: lot.MerchantID, PaymentID: *lot.PaymentID})
+	return min(max(settled, 0), paid), err
+}
+
+// applyUnitReversal brings a pack of a merchant's unit to what its payment's
+// settled reversals take of it: their share of what the pack paid
+// (returnedCash) of its units, rounded down, so partial reversals sum to the
+// whole. What they take is drawn as a refund always draws, from scratch: the
+// lot's units on the balance first, then what expired or was revoked of it,
+// and the rest is consumed; each part moves by the difference from what
+// earlier reversals took, so a recovery returns units in the reverse order.
+// The legs route through credit_refund_clearing and the units go back to
+// processor_clearing, which issued them: the unit has no cash. It reports
+// whether it posted; a reversal that posted is not applied again.
+func (s *Service) applyUnitReversal(ctx context.Context, q *gen.Queries, mid uuid.UUID, g gen.BillingCreditGrant, reversalID uuid.UUID) (bool, error) {
+	unit := g.Unit
+	if g.PaymentID == nil {
+		return false, fmt.Errorf("purchased credit lacks its payment")
+	}
+	if _, _, err := s.lockBalance(ctx, q, mid, g.CustomerID, unit); err != nil {
+		return false, err
+	}
+	reversal, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid, ID: reversalID})
+	if err != nil {
+		return false, err
+	}
+	if reversal.CustomerID != g.CustomerID || reversal.Currency != *g.PaidCurrency || reversal.RefundedPaymentID == nil || *reversal.RefundedPaymentID != *g.PaymentID || reversal.Status != "succeeded" || reversal.Amount == 0 {
+		return false, fmt.Errorf("credit reversal contradicts completed payment")
+	}
+	committed, err := q.GetPurchasedCreditReversalState(ctx, gen.GetPurchasedCreditReversalStateParams{MerchantID: mid, CreditGrantID: g.ID, ReversalID: reversalID.String()})
+	if err != nil || committed.Legs > 0 {
+		return false, err
+	}
+	paid, err := fundingAmount(g)
+	if err != nil {
+		return false, err
+	}
+	returned, err := returnedCash(ctx, q, g, paid)
+	if err != nil {
+		return false, err
+	}
+	taken, err := q.GetPurchasedCreditUnitRefundState(ctx, gen.GetPurchasedCreditUnitRefundStateParams{MerchantID: mid, CreditGrantID: g.ID})
+	if err != nil {
+		return false, err
+	}
+	target := proportional(g.Units, returned, paid, false)
+	delta := target - (taken.Withdrawn + taken.Expired + taken.Revoked + taken.Consumed)
+	if delta == 0 {
+		return false, nil
+	}
+	lots := credits.New(q, mid, s.now)
+	if _, err := lots.ExpireLapsed(ctx, g.CustomerID, unit); err != nil {
+		return false, err
+	}
+	if _, err := lots.SettleRunningCharges(ctx, g.CustomerID, unit, s.now()); err != nil {
+		return false, err
+	}
+	if g, err = lots.Get(ctx, g.ID); err != nil {
+		return false, err
+	}
+	retired, err := q.GetPurchasedCreditRetiredBalance(ctx, gen.GetPurchasedCreditRetiredBalanceParams{MerchantID: mid, CreditGrantID: g.ID})
+	if err != nil {
+		return false, err
+	}
+	// What the reversals take, as if none had taken anything yet.
+	withdrawn := min(target, max(credits.Remaining(g), 0)+taken.Withdrawn)
+	expired := min(target-withdrawn, max(retired.Expired, 0)+taken.Expired)
+	revoked := min(target-withdrawn-expired, max(retired.Revoked, 0)+taken.Revoked)
+	consumed := target - withdrawn - expired - revoked
+
+	l := ledger.New(q, mid)
+	clearing, err := l.EnsureSystemAccount(ctx, ledger.CreditRefundClearing, unit)
+	if err != nil {
+		return false, err
+	}
+	// leg moves amount of the lot's units from one account to the other.
+	leg := func(from, to uuid.UUID, amount int64, kind ledger.TransferType, label string, customer *uuid.UUID) error {
+		if amount <= 0 {
+			return nil
+		}
+		_, err := l.Apply(ctx, ledger.Transfer{Debit: from, Credit: to, Amount: amount, Currency: unit, Type: kind,
+			Coord: ledger.Coord{Operation: "purchased_credit_refund", Source: label, SourceID: reversalID.String()}, CreditGrantID: &g.ID, Customer: customer})
+		return err
+	}
+	account := func(t ledger.AccountType) (uuid.UUID, error) {
+		if t == ledger.CustomerBalance {
+			return l.EnsureCustomerBalance(ctx, g.CustomerID, unit)
+		}
+		return l.EnsureSystemAccount(ctx, t, unit)
+	}
+	// Each part moves into the clearing account by what it takes more than
+	// before, and back by what it takes less. Units a lot no longer holds go
+	// back where its end put the rest.
+	backTo, backLabel, backType := ledger.CustomerBalance, "credit_restore", ledger.CreditRefundRestore
+	switch {
+	case g.ExpiresAt != nil && !g.ExpiresAt.After(s.now()):
+		backTo, backLabel, backType = ledger.ExpiredCredits, "retired_credit_restore", ledger.CreditRefundFunding
+	case g.RevokedAt != nil:
+		backTo, backLabel, backType = ledger.RevokedCredits, "retired_credit_restore", ledger.CreditRefundFunding
+	}
+	for _, part := range []struct {
+		from, back           ledger.AccountType
+		change               int64
+		take, restore        ledger.TransferType
+		takeLabel, backLabel string
+	}{
+		{ledger.CustomerBalance, backTo, withdrawn - taken.Withdrawn, ledger.CreditRefund, backType, "credit", backLabel},
+		{ledger.ExpiredCredits, ledger.ExpiredCredits, expired - taken.Expired, ledger.CreditRefundFunding, ledger.CreditRefundFunding, "expired_credit", "expired_credit_restore"},
+		{ledger.RevokedCredits, ledger.RevokedCredits, revoked - taken.Revoked, ledger.CreditRefundFunding, ledger.CreditRefundFunding, "revoked_credit", "revoked_credit_restore"},
+		{ledger.CreditRefundLoss, ledger.CreditRefundLoss, consumed - taken.Consumed, ledger.CreditRefundFunding, ledger.CreditRefundFunding, "consumed_credit", "consumed_credit_restore"},
+	} {
+		if part.change == 0 {
+			continue
+		}
+		from, back := part.from, part.back
+		id, err := account(from)
+		if part.change < 0 {
+			id, err = account(back)
+		}
+		if err != nil {
+			return false, err
+		}
+		var customer *uuid.UUID
+		if id == g.AccountID {
+			customer = &g.CustomerID
+		}
+		if part.change > 0 {
+			err = leg(id, clearing, part.change, part.take, part.takeLabel, customer)
+		} else {
+			err = leg(clearing, id, -part.change, part.restore, part.backLabel, customer)
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+	// The units go back to the account that issued them, or come out again.
+	issued, err := l.EnsureSystemAccount(ctx, ledger.RailClearing, unit)
+	if err != nil {
+		return false, err
+	}
+	if delta > 0 {
+		err = leg(clearing, issued, delta, ledger.CreditRefundFunding, "units_returned", nil)
+	} else {
+		err = leg(issued, clearing, -delta, ledger.CreditRefundFunding, "units_returned_restore", nil)
+	}
+	return err == nil, err
 }
 
 // proportional uses integer arithmetic without int64 multiplication overflow.

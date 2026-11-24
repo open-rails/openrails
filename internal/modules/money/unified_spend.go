@@ -73,7 +73,9 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	for _, lot := range lots {
 		spendable += lot.Available
 	}
-	if available > spendable {
+	// Admitted usage in a merchant's unit is never owed: it takes what the
+	// lots hold, whatever other holds reserve, before any of it goes uncharged.
+	if available > spendable || preAuthorized && IsMerchantUnit(cur) {
 		available = spendable
 	}
 	fromBalance := amount
@@ -81,6 +83,16 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		fromBalance = available
 	}
 	fromOwed := amount - fromBalance
+
+	// A merchant's units are prepaid, never owed: an admitted charge the lots
+	// cannot cover takes what they hold, and the rest is not charged.
+	var waived int64
+	if fromOwed > 0 && IsMerchantUnit(cur) {
+		if !preAuthorized {
+			return 0, 0, false, ErrInsufficientCredits
+		}
+		waived, fromOwed = fromOwed, 0
+	}
 
 	if fromOwed > 0 {
 		if preAuthorized {
@@ -145,6 +157,10 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			return 0, 0, false, err
 		}
 		owedAccrued = fromOwed
+	}
+	if waived > 0 && fromBalance == 0 {
+		// Nothing posted, yet the charge is settled: it is not a replay.
+		applied = true
 	}
 
 	return balanceSpent, owedAccrued, applied, nil

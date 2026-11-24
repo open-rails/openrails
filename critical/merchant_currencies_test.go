@@ -96,6 +96,17 @@ func TestMerchantCurrencies(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []billing.MerchantCurrency{goldUnit}, edited.Currencies)
 		require.Equal(t, []billing.MerchantCurrency{{Code: "GOLD", Name: "Gold coins", Symbol: "🪙"}}, customerUnits(t, a, a.aliceToken), "a Vault edit serves the unit")
+		// Once a balance counts it, a unit is neither removed nor rescaled.
+		_, err = a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Currency: "GOLD", Amount: 400, Source: "critical", SourceID: "gold"}})
+		require.NoError(t, err)
+		for name, currencies := range map[string][]billing.MerchantCurrency{
+			"rescaled": {{Code: "GOLD", Name: "Gold coins", Symbol: "🪙", Scale: 2}},
+			"removed":  {creditsUnit},
+		} {
+			_, err := a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{Currencies: currencies}})
+			refusal := requireCode(t, err, billing.CodeInvalidParam)
+			require.Equal(t, "settings.currencies", *refusal.Param, name)
+		}
 		for name, invalid := range map[string][]billing.MerchantCurrency{
 			"registry":  {{Code: "USD", Name: "Dollars"}},
 			"iso-space": {{Code: "GEM", Name: "Gems"}},
@@ -126,47 +137,52 @@ func TestMerchantCurrencies(t *testing.T) {
 		require.Nil(t, after.UsageBilling)
 	})
 
-	t.Run("OR-J05-S08/a-unit-is-refused-where-money-is-taken", func(t *testing.T) {
+	t.Run("OR-J05-S08/a-unit-is-never-owed-never-a-packs-price-and-only-the-merchants-own", func(t *testing.T) {
 		a := unitWorld(t)
 		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		_, err := a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: alice, Currency: "GOLD", Amount: 400, Source: "critical", SourceID: "gold"}})
-		refusal := requireCode(t, err, billing.CodeMerchantUnitUnsupported)
-		require.Equal(t, "items[0].currency", *refusal.Param)
-		grants, err := a.alphaRemote.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: alice})
-		require.NoError(t, err)
-		require.Empty(t, grants.Items, "nothing is credited in a unit")
-		_, err = a.alphaRemote.GetBalance(t.Context(), alice, billing.GetBalanceParams{Currency: "credits"})
-		requireCode(t, err, billing.CodeMerchantUnitUnsupported)
-		_, err = a.alphaRemote.GetBalance(t.Context(), alice, billing.GetBalanceParams{Currency: "GOLDX"})
+		_, err := a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: alice, Currency: "GEMS", Amount: 400, Source: "critical", SourceID: "gems"}})
+		refusal := requireCode(t, err, billing.CodeCurrencyUnsupported)
+		require.Equal(t, "items[0].currency", *refusal.Param, "a unit the merchant does not declare is an unknown currency")
+		_, err = a.alphaRemote.GetBalance(t.Context(), alice, billing.GetBalanceParams{Currency: "GEMS"})
 		requireCode(t, err, billing.CodeCurrencyUnsupported)
+		_, err = a.alphaRemote.UpdateCustomer(t.Context(), alice, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "GOLD", Amount: 100}}})
+		requireCode(t, err, billing.CodeCurrencyUnsupported)
+		_, err = a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: alice, Currency: "GOLD", Amount: 400, Source: "critical", SourceID: "gold"}})
+		require.NoError(t, err, "a declared unit is granted")
 
-		product, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "shop", DisplayName: "Shop", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"shop:sword"}})
+		shop, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "shop", DisplayName: "Shop", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"shop:sword"}})
 		require.NoError(t, err)
-		_, err = a.alphaRemote.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "sword", UnitAmount: 50, Currency: "GOLD"})
-		refusal = requireCode(t, err, billing.CodeMerchantUnitUnsupported)
+		_, err = a.alphaRemote.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: shop.ID, Key: "monthly", UnitAmount: 50, Currency: "GOLD", BillingIntervalHours: ptr(720)})
+		requireCode(t, err, billing.CodeInvalidParam)
+		_, err = a.alphaRemote.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: shop.ID, Key: "gems", UnitAmount: 50, Currency: "GEMS"})
+		refusal = requireCode(t, err, billing.CodeCurrencyUnsupported)
 		require.Equal(t, "currency", *refusal.Param)
-		prices, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductID: product.ID})
+		_, err = a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "deposit", DisplayName: "Deposit",
+			CreditGrant: &catalog.CreditGrantSpec{Currency: "GOLD", FromPayment: true}})
+		requireCode(t, err, billing.CodeInvalidParam)
+		pack, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pack", DisplayName: "Gold pack",
+			CreditGrant: &catalog.CreditGrantSpec{Currency: "GOLD", Amount: ptr(int64(400))}})
 		require.NoError(t, err)
-		require.Empty(t, prices.Items, "no price is denominated in a unit")
+		_, err = a.alphaRemote.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: pack.ID, Key: "in-gold", UnitAmount: 50, Currency: "GOLD"})
+		requireCode(t, err, billing.CodeInvalidParam)
+		prices, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductID: pack.ID})
+		require.NoError(t, err)
+		require.Empty(t, prices.Items, "a pack is bought with money, never with a unit")
 
-		for _, document := range []string{
-			"schema_version: 1\nproducts:\n  sword: {display_name: Sword, prices: {gold: {amount: 50 GOLD}}}\n",
-			"schema_version: 1\nproducts:\n  sword: {display_name: Sword, prices: {gold: {currency: GOLD, unit_amount: \"50\"}}}\n",
-		} {
-			_, err := catalog.ParseApplicationYAML([]byte(document))
-			require.ErrorContains(t, err, `unknown currency "GOLD"`, "a catalog prices in OpenRails' registry alone")
-		}
+		_, err = catalog.ParseApplicationYAML([]byte("schema_version: 1\nproducts:\n  sword: {display_name: Sword, prices: {gold: {amount: 50 GOLD}}}\n"))
+		require.ErrorContains(t, err, "GOLD is a merchant's unit", "a unit's scale is its merchant's: the amount shorthand cannot read it")
 		for param, document := range map[string]string{
-			"products.pack.credit_grant.currency":           "schema_version: 1\nproducts:\n  pack:\n    display_name: Gold pack\n    credit_grant: {currency: GOLD, amount: \"400\"}\n    prices: {pack: {amount: 20 USD}}\n",
-			"products.metered.rate_cards[0].price.currency": "schema_version: 1\nmeters:\n  calls: {event_type: calls, value_property: n, aggregation: sum}\nproducts:\n  metered: {display_name: Metered, rate_cards: [{meter: calls, price: {model: dynamic, currency: GOLD}}]}\n",
+			"products.sword.prices.gems.currency":           "schema_version: 1\nproducts:\n  sword: {display_name: Sword, prices: {gems: {currency: GEMS, unit_amount: \"50\"}}}\n",
+			"products.pack.credit_grant.currency":           "schema_version: 1\nproducts:\n  pack:\n    display_name: Gem pack\n    credit_grant: {currency: GEMS, amount: \"400\"}\n    prices: {pack: {amount: 20 USD}}\n",
+			"products.metered.rate_cards[0].price.currency": "schema_version: 1\nmeters:\n  calls: {event_type: calls, value_property: n, aggregation: sum}\nproducts:\n  metered: {display_name: Metered, rate_cards: [{meter: calls, price: {model: dynamic, currency: GEMS}}]}\n",
 		} {
 			parsed, err := catalog.ParseApplicationYAML([]byte(document))
 			require.NoError(t, err)
 			_, err = a.alphaRemote.ApplyCatalog(t.Context(), parsed, billing.ApplyCatalogParams{})
-			refusal := requireCode(t, err, billing.CodeMerchantUnitUnsupported)
+			refusal := requireCode(t, err, billing.CodeCurrencyUnsupported)
 			require.Equal(t, param, *refusal.Param)
 		}
-		products, err := a.alphaRemote.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"pack", "metered"}})
+		products, err := a.alphaRemote.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"sword", "metered"}})
 		require.NoError(t, err)
 		require.Empty(t, products.Items, "a refused document applies nothing")
 	})
@@ -180,8 +196,18 @@ func TestMerchantCurrencies(t *testing.T) {
 		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		_, err := a.betaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: alice, Currency: "CREDITS", Amount: 100, Source: "critical", SourceID: "credits"}})
 		requireCode(t, err, billing.CodeCurrencyUnsupported)
-		_, err = a.betaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: alice, Currency: "GOLD", Amount: 100, Source: "critical", SourceID: "gold"}})
-		requireCode(t, err, billing.CodeMerchantUnitUnsupported)
+		_, err = a.betaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: alice, Currency: "GOLD", Amount: 150, Source: "critical", SourceID: "gold"}})
+		require.NoError(t, err)
+		_, err = a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: alice, Currency: "GOLD", Amount: 7, Source: "critical", SourceID: "gold"}})
+		require.NoError(t, err)
+		betaGold, err := a.betaRemote.GetBalance(t.Context(), alice, billing.GetBalanceParams{Currency: "GOLD"})
+		require.NoError(t, err)
+		require.EqualValues(t, 150, betaGold.BalanceAmount, "1.50 of beta's gold")
+		require.Equal(t, &billing.MerchantCurrency{Code: "GOLD", Name: "Beta gold", Symbol: "GOLD", Scale: 2}, betaGold.Unit)
+		alphaGold, err := a.alphaRemote.GetBalance(t.Context(), alice, billing.GetBalanceParams{Currency: "GOLD"})
+		require.NoError(t, err)
+		require.EqualValues(t, 7, alphaGold.BalanceAmount, "alpha's gold is its own balance")
+		require.Equal(t, 0, alphaGold.Unit.Scale)
 		state, err := a.betaRemote.GetMerchantConfiguration(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, []billing.MerchantCurrency{{Code: "GOLD", Name: "Beta gold", Scale: 2}}, state.Currencies)

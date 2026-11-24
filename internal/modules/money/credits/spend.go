@@ -17,6 +17,15 @@ import (
 // not reserve. Nothing is applied unless the lots cover amount; compose
 // inside a transaction.
 func (l *Lots) Spend(ctx context.Context, customer uuid.UUID, unit string, amount int64, invoker, resource string, coord ledger.Coord) (applied bool, err error) {
+	return l.spend(ctx, customer, unit, amount, invoker, resource, coord, nil)
+}
+
+// SpendOrder is Spend for a line of order, which its legs name.
+func (l *Lots) SpendOrder(ctx context.Context, customer uuid.UUID, unit string, amount int64, order uuid.UUID, coord ledger.Coord) (bool, error) {
+	return l.spend(ctx, customer, unit, amount, customer.String(), "order", coord, &order)
+}
+
+func (l *Lots) spend(ctx context.Context, customer uuid.UUID, unit string, amount int64, invoker, resource string, coord ledger.Coord, order *uuid.UUID) (applied bool, err error) {
 	if amount <= 0 {
 		return false, fmt.Errorf("credits: spend amount must be positive, got %d", amount)
 	}
@@ -53,7 +62,7 @@ func (l *Lots) Spend(ctx context.Context, customer uuid.UUID, unit string, amoun
 		id, c, inv, res := lot.ID, customer, invoker, resource
 		_, lotApplied, err := l.money.ApplyIdempotent(ctx, ledger.Transfer{
 			Debit: balance, Credit: revenue, Amount: take, Currency: unit, Type: ledger.CreditSpend,
-			Coord: coord, CreditGrantID: &id, Customer: &c, Invoker: &inv, Resource: &res,
+			Coord: coord, CreditGrantID: &id, Customer: &c, Invoker: &inv, Resource: &res, Order: order,
 		})
 		if err != nil {
 			return applied, fmt.Errorf("credits: spend from lot %s: %w", lot.ID, err)

@@ -55,3 +55,22 @@ SELECT COALESCE(sum(CASE
     ELSE 0 END),0)::bigint AS amount
 FROM billing.ledger_transfers
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid;
+
+-- name: GetPurchasedCreditSettledReversals :one
+-- What the settled reversals of a payment returned, net of recoveries.
+SELECT COALESCE(sum(-amount),0)::bigint AS amount
+FROM billing.payments
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND refunded_payment_id=sqlc.arg(payment_id)::uuid
+ AND status='succeeded' AND deleted_at IS NULL;
+
+-- name: GetPurchasedCreditUnitRefundState :one
+-- What reversals took of a pack of a merchant's unit, net of recoveries, by
+-- where its units were: left on the balance, expired, revoked or consumed.
+SELECT
+ COALESCE(sum(CASE WHEN source='credit' THEN amount WHEN source IN ('credit_restore','retired_credit_restore') THEN -amount ELSE 0 END),0)::bigint AS withdrawn,
+ COALESCE(sum(CASE source WHEN 'expired_credit' THEN amount WHEN 'expired_credit_restore' THEN -amount ELSE 0 END),0)::bigint AS expired,
+ COALESCE(sum(CASE source WHEN 'revoked_credit' THEN amount WHEN 'revoked_credit_restore' THEN -amount ELSE 0 END),0)::bigint AS revoked,
+ COALESCE(sum(CASE source WHEN 'consumed_credit' THEN amount WHEN 'consumed_credit_restore' THEN -amount ELSE 0 END),0)::bigint AS consumed
+FROM billing.ledger_transfers
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid
+ AND operation='purchased_credit_refund';

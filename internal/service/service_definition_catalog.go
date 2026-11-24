@@ -66,6 +66,11 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 	if err != nil {
 		return nil, err
 	}
+	if credit != nil {
+		if err := s.ownUnit(ctx, "credit_grant.currency", string(credit.Currency)); err != nil {
+			return nil, err
+		}
+	}
 	req.CreditGrant = credit
 	now := time.Now().UTC()
 	tid, err := merchant.Require(ctx)
@@ -225,6 +230,11 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 		credit, err := normalizeCreditGrant(req.CreditGrant)
 		if err != nil {
 			return nil, err
+		}
+		if credit != nil {
+			if err := s.ownUnit(ctx, "credit_grant.currency", string(credit.Currency)); err != nil {
+				return nil, err
+			}
 		}
 		req.CreditGrant = credit
 		current, err := products.GetByID(ctx, id.UUID())
@@ -410,7 +420,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// is case-insensitive, so without this a caller-supplied "usd" validated
 	// fine and then failed the prices_currency_check CHECK at INSERT.
 	req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
-	if err := s.unitRefusal(ctx, "currency", string(req.Currency)); err != nil {
+	if err := s.ownUnit(ctx, "currency", string(req.Currency)); err != nil {
 		return nil, err
 	}
 	defaultRecurringAccess(&req)
@@ -669,6 +679,20 @@ func defaultRecurringAccess(req *billing.CreatePriceParams) {
 }
 
 func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
+	if currency.IsUnitCode(string(req.Currency)) {
+		if req.BillingIntervalHours != nil || req.BillingIntervalMonths != nil || req.TrialUnitAmount != nil || req.TrialDurationHours != nil || req.CustomerAmount != nil || req.Quantity != nil || len(req.SellVia) > 0 {
+			return apperr.Invalidf("a price in a merchant's unit is a one-off price the customer's balance pays: it has no billing interval, trial, customer_amount, quantity or sell_via")
+		}
+		if req.UnitAmount < 0 {
+			return apperr.Invalidf("unit_amount must be non-negative")
+		}
+		for _, hours := range []*int{req.AccessDurationHours} {
+			if hours != nil && (*hours <= 0 || *hours > syntax.MaxDurationHours) {
+				return apperr.Invalidf("access_duration_hours must be between 1 and %d hours or null", syntax.MaxDurationHours)
+			}
+		}
+		return nil
+	}
 	if req.BillingIntervalMonths != nil {
 		if req.BillingIntervalHours != nil || *req.BillingIntervalMonths < 1 || *req.BillingIntervalMonths > 1200 {
 			return apperr.Invalidf("billing_interval_months must be 1 to 1200 and cannot be combined with billing_interval_hours")

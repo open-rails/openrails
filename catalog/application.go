@@ -270,7 +270,7 @@ func (a Application) Validate() error {
 			if price.Currency.Null || price.UnitAmount.Null || price.Archived.Null {
 				return fmt.Errorf("price %q: nonnullable field is null", priceKey)
 			}
-			if price.Currency.Set {
+			if price.Currency.Set && !currency.IsUnitCode(string(price.Currency.Value)) {
 				if _, err := currency.ForPrice(string(price.Currency.Value)); err != nil {
 					return fmt.Errorf("price %q: %w", priceKey, err)
 				}

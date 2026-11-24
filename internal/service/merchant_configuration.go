@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // ErrRevisionMismatch refuses an edit naming a revision the configuration has
@@ -134,6 +135,9 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 		if err := s.refuseAssignedPolicyRemoval(ctx, mid, settings); err != nil {
 			return nil, err
 		}
+		if err := s.refuseUnitChange(ctx, mid, held.Value.MerchantSettings, settings); err != nil {
+			return nil, err
+		}
 		if usage := settings.Config.UsageBilling; usage != nil {
 			for _, cur := range usage.Currencies {
 				err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -189,6 +193,29 @@ func (s *Service) refuseAssignedPolicyRemoval(ctx context.Context, mid billing.M
 		}
 		return apperr.Invalidf("billing policy %q is assigned to customers; reassign them first", missing).WithParam("settings.billing_policies")
 	})
+}
+
+// refuseUnitChange refuses settings that remove or rescale one of the
+// merchant's units while a balance, price, credit policy or rate card counts
+// it: its amounts would lose their meaning.
+func (s *Service) refuseUnitChange(ctx context.Context, mid billing.MerchantID, held billing.MerchantSettings, next merchantconfig.Settings) error {
+	for _, unit := range held.Currencies {
+		code := moneyutil.NormalizeCurrency(string(unit.Code))
+		if kept, ok := next.Currencies.Unit(code); ok && kept.Decimals == unit.Scale {
+			continue
+		}
+		err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			used, err := s.rt.DB.Gen(ctx).MerchantUnitInUse(ctx, gen.MerchantUnitInUseParams{MerchantID: mid.UUID(), Unit: code})
+			if err != nil || !used {
+				return err
+			}
+			return apperr.Invalidf("unit %s counts balances, prices, credit or rate cards: it cannot be removed or rescaled", code).WithParam("settings.currencies")
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.MerchantSettings {

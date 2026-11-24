@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
@@ -169,9 +170,15 @@ func (l *Lots) Materialize(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("credits: post usage before the deposit: %w", err)
 	}
 	coord := ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: lot.ID.String()}
-	if lot.PaidAmount != nil && *lot.PaidCurrency == lot.Unit {
+	switch {
+	case lot.PaidAmount != nil && *lot.PaidCurrency == lot.Unit:
 		err = l.money.PurchasedDeposit(ctx, lot.CustomerID, lot.Unit, lot.Units, *lot.PaidAmount, coord, lot.ID)
-	} else {
+	case lot.PaidAmount == nil && currency.IsUnitCode(lot.Unit):
+		// A merchant's units nobody paid for were given: issued, not sold.
+		_, err = l.money.GrantedDeposit(ctx, lot.CustomerID, lot.Unit, lot.Units, coord, lot.ID)
+	default:
+		// A pack of a merchant's unit is all bought, its bonus included: the
+		// lot's rate is what was paid over every unit.
 		_, err = l.money.Deposit(ctx, lot.CustomerID, lot.Unit, lot.Units, coord, lot.ID)
 	}
 	if err != nil {

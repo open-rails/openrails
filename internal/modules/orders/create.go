@@ -1,6 +1,7 @@
 package orders
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -86,7 +87,17 @@ type CreateInput struct {
 	// LinesDigest names a customer order's lines (LinesDigest): FindOrCreate
 	// answers the customer's open order of the same lines instead.
 	LinesDigest []byte
+	// BalanceKey is a customer request's scoped Idempotency-Key and
+	// BalanceDigest its digest: an order in a merchant's unit, paid as it is
+	// created, keeps them, so a retry answers it.
+	BalanceKey    string
+	BalanceDigest []byte
 }
+
+var (
+	errUnitOrderKey       = apperr.New(http.StatusBadRequest, billing.CodeIdempotencyKeyRequired, "An order in a merchant's unit is paid from the balance as it is created: the Idempotency-Key header is required.")
+	errUnitOrderKeyReused = apperr.New(http.StatusUnprocessableEntity, billing.CodeIdempotencyKeyReused, "The Idempotency-Key named another order in a merchant's unit.")
+)
 
 // LineKey is one line as LinesDigest names it: its price (by storage id),
 // quantity and customer-chosen amount.
@@ -269,12 +280,32 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 		if in.ExpectedTotal != nil && *in.ExpectedTotal != quote.Total {
 			return ErrTotalChanged
 		}
+		unit := InMerchantUnit(quote.Currency)
+		keyed, digest := in.IdempotencyKey, in.RequestDigest
+		// An order in a merchant's unit is paid as it is created: its key
+		// answers a retry with that order instead of spending again.
+		if unit && quote.Total > 0 && keyed == "" {
+			if in.BalanceKey == "" {
+				return errUnitOrderKey
+			}
+			prior, err := q.GetOrderByIdempotencyKey(ctx, gen.GetOrderByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: in.BalanceKey})
+			switch {
+			case err == nil && (prior.CustomerID != in.CustomerID || !bytes.Equal(prior.RequestDigest, in.BalanceDigest)):
+				return errUnitOrderKeyReused
+			case err == nil:
+				id, found = prior.ID, true
+				return nil
+			case !db.IsNotFound(err):
+				return err
+			}
+			keyed, digest = in.BalanceKey, in.BalanceDigest
+		}
 		var key *string
-		if in.IdempotencyKey != "" {
-			key = &in.IdempotencyKey
+		if keyed != "" {
+			key = &keyed
 		}
 		if err := q.CreateOrder(ctx, gen.CreateOrderParams{MerchantID: mid.UUID(), ID: id, CustomerID: in.CustomerID, Origin: string(in.Origin),
-			Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: in.RequestDigest, LinesDigest: in.LinesDigest,
+			Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: digest, LinesDigest: in.LinesDigest,
 			ExpiresAt: now.Add(in.TTL), Now: now}); err != nil {
 			return err
 		}
@@ -336,15 +367,22 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 			}
 		}
 		if in.Attach != nil {
+			if unit {
+				return apperr.Invalidf("an order in a merchant's unit is paid from the customer's balance as it is created: it has no pay URL").WithParam("pay_url")
+			}
 			if err := in.Attach(ctx, q, id); err != nil {
 				return err
 			}
 		}
-		if quote.Total > 0 {
+		if quote.Total > 0 && !unit {
 			return nil
 		}
 		order, err := s.load(ctx, q, mid.UUID(), id, true)
 		if err != nil {
+			return err
+		}
+		if quote.Total > 0 {
+			_, err = s.payFromBalance(ctx, d, order)
 			return err
 		}
 		_, err = s.settle(ctx, d, order, nil)

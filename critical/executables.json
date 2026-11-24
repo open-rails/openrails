@@ -86,7 +86,7 @@
       "TestMerchantCurrencies/OR-J05-S07/an-invalid-or-colliding-unit-is-refused-at-load-and-on-edit"
     ],
     "OR-J05-S08": [
-      "TestMerchantCurrencies/OR-J05-S08/a-unit-is-refused-where-money-is-taken"
+      "TestMerchantCurrencies/OR-J05-S08/a-unit-is-never-owed-never-a-packs-price-and-only-the-merchants-own"
     ],
     "OR-J05-S09": [
       "TestMerchantCurrencies/OR-J05-S09/another-merchant-does-not-see-a-merchants-units"
@@ -1613,6 +1613,27 @@
     ],
     "OR-J43-S07": [
       "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
+    ],
+    "OR-J48-S01": [
+      "TestMerchantUnits/OR-J48-S01/packs-buy-units-at-their-own-rates"
+    ],
+    "OR-J48-S02": [
+      "TestMerchantUnits/OR-J48-S02/the-same-units-bought-in-another-currency"
+    ],
+    "OR-J48-S03": [
+      "TestMerchantUnits/OR-J48-S03/a-plan-allowance-and-a-gift-give-units"
+    ],
+    "OR-J48-S04": [
+      "TestMerchantUnits/OR-J48-S04/a-unit-priced-product-is-paid-from-the-balance"
+    ],
+    "OR-J48-S05": [
+      "TestMerchantUnits/OR-J48-S05/usage-priced-in-units-draws-lots-soonest-expiry-first"
+    ],
+    "OR-J48-S06": [
+      "TestMerchantUnits/OR-J48-S06/an-unspent-pack-expires-in-its-unit"
+    ],
+    "OR-J48-S07": [
+      "TestMerchantUnits/OR-J48-S07/a-refund-claws-back-its-lots-units-first"
     ]
   }
 }

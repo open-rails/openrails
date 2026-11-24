@@ -47,6 +47,16 @@ func ValidateCurrency(code string) error {
 	return nil
 }
 
+// ValidateBalanceCurrency errors on a code that is neither a registry
+// currency nor spelled as a merchant's unit. A balance, lot or spend may be
+// in a merchant's unit; the caller checked the merchant declares it.
+func ValidateBalanceCurrency(code string) error {
+	if _, ok := currencies[NormalizeCurrency(code)]; ok || currency.IsUnitCode(code) {
+		return nil
+	}
+	return fmt.Errorf("money: unknown currency %q", code)
+}
+
 // CurrencyScale returns the currency's internal precision decimals.
 func CurrencyScale(code string) (int, bool) {
 	cur, ok := currencies[NormalizeCurrency(code)]

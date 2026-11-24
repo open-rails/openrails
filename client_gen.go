@@ -48,8 +48,10 @@ func (c *Client) GetOrderPaymentAttempt(ctx context.Context, idempotencyKey stri
 
 // CreateOrder creates a merchant order: an unpaid order for one customer,
 // which they pay on your site (POST /v1/me/orders/{id}/pay, or billing-ui's
-// OrderPayURL). It never charges. idempotencyKey is required: a retry with
-// it answers the same order.
+// OrderPayURL). It never charges a card. An order in one of the merchant's
+// own units is paid from the customer's balance in it as it is created
+// (insufficient_credits when the balance does not cover it). idempotencyKey
+// is required: a retry with it answers the same order.
 func (c *Client) CreateOrder(ctx context.Context, idempotencyKey string, params billing.CreateOrderParams) (*billing.Order, error) {
 	var out billing.Order
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/orders", idempotencyKey: idempotencyKey, body: params}, &out); err != nil {

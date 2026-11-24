@@ -140,7 +140,7 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -181,7 +181,7 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 		return fmt.Errorf("admission capacity callback required")
 	}
 	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return err
 	}
 	tid, err := merchant.Require(ctx)
@@ -248,7 +248,7 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 		return AdmissionCapacity{}, fmt.Errorf("money service not initialized")
 	}
 	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return AdmissionCapacity{}, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -317,7 +317,7 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 		return page, nil
 	}
 	cur := normalizeCurrency(string(params.Currency))
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return page, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -497,7 +497,7 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 		return nil, err
 	}
 	cur := normalizeCurrency(params.Currency)
-	if _, err := CurrencyDecimals(cur); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)

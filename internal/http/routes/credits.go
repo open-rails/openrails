@@ -22,7 +22,7 @@ var creditsRoutes = []Route{
 			"retry answers the existing grant with Replayed set, one with a different amount, currency or expiry " +
 			"refuses the batch with billing.ErrIdempotencyKeyReused.",
 		Request: billing.CreateCreditGrantBatchParams{}, Responses: []Reply{{201, billing.CreateCreditGrantBatchResult{}}, {200, billing.CreateCreditGrantBatchResult{}}},
-		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", "merchant_unit_unsupported", billing.CodeServiceCredentialCustomerScopeDenied), Handler: h(handlers.CreateCreditGrants)},
+		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", billing.CodeServiceCredentialCustomerScopeDenied), Handler: h(handlers.CreateCreditGrants)},
 	{Method: GET, Path: "/v1/admin/credit-grants", Group: Admin, Auth: AuthMerchant, Name: "ListCreditGrants", Level: LevelRead,
 		Doc: "ListCreditGrants lists params.CustomerID's credit grants, newest first, or the grants params.IDs " +
 			"names.",
@@ -43,11 +43,11 @@ var creditsRoutes = []Route{
 		Doc: "ListBalanceTransactions lists a customer's balance transactions in one currency, newest first, or " +
 			"the transactions params.IDs names.",
 		Query: billing.BalanceTransactionListParams{}, Responses: []Reply{{200, billing.ListPage[billing.BalanceTransaction]{}}},
-		Errors: withCustomer("currency_unsupported", "invalid_cursor", "merchant_unit_unsupported"), Handler: h(handlers.ListBalanceTransactions)},
+		Errors: withCustomer("currency_unsupported", "invalid_cursor"), Handler: h(handlers.ListBalanceTransactions)},
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}/balance", Group: Admin, Auth: AuthMerchant, Name: "GetBalance", Level: LevelRead,
 		Args:  []any{billing.CustomerID{}},
 		Doc:   "GetBalance reads a customer's balance, holds and owed amount in params.Currency.",
-		Query: billing.GetBalanceParams{}, Responses: []Reply{{200, billing.Balance{}}}, Errors: withCustomer("currency_unsupported", "merchant_unit_unsupported"), Handler: h(handlers.GetBalance)},
+		Query: billing.GetBalanceParams{}, Responses: []Reply{{200, billing.Balance{}}}, Errors: withCustomer("currency_unsupported"), Handler: h(handlers.GetBalance)},
 	{Method: GET, Path: "/v1/me", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.CustomerAccount{}}}, Handler: h(handlers.GetMe)},
 	{Method: PUT, Path: "/v1/me/low-balance-lines/{currency}", Group: Customer, Auth: AuthCustomer,
@@ -55,5 +55,5 @@ var creditsRoutes = []Route{
 		Errors: codes("currency_unsupported", "invalid_param"), Handler: h(handlers.SetMyLowBalanceLine)},
 	{Method: GET, Path: "/v1/me/balance/transactions", Group: Customer, Auth: AuthCustomer,
 		Query: handlers.MyBalanceTransactionListQuery{}, Responses: []Reply{{200, billing.ListPage[billing.BalanceTransaction]{}}},
-		Errors: codes("currency_unsupported", "invalid_cursor", "merchant_unit_unsupported"), Handler: h(handlers.ListMyBalanceTransactions)},
+		Errors: codes("currency_unsupported", "invalid_cursor"), Handler: h(handlers.ListMyBalanceTransactions)},
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	unit "github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -90,6 +91,9 @@ const (
 	OpWithdraw Operation = "withdraw" // history only
 	OpDeposit  Operation = "deposit"  // credit grant / top-up
 
+	// OpOrder is an order line in a merchant's unit, paid from the balance.
+	OpOrder Operation = "order"
+
 	OpCreditExpire    Operation = "credit_expire"
 	OpCreditRevoke    Operation = "credit_revoke"
 	OpCreditReinstate Operation = "credit_reinstate"
@@ -141,6 +145,10 @@ const MaxCoordBytes = 512
 func (c Coord) String() string {
 	return string(c.Operation) + "/" + c.Source + "/" + c.SourceID
 }
+
+// ErrMerchantUnitOwed refuses debt in a merchant's own unit: its units are
+// prepaid, never owed.
+var ErrMerchantUnitOwed = errors.New("ledger: nothing is owed in a merchant's unit")
 
 // ErrInsufficientFunds is returned when a posting transfer would push the debit
 // account below its sign-constraint floor.
@@ -196,6 +204,9 @@ func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, 
 // account, so outstanding owed is one counter read, not a sum over history.
 // Not debits_must_not_exceed_credits: its negative balance IS the debt.
 func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
+	if unit.IsUnitCode(currency) {
+		return uuid.Nil, fmt.Errorf("%w: %s", ErrMerchantUnitOwed, currency)
+	}
 	c := customer
 	id, _, err := l.ensureAccount(ctx, ArrearsLiability, currency, &c, false, false)
 	return id, err
@@ -393,7 +404,18 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 // (DR processor_clearing / CR customer_balance). grantID attributes the deposit
 // to its credit lot (uuid.Nil for a non-lot deposit).
 func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
+	return l.depositFrom(ctx, RailClearing, customer, currency, amount, coord, grantID)
+}
+
+// GrantedDeposit credits the customer's balance with units the merchant gave
+// (DR promotional_funding / CR customer_balance): a gift lot of a merchant's
+// unit, which no cash bought.
+func (l *Ledger) GrantedDeposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	return l.depositFrom(ctx, PromotionalFunding, customer, currency, amount, coord, grantID)
+}
+
+func (l *Ledger) depositFrom(ctx context.Context, from AccountType, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	clearing, err := l.EnsureSystemAccount(ctx, from, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}

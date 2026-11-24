@@ -108,7 +108,7 @@ func (s *Service) admit(ctx context.Context, database *db.DB, in AdmitInput) (*b
 			return nil, &spendgate.ValidationError{Param: "usage", Message: "usage and estimated_amount are exclusive: the rate cards price usage"}
 		}
 	}
-	currency, err := s.registryCurrency(ctx, "currency", in.Currency)
+	currency, err := s.balanceCurrency(ctx, "currency", in.Currency)
 	if err != nil {
 		return nil, err
 	}

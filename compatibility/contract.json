@@ -663,7 +663,7 @@
       "type ApplyCatalogParams struct {\n\tForce bool `form:\"force\"`\n}",
       "type ApproveProposalsParams struct {\n\tIDs   []FindingID `json:\"ids\"`\n\tNotes string      `json:\"notes\"`\n}",
       "type AskCatalogParams struct {\n\tQuestion string `json:\"question\"`\n}",
-      "type Balance struct {\n\tCustomerID         CustomerID       `json:\"customer_id\"`\n\tCurrency           catalog.Currency `json:\"currency\"`\n\tBillingMode        BillingMode      `json:\"billing_mode\"`\n\tBalanceAmount      int64            `json:\"balance_amount,string\"`\n\tHeldAmount         int64            `json:\"held_amount,string\"`\n\tAccruedAmount      int64            `json:\"accrued_amount,string\"`\n\tAvailableAmount    int64            `json:\"available_amount,string\"`\n\tOwedAmount         int64            `json:\"owed_amount,string\"`\n\tAccrualRatePerHour int64            `json:\"accrual_rate_per_hour,string\"`\n\tAsOf               time.Time        `json:\"as_of\"`\n\tDepletesAt         *time.Time       `json:\"depletes_at\"`\n}",
+      "type Balance struct {\n\tCustomerID CustomerID       `json:\"customer_id\"`\n\tCurrency   catalog.Currency `json:\"currency\"`\n\n\tUnit               *MerchantCurrency `json:\"unit\"`\n\tBillingMode        BillingMode       `json:\"billing_mode\"`\n\tBalanceAmount      int64             `json:\"balance_amount,string\"`\n\tHeldAmount         int64             `json:\"held_amount,string\"`\n\tAccruedAmount      int64             `json:\"accrued_amount,string\"`\n\tAvailableAmount    int64             `json:\"available_amount,string\"`\n\tOwedAmount         int64             `json:\"owed_amount,string\"`\n\tAccrualRatePerHour int64             `json:\"accrual_rate_per_hour,string\"`\n\tAsOf               time.Time         `json:\"as_of\"`\n\tDepletesAt         *time.Time        `json:\"depletes_at\"`\n}",
       "type BalanceHostEvent struct {\n\tCustomerID         CustomerID       `json:\"customer_id\"`\n\tCurrency           catalog.Currency `json:\"currency\"`\n\tAvailableAmount    int64            `json:\"available_amount,string\"`\n\tOwedAmount         int64            `json:\"owed_amount,string\"`\n\tAccrualRatePerHour int64            `json:\"accrual_rate_per_hour,string\"`\n\tUsageRatePerHour   int64            `json:\"usage_rate_per_hour,string\"`\n\tLowBalanceAmount   int64            `json:\"low_balance_amount,string\"`\n\tAsOf               time.Time        `json:\"as_of\"`\n\tDepletesAt         *time.Time       `json:\"depletes_at\"`\n\tRunwayEndsAt       *time.Time       `json:\"runway_ends_at\"`\n}",
       "type BalanceNoticeAmount struct {\n\tCurrency catalog.Currency `json:\"currency\"`\n\tAmount   int64            `json:\"amount,string\"`\n}",
       "type BalanceNoticeSettings struct {\n\tRunwayHours *int                  `json:\"runway_hours,omitempty\"`\n\tLowAmounts  []BalanceNoticeAmount `json:\"low_amounts,omitempty\"`\n}",
@@ -2629,6 +2629,8 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/db/models/credit_benefit.go": {
+      "catalog": "github.com/open-rails/openrails/catalog",
+      "currency": "github.com/open-rails/openrails/internal/currency",
       "errors": "errors",
       "strings": "strings",
       "time": "time"
@@ -4242,6 +4244,7 @@
       "calendarutil": "github.com/open-rails/openrails/internal/shared/calendarutil",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "context": "context",
+      "currency": "github.com/open-rails/openrails/internal/currency",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",

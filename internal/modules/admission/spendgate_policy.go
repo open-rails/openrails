@@ -7,6 +7,7 @@ import (
 	"time"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/budgets"
@@ -57,6 +58,11 @@ func (l *SpendgatePolicyLoader) InCurrency(ctx context.Context, resolved Resolve
 		return resolved, nil
 	}
 	resolved.OutstandingCapAmount = 0
+	// No rate converts money into a merchant's unit: its caps bind only money.
+	if currency.IsUnitCode(to) {
+		resolved.AccrualRateCapPerHour = 0
+		return resolved, nil
+	}
 	if resolved.AccrualRateCapPerHour > 0 {
 		conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(from), to, resolved.AccrualRateCapPerHour)
 		if err != nil {
@@ -82,6 +88,9 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 			c = strings.TrimSpace(policyCurrency)
 		}
 		if c != "" && money.NormalizeCurrency(c) != reqCur {
+			if currency.IsUnitCode(reqCur) {
+				continue
+			}
 			conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(c), reqCur, w.Limit)
 			if err != nil {
 				return nil, err

@@ -86,6 +86,28 @@ func (q *Queries) ListCustomerBillingPolicyAssignments(ctx context.Context, arg 
 	return items, nil
 }
 
+const merchantUnitInUse = `-- name: MerchantUnitInUse :one
+SELECT EXISTS (SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id = $1::uuid AND a.customer_id IS NULL AND a.currency = $2::text)
+    OR EXISTS (SELECT 1 FROM billing.prices p WHERE p.merchant_id = $1::uuid AND p.currency = $2::text)
+    OR EXISTS (SELECT 1 FROM billing.products p WHERE p.merchant_id = $1::uuid AND p.credit_grant ->> 'currency' = $2::text)
+    OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards c WHERE c.merchant_id = $1::uuid AND c.price ->> 'currency' = $2::text) AS in_use
+`
+
+type MerchantUnitInUseParams struct {
+	MerchantID uuid.UUID
+	Unit       string
+}
+
+// Whether a merchant's unit counts anything: a balance (whose deposit made a
+// system account in it), a price, a product's credit or a rate card. A
+// settings change may not remove or rescale it then.
+func (q *Queries) MerchantUnitInUse(ctx context.Context, arg MerchantUnitInUseParams) (bool, error) {
+	row := q.db.QueryRow(ctx, merchantUnitInUse, arg.MerchantID, arg.Unit)
+	var in_use bool
+	err := row.Scan(&in_use)
+	return in_use, err
+}
+
 const setCustomerBillingPolicy = `-- name: SetCustomerBillingPolicy :execrows
 
 UPDATE billing.customers SET billing_policy = $1::text

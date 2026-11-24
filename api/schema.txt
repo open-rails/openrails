@@ -11,6 +11,7 @@ migration 0007_dashboard_retired_measures.up.sql sha256:f6dd2a2187e91c2d0ae89192
 migration 0008_drop_entitlement_cache_contract.up.sql sha256:5614790da69dcc343f221554426cf4c88ea8e126923a80a6a725f03ed005b372
 migration 0009_order_keys_and_cancel_kinds.up.sql sha256:d9f399efae661b1fc5f50edb9295edb31f349d302a9e18e0590bd2419f62bc58
 migration 0010_credit_grants.up.sql sha256:fdab284c9d4a8a721620c8b9c9bd34796ccbe679afc1c79e39299857c0e4e340
+migration 0021_merchant_unit_spending.up.sql sha256:ee11840e33395e10d1f091cfa90cff223668080d863f87c26fb075bfa31ae4a3
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -290,6 +291,7 @@ table billing.credit_grants
   constraint credit_grants_paid_amount_check CHECK ((paid_amount > 0))
   constraint credit_grants_paid_check CHECK (((paid_amount IS NULL) = (paid_currency IS NULL)))
   constraint credit_grants_paid_currency_check CHECK ((paid_currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint credit_grants_paid_currency_registry_check CHECK (((paid_currency IS NULL) OR (paid_currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint credit_grants_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
   constraint credit_grants_pkey PRIMARY KEY (merchant_id, id)
   constraint credit_grants_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
@@ -835,6 +837,7 @@ table billing.ledger_accounts
   constraint ledger_accounts_customer_id_currency_id_key UNIQUE (merchant_id, customer_id, currency, id)
   constraint ledger_accounts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint ledger_accounts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint ledger_accounts_owed_currency_check CHECK (((account_type <> 'arrears_liability'::text) OR (currency = ANY (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint ledger_accounts_pkey PRIMARY KEY (merchant_id, id)
   constraint ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text, 'promotional_funding'::text, 'credit_refund_clearing'::text, 'credit_refund_loss'::text])))
   index CREATE UNIQUE INDEX ledger_accounts_account_type_currency_key ON billing.ledger_accounts USING btree (merchant_id, account_type, currency) WHERE (customer_id IS NULL)
@@ -1431,7 +1434,7 @@ table billing.orders
   constraint orders_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text])))
   constraint orders_collection_owner_check CHECK ((collection_owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint orders_complete_check CHECK (((status = 'complete'::text) = ((number IS NOT NULL) AND (completed_at IS NOT NULL))))
-  constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL) OR (origin = 'usage'::text) OR (collection_owner <> 'engine'::text)))
+  constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL) OR (origin = 'usage'::text) OR (collection_owner <> 'engine'::text) OR (currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
   constraint orders_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint orders_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint orders_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
@@ -3459,9 +3462,16 @@ function billing.credit_grant_reservation(uuid,uuid)
           CROSS JOIN LATERAL (SELECT sum(-r.amount)::numeric AS amount FROM billing.payments r
               WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id AND r.currency = g.paid_currency
                 AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL) pending
-          CROSS JOIN LATERAL (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric AS amount
-              FROM billing.ledger_transfers t
-              WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund') returned
+          CROSS JOIN LATERAL (SELECT CASE WHEN g.paid_currency = g.unit THEN
+                  (SELECT COALESCE(sum(CASE t.transfer_type WHEN 'credit_refund_cash' THEN t.amount WHEN 'credit_refund_cash_restore' THEN -t.amount ELSE 0 END), 0)::numeric
+                   FROM billing.ledger_transfers t
+                   WHERE t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id AND t.operation = 'purchased_credit_refund')
+              ELSE
+                  (SELECT LEAST(GREATEST(COALESCE(sum(-r.amount), 0), 0), g.paid_amount)::numeric
+                   FROM billing.payments r
+                   WHERE r.merchant_id = g.merchant_id AND r.refunded_payment_id = g.payment_id
+                     AND r.status = 'succeeded' AND r.deleted_at IS NULL)
+              END AS amount) returned
           WHERE g.merchant_id = p_merchant AND g.id = p_lot AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
             AND pending.amount > 0), 0)
   $function$

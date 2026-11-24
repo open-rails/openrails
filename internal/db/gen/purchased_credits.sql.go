@@ -179,3 +179,60 @@ func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPu
 	)
 	return i, err
 }
+
+const getPurchasedCreditSettledReversals = `-- name: GetPurchasedCreditSettledReversals :one
+SELECT COALESCE(sum(-amount),0)::bigint AS amount
+FROM billing.payments
+WHERE merchant_id=$1::uuid AND refunded_payment_id=$2::uuid
+ AND status='succeeded' AND deleted_at IS NULL
+`
+
+type GetPurchasedCreditSettledReversalsParams struct {
+	MerchantID uuid.UUID
+	PaymentID  uuid.UUID
+}
+
+// What the settled reversals of a payment returned, net of recoveries.
+func (q *Queries) GetPurchasedCreditSettledReversals(ctx context.Context, arg GetPurchasedCreditSettledReversalsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getPurchasedCreditSettledReversals, arg.MerchantID, arg.PaymentID)
+	var amount int64
+	err := row.Scan(&amount)
+	return amount, err
+}
+
+const getPurchasedCreditUnitRefundState = `-- name: GetPurchasedCreditUnitRefundState :one
+SELECT
+ COALESCE(sum(CASE WHEN source='credit' THEN amount WHEN source IN ('credit_restore','retired_credit_restore') THEN -amount ELSE 0 END),0)::bigint AS withdrawn,
+ COALESCE(sum(CASE source WHEN 'expired_credit' THEN amount WHEN 'expired_credit_restore' THEN -amount ELSE 0 END),0)::bigint AS expired,
+ COALESCE(sum(CASE source WHEN 'revoked_credit' THEN amount WHEN 'revoked_credit_restore' THEN -amount ELSE 0 END),0)::bigint AS revoked,
+ COALESCE(sum(CASE source WHEN 'consumed_credit' THEN amount WHEN 'consumed_credit_restore' THEN -amount ELSE 0 END),0)::bigint AS consumed
+FROM billing.ledger_transfers
+WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
+ AND operation='purchased_credit_refund'
+`
+
+type GetPurchasedCreditUnitRefundStateParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+}
+
+type GetPurchasedCreditUnitRefundStateRow struct {
+	Withdrawn int64
+	Expired   int64
+	Revoked   int64
+	Consumed  int64
+}
+
+// What reversals took of a pack of a merchant's unit, net of recoveries, by
+// where its units were: left on the balance, expired, revoked or consumed.
+func (q *Queries) GetPurchasedCreditUnitRefundState(ctx context.Context, arg GetPurchasedCreditUnitRefundStateParams) (GetPurchasedCreditUnitRefundStateRow, error) {
+	row := q.db.QueryRow(ctx, getPurchasedCreditUnitRefundState, arg.MerchantID, arg.CreditGrantID)
+	var i GetPurchasedCreditUnitRefundStateRow
+	err := row.Scan(
+		&i.Withdrawn,
+		&i.Expired,
+		&i.Revoked,
+		&i.Consumed,
+	)
+	return i, err
+}

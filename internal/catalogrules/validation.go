@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/currency"
 )
 
 // Meter is a meter's definition: what it counts and how it aggregates.
@@ -101,8 +102,8 @@ func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 	price.Model = catalog.Model(strings.ToLower(strings.TrimSpace(string(price.Model))))
 	if price.Currency != "" {
 		price.Currency = catalog.Currency(strings.ToUpper(strings.TrimSpace(string(price.Currency))))
-		if !validRateCurrency(string(price.Currency)) {
-			return fmt.Errorf("%s: currency must be an ISO money currency", where)
+		if !validRateCurrency(string(price.Currency)) && !currency.IsUnitCode(string(price.Currency)) {
+			return fmt.Errorf("%s: currency must be an ISO money currency or a merchant's unit", where)
 		}
 	}
 

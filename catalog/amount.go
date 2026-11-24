@@ -16,6 +16,9 @@ func parseAmount(input string) (int64, Currency, error) {
 		return 0, "", fmt.Errorf("amount requires a decimal value and currency, for example 9.99 USD")
 	}
 	units, ok := currency.Lookup(parts[1])
+	if !ok && currency.IsUnitCode(parts[1]) {
+		return 0, "", fmt.Errorf("%s is a merchant's unit, whose scale its merchant declares: give currency and unit_amount in its native units", strings.ToUpper(parts[1]))
+	}
 	if !ok {
 		return 0, "", fmt.Errorf("unknown currency %q; recognized currencies: %s", parts[1], recognizedCurrencies())
 	}

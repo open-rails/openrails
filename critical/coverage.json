@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 505,
+  "scenario_count": 512,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -141,12 +141,12 @@
     {
       "id": "OR-J05-S07",
       "journey": "J05",
-      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing"
+      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing; a unit a balance counts is neither removed nor rescaled"
     },
     {
       "id": "OR-J05-S08",
       "journey": "J05",
-      "name": "A merchant unit is refused merchant_unit_unsupported by credit grants, balances, prices and catalog credit grants and rate cards, and a catalog cannot price in one; nothing is written"
+      "name": "A merchant's unit is never owed, never the price of a credit pack and never a recurring price; a credit limit in one, a pack paid from_payment and the amount shorthand are refused; a unit the merchant does not declare is an unknown currency anywhere a document or request names it"
     },
     {
       "id": "OR-J05-S09",
@@ -2527,6 +2527,41 @@
       "id": "OR-J43-S07",
       "journey": "J43",
       "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
+    },
+    {
+      "id": "OR-J48-S01",
+      "journey": "J48",
+      "name": "A pack buys a merchant's unit at its own price-to-units ratio, bonus packs included: one lot per pack records its units, what was paid and in what currency, deposited from processor_clearing, and the balance shows at the unit's scale"
+    },
+    {
+      "id": "OR-J48-S02",
+      "journey": "J48",
+      "name": "The same units bought in another currency credit the same unit balance; each lot records the currency that paid it and nothing converts"
+    },
+    {
+      "id": "OR-J48-S03",
+      "journey": "J48",
+      "name": "A plan's allowance delivers its units each paid cycle as a recurring lot, and a staff gift in a unit is granted from promotional_funding with nothing paid"
+    },
+    {
+      "id": "OR-J48-S04",
+      "journey": "J48",
+      "name": "An order priced in a merchant's unit is paid from the customer's balance as it is created, with no payment or provider, and grants its product's keys; a balance short of it is refused insufficient_credits and creates nothing"
+    },
+    {
+      "id": "OR-J48-S05",
+      "journey": "J48",
+      "name": "Usage priced in a unit by rate card holds and draws the unit balance, soonest-expiring lot first; admitted usage the units cannot cover is never owed"
+    },
+    {
+      "id": "OR-J48-S06",
+      "journey": "J48",
+      "name": "A lapsed pack is never drawn and its unspent units expire in the unit, once"
+    },
+    {
+      "id": "OR-J48-S07",
+      "journey": "J48",
+      "name": "Refunding a pack's payment takes that lot's unspent units first, refuses a refund whose share is spent, books a chargeback's spent share as consumed, and a won dispute returns what the chargeback took, with no cash leg in the unit"
     }
   ]
 }
