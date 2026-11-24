@@ -1609,17 +1609,17 @@
       "name": "A subscription end the provider confirmed is stored as the provider's: read back, a later renewal is kept for refund review and does not reopen it"
     },
     {
-      "id": "OR-J38-S76",
+      "id": "OR-J38-S79",
       "journey": "J38",
       "name": "A CCBill cancel the pull lands is a lapse, and the member's reactivation and rebill restore access"
     },
     {
-      "id": "OR-J38-S77",
+      "id": "OR-J38-S80",
       "journey": "J38",
       "name": "A CCBill Cancellation is a lapse: a reactivation inside the paid period resumes it, and a late rebill past it restores it"
     },
     {
-      "id": "OR-J38-S78",
+      "id": "OR-J38-S81",
       "journey": "J38",
       "name": "A failed-rebill cancel on a provider's or a chargeback's end tightens it and keeps its kind: a later rebill does not reopen it"
     },

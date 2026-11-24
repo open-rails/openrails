@@ -340,7 +340,7 @@ func TestCCBillIdentity(t *testing.T) {
 		require.Equal(t, billing.FindingStatus("requires_review"), review.Items[0].Status)
 	})
 
-	t.Run("OR-J38-S76/a-ccbill-cancel-the-pull-lands-is-restored-by-its-rebill", func(t *testing.T) {
+	t.Run("OR-J38-S79/a-ccbill-cancel-the-pull-lands-is-restored-by-its-rebill", func(t *testing.T) {
 		// The Cancellation webhook never came; DataLink reports it.
 		var feed *httptest.Server
 		var canceled time.Time
@@ -380,7 +380,7 @@ func TestCCBillIdentity(t *testing.T) {
 		require.True(t, entitledTo(t, a.alpha, alice, "ccbill:member"))
 	})
 
-	t.Run("OR-J38-S77/a-ccbill-cancellation-is-undone-by-reactivation-or-a-late-rebill", func(t *testing.T) {
+	t.Run("OR-J38-S80/a-ccbill-cancellation-is-undone-by-reactivation-or-a-late-rebill", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
 		bob, carol := customerOf(a.bob), customerOf(authtest.NewUser(t, a.auth))
@@ -415,7 +415,7 @@ func TestCCBillIdentity(t *testing.T) {
 		require.True(t, entitledTo(t, a.alpha, carol, "ccbill:member"))
 	})
 
-	t.Run("OR-J38-S78/a-failed-rebill-cancel-on-a-decided-end-keeps-it-decided", func(t *testing.T) {
+	t.Run("OR-J38-S81/a-failed-rebill-cancel-on-a-decided-end-keeps-it-decided", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
 		alice, carol := customerOf(a.alice), customerOf(a.bob)

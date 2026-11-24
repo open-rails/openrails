@@ -116,7 +116,7 @@ Checks:
 - `lifecycle.Apply` gives no effects for a stale `RenewalPaid` or for
   `RenewalDeclined` on a canceled row.
 - `RenewalOverdue` and `DunningStale` reach only `unverified`.
-- OR-J17-S04 (late callbacks); OR-J15-S18, OR-J15-S19 (ends only on not-found); OR-J38-S75 (a provider-confirmed end is not reopened by a later renewal); OR-J38-S76, S77 (CCBill's cancels are lapses); OR-J38-S78 (a later failed-rebill cancel keeps a decided end decided).
+- OR-J17-S04 (late callbacks); OR-J15-S18, OR-J15-S19 (ends only on not-found); OR-J38-S75 (a provider-confirmed end is not reopened by a later renewal); OR-J38-S79, S80 (CCBill's cancels are lapses); OR-J38-S81 (a later failed-rebill cancel keeps a decided end decided).
 
 ### 3. Exact money
 
