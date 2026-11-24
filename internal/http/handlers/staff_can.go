@@ -12,15 +12,16 @@ import (
 )
 
 // StaffCan asks whether the caller would pass the guard of another staff
-// route (its key), on the merchant the route already authorized: its
-// permission, its person rule and its operation limit. nil is yes. A handler
-// that runs another route's effect itself takes one.
-type StaffCan func(r *httprequest.Request, routeKey string) error
+// route (its key), on the merchant the route already authorized, for items
+// objects: its permission, its person rule and its operation limit, spent
+// once per object. nil is yes. A handler that runs another route's effect
+// itself takes one.
+type StaffCan func(r *httprequest.Request, routeKey string, items int64) error
 
 // staffCanAll asks can for each route key; the first refusal is the answer.
-func staffCanAll(r *httprequest.Request, can StaffCan, keys []string) error {
+func staffCanAll(r *httprequest.Request, can StaffCan, keys []string, items int64) error {
 	for _, key := range keys {
-		if err := can(r, key); err != nil {
+		if err := can(r, key, items); err != nil {
 			return err
 		}
 	}

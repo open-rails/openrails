@@ -137,6 +137,12 @@ func (e *AdminRateLimitError) APIError() *api.APIError {
 // on a subject's behalf, is metered as its invoker. A request the gate
 // admitted nobody to is an error.
 func (l *AdminOperationLimiter) Admit(r *request.Request, operation AdminOperation) error {
+	return l.AdmitWeighted(r, operation, requestItems(r))
+}
+
+// AdmitWeighted is Admit for weight operations at once: a handler running
+// another route's effect on several objects spends one per object.
+func (l *AdminOperationLimiter) AdmitWeighted(r *request.Request, operation AdminOperation, weight int64) error {
 	if l == nil {
 		return nil
 	}
@@ -148,7 +154,7 @@ func (l *AdminOperationLimiter) Admit(r *request.Request, operation AdminOperati
 		return nil
 	}
 	userID := adminActorKey(staff.Invoker.Issuer, staff.Invoker.ID)
-	decision := l.evaluate(r.Request.Context(), userID, operation, requestItems(r))
+	decision := l.evaluate(r.Request.Context(), userID, operation, weight)
 	event := AdminRateLimitEvent{
 		UserID:     userID,
 		Operation:  operation,

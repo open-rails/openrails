@@ -18,6 +18,7 @@
       "func (c *Client) ChangeSubscription(ctx context.Context, idempotencyKey string, id billing.SubscriptionID, params billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error)",
       "func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams) (*billing.EntitlementCheck, error)",
       "func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)",
+      "func (c *Client) ClearErasureHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error)",
       "func (c *Client) CreateAlertWebhook(ctx context.Context, params billing.CreateAlertWebhookParams) (*billing.AlertWebhook, error)",
       "func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams) ([]billing.CreditGrant, error)",
       "func (c *Client) CreateCustomerAssertion(ctx context.Context, params billing.CustomerTokenParams) (string, error)",
@@ -2735,6 +2736,7 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/destructive/erasure.go": {
+      "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "errors": "errors",
       "fmt": "fmt",

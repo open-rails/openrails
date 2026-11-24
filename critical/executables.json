@@ -1742,6 +1742,18 @@
     ],
     "OR-J01-S24": [
       "TestRoutePermissions/OR-J01-S24/a-psp-import-applies-only-the-corrections-its-approver-may-approve"
+    ],
+    "OR-J07-S09": [
+      "TestDirectoryAuthority/OR-J07-S09/a-waiting-erasure-takes-the-contact-at-once-and-a-stale-report-cannot-restore-it"
+    ],
+    "OR-J34-S33": [
+      "TestDestructiveReservations/OR-J34-S33/a-reservation-started-past-its-life-is-admitted-again"
+    ],
+    "OR-J01-S25": [
+      "TestRoutePermissions/OR-J01-S25/a-proposal-approval-spends-its-routes-limit-per-proposal"
+    ],
+    "OR-J01-S26": [
+      "TestRoutePermissions/OR-J01-S26/a-proposal-rewritten-before-its-lock-is-held-to-the-kinds-allowed"
     ]
   }
 }

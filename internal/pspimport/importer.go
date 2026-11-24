@@ -456,7 +456,7 @@ func (im *Importer) SetMappings(ctx context.Context, p billing.SetPSPImportMappi
 // RequestApply checks an import can land, marks it applying in the name of
 // the person who asked (who approves its corrections) and queues its landing
 // in the same transaction.
-func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, requestedBy string, authorize func(billing.ChangeKind) error) (*billing.PSPImport, error) {
+func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, requestedBy string, authorize func(billing.ChangeKind, int) error) (*billing.PSPImport, error) {
 	if strings.TrimSpace(requestedBy) == "" {
 		return nil, errors.New("pspimport: an apply names the person who asked")
 	}
@@ -506,10 +506,11 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 var applyKinds = []billing.ChangeKind{billing.ChangeRecordCharge, billing.ChangeUpdateCard, billing.ChangeAdoptSubscription, billing.ChangeCorrectSubscription}
 
 // approvedKinds are the kinds among applyKinds the person asking to apply
-// may approve, as authorize says; nil authorizes all of them. A kind they may
-// not approve refuses the request when one of the import's open corrections
-// has it; one raised later is left open for a person who may.
-func (im *Importer) approvedKinds(ctx context.Context, id billing.PSPImportID, authorize func(billing.ChangeKind) error) ([]billing.ChangeKind, error) {
+// may approve, as authorize says for the import's open corrections of each;
+// nil authorizes all of them. A kind they may not approve refuses the request
+// when one of the import's open corrections has it; one raised later is left
+// open for a person who may.
+func (im *Importer) approvedKinds(ctx context.Context, id billing.PSPImportID, authorize func(billing.ChangeKind, int) error) ([]billing.ChangeKind, error) {
 	if authorize == nil {
 		return slices.Clone(applyKinds), nil
 	}
@@ -522,7 +523,7 @@ func (im *Importer) approvedKinds(ctx context.Context, id billing.PSPImportID, a
 	if err != nil {
 		return nil, err
 	}
-	open := map[billing.ChangeKind]bool{}
+	open := map[billing.ChangeKind]int{}
 	if len(ids) > 0 {
 		rows, err := q.ListReconciliationFindingsByIDs(ctx, gen.ListReconciliationFindingsByIDsParams{MerchantID: mid.UUID(), Ids: ids})
 		if err != nil {
@@ -530,14 +531,14 @@ func (im *Importer) approvedKinds(ctx context.Context, id billing.PSPImportID, a
 		}
 		for _, row := range rows {
 			if change, err := reconcile.DecodeChange(row.Change); err == nil && change != nil {
-				open[change.Kind] = true
+				open[change.Kind]++
 			}
 		}
 	}
 	approved := []billing.ChangeKind{}
 	for _, kind := range applyKinds {
-		if err := authorize(kind); err != nil {
-			if open[kind] {
+		if err := authorize(kind, open[kind]); err != nil {
+			if open[kind] > 0 {
 				return nil, err
 			}
 			continue

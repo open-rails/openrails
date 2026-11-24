@@ -71,9 +71,13 @@ const approveOperation = "proposals.approve"
 // subscription, charge, refund, renewal or card it holds, none of them a
 // charge, price or access OpenRails decides.
 var ProposalChangeRoutes = map[billing.ChangeKind][]string{
-	billing.ChangeCreateSubscription:      nil,
-	billing.ChangeRecordCharge:            nil,
-	billing.ChangeRecordRefund:            nil,
+	billing.ChangeCreateSubscription: nil,
+	billing.ChangeRecordCharge:       nil,
+	billing.ChangeRecordRefund:       nil,
+	// An adoption records a renewal the provider charged, confirms an
+	// unverified row's running period without moving it, or marks the row
+	// past due or unverified: access stands and nothing is charged, so no
+	// adopted period end ever ends it.
 	billing.ChangeAdoptSubscription:       nil,
 	billing.ChangeUpdateCard:              nil,
 	billing.ChangeCancelSubscription:      {"POST /v1/admin/subscriptions/{id}/cancel"},
@@ -87,15 +91,16 @@ var ProposalChangeRoutes = map[billing.ChangeKind][]string{
 	billing.ChangeCorrectSubscription:   {"POST /v1/admin/subscriptions/{id}/change"},
 }
 
-// changeAuthorizer asks can for each change kind's routes: a kind this
-// version does not list is refused, a route's refusal is a staffCanRefusal.
-func changeAuthorizer(r *httprequest.Request, can StaffCan) func(billing.ChangeKind) error {
-	return func(kind billing.ChangeKind) error {
+// changeAuthorizer asks can for each change kind's routes, spending their
+// limits once per proposal: a kind this version does not list is refused, a
+// route's refusal is a staffCanRefusal.
+func changeAuthorizer(r *httprequest.Request, can StaffCan) func(billing.ChangeKind, int) error {
+	return func(kind billing.ChangeKind, proposals int) error {
 		keys, known := ProposalChangeRoutes[kind]
 		if !known {
 			return api.Coded(billing.CodeFindingNotActionable, "a proposal names a change this version does not authorize")
 		}
-		if err := staffCanAll(r, can, keys); err != nil {
+		if err := staffCanAll(r, can, keys, int64(proposals)); err != nil {
 			return staffCanRefusal{err}
 		}
 		return nil

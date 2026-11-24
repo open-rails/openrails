@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 542,
+  "scenario_count": 546,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1139,6 +1139,11 @@
       "name": "Contact erasures keep a budget and holds of their own, and an erasure past it waits rather than fails"
     },
     {
+      "id": "OR-J07-S09",
+      "journey": "J07",
+      "name": "A waiting erasure takes the contact at once and a report older than it cannot restore it"
+    },
+    {
       "id": "OR-J01-S12",
       "journey": "J01",
       "name": "Existing customer proof is read-only and never enrolls or requires recent sign-in"
@@ -1202,6 +1207,16 @@
       "id": "OR-J01-S24",
       "journey": "J01",
       "name": "A PSP import's apply approves only the corrections its approver may approve"
+    },
+    {
+      "id": "OR-J01-S25",
+      "journey": "J01",
+      "name": "A proposal approval spends its change's route limit once per proposal"
+    },
+    {
+      "id": "OR-J01-S26",
+      "journey": "J01",
+      "name": "A proposal rewritten before its lock is held to the change kinds its approval allowed"
     },
     {
       "id": "OR-J22-S05",
@@ -1757,6 +1772,11 @@
       "id": "OR-J34-S32",
       "journey": "J34",
       "name": "A reservation that never starts, left by a crash or refused at its start, stops holding budget"
+    },
+    {
+      "id": "OR-J34-S33",
+      "journey": "J34",
+      "name": "A reservation started past its life is admitted against the budget again"
     },
     {
       "id": "OR-J16-S30",

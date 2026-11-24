@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -35,7 +37,11 @@ type approval struct {
 	// version they found and the one they left. A proposal computed on the
 	// same basis still holds after them.
 	moved map[uuid.UUID]versionMove
-	Log   *slog.Logger
+	// allowed are the change kinds the approver may approve; nil allows any.
+	// A proposal is checked against them under its lock, so a pull rewriting
+	// it meanwhile cannot swap in another kind.
+	allowed []billing.ChangeKind
+	Log     *slog.Logger
 }
 
 type versionMove struct{ from, to int64 }
@@ -98,11 +104,17 @@ func (a *approval) one(ctx context.Context, id uuid.UUID) billing.ProposalResult
 	return result
 }
 
+// FailpointKind names a proposal approval at failpoint.BeforeLock.
+const FailpointKind = "proposal_approval"
+
 // try runs one id in its own transaction.
 func (a *approval) try(ctx context.Context, id uuid.UUID, admitted *destructive.Command) (billing.ProposalResult, error) {
 	result := billing.ProposalResult{ID: billing.FindingID(id)}
 	apply := func(ctx context.Context, tx pgx.Tx, txdb *db.DB) error {
 		q := gen.New(tx)
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeLock, Kind: FailpointKind, Operation: id}); err != nil {
+			return err
+		}
 		row, err := q.LockProposal(ctx, gen.LockProposalParams{MerchantID: a.mid, ID: id})
 		if err != nil {
 			return err
@@ -112,6 +124,11 @@ func (a *approval) try(ctx context.Context, id uuid.UUID, admitted *destructive.
 			return nil
 		}
 		rec := reconcile.FindingRecordFromRow(row)
+		if rec.Change != nil && a.allowed != nil && !slices.Contains(a.allowed, rec.Change.Kind) {
+			result.Outcome = billing.ProposalFailed
+			result.Error = &billing.ProposalError{Code: billing.CodePermissionRequired, Message: "the proposal now changes " + string(rec.Change.Kind) + ", which this approval was not allowed"}
+			return nil
+		}
 		if rec.Change == nil || rec.PSPID == nil {
 			result.Outcome = billing.ProposalFailed
 			result.Error = &billing.ProposalError{Code: billing.CodeFindingNotActionable, Message: "this finding proposes no change; dismiss it"}

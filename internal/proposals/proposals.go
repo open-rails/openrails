@@ -58,9 +58,11 @@ type Request struct {
 	// AdmissionActor is set only by trusted internal entry points that do
 	// not carry a verified HTTP principal, such as the local operator CLI.
 	AdmissionActor *destructive.Actor
-	// Authorize, when set, is asked of each approved change's kind before
-	// anything runs: an HTTP caller holds what the change's own route needs.
-	Authorize func(billing.ChangeKind) error
+	// Authorize, when set, is asked of each approved change kind before
+	// anything runs, with how many of the call's proposals are of it: an
+	// HTTP caller holds what the change's own route needs and spends its limit
+	// once per proposal. Each proposal is held to the kinds it allowed.
+	Authorize func(kind billing.ChangeKind, proposals int) error
 }
 
 func (e *Executor) now() time.Time { return timeutil.FirstClock(e.Clock).Now().UTC() }
@@ -69,11 +71,11 @@ func (e *Executor) now() time.Time { return timeutil.FirstClock(e.Clock).Now().U
 // nothing holds. An unknown id or one that is not a pull.* finding refuses the
 // whole call before anything runs.
 func (e *Executor) Approve(ctx context.Context, req Request) (billing.ProposalResults, error) {
-	mid, err := e.validate(ctx, req, false)
+	mid, allowed, err := e.validate(ctx, req, false)
 	if err != nil {
 		return billing.ProposalResults{}, err
 	}
-	call := &approval{e: e, mid: mid, notes: strings.TrimSpace(req.Notes), actor: req.Actor, ids: len(req.IDs), admissionActor: req.AdmissionActor, Log: e.Log}
+	call := &approval{e: e, mid: mid, notes: strings.TrimSpace(req.Notes), actor: req.Actor, ids: len(req.IDs), admissionActor: req.AdmissionActor, allowed: allowed, Log: e.Log}
 	out := billing.ProposalResults{Data: make([]billing.ProposalResult, 0, len(req.IDs))}
 	for _, id := range req.IDs {
 		out.Data = append(out.Data, call.one(ctx, id.UUID()))
@@ -104,7 +106,7 @@ func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes
 	if strings.TrimSpace(actor) == "" {
 		return billing.ProposalResults{}, errors.New("proposals: an approval names who decided")
 	}
-	call := &approval{e: e, mid: mid.UUID(), notes: strings.TrimSpace(notes), actor: actor, ids: len(ids), admissionActor: admissionActor, Log: e.Log}
+	call := &approval{e: e, mid: mid.UUID(), notes: strings.TrimSpace(notes), actor: actor, ids: len(ids), admissionActor: admissionActor, allowed: approved, Log: e.Log}
 	out := billing.ProposalResults{Data: make([]billing.ProposalResult, 0, len(ids))}
 	for _, id := range ids {
 		out.Data = append(out.Data, call.one(ctx, id))
@@ -151,7 +153,7 @@ func (e *Executor) ofKinds(ctx context.Context, mid uuid.UUID, ids []uuid.UUID, 
 // Dismiss closes each listed open proposal without applying it; notes are
 // required. A dismissed proposal is raised again only on other evidence.
 func (e *Executor) Dismiss(ctx context.Context, req Request) (billing.ProposalResults, error) {
-	mid, err := e.validate(ctx, req, true)
+	mid, _, err := e.validate(ctx, req, true)
 	if err != nil {
 		return billing.ProposalResults{}, err
 	}
@@ -192,7 +194,7 @@ func (e *Executor) Dismiss(ctx context.Context, req Request) (billing.ProposalRe
 // its customer reference, no customer its read matched. Anything else is
 // refused and stays open.
 func (e *Executor) Foreign(ctx context.Context, req Request) (billing.ProposalResults, error) {
-	mid, err := e.validate(ctx, req, true)
+	mid, _, err := e.validate(ctx, req, true)
 	if err != nil {
 		return billing.ProposalResults{}, err
 	}
@@ -363,36 +365,39 @@ func severityRank(s reconcile.Severity) int32 {
 }
 
 // validate refuses a call that names no ids, more than MaxBatchItems, an id
-// twice, an unknown id or a finding outside the pull.* plane.
-func (e *Executor) validate(ctx context.Context, req Request, dismiss bool) (uuid.UUID, error) {
+// twice, an unknown id or a finding outside the pull.* plane, and answers the
+// change kinds an approval may approve: those Authorize allowed, nil without
+// it.
+func (e *Executor) validate(ctx context.Context, req Request, dismiss bool) (uuid.UUID, []billing.ChangeKind, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
 	if strings.TrimSpace(req.Actor) == "" {
-		return uuid.Nil, errors.New("proposals: an approve or dismiss names who decided")
+		return uuid.Nil, nil, errors.New("proposals: an approve or dismiss names who decided")
 	}
 	if dismiss && strings.TrimSpace(req.Notes) == "" {
-		return uuid.Nil, api.Coded(billing.CodeInvalidParam, "notes are required to dismiss a proposal").WithParam("notes")
+		return uuid.Nil, nil, api.Coded(billing.CodeInvalidParam, "notes are required to dismiss a proposal").WithParam("notes")
 	}
 	if len(req.IDs) == 0 || len(req.IDs) > billing.MaxBatchItems {
-		return uuid.Nil, api.Coded(billing.CodeInvalidParam, fmt.Sprintf("ids names 1 to %d proposals", billing.MaxBatchItems)).WithParam("ids")
+		return uuid.Nil, nil, api.Coded(billing.CodeInvalidParam, fmt.Sprintf("ids names 1 to %d proposals", billing.MaxBatchItems)).WithParam("ids")
 	}
 	seen := make(map[uuid.UUID]bool, len(req.IDs))
 	ids := make([]uuid.UUID, 0, len(req.IDs))
 	for _, id := range req.IDs {
 		if id.IsZero() || seen[id.UUID()] {
-			return uuid.Nil, api.Coded(billing.CodeInvalidParam, "ids must be distinct finding ids").WithParam("ids")
+			return uuid.Nil, nil, api.Coded(billing.CodeInvalidParam, "ids must be distinct finding ids").WithParam("ids")
 		}
 		seen[id.UUID()] = true
 		ids = append(ids, id.UUID())
 	}
 	rows, err := e.DB.Gen(ctx).ListReconciliationFindingsByIDs(ctx, gen.ListReconciliationFindingsByIDsParams{MerchantID: mid.UUID(), Ids: ids})
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, nil, err
 	}
 	found := make(map[uuid.UUID]bool, len(rows))
 	var kinds []billing.ChangeKind
+	counts := map[billing.ChangeKind]int{}
 	for _, row := range rows {
 		if !strings.HasPrefix(row.FindingType, "pull.") {
 			continue
@@ -400,27 +405,32 @@ func (e *Executor) validate(ctx context.Context, req Request, dismiss bool) (uui
 		found[row.ID] = true
 		change, err := reconcile.DecodeChange(row.Change)
 		if err != nil {
-			return uuid.Nil, err
+			return uuid.Nil, nil, err
 		}
-		if change != nil && !slices.Contains(kinds, change.Kind) {
+		if change == nil {
+			continue
+		}
+		if counts[change.Kind] == 0 {
 			kinds = append(kinds, change.Kind)
 		}
+		counts[change.Kind]++
 	}
-	// Each kind is asked once, whatever number of its proposals the call
-	// names.
+	var allowed []billing.ChangeKind
 	if !dismiss && req.Authorize != nil {
+		allowed = []billing.ChangeKind{}
 		for _, kind := range kinds {
-			if err := req.Authorize(kind); err != nil {
-				return uuid.Nil, err
+			if err := req.Authorize(kind, counts[kind]); err != nil {
+				return uuid.Nil, nil, err
 			}
+			allowed = append(allowed, kind)
 		}
 	}
 	for _, id := range req.IDs {
 		if !found[id.UUID()] {
-			return uuid.Nil, api.Coded(billing.CodeInvalidParam, id.String()+" is not a proposal (an open or resolved pull.* finding of this merchant)").WithParam("ids")
+			return uuid.Nil, nil, api.Coded(billing.CodeInvalidParam, id.String()+" is not a proposal (an open or resolved pull.* finding of this merchant)").WithParam("ids")
 		}
 	}
-	return mid.UUID(), nil
+	return mid.UUID(), allowed, nil
 }
 
 func deref(s *string) string {

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,12 +24,17 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/failpoint"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/internal/vaulttest"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -337,6 +343,57 @@ func TestRoutePermissions(t *testing.T) {
 		require.NotNil(t, applied.Resolution)
 		require.Equal(t, "approved", *applied.Resolution)
 	})
+	t.Run("OR-J01-S25/a-proposal-approval-spends-its-routes-limit-per-proposal", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		// The subscription-change route allows ten a minute: eleven
+		// corrections in one approval spend eleven of it.
+		var ids []billing.FindingID
+		for range 11 {
+			ids = append(ids, raiseProposal(t, a, billing.ChangeCorrectSubscription))
+		}
+		person := consoleStaff(t, a, "correction-person", billing.MerchantConfigManage, billing.MerchantCustomerManage)
+		status, raw := a.request(t, "POST", "/v1/merchant/proposals/approve", person, billing.ApproveProposalsParams{IDs: ids, Notes: "the provider's terms"},
+			map[string]string{"Idempotency-Key": uuid.NewString()})
+		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
+		require.Contains(t, string(raw), `"code":"rate_limit_exceeded"`)
+		for _, id := range ids {
+			f, err := a.alpha.GetFinding(t.Context(), id)
+			require.NoError(t, err)
+			require.Nil(t, f.Resolution, "a refused approval approves none")
+		}
+	})
+	t.Run("OR-J01-S26/a-proposal-rewritten-before-its-lock-is-held-to-the-kinds-allowed", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		proposal := raiseProposal(t, a, billing.ChangeRecordCharge)
+		// A pull rewrites the proposal into a cancel after the approval
+		// checked its kind, before the approval locks it.
+		cancel, err := json.Marshal(reconcile.Change{FindingChange: billing.FindingChange{Kind: billing.ChangeCancelSubscription}})
+		require.NoError(t, err)
+		var once sync.Once
+		remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {
+			if site.Point != failpoint.BeforeLock || site.Kind != proposals.FailpointKind || site.Operation != proposal.UUID() {
+				return nil
+			}
+			var err error
+			once.Do(func() {
+				_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "reconciliation_findings"}.Sanitize()+" SET change = $1 WHERE merchant_id = $2 AND id = $3", cancel, a.alpha.MerchantID().UUID(), proposal.UUID())
+			})
+			return err
+		})
+		defer remove()
+		status, raw := a.request(t, "POST", "/v1/merchant/proposals/approve", consoleStaff(t, a, "config-person", billing.MerchantConfigManage),
+			billing.ApproveProposalsParams{IDs: []billing.FindingID{proposal}, Notes: "the provider's facts"}, map[string]string{"Idempotency-Key": uuid.NewString()})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var out billing.ProposalResults
+		require.NoError(t, json.Unmarshal(raw, &out))
+		require.Len(t, out.Data, 1)
+		require.Equal(t, billing.ProposalFailed, out.Data[0].Outcome)
+		require.NotNil(t, out.Data[0].Error)
+		require.Equal(t, billing.CodePermissionRequired, out.Data[0].Error.Code, out.Data[0].Error.Message)
+		f, err := a.alpha.GetFinding(t.Context(), proposal)
+		require.NoError(t, err)
+		require.Nil(t, f.Resolution)
+	})
 	t.Run("OR-J01-S22/a-config-only-person-cannot-approve-a-cancel-proposal", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		approve := func(token string, finding billing.FindingID) (int, []byte) {
@@ -443,15 +500,75 @@ func TestDirectoryAuthority(t *testing.T) {
 		require.NotNil(t, customer.Contact)
 		require.Equal(t, "admitted", *customer.Contact.Name)
 	})
+	t.Run("OR-J07-S09/a-waiting-erasure-takes-the-contact-at-once-and-a-stale-report-cannot-restore-it", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _ := newPaymentWorld(t, func(w *world) {
+			w.deps.UserInfo = nil
+			w.deps.Email = mail
+			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ErasurePerHour: 1}
+		})
+		startFleet(t, a.world)
+		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
+		require.NoError(t, err)
+		provision := func(name string, meta map[string]any) (string, int, []byte) {
+			id := uuid.NewString()
+			user := map[string]any{"schemas": []string{hostSCIMUserSchema}, "externalId": id, "userName": name, "displayName": name,
+				"emails": []any{map[string]any{"value": name + "@directory.invalid", "primary": true}}}
+			if meta != nil {
+				user["meta"] = meta
+			}
+			status, raw := a.request(t, "POST", scimUsers, token.Token, user)
+			return id, status, raw
+		}
+		spent, status, raw := provision("spent", nil)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		held, status, raw := provision("held", nil)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		// The first erasure spends the budget of one; the second waits under
+		// the erasure hold, and its contact is gone at once.
+		for _, id := range []string{spent, held} {
+			status, raw := a.request(t, "DELETE", scimUsers+"/"+id, token.Token, nil)
+			require.Equal(t, http.StatusNoContent, status, string(raw))
+		}
+		customer := billing.CustomerID(uuid.MustParse(held))
+		read, err := a.alpha.GetCustomer(t.Context(), customer)
+		require.NoError(t, err)
+		require.True(t, read.Contact == nil || read.Contact.Email == nil && read.Contact.Name == nil, "no contact: %+v", read.Contact)
+		found, err := a.alpha.ListCustomers(t.Context(), billing.CustomerListParams{Search: "held"})
+		require.NoError(t, err)
+		require.Empty(t, found.Items)
+		paidExternally(t, a, customer, messageSale(t, a), "held-receipt")
+		log := settledMessages(t, a.world, customer, 1)
+		require.Equal(t, billing.MessageNoContact, log[0].Status, "the message has no recipient")
+		require.Empty(t, mail.to("held@directory.invalid"))
+
+		// A report dated before the erasure loses to it; one dated after
+		// provisions the User again.
+		status, raw = a.request(t, "POST", scimUsers, token.Token, map[string]any{"schemas": []string{hostSCIMUserSchema}, "externalId": held, "userName": "held",
+			"emails": []any{map[string]any{"value": "held@directory.invalid", "primary": true}}, "meta": map[string]any{"lastModified": "2020-01-01T00:00:00Z"}})
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		status, raw = a.request(t, "GET", scimUsers+"/"+held, token.Token, nil)
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		read, err = a.alpha.GetCustomer(t.Context(), customer)
+		require.NoError(t, err)
+		require.True(t, read.Contact == nil || read.Contact.Email == nil, "a stale report restores nothing: %+v", read.Contact)
+		status, raw = a.request(t, "POST", scimUsers, token.Token, map[string]any{"schemas": []string{hostSCIMUserSchema}, "externalId": held, "userName": "held-again"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+	})
 	t.Run("OR-J07-S08/erasures-keep-their-own-budget-and-are-never-lost", func(t *testing.T) {
-		a := newAuthorityWorld(t, func(w *world) {
+		// A root operator holding the unlock and the configuration's root
+		// name, and nothing of the provisioning.
+		var operator iam.Role
+		a := newAuthorityWorldWithAuth(t, func(c *authkit.Config) {
+			operator = c.Roles.Root.Role("hold-operator", mustPermission(t, string(billing.RootConfigManage)), mustPermission(t, string(billing.RootAdminRateLimitsUnlock)))
+		}, func(w *world) {
 			w.deps.UserInfo = nil
 			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ErasurePerHour: 2, ActorPerHour: 2, MerchantPerHour: 2}
 		})
-		quietFleet(t, a.world)
+		fleet := quietFleet(t, a.world)
 		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
 		require.NoError(t, err)
-		users := make([]string, 4)
+		users := make([]string, 5)
 		for i := range users {
 			users[i] = uuid.NewString()
 			status, raw := a.request(t, "POST", scimUsers, token.Token, scimUser(users[i], "user-"+users[i][:8]))
@@ -489,6 +606,11 @@ func TestDirectoryAuthority(t *testing.T) {
 			require.Equal(t, "succeeded", state)
 			require.Nil(t, contactName(id))
 		}
+		// An erasure that ran at once left its drain queued, to run it again
+		// had the run not finished.
+		drains, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds(destructive.DrainErasuresKind).States(rivertype.JobStateScheduled))
+		require.NoError(t, err)
+		require.NotEmpty(t, drains.Jobs, "a started erasure queues its drain")
 
 		// The third waits: the User is gone from the directory at once, its
 		// values stay, and the merchant's erasure hold opens.
@@ -497,7 +619,10 @@ func TestDirectoryAuthority(t *testing.T) {
 		present(users[2], http.StatusNotFound)
 		_, _, state := erasure(users[2])
 		require.Equal(t, "reserved", state)
-		require.NotNil(t, contactName(users[2]), "a waiting erasure keeps the values until it runs")
+		require.Nil(t, contactName(users[2]), "a waiting erasure takes the contact at once")
+		found, err := a.alpha.ListCustomers(t.Context(), billing.CustomerListParams{Search: "user-" + users[2][:8]})
+		require.NoError(t, err)
+		require.Empty(t, found.Items, "a waiting erasure's contact is found by no search")
 		holds, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
 		require.NoError(t, err)
 		require.Len(t, holds.Items, 1)
@@ -542,15 +667,15 @@ func TestDirectoryAuthority(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, holds.Items, 2)
 
-		// Only a person holding merchant:provisioning:manage clears the
-		// erasure hold; the waiting erasures then run, though the merchant's
-		// own hold stays open.
-		clear := "/v1/merchant/destructive-holds/" + hold.ID.String() + "/clear"
+		// A person holding merchant:provisioning:manage alone clears the
+		// erasure hold, and a configuration-only one cannot; the waiting
+		// erasures then run, though the merchant's own hold stays open.
+		clear := "/v1/merchant/erasure-holds/" + hold.ID.String() + "/clear"
 		configOnly := consoleStaff(t, a, "config-person", billing.MerchantConfigManage)
 		status, raw = a.request(t, "POST", clear, configOnly, billing.ClearDestructiveHoldParams{Reason: "reviewed"})
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), `"code":"permission_required"`)
-		provisioner := consoleStaff(t, a, "directory-person", billing.MerchantConfigManage, billing.MerchantProvisioningManage)
+		provisioner := consoleStaff(t, a, "directory-person", billing.MerchantProvisioningManage)
 		status, raw = a.request(t, "POST", clear, provisioner, billing.ClearDestructiveHoldParams{Reason: "the directory removed them"})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Eventually(t, func() bool {
@@ -565,6 +690,29 @@ func TestDirectoryAuthority(t *testing.T) {
 		stored, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{IDs: []billing.DestructiveHoldID{hold.ID}})
 		require.NoError(t, err)
 		require.NotNil(t, stored.Items[0].ClearedAt)
+
+		// The next erasure past the budget opens the hold again; a root
+		// operator holding root:admin-rate-limits:unlock clears it through the
+		// hold route.
+		status, raw = a.request(t, "DELETE", scimUsers+"/"+users[4], token.Token, nil)
+		require.Equal(t, http.StatusNoContent, status, string(raw))
+		holds, err = a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
+		require.NoError(t, err)
+		var again billing.DestructiveHold
+		for _, h := range holds.Items {
+			if h.Scope == "erasure" && h.ClearedAt == nil {
+				again = h
+			}
+		}
+		require.NotEqual(t, hold.ID, again.ID, "a second erasure hold")
+		user := authtest.NewUser(t, a.auth)
+		authtest.GrantRole(t, a.auth, iam.RootGroup(), iam.UserSubject(user.ID), operator)
+		status, raw = a.request(t, "POST", "/v1/merchant/destructive-holds/"+again.ID.String()+"/clear", authtest.SignIn(t, a.auth, user).AccessToken, billing.ClearDestructiveHoldParams{Reason: "reviewed by the operator"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Eventually(t, func() bool {
+			_, _, state := erasure(users[4])
+			return state == "succeeded"
+		}, 30*time.Second, 100*time.Millisecond, "the queue drains once the operator clears the hold")
 	})
 }
 

@@ -624,10 +624,11 @@ func inPerson(c billingauth.Identity) bool {
 // staffCan answers whether the request's admitted staff member or
 // application would also pass another staff route's guard, at the merchant
 // this route admitted it for: its permission, its person rule and its
-// operation limit, which it spends. A handler asks before it runs that
+// operation limit, which it spends once per object of items. A handler asks
+// before it runs that
 // route's effect itself (handlers.StaffCan). A name the Authenticator does
 // not know is held by no one.
-func (e *Env) staffCan(r *httprequest.Request, routeKey string) error {
+func (e *Env) staffCan(r *httprequest.Request, routeKey string, items int64) error {
 	other, ok := routeByKey(routeKey)
 	if !ok || !other.Staff() {
 		return errors.Join(auth.ErrUnavailable, fault(routeKey+" is not a staff route"))
@@ -650,7 +651,7 @@ func (e *Env) staffCan(r *httprequest.Request, routeKey string) error {
 	case other.Person && !inPerson(staff.Identity):
 		return billingauth.Refusal(billing.CodePersonRequired)
 	case other.Limit != "":
-		return e.AdminLimiter.Admit(r, other.Limit)
+		return e.AdminLimiter.AdmitWeighted(r, other.Limit, items)
 	}
 	return nil
 }

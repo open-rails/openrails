@@ -203,7 +203,7 @@ func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, fin
 		r.ErrorCode(billing.CodeFindingNotActionable, "the recommendation names an action this version does not authorize")
 		return nil, false
 	}
-	if err := staffCanAll(r, can, keys); err != nil {
+	if err := staffCanAll(r, can, keys, 1); err != nil {
 		refuseStaffCan(r, err)
 		return nil, false
 	}
