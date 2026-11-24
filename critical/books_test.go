@@ -661,8 +661,17 @@ func TestBooks(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, members, 2)
 		booksOpen(t, w, mid, "USD")
+		// A CCBill membership holds no seats (subscriptions_quantity_check):
+		// its MRR changes with its price, here to one twice the member's.
+		var product uuid.UUID
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT product_id FROM "+booksTable(w, "subscriptions")+" WHERE merchant_id=$1 AND id=$2", mid, members[0].Sub).Scan(&product))
+		_, err = a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: billing.ProductID(product), Key: "ccbill-double", PSP: "ccbill", FlexID: "critical-double-flex",
+			Currency: "USD", UnitAmount: ptr(int64(2 * ccbillMemberMRR)), BillingIntervalHours: ptr(720)})
+		require.NoError(t, err)
+		var double uuid.UUID
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(w, "prices")+" WHERE merchant_id=$1 AND product_id=$2 AND key='ccbill-double'", mid, product).Scan(&double))
 		seat := func(ctx context.Context, tx pgx.Tx, sub uuid.UUID) error {
-			_, err := tx.Exec(ctx, "UPDATE "+booksTable(w, "subscriptions")+" SET quantity=COALESCE(quantity, 1)+1, updated_at=now() WHERE merchant_id=$1 AND id=$2", mid, sub)
+			_, err := tx.Exec(ctx, "UPDATE "+booksTable(w, "subscriptions")+" SET price_id=$3, updated_at=now() WHERE merchant_id=$1 AND id=$2", mid, sub, double)
 			return err
 		}
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {

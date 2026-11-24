@@ -187,10 +187,10 @@ func TestRevenueReversals(t *testing.T) {
 			return books.PostReversal(ctx, database.NewWithPgxTx(tx), skipped, a.clock.Now())
 		}))
 		require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", audit), "Ledger integrity OK")
-		found, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.entry.missing"})
+		found, err = a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.entry.missing", Status: "fixed"})
 		require.NoError(t, err)
 		require.Len(t, found.Items, 1)
-		require.Equal(t, billing.FindingStatus("fixed"), found.Items[0].Status)
+		require.Equal(t, "payment:"+skipped.String(), found.Items[0].SubjectKey)
 	})
 
 	t.Run("OR-J41-S22/a-duplicate-captures-refund-returns-it-from-unapplied-cash", func(t *testing.T) {

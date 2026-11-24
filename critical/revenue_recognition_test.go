@@ -188,7 +188,6 @@ func TestRevenueRecognition(t *testing.T) {
 		require.NoError(t, err)
 		_, err = w.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "plan-month", UnitAmount: 20_000_000, Currency: "USD", BillingIntervalHours: ptr(720), AccessDurationHours: ptr(720)})
 		require.NoError(t, err)
-		customer := uuid.New()
 		priceID := priceUUID(t, w, product.ID.UUID())
 		plan := observed.Line{PriceID: &priceID, ProductID: ptr(product.ID.UUID()), Description: "Plan", Quantity: ptr(1), BillingIntervalHours: ptr(720)}
 		type rebill struct {
@@ -219,6 +218,8 @@ func TestRevenueRecognition(t *testing.T) {
 				lines: []observed.Line{withAmount(plan, 9_990_000)}, caughtUp: 13_875},
 		} {
 			psp := railPSP(t, w, r.rail)
+			// A customer holds one subscription to a product: one each.
+			customer := uuid.New()
 			sub := fixtureSubscription(t, w, customer, product.ID.UUID(), priceID, psp, r.rail, r.policy, start, end, nil)
 			settlement := "cash"
 			if r.nonCash > 0 {
@@ -278,9 +279,12 @@ func TestRevenueRecognition(t *testing.T) {
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			return books.Replay(ctx, database.NewWithPgxTx(tx), stripeOrder)
 		}))
-		findings, err = w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.adjustment.unapplied"})
+		findings, err = w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.adjustment.unapplied", Status: "fixed"})
 		require.NoError(t, err)
-		require.Equal(t, billing.FindingStatus("fixed"), findings.Items[0].Status)
+		require.Len(t, findings.Items, 1, "a settled finding stays settled")
+		open, err := w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.adjustment.unapplied"})
+		require.NoError(t, err)
+		require.Empty(t, open.Items)
 	})
 
 	t.Run("OR-J41-S05/a-seat-increase-defers-its-charge-over-the-rest-of-the-period", func(t *testing.T) {
@@ -332,12 +336,13 @@ func TestRevenueRecognition(t *testing.T) {
 		fleet := startFleet(t, a.world)
 
 		// Nothing is due before 1 July: the pass reads the due index, finds
-		// nothing and takes no schedule's row.
+		// nothing and takes no schedule's row. Other jobs may post (the
+		// sale's processor fee): only the schedule's legs are counted.
 		before := scheduleVersion(t, a.world, sched.ID)
-		count := glCount(t, a.world)
+		count := scheduleLegCount(t, a.world)
 		passAt(t, a, fleet, time.Date(2026, time.June, 30, 23, 0, 0, 0, time.UTC))
 		require.Equal(t, before, scheduleVersion(t, a.world, sched.ID), "an idle pass locks no schedule")
-		require.Equal(t, count, glCount(t, a.world))
+		require.Equal(t, count, scheduleLegCount(t, a.world))
 
 		// The boundary posts once, whichever pass reaches it and however often.
 		july := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
@@ -348,14 +353,14 @@ func TestRevenueRecognition(t *testing.T) {
 		require.Equal(t, want, recognitions(t, a.world, sched.ID))
 
 		// The rebuild's replay of the order posts nothing again.
-		count = glCount(t, a.world)
+		count = scheduleLegCount(t, a.world)
 		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			return books.Replay(ctx, database.NewWithPgxTx(tx), order.ID.UUID())
 		}))
-		require.Equal(t, count, glCount(t, a.world))
+		require.Equal(t, count, scheduleLegCount(t, a.world))
 		require.Equal(t, want, recognitions(t, a.world, sched.ID))
 		require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", "id:"+a.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
@@ -651,13 +656,13 @@ func TestRevenueRecognition(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, tax.Items, 1)
 		require.Equal(t, "order:"+paid.Order.ID.String(), tax.Items[0].SubjectKey)
-		unapplied := func() []billing.Finding {
+		unapplied := func(status billing.FindingStatus) []billing.Finding {
 			t.Helper()
-			found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.line.unapplied"})
+			found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.line.unapplied", Status: status})
 			require.NoError(t, err)
 			return found.Items
 		}
-		require.Empty(t, unapplied(), "the grant is its caller's next step")
+		require.Empty(t, unapplied(""), "the grant is its caller's next step")
 
 		// Applied for good with no access granted: a finding, and the audit
 		// names the line.
@@ -667,7 +672,7 @@ func TestRevenueRecognition(t *testing.T) {
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			return books.ApplyOrder(ctx, database.NewWithPgxTx(tx), paid.Order.ID, nil)
 		}))
-		pending := unapplied()
+		pending := unapplied("")
 		require.Len(t, pending, 1)
 		lines, err := a.alpha.GetOrder(t.Context(), billing.OrderID(paid.Order.ID))
 		require.NoError(t, err)
@@ -695,7 +700,8 @@ func TestRevenueRecognition(t *testing.T) {
 		require.Equal(t, granted.ID, *sched.ProductAccess)
 		require.Equal(t, revenueSchedule{Method: "ratable", Account: "one_time_revenue", Funded: 9_000_000, Starts: from, Ends: until, Through: from, Next: ptr(time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC))}, sched.terms())
 		require.EqualValues(t, 1_000_000, unappliedCash(t, a.world, "USD"), "the tax waits")
-		require.Equal(t, billing.FindingStatus("fixed"), unapplied()[0].Status, "the line is scheduled at last")
+		require.Empty(t, unapplied(""), "the line is scheduled at last")
+		require.Len(t, unapplied("fixed"), 1)
 		require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", audit), "Ledger integrity OK")
 
 		// Revoked before it began: forfeited whole at its start.
@@ -752,15 +758,15 @@ func TestRevenueRecognition(t *testing.T) {
 		}))
 		require.ElementsMatch(t, []uuid.UUID{sold.Payment.ID, renewed.Payment.ID}, pruned.PaymentIDs)
 		require.Equal(t, []uuid.UUID{sub}, pruned.SubscriptionIDs)
-		findings := func(typ string) []billing.Finding {
+		findings := func(typ string, status billing.FindingStatus) []billing.Finding {
 			t.Helper()
-			found, err := w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: typ})
+			found, err := w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: typ, Status: status})
 			require.NoError(t, err)
 			return found.Items
 		}
-		payments := findings("books.payment.pruned")
+		payments := findings("books.payment.pruned", "")
 		require.Len(t, payments, 2)
-		subscriptions := findings("books.subscription.pruned")
+		subscriptions := findings("books.subscription.pruned", "")
 		require.Len(t, subscriptions, 1)
 		require.Equal(t, "subscription:"+sub.String(), subscriptions[0].SubjectKey)
 		require.Len(t, glFor(t, w, "payment", sold.Payment.ID.String()), 2, "the books keep what they booked until a person decides")
@@ -770,9 +776,9 @@ func TestRevenueRecognition(t *testing.T) {
 			_, err := reconcile.RollbackDestructiveRun(ctx, database, pruned.RunID, "critical")
 			return err
 		}))
-		for _, f := range append(findings("books.payment.pruned"), findings("books.subscription.pruned")...) {
-			require.Equal(t, billing.FindingStatus("fixed"), f.Status, f.SubjectKey)
-		}
+		require.Empty(t, append(findings("books.payment.pruned", ""), findings("books.subscription.pruned", "")...), "none stays open")
+		require.Len(t, findings("books.payment.pruned", "fixed"), 2)
+		require.Len(t, findings("books.subscription.pruned", "fixed"), 1)
 	})
 
 	t.Run("OR-J41-S14/an-end-before-the-schedule-exists-reaches-it", func(t *testing.T) {
@@ -1116,10 +1122,11 @@ func glAccount(t *testing.T, w *world, schedule uuid.UUID) string {
 	return out[0].Credit
 }
 
-func glCount(t *testing.T, w *world) int {
+// scheduleLegCount is how many general-ledger legs name a revenue schedule.
+func scheduleLegCount(t *testing.T, w *world) int {
 	t.Helper()
 	var n int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(w, "ledger_transfers")+" WHERE merchant_id=$1 AND book='general'", w.alpha.MerchantID().UUID()).Scan(&n))
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(w, "ledger_transfers")+" WHERE merchant_id=$1 AND book='general' AND revenue_schedule_id IS NOT NULL", w.alpha.MerchantID().UUID()).Scan(&n))
 	return n
 }
 

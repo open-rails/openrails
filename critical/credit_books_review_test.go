@@ -417,7 +417,7 @@ func (s *creditShop) reverse(t *testing.T, payment uuid.UUID, amount int64, kind
 	require.NoError(t, err)
 	id := uuid.New()
 	require.NoError(t, service.Create(ctx, &models.Payment{
-		ID: id, CustomerID: original.CustomerID, RefundedPaymentID: &original.ID, Channel: original.Channel, Rail: original.Rail, PspID: original.PspID,
+		ID: id, CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Channel: original.Channel, Rail: original.Rail, PspID: original.PspID,
 		TransactionID: key, Amount: amount, ListAmount: original.ListAmount, Currency: original.Currency, ReversalKind: &kind,
 		Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
 	}))
