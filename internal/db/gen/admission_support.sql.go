@@ -106,8 +106,8 @@ type ListMerchantUnitsInUseParams struct {
 
 // The merchant's own units something counts: a balance (whose deposit made a
 // system account in it, and the units book recorded), a price, a product's
-// credit or a rate card. Every code outside the registry is a unit. A settings change may not remove or
-// rescale one.
+// credit or a rate card. Every code outside the registry is a unit. A
+// settings change may not remove or rescale one.
 func (q *Queries) ListMerchantUnitsInUse(ctx context.Context, arg ListMerchantUnitsInUseParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listMerchantUnitsInUse, arg.MerchantID, arg.Registry)
 	if err != nil {

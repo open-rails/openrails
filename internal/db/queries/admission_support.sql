@@ -31,9 +31,8 @@ LIMIT 1;
 -- name: ListMerchantUnitsInUse :many
 -- The merchant's own units something counts: a balance (whose deposit made a
 -- system account in it, and the units book recorded), a price, a product's
--- credit or a rate card. Every
--- code outside the registry is a unit. A settings change may not remove or
--- rescale one.
+-- credit or a rate card. Every code outside the registry is a unit. A
+-- settings change may not remove or rescale one.
 SELECT DISTINCT u.code::text AS code
 FROM (
     SELECT a.currency AS code FROM billing.ledger_accounts a WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id IS NULL

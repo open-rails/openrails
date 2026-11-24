@@ -195,7 +195,7 @@ type BillingCreditGrant struct {
 	Units int64
 	// purchase and recurring were paid (a one-off order line, or a recurring price's cycle); grant and promotion were given; import came from another system and may declare what was paid.
 	FundingSource string
-	// What was paid for the lot, in paid_currency (a registry currency); NULL for a gift.
+	// What was paid for the lot, in paid_currency (a registry currency); NULL for a gift. A pack of a merchant's unit is paid in any currency: its rate is paid_amount over units, bonus units included.
 	PaidAmount   *int64
 	PaidCurrency *string
 	// The label the funding named, part of its once-only key.
@@ -801,7 +801,7 @@ type BillingLedgerTypeTotal struct {
 	DebitsPosted  int64
 }
 
-// A merchant's own unit as the units book first counted it: written when the book opens its first account in the unit, under the units lock a settings change takes, with the scale the merchant then declared. Loading a configuration that rescales or removes it serves this scale instead, with a finding. Retention: permanent, never pruned.
+// A merchant's own unit as the units book first counted it: written when a catalog write first names it or the book first holds it, under the units lock a settings change takes, with the scale its document in the file or Vault then declared. Loading a configuration that rescales or removes it serves this scale instead, with a finding. Retention: permanent, never pruned.
 type BillingLedgerUnit struct {
 	MerchantID uuid.UUID
 	Unit       string
