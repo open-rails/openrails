@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -90,10 +91,14 @@ func (e *Executor) Approve(ctx context.Context, req Request) (billing.ProposalRe
 // ApproveSet approves a listed set of proposals of any size, each in its own
 // transaction, under one approval run in actor's name: a PSP import's
 // corrections, approved when a person applies it. ids must name pull.*
-// findings of the merchant in ctx.
-func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes string, admissionActor *destructive.Actor) (billing.ProposalResults, error) {
+// findings of the merchant in ctx. A proposal whose change is of a kind
+// approved does not list stays open.
+func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes string, admissionActor *destructive.Actor, approved []billing.ChangeKind) (billing.ProposalResults, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
+		return billing.ProposalResults{}, err
+	}
+	if ids, err = e.ofKinds(ctx, mid.UUID(), ids, approved); err != nil {
 		return billing.ProposalResults{}, err
 	}
 	if strings.TrimSpace(actor) == "" {
@@ -110,6 +115,35 @@ func (e *Executor) ApproveSet(ctx context.Context, ids []uuid.UUID, actor, notes
 		}
 		run := billing.RunID(call.run)
 		out.RunID = &run
+	}
+	return out, nil
+}
+
+// ofKinds are the proposals among ids whose change is of a kind kinds lists,
+// in ids' order.
+func (e *Executor) ofKinds(ctx context.Context, mid uuid.UUID, ids []uuid.UUID, kinds []billing.ChangeKind) ([]uuid.UUID, error) {
+	if len(ids) == 0 {
+		return ids, nil
+	}
+	rows, err := e.DB.Gen(ctx).ListReconciliationFindingsByIDs(ctx, gen.ListReconciliationFindingsByIDsParams{MerchantID: mid, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	keep := map[uuid.UUID]bool{}
+	for _, row := range rows {
+		change, err := reconcile.DecodeChange(row.Change)
+		if err != nil {
+			return nil, err
+		}
+		if change != nil && slices.Contains(kinds, change.Kind) {
+			keep[row.ID] = true
+		}
+	}
+	out := make([]uuid.UUID, 0, len(keep))
+	for _, id := range ids {
+		if keep[id] {
+			out = append(out, id)
+		}
 	}
 	return out, nil
 }
@@ -358,23 +392,27 @@ func (e *Executor) validate(ctx context.Context, req Request, dismiss bool) (uui
 		return uuid.Nil, err
 	}
 	found := make(map[uuid.UUID]bool, len(rows))
+	var kinds []billing.ChangeKind
 	for _, row := range rows {
 		if !strings.HasPrefix(row.FindingType, "pull.") {
 			continue
 		}
 		found[row.ID] = true
-		if dismiss || req.Authorize == nil {
-			continue
-		}
 		change, err := reconcile.DecodeChange(row.Change)
 		if err != nil {
 			return uuid.Nil, err
 		}
-		if change == nil {
-			continue
+		if change != nil && !slices.Contains(kinds, change.Kind) {
+			kinds = append(kinds, change.Kind)
 		}
-		if err := req.Authorize(change.Kind); err != nil {
-			return uuid.Nil, err
+	}
+	// Each kind is asked once, whatever number of its proposals the call
+	// names.
+	if !dismiss && req.Authorize != nil {
+		for _, kind := range kinds {
+			if err := req.Authorize(kind); err != nil {
+				return uuid.Nil, err
+			}
 		}
 	}
 	for _, id := range req.IDs {

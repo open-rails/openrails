@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 541,
+  "scenario_count": 542,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1191,12 +1191,17 @@
     {
       "id": "OR-J01-S22",
       "journey": "J01",
-      "name": "A configuration-only person cannot approve a proposal that cancels, revokes or refunds"
+      "name": "A configuration-only person cannot approve a proposal that cancels, revokes, refunds, collects or corrects a subscription"
     },
     {
       "id": "OR-J01-S23",
       "journey": "J01",
       "name": "A finding approval spends the operation limit of the action it runs"
+    },
+    {
+      "id": "OR-J01-S24",
+      "journey": "J01",
+      "name": "A PSP import's apply approves only the corrections its approver may approve"
     },
     {
       "id": "OR-J22-S05",

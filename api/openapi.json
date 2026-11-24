@@ -11693,7 +11693,7 @@
           "merchant_config"
         ],
         "operationId": "ApplyPSPImport",
-        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
+        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies; one holding merchant:customer:manage too approves the corrections that move a subscription's price or terms, and without it an import with one open is refused. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
         "parameters": [
           {
             "name": "id",
@@ -11740,6 +11740,7 @@
         },
         "x-openrails-person": true,
         "x-openrails-errors": [
+          "finding_not_actionable",
           "invalid_param",
           "person_required",
           "psp_import_in_progress",

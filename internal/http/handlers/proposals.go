@@ -64,20 +64,42 @@ const approveOperation = "proposals.approve"
 
 // ProposalChangeRoutes are the staff routes whose effect each change kind
 // runs: approving a proposal needs what calling them needs, besides the
-// approve route's merchant:config:manage. Every kind is listed, those that
-// only record provider facts with none; a kind missing here is refused.
+// approve route's merchant:config:manage. Every kind is listed; one missing
+// here is refused. A kind that charges a customer or changes a
+// subscription's price, billing or access names customer support's route. The
+// kinds with none only record what the provider already did and billed: a
+// subscription, charge, refund, renewal or card it holds, none of them a
+// charge, price or access OpenRails decides.
 var ProposalChangeRoutes = map[billing.ChangeKind][]string{
 	billing.ChangeCreateSubscription:      nil,
 	billing.ChangeRecordCharge:            nil,
 	billing.ChangeRecordRefund:            nil,
 	billing.ChangeAdoptSubscription:       nil,
-	billing.ChangeCancelSubscription:      {"POST /v1/admin/subscriptions/{id}/cancel"},
 	billing.ChangeUpdateCard:              nil,
+	billing.ChangeCancelSubscription:      {"POST /v1/admin/subscriptions/{id}/cancel"},
 	billing.ChangeRevokeAccess:            {"POST /v1/admin/product-access/{id}/revoke"},
 	billing.ChangeRefundChargeAfterCancel: {"POST /v1/admin/payments/{id}/refunds"},
 	billing.ChangeCancelProviderSchedule:  {"POST /v1/admin/subscriptions/{id}/cancel"},
-	billing.ChangeCollectSkippedRenewal:   nil,
-	billing.ChangeCorrectSubscription:     nil,
+	// Collecting a skipped renewal charges the customer; a correction moves
+	// the price, schedule and start a subscription bills on, and can end a
+	// product's access.
+	billing.ChangeCollectSkippedRenewal: {"POST /v1/admin/subscriptions/{id}/change"},
+	billing.ChangeCorrectSubscription:   {"POST /v1/admin/subscriptions/{id}/change"},
+}
+
+// changeAuthorizer asks can for each change kind's routes: a kind this
+// version does not list is refused, a route's refusal is a staffCanRefusal.
+func changeAuthorizer(r *httprequest.Request, can StaffCan) func(billing.ChangeKind) error {
+	return func(kind billing.ChangeKind) error {
+		keys, known := ProposalChangeRoutes[kind]
+		if !known {
+			return api.Coded(billing.CodeFindingNotActionable, "a proposal names a change this version does not authorize")
+		}
+		if err := staffCanAll(r, can, keys); err != nil {
+			return staffCanRefusal{err}
+		}
+		return nil
+	}
 }
 
 // staffCanRefusal is a proposal whose change's own route refused the caller.
@@ -137,17 +159,7 @@ func approveProposals(r *httprequest.Request, can StaffCan) {
 		replayApproval(r, rec, digest)
 		return
 	}
-	authorize := func(kind billing.ChangeKind) error {
-		keys, known := ProposalChangeRoutes[kind]
-		if !known {
-			return api.Coded(billing.CodeFindingNotActionable, "a proposal names a change this version does not authorize")
-		}
-		if err := staffCanAll(r, can, keys); err != nil {
-			return staffCanRefusal{err}
-		}
-		return nil
-	}
-	out, err := x.Approve(ctx, proposals.Request{IDs: params.IDs, Notes: params.Notes, Actor: personActor(r), Authorize: authorize})
+	out, err := x.Approve(ctx, proposals.Request{IDs: params.IDs, Notes: params.Notes, Actor: personActor(r), Authorize: changeAuthorizer(r, can)})
 	if err != nil {
 		_ = claim.Fail(ctx, err)
 		var refused staffCanRefusal

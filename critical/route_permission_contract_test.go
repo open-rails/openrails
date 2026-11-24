@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/internal/vaulttest"
@@ -301,38 +302,69 @@ func TestRoutePermissions(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, open.Resolution, "a refused approval leaves the finding open")
 	})
-	t.Run("OR-J01-S22/a-config-only-person-cannot-approve-a-cancel-proposal", func(t *testing.T) {
-		a := newAuthorityWorld(t)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
-		require.NoError(t, err)
-		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
-		var finding reconcile.FindingRecord
-		require.NoError(t, database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-			var err error
-			finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: reconcile.FindingLocalActiveRemoteDead,
-				SubjectKey: "subscription:" + uuid.NewString(), Severity: reconcile.SeverityHigh, Evidence: map[string]any{}})
-			return err
-		}))
-		// The pull's proposal: a cancel, which the approve route checks before
-		// anything runs.
-		change, err := json.Marshal(reconcile.Change{FindingChange: billing.FindingChange{Kind: billing.ChangeCancelSubscription}})
-		require.NoError(t, err)
-		_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "reconciliation_findings"}.Sanitize()+" SET change = $1 WHERE merchant_id = $2 AND id = $3", change, a.alpha.MerchantID().UUID(), finding.ID)
-		require.NoError(t, err)
-		approve := func(token string) (int, []byte) {
-			return a.request(t, "POST", "/v1/merchant/proposals/approve", token, billing.ApproveProposalsParams{IDs: []billing.FindingID{billing.FindingID(finding.ID)}, Notes: "ended at the provider"},
-				map[string]string{"Idempotency-Key": uuid.NewString()})
-		}
-		before, err := a.alpha.GetFinding(t.Context(), billing.FindingID(finding.ID))
-		require.NoError(t, err)
-		status, raw := approve(consoleStaff(t, a, "config-person", billing.MerchantConfigManage))
+	t.Run("OR-J01-S24/a-psp-import-applies-only-the-corrections-its-approver-may-approve", func(t *testing.T) {
+		// A host book holds alice on a legacy price NMI no longer bills: the
+		// pull proposes the correction to the provider's price and terms.
+		iw := newImportWorld(t, "nmi")
+		start := iw.clock.Now().Add(-10 * 24 * time.Hour).Truncate(24 * time.Hour)
+		iw.nmi.AddPlan(nmimock.Plan{ID: "legacy23", Name: "Legacy", Amount: "23.00", Days: 30})
+		iw.nmi.AddPlan(nmimock.Plan{ID: "current19", Name: "Current", Amount: "19.00", Days: 30})
+		prices := iw.premium(t, "legacy23", "current19")
+		schedule := iw.nmiMember(t, iw.alice.Email, "current19", "19.00", start)
+		paid := iw.clock.Now().Add(5 * 24 * time.Hour)
+		res := iw.hostBook(t, start.Add(24*time.Hour), billing.DeclaredSubscription{SourceID: "legacy-alice", Customer: customerOf(iw.alice), Price: prices["legacy23"].ID,
+			Rail: "nmi", RailSubscriptionID: schedule, StartedAt: start.Add(5 * 24 * time.Hour), PaidThrough: &paid})
+		require.Equal(t, []string{"legacy-alice"}, res.Imported, "%v", res.Reasons)
+		imp := iw.manual(t, "nmi")
+		correct := proposalOf(t, iw.proposals(t, imp.ID), billing.ChangeCorrectSubscription, subscriptionOf(t, iw, customerOf(iw.alice), schedule).ID.String())
+
+		// A configuration-only person cannot apply it: the correction would
+		// move what alice is billed.
+		apply := "/v1/merchant/psp-imports/" + imp.ID.String() + "/apply"
+		status, raw := iw.request(t, "POST", apply, consoleStaff(t, iw.authorityWorld, "import-person", billing.MerchantConfigManage), nil)
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), `"code":"permission_required"`)
-		after, err := a.alpha.GetFinding(t.Context(), billing.FindingID(finding.ID))
+		held, err := iw.alpha.GetFinding(t.Context(), correct.ID)
 		require.NoError(t, err)
-		require.Equal(t, before.Status, after.Status, "a refused approval leaves the proposal open")
-		// Holding customer support's manage permission too, the approval runs.
-		status, raw = approve(consoleStaff(t, a, "config-support-person", billing.MerchantConfigManage, billing.MerchantCustomerManage))
+		require.Nil(t, held.Resolution, "a refused apply approves nothing")
+		// Holding customer support's manage permission too, the apply runs
+		// and approves the correction.
+		status, raw = iw.request(t, "POST", apply, consoleStaff(t, iw.authorityWorld, "import-support-person", billing.MerchantConfigManage, billing.MerchantCustomerManage), nil)
+		require.Equal(t, http.StatusAccepted, status, string(raw))
+		iw.await(t, imp.ID, billing.PSPImportApplied)
+		applied, err := iw.alpha.GetFinding(t.Context(), correct.ID)
+		require.NoError(t, err)
+		require.NotNil(t, applied.Resolution)
+		require.Equal(t, "approved", *applied.Resolution)
+	})
+	t.Run("OR-J01-S22/a-config-only-person-cannot-approve-a-cancel-proposal", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		approve := func(token string, finding billing.FindingID) (int, []byte) {
+			return a.request(t, "POST", "/v1/merchant/proposals/approve", token, billing.ApproveProposalsParams{IDs: []billing.FindingID{finding}, Notes: "the provider's facts"},
+				map[string]string{"Idempotency-Key": uuid.NewString()})
+		}
+		configOnly := consoleStaff(t, a, "config-person", billing.MerchantConfigManage)
+		// A cancel ends access; a correction moves the price and terms a
+		// subscription bills on: each is customer support's too, asked before
+		// anything runs.
+		for _, kind := range []billing.ChangeKind{billing.ChangeCancelSubscription, billing.ChangeCorrectSubscription} {
+			proposal := raiseProposal(t, a, kind)
+			before, err := a.alpha.GetFinding(t.Context(), proposal)
+			require.NoError(t, err)
+			status, raw := approve(configOnly, proposal)
+			require.Equal(t, http.StatusForbidden, status, "%s: %s", kind, raw)
+			require.Contains(t, string(raw), `"code":"permission_required"`)
+			after, err := a.alpha.GetFinding(t.Context(), proposal)
+			require.NoError(t, err)
+			require.Equal(t, before.Status, after.Status, "a refused approval leaves the %s proposal open", kind)
+		}
+		// A recorded charge only records what the provider billed: the
+		// configuration approves it alone.
+		status, raw := approve(configOnly, raiseProposal(t, a, billing.ChangeRecordCharge))
+		require.Equal(t, http.StatusOK, status, string(raw))
+		// Holding customer support's manage permission too, the cancel's
+		// approval runs.
+		status, raw = approve(consoleStaff(t, a, "config-support-person", billing.MerchantConfigManage, billing.MerchantCustomerManage), raiseProposal(t, a, billing.ChangeCancelSubscription))
 		require.Equal(t, http.StatusOK, status, string(raw))
 	})
 }
@@ -547,5 +579,24 @@ func raiseRecommendation(t *testing.T, a *authorityWorld, subject string, rec re
 			SubjectKey: subject, Severity: reconcile.SeverityHigh, Evidence: map[string]any{recommend.EvidenceKey: rec.Map()}})
 		return err
 	}))
+	return billing.FindingID(finding.ID)
+}
+
+// raiseProposal opens a pull finding of alpha's proposing a change of kind:
+// the approve route decides on its kind before anything runs.
+func raiseProposal(t *testing.T, a *authorityWorld, kind billing.ChangeKind) billing.FindingID {
+	t.Helper()
+	database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+	require.NoError(t, err)
+	var finding reconcile.FindingRecord
+	require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+		finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: reconcile.FindingLocalActiveRemoteDead,
+			SubjectKey: "subscription:" + uuid.NewString(), Severity: reconcile.SeverityHigh, Evidence: map[string]any{}})
+		return err
+	}))
+	change, err := json.Marshal(reconcile.Change{FindingChange: billing.FindingChange{Kind: kind}})
+	require.NoError(t, err)
+	_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "reconciliation_findings"}.Sanitize()+" SET change = $1 WHERE merchant_id = $2 AND id = $3", change, a.alpha.MerchantID().UUID(), finding.ID)
+	require.NoError(t, err)
 	return billing.FindingID(finding.ID)
 }

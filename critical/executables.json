@@ -1739,6 +1739,9 @@
     ],
     "OR-J01-S23": [
       "TestRoutePermissions/OR-J01-S23/a-finding-approval-spends-its-actions-operation-limit"
+    ],
+    "OR-J01-S24": [
+      "TestRoutePermissions/OR-J01-S24/a-psp-import-applies-only-the-corrections-its-approver-may-approve"
     ]
   }
 }

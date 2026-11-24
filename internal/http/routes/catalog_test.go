@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -102,6 +103,15 @@ func TestStaffActionsNeedTheirRoutes(t *testing.T) {
 	for _, key := range keys {
 		if r := declared(t, key); r.Needs() != needAdminUpdate {
 			t.Errorf("%s checks %v, want %v", key, r.Needs().Names(), needAdminUpdate.Names())
+		}
+	}
+	// Only the kinds that record what the provider already did and billed are
+	// the configuration's alone; one that charges or moves a subscription's
+	// price, billing or access is customer support's too.
+	configOnly := []billing.ChangeKind{billing.ChangeCreateSubscription, billing.ChangeRecordCharge, billing.ChangeRecordRefund, billing.ChangeAdoptSubscription, billing.ChangeUpdateCard}
+	for _, kind := range billing.ChangeKinds() {
+		if routes := handlers.ProposalChangeRoutes[kind]; (len(routes) == 0) != slices.Contains(configOnly, kind) {
+			t.Errorf("change kind %s names routes %v; configuration-only kinds are %v", kind, routes, configOnly)
 		}
 	}
 }

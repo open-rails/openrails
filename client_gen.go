@@ -1082,10 +1082,12 @@ func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, para
 // ApplyPSPImport lands the import's linked records as customers, payment
 // methods, subscriptions and payments, then approves its corrections (the
 // proposals that keep or extend access) in the caller's name. Only a person
-// signed in, or the in-process host, applies. It runs in the background. A
-// subscription lands on the provider price mapping its plan; one whose plan
-// is unmapped stays blocked until it is mapped (CreateProviderPrice), linked
-// and applied again.
+// signed in, or the in-process host, applies; one holding
+// merchant:customer:manage too approves the corrections that move a
+// subscription's price or terms, and without it an import with one open is
+// refused. It runs in the background. A subscription lands on the provider
+// price mapping its plan; one whose plan is unmapped stays blocked until it
+// is mapped (CreateProviderPrice), linked and applied again.
 func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID) (*billing.PSPImport, error) {
 	var out billing.PSPImport
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/psp-imports/{id}/apply", args: []string{id.String()}}, &out); err != nil {

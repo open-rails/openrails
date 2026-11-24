@@ -1942,7 +1942,7 @@
       "type position struct {\n\tRank int32     `json:\"r\"`\n\tAt   time.Time `json:\"t\"`\n\tID   uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/pspimport": [
-      "type JobArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tImportID   uuid.UUID `json:\"import_id\"`\n\tStep       Step      `json:\"step\"`\n\n\tApprovalActor *destructive.Actor `json:\"approval_actor,omitempty\"`\n}",
+      "type JobArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tImportID   uuid.UUID `json:\"import_id\"`\n\tStep       Step      `json:\"step\"`\n\n\tApprovalActor *destructive.Actor `json:\"approval_actor,omitempty\"`\n\n\tApprovedKinds []billing.ChangeKind `json:\"approved_kinds\"`\n}",
       "type cardData struct {\n\tMethodRef string `json:\"method_ref\"`\n\tPrimary   bool   `json:\"primary,omitempty\"`\n\tBrand     string `json:\"brand,omitempty\"`\n\tLast4     string `json:\"last4,omitempty\"`\n\tExpMonth  int    `json:\"exp_month,omitempty\"`\n\tExpYear   int    `json:\"exp_year,omitempty\"`\n}",
       "type customerData struct {\n\tCards  []cardData                      `json:\"cards\"`\n\tRemote []reconcile.RemotePaymentMethod `json:\"remote,omitempty\"`\n}",
       "type recordPosition struct {\n\tID uuid.UUID `json:\"i\"`\n}",
@@ -4619,6 +4619,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
       "reconcile": "github.com/open-rails/openrails/internal/reconcile",
+      "slices": "slices",
       "slog": "log/slog",
       "strings": "strings",
       "time": "time",
@@ -4649,7 +4650,9 @@
       "proposals": "github.com/open-rails/openrails/internal/proposals",
       "providerobjects": "github.com/open-rails/openrails/internal/modules/catalog/providerobjects",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "reconcile": "github.com/open-rails/openrails/internal/reconcile",
       "river": "github.com/riverqueue/river",
+      "slices": "slices",
       "slog": "log/slog",
       "sort": "sort",
       "strings": "strings",
