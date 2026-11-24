@@ -1065,7 +1065,7 @@ type BillingMrrProductFlow struct {
 	Subscribers int64
 }
 
-// One stretch of a subscription's MRR at risk, from its first reason to its last: opened by its entry_reason, chaining reasons (mrr_risk_episodes), and closed recovered (healthy again), churned (canceled or adding no MRR; voluntary for a customer's or merchant's cancel) or superseded (a prune or an upgrade). The recovery rate is recovered MRR over recovered and churned. Retention: permanent, never pruned.
+// One stretch of a subscription's MRR at risk, from its first reason to its last: opened by its entry_reason, chaining reasons (mrr_risk_episodes), and closed recovered (healthy again while adding MRR), churned (its MRR ended while the case was open; voluntary for a customer's or merchant's cancel) or superseded (a prune, an upgrade or a change of currency). A cancel at period end keeps the case open until the MRR ends; a resume continues it. The recovery rate is recovered MRR over recovered and churned. Retention: permanent, never pruned.
 type BillingMrrRiskCase struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
@@ -1080,13 +1080,14 @@ type BillingMrrRiskCase struct {
 	// The MRR recovered, or the MRR at risk when it churned.
 	MrrAtExit *int64
 	Voluntary *bool
-	// Opened from current state by a backfill, not when the risk began.
+	// Opened from current state by a backfill: opened_at is when its delinquency or unverified state began where the book records it, else the backfill.
 	Backfilled bool
 }
 
-// Customers whose subscriptions' risk a change of a card, a default card, a provider's decline or delinquency may have changed: openrails.mrr_due re-evaluates them, locking each subscription first, and deletes the row. changed_at is the latest such change.
+// Changes outside a subscription row that may change the risk of its customer's subscriptions: a card, a default card, a provider's decline or delinquency. Each change appends its own row, so no writer waits on another's; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer's subscriptions, locking them in id order. changed_at dates the change. Retention: state, deleted when claimed.
 type BillingMrrRiskDue struct {
 	MerchantID uuid.UUID
+	ID         uuid.UUID
 	CustomerID uuid.UUID
 	ChangedAt  time.Time
 }
@@ -2370,7 +2371,7 @@ type BillingSubscriptionMrr struct {
 	RecordedPriceID   uuid.UUID
 	RecordedMrr       int64
 	Dirty             bool
-	// Why the subscription's MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR.
+	// Why the subscription's MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps the reasons it had until its MRR ends.
 	Risk []string
 	// The reasons its open risk episodes record.
 	RecordedRisk []string

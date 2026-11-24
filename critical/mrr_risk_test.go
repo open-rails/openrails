@@ -3,6 +3,8 @@
 package critical_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,12 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/nmimock"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -102,6 +106,50 @@ func (v *vaultCards) saveExpiringCard(t *testing.T, bearer, number, last4 string
 	var method billing.PaymentMethod
 	require.NoError(t, json.Unmarshal(raw, &method))
 	return method
+}
+
+// closedCase is the subscription's one closed risk case: when it closed, its
+// outcome and whether its churn was voluntary.
+func closedCase(t *testing.T, w *world, client *openrails.Client, id billing.SubscriptionID) (time.Time, string, *bool) {
+	t.Helper()
+	var at time.Time
+	var outcome string
+	var voluntary *bool
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT closed_at, outcome, voluntary FROM "+pgx.Identifier{w.schema, "mrr_risk_cases"}.Sanitize()+
+		" WHERE merchant_id = $1 AND subscription_id = $2 AND closed_at IS NOT NULL", client.MerchantID().UUID(), id.UUID()).Scan(&at, &outcome, &voluntary))
+	return at, outcome, voluntary
+}
+
+// riskQueued counts the customer's queued MRR risk changes.
+func riskQueued(t *testing.T, w *world, client *openrails.Client, customer billing.CustomerID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "mrr_risk_due"}.Sanitize()+
+		" WHERE merchant_id = $1 AND customer_id = $2", client.MerchantID().UUID(), customer.UUID()).Scan(&n))
+	return n
+}
+
+// setDefaultCard makes method the bearer's default card in USD.
+func setDefaultCard(t *testing.T, a *authorityWorld, bearer string, method billing.PaymentMethodID) {
+	t.Helper()
+	status, raw := a.request(t, http.MethodPut, "/v1/me/default-payment-methods/USD", bearer, billing.SetDefaultPaymentMethodParams{PaymentMethodID: method})
+	require.Equal(t, http.StatusOK, status, string(raw))
+}
+
+// monthsAgo is the first of the month n months before now: a vault world's
+// clock set before it keeps every payment in the database's past.
+func monthsAgo(n int) time.Time {
+	today := time.Now().UTC()
+	return time.Date(today.Year(), today.Month()-time.Month(n), 1, 0, 0, 0, 0, time.UTC)
+}
+
+// expiringVaultCards is a vault world whose clock stands before boundary,
+// with alice's card that expires there, the month before.
+func expiringVaultCards(t *testing.T, boundary time.Time, before time.Duration) (*vaultCards, billing.PaymentMethod) {
+	t.Helper()
+	v := newVaultCards(t, false, false, func(w *world) { w.clock.Advance(boundary.Add(-before).Sub(w.clock.Now())) })
+	expiry := boundary.Add(-24 * time.Hour)
+	return v, v.saveExpiringCard(t, v.aliceToken, "4111111111111111", "1111", int(expiry.Month()), expiry.Year())
 }
 
 func TestMRRRisk(t *testing.T) {
@@ -257,8 +305,7 @@ func TestMRRRisk(t *testing.T) {
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		order := usageOrderOf(t, a, customer)
 		require.True(t, order.Usage.Delinquent)
-		// The delinquency queued the customer; the next pass re-evaluates.
-		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		// The delinquency queued the customer; its commit wakes the risk drain.
 		require.Eventually(t, func() bool {
 			risk := mrrRiskOf(t, a.alpha, sub.ID)
 			return risk != nil && len(risk.Reasons) == 1 && risk.Reasons[0] == billing.MRRRiskDelinquent
@@ -272,9 +319,192 @@ func TestMRRRisk(t *testing.T) {
 		require.NoError(t, err)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.False(t, usageOrderOf(t, a, customer).Usage.Delinquent)
-		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Eventually(t, func() bool { return mrrRiskOf(t, a.alpha, sub.ID) == nil }, 20*time.Second, 20*time.Millisecond)
 		require.Equal(t, []string{"delinquent recovered [delinquent]"}, riskCases(t, a.world, a.alpha, sub.ID))
+	})
+
+	t.Run("OR-J42-S16/the-risk-drain-and-a-decline-for-one-customer-both-commit-and-the-decline-queued-after-the-claim-is-re-evaluated", func(t *testing.T) {
+		a, p, sub := nmiMembership(t)
+		merchant := a.alpha.MerchantID().UUID()
+		_, err := a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "mrr_risk_due"}.Sanitize()+" (merchant_id, customer_id, changed_at) VALUES ($1, $2, $3)",
+			merchant, sub.CustomerID.UUID(), a.clock.Now())
+		require.NoError(t, err)
+
+		// The drain claims the customer's changes and holds its subscriptions.
+		drain, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = drain.Rollback(context.Background()) }()
+		_, err = drain.Exec(t.Context(), "SELECT set_config('openrails.merchant_id', $1, true)", merchant.String())
+		require.NoError(t, err)
+		var claimed, holder int
+		require.NoError(t, drain.QueryRow(t.Context(), "SELECT "+pgx.Identifier{a.schema, "effect_due_mrr_risk"}.Sanitize()+"($1, 100), pg_backend_pid()", merchant).Scan(&claimed, &holder))
+		require.Positive(t, claimed)
+		require.Zero(t, riskQueued(t, a.world, a.alpha, sub.CustomerID), "the claim took the customer's changes")
+
+		// NMI declines the renewal for a card it must not charge again; the
+		// decline's writer queues the customer and waits for the drain's locks.
+		due := *sub.CurrentPeriodEndsAt
+		sale := p.core.AddScheduleSale(*sub.RailSubscriptionID, due)
+		p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Declined, s.IssuerCode = "200", "04" })
+		a.clock.Advance(due.Sub(a.clock.Now()) + time.Hour)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, fleet.Start(t.Context()))
+		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		job, err := fleet.Insert(t.Context(), subscriptionConvergeJob{PSPID: uuid.UUID(sub.PSPID), MerchantID: merchant, Rail: "nmi", SubscriptionReference: *sub.RailSubscriptionID},
+			&river.InsertOpts{Queue: openrails.QueueBilling})
+		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			var n int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))", holder).Scan(&n))
+			return n > 0
+		}, 20*time.Second, 20*time.Millisecond, "the decline's writer waits on the drain")
+		require.NoError(t, drain.Commit(t.Context()))
+		deadline := time.After(20 * time.Second)
+	converged:
+		for {
+			select {
+			case event := <-events:
+				if event != nil && event.Job.ID == job.Job.ID {
+					require.Equal(t, river.EventKindJobCompleted, event.Kind, "%+v", event.Job.Errors)
+					break converged
+				}
+			case <-deadline:
+				t.Fatal("the decline's convergence did not finish")
+			}
+		}
+		subscriptionState(t, a, sub.ID, "awaiting_method")
+
+		// The decline committed after the claim: it is still queued, and the
+		// next drain takes it.
+		require.Positive(t, riskQueued(t, a.world, a.alpha, sub.CustomerID))
+		runRegistered(t, fleet, "openrails.mrr_risk", 1)
+		require.Zero(t, riskQueued(t, a.world, a.alpha, sub.CustomerID))
+		risk := mrrRiskOf(t, a.alpha, sub.ID)
+		require.NotNil(t, risk)
+		require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskNeedsPaymentMethod}, risk.Reasons)
+		require.Equal(t, []string{"needs_payment_method open [needs_payment_method]"}, riskCases(t, a.world, a.alpha, sub.ID))
+	})
+
+	t.Run("OR-J42-S17/a-cancel-at-period-end-keeps-the-case-open-a-resume-continues-it-the-end-churns-it-once", func(t *testing.T) {
+		boundary := monthsAgo(3)
+		v, card := expiringVaultCards(t, boundary, 3*24*time.Hour)
+		began := v.clock.Now()
+		sub := v.subscribe(t, v.aliceToken, "canceled-at-risk", 7*24, 10_000_000, card)
+		end := *sub.CurrentPeriodEndsAt
+		require.True(t, end.After(boundary))
+		risk := mrrRiskOf(t, v.alpha, sub.ID)
+		require.NotNil(t, risk, "the card expires before the renewal it pays for")
+		require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskCardExpiring}, risk.Reasons)
+
+		// Canceled at its period end, it adds its MRR until then: the case
+		// stays open with its reasons.
+		customerCancel(t, v.authorityWorld, sub.ID)
+		risk = mrrRiskOf(t, v.alpha, sub.ID)
+		require.NotNil(t, risk, "MRR still added is still at risk")
+		require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskCardExpiring}, risk.Reasons)
+		require.Equal(t, []string{"card_expiring open [card_expiring]"}, riskCases(t, v.world, v.alpha, sub.ID))
+		require.Equal(t, map[string]int64{"USD": weeklyTenMRR}, atRiskMRR(t, v.alpha, riskWindow(began, v.clock.Now().Add(time.Second))))
+
+		// A resume continues the same case.
+		_, err := v.alpha.ResumeSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, []string{"card_expiring open [card_expiring]"}, riskCases(t, v.world, v.alpha, sub.ID))
+
+		// Canceled again: the end churns it, once, at the end.
+		customerCancel(t, v.authorityWorld, sub.ID)
+		v.clock.Advance(end.Sub(v.clock.Now()))
+		fleet := startFleet(t, v.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		require.Eventually(t, func() bool { return mrrRiskOf(t, v.alpha, sub.ID) == nil }, 20*time.Second, 20*time.Millisecond)
+		require.Equal(t, []string{"card_expiring churned [card_expiring]"}, riskCases(t, v.world, v.alpha, sub.ID))
+		closed, outcome, voluntary := closedCase(t, v.world, v.alpha, sub.ID)
+		require.Equal(t, "churned", outcome)
+		require.True(t, closed.Equal(end), "churned at the end, %s", closed)
+		require.NotNil(t, voluntary)
+		require.True(t, *voluntary, "the customer's cancel is voluntary churn")
+		require.Empty(t, atRiskMRR(t, v.alpha, riskWindow(began, v.clock.Now().Add(time.Second))))
+	})
+
+	t.Run("OR-J42-S18/a-new-default-card-expiring-before-renewal-puts-a-subscription-following-it-at-risk-never-an-nmi-schedule", func(t *testing.T) {
+		boundary := monthsAgo(3)
+		v := newVaultCards(t, false, false, func(w *world) { w.clock.Advance(boundary.Add(-3 * 24 * time.Hour).Sub(w.clock.Now())) })
+		// An NMI schedule charges the card NMI holds for it; this one names none.
+		schedule := nmiMembershipDeclared(t, v.authorityWorld, v.journal, catalog.Field[int]{}, func(book *billing.DeclaredBilling) {
+			book.Subscriptions[0].PaymentMethod = nil
+		})
+		require.Nil(t, schedule.PaymentMethodID)
+		good := v.saveCard(t, v.aliceToken, "4111111111111111", "visa", "1111")
+		setDefaultCard(t, v.authorityWorld, v.aliceToken, good.ID)
+		sub := v.subscribe(t, v.aliceToken, "following", 7*24, 10_000_000, good)
+		require.Nil(t, sub.PaymentMethodID, "bought with the default, it follows the default")
+		require.Nil(t, mrrRiskOf(t, v.alpha, sub.ID))
+		startVaultFleet(t, v)
+
+		// A new default that expires before the renewal: the change queues the
+		// customer and its commit wakes the drain.
+		expiry := boundary.Add(-24 * time.Hour)
+		expiring := v.saveExpiringCard(t, v.aliceToken, "4012888888881881", "1881", int(expiry.Month()), expiry.Year())
+		setDefaultCard(t, v.authorityWorld, v.aliceToken, expiring.ID)
+		require.Eventually(t, func() bool {
+			risk := mrrRiskOf(t, v.alpha, sub.ID)
+			return risk != nil && len(risk.Reasons) == 1 && risk.Reasons[0] == billing.MRRRiskCardExpiring
+		}, 20*time.Second, 20*time.Millisecond, "the subscription charges its customer's new default")
+		require.Zero(t, riskQueued(t, v.world, v.alpha, sub.CustomerID))
+		require.Nil(t, mrrRiskOf(t, v.alpha, schedule.ID), "no evidence ties the default to the card NMI charges")
+	})
+
+	t.Run("OR-J42-S19/an-upgrade-while-at-risk-supersedes-the-case-and-the-replacement-opens-its-own", func(t *testing.T) {
+		boundary := monthsAgo(3)
+		v, card := expiringVaultCards(t, boundary, 12*time.Hour)
+		sub := v.subscribe(t, v.aliceToken, "upgraded-at-risk", 24, 10_000_000, card)
+		require.NotNil(t, mrrRiskOf(t, v.alpha, sub.ID), "the card expires before the renewal it pays for")
+		price := upgradePrice(t, v.authorityWorld, &sub)
+		status, raw := v.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/change", v.aliceToken, map[string]any{"price_id": price.ID},
+			map[string]string{"Idempotency-Key": "upgrade-at-risk"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var changed billing.SubscriptionChange
+		require.NoError(t, json.Unmarshal(raw, &changed))
+		require.Equal(t, "succeeded", changed.Status, string(raw))
+		require.NotNil(t, changed.SubscriptionID)
+		require.NotEqual(t, sub.ID, *changed.SubscriptionID)
+
+		require.Equal(t, []string{"card_expiring superseded [card_expiring]"}, riskCases(t, v.world, v.alpha, sub.ID), "an upgrade is neither recovery nor churn")
+		require.Equal(t, []string{"card_expiring open [card_expiring]"}, riskCases(t, v.world, v.alpha, *changed.SubscriptionID))
+		require.Equal(t, map[string]int64{"USD": dailyTwentyMRR}, atRiskMRR(t, v.alpha, riskWindow(boundary.Add(-24*time.Hour), v.clock.Now().Add(time.Second))))
+		require.Empty(t, recoveryRate(t, v.alpha, riskWindow(boundary.Add(-24*time.Hour), v.clock.Now().Add(time.Second))))
+	})
+
+	t.Run("OR-J42-S21/a-restore-carries-the-open-case-and-re-evaluates-every-customer-with-mrr", func(t *testing.T) {
+		a, p, sub := purchasedMembership(t, 7*24)
+		began := a.clock.Now()
+		due := *sub.CurrentPeriodEndsAt
+		p.core.SetDecline("4242", "insufficient_funds")
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 2)
+		subscriptionState(t, a, sub.ID, "past_due")
+		require.Equal(t, []string{"past_due open [past_due]"}, riskCases(t, a.world, a.alpha, sub.ID))
+
+		archive := archiveBytes(t, a.alpha)
+		target, client := archiveTarget(t, a.world)
+		_, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+		risk := mrrRiskOf(t, client, sub.ID)
+		require.NotNil(t, risk, "the restore carries the open case")
+		require.Equal(t, []billing.MRRRiskReason{billing.MRRRiskPastDue}, risk.Reasons)
+		require.Equal(t, billing.MRRRiskPastDue, risk.EntryReason)
+		require.Equal(t, []string{"past_due open [past_due]"}, riskCases(t, target, client, sub.ID))
+		window := riskWindow(began, a.clock.Now().Add(time.Second))
+		require.Equal(t, map[string]int64{"USD": weeklyTenMRR}, atRiskMRR(t, client, window))
+
+		// The source's queued changes stay there: the restore queues every
+		// customer with MRR, and the target's drain re-evaluates them.
+		require.Equal(t, 1, riskQueued(t, target, client, sub.CustomerID))
+		startFleet(t, target)
+		require.Eventually(t, func() bool { return riskQueued(t, target, client, sub.CustomerID) == 0 }, 20*time.Second, 20*time.Millisecond)
+		require.Equal(t, []string{"past_due open [past_due]"}, riskCases(t, target, client, sub.ID))
 	})
 }
 

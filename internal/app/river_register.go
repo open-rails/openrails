@@ -184,6 +184,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}
+	// MRR risk: the backstop of the drain each queued change wakes.
+	if err := addWorker(workers, &riverjobs.MRRRiskWorker{Risk: r.MRRRisk}); err != nil {
+		return fmt.Errorf("add mrr risk worker: %w", err)
+	}
 	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
 		return fmt.Errorf("add contact erasure worker: %w", err)
 	}
@@ -417,6 +421,9 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	}
 	if r.Messages == nil {
 		return fmt.Errorf("billing worker runtime customer messages are required")
+	}
+	if r.MRRRisk == nil {
+		return fmt.Errorf("billing worker runtime mrr risk is required")
 	}
 	return nil
 }

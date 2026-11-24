@@ -304,6 +304,11 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := q.SeedMRR(ctx, gen.SeedMRRParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {
 			return err
 		}
+		// The source's queued risk changes stay there: every customer whose
+		// MRR could be at risk is re-evaluated.
+		if err := q.QueueRestoredMRRRisk(ctx, gen.QueueRestoredMRRRiskParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {
+			return err
+		}
 		// The source's wakes stay in its River schema.
 		if err := queueWakes(ctx, database, tx, q, id); err != nil {
 			return err

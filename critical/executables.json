@@ -1477,6 +1477,21 @@
     "OR-J42-S15": [
       "TestMRRRisk/OR-J42-S15/usage-delinquency-puts-the-customers-mrr-at-risk-and-clears-it"
     ],
+    "OR-J42-S16": [
+      "TestMRRRisk/OR-J42-S16/the-risk-drain-and-a-decline-for-one-customer-both-commit-and-the-decline-queued-after-the-claim-is-re-evaluated"
+    ],
+    "OR-J42-S17": [
+      "TestMRRRisk/OR-J42-S17/a-cancel-at-period-end-keeps-the-case-open-a-resume-continues-it-the-end-churns-it-once"
+    ],
+    "OR-J42-S18": [
+      "TestMRRRisk/OR-J42-S18/a-new-default-card-expiring-before-renewal-puts-a-subscription-following-it-at-risk-never-an-nmi-schedule"
+    ],
+    "OR-J42-S19": [
+      "TestMRRRisk/OR-J42-S19/an-upgrade-while-at-risk-supersedes-the-case-and-the-replacement-opens-its-own"
+    ],
+    "OR-J42-S21": [
+      "TestMRRRisk/OR-J42-S21/a-restore-carries-the-open-case-and-re-evaluates-every-customer-with-mrr"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],

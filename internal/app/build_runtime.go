@@ -537,6 +537,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.Contacts, runtime.HostUserInfo = directory, hostUserInfo
 	runtime.Messages = &messages.Service{DB: database, Email: sender, Contacts: directory,
 		Profiles: merchantconfig.NewStore(database), Renderer: renderer, Abuse: abuseState, Clock: clock, Log: logger}
+	runtime.MRRRisk = &subscriptions.MRRRisk{DB: database, Log: logger}
 
 	return runtime, nil
 }

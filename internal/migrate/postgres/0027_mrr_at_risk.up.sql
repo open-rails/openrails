@@ -17,7 +17,7 @@ ALTER TABLE billing.subscription_mrr ALTER COLUMN dirty SET EXPRESSION AS (mrr <
     OR product_id <> recorded_product_id OR price_id <> recorded_price_id OR risk <> recorded_risk);
 CREATE INDEX subscription_mrr_risk_idx ON billing.subscription_mrr (merchant_id, subscription_id)
     WHERE risk <> '{}';
-COMMENT ON COLUMN billing.subscription_mrr.risk IS 'Why the subscription''s MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR.';
+COMMENT ON COLUMN billing.subscription_mrr.risk IS 'Why the subscription''s MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps the reasons it had until its MRR ends.';
 COMMENT ON COLUMN billing.subscription_mrr.recorded_risk IS 'The reasons its open risk episodes record.';
 COMMENT ON COLUMN billing.subscription_mrr.risk_changed_at IS 'The business instant of the latest change of its reasons.';
 
@@ -40,9 +40,9 @@ CREATE TABLE billing.mrr_risk_cases (
     CONSTRAINT mrr_risk_cases_closed_check CHECK ((closed_at IS NULL) = (outcome IS NULL) AND (closed_at IS NULL) = (mrr_at_exit IS NULL) AND (closed_at IS NULL OR closed_at >= opened_at)),
     CONSTRAINT mrr_risk_cases_voluntary_check CHECK ((voluntary IS NOT NULL) = COALESCE(outcome = 'churned', false))
 );
-COMMENT ON TABLE billing.mrr_risk_cases IS 'One stretch of a subscription''s MRR at risk, from its first reason to its last: opened by its entry_reason, chaining reasons (mrr_risk_episodes), and closed recovered (healthy again), churned (canceled or adding no MRR; voluntary for a customer''s or merchant''s cancel) or superseded (a prune or an upgrade). The recovery rate is recovered MRR over recovered and churned. Retention: permanent, never pruned.';
+COMMENT ON TABLE billing.mrr_risk_cases IS 'One stretch of a subscription''s MRR at risk, from its first reason to its last: opened by its entry_reason, chaining reasons (mrr_risk_episodes), and closed recovered (healthy again while adding MRR), churned (its MRR ended while the case was open; voluntary for a customer''s or merchant''s cancel) or superseded (a prune, an upgrade or a change of currency). A cancel at period end keeps the case open until the MRR ends; a resume continues it. The recovery rate is recovered MRR over recovered and churned. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.mrr_risk_cases.mrr_at_exit IS 'The MRR recovered, or the MRR at risk when it churned.';
-COMMENT ON COLUMN billing.mrr_risk_cases.backfilled IS 'Opened from current state by a backfill, not when the risk began.';
+COMMENT ON COLUMN billing.mrr_risk_cases.backfilled IS 'Opened from current state by a backfill: opened_at is when its delinquency or unverified state began where the book records it, else the backfill.';
 
 CREATE UNIQUE INDEX mrr_risk_cases_subscription_id_key ON billing.mrr_risk_cases (merchant_id, subscription_id)
     WHERE closed_at IS NULL;
@@ -107,24 +107,45 @@ COMMENT ON TABLE billing.mrr_risk_totals IS 'The merchant''s MRR at risk now per
 
 CREATE TABLE billing.mrr_risk_due (
     merchant_id uuid NOT NULL,
+    id uuid NOT NULL DEFAULT uuidv7(),
     customer_id uuid NOT NULL,
     changed_at timestamptz NOT NULL,
-    PRIMARY KEY (merchant_id, customer_id),
+    PRIMARY KEY (merchant_id, id),
     CONSTRAINT mrr_risk_due_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id) ON DELETE CASCADE
 );
-COMMENT ON TABLE billing.mrr_risk_due IS 'Customers whose subscriptions'' risk a change of a card, a default card, a provider''s decline or delinquency may have changed: openrails.mrr_due re-evaluates them, locking each subscription first, and deletes the row. changed_at is the latest such change.';
+COMMENT ON TABLE billing.mrr_risk_due IS 'Changes outside a subscription row that may change the risk of its customer''s subscriptions: a card, a default card, a provider''s decline or delinquency. Each change appends its own row, so no writer waits on another''s; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer''s subscriptions, locking them in id order. changed_at dates the change. Retention: state, deleted when claimed.';
 
--- Why a live subscription adding p_level is at risk, in the order the reasons
--- are listed. The caller holds the subscription row.
-CREATE FUNCTION billing.subscription_risk(s billing.subscriptions, p_level bigint) RETURNS text[]
+-- Each change wakes the MRR risk worker at its commit; the payload is the
+-- schema.
+CREATE FUNCTION billing.notify_mrr_risk_due() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+BEGIN
+    PERFORM pg_notify('openrails_mrr_risk', TG_TABLE_SCHEMA);
+    RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER mrr_risk_due_notify AFTER INSERT ON billing.mrr_risk_due
+    FOR EACH STATEMENT EXECUTE FUNCTION billing.notify_mrr_risk_due();
+
+-- Why a subscription adding p_level is at risk, in the order the reasons are
+-- listed; p_prev is its reasons until now. The caller holds the subscription
+-- row.
+CREATE FUNCTION billing.subscription_risk(s billing.subscriptions, p_level bigint, p_prev text[]) RETURNS text[]
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 DECLARE
     v_currency text;
     v_fix boolean;
+    v_card uuid;
     v_expires timestamptz;
 BEGIN
-    IF p_level = 0 OR s.deleted_at IS NOT NULL OR s.status NOT IN ('active', 'past_due', 'awaiting_method', 'unverified') THEN
+    IF p_level = 0 OR s.deleted_at IS NOT NULL THEN
         RETURN '{}';
+    END IF;
+    -- Canceled at its period end, it adds MRR until then: its case stays open
+    -- until the MRR ends, or a resume continues it.
+    IF s.status = 'canceled' THEN
+        RETURN p_prev;
     END IF;
     SELECT currency INTO v_currency FROM billing.prices WHERE merchant_id = s.merchant_id AND id = s.price_id;
     -- A provider retries on its own: its latest decline's action says
@@ -134,12 +155,16 @@ BEGIN
          WHERE a.merchant_id = s.merchant_id AND a.subscription_id = s.id
          ORDER BY a.attempted_at DESC, a.id DESC LIMIT 1;
     END IF;
-    -- A card OpenRails charges is good through the end of its month.
-    IF s.collection_policy IN ('engine', 'nmi_schedule') AND s.current_period_ends_at IS NOT NULL THEN
+    -- The card OpenRails charges is good through the end of its month. An NMI
+    -- schedule charges the card NMI holds for it: only one the subscription
+    -- names is known to be that card.
+    v_card := CASE s.collection_policy
+        WHEN 'engine' THEN billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy)
+        WHEN 'nmi_schedule' THEN s.payment_method_id END;
+    IF v_card IS NOT NULL AND s.current_period_ends_at IS NOT NULL THEN
         SELECT (make_date(pm.card_exp_year, pm.card_exp_month, 1) + interval '1 month') AT TIME ZONE 'UTC' INTO v_expires
           FROM billing.payment_methods pm
-         WHERE pm.merchant_id = s.merchant_id
-           AND pm.id = billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy);
+         WHERE pm.merchant_id = s.merchant_id AND pm.id = v_card;
     END IF;
     RETURN array_remove(ARRAY[
         CASE WHEN s.status = 'past_due' AND NOT COALESCE(v_fix, false) THEN 'past_due' END,
@@ -151,7 +176,19 @@ BEGIN
     ]::text[], NULL);
 END;
 $$;
-COMMENT ON FUNCTION billing.subscription_risk(s billing.subscriptions, p_level bigint) IS 'The reasons a live subscription adding MRR is at risk: its status (a provider''s past due needs a payment method when its latest decline''s action says so), a charged card expiring by its period end, and its customer''s delinquency in its currency.';
+COMMENT ON FUNCTION billing.subscription_risk(s billing.subscriptions, p_level bigint, p_prev text[]) IS 'The reasons a subscription adding MRR is at risk: its status (a provider''s past due needs a payment method when its latest decline''s action says so), the card it charges expiring by its period end (on an NMI schedule, only a card it names), and its customer''s delinquency in its currency. Canceled at its period end, it keeps p_prev.';
+
+-- When a backfilled reason began, where the book records it: the customer's
+-- delinquency or the subscription's unverified state; else p_at.
+CREATE FUNCTION billing.mrr_risk_began(p_merchant uuid, p_customer uuid, p_subscription uuid, p_currency text, p_reason text, p_at timestamptz) RETURNS timestamptz
+LANGUAGE sql STABLE SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+SELECT least(p_at, COALESCE(CASE p_reason
+    WHEN 'delinquent' THEN (SELECT d.entered_at FROM billing.customer_delinquency d
+                             WHERE d.merchant_id = p_merchant AND d.customer_id = p_customer AND d.currency = p_currency AND d.state = 'delinquent')
+    WHEN 'unverified' THEN (SELECT v.unverified_at FROM billing.subscription_verifications v
+                             WHERE v.merchant_id = p_merchant AND v.subscription_id = p_subscription) END, p_at))
+$$;
+COMMENT ON FUNCTION billing.mrr_risk_began(p_merchant uuid, p_customer uuid, p_subscription uuid, p_currency text, p_reason text, p_at timestamptz) IS 'When a backfilled risk reason began: customer_delinquency.entered_at for delinquent, subscription_verifications.unverified_at for unverified, else p_at, never after p_at.';
 
 -- One subscription's MRR at p_at, the change p_cause explains, its risk and
 -- its scheduled churn. Its writer holds the subscription row.
@@ -200,7 +237,7 @@ BEGIN
             v_at := v_prev.ends_at;
         END IF;
     END IF;
-    v_risk := billing.subscription_risk(s, v_level);
+    v_risk := billing.subscription_risk(s, v_level, COALESCE(v_prev.risk, '{}'));
     IF v_prev.subscription_id IS NULL THEN
         INSERT INTO billing.subscription_mrr (merchant_id, subscription_id, customer_id, currency, product_id, price_id, mrr, contributes,
             ends_at, next_change_at, changed_at, cause, recorded_currency, recorded_product_id, recorded_price_id, recorded_mrr,
@@ -213,7 +250,7 @@ BEGIN
         UPDATE billing.subscription_mrr
            SET currency = v_price.currency, product_id = s.product_id, price_id = s.price_id, mrr = v_level, contributes = v_live,
                ends_at = v_ends, next_change_at = v_ends, risk = v_risk,
-               risk_changed_at = CASE WHEN v_prev.risk <> v_risk THEN v_at ELSE v_prev.risk_changed_at END,
+               risk_changed_at = CASE WHEN v_prev.risk <> v_risk THEN greatest(v_at, v_prev.risk_changed_at) ELSE v_prev.risk_changed_at END,
                -- A change of what MRR counts is dated and explained by this one.
                changed_at = CASE WHEN ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr) IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level)
                    THEN v_at ELSE v_prev.changed_at END,
@@ -287,6 +324,7 @@ DECLARE
     v_case billing.mrr_risk_cases;
     v_outcome text;
     v_closed uuid[] := '{}';
+    v_moved boolean;
     v_backfill boolean := COALESCE(current_setting('openrails.mrr_cause', true) = 'backfill', false);
 BEGIN
     FOR v_pair IN
@@ -405,45 +443,62 @@ BEGIN
            SET mrr = mrr + v_sum.mrr, customers = customers + v_sum.customers, subscribers = subscribers + v_sum.subscribers
          WHERE merchant_id = p_merchant AND currency = v_sum.currency;
     END LOOP;
-    -- At-risk MRR: a subscription whose reasons changed opens, chains or
-    -- closes its case and episodes.
+    -- At-risk MRR: a subscription whose reasons or currency changed opens,
+    -- chains or closes its case and episodes. A change of currency supersedes
+    -- the open case; one opens in the new currency.
     FOR v_row IN
         SELECT m.*, s.status, s.cancel_type, s.deleted_at
           FROM billing.subscription_mrr m
           JOIN billing.subscriptions s ON s.merchant_id = m.merchant_id AND s.id = m.subscription_id
-         WHERE m.merchant_id = p_merchant AND m.dirty AND m.risk <> m.recorded_risk
+         WHERE m.merchant_id = p_merchant AND m.dirty
+           AND (m.risk <> m.recorded_risk OR m.recorded_risk <> '{}' AND m.currency <> m.recorded_currency)
          ORDER BY m.subscription_id
     LOOP
-        UPDATE billing.mrr_risk_episodes SET left_at = greatest(v_row.risk_changed_at, entered_at), mrr_at_exit = v_row.recorded_mrr
-         WHERE merchant_id = p_merchant AND subscription_id = v_row.subscription_id AND left_at IS NULL AND reason <> ALL(v_row.risk);
-        IF v_row.recorded_risk = '{}' THEN
-            INSERT INTO billing.mrr_risk_cases (merchant_id, subscription_id, customer_id, currency, entry_reason, opened_at, mrr_at_entry, backfilled)
-            VALUES (p_merchant, v_row.subscription_id, v_row.customer_id, v_row.currency, v_row.risk[1], v_row.risk_changed_at, v_row.mrr, v_backfill)
-            RETURNING * INTO v_case;
-        ELSE
+        v_moved := v_row.recorded_risk <> '{}' AND v_row.currency <> v_row.recorded_currency;
+        -- Dated at the change of its reasons, else of its currency.
+        v_at := CASE WHEN v_row.risk <> v_row.recorded_risk THEN v_row.risk_changed_at ELSE v_row.changed_at END;
+        v_case := NULL;
+        UPDATE billing.mrr_risk_episodes SET left_at = greatest(v_at, entered_at), mrr_at_exit = v_row.recorded_mrr
+         WHERE merchant_id = p_merchant AND subscription_id = v_row.subscription_id AND left_at IS NULL
+           AND (v_moved OR reason <> ALL(v_row.risk));
+        IF v_row.recorded_risk <> '{}' THEN
             SELECT * INTO v_case FROM billing.mrr_risk_cases
              WHERE merchant_id = p_merchant AND subscription_id = v_row.subscription_id AND closed_at IS NULL;
+            IF v_moved OR v_row.risk = '{}' THEN
+                -- Healthy again while adding MRR is recovered; MRR that ended
+                -- churned; a prune, an upgrade or a new currency supersedes.
+                v_outcome := CASE
+                    WHEN v_moved OR v_row.deleted_at IS NOT NULL OR v_row.cancel_type = 'upgrade' THEN 'superseded'
+                    WHEN v_row.mrr > 0 THEN 'recovered'
+                    ELSE 'churned' END;
+                UPDATE billing.mrr_risk_cases
+                   SET closed_at = greatest(v_at, opened_at), outcome = v_outcome,
+                       mrr_at_exit = CASE WHEN v_outcome = 'recovered' THEN v_row.mrr ELSE v_row.recorded_mrr END,
+                       voluntary = CASE WHEN v_outcome = 'churned' THEN COALESCE(v_row.cancel_type IN ('user', 'merchant'), false) END
+                 WHERE merchant_id = p_merchant AND id = v_case.id;
+                v_closed := array_append(v_closed, v_case.id);
+                v_case := NULL;
+            END IF;
         END IF;
         IF v_row.risk <> '{}' THEN
+            -- A backfilled reason enters when the book says it began.
+            IF v_case.id IS NULL THEN
+                INSERT INTO billing.mrr_risk_cases (merchant_id, subscription_id, customer_id, currency, entry_reason, opened_at, mrr_at_entry, backfilled)
+                SELECT p_merchant, v_row.subscription_id, v_row.customer_id, v_row.currency, e.reason, e.at, v_row.mrr, v_backfill
+                  FROM (SELECT r.reason, r.n, CASE WHEN v_backfill THEN billing.mrr_risk_began(p_merchant, v_row.customer_id, v_row.subscription_id,
+                               v_row.currency, r.reason, v_at) ELSE v_at END AS at
+                          FROM unnest(v_row.risk) WITH ORDINALITY AS r(reason, n)) e
+                 ORDER BY e.at, e.n LIMIT 1
+                RETURNING * INTO v_case;
+            END IF;
             INSERT INTO billing.mrr_risk_episodes (merchant_id, case_id, subscription_id, currency, reason, entered_at, mrr_at_entry, overdue_amount)
-            SELECT p_merchant, v_case.id, v_row.subscription_id, v_row.currency, r.reason, v_row.risk_changed_at, v_row.mrr,
+            SELECT p_merchant, v_case.id, v_row.subscription_id, v_row.currency, r.reason,
+                   CASE WHEN v_backfill THEN billing.mrr_risk_began(p_merchant, v_row.customer_id, v_row.subscription_id,
+                        v_row.currency, r.reason, v_at) ELSE v_at END, v_row.mrr,
                    CASE WHEN r.reason = 'delinquent' THEN (SELECT d.overdue_amount FROM billing.customer_delinquency d
                        WHERE d.merchant_id = p_merchant AND d.customer_id = v_row.customer_id AND d.currency = v_row.currency) END
               FROM unnest(v_row.risk) AS r(reason)
-             WHERE r.reason <> ALL(v_row.recorded_risk);
-        ELSE
-            -- Healthy again is recovered; a cancel or the loss of its MRR
-            -- churned; a prune or an upgrade ends the case without either.
-            v_outcome := CASE
-                WHEN v_row.deleted_at IS NOT NULL OR v_row.cancel_type = 'upgrade' THEN 'superseded'
-                WHEN v_row.mrr > 0 AND v_row.status IN ('active', 'past_due', 'awaiting_method', 'unverified') THEN 'recovered'
-                ELSE 'churned' END;
-            UPDATE billing.mrr_risk_cases
-               SET closed_at = greatest(v_row.risk_changed_at, opened_at), outcome = v_outcome,
-                   mrr_at_exit = CASE WHEN v_outcome = 'recovered' THEN v_row.mrr ELSE v_row.recorded_mrr END,
-                   voluntary = CASE WHEN v_outcome = 'churned' THEN COALESCE(v_row.cancel_type IN ('user', 'merchant'), false) END
-             WHERE merchant_id = p_merchant AND id = v_case.id;
-            v_closed := array_append(v_closed, v_case.id);
+             WHERE v_moved OR r.reason <> ALL(v_row.recorded_risk);
         END IF;
     END LOOP;
     -- The at-risk amounts and counts per reason, any counting a subscription
@@ -538,14 +593,15 @@ DROP TRIGGER trg_subscriptions_track_mrr ON billing.subscriptions;
 CREATE TRIGGER trg_subscriptions_track_mrr AFTER INSERT OR UPDATE OF status, price_id, product_id, quantity, ended_at, current_period_starts_at, current_period_ends_at, deleted_at, cancel_type, payment_method_id ON billing.subscriptions
     FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_track_mrr();
 
--- A change outside the subscription row queues its customer instead of
--- touching subscription_mrr: openrails.mrr_due locks each subscription before
--- it re-evaluates, in the order its writers take them.
+-- A change outside the subscription row appends its customer for the MRR
+-- risk worker instead of touching subscription_mrr: the worker locks each
+-- subscription before it re-evaluates, in the order its writers take them.
+-- Only a customer with a subscription adding MRR can be at risk.
 CREATE FUNCTION billing.queue_mrr_risk(p_merchant uuid, p_customer uuid, p_at timestamptz) RETURNS void
 LANGUAGE sql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-INSERT INTO billing.mrr_risk_due AS d (merchant_id, customer_id, changed_at)
-VALUES (p_merchant, p_customer, p_at)
-ON CONFLICT (merchant_id, customer_id) DO UPDATE SET changed_at = greatest(d.changed_at, EXCLUDED.changed_at)
+INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at)
+SELECT p_merchant, p_customer, p_at
+ WHERE EXISTS (SELECT 1 FROM billing.subscription_mrr m WHERE m.merchant_id = p_merchant AND m.customer_id = p_customer AND m.mrr > 0)
 $$;
 
 CREATE FUNCTION billing.payment_methods_track_mrr_risk() RETURNS trigger
@@ -565,7 +621,7 @@ CREATE TRIGGER payment_methods_track_mrr_risk AFTER UPDATE OF card_exp_month, ca
 CREATE FUNCTION billing.money_settings_track_mrr_risk() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
-    IF NEW.default_payment_method_id IS DISTINCT FROM CASE WHEN TG_OP = 'UPDATE' THEN OLD.default_payment_method_id END
+    IF NEW.default_payment_method_id IS DISTINCT FROM (CASE WHEN TG_OP = 'UPDATE' THEN OLD.default_payment_method_id END)
        AND NOT billing.billing_restore_active(NEW.merchant_id) THEN
         PERFORM billing.queue_mrr_risk(NEW.merchant_id, NEW.customer_id, NEW.updated_at);
     END IF;
@@ -605,30 +661,44 @@ CREATE TRIGGER payment_attempts_track_mrr_risk AFTER INSERT ON billing.payment_a
     FOR EACH ROW WHEN (NEW.subscription_id IS NOT NULL AND NEW.action IS NOT NULL AND NEW.owner IN ('provider', 'nmi_schedule'))
     EXECUTE FUNCTION billing.payment_attempts_track_mrr_risk();
 
--- openrails.mrr_due: one queued customer. Each subscription is locked, then
--- its reasons are taken anew, dated at the change that queued it.
-CREATE FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_customer uuid, p_changed_at timestamptz) RETURNS void
+-- The MRR risk worker: claims up to p_batch of the merchant's queued changes
+-- that no other worker holds, then re-evaluates each customer's subscriptions,
+-- locked in id order, dated at its latest claimed change. A change committed
+-- after the claim stays queued for the next. Returns how many it claimed.
+CREATE FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer) RETURNS integer
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 DECLARE
+    v_due record;
     v_sub billing.subscriptions;
     v_risk text[];
+    v_claimed integer := 0;
 BEGIN
-    FOR v_sub IN
-        SELECT s.* FROM billing.subscriptions s
-         WHERE s.merchant_id = p_merchant AND s.customer_id = p_customer
-           AND EXISTS (SELECT 1 FROM billing.subscription_mrr m WHERE m.merchant_id = s.merchant_id AND m.subscription_id = s.id)
-         ORDER BY s.id
-           FOR UPDATE
+    FOR v_due IN
+        WITH claimed AS (
+            DELETE FROM billing.mrr_risk_due d
+             USING (SELECT q.id FROM billing.mrr_risk_due q WHERE q.merchant_id = p_merchant ORDER BY q.id LIMIT p_batch FOR UPDATE SKIP LOCKED) c
+             WHERE d.merchant_id = p_merchant AND d.id = c.id
+            RETURNING d.customer_id, d.changed_at)
+        SELECT customer_id, max(changed_at) AS changed_at, count(*)::integer AS changes FROM claimed GROUP BY customer_id ORDER BY customer_id
     LOOP
-        SELECT billing.subscription_risk(v_sub, m.mrr) INTO v_risk FROM billing.subscription_mrr m
-         WHERE m.merchant_id = p_merchant AND m.subscription_id = v_sub.id;
-        UPDATE billing.subscription_mrr SET risk = v_risk, risk_changed_at = greatest(p_changed_at, risk_changed_at)
-         WHERE merchant_id = p_merchant AND subscription_id = v_sub.id AND risk <> v_risk;
+        v_claimed := v_claimed + v_due.changes;
+        FOR v_sub IN
+            SELECT s.* FROM billing.subscriptions s
+             WHERE s.merchant_id = p_merchant AND s.customer_id = v_due.customer_id
+               AND EXISTS (SELECT 1 FROM billing.subscription_mrr m WHERE m.merchant_id = s.merchant_id AND m.subscription_id = s.id)
+             ORDER BY s.id
+               FOR UPDATE
+        LOOP
+            SELECT billing.subscription_risk(v_sub, m.mrr, m.risk) INTO v_risk FROM billing.subscription_mrr m
+             WHERE m.merchant_id = p_merchant AND m.subscription_id = v_sub.id;
+            UPDATE billing.subscription_mrr SET risk = v_risk, risk_changed_at = greatest(v_due.changed_at, risk_changed_at)
+             WHERE merchant_id = p_merchant AND subscription_id = v_sub.id AND risk <> v_risk;
+        END LOOP;
     END LOOP;
-    DELETE FROM billing.mrr_risk_due WHERE merchant_id = p_merchant AND customer_id = p_customer AND changed_at = p_changed_at;
+    RETURN v_claimed;
 END;
 $$;
-COMMENT ON FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_customer uuid, p_changed_at timestamptz) IS 'Re-evaluates a queued customer''s subscriptions'' risk and removes the customer from mrr_risk_due unless a later change queued it again.';
+COMMENT ON FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer) IS 'Claims up to p_batch of the merchant''s mrr_risk_due rows no other transaction holds (FOR UPDATE SKIP LOCKED), deletes them and re-evaluates each claimed customer''s subscriptions'' risk, locking them in id order. Returns the rows claimed.';
 
 -- A subscription with no subscription_mrr row (one written before MRR, or a
 -- restore from an archive without it) is adopted as an opening movement, and
@@ -649,6 +719,7 @@ BEGIN
         PERFORM billing.schedule_mrr_change(p_merchant, v_sub.id, p_at);
     END LOOP;
     PERFORM billing.settle_mrr(p_merchant);
+    PERFORM set_config('openrails.mrr_cause', '', true);
 END;
 $$;
 
@@ -698,10 +769,11 @@ END;
 $$;
 REVOKE ALL ON FUNCTION billing.check_billing_restore_mrr(p_merchant uuid) FROM PUBLIC;
 
--- The risk of every subscription now, opened as backfilled cases.
+-- The risk of every subscription now, opened as backfilled cases dated when
+-- the book says each reason began.
 SELECT set_config('openrails.mrr_cause', 'backfill', true);
 UPDATE billing.subscription_mrr m SET risk = r.risk, risk_changed_at = now()
-  FROM (SELECT s.merchant_id, s.id, billing.subscription_risk(s, x.mrr) AS risk
+  FROM (SELECT s.merchant_id, s.id, billing.subscription_risk(s, x.mrr, '{}') AS risk
           FROM billing.subscriptions s
           JOIN billing.subscription_mrr x ON x.merchant_id = s.merchant_id AND x.subscription_id = s.id
          WHERE x.mrr > 0) r

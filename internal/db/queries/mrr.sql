@@ -28,20 +28,25 @@ LEFT JOIN billing.mrr_scheduled e ON e.merchant_id = m.merchant_id AND e.subscri
 LEFT JOIN billing.mrr_risk_cases c ON c.merchant_id = m.merchant_id AND c.subscription_id = m.subscription_id AND c.closed_at IS NULL
 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
 
--- name: ListDueMRRRisk :many
--- CROSS-MERCHANT: customers queued by a change of a card, a default card, a
--- provider's decline or delinquency, in key order. Only queued customers are
--- read.
-SELECT d.merchant_id, d.customer_id, d.changed_at
+-- name: ListMRRRiskDueMerchants :many
+-- CROSS-MERCHANT: the merchants with queued risk changes, ids only. The queue
+-- holds only changes not yet claimed.
+SELECT DISTINCT d.merchant_id
 FROM billing.mrr_risk_due d
-WHERE sqlc.narg(after_merchant_id)::uuid IS NULL
-   OR (d.merchant_id, d.customer_id) > (sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_customer_id)::uuid)
-ORDER BY d.merchant_id, d.customer_id
-LIMIT sqlc.arg(row_limit)::int;
+ORDER BY d.merchant_id;
 
--- name: EffectDueMRRRisk :exec
--- Re-evaluates one queued customer's subscriptions' risk.
-SELECT billing.effect_due_mrr_risk(sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(changed_at)::timestamptz);
+-- name: EffectDueMRRRisk :one
+-- Claims up to batch of the merchant's queued risk changes no other worker
+-- holds and re-evaluates their customers; returns how many it claimed.
+SELECT billing.effect_due_mrr_risk(sqlc.arg(merchant_id)::uuid, sqlc.arg(batch)::int)::int AS claimed;
+
+-- name: QueueRestoredMRRRisk :exec
+-- A restore re-evaluates every customer with a subscription adding MRR: the
+-- changes the source had queued stay at the source.
+INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at)
+SELECT DISTINCT m.merchant_id, m.customer_id, sqlc.arg(at)::timestamptz
+FROM billing.subscription_mrr m
+WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0;
 
 -- name: SeedMRR :exec
 -- Adopts the subscriptions without MRR state (an archive from before MRR) as

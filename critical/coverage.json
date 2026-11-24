@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 558,
+  "scenario_count": 563,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2422,6 +2422,31 @@
       "id": "OR-J42-S15",
       "journey": "J42",
       "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk with the overdue amount beside it; paying the debt recovers it"
+    },
+    {
+      "id": "OR-J42-S16",
+      "journey": "J42",
+      "name": "The risk drain holds a customer's subscriptions while an NMI decline for the same customer queues it and waits: both commit, and the decline, queued after the claim, is re-evaluated by the next drain"
+    },
+    {
+      "id": "OR-J42-S17",
+      "journey": "J42",
+      "name": "A subscription at risk canceled at period end keeps its case open while it adds MRR; a resume continues the same case; canceled again, the end closes it churned, voluntary, once, at the end"
+    },
+    {
+      "id": "OR-J42-S18",
+      "journey": "J42",
+      "name": "A new default card that expires before the renewal puts the subscription following the default at risk through the queued change; an NMI schedule naming no card of its own is never at risk on the default"
+    },
+    {
+      "id": "OR-J42-S19",
+      "journey": "J42",
+      "name": "An upgrade of a subscription at risk closes its case superseded, counted in no recovery rate, and its replacement opens its own case"
+    },
+    {
+      "id": "OR-J42-S21",
+      "journey": "J42",
+      "name": "A merchant archive carries an open risk case, its episodes and at-risk MRR; the restore queues every customer with MRR, whom the target's drain re-evaluates"
     },
     {
       "id": "OR-J28-S09",

@@ -19,6 +19,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | `openrails.billing_pass` | `billing` | At the top of each UTC hour | Runs the [hourly billing scans](#hourly-billing-scans) and records any critical work still overdue. [Worker](../internal/river/jobs_billing_pass.go) |
 | `openrails.cleanup_expired_data` | `billing` | Every hour, with continuation jobs for large passes | Deletes expired operational data and maintains rolling monthly partitions. [Worker](../internal/river/jobs_cleanup.go) |
 | `openrails.customer_messages_dispatch` | `billing` | Every 5 minutes | Queues the send job of each pending customer message a dispatcher's database notification missed. [Worker](../internal/river/jobs_customer_messages.go) · [Dispatch](../internal/modules/messages/dispatch.go) |
+| `openrails.mrr_risk` | `billing` | Every 30 seconds | Drains the MRR risk changes in `mrr_risk_due` that no drain woken by their database notification took. [Worker](../internal/river/jobs_mrr_risk.go) · [Drain](../internal/modules/subscriptions/mrr_risk.go) |
 | `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, stuck provider operations, and timed access lapses. [Worker](../internal/river/jobs_merchant_health.go) |
 | `openrails.stripe_webhook_reconcile` | `billing` | Every 24 hours. Per-PSP jobs also run on configuration changes, at boot when configuration differs, and at endpoint retirement. | Queues checks for active Stripe PSPs and registers, updates, or retires their managed webhook endpoints. [Worker](../internal/river/jobs_stripe_webhooks.go) · [Configuration trigger](../internal/app/stripe_webhook_follow.go) |
 
@@ -66,7 +67,7 @@ continuations. The other scan names label work inside the pass.
 | `openrails.config_realerts` | Unresolved undeclared-account findings due for another operator alert. [Source](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
 | `openrails.operation_wakes` | Live provider operations more than an hour overdue that need another wake. [Source](../internal/river/jobs_operation_wakes.go) |
-| `openrails.mrr_due` | Subscriptions canceled at period end whose end has come: each leaves MRR, dated at its end. The read is indexed on the change instant. Then the customers queued in `mrr_risk_due` by a change of a card, a default card, a provider's decline or delinquency: each subscription is locked and its risk re-evaluated. [Source](../internal/river/jobs_mrr_due.go) |
+| `openrails.mrr_due` | Subscriptions canceled at period end whose end has come: each leaves MRR, dated at its end. The read is indexed on the change instant. [Source](../internal/river/jobs_mrr_due.go) |
 
 ## Inspect a running deployment
 

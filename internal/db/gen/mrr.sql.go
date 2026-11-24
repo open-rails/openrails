@@ -12,20 +12,22 @@ import (
 	"github.com/google/uuid"
 )
 
-const effectDueMRRRisk = `-- name: EffectDueMRRRisk :exec
-SELECT billing.effect_due_mrr_risk($1::uuid, $2::uuid, $3::timestamptz)
+const effectDueMRRRisk = `-- name: EffectDueMRRRisk :one
+SELECT billing.effect_due_mrr_risk($1::uuid, $2::int)::int AS claimed
 `
 
 type EffectDueMRRRiskParams struct {
 	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	ChangedAt  time.Time
+	Batch      int32
 }
 
-// Re-evaluates one queued customer's subscriptions' risk.
-func (q *Queries) EffectDueMRRRisk(ctx context.Context, arg EffectDueMRRRiskParams) error {
-	_, err := q.db.Exec(ctx, effectDueMRRRisk, arg.MerchantID, arg.CustomerID, arg.ChangedAt)
-	return err
+// Claims up to batch of the merchant's queued risk changes no other worker
+// holds and re-evaluates their customers; returns how many it claimed.
+func (q *Queries) EffectDueMRRRisk(ctx context.Context, arg EffectDueMRRRiskParams) (int32, error) {
+	row := q.db.QueryRow(ctx, effectDueMRRRisk, arg.MerchantID, arg.Batch)
+	var claimed int32
+	err := row.Scan(&claimed)
+	return claimed, err
 }
 
 const effectDueSubscriptionMRR = `-- name: EffectDueSubscriptionMRR :one
@@ -44,44 +46,6 @@ func (q *Queries) EffectDueSubscriptionMRR(ctx context.Context, arg EffectDueSub
 	var effected bool
 	err := row.Scan(&effected)
 	return effected, err
-}
-
-const listDueMRRRisk = `-- name: ListDueMRRRisk :many
-SELECT d.merchant_id, d.customer_id, d.changed_at
-FROM billing.mrr_risk_due d
-WHERE $1::uuid IS NULL
-   OR (d.merchant_id, d.customer_id) > ($1::uuid, $2::uuid)
-ORDER BY d.merchant_id, d.customer_id
-LIMIT $3::int
-`
-
-type ListDueMRRRiskParams struct {
-	AfterMerchantID *uuid.UUID
-	AfterCustomerID *uuid.UUID
-	RowLimit        int32
-}
-
-// CROSS-MERCHANT: customers queued by a change of a card, a default card, a
-// provider's decline or delinquency, in key order. Only queued customers are
-// read.
-func (q *Queries) ListDueMRRRisk(ctx context.Context, arg ListDueMRRRiskParams) ([]BillingMrrRiskDue, error) {
-	rows, err := q.db.Query(ctx, listDueMRRRisk, arg.AfterMerchantID, arg.AfterCustomerID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingMrrRiskDue
-	for rows.Next() {
-		var i BillingMrrRiskDue
-		if err := rows.Scan(&i.MerchantID, &i.CustomerID, &i.ChangedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listDueSubscriptionMRR = `-- name: ListDueSubscriptionMRR :many
@@ -133,6 +97,34 @@ func (q *Queries) ListDueSubscriptionMRR(ctx context.Context, arg ListDueSubscri
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMRRRiskDueMerchants = `-- name: ListMRRRiskDueMerchants :many
+SELECT DISTINCT d.merchant_id
+FROM billing.mrr_risk_due d
+ORDER BY d.merchant_id
+`
+
+// CROSS-MERCHANT: the merchants with queued risk changes, ids only. The queue
+// holds only changes not yet claimed.
+func (q *Queries) ListMRRRiskDueMerchants(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listMRRRiskDueMerchants)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var merchant_id uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -197,6 +189,25 @@ func (q *Queries) ListSubscriptionMRR(ctx context.Context, arg ListSubscriptionM
 		return nil, err
 	}
 	return items, nil
+}
+
+const queueRestoredMRRRisk = `-- name: QueueRestoredMRRRisk :exec
+INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at)
+SELECT DISTINCT m.merchant_id, m.customer_id, $1::timestamptz
+FROM billing.subscription_mrr m
+WHERE m.merchant_id = $2::uuid AND m.mrr > 0
+`
+
+type QueueRestoredMRRRiskParams struct {
+	At         time.Time
+	MerchantID uuid.UUID
+}
+
+// A restore re-evaluates every customer with a subscription adding MRR: the
+// changes the source had queued stay at the source.
+func (q *Queries) QueueRestoredMRRRisk(ctx context.Context, arg QueueRestoredMRRRiskParams) error {
+	_, err := q.db.Exec(ctx, queueRestoredMRRRisk, arg.At, arg.MerchantID)
+	return err
 }
 
 const seedMRR = `-- name: SeedMRR :exec
