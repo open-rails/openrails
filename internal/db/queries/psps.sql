@@ -63,17 +63,21 @@ WHERE rail = lower(sqlc.arg(rail)::text)
   AND live = sqlc.arg(live)::bool
   AND account_id = sqlc.arg(account_id)::text;
 
--- CROSS-MERCHANT: whether another merchant declares a CCBill PSP on the
--- client account, in any subaccount: DataLink's credentials and its hourly
--- limit are the account's.
--- name: CCBillAccountDeclaredElsewhere :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.psps
-    WHERE rail = 'ccbill'
-      AND merchant_id <> sqlc.arg(merchant_id)::uuid
-      AND split_part(account_id, '-', 1) = sqlc.arg(client_accnum)::text
-      AND superseded_at IS NULL
-);
+-- CROSS-MERCHANT: the CCBill PSPs of other undeleted, unretired merchants on
+-- the client account in one money class, in any subaccount: DataLink's
+-- credentials and its hourly limit are the account's. Each merchant's
+-- configuration says which are archived.
+-- name: ListCCBillAccountPSPsElsewhere :many
+SELECT p.id, p.merchant_id, p.key, p.rail, p.environment, p.account_id, p.superseded_at
+FROM billing.psps p
+JOIN billing.merchants m ON m.id = p.merchant_id
+WHERE p.rail = 'ccbill'
+  AND p.live = sqlc.arg(live)::bool
+  AND p.merchant_id <> sqlc.arg(merchant_id)::uuid
+  AND split_part(p.account_id, '-', 1) = sqlc.arg(client_accnum)::text
+  AND p.superseded_at IS NULL
+  AND m.deleted_at IS NULL AND m.retired_at IS NULL
+ORDER BY p.merchant_id, p.id;
 
 -- CROSS-MERCHANT: an ordered page of merchants after the cursor holding a
 -- current PSP on one of the named rails (undeleted merchant). Ids only; each

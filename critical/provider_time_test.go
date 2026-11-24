@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -26,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/pspimport"
@@ -677,5 +679,49 @@ func TestProviderTime(t *testing.T) {
 		require.Equal(t, http.StatusConflict, status)
 		require.Equal(t, billing.CodePSPExists, code)
 		require.Len(t, dataLink.Requests(), probed, "beta's claim reached no DataLink")
+	})
+
+	t.Run("OR-J28-S13/a-ccbill-account-archived-or-in-the-other-money-class-is-declarable-by-another-merchant", func(t *testing.T) {
+		for name, release := range map[string]func(*testing.T, *authorityWorld, *billing.PSP){
+			"archived": func(t *testing.T, a *authorityWorld, psp *billing.PSP) {
+				_, err := a.alphaRemote.UpdatePSP(t.Context(), psp.ID, billing.UpdatePSPParams{Archived: true, AllowLast: true})
+				require.NoError(t, err)
+			},
+			"live": func(t *testing.T, a *authorityWorld, psp *billing.PSP) {
+				// Alpha's account as a live merchant holds it: no live PSP is
+				// declared beside a fake DataLink, so its document and row are
+				// written here.
+				source, ok := embedded.Graph(a.engine).Runtime.MerchantConfig.Source().(*merchantdocs.VaultSource)
+				require.True(t, ok)
+				set, err := source.Load(t.Context(), a.alpha.MerchantID())
+				require.NoError(t, err)
+				doc := set.PSPs["ccbill"]
+				doc.Value.Environment = "live"
+				_, err = source.PutPSP(t.Context(), a.alpha.MerchantID(), "ccbill", doc.Value, doc.Revision)
+				require.NoError(t, err)
+				_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "psps"}.Sanitize()+" SET environment = 'live' WHERE merchant_id = $1 AND id = $2", a.alpha.MerchantID().UUID(), psp.ID.UUID())
+				require.NoError(t, err)
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				dataLink := ccbillmock.New()
+				t.Cleanup(dataLink.Close)
+				account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
+				a, _ := newPSPWorld(t, func(w *world) {
+					w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+				})
+				dataLink.SetClock(a.clock.Now)
+				create := func(client *openrails.Client, subacc string) (*billing.PSP, error) {
+					return client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "ccbill", Rail: billing.RailCCBill, Environment: billing.EnvironmentSandbox,
+						PSPAccount:  billing.PSPAccount{ClientAccnum: account, ClientSubacc: subacc},
+						Credentials: map[string]string{"salt": "critical-ccbill-salt", "datalink_username": "critical-datalink", "datalink_password": "critical-datalink-password"}})
+				}
+				psp, err := create(a.alphaRemote, "0001")
+				require.NoError(t, err)
+				release(t, a, psp)
+				_, err = create(a.betaRemote, "0002")
+				require.NoError(t, err, "alpha holds no current sandbox PSP on the account")
+			})
+		}
 	})
 }

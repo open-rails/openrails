@@ -12,31 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const cCBillAccountDeclaredElsewhere = `-- name: CCBillAccountDeclaredElsewhere :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.psps
-    WHERE rail = 'ccbill'
-      AND merchant_id <> $1::uuid
-      AND split_part(account_id, '-', 1) = $2::text
-      AND superseded_at IS NULL
-)
-`
-
-type CCBillAccountDeclaredElsewhereParams struct {
-	MerchantID   uuid.UUID
-	ClientAccnum string
-}
-
-// CROSS-MERCHANT: whether another merchant declares a CCBill PSP on the
-// client account, in any subaccount: DataLink's credentials and its hourly
-// limit are the account's.
-func (q *Queries) CCBillAccountDeclaredElsewhere(ctx context.Context, arg CCBillAccountDeclaredElsewhereParams) (bool, error) {
-	row := q.db.QueryRow(ctx, cCBillAccountDeclaredElsewhere, arg.MerchantID, arg.ClientAccnum)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const clearPSPCredentialDuplicate = `-- name: ClearPSPCredentialDuplicate :exec
 UPDATE billing.psps SET credential_duplicate_at = NULL
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND credential_duplicate_at IS NOT NULL
@@ -180,6 +155,67 @@ func (q *Queries) GetPSPForCutoverWrite(ctx context.Context, arg GetPSPForCutove
 		&i.WebhookDigest,
 	)
 	return i, err
+}
+
+const listCCBillAccountPSPsElsewhere = `-- name: ListCCBillAccountPSPsElsewhere :many
+SELECT p.id, p.merchant_id, p.key, p.rail, p.environment, p.account_id, p.superseded_at
+FROM billing.psps p
+JOIN billing.merchants m ON m.id = p.merchant_id
+WHERE p.rail = 'ccbill'
+  AND p.live = $1::bool
+  AND p.merchant_id <> $2::uuid
+  AND split_part(p.account_id, '-', 1) = $3::text
+  AND p.superseded_at IS NULL
+  AND m.deleted_at IS NULL AND m.retired_at IS NULL
+ORDER BY p.merchant_id, p.id
+`
+
+type ListCCBillAccountPSPsElsewhereParams struct {
+	Live         bool
+	MerchantID   uuid.UUID
+	ClientAccnum string
+}
+
+type ListCCBillAccountPSPsElsewhereRow struct {
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	Key          string
+	Rail         string
+	Environment  string
+	AccountID    string
+	SupersededAt *time.Time
+}
+
+// CROSS-MERCHANT: the CCBill PSPs of other undeleted, unretired merchants on
+// the client account in one money class, in any subaccount: DataLink's
+// credentials and its hourly limit are the account's. Each merchant's
+// configuration says which are archived.
+func (q *Queries) ListCCBillAccountPSPsElsewhere(ctx context.Context, arg ListCCBillAccountPSPsElsewhereParams) ([]ListCCBillAccountPSPsElsewhereRow, error) {
+	rows, err := q.db.Query(ctx, listCCBillAccountPSPsElsewhere, arg.Live, arg.MerchantID, arg.ClientAccnum)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCCBillAccountPSPsElsewhereRow
+	for rows.Next() {
+		var i ListCCBillAccountPSPsElsewhereRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Key,
+			&i.Rail,
+			&i.Environment,
+			&i.AccountID,
+			&i.SupersededAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPSPWebhookDigests = `-- name: ListPSPWebhookDigests :many

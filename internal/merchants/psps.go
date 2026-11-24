@@ -266,7 +266,7 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	} else if err != nil {
 		return billing.PSP{}, err
 	}
-	if err := s.refuseCCBillAccountElsewhere(ctx, id, rail, accountID); err != nil {
+	if err := s.refuseCCBillAccountElsewhere(ctx, id, rail, environment, accountID); err != nil {
 		return billing.PSP{}, err
 	}
 	if err := s.verifyNMIEnvironment(ctx, id, doc); err != nil {
@@ -609,9 +609,11 @@ func (s *Service) normalizeCredentials(ctx context.Context, rail string, in map[
 }
 
 // refuseCCBillAccountElsewhere refuses a CCBill account another merchant
-// declares, in any subaccount, before its credentials are probed: DataLink's
-// credentials and its hourly limit are the account's.
-func (s *Service) refuseCCBillAccountElsewhere(ctx context.Context, id billing.MerchantID, rail, accountID string) error {
+// holds, in any subaccount, before its credentials are probed: DataLink's
+// credentials and its hourly limit are the account's. It is held by a
+// current PSP (pspCurrent) of an undeleted, unretired merchant in the same
+// money class; an archived or superseded one holds nothing.
+func (s *Service) refuseCCBillAccountElsewhere(ctx context.Context, id billing.MerchantID, rail, environment, accountID string) error {
 	if rail != "ccbill" {
 		return nil
 	}
@@ -619,12 +621,20 @@ func (s *Service) refuseCCBillAccountElsewhere(ctx context.Context, id billing.M
 	if err != nil {
 		return nil // the probe refuses the account id
 	}
-	declared, err := gen.New(s.pool).CCBillAccountDeclaredElsewhere(ctx, gen.CCBillAccountDeclaredElsewhereParams{MerchantID: id.UUID(), ClientAccnum: accnum})
+	rows, err := gen.New(s.pool).ListCCBillAccountPSPsElsewhere(ctx, gen.ListCCBillAccountPSPsElsewhereParams{
+		Live: config.LiveEnvironment(rail, environment), MerchantID: id.UUID(), ClientAccnum: accnum})
 	if err != nil {
 		return err
 	}
-	if declared {
-		return fmt.Errorf("PSP %s:%s: %w", rail, accountID, ErrPSPExists)
+	for _, row := range rows {
+		current, err := s.pspCurrent(ctx, PSPIdentity{ID: row.ID, MerchantID: billing.MerchantID(row.MerchantID), Key: row.Key, Rail: row.Rail,
+			Environment: row.Environment, AccountID: row.AccountID, Superseded: row.SupersededAt != nil})
+		if err != nil {
+			return err
+		}
+		if current {
+			return fmt.Errorf("PSP %s:%s: %w", rail, accountID, ErrPSPExists)
+		}
 	}
 	return nil
 }

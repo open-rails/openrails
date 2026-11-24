@@ -1387,6 +1387,9 @@
     "OR-J15-S74": [
       "TestProviderTime/OR-J15-S74/an-nmi-refresh-backlog-is-read-a-link-at-a-time-by-last-change"
     ],
+    "OR-J28-S13": [
+      "TestProviderTime/OR-J28-S13/a-ccbill-account-archived-or-in-the-other-money-class-is-declarable-by-another-merchant"
+    ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],
