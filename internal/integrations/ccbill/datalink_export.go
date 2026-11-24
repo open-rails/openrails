@@ -40,8 +40,9 @@ var AllDataLinkTxnTypes = []DataLinkTxnType{
 // dataLinkTimeFormat is the startTime/endTime layout (YYYYMMDDHHMMSS).
 const dataLinkTimeFormat = "20060102150405"
 
-// dataLinkLocation is the timezone DataLink interprets startTime/endTime in:
-// CCBill operates on US Mountain Standard Time (Arizona — no DST).
+// dataLinkLocation is the timezone DataLink's startTime/endTime are sent in:
+// US Mountain Standard Time (Arizona, no DST), where CCBill operates.
+// UNCONFIRMED: the DataLink guide names no zone; see timeZone.
 var dataLinkLocation = time.FixedZone("MST", -7*60*60)
 
 // maxDataLinkWindow is the longest range one export answers: CCBill refuses

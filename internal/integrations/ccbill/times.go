@@ -8,9 +8,10 @@ import (
 )
 
 // timeZone is the zone every time CCBill sends is read in: DataLink rows,
-// webhook timestamps, subscription-management dates. CCBill documents their
-// shapes but no zone, so they are read as UTC. DataLink's request bounds go
-// out in dataLinkLocation.
+// webhook timestamps, subscription-management dates. UNCONFIRMED: CCBill
+// documents their shapes but no zone (its billing weeks are MST), so they are
+// read as UTC, as they always were, until a live account shows otherwise.
+// DataLink's request bounds go out in dataLinkLocation, also unconfirmed.
 var timeZone = time.UTC
 
 var (
