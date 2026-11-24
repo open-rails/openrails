@@ -73,12 +73,12 @@ func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*
 	return a, p, customer
 }
 
-// postUsageDay ends the day the usage occurred: its accrual posts, and what
-// it leaves owed is billed as usage billing bills owed.
+// postUsageDay ends the month the usage occurred: it posts, and what it
+// leaves owed is billed as usage billing bills owed.
 func postUsageDay(t *testing.T, w *world, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
-	nextDay(w)
-	postDays(t, fleet)
+	nextMonth(w)
+	closeMonths(t, fleet)
 }
 
 // unscheduledAgreement is alice's USD collection agreement.
@@ -144,9 +144,9 @@ func TestUsageBillingContracts(t *testing.T) {
 	t.Run("OR-J26-S02/disabled-host-does-not-collect-automatic-wakeups", func(t *testing.T) {
 		a, p, customer := usageBillingWorld(t, false, false)
 		oneUsage(t, a.alpha, usageInput(customer, "debt-without-opt-in", 3))
-		a.clock.Advance(48 * time.Hour)
 		fleet := startFleet(t, a.world)
-		postDays(t, fleet)
+		nextMonth(a.world)
+		closeMonths(t, fleet)
 		runUsageDue(t, fleet)
 		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
 		require.NoError(t, err)
@@ -293,7 +293,7 @@ func TestUsageBillingContracts(t *testing.T) {
 	t.Run("OR-J26-S51/an-overdue-order-is-told-without-automatic-usage-billing", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false, false)
 		oneUsage(t, a.alpha, usageInput(customer, "billed-on-revocation", 3))
-		// What the revocation bills is owed once the day's usage posts.
+		// What the revocation bills is owed once the month's usage posts.
 		fleet := startFleet(t, a.world)
 		postUsageDay(t, a.world, fleet)
 		// Revoking the collection agreement bills what is owed so far.

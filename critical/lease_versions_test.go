@@ -239,8 +239,9 @@ func TestLeaseVersions(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true)
 		oneUsage(t, a.alpha, usageInput(customer, "late-in-the-day", 3))
 		fleet := startFleet(t, a.world)
-		// The day's accrual posts after midnight, before the usage-billing
-		// check; the bill dated the next day bills it as the day's usage.
+		// The month's close posts it, before the usage-billing check: what it
+		// leaves owed is dated before its pricing period ended, so the bill
+		// of that period bills it.
 		postUsageDay(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		order := oneUsageOrder(t, a, customer)
@@ -264,8 +265,8 @@ func TestLeaseVersions(t *testing.T) {
 		w.clock.Advance(2 * time.Hour)
 		settleUsage(t, w.alpha, lease, numbered(2, usageInput(customer, "after-it-lapsed", 3))...)
 		fleet := startFleet(t, w)
-		nextDay(w)
-		postDays(t, fleet)
+		nextMonth(w)
+		closeMonths(t, fleet)
 		b, err := w.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Zero(t, b.BalanceAmount, "the lot paid for the usage before it lapsed and expired with the rest")
