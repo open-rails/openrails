@@ -85,3 +85,14 @@ func TestQueryShape(t *testing.T) {
 		}
 	}
 }
+
+// One name is one dimension: a second definition would shadow the first.
+func TestDimensionNamesAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range Dimensions {
+		if seen[d.Name] {
+			t.Errorf("dimension %q is defined twice", d.Name)
+		}
+		seen[d.Name] = true
+	}
+}
