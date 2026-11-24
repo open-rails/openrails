@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 661,
+  "scenario_count": 663,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3307,6 +3307,16 @@
       "id": "OR-J19-S14",
       "journey": "J19",
       "name": "A creation interrupted while reaching its subscribers records nothing, not even the moves it made, and its retry moves everyone once and answers again with the same migration"
+    },
+    {
+      "id": "OR-J04-S78",
+      "journey": "J04",
+      "name": "OrderPayment reads back a pay whose answer was lost with getOrderPaymentAttempt under its key, and retries a pay that never arrived under the same key: one attempt"
+    },
+    {
+      "id": "OR-J04-S79",
+      "journey": "J04",
+      "name": "OrderPayment reads a Solana order awaiting its wallet and confirms it at most twice a minute, well under the purchase limit"
     }
   ]
 }

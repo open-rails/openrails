@@ -2146,6 +2146,12 @@
     ],
     "OR-J19-S14": [
       "TestPriceMigrationScale/OR-J19-S14/an-interrupted-create-records-nothing-and-its-retry-moves-everyone-once"
+    ],
+    "OR-J04-S78": [
+      "TestOrderPaymentBrowser/OR-J04-S78/a-lost-pay-answer-is-read-back-under-its-key-and-a-retry-keeps-it"
+    ],
+    "OR-J04-S79": [
+      "TestOrderPaymentBrowser/OR-J04-S79/an-order-awaiting-its-wallet-is-read-and-confirmed-well-under-the-purchase-limit"
     ]
   }
 }
