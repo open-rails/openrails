@@ -578,25 +578,38 @@ func (q *Queries) ListCreditLotsMissingDeposit(ctx context.Context, arg ListCred
 }
 
 const listCreditReservationDrifts = `-- name: ListCreditReservationDrifts :many
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at FROM billing.credit_grants g
-WHERE g.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
-  AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
+WITH candidates AS (
+    SELECT g.id FROM billing.credit_grants g
+    WHERE g.merchant_id = $1::uuid
+      AND ($3::uuid IS NULL OR g.customer_id = $3::uuid)
+      AND g.units_reserved > 0
+    UNION
+    SELECT g.id FROM billing.payments r
+    JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id
+    WHERE r.merchant_id = $1::uuid
+      AND ($3::uuid IS NULL OR r.customer_id = $3::uuid)
+      AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL
+)
+SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.order_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at FROM billing.credit_grants g
+JOIN candidates c ON c.id = g.id
+WHERE g.merchant_id = $1::uuid AND g.paid_amount IS NOT NULL
   AND g.units_reserved <> billing.credit_grant_reservation(g.merchant_id, g.id)
 ORDER BY g.created_at, g.id
-LIMIT $3::int
+LIMIT $2::int
 `
 
 type ListCreditReservationDriftsParams struct {
 	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
 	RowLimit   int32
+	CustomerID *uuid.UUID
 }
 
 // Purchased lots whose reservation disagrees with their payment's pending
-// refunds. NULL customer_id = merchant-wide. Repair = SyncCreditGrantReservation.
+// refunds. Only lots that reserve something or whose payment has a pending
+// refund can drift: those two indexed sets are read, not every lot. NULL
+// customer_id = merchant-wide. Repair = SyncCreditGrantReservation.
 func (q *Queries) ListCreditReservationDrifts(ctx context.Context, arg ListCreditReservationDriftsParams) ([]BillingCreditGrant, error) {
-	rows, err := q.db.Query(ctx, listCreditReservationDrifts, arg.MerchantID, arg.CustomerID, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listCreditReservationDrifts, arg.MerchantID, arg.RowLimit, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}

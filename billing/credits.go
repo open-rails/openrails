@@ -55,7 +55,8 @@ func (id *BalanceTransactionID) UnmarshalText(text []byte) error {
 // CreateCreditGrantParams grants a customer prepaid credit. SourceID identifies the
 // grant per customer and must be reproducible across retries: an identical
 // retry returns the existing grant (Replayed), one whose amount, currency,
-// expiry or funding source differs is ErrIdempotencyKeyReused. Source labels
+// expiry or named funding source differs is ErrIdempotencyKeyReused; a retry
+// that names no funding source matches the grant's. Source labels
 // where the credit came from; Invoker records who granted it (default: the
 // customer), at most 512 bytes.
 type CreateCreditGrantParams struct {

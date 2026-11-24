@@ -59,10 +59,12 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		if strings.TrimSpace(item.SourceID) == "" || len(item.SourceID) > maxSourceIDBytes {
 			return nil, apperr.Invalidf("source_id must contain 1 to %d bytes", maxSourceIDBytes).WithParam(param("source_id"))
 		}
-		funding := credits.Grant
+		// Left out, a new grant is a grant and a replay matches what the lot
+		// recorded (a deposit migrated as a purchase among them).
+		var funding credits.FundingSource
 		switch item.FundingSource {
-		case "", billing.CreditGrantFundingGrant:
-		case billing.CreditGrantFundingPromotion, billing.CreditGrantFundingImport:
+		case "":
+		case billing.CreditGrantFundingGrant, billing.CreditGrantFundingPromotion, billing.CreditGrantFundingImport:
 			funding = credits.FundingSource(item.FundingSource)
 		default:
 			return nil, apperr.Invalidf("funding_source must be grant, promotion or import").WithParam(param("funding_source"))

@@ -70,11 +70,24 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.payment_id = sqlc.arg(pa
 
 -- name: ListCreditReservationDrifts :many
 -- Purchased lots whose reservation disagrees with their payment's pending
--- refunds. NULL customer_id = merchant-wide. Repair = SyncCreditGrantReservation.
-SELECT * FROM billing.credit_grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
-  AND g.payment_id IS NOT NULL AND g.paid_amount IS NOT NULL
+-- refunds. Only lots that reserve something or whose payment has a pending
+-- refund can drift: those two indexed sets are read, not every lot. NULL
+-- customer_id = merchant-wide. Repair = SyncCreditGrantReservation.
+WITH candidates AS (
+    SELECT g.id FROM billing.credit_grants g
+    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
+      AND g.units_reserved > 0
+    UNION
+    SELECT g.id FROM billing.payments r
+    JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id
+    WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND (sqlc.narg(customer_id)::uuid IS NULL OR r.customer_id = sqlc.narg(customer_id)::uuid)
+      AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL
+)
+SELECT g.* FROM billing.credit_grants g
+JOIN candidates c ON c.id = g.id
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.paid_amount IS NOT NULL
   AND g.units_reserved <> billing.credit_grant_reservation(g.merchant_id, g.id)
 ORDER BY g.created_at, g.id
 LIMIT sqlc.arg(row_limit)::int;

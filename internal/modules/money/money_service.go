@@ -381,7 +381,8 @@ type DepositParams struct {
 	SourceID    *string    // natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
 	ExpiresAt   *time.Time // nil is permanent; expiry is an immutable operation term
 	Description *string
-	// Funding is where the units came from; zero is a grant. A purchase here
+	// Funding is where the units came from; zero is a grant, and a replay
+	// that leaves it zero matches whatever the lot recorded. A purchase here
 	// is change from a charge, paid at face.
 	Funding credits.FundingSource
 	// RepayOwed applies the new credit to outstanding owed first.
@@ -538,9 +539,9 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 				return nil, &IdempotencyConflict{Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
 					Field: "expires_at", Committed: existing.ExpiresAt, Retried: retryExpiry}
 			}
-			if existing.FundingSource != string(params.funding()) {
+			if params.Funding != "" && existing.FundingSource != string(params.Funding) {
 				return nil, &IdempotencyConflict{Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
-					Field: "funding_source", Committed: existing.FundingSource, Retried: string(params.funding())}
+					Field: "funding_source", Committed: existing.FundingSource, Retried: string(params.Funding)}
 			}
 			replayed := creditGrantTxn(existing)
 			replayed.Replayed = true
