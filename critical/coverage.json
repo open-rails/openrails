@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 414,
+  "scenario_count": 416,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1104,6 +1104,11 @@
       "name": "Exact payment key reads its own retained outcome without attributing another payment"
     },
     {
+      "id": "OR-J10-S06",
+      "journey": "J10",
+      "name": "A card save retried with its Idempotency-Key answers the first saved card; other terms under the key are refused"
+    },
+    {
       "id": "OR-J12-S06",
       "journey": "J12",
       "name": "Merchant and hosted vault custody retain original card and charge authority through recovery and removal"
@@ -1912,6 +1917,11 @@
       "id": "OR-J27-S14",
       "journey": "J27",
       "name": "A purchase after a cached entitlement check is visible on the next check"
+    },
+    {
+      "id": "OR-J27-S15",
+      "journey": "J27",
+      "name": "A product-access grant requires an Idempotency-Key and a retry under it grants once"
     },
     {
       "id": "OR-J04-S42",

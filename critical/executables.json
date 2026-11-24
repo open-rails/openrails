@@ -152,6 +152,9 @@
     "OR-J10-S04": [
       "TestPaymentReplay/OR-J10-S04/different-orders-remain-independent-obligations"
     ],
+    "OR-J10-S06": [
+      "TestRequestIdempotency/OR-J10-S06/a-card-save-key-answers-one-saved-card"
+    ],
     "OR-J11-S01": [
       "TestProviderRecovery/OR-J11-S01/accepted-payment-response-loss-recovers-without-new-debit"
     ],
@@ -639,6 +642,9 @@
     ],
     "OR-J27-S09": [
       "TestSubscriptionAccessRepairTerminated/OR-J27-S09/an-ended-window-still-applies-its-recorded-revocation"
+    ],
+    "OR-J27-S15": [
+      "TestRequestIdempotency/OR-J27-S15/a-grant-needs-its-key-and-replays-under-it"
     ],
     "OR-J28-S01": [
       "TestCallbackContracts/OR-J28-S01/signed-account-bound-evidence-settles-the-original-order"
