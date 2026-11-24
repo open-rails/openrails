@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 479,
+  "scenario_count": 498,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2234,6 +2234,81 @@
       "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
     },
     {
+      "id": "OR-J28-S09",
+      "journey": "J28",
+      "name": "An NMI delivery signed under any nonce is accepted, with no replay window; a replay or retry of its event applies nothing"
+    },
+    {
+      "id": "OR-J15-S73",
+      "journey": "J15",
+      "name": "An NMI window read reaches a sale settled, refunded or voided after it: prune keeps its receipt, and still finds a receipt NMI does not list"
+    },
+    {
+      "id": "OR-J38-S44",
+      "journey": "J38",
+      "name": "A CCBill provider refresh reads DataLink in exports of at most 24 hours, which CCBill requires, and records every rebill of its eight-day windows"
+    },
+    {
+      "id": "OR-J38-S45",
+      "journey": "J38",
+      "name": "A live CCBill PSP refreshes in a job of its own, one DataLink request an hour: a day of transactions each, then the roster; a request CCBill refuses within the hour waits, and every rebill is recorded"
+    },
+    {
+      "id": "OR-J38-S46",
+      "journey": "J38",
+      "name": "A live CCBill PSP import reads its roster, then a day of history an hour, waiting between requests and resuming where it stopped until it is pulled"
+    },
+    {
+      "id": "OR-J38-S47",
+      "journey": "J38",
+      "name": "A CCBill cancellation whose webhook was missed, read from a paced day of transactions with no roster, cancels at the period end and keeps the time paid for"
+    },
+    {
+      "id": "OR-J28-S11",
+      "journey": "J28",
+      "name": "A CCBill account another merchant's current PSP holds in the same money class, in any subaccount, is refused as psp_exists before its credentials are probed"
+    },
+    {
+      "id": "OR-J28-S10",
+      "journey": "J28",
+      "name": "A signed NMI transaction event dated before its event_id record would be kept is acknowledged, applies nothing and raises life.webhook.replay_refused; one of its own time applies"
+    },
+    {
+      "id": "OR-J28-S12",
+      "journey": "J28",
+      "name": "An NMI chargeback batch is booked whatever its sales' dates: a chargeback of a sale 120 days old reverses it and cancels its membership, refused as no replay"
+    },
+    {
+      "id": "OR-J38-S73",
+      "journey": "J38",
+      "name": "A CCBill status read answering 1 for an unverified row whose paid period lapsed cancels it and keeps access through CCBill's expiration date"
+    },
+    {
+      "id": "OR-J38-S74",
+      "journey": "J38",
+      "name": "A CCBill rebill and the member's cancellation read in one export book the rebill, cancel, and keep access through the rebilled period's end"
+    },
+    {
+      "id": "OR-J15-S74",
+      "journey": "J15",
+      "name": "An NMI refresh backlog is read a link a run by last change, each ending at its end and advancing the applied watermark, the last through now; a sale settled in it is read in the link of its last change and booked once"
+    },
+    {
+      "id": "OR-J28-S13",
+      "journey": "J28",
+      "name": "A CCBill account another merchant archived, or holds only in the other money class, is declarable: only a current PSP of an unretired merchant in the same class holds it"
+    },
+    {
+      "id": "OR-J28-S14",
+      "journey": "J28",
+      "name": "A CCBill DataLink login CCBill refuses is psp_credentials_rejected and declares nothing; the probe is a subscription-management status read, which takes no DataLink hour"
+    },
+    {
+      "id": "OR-J28-S15",
+      "journey": "J28",
+      "name": "Two refused CCBill credential probes hold that login (account and username) an hour, across merchants and money classes: a third is psp_probe_limited with Retry-After and reaches no CCBill, and the account's owner on its own login is not held"
+    },
+    {
       "id": "OR-J22-S12",
       "journey": "J22",
       "name": "A staff member grants a full batch of credit at once, one batch a minute; the merchant's own application is not metered"
@@ -2362,6 +2437,26 @@
       "id": "OR-J39-S25",
       "journey": "J39",
       "name": "A staff refund OpenRails completes more than a week after it was asked sends its receipt"
+    },
+    {
+      "id": "OR-J28-S16",
+      "journey": "J28",
+      "name": "A replayed NMI chargeback batch, its reversal already booked, reverses and revokes nothing again: access the merchant restored after the dispute survives it"
+    },
+    {
+      "id": "OR-J53-S01",
+      "journey": "J53",
+      "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a removed measure is refused naming its replacement"
+    },
+    {
+      "id": "OR-J53-S02",
+      "journey": "J53",
+      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure are dropped"
+    },
+    {
+      "id": "OR-J53-S03",
+      "journey": "J53",
+      "name": "Every money measure splits by currency unless one currency is named, by PSP and by time too, and money beside a measure with no currency is refused rather than summed"
     },
     {
       "id": "OR-J43-S01",

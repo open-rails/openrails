@@ -1,26 +1,38 @@
-import { AdminMessage } from "#orck/admin/ui-context"
+import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 import { useAdminServices } from "#orck/admin/context"
-// #741 configurable dashboard: a per-merchant widget grid over the metrics
-// API. Tile registry + serialized Layout[] on react-grid-layout v2 — drag,
-// resize, edit, remove; the layout persists via PUT (debounced). First
-// load with no saved row shows the seeded default template.
+// The merchant's dashboard: a per-merchant widget grid over the metrics API
+// on react-grid-layout v2 — drag, resize, add, edit, remove; the layout
+// persists via PUT (debounced). With no saved row it is the health overview
+// built for the merchant's profile. The page's range, currency and
+// comparison apply to every widget.
 import type { AdminAccess } from "#orck/client/generated/wire"
 import { useAccess, useDashboardLayout } from "#orck/admin/lib/capabilities"
 import * as React from "react"
-import { Navigate } from "#orck/admin/router"
+import { Link, Navigate } from "#orck/admin/router"
 import { GridLayout, type Layout } from "react-grid-layout"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import "react-grid-layout/css/styles.css"
 
 import { useConfirm } from "#orck/admin/lib/confirm"
+import { Button } from "#orck/admin/components/ui/button"
 import { Skeleton } from "#orck/admin/components/ui/skeleton"
-import type { Widget } from "#orck/admin/lib/api/metrics"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#orck/admin/components/ui/select"
+import type { Compare, Widget } from "#orck/admin/lib/api/metrics"
+import { currencyScale } from "#orck/admin/lib/format"
 
+import { metricsRange, type DashboardRange } from "./range"
 import { RangePicker } from "./range-picker"
-import { useDashboardRange } from "./use-range"
+import { useRegistry } from "./registry"
+import { useDashboardView } from "./use-range"
 import { WidgetEditor, type WidgetDraft } from "./widget-editor"
-import { WidgetTile } from "./widget-tile"
+import { isTile, WidgetTile } from "./widget-tile"
 
 const COLS = 12
 const ROW_HEIGHT = 56
@@ -44,12 +56,12 @@ function useMeasuredWidth() {
   return { containerRef: setEl, width, mounted: width > 0, el }
 }
 
-// A stat tile's label is uppercase 12px medium text at 0.05em tracking,
-// clamped to two lines; it needs its best two-line break (the split whose
-// longer line is shortest) plus the tile's 16px padding on each side. The
-// saved grid is kept wherever every stat tile has that room; narrower, the
-// dashboard reflows instead of cutting labels.
-const STAT_PADDING = 32
+// A tile's label is uppercase 12px medium text at 0.05em tracking, clamped
+// to two lines; it needs its best two-line break (the split whose longer
+// line is shortest) plus the tile's 16px padding on each side. The saved
+// grid is kept wherever every tile has that room; narrower, the dashboard
+// reflows instead of cutting labels.
+const TILE_PADDING = 32
 const MARGIN = 12
 function labelRoom(widgets: Widget[], font: string): number {
   const context = document.createElement("canvas").getContext("2d")
@@ -61,7 +73,7 @@ function labelRoom(widgets: Widget[], font: string): number {
   }
   let widest = 0
   for (const widget of widgets) {
-    if (widget.viz !== "stat") continue
+    if (!isTile(widget)) continue
     const words = widget.title.toUpperCase().split(/\s+/).filter(Boolean)
     let best = line(words)
     for (let i = 1; i < words.length; i++)
@@ -71,17 +83,20 @@ function labelRoom(widgets: Widget[], font: string): number {
       )
     widest = Math.max(widest, best)
   }
-  return Math.ceil(widest) + STAT_PADDING
+  return Math.ceil(widest) + TILE_PADDING
 }
 
-// narrowest is the width react-grid-layout gives the narrowest stat tile in
-// the saved layout at this container width, or the narrowest chart when
-// there are no stat tiles.
-function narrowest(widgets: Widget[], width: number, stat: boolean): number {
+type Kind = "tile" | "chart" | "heading"
+const kindOf = (widget: Widget): Kind =>
+  widget.viz === "heading" ? "heading" : isTile(widget) ? "tile" : "chart"
+
+// narrowest is the width react-grid-layout gives the narrowest widget of a
+// kind in the saved layout at this container width.
+function narrowest(widgets: Widget[], width: number, kind: Kind): number {
   const column = (width - MARGIN * (COLS - 1) - MARGIN * 2) / COLS
   let least = Infinity
   for (const widget of widgets)
-    if ((widget.viz === "stat") === stat)
+    if (kindOf(widget) === kind)
       least = Math.min(
         least,
         column * widget.grid.w + MARGIN * (widget.grid.w - 1)
@@ -89,33 +104,41 @@ function narrowest(widgets: Widget[], width: number, stat: boolean): number {
   return least
 }
 
-// runs splits the reflowed order into consecutive stat and chart runs, so
-// each run gets its own columns while the saved order is kept.
-function runs(widgets: Widget[]): { stat: boolean; widgets: Widget[] }[] {
-  const out: { stat: boolean; widgets: Widget[] }[] = []
+// runs splits the reflowed order into consecutive runs of one kind, so each
+// run gets its own columns while the saved order is kept.
+function runs(widgets: Widget[]): { kind: Kind; widgets: Widget[] }[] {
+  const out: { kind: Kind; widgets: Widget[] }[] = []
   for (const widget of widgets) {
-    const stat = widget.viz === "stat"
+    const kind = kindOf(widget)
     const last = out.at(-1)
-    if (last && last.stat === stat) last.widgets.push(widget)
-    else out.push({ stat, widgets: [widget] })
+    if (last && last.kind === kind && kind !== "heading")
+      last.widgets.push(widget)
+    else out.push({ kind, widgets: [widget] })
   }
   return out
 }
 
-// Reflowed columns come from the content, not from device sizes: a stat tile
+// Reflowed columns come from the content, not from device sizes: a tile
 // needs 10rem (its widest label with room for a four-digit amount), a chart
 // 22rem to keep its axis labels readable. Of the columns that fit, the row
-// count is kept and the tiles are spread evenly over it, so twelve tiles that
-// fit five across sit four, four and four rather than five, five and two.
-const STAT_MIN = 160
+// count is kept and the widgets are spread evenly over it, so twelve tiles
+// that fit five across sit four, four and four rather than five, five and
+// two.
+const TILE_MIN = 160
 const CHART_MIN = 352
 function balancedColumns(count: number, width: number, min: number) {
   const fit = Math.max(1, Math.floor((width + MARGIN) / (min + MARGIN)))
   return Math.ceil(count / Math.ceil(count / fit))
 }
+// A reflowed widget's height: a kpi has room for its sparkline.
+function reflowHeight(widget: Widget): string {
+  if (widget.viz === "heading") return "h-9"
+  if (widget.viz === "kpi") return "h-[164px]"
+  return widget.viz === "stat" ? "h-[124px]" : "h-64"
+}
 // The loading skeleton's rows: auto-fit, so a few placeholders spread over
 // the row rather than leaving empty tracks.
-const STAT_FLOW =
+const TILE_FLOW =
   "grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-3"
 const CHART_FLOW =
   "grid grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-3"
@@ -149,8 +172,55 @@ function firstArea(access: AdminAccess): string {
   return "/settings"
 }
 
+// useCurrencies lists the currencies with activity in the range, the one
+// with the most cash (in major units) first.
+function useCurrencies(range: DashboardRange, enabled: boolean): string[] {
+  const { adminQueries } = useAdminServices()
+  const { data } = useQuery({
+    ...adminQueries.widgetMetrics({
+      measures: ["cash", "usage_charged", "credits_sold"],
+      by: ["currency"],
+      range: metricsRange(range),
+    }),
+    enabled,
+  })
+  return React.useMemo(() => {
+    if (!data) return []
+    const cash = data.columns.findIndex((c) => c.name === "cash")
+    const major = (row: (typeof data.rows)[number]) =>
+      Number(row[cash] ?? 0) / 10 ** (currencyScale(String(row[0])) ?? 0)
+    return [...data.rows]
+      .sort((a, b) => major(b) - major(a))
+      .map((row) => String(row[0]))
+  }, [data])
+}
+
+const COMPARES: { value: Compare; label: string }[] = [
+  { value: "previous_period", label: "vs previous period" },
+  { value: "previous_year", label: "vs last year" },
+]
+
+// newWidget is where an added widget starts: cash over the range by day.
+function newWidget(widgets: Widget[]): Widget {
+  const bottom = widgets.reduce((y, w) => Math.max(y, w.grid.y + w.grid.h), 0)
+  return {
+    id: `widget-${Date.now().toString(36)}`,
+    title: "Cash",
+    viz: "line",
+    query: {
+      measures: ["cash"],
+      by: ["time"],
+      grain: "auto",
+      range: { last: "30d" },
+    },
+    grid: { x: 0, y: bottom, w: 6, h: 4 },
+    fixed_range: false,
+  }
+}
+
 function MetricsDashboard() {
   const { toastApiError, adminMutations, adminQueries } = useAdminServices()
+  const { text: adminText } = useAdminUI()
 
   const queryClient = useQueryClient()
   // The layout is the merchant's configuration, over its metrics: editable
@@ -163,12 +233,30 @@ function MetricsDashboard() {
   const { data, isPending: loading } = useQuery(dashboardOptions)
   const [draftWidgets, setDraftWidgets] = React.useState<Widget[] | null>(null)
   const widgets = draftWidgets ?? data?.widgets ?? null
-  const [editorOpen, setEditorOpen] = React.useState(false)
-  const [editing, setEditing] = React.useState<Widget | null>(null)
+  const [editing, setEditing] = React.useState<{
+    widget: Widget
+    added: boolean
+  } | null>(null)
   const { width, containerRef, mounted, el } = useMeasuredWidth()
-  const [range] = useDashboardRange()
+  const [view, setView] = useDashboardView()
+  const registry = useRegistry()
   const confirm = useConfirm()
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const profile = data?.is_default ? data.profile : null
+  const empty =
+    !!profile &&
+    !profile.subscriptions &&
+    !profile.card_payments &&
+    !profile.usage &&
+    !profile.credits
+  const currencies = useCurrencies(view.range, !!data && !empty)
+  // The page's currency: the one picked if it has activity, else the one
+  // with the most cash.
+  const currency =
+    view.currency && currencies.includes(view.currency)
+      ? view.currency
+      : currencies[0]
+  const shown = { ...view, currency }
 
   React.useEffect(
     () => () => {
@@ -219,8 +307,12 @@ function MetricsDashboard() {
     if (changed) update(next)
   }
 
-  const editWidget = (id: string, draft: WidgetDraft) => {
+  const saveWidget = (id: string, draft: WidgetDraft, added: boolean) => {
     if (!widgets) return
+    if (added) {
+      update([...widgets, { ...newWidget(widgets), ...draft, id }])
+      return
+    }
     update(widgets.map((w) => (w.id === id ? { ...w, ...draft } : w)))
   }
 
@@ -241,7 +333,64 @@ function MetricsDashboard() {
         <AdminMessage id={"Dashboard"} />
       </h1>
       <div className="flex flex-wrap items-center gap-3">
+        {currencies.length > 1 ? (
+          <Select
+            items={currencies.map((c) => ({ value: c, label: c }))}
+            value={currency}
+            onValueChange={(next) => setView({ currency: next ?? undefined })}
+          >
+            <SelectTrigger
+              size="sm"
+              className="w-[96px]"
+              aria-label={adminText("Currency")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {currencies.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+        <Select
+          items={COMPARES}
+          value={view.compare ?? "previous_period"}
+          onValueChange={(next) =>
+            setView({
+              compare: next === "previous_year" ? "previous_year" : undefined,
+            })
+          }
+        >
+          <SelectTrigger
+            size="sm"
+            className="w-[170px]"
+            aria-label={adminText("Compare with")}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {COMPARES.map((c) => (
+              <SelectItem key={c.value} value={c.value}>
+                {c.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <RangePicker />
+        {editable && widgets ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              setEditing({ widget: newWidget(widgets), added: true })
+            }
+          >
+            <AdminMessage id={"Add widget"} />
+          </Button>
+        ) : null}
       </div>
     </div>
   )
@@ -250,9 +399,9 @@ function MetricsDashboard() {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <div className={STAT_FLOW}>
+        <div className={TILE_FLOW}>
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-[124px]" />
+            <Skeleton key={i} className="h-[164px]" />
           ))}
         </div>
         <div className={CHART_FLOW}>
@@ -264,16 +413,16 @@ function MetricsDashboard() {
   }
   if (!widgets) return null
 
-  // The saved grid needs room for each stat label; the reflow also keeps
+  // The saved grid needs room for each tile label; the reflow also keeps
   // room for a four-digit amount, and never less than the widest label.
   const labels = el ? labelRoom(widgets, getComputedStyle(el).fontFamily) : 0
-  const statMin = Math.max(STAT_MIN, labels)
+  const tileMin = Math.max(TILE_MIN, labels)
   const fits =
     mounted &&
     el !== null &&
-    (widgets.some((w) => w.viz === "stat")
-      ? narrowest(widgets, width, true) >= labels
-      : narrowest(widgets, width, false) >= CHART_MIN)
+    (widgets.some(isTile)
+      ? narrowest(widgets, width, "tile") >= labels
+      : narrowest(widgets, width, "chart") >= CHART_MIN)
 
   const layout: Layout = widgets.map((w) => ({
     i: w.id,
@@ -281,13 +430,40 @@ function MetricsDashboard() {
     y: w.grid.y,
     w: w.grid.w,
     h: w.grid.h,
-    minW: 2,
-    minH: 2,
+    minW: w.viz === "heading" ? COLS : 2,
+    minH: w.viz === "heading" ? 1 : 2,
   }))
+  const tile = (w: Widget) => (
+    <WidgetTile
+      widget={w}
+      view={shown}
+      registry={registry}
+      empty={empty}
+      editable={editable}
+      onEdit={() => setEditing({ widget: w, added: false })}
+      onDelete={() => void removeWidget(w)}
+    />
+  )
 
   return (
     <div className="flex flex-col gap-4">
       {header}
+      {empty ? (
+        <p className="text-sm text-muted-foreground">
+          <AdminMessage id={"Nothing to show yet. Add products in "} />
+          <Link to="/catalog" className="underline underline-offset-2">
+            <AdminMessage id={"Catalog"} />
+          </Link>
+          <AdminMessage id={" and connect a PSP in "} />
+          <Link
+            to="/settings?tab=psps"
+            className="underline underline-offset-2"
+          >
+            <AdminMessage id={"Settings › PSPs"} />
+          </Link>
+          <AdminMessage id={" to start taking payments."} />
+        </p>
+      ) : null}
 
       <div ref={containerRef} className="min-h-0 w-full">
         {widgets.length === 0 ? (
@@ -303,25 +479,20 @@ function MetricsDashboard() {
                 key={run.widgets[0].id}
                 className="grid gap-3"
                 style={{
-                  gridTemplateColumns: `repeat(${balancedColumns(
-                    run.widgets.length,
-                    width,
-                    run.stat ? statMin : CHART_MIN
-                  )}, minmax(0, 1fr))`,
+                  gridTemplateColumns: `repeat(${
+                    run.kind === "heading"
+                      ? 1
+                      : balancedColumns(
+                          run.widgets.length,
+                          width,
+                          run.kind === "tile" ? tileMin : CHART_MIN
+                        )
+                  }, minmax(0, 1fr))`,
                 }}
               >
                 {run.widgets.map((w) => (
-                  <div key={w.id} className={run.stat ? "h-[124px]" : "h-64"}>
-                    <WidgetTile
-                      widget={w}
-                      range={range}
-                      editable={editable}
-                      onEdit={() => {
-                        setEditing(w)
-                        setEditorOpen(true)
-                      }}
-                      onDelete={() => void removeWidget(w)}
-                    />
+                  <div key={w.id} className={reflowHeight(w)}>
+                    {tile(w)}
                   </div>
                 ))}
               </div>
@@ -340,28 +511,24 @@ function MetricsDashboard() {
             onLayoutChange={onLayoutChange}
           >
             {widgets.map((w) => (
-              <div key={w.id}>
-                <WidgetTile
-                  widget={w}
-                  range={range}
-                  editable={editable}
-                  onEdit={() => {
-                    setEditing(w)
-                    setEditorOpen(true)
-                  }}
-                  onDelete={() => void removeWidget(w)}
-                />
-              </div>
+              <div key={w.id}>{tile(w)}</div>
             ))}
           </GridLayout>
         ) : null}
       </div>
 
-      {editorOpen && editing ? (
+      {editing ? (
         <WidgetEditor
-          onOpenChange={setEditorOpen}
-          initial={editing}
-          onSave={(draft) => editWidget(editing.id, draft)}
+          onOpenChange={(open) => {
+            if (!open) setEditing(null)
+          }}
+          initial={editing.widget}
+          added={editing.added}
+          view={shown}
+          registry={registry}
+          onSave={(draft) =>
+            saveWidget(editing.widget.id, draft, editing.added)
+          }
         />
       ) : null}
     </div>

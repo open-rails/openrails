@@ -3,6 +3,7 @@ package converge
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -89,32 +90,55 @@ func (s share) String() string {
 	return fmt.Sprintf("%d.%d%%", tenths/10, tenths%10)
 }
 
-// shares runs [failed, total] by PSP and owner over [from, to).
-func (p *healthPass) shares(ctx context.Context, failed, total string, filters map[string][]string, from, to, now time.Time) (map[healthKey]share, error) {
-	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{failed, total}, By: []string{"psp", "owner"}, Filters: filters}, from, to, now)
+// funnel is a funnel measure split by one of its dimensions: failed values
+// out of counted ones (every value when counted is nil).
+type funnel struct {
+	measure, by     string
+	failed, counted []string
+}
+
+var (
+	attemptFunnel = funnel{measure: "attempts", by: "outcome", failed: []string{"declined"}}
+	rebillFunnel  = funnel{measure: "rebills", by: "first_outcome", failed: []string{"declined", "error", "missed"},
+		counted: []string{"approved", "declined", "error", "missed"}}
+)
+
+// shares runs f by PSP and owner over [from, to).
+func (p *healthPass) shares(ctx context.Context, f funnel, filters map[string][]string, from, to, now time.Time) (map[healthKey]share, error) {
+	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{f.measure}, By: []string{"psp", "owner", f.by}, Filters: filters}, from, to, now)
 	if err != nil {
 		return nil, err
 	}
 	out := map[healthKey]share{}
 	for _, r := range rows {
-		out[healthKey{str(r["psp"]), str(r["owner"])}] = share{failed: count(r[failed]), total: count(r[total])}
+		value := str(r[f.by])
+		if f.counted != nil && !slices.Contains(f.counted, value) {
+			continue
+		}
+		k, n := healthKey{str(r["psp"]), str(r["owner"])}, count(r[f.measure])
+		s := out[k]
+		s.total += n
+		if slices.Contains(f.failed, value) {
+			s.failed += n
+		}
+		out[k] = s
 	}
 	return out, nil
 }
 
 // spikes compares the last day against the 28 days before it.
-func (p *healthPass) spikes(ctx context.Context, failed, total string, filters map[string][]string, now time.Time) (recent, baseline map[healthKey]share, err error) {
-	if recent, err = p.shares(ctx, failed, total, filters, now.Add(-spikeWindow), now, now); err != nil {
+func (p *healthPass) spikes(ctx context.Context, f funnel, filters map[string][]string, now time.Time) (recent, baseline map[healthKey]share, err error) {
+	if recent, err = p.shares(ctx, f, filters, now.Add(-spikeWindow), now, now); err != nil {
 		return nil, nil, err
 	}
-	baseline, err = p.shares(ctx, failed, total, filters, now.Add(-spikeWindow-baselineWindow), now.Add(-spikeWindow), now)
+	baseline, err = p.shares(ctx, f, filters, now.Add(-spikeWindow-baselineWindow), now.Add(-spikeWindow), now)
 	return recent, baseline, err
 }
 
 // newCardSpikes: the trailing-24h new-card decline rate at least ten points
 // above its 28-day baseline, both with the minimum volume.
 func (p *healthPass) newCardSpikes(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
-	recent, baseline, err := p.spikes(ctx, "failed_attempts", "attempts", newCardFilters, now)
+	recent, baseline, err := p.spikes(ctx, attemptFunnel, newCardFilters, now)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +158,7 @@ func (p *healthPass) newCardSpikes(ctx context.Context, now time.Time) ([]Conver
 // rebillSpikes: the trailing-24h rebill first-attempt failure rate at least
 // ten points above its baseline, or above 25%, over the minimum cycles.
 func (p *healthPass) rebillSpikes(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
-	recent, baseline, err := p.spikes(ctx, "rebill_first_failures", "rebills_attempted", nil, now)
+	recent, baseline, err := p.spikes(ctx, rebillFunnel, nil, now)
 	if err != nil {
 		return nil, err
 	}
@@ -225,13 +249,14 @@ func (p *healthPass) systemErrors(ctx context.Context, now time.Time) ([]Converg
 // unmappedDeclines: a decline code no table maps, per rail and code. It
 // resolves once the code is mapped or ages out of the lookback.
 func (p *healthPass) unmappedDeclines(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
-	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"failed_attempts"}, By: []string{"rail", "response_code"}}, now.Add(-unmappedLookback), now, now)
+	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"rail", "response_code"},
+		Filters: map[string][]string{"outcome": {"declined"}}}, now.Add(-unmappedLookback), now, now)
 	if err != nil {
 		return nil, err
 	}
 	var out []ConvergeFinding
 	for _, r := range rows {
-		rail, code, n := str(r["rail"]), str(r["response_code"]), count(r["failed_attempts"])
+		rail, code, n := str(r["rail"]), str(r["response_code"]), count(r["attempts"])
 		if code == "" || n == 0 || !decline.Classify(rail, code).NeedsMapping() {
 			continue
 		}

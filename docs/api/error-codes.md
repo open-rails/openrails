@@ -157,6 +157,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `psp_key_taken` | 409 | `invalid_request_error` | Another live PSP holds the key. |
 | `psp_last_active` | 409 | `invalid_request_error` | The PSP is the last active one on its rail; pass allow_last to archive it. |
 | `psp_not_found` | 404 | `invalid_request_error` | The PSP does not exist. |
+| `psp_probe_limited` | 429 | `rate_limit_error` | The provider refused this login twice within the hour, or it is being checked, and it locks out repeated failed logins; Retry-After says when it may be checked again. |
 | `purchase_review_resolved` | 409 | `invalid_request_error` | The purchase review was already resolved. |
 | `quantity_not_allowed` | 422 | `invalid_request_error` | A quantity was sent for a price that is not sold per seat. |
 | `rate_card_product_not_found` | 404 | `invalid_request_error` | The rate card names a product that does not exist. |

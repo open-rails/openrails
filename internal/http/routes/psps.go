@@ -7,7 +7,7 @@ import (
 
 // pspWriteErrors are the refusals of a PSP write, beside the route's own.
 func pspWriteErrors(own ...billing.ErrorCode) []billing.ErrorCode {
-	return codes(append(own, "invalid_param", "psp_credentials_rejected", "revision_mismatch", "service_unavailable")...)
+	return codes(append(own, "invalid_param", "psp_credentials_rejected", "psp_probe_limited", "revision_mismatch", "service_unavailable")...)
 }
 
 // pspsRoutes is a merchant's PSPs (accounts on rails), the rails they can be

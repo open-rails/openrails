@@ -1,10 +1,12 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 import { useAdminServices } from "#orck/admin/context"
-// Dashboard › Reports: the daily subscription report and the monthly renewal
-// report over the dashboard's range, each a table with a CSV download.
+// Dashboard › Reports: an explorer that charts any measure in the metrics
+// registry with its dimensions, the daily subscription report and the
+// monthly renewal report over the dashboard's range, each with a CSV
+// download.
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Download01Icon } from "@hugeicons/core-free-icons"
-import type * as React from "react"
+import * as React from "react"
 import { Navigate } from "#orck/admin/router"
 import { useQuery } from "@tanstack/react-query"
 
@@ -31,8 +33,19 @@ import { ApiError } from "#orck/admin/lib/api/client"
 import { useAccess } from "#orck/admin/lib/capabilities"
 import { downloadCsv } from "#orck/admin/lib/csv"
 
-import { rangeDates, type DashboardRange } from "./range"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#orck/admin/components/ui/select"
+import { CHART_VIZ, type WidgetViz } from "#orck/admin/lib/api/metrics"
+
+import { draftOf, QueryBuilder, queryOf, type Draft } from "./query-builder"
+import { rangeDates, widgetQuery, type DashboardRange } from "./range"
 import { RangePicker } from "./range-picker"
+import { measureLabel, useRegistry } from "./registry"
 import { useDashboardRange } from "./use-range"
 import {
   MAX_DAYS,
@@ -44,7 +57,9 @@ import {
   monthlyRows,
   rangeDays,
   renewalsQuery,
+  resultCsv,
 } from "./reports-model"
+import { WidgetVizView } from "./widget-viz"
 
 const utcDay = (date: string) =>
   new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
@@ -87,6 +102,7 @@ export function ReportsPage() {
         </h1>
         <RangePicker />
       </div>
+      <Explorer range={range} />
       <DailyReport range={range} />
       <MonthlyReport range={range} />
     </div>
@@ -172,6 +188,104 @@ function ReportState({
       </p>
     )
   return null
+}
+
+const EXPLORE_VIZ = CHART_VIZ.filter((v) => v !== "kpi" && v !== "stat")
+
+// Explorer charts any measure of the registry over the page's range, split
+// by its dimensions, with its table as CSV.
+function Explorer({ range }: { range: DashboardRange }) {
+  const { id: adminId, text: adminText } = useAdminUI()
+  const { adminQueries } = useAdminServices()
+  const registry = useRegistry()
+  const [draft, setDraft] = React.useState<Draft>(() =>
+    draftOf({
+      measures: ["cash"],
+      by: ["time"],
+      grain: "auto",
+      range: { last: "30d" },
+    })
+  )
+  const [viz, setViz] = React.useState<WidgetViz>("bar")
+  const query = widgetQuery(
+    {
+      id: "explore",
+      title: "",
+      viz,
+      query: queryOf(draft, { measures: [], range: { last: "30d" } }),
+      grid: { x: 0, y: 0, w: 1, h: 1 },
+      fixed_range: false,
+    },
+    { range }
+  )
+  const result = useQuery(adminQueries.widgetMetrics(query))
+  const drawn: WidgetViz =
+    draft.time || viz === "table" ? viz : viz === "donut" ? viz : "table"
+  return (
+    <ReportCard
+      title={adminText("Explore")}
+      description={adminText(
+        "Chart any measure, split by its dimensions, over the range picked."
+      )}
+      canDownload={!!result.data?.rows.length}
+      onDownload={() => {
+        if (!result.data) return
+        const csv = resultCsv(result.data)
+        downloadCsv(
+          `${draft.measures.join("-")}-${suffix(range)}.csv`,
+          csv.header,
+          csv.rows
+        )
+      }}
+    >
+      <div className="flex flex-col gap-4">
+        <div className="grid gap-4 lg:grid-cols-[1fr_12rem]">
+          <QueryBuilder draft={draft} onChange={setDraft} registry={registry} />
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={adminId("explore-viz")} className="text-sm">
+              <AdminMessage id={"Chart type"} />
+            </label>
+            <Select
+              items={EXPLORE_VIZ.map((v) => ({
+                value: v,
+                label: measureLabel(v),
+              }))}
+              value={viz}
+              onValueChange={(v) => v && setViz(v as WidgetViz)}
+            >
+              <SelectTrigger id={adminId("explore-viz")} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EXPLORE_VIZ.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {measureLabel(v)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="h-72">
+          {result.data ? (
+            <WidgetVizView
+              viz={drawn}
+              result={result.data}
+              query={query}
+              registry={registry}
+            />
+          ) : (
+            <ReportState
+              loading={result.isPending}
+              error={result.error}
+              retry={() => void result.refetch()}
+              empty={false}
+            />
+          )}
+        </div>
+      </div>
+    </ReportCard>
+  )
 }
 
 function DailyReport({ range }: { range: DashboardRange }) {

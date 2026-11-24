@@ -585,6 +585,7 @@ pkg openrails/billing, const CodePSPImportInProgress ErrorCode = "psp_import_in_
 pkg openrails/billing, const CodePSPKeyTaken ErrorCode = "psp_key_taken"
 pkg openrails/billing, const CodePSPLastActive ErrorCode = "psp_last_active"
 pkg openrails/billing, const CodePSPNotFound ErrorCode = "psp_not_found"
+pkg openrails/billing, const CodePSPProbeLimited ErrorCode = "psp_probe_limited"
 pkg openrails/billing, const CodePayURLAttemptsExhausted ErrorCode = "pay_url_attempts_exhausted"
 pkg openrails/billing, const CodePayURLExpired ErrorCode = "pay_url_expired"
 pkg openrails/billing, const CodePayURLNotFound ErrorCode = "pay_url_not_found"
@@ -1897,6 +1898,7 @@ pkg openrails/billing, type CustomerTokenParams struct, Email string
 pkg openrails/billing, type CustomerTokenParams struct, EmailVerified bool
 pkg openrails/billing, type Dashboard struct
 pkg openrails/billing, type Dashboard struct, IsDefault bool `json:"is_default"`
+pkg openrails/billing, type Dashboard struct, Profile *DashboardProfile `json:"profile"`
 pkg openrails/billing, type Dashboard struct, UpdatedAt *time.Time `json:"updated_at"`
 pkg openrails/billing, type Dashboard struct, UpdatedBy *string `json:"updated_by"`
 pkg openrails/billing, type Dashboard struct, Widgets []DashboardWidget `json:"widgets"`
@@ -1905,6 +1907,11 @@ pkg openrails/billing, type DashboardGrid struct, H int `json:"h"`
 pkg openrails/billing, type DashboardGrid struct, W int `json:"w"`
 pkg openrails/billing, type DashboardGrid struct, X int `json:"x"`
 pkg openrails/billing, type DashboardGrid struct, Y int `json:"y"`
+pkg openrails/billing, type DashboardProfile struct
+pkg openrails/billing, type DashboardProfile struct, CardPayments bool `json:"card_payments"`
+pkg openrails/billing, type DashboardProfile struct, Credits bool `json:"credits"`
+pkg openrails/billing, type DashboardProfile struct, Subscriptions bool `json:"subscriptions"`
+pkg openrails/billing, type DashboardProfile struct, Usage bool `json:"usage"`
 pkg openrails/billing, type DashboardWidget struct
 pkg openrails/billing, type DashboardWidget struct, FixedRange bool `json:"fixed_range"`
 pkg openrails/billing, type DashboardWidget struct, Grid DashboardGrid `json:"grid"`
@@ -2719,19 +2726,25 @@ pkg openrails/billing, type MetricsDimension struct
 pkg openrails/billing, type MetricsDimension struct, Description string `json:"description"`
 pkg openrails/billing, type MetricsDimension struct, Name string `json:"name"`
 pkg openrails/billing, type MetricsDimension struct, Values []string `json:"values,omitempty"`
+pkg openrails/billing, type MetricsDirection string
 pkg openrails/billing, type MetricsExample struct
 pkg openrails/billing, type MetricsExample struct, Intent string `json:"intent"`
 pkg openrails/billing, type MetricsExample struct, Query QueryMetricsParams `json:"query"`
+pkg openrails/billing, type MetricsGroup string
 pkg openrails/billing, type MetricsLimits struct
 pkg openrails/billing, type MetricsLimits struct, MaxBuckets int `json:"max_buckets"`
 pkg openrails/billing, type MetricsLimits struct, MaxLimit int `json:"max_limit"`
 pkg openrails/billing, type MetricsMeasure struct
 pkg openrails/billing, type MetricsMeasure struct, Class MetricsClass `json:"class"`
 pkg openrails/billing, type MetricsMeasure struct, Description string `json:"description"`
+pkg openrails/billing, type MetricsMeasure struct, DimValues map[string][]string `json:"dim_values,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Dims []string `json:"dims"`
+pkg openrails/billing, type MetricsMeasure struct, Direction MetricsDirection `json:"direction"`
 pkg openrails/billing, type MetricsMeasure struct, Formula string `json:"formula"`
+pkg openrails/billing, type MetricsMeasure struct, Group MetricsGroup `json:"group"`
 pkg openrails/billing, type MetricsMeasure struct, Money bool `json:"money,omitempty"`
 pkg openrails/billing, type MetricsMeasure struct, Name string `json:"name"`
+pkg openrails/billing, type MetricsMeasure struct, Thresholds []MetricsThreshold `json:"thresholds"`
 pkg openrails/billing, type MetricsMeasure struct, Unit string `json:"unit"`
 pkg openrails/billing, type MetricsOrder struct
 pkg openrails/billing, type MetricsOrder struct, Dimension string `json:"dimension,omitempty"`
@@ -2760,6 +2773,9 @@ pkg openrails/billing, type MetricsSchema struct, Grains []string `json:"grains"
 pkg openrails/billing, type MetricsSchema struct, Limits MetricsLimits `json:"limits"`
 pkg openrails/billing, type MetricsSchema struct, Measures []MetricsMeasure `json:"measures"`
 pkg openrails/billing, type MetricsSchema struct, QueryShape string `json:"query_shape"`
+pkg openrails/billing, type MetricsThreshold struct
+pkg openrails/billing, type MetricsThreshold struct, Label string `json:"label"`
+pkg openrails/billing, type MetricsThreshold struct, Value float64 `json:"value"`
 pkg openrails/billing, type MigrationFallback string
 pkg openrails/billing, type MyOrderPayURLParams struct
 pkg openrails/billing, type MyOrderPayURLParams struct, Embedded bool `json:"embedded"`

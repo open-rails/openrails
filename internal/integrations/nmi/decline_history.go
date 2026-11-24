@@ -48,8 +48,9 @@ type DeclineHistory struct {
 
 // DeclineHistory counts the card verifications, one-off sales and scheduled
 // rebills NMI answered in [since, until), once each in the month made. Read
-// only. The Query API selects by last change, so until should be now; it reads
-// one calendar month per query, oldest first, in pages of QueryPageLimit.
+// only. The Query API selects by last change, which a later action moves
+// past until, so it reads the changes of one calendar month per query, oldest
+// first, the last through now, in pages of QueryPageLimit.
 func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) (DeclineHistory, error) {
 	h := DeclineHistory{Since: since.UTC(), Until: until.UTC()}
 	counts := map[HistoryCount]int{}
@@ -59,7 +60,7 @@ func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) 
 		if to.After(h.Until) {
 			to = h.Until
 		}
-		if err := c.readHistoryWindow(ctx, from, to, &h, counts, seen); err != nil {
+		if err := c.readHistoryWindow(ctx, from, to, !to.Before(h.Until), &h, counts, seen); err != nil {
 			return DeclineHistory{}, err
 		}
 		from = to
@@ -74,30 +75,22 @@ func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) 
 	return h, nil
 }
 
-// readHistoryWindow pages the transactions last changed in [from, to).
-func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, h *DeclineHistory, counts map[HistoryCount]int, seen map[string]bool) error {
-	// end_date is inclusive, to the second.
-	filter := QueryFilter{StartDate: from.Format(QueryTimeFormat), EndDate: to.Add(-time.Second).Format(QueryTimeFormat), ResultLimit: QueryPageLimit}
-	firsts := map[string]bool{}
-	for filter.PageNumber = 0; ; filter.PageNumber++ {
-		batch, err := c.TransactionReport(ctx, filter)
-		if err != nil {
-			return fmt.Errorf("nmi transactions from %s, page %d: %w", from.Format(time.DateOnly), filter.PageNumber, err)
-		}
-		if len(batch.Transactions) > 0 {
-			first := strings.TrimSpace(batch.Transactions[0].TransactionID)
-			if firsts[first] {
-				return fmt.Errorf("nmi transaction pagination repeated page starting at %s", first)
-			}
-			firsts[first] = true
-		}
-		for _, t := range batch.Transactions {
+// readHistoryWindow pages the transactions last changed in [from, to), or
+// since from when last.
+func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, last bool, h *DeclineHistory, counts map[HistoryCount]int, seen map[string]bool) error {
+	filter, asOf := QueryFilter{StartDate: from.Format(QueryTimeFormat)}, to
+	if !last {
+		filter.EndDate, asOf = to.Add(-time.Second).Format(QueryTimeFormat), time.Time{} // end_date is inclusive
+	}
+	if err := c.PageTransactions(ctx, filter, asOf, func(page []QueryTransaction) error {
+		for _, t := range page {
 			h.count(t, counts, seen)
 		}
-		if len(batch.Transactions) < QueryPageLimit {
-			return nil
-		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("nmi transactions from %s: %w", from.Format(time.DateOnly), err)
 	}
+	return nil
 }
 
 // count adds a transaction's authorization once, in its month, when it was

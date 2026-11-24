@@ -211,6 +211,11 @@ type Decision struct {
 	// still exist and keep retrying: the apply path then queues the deferred
 	// provider delete.
 	RemoteGone bool
+	// KeepsPaidTime (RemoteGone): the provider only stopped rebilling (a
+	// CCBill cancellation); the member keeps the period paid for, through
+	// PaidThrough when the provider states it.
+	KeepsPaidTime bool
+	PaidThrough   *time.Time
 	// Backfill are the provider's charge-level events for this subscription
 	// at or after the lapsed period end: successes become missing payments,
 	// declines are attempts. Populated whenever a snapshot was consulted,
@@ -566,8 +571,21 @@ func decideFromSnapshot(rail, railSubID string, localStart, localEnd *time.Time,
 		return with(Decision{Kind: TransitionCancel, RemoteGone: remoteGone, Reason: "roster_past_due_beyond_window"})
 	}
 	// 5) The provider says canceled/expired. The evidence is the roster read
-	//    itself, so it dates from this pass.
+	//    itself, so it dates from this pass. A cancellation that only stopped
+	//    rebilling keeps the paid period.
 	if remoteSub != nil && (remoteSub.Status == SubscriptionStatusCanceled || remoteSub.Status == SubscriptionStatusExpired) {
+		if stoppedRebillingOnly(snap.Provider, remoteSub) {
+			// CCBill's paid-through, or the period a rebill read with the
+			// cancellation paid when that ends later. A rebill its refund or
+			// chargeback in the read reverses paid for nothing.
+			paid := remoteSub.NextBillingAt
+			if kept := unreversedSales(txns); renewedSince(kept, chargeCutoff) {
+				if _, end := paidPeriod(kept, chargeCutoff, localStart, localEnd, remoteSub); end != nil && (paid == nil || end.After(*paid)) {
+					paid = end
+				}
+			}
+			return with(Decision{Kind: TransitionCancel, RemoteGone: true, KeepsPaidTime: true, PaidThrough: paid, EvidenceAt: snap.FetchedAt, Reason: "provider_stopped_rebilling"})
+		}
 		return with(Decision{Kind: TransitionCancel, RemoteGone: true, EvidenceAt: snap.FetchedAt, Reason: "roster_dead"})
 	}
 	// 6) The sub is absent AND the pull exhaustively covered subscriptions → it

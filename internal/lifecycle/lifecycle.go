@@ -144,7 +144,13 @@ type DunningStale struct{}
 type RenewalOverdue struct{}
 
 // ProviderCanceled is the provider confirming the subscription ended.
-type ProviderCanceled struct{ At time.Time }
+// PaidThrough is the end of the time paid for when the provider states it (a
+// CCBill cancellation's expiry); zero when it states none. Lapse is an end
+// that only stopped rebilling: its reactivation or next rebill restores it.
+type ProviderCanceled struct {
+	At, PaidThrough time.Time
+	Lapse           bool
+}
 
 // Cancel is a user, merchant or chargeback cancellation.
 type Cancel struct {
@@ -412,12 +418,26 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		if !s.Status.Live() && s.Status != Pending {
 			return s, nil, nil
 		}
+		var effects []Effect
+		if ev.PaidThrough.After(s.PaidThrough) && ev.PaidThrough.After(ev.At) {
+			// The provider sold time this row has not recorded: it is kept.
+			start := s.PaidThrough
+			if start.IsZero() {
+				start = ev.At
+			}
+			effects = append(effects, GrantPeriod{start, ev.PaidThrough})
+			s.PaidThrough = ev.PaidThrough
+		}
 		end := ev.At
 		if s.PaidThrough.After(end) {
 			end = s.PaidThrough // what was paid for is kept
 		}
-		s.Status, s.CancelKind, s.EndedAt = Canceled, CancelProvider, end
-		return s, []Effect{CloseDunning{}, EndAccess{At: end}, Notify{NoticeEnded}}, nil
+		kind := CancelProvider
+		if ev.Lapse {
+			kind = CancelExpired
+		}
+		s.Status, s.CancelKind, s.EndedAt = Canceled, kind, end
+		return s, append(effects, CloseDunning{}, EndAccess{At: end}, Notify{NoticeEnded}), nil
 
 	case Cancel:
 		if ev.Kind == "" {

@@ -78,11 +78,14 @@ func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 	if plan.HasTime {
 		res.Grain = plan.Grain
 	}
-	if plan.Compare {
-		shift := plan.To.Sub(plan.From)
+	if plan.Compare != "" {
 		prev := *plan
-		prev.From, prev.To = plan.From.Add(-shift), plan.From
-		prev.Compare = false
+		if plan.Compare == "previous_year" {
+			prev.From, prev.To = plan.From.AddDate(-1, 0, 0), plan.To.AddDate(-1, 0, 0)
+		} else {
+			prev.From, prev.To = plan.From.Add(-plan.To.Sub(plan.From)), plan.From
+		}
+		prev.Compare = ""
 		if prev.HasTime {
 			prev.Buckets = bucketLabels(prev.From, prev.To, prev.Grain)
 		}

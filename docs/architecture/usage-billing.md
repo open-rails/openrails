@@ -67,9 +67,7 @@ movements (`postRunningChargesThrough`).
 - **Staff**: `UpdateCustomer` (`usage_billing`); `WaiveOrderBalance`,
   `MarkOrderUncollectible`, `RecordExternalPayment`.
 - **Customer**: `GET /v1/me/usage`, `/v1/me/balance/transactions`.
-- **Metrics and events**: `usage_units`, `usage_revenue`, `forgiven_usage`
-  (`POST /v1/metrics/query`); `delinquency.*`; customer facts `order_due`,
-  `order_overdue`, `order_collection_stopped`.
+- **Metrics and events**: `usage_units` and `usage_charged` by `charge` (charged, forgiven) (`POST /v1/metrics/query`); `delinquency.*`; customer facts `order_due`, `order_overdue`, `order_collection_stopped`.
 - **Configuration**: `usage_billing_enabled` (`Config.UsageBillingEnabled`);
   merchant `usage_billing`, `billing_period_boundary`
   ([usage billing](../client.md#usage-and-running-charges)).

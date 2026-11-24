@@ -341,19 +341,20 @@ func TestCCBillIdentity(t *testing.T) {
 	})
 
 	t.Run("OR-J38-S79/a-ccbill-cancel-the-pull-lands-is-restored-by-its-rebill", func(t *testing.T) {
-		// The Cancellation webhook never came; DataLink reports it.
+		// The Cancellation webhook never came; DataLink reports it, with the
+		// time paid for ending two days ago.
 		var feed *httptest.Server
-		var canceled time.Time
+		var canceled, due time.Time
 		a := ccbillWebhookWorld(t, func(w *world) {
 			canceled = w.clock.Now().UTC().Truncate(time.Second).Add(-30 * time.Minute)
-			feed = dataLinkCancellationFeed(t, ccbillProvider, canceled)
-			declareCCBill(w, feed)
+			due = w.clock.Now().UTC().Truncate(time.Second).Add(-48 * time.Hour)
+			feed = dataLinkCancellationFeed(t, ccbillProvider, canceled, due)
+			declareCCBill(w, feed.URL)
 			w.cfg.ProviderSandbox.CCBillWebhookSources = []string{"127.0.0.1/32"}
 		})
 		price := ccbillMemberPrice(t, a.alpha)
 		alice := customerOf(a.alice)
 		now := a.clock.Now().UTC().Truncate(time.Second)
-		due := now.Add(-time.Hour)
 		importLegacyCCBill(t, a.alpha, now)(legacyCCBillMember(alice, price, ccbillStored, "0812233445566778801", due))
 		armDestructive(t, a, true)
 		fleet := hostFleet(t, a.world)
@@ -499,7 +500,7 @@ func TestCCBillIdentity(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			rebill = w.clock.Now().Truncate(time.Second).Add(-24 * time.Hour)
 			feed = dataLinkFeedFor(t, ccbillProvider, "0912233445566778801", rebill)
-			declareCCBill(w, feed)
+			declareCCBill(w, feed.URL)
 		})
 		price := ccbillMemberPrice(t, w.alpha)
 		customer := billing.CustomerID(uuid.New())
@@ -534,7 +535,7 @@ func TestCCBillIdentity(t *testing.T) {
 		w := newWorld(t, func(w *world) {
 			rebill = w.clock.Now().Truncate(time.Second).Add(-10 * 24 * time.Hour)
 			feed = dataLinkFeedFor(t, ccbillProvider, "0912233445566778801", rebill)
-			declareCCBill(w, feed)
+			declareCCBill(w, feed.URL)
 		})
 		price := ccbillMemberPrice(t, w.alpha)
 		customer := billing.CustomerID(uuid.New())
@@ -705,8 +706,9 @@ func ccbillPull(t *testing.T, w *world, feed *httptest.Server, since time.Time, 
 }
 
 // dataLinkCancellationFeed is CCBill's DataLink after sub was canceled at
-// canceled: no active member, and the cancellation in its export.
-func dataLinkCancellationFeed(t *testing.T, sub string, canceled time.Time) *httptest.Server {
+// canceled, paid through expires: no active member, and the cancellation in
+// its export.
+func dataLinkCancellationFeed(t *testing.T, sub string, canceled, expires time.Time) *httptest.Server {
 	t.Helper()
 	mst := time.FixedZone("MST", -7*60*60)
 	server := httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
@@ -723,8 +725,12 @@ func dataLinkCancellationFeed(t *testing.T, sub string, canceled time.Time) *htt
 			http.Error(out, "unbounded DataLink export", http.StatusBadRequest)
 			return
 		}
-		if !canceled.Before(from) && canceled.Before(until) {
-			fmt.Fprintf(out, "CANCELLATION,945280,0001,%s,%s\n", sub, canceled.UTC().Format("2006-01-02 15:04:05"))
+		if until.Sub(from) > 24*time.Hour {
+			fmt.Fprint(out, "Error: Selected period is greater than 24 hours.")
+			return
+		}
+		if !canceled.Before(from) && !canceled.After(until) {
+			fmt.Fprintf(out, "\"CANCELLATION\",\"945280\",\"0001\",\"%s\",\"%s\",\"%s\",\"N\"\n", sub, expires.UTC().Format(time.DateOnly), canceled.UTC().Format(time.DateOnly))
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -752,7 +758,11 @@ func dataLinkFeedFor(t *testing.T, sub, txn string, rebill time.Time) *httptest.
 			http.Error(out, "unbounded DataLink export", http.StatusBadRequest)
 			return
 		}
-		if !rebill.Before(from) && rebill.Before(until) {
+		if until.Sub(from) > 24*time.Hour {
+			fmt.Fprint(out, "Error: Selected period is greater than 24 hours.")
+			return
+		}
+		if !rebill.Before(from) && !rebill.After(until) {
 			fmt.Fprintf(out, "REBILL,945280,0001,%s,%s,%s,10.00\n", sub, rebill.UTC().Format("2006-01-02 15:04:05"), txn)
 		}
 	}))

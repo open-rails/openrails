@@ -134,9 +134,11 @@ func reconcileUnknownPSP(ctx context.Context, database *db.DB, lc *subscriptions
 	// history by definition.
 	floor := EvidenceFloorFor(ctx, database, merchantID.UUID())
 
-	// One windowed bulk pull covering every unknown row of this PSP.
+	// One windowed bulk pull covering every unknown row of this PSP; a paced
+	// one (a live CCBill account) takes a request an hour, so its rows are
+	// probed one by one instead.
 	var snap *RemoteSnapshot
-	if fetcher != nil {
+	if fetcher != nil && !Paced(fetcher) {
 		since := now
 		for _, r := range rows {
 			if r.CurrentPeriodEndsAt != nil && r.CurrentPeriodEndsAt.Before(since) {

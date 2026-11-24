@@ -11,8 +11,13 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Grains accepted for the time dimension.
-var Grains = []string{"day", "week", "month", "quarter", "year"}
+// Grains accepted for the time dimension; auto is day up to 45 days, week up
+// to 26 weeks, then month.
+var Grains = []string{"auto", "day", "week", "month", "quarter", "year"}
+
+// Compares are the comparison windows: the preceding window of equal length,
+// or the same window a year before.
+var Compares = []string{"previous_period", "previous_year"}
 
 const (
 	// MaxBuckets caps a time series (range / grain).

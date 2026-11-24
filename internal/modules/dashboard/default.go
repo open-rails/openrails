@@ -1,102 +1,157 @@
 package dashboard
 
-import "github.com/open-rails/openrails/internal/modules/metrics"
+import (
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/metrics"
+)
 
-// DefaultWidgets is the template served when a merchant has no saved layout;
-// usage widgets appear only when the merchant has usage. Nothing is written
-// until the merchant saves. The first row is today against yesterday; every
-// other widget follows the range the viewer picks (its saved range is the
-// default).
-func DefaultWidgets(hasUsage bool) []Widget {
-	last30 := &metrics.QueryRange{Last: "30d"}
-	last12w := &metrics.QueryRange{Last: "12w"}
-	today := func(id, title string, x, w int, measure string, filters map[string][]string) Widget {
-		return Widget{
-			ID: id, Title: title, Viz: "stat", FixedRange: true,
-			Query: metrics.Query{Measures: []string{measure}, Filters: filters,
-				Range: &metrics.QueryRange{Last: "1d"}, Compare: "previous_period"},
-			Grid: Grid{X: x, Y: 0, W: w, H: 2},
-		}
-	}
-	stat := func(id, title string, x, y, w int, measure string, filters map[string][]string) Widget {
-		return Widget{
-			ID: id, Title: title, Viz: "stat",
-			Query: metrics.Query{Measures: []string{measure}, Filters: filters, Range: last30, Compare: "previous_period"},
-			Grid:  Grid{X: x, Y: y, W: w, H: 2},
-		}
-	}
-	widgets := []Widget{
-		today("today-new", "New subscriptions today", 0, 3, "new_subscriptions", nil),
-		today("today-renewals", "Renewals today", 3, 3, "payment_count", map[string][]string{"attempt_kind": {"renewal"}}),
-		today("today-cancellations", "Cancellations today", 6, 2, "cancellations", nil),
-		today("today-failed-purchases", "Failed purchases today", 8, 2, "failed_attempts", map[string][]string{"kind": {"initial"}}),
-		today("today-net", "Net change today", 10, 2, "net_new_subscriptions", nil),
+// Profile is what the merchant's data shows it sells.
+type Profile = billing.DashboardProfile
 
-		stat("active-subscribers", "Active subscribers", 0, 2, 3, "subscriptions", map[string][]string{"status": {"active"}}),
-		stat("net-new", "Net new subscribers", 3, 2, 3, "net_new_subscriptions", nil),
-		stat("mrr", "MRR", 6, 2, 3, "mrr", nil),
-		stat("net-revenue", "Net revenue", 9, 2, 3, "net_revenue", nil),
-		stat("churn-rate", "Churn rate", 0, 4, 4, "churn_rate", nil),
-		stat("failed-renewals", "Failed renewals", 4, 4, 4, "rebill_first_failures", nil),
-		{
-			ID: "dunning", Title: "Subscriptions in dunning", Viz: "stat",
-			Query: metrics.Query{Measures: []string{"subscriptions"},
-				Filters: map[string][]string{"status": {"past_due"}}, Range: last30},
-			Grid: Grid{X: 8, Y: 4, W: 4, H: 2},
-		},
-		{
-			ID: "new-vs-canceled", Title: "New vs canceled by day", Viz: "line",
-			Query: metrics.Query{Measures: []string{"new_subscriptions", "cancellations"}, By: []string{"time"},
-				Grain: "day", Range: last30},
-			Grid: Grid{X: 0, Y: 6, W: 6, H: 4},
-		},
-		{
-			ID: "cancellations-by-type", Title: "Cancellations by type", Viz: "bar",
-			Query: metrics.Query{Measures: []string{"cancellations"}, By: []string{"time", "cancel_type"},
-				Grain: "week", Range: last12w},
-			Grid: Grid{X: 6, Y: 6, W: 6, H: 4},
-		},
-		{
-			ID: "revenue-by-rail", Title: "Net revenue by rail", Viz: "donut",
-			Query: metrics.Query{Measures: []string{"net_revenue"}, By: []string{"rail"}, Range: last30},
-			Grid:  Grid{X: 0, Y: 10, W: 6, H: 4},
-		},
-		{
-			ID: "revenue-by-stream", Title: "Net revenue by stream", Viz: "area",
-			Query: metrics.Query{Measures: []string{"net_revenue"}, By: []string{"time", "stream"},
-				Grain: "week", Range: last12w},
-			Grid: Grid{X: 6, Y: 10, W: 6, H: 4},
-		},
-		{
-			ID: "payment-health", Title: "Payment health by rail account", Viz: "table",
-			Query: metrics.Query{Measures: []string{"attempt_failure_rate", "chargeback_rate"},
-				By: []string{"psp"}, Range: last30},
-			Grid: Grid{X: 0, Y: 14, W: 6, H: 4},
-		},
-		{
-			ID: "new-subscriptions", Title: "New subscriptions by subscriber type", Viz: "bar",
-			Query: metrics.Query{Measures: []string{"new_subscriptions"}, By: []string{"time", "subscriber_type"},
-				Grain: "week", Range: last12w},
-			Grid: Grid{X: 6, Y: 14, W: 6, H: 4},
-		},
+// Empty reports a merchant with no activity yet.
+func Empty(p Profile) bool { return p == Profile{} }
+
+// Grid sizes: tiles four to a row, charts two, headings across.
+const (
+	cols     = 12
+	tileW    = 3
+	tileH    = 3
+	chartW   = 6
+	chartH   = 4
+	headingH = 1
+)
+
+// DefaultWidgets is the health overview served while a merchant has saved no
+// layout: KPI tiles, then a section of trend charts for each thing the
+// profile shows it sells. Sections without data are left out; an empty
+// merchant gets the tiles of a subscription business and no sections. Every
+// widget follows the range the viewer picks (its saved range, the last 30
+// days, is the default) at a grain that fits it.
+func DefaultWidgets(p Profile) []Widget {
+	empty := Empty(p)
+	subscriptions, cards := p.Subscriptions || empty, p.CardPayments || empty
+	var l layout
+
+	l.tile("kpi-cash", "Cash collected", "cash", nil)
+	if subscriptions {
+		l.tile("kpi-subscriptions", "Subscriptions", "subscriptions", nil)
+		l.tile("kpi-new-subscriptions", "New subscriptions", "new_subscriptions", nil)
+		l.tile("kpi-cancellations", "Cancellations", "cancellations", nil)
+		l.tile("kpi-dunning", "Renewals in dunning", "rebills", map[string][]string{"outcome": {"open"}})
+		l.tile("kpi-rebill-rate", "Rebill rate", "rebill_rate", nil)
 	}
-	if hasUsage {
-		widgets = append(widgets,
-			Widget{
-				ID: "usage-vs-credits", Title: "Credits sold vs usage revenue", Viz: "line",
-				Query: metrics.Query{Measures: []string{"credits_sold", "usage_revenue"}, By: []string{"time"},
-					Grain: "week", Range: last12w},
-				Grid: Grid{X: 0, Y: 18, W: 6, H: 4},
-			},
-			Widget{
-				ID: "top-customers", Title: "Top customers by usage revenue", Viz: "table",
-				Query: metrics.Query{Measures: []string{"usage_revenue"}, By: []string{"customer"}, Range: last30,
-					Order: []metrics.OrderTerm{{Measure: "usage_revenue", Dir: "desc"}}, Limit: intp(10)},
-				Grid: Grid{X: 6, Y: 18, W: 6, H: 4},
-			},
+	if cards {
+		l.tile("kpi-chargeback-rate", "Chargeback rate", "chargeback_rate", nil)
+	}
+	if p.Usage {
+		l.tile("kpi-usage-charged", "Usage charged", "usage_charged", map[string][]string{"charge": {"charged"}})
+		l.tile("kpi-active-customers", "Active customers", "active_customers", nil)
+	}
+	if p.Credits {
+		l.tile("kpi-credits-sold", "Credits sold", "credits_sold", nil)
+	}
+	if empty {
+		return l.widgets
+	}
+
+	l.section("revenue", "Revenue and cash",
+		chart("cash-by-kind", "Cash by kind", "bar", series([]string{"cash"}, "cash_kind")),
+		chart("cash-by-psp", "Cash by PSP", "donut", metrics.Query{Measures: []string{"cash"}, By: []string{"psp"}}),
+	)
+	if p.Subscriptions {
+		l.section("recurring", "Recurring",
+			chart("new-vs-canceled", "New against canceled subscriptions", "line", series([]string{"new_subscriptions", "cancellations"})),
+			chart("cancellations-by-type", "Cancellations by type", "bar", series([]string{"cancellations"}, "cancel_type")),
+		)
+		l.section("retention", "Retention",
+			chart("rebill-rate", "Rebill rate", "line", series([]string{"rebill_rate"})),
 		)
 	}
-	return widgets
+	var health []Widget
+	if p.Subscriptions {
+		health = append(health,
+			chart("rebills-by-outcome", "Renewals by outcome", "bar", series([]string{"rebills"}, "outcome")),
+			chart("dunning-recovery", "Dunning recovery rate", "line", series([]string{"dunning_recovery_rate"})),
+		)
+	}
+	if p.CardPayments {
+		health = append(health,
+			chart("refund-chargeback-rate", "Refund and chargeback rate", "line", series([]string{"refund_rate", "chargeback_rate"})),
+			chart("attempts-by-psp", "Attempts by PSP and outcome", "table", metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "outcome"}}),
+		)
+	}
+	l.section("payment-health", "Payment health", health...)
+	var credits []Widget
+	switch {
+	case p.Usage && p.Credits:
+		credits = append(credits, chart("usage-vs-credits", "Usage against credits sold", "line", series([]string{"usage_charged", "credits_sold"})))
+	case p.Usage:
+		credits = append(credits, chart("usage-by-charge", "Usage charged and forgiven", "bar", series([]string{"usage_charged"}, "charge")))
+	case p.Credits:
+		credits = append(credits, chart("credits-sold", "Credits sold", "line", series([]string{"credits_sold"})))
+	}
+	if p.Usage {
+		credits = append(credits,
+			chart("active-customers", "Active customers", "line", series([]string{"active_customers"})),
+			chart("top-customers", "Top customers by usage", "table", metrics.Query{Measures: []string{"usage_charged"}, By: []string{"customer"},
+				Filters: map[string][]string{"charge": {"charged"}},
+				Order:   []metrics.OrderTerm{{Measure: "usage_charged", Dir: "desc"}}, Limit: intp(10)}),
+		)
+	}
+	if p.Credits {
+		credits = append(credits, chart("depletion-risk", "Customers at depletion risk", "line", series([]string{"customers_at_depletion_risk"})))
+	}
+	l.section("credits-usage", "Credits and usage", credits...)
+	return l.widgets
 }
+
+// layout places widgets row by row.
+type layout struct {
+	widgets []Widget
+	y       int
+	tiles   int // tiles placed in the current row of tiles
+}
+
+func (l *layout) tile(id, title, measure string, filters map[string][]string) {
+	if l.tiles == cols/tileW {
+		l.y, l.tiles = l.y+tileH, 0
+	}
+	l.widgets = append(l.widgets, Widget{
+		ID: id, Title: title, Viz: "kpi",
+		Query: metrics.Query{Measures: []string{measure}, Filters: filters, Range: saved(), Compare: "previous_period"},
+		Grid:  Grid{X: l.tiles * tileW, Y: l.y, W: tileW, H: tileH},
+	})
+	l.tiles++
+}
+
+// section is a heading over its charts, two to a row; none is no section.
+func (l *layout) section(id, title string, charts ...Widget) {
+	if len(charts) == 0 {
+		return
+	}
+	if l.tiles > 0 {
+		l.y, l.tiles = l.y+tileH, 0
+	}
+	l.widgets = append(l.widgets, Widget{ID: "section-" + id, Title: title, Viz: Heading, Grid: Grid{X: 0, Y: l.y, W: cols, H: headingH}})
+	l.y += headingH
+	for i, c := range charts {
+		c.Grid = Grid{X: (i % 2) * chartW, Y: l.y + (i/2)*chartH, W: chartW, H: chartH}
+		l.widgets = append(l.widgets, c)
+	}
+	l.y += (len(charts) + 1) / 2 * chartH
+}
+
+func chart(id, title, viz string, q metrics.Query) Widget {
+	q.Range = saved()
+	return Widget{ID: id, Title: title, Viz: viz, Query: q}
+}
+
+// series is measures over time at the grain that fits the range, split by
+// the given dimensions.
+func series(measures []string, by ...string) metrics.Query {
+	return metrics.Query{Measures: measures, By: append([]string{"time"}, by...), Grain: "auto"}
+}
+
+func saved() *metrics.QueryRange { return &metrics.QueryRange{Last: "30d"} }
 
 func intp(v int) *int { return &v }

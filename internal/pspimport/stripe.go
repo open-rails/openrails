@@ -200,7 +200,7 @@ func stripeSubscription(sub reconcile.RemoteSubscription, raw json.RawMessage) (
 	return staged{kind: billing.PSPImportSubscription, ref: sub.RailSubscriptionID, customerRef: sub.CustomerID, occurredAt: data.StartedAt, facts: f, data: data}, nil
 }
 
-func (s *stripeSource) history(ctx context.Context, since, until time.Time) ([]staged, error) {
+func (s *stripeSource) history(ctx context.Context, since, until time.Time, _ bool) ([]staged, error) {
 	if s.billOf == nil {
 		if err := s.readBills(ctx); err != nil {
 			return nil, err

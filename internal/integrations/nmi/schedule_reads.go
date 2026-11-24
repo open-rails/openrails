@@ -86,7 +86,7 @@ func (c *NMIClient) SalesForSchedules(ctx context.Context, ids []string, since t
 	}
 	var out []ScheduleSale
 	for page := 0; ; page++ {
-		sales, n, err := c.salesPage(ctx, QueryFilter{SubscriptionID: list}, since, time.Time{}, page)
+		sales, n, err := c.salesPage(ctx, QueryFilter{SubscriptionID: list}, since, page)
 		if err != nil {
 			return nil, err
 		}
@@ -97,19 +97,17 @@ func (c *NMIClient) SalesForSchedules(ctx context.Context, ids []string, since t
 	}
 }
 
-// SalesPage reads one page of every sale action in [since, until). It
-// reports how many transactions the page held, so a caller checkpointing a
+// SalesPage reads one page of every sale action on or after since. It has
+// no end: NMI selects by last change, which a later action moves past any.
+// It reports how many transactions the page held, so a caller checkpointing a
 // bulk read knows when the report is exhausted (fewer than QueryPageLimit).
-func (c *NMIClient) SalesPage(ctx context.Context, since, until time.Time, page int) ([]ScheduleSale, int, error) {
-	return c.salesPage(ctx, QueryFilter{}, since, until, page)
+func (c *NMIClient) SalesPage(ctx context.Context, since time.Time, page int) ([]ScheduleSale, int, error) {
+	return c.salesPage(ctx, QueryFilter{}, since, page)
 }
 
-func (c *NMIClient) salesPage(ctx context.Context, filter QueryFilter, since, until time.Time, page int) ([]ScheduleSale, int, error) {
+func (c *NMIClient) salesPage(ctx context.Context, filter QueryFilter, since time.Time, page int) ([]ScheduleSale, int, error) {
 	if !since.IsZero() {
 		filter.StartDate = since.UTC().Format(QueryTimeFormat)
-	}
-	if !until.IsZero() {
-		filter.EndDate = until.UTC().Format(QueryTimeFormat)
 	}
 	filter.ResultLimit, filter.PageNumber = QueryPageLimit, page
 	report, err := c.TransactionReport(ctx, filter)

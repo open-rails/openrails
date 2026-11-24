@@ -3,6 +3,8 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -110,10 +112,16 @@ func pspContext(r *httprequest.Request) (*merchants.Service, billing.MerchantID,
 
 func writePSPError(r *httprequest.Request, err error) {
 	var lastActive *merchants.LastActivePSPError
+	var limited *merchants.ProbeLimitedError
 	switch {
 	case errors.As(err, &lastActive):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePSPLastActive, err.Error()).
 			WithMetadata(map[string]any{"psp_id": lastActive.PSP.String()}))
+	case errors.As(err, &limited):
+		seconds := int64((limited.RetryAfter + time.Second - 1) / time.Second)
+		r.SetHeader("Retry-After", strconv.FormatInt(seconds, 10))
+		r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, billing.CodePSPProbeLimited, err.Error()).
+			WithMetadata(map[string]any{"retry_after_seconds": seconds}))
 	case errors.Is(err, merchants.ErrConfigUnavailable):
 		r.ErrorCode(billing.CodeServiceUnavailable, "merchant configuration unavailable")
 	default:

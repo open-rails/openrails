@@ -960,6 +960,9 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			RecommendedAction: "rail reports this subscription " + string(r.Status) + "; enforce cancels it locally and revokes its subscription-sourced entitlements",
 			Apply:             decideApply(s, snap, now, opts),
 		}
+		if stoppedRebillingOnly(provider, r) {
+			f.RecommendedAction = "rail stopped rebilling this subscription; enforce cancels it locally at its period end, keeping the time paid for"
+		}
 		if intent := deletionIntent(s); intent != nil {
 			f.IntentEvidence = intent
 		}
