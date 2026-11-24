@@ -36,6 +36,7 @@ migration 0037_unit_order_revenue.up.sql sha256:5c5569cedec95ee75775645cea9ab575
 migration 0038_write_posture_comments.up.sql sha256:4e52a41d97043af3c86dffd550e7456735d0e4642669498ddadcc1a3512e29fe
 migration 0039_lease_in_flight_off_customers.up.sql sha256:c0290a0816eb44a2edef247a2116743b5ddfa57a2f4114056cf4b63b77d82edc
 migration 0040_migration_cohort_order.up.sql sha256:72f4a45e6f1533ec1dca16b01d24db219b14490cd071402e8fe61d02964e702a
+migration 0041_mrr_totals_settle.up.sql sha256:88d0cea1c62392fc13958c7e9b917d6b4c7c7f109ba392dbd60ea90c24c55c6e
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3154,7 +3155,7 @@ table billing.reconciliation_findings
   constraint reconciliation_findings_severity_check CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])))
   constraint reconciliation_findings_source_check CHECK ((((finding_type ~~ 'pull.%'::text) = (source IS NOT NULL)) AND ((source IS NULL) OR (source = ANY (ARRAY['pull'::text, 'verification'::text])))))
   constraint reconciliation_findings_status_check CHECK ((status = ANY (ARRAY['auto_fixed'::text, 'reconcile_required'::text, 'requires_review'::text, 'fixed'::text, 'ignored'::text])))
-  constraint reconciliation_findings_type_check CHECK ((finding_type ~ '^(pull|derive|life|consistency|notify|catalog|books)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'::text))
+  constraint reconciliation_findings_type_check CHECK ((finding_type ~ '^(pull|derive|life|consistency|notify|catalog|books|mrr)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'::text))
   index CREATE INDEX reconciliation_findings_approval_run_id_idx ON billing.reconciliation_findings USING btree (merchant_id, approval_run_id) WHERE (approval_run_id IS NOT NULL)
   index CREATE INDEX reconciliation_findings_finding_type_idx ON billing.reconciliation_findings USING btree (finding_type) WHERE (status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text]))
   index CREATE UNIQUE INDEX reconciliation_findings_finding_type_psp_id_subject_key_key ON billing.reconciliation_findings USING btree (merchant_id, finding_type, psp_id, subject_key) NULLS NOT DISTINCT
@@ -3465,7 +3466,7 @@ table billing.subscription_cancellations
   column cancel_type text
   column decided_at timestamp with time zone NOT NULL
   column reversed_at timestamp with time zone
-  constraint subscription_cancellations_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
+  constraint subscription_cancellations_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscription_cancellations_pkey PRIMARY KEY (merchant_id, id)
   constraint subscription_cancellations_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE RESTRICT
   index CREATE INDEX subscription_cancellations_decided_at_idx ON billing.subscription_cancellations USING btree (merchant_id, decided_at)
@@ -6467,9 +6468,13 @@ function billing.settle_mrr(uuid)
           INSERT INTO billing.mrr_customer_flows AS f (merchant_id, bucket_at, logos)
           SELECT p_merchant, b.bucket_at, b.logos FROM unnest(v_buckets, v_logos) AS b(bucket_at, logos) ORDER BY b.bucket_at
           ON CONFLICT (merchant_id, bucket_at) DO UPDATE SET logos = f.logos + EXCLUDED.logos;
-          INSERT INTO billing.mrr_customer_totals AS t (merchant_id, customers)
-          SELECT p_merchant, sum(l)::bigint FROM unnest(v_logos) AS l
-          ON CONFLICT (merchant_id) DO UPDATE SET customers = t.customers + EXCLUDED.customers;
+          -- A CHECK judges the row an INSERT proposes before ON CONFLICT
+          -- turns it into an update, so a fall is never proposed: the row is
+          -- made at zero, then moved.
+          INSERT INTO billing.mrr_customer_totals (merchant_id, customers) VALUES (p_merchant, 0)
+          ON CONFLICT (merchant_id) DO NOTHING;
+          UPDATE billing.mrr_customer_totals SET customers = customers + (SELECT sum(l) FROM unnest(v_logos) AS l)
+           WHERE merchant_id = p_merchant;
       END IF;
       -- Each changed subscription moves its products' MRR and subscribers, in
       -- the bucket of its customer's movement in each currency: the latest
@@ -6486,17 +6491,24 @@ function billing.settle_mrr(uuid)
        ORDER BY x.currency, billing.mrr_bucket(x.at), x.product_id
       ON CONFLICT (merchant_id, currency, bucket_at, product_id) DO UPDATE
       SET amount = p.amount + EXCLUDED.amount, subscribers = p.subscribers + EXCLUDED.subscribers;
-      INSERT INTO billing.mrr_product_totals AS p (merchant_id, currency, product_id, mrr, subscribers)
-      SELECT p_merchant, x.currency, x.product_id, sum(x.amount), sum(x.subscribers)
-        FROM billing.subscription_mrr m
-        CROSS JOIN LATERAL (VALUES (m.recorded_currency, m.recorded_product_id, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
-                                   (m.currency, m.product_id, m.mrr, (m.mrr > 0)::integer)) x(currency, product_id, amount, subscribers)
-       WHERE m.merchant_id = p_merchant AND m.dirty
-       GROUP BY x.currency, x.product_id
-      HAVING sum(x.amount) <> 0 OR sum(x.subscribers) <> 0
-       ORDER BY x.currency, x.product_id
-      ON CONFLICT (merchant_id, currency, product_id) DO UPDATE
-      SET mrr = p.mrr + EXCLUDED.mrr, subscribers = p.subscribers + EXCLUDED.subscribers;
+      -- Each product's totals, one at a time in key order, made at zero and
+      -- then moved: a CHECK would refuse a fall proposed as an INSERT.
+      FOR v_sum IN
+          SELECT x.currency, x.product_id, sum(x.amount)::bigint AS mrr, sum(x.subscribers)::bigint AS subscribers
+            FROM billing.subscription_mrr m
+            CROSS JOIN LATERAL (VALUES (m.recorded_currency, m.recorded_product_id, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
+                                       (m.currency, m.product_id, m.mrr, (m.mrr > 0)::integer)) x(currency, product_id, amount, subscribers)
+           WHERE m.merchant_id = p_merchant AND m.dirty
+           GROUP BY x.currency, x.product_id
+          HAVING sum(x.amount) <> 0 OR sum(x.subscribers) <> 0
+           ORDER BY x.currency, x.product_id
+      LOOP
+          INSERT INTO billing.mrr_product_totals (merchant_id, currency, product_id, mrr, subscribers)
+          VALUES (p_merchant, v_sum.currency, v_sum.product_id, 0, 0)
+          ON CONFLICT (merchant_id, currency, product_id) DO NOTHING;
+          UPDATE billing.mrr_product_totals SET mrr = mrr + v_sum.mrr, subscribers = subscribers + v_sum.subscribers
+           WHERE merchant_id = p_merchant AND currency = v_sum.currency AND product_id = v_sum.product_id;
+      END LOOP;
       -- The merchant's totals, one currency at a time.
       FOR v_sum IN
           SELECT x.currency, sum(x.amount)::bigint AS mrr, sum(x.subscribers)::bigint AS subscribers,

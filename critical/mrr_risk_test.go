@@ -247,13 +247,14 @@ func TestMRRRisk(t *testing.T) {
 	t.Run("OR-J42-S13/a-card-expiring-before-renewal-enters-on-the-period-change-and-leaves-on-an-account-updater-refresh", func(t *testing.T) {
 		// A month boundary falls between the first and second period ends:
 		// the card expires at it. Everything happens months ago, so every
-		// payment is in the database's past.
-		today := time.Now().UTC()
-		boundary := time.Date(today.Year(), today.Month()-3, 1, 0, 0, 0, 0, time.UTC)
-		v := newVaultCards(t, false, true, func(w *world) { w.clock.Advance(boundary.Add(-10 * 24 * time.Hour).Sub(w.clock.Now())) })
+		// payment is in the database's past. Ten-day periods put the second
+		// renewal's 14-day lookahead after the first check, so the updater
+		// is asked again once the renewal is paid.
+		boundary := monthsAgo(3)
+		v := newVaultCards(t, false, true, func(w *world) { w.clock.Advance(boundary.Add(-12 * 24 * time.Hour).Sub(w.clock.Now())) })
 		expiry := boundary.Add(-24 * time.Hour)
 		card := v.saveExpiringCard(t, v.aliceToken, "4111111111111111", "1111", int(expiry.Month()), expiry.Year())
-		sub := v.subscribe(t, v.aliceToken, "expiring", 7*24, 10_000_000, card)
+		sub := v.subscribe(t, v.aliceToken, "expiring", 10*24, 10_000_000, card)
 		require.True(t, sub.CurrentPeriodEndsAt.Before(boundary))
 		require.Nil(t, mrrRiskOf(t, v.alpha, sub.ID), "the card covers the first renewal")
 		fleet := startVaultFleet(t, v)
@@ -339,9 +340,12 @@ func TestMRRRisk(t *testing.T) {
 		_, err = drain.Exec(t.Context(), "SELECT set_config('openrails.merchant_id', $1, true)", merchant.String())
 		require.NoError(t, err)
 		var claimed, holder int
-		require.NoError(t, drain.QueryRow(t.Context(), "SELECT "+pgx.Identifier{a.schema, "effect_due_mrr_risk"}.Sanitize()+"($1, 100), pg_backend_pid()", merchant).Scan(&claimed, &holder))
+		require.NoError(t, drain.QueryRow(t.Context(), "SELECT "+pgx.Identifier{a.schema, "effect_due_mrr_risk"}.Sanitize()+"($1, 100, NULL), pg_backend_pid()", merchant).Scan(&claimed, &holder))
 		require.Positive(t, claimed)
-		require.Zero(t, riskQueued(t, a.world, a.alpha, sub.CustomerID), "the claim took the customer's changes")
+		var left int
+		require.NoError(t, drain.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "mrr_risk_due"}.Sanitize()+
+			" WHERE merchant_id = $1 AND customer_id = $2", merchant, sub.CustomerID.UUID()).Scan(&left))
+		require.Zero(t, left, "the claim took the customer's changes")
 
 		// NMI declines the renewal for a card it must not charge again; the
 		// decline's writer queues the customer and waits for the drain's locks.
@@ -432,11 +436,6 @@ func TestMRRRisk(t *testing.T) {
 	t.Run("OR-J42-S18/a-new-default-card-expiring-before-renewal-puts-a-subscription-following-it-at-risk-never-an-nmi-schedule", func(t *testing.T) {
 		boundary := monthsAgo(3)
 		v := newVaultCards(t, false, false, func(w *world) { w.clock.Advance(boundary.Add(-3 * 24 * time.Hour).Sub(w.clock.Now())) })
-		// An NMI schedule charges the card NMI holds for it; this one names none.
-		schedule := nmiMembershipDeclared(t, v.authorityWorld, v.journal, catalog.Field[int]{}, func(book *billing.DeclaredBilling) {
-			book.Subscriptions[0].PaymentMethod = nil
-		})
-		require.Nil(t, schedule.PaymentMethodID)
 		good := v.saveCard(t, v.aliceToken, "4111111111111111", "visa", "1111")
 		setDefaultCard(t, v.authorityWorld, v.aliceToken, good.ID)
 		sub := v.subscribe(t, v.aliceToken, "following", 7*24, 10_000_000, good)
@@ -454,16 +453,38 @@ func TestMRRRisk(t *testing.T) {
 			return risk != nil && len(risk.Reasons) == 1 && risk.Reasons[0] == billing.MRRRiskCardExpiring
 		}, 20*time.Second, 20*time.Millisecond, "the subscription charges its customer's new default")
 		require.Zero(t, riskQueued(t, v.world, v.alpha, sub.CustomerID))
+
+		// An NMI schedule charges the card NMI holds for it; one naming none
+		// is never at risk on the default, though it renews after the default
+		// expires. (A default held outside NMI cannot be set while an NMI
+		// schedule follows it, so the schedule comes after the default.)
+		schedule, _ := importNMISchedule(t, v.authorityWorld, v.journal, catalog.Field[int]{}, func(book *billing.DeclaredBilling) {
+			book.Subscriptions[0].PaymentMethod = nil
+		})
+		require.Nil(t, schedule.PaymentMethodID)
+		require.True(t, schedule.CurrentPeriodEndsAt.After(boundary))
 		require.Nil(t, mrrRiskOf(t, v.alpha, schedule.ID), "no evidence ties the default to the card NMI charges")
 	})
 
 	t.Run("OR-J42-S19/an-upgrade-while-at-risk-supersedes-the-case-and-the-replacement-opens-its-own", func(t *testing.T) {
+		// The card expires at the boundary, before the renewal it pays for.
 		boundary := monthsAgo(3)
-		v, card := expiringVaultCards(t, boundary, 12*time.Hour)
-		sub := v.subscribe(t, v.aliceToken, "upgraded-at-risk", 24, 10_000_000, card)
-		require.NotNil(t, mrrRiskOf(t, v.alpha, sub.ID), "the card expires before the renewal it pays for")
-		price := upgradePrice(t, v.authorityWorld, &sub)
-		status, raw := v.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/change", v.aliceToken, map[string]any{"price_id": price.ID},
+		a, _, sub := purchasedMembershipWith(t, 24, func(w *world) { w.clock.Advance(boundary.Add(-12 * time.Hour).Sub(w.clock.Now())) })
+		require.NotNil(t, sub.PaymentMethodID)
+		require.True(t, sub.CurrentPeriodEndsAt.After(boundary))
+		startFleet(t, a.world)
+		a.clock.Advance(time.Hour)
+		expiry := boundary.Add(-24 * time.Hour)
+		status, raw := a.request(t, http.MethodPatch, "/v1/me/payment-methods/"+sub.PaymentMethodID.String(), a.aliceToken,
+			billing.UpdatePaymentMethodParams{ExpMonth: ptr(int(expiry.Month())), ExpYear: ptr(expiry.Year())})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Eventually(t, func() bool {
+			risk := mrrRiskOf(t, a.alpha, sub.ID)
+			return risk != nil && slices.Equal(risk.Reasons, []billing.MRRRiskReason{billing.MRRRiskCardExpiring})
+		}, 20*time.Second, 20*time.Millisecond, "the card expires before the renewal it pays for")
+
+		price := upgradePrice(t, a, sub)
+		status, raw = a.request(t, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/change", a.aliceToken, map[string]any{"price_id": price.ID},
 			map[string]string{"Idempotency-Key": "upgrade-at-risk"})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var changed billing.SubscriptionChange
@@ -472,10 +493,11 @@ func TestMRRRisk(t *testing.T) {
 		require.NotNil(t, changed.SubscriptionID)
 		require.NotEqual(t, sub.ID, *changed.SubscriptionID)
 
-		require.Equal(t, []string{"card_expiring superseded [card_expiring]"}, riskCases(t, v.world, v.alpha, sub.ID), "an upgrade is neither recovery nor churn")
-		require.Equal(t, []string{"card_expiring open [card_expiring]"}, riskCases(t, v.world, v.alpha, *changed.SubscriptionID))
-		require.Equal(t, map[string]int64{"USD": dailyTwentyMRR}, atRiskMRR(t, v.alpha, riskWindow(boundary.Add(-24*time.Hour), v.clock.Now().Add(time.Second))))
-		require.Empty(t, recoveryRate(t, v.alpha, riskWindow(boundary.Add(-24*time.Hour), v.clock.Now().Add(time.Second))))
+		require.Equal(t, []string{"card_expiring superseded [card_expiring]"}, riskCases(t, a.world, a.alpha, sub.ID), "an upgrade is neither recovery nor churn")
+		require.Equal(t, []string{"card_expiring open [card_expiring]"}, riskCases(t, a.world, a.alpha, *changed.SubscriptionID))
+		window := riskWindow(boundary.Add(-24*time.Hour), a.clock.Now().Add(time.Second))
+		require.Equal(t, map[string]int64{"USD": dailyTwentyMRR}, atRiskMRR(t, a.alpha, window))
+		require.Empty(t, recoveryRate(t, a.alpha, window))
 	})
 
 	t.Run("OR-J42-S21/a-restore-carries-the-open-case-and-re-evaluates-every-customer-with-mrr", func(t *testing.T) {
