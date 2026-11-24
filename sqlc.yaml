@@ -9,6 +9,7 @@ sql:
       - "internal/migrate/postgres/0004_drop_access_cutover_contract.up.sql"
       - "internal/migrate/postgres/0005_customer_messages.up.sql"
       - "internal/migrate/postgres/0006_change_log.up.sql"
+      - "internal/migrate/postgres/0007_dashboard_retired_measures.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -848,6 +848,7 @@ export type CustomerSettingsResult = {
 export type Dashboard = {
   widgets: DashboardWidget[]
   is_default: boolean
+  profile: DashboardProfile | null
   updated_at: string | null
   updated_by: string | null
 }
@@ -857,6 +858,13 @@ export type DashboardGrid = {
   y: number
   w: number
   h: number
+}
+
+export type DashboardProfile = {
+  subscriptions: boolean
+  card_payments: boolean
+  usage: boolean
+  credits: boolean
 }
 
 export type DashboardWidget = {
@@ -1553,9 +1561,13 @@ export type MetricsMeasure = {
   name: string
   class: string
   unit: string
+  group: string
+  direction: string
+  thresholds: MetricsThreshold[]
   description: string
   formula: string
   dims: string[]
+  dim_values?: Record<string, string[]>
   money?: boolean
 }
 
@@ -1594,6 +1606,11 @@ export type MetricsSchema = {
   examples: MetricsExample[]
   limits: MetricsLimits
   query_shape: string
+}
+
+export type MetricsThreshold = {
+  value: number
+  label: string
 }
 
 export type MyOrderPayURLParams = {

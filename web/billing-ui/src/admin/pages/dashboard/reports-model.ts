@@ -1,5 +1,6 @@
 // The Reports page's tables, built from metrics queries over the dashboard's
-// range: subscriptions by UTC day, renewals and churn by UTC month.
+// range: subscriptions by UTC day, renewals and churn by UTC month, and the
+// explorer's table of any query.
 import type {
   MetricsCell,
   QueryMetricsParams,
@@ -27,11 +28,11 @@ export function dailyQuery(range: DashboardRange): QueryMetricsParams {
 
 export function renewalsQuery(range: DashboardRange): QueryMetricsParams {
   return {
-    measures: ["payment_count"],
+    measures: ["payments"],
     by: ["time"],
     grain: "month",
     range: metricsRange(range),
-    filters: { attempt_kind: ["renewal"] },
+    filters: { payment_kind: ["sale"], kind: ["renewal"] },
   }
 }
 
@@ -103,7 +104,7 @@ export function monthlyRows(
     const rate = lost.get(bucket)?.churn_rate
     return {
       month: bucket.slice(0, 7),
-      renewals: count(paid.get(bucket)?.payment_count),
+      renewals: count(paid.get(bucket)?.payments),
       canceled: count(lost.get(bucket)?.cancellations),
       churn: rate === null || rate === undefined ? null : Number(rate),
     }
@@ -113,6 +114,12 @@ export function monthlyRows(
 export const dailyCsv = (rows: DailyRow[]) => ({
   header: ["date", "new_subscriptions", "cancellations", "net_change"],
   rows: rows.map((r) => [r.date, r.started, r.canceled, r.net]),
+})
+
+// resultCsv is any result as a table: its columns, then its rows.
+export const resultCsv = (result: MetricsResult) => ({
+  header: result.columns.map((c) => c.name),
+  rows: result.rows,
 })
 
 export const monthlyCsv = (rows: MonthlyRow[]) => ({

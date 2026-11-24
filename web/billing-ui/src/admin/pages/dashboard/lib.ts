@@ -26,6 +26,18 @@ export function formatMeasure(
       return `${(n * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
     case "days":
       return `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })} d`
+    case "seconds": {
+      // An age reads in the largest unit it fills.
+      const [size, suffix] =
+        Math.abs(n) >= 172_800
+          ? [86_400, "d"]
+          : Math.abs(n) >= 7_200
+            ? [3_600, "h"]
+            : Math.abs(n) >= 120
+              ? [60, "min"]
+              : [1, "s"]
+      return `${(n / size).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${suffix}`
+    }
     default:
       return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
   }
@@ -104,6 +116,7 @@ export function rowCurrency(
 
 // Absolute bucket dates differ between periods; stat deltas are defined only
 // for a single value per dimension tuple. Never sum ratios or unlike monies.
+// A ratio's change is its difference in points; anything else's is relative.
 export function statDelta(
   result: MetricsResult,
   row: MetricsCell[],
@@ -119,18 +132,27 @@ export function statDelta(
   if (previous.length !== 1 || previous[0][measureIndex] === null) return null
   const prev = Number(previous[0][measureIndex])
   const cur = Number(row[measureIndex])
-  return Number.isFinite(prev) && Number.isFinite(cur) && prev !== 0
-    ? (cur - prev) / Math.abs(prev)
-    : null
+  if (!Number.isFinite(prev) || !Number.isFinite(cur)) return null
+  if (idx.measures.find((m) => m.index === measureIndex)?.unit === "ratio")
+    return cur - prev
+  return prev !== 0 ? (cur - prev) / Math.abs(prev) : null
+}
+
+// changeText says a change: points for a ratio, a percentage otherwise.
+export function changeText(delta: number, unit?: string): string {
+  const sign = delta > 0 ? "+" : ""
+  return unit === "ratio"
+    ? `${sign}${(delta * 100).toFixed(1)} pp`
+    : `${sign}${(delta * 100).toFixed(1)}%`
 }
 
 // comparedWith names the period a stat's delta compares with: a one-day
-// range compares with yesterday.
+// range compares with yesterday, a window a year before with last year.
 export function comparedWith(result: MetricsResult): string {
-  const span = result.compare_range
-    ? Date.parse(result.compare_range.to) -
-      Date.parse(result.compare_range.from)
-    : 0
+  if (!result.compare_range) return "previous period"
+  const span =
+    Date.parse(result.compare_range.to) - Date.parse(result.compare_range.from)
+  if (result.compare_range.to !== result.range.from) return "last year"
   return span === 86_400_000 ? "yesterday" : "previous period"
 }
 
@@ -246,7 +268,8 @@ export type DonutSlice = PivotSeries & {
 // dropping zero slices.
 export function donutSlices(
   result: MetricsResult,
-  currency?: string
+  currency?: string,
+  pspKey: (id: string) => string = (id) => id
 ): DonutSlice[] {
   const idx = indexColumns(result.columns)
   const primary = idx.measures[0]
@@ -259,7 +282,10 @@ export function donutSlices(
         key,
         label:
           idx.dims
-            .map((d) => String(row[d.index] ?? ""))
+            .map((d) => {
+              const value = String(row[d.index] ?? "")
+              return d.name === "psp" && value ? pspKey(value) : value
+            })
             .filter(Boolean)
             .join(" · ") || primary.name,
         measure: primary.name,
@@ -281,55 +307,17 @@ export function chartColor(i: number): string {
   return `var(--chart-${(i % 5) + 1})`
 }
 
-// Measures that are better lower: a fall reads as good news.
-export const LOWER_IS_BETTER = new Set([
-  "cancellations",
-  "churn_rate",
-  "failed_attempts",
-  "attempt_failure_rate",
-  "failed_purchases",
-  "purchase_failure_rate",
-  "chargebacks",
-  "chargeback_count",
-  "chargeback_rate",
-  "refunds",
-  "refund_count",
-  "rebill_first_failures",
-  "rebill_first_failure_rate",
-  "rebills_missed",
-  "rebill_missed_rate",
-  "rebills_lost",
-  "rebill_loss_rate",
-  "nmi_history_refused",
-  "nmi_history_refusal_rate",
-])
-
-// Decline, rebill-failure and NMI history measures open Payments → Health.
+// Payment-health measures open Payments → Health.
 const HEALTH_MEASURES = new Set([
   "attempts",
-  "approved_attempts",
-  "failed_attempts",
   "attempt_failure_rate",
   "purchases",
-  "failed_purchases",
   "purchase_failure_rate",
-  "attempts_per_purchase",
-  "purchase_recovery_rate",
-  "rebills_due",
-  "rebills_open",
-  "rebills_attempted",
-  "rebill_first_failures",
+  "rebills",
+  "rebill_rate",
   "rebill_first_failure_rate",
-  "rebills_missed",
-  "rebill_missed_rate",
-  "dunning_recovered",
   "dunning_recovery_rate",
-  "rebill_collection_rate",
-  "rebill_loss_rate",
   "nmi_history_authorizations",
-  "nmi_history_approved",
-  "nmi_history_refused",
-  "nmi_history_refusal_rate",
 ])
 
 // deepLinkFor maps a widget to the admin page carrying the same filter: health
@@ -341,10 +329,10 @@ export function deepLinkFor(
 ): string | null {
   const measures = query.measures ?? []
   if (measures.some((m) => HEALTH_MEASURES.has(m))) return "/payments/health"
-  if (viz !== "stat") return null
+  if (viz !== "stat" && viz !== "kpi") return null
   const status = query.filters?.status?.[0]
   const has = (...names: string[]) => names.some((n) => measures.includes(n))
-  if (has("subscriptions", "billable_subscriptions")) {
+  if (has("subscriptions")) {
     return status
       ? `/subscriptions?status=${encodeURIComponent(status)}`
       : "/subscriptions"
@@ -352,14 +340,7 @@ export function deepLinkFor(
   if (has("new_subscriptions", "net_new_subscriptions"))
     return "/subscriptions?status=active"
   if (has("cancellations")) return "/subscriptions?view=recently_canceled"
-  if (
-    has(
-      "payment_count",
-      "refund_count",
-      "chargeback_count",
-      "unique_rebilled_customers"
-    )
-  )
+  if (has("cash", "payments", "refund_rate", "chargeback_rate"))
     return "/payments"
   if (has("entitled_customers")) return "/customers"
   return null

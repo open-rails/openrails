@@ -1153,21 +1153,22 @@ destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-swit
 
 | Method | Use it to |
 |---|---|
-| `GetMetricsSchema` | the measures, dimensions and grains a query may name |
-| `QueryMetrics` | revenue, sales, usage and payment measures, grouped and bucketed |
-| `GetDashboard`, `SetDashboard` | the console dashboard's saved layout |
+| `GetMetricsSchema` | the measures, dimensions and grains a query may name, with each measure's group (`business` or `ops`), direction and thresholds |
+| `QueryMetrics` | cash, payment, subscription, renewal, usage and ops measures, grouped and bucketed |
+| `GetDashboard`, `SetDashboard` | the console dashboard's saved layout, or the health overview built for the merchant's profile |
 
 ```go guide:metrics
 return shop.QueryMetrics(ctx, billing.QueryMetricsParams{
-	Measures: []string{"net_revenue", "mrr"},
+	Measures: []string{"cash", "mrr"},
 	By:       []string{"time"},
 	Grain:    "month",
 	Range:    &billing.MetricsRange{Last: "12m"},
 })
 ```
 
-An unknown measure or a bad combination is a `400` naming what is wrong and what
-is allowed, so a caller (an agent included) can correct itself.
+A fact is one measure split by its outcome or kind: `cash` by `cash_kind`, `payments` by `payment_kind`, `attempts`, `purchases` and `rebills` by `outcome`; rates such as `refund_rate` and `rebill_rate` divide its slices. `grain: "auto"` picks day, week or month from the range, and `compare` is `previous_period` or `previous_year`. Money is split by currency unless one is named.
+
+An unknown measure or a bad combination is a `400` naming what is wrong and what is allowed, so a caller (an agent included) can correct itself; a removed measure's error names its replacement.
 
 ## Alerts
 

@@ -17279,6 +17279,16 @@
           "is_default": {
             "type": "boolean"
           },
+          "profile": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DashboardProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "oneOf": [
               {
@@ -17304,6 +17314,7 @@
         "required": [
           "widgets",
           "is_default",
+          "profile",
           "updated_at",
           "updated_by"
         ]
@@ -17329,6 +17340,29 @@
           "y",
           "w",
           "h"
+        ]
+      },
+      "DashboardProfile": {
+        "type": "object",
+        "properties": {
+          "subscriptions": {
+            "type": "boolean"
+          },
+          "card_payments": {
+            "type": "boolean"
+          },
+          "usage": {
+            "type": "boolean"
+          },
+          "credits": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "subscriptions",
+          "card_payments",
+          "usage",
+          "credits"
         ]
       },
       "DashboardWidget": {
@@ -20541,6 +20575,18 @@
           "unit": {
             "type": "string"
           },
+          "group": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "thresholds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsThreshold"
+            }
+          },
           "description": {
             "type": "string"
           },
@@ -20553,6 +20599,15 @@
               "type": "string"
             }
           },
+          "dim_values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
           "money": {
             "type": "boolean"
           }
@@ -20561,6 +20616,9 @@
           "name",
           "class",
           "unit",
+          "group",
+          "direction",
+          "thresholds",
           "description",
           "formula",
           "dims"
@@ -20705,6 +20763,21 @@
           "examples",
           "limits",
           "query_shape"
+        ]
+      },
+      "MetricsThreshold": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
         ]
       },
       "MyOrderPayURLParams": {
