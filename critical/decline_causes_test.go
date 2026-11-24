@@ -140,15 +140,23 @@ func TestDeclineCauses(t *testing.T) {
 				merchant, psp, month, h.kind, h.category, h.reason, h.n)
 			require.NoError(t, err)
 		}
-		// Saved dashboards naming a dimension decline_cause renamed.
+		// Saved dashboards naming a dimension decline_cause renamed, or
+		// filtering on what declined meant before refused and error.
 		widget := func(id string, q billing.QueryMetricsParams) billing.DashboardWidget {
 			return billing.DashboardWidget{ID: id, Title: id, Viz: "line", Grid: billing.DashboardGrid{W: 6, H: 4}, Query: q}
 		}
 		kept := widget("cash", billing.QueryMetricsParams{Measures: []string{"cash"}})
+		failed := func(filters map[string][]string) billing.DashboardWidget {
+			return widget("failed", billing.QueryMetricsParams{Measures: []string{"attempts"}, Filters: filters})
+		}
+		firstFailed := func(filters map[string][]string) billing.DashboardWidget {
+			return widget("first-failed", billing.QueryMetricsParams{Measures: []string{"rebills"}, Filters: filters})
+		}
 		emptied := uuid.New()
 		for owner, widgets := range map[uuid.UUID][]billing.DashboardWidget{
 			merchant: {widget("by-category", billing.QueryMetricsParams{Measures: []string{"attempts"}, By: []string{"category"}}), kept,
-				widget("first-category", billing.QueryMetricsParams{Measures: []string{"rebills"}, Filters: map[string][]string{"first_failure_category": {"issuer_hard"}}})},
+				widget("first-category", billing.QueryMetricsParams{Measures: []string{"rebills"}, Filters: map[string][]string{"first_failure_category": {"issuer_hard"}}}),
+				failed(map[string][]string{"outcome": {"declined"}, "psp": {"psp_a"}}), firstFailed(map[string][]string{"first_outcome": {"declined", "error"}})},
 			emptied: {widget("by-first-category", billing.QueryMetricsParams{Measures: []string{"rebills"}, By: []string{"time", "first_failure_category"}})},
 		} {
 			layout, err := json.Marshal(widgets)
@@ -162,7 +170,10 @@ func TestDeclineCauses(t *testing.T) {
 		require.NoError(t, pool.QueryRow(ctx, `SELECT layout FROM `+table("dashboard_configs")+` WHERE merchant_id = $1`, merchant).Scan(&layout))
 		var left []billing.DashboardWidget
 		require.NoError(t, json.Unmarshal(layout, &left))
-		require.Equal(t, []billing.DashboardWidget{kept}, left, "the widgets naming a renamed dimension are dropped")
+		require.Equal(t, []billing.DashboardWidget{kept,
+			failed(map[string][]string{"outcome": {"declined", "error", "refused"}, "psp": {"psp_a"}}),
+			firstFailed(map[string][]string{"first_outcome": {"declined", "error", "refused"}}),
+		}, left, "the widgets naming a renamed dimension are dropped; a declined filter keeps what it meant")
 		var layouts int
 		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM `+table("dashboard_configs")+` WHERE merchant_id = $1`, emptied).Scan(&layouts))
 		require.Zero(t, layouts, "a layout left empty is deleted")

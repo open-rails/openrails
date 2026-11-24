@@ -123,6 +123,31 @@ COMMENT ON TABLE billing.nmi_history_months IS 'Authorizations NMI answered per 
 DROP TABLE decline_causes;
 DROP TABLE issuer_reasons;
 
+-- A saved filter on what used to be declined keeps its meaning: an
+-- authorization's outcome declined then covered every refusal and error, a
+-- rebill's first_outcome declined every refusal but a processing error.
+WITH widened AS (
+    SELECT c.merchant_id,
+        jsonb_agg(CASE
+            WHEN w.widget #> '{query,filters,outcome}' ? 'declined'
+                THEN jsonb_set(w.widget, '{query,filters,outcome}',
+                    (SELECT jsonb_agg(DISTINCT v ORDER BY v) FROM jsonb_array_elements_text((w.widget #> '{query,filters,outcome}') || '["refused", "error"]'::jsonb) AS v))
+            WHEN w.widget #> '{query,filters,first_outcome}' ? 'declined'
+                THEN jsonb_set(w.widget, '{query,filters,first_outcome}',
+                    (SELECT jsonb_agg(DISTINCT v ORDER BY v) FROM jsonb_array_elements_text((w.widget #> '{query,filters,first_outcome}') || '["refused"]'::jsonb) AS v))
+            ELSE w.widget END ORDER BY w.position) AS layout,
+        bool_or(COALESCE(w.widget #> '{query,filters,outcome}' ? 'declined', false)
+            OR COALESCE(w.widget #> '{query,filters,first_outcome}' ? 'declined', false)) AS changed
+    FROM billing.dashboard_configs c
+    CROSS JOIN LATERAL jsonb_array_elements(c.layout) WITH ORDINALITY AS w(widget, position)
+    WHERE jsonb_typeof(c.layout) = 'array'
+    GROUP BY c.merchant_id
+)
+UPDATE billing.dashboard_configs c
+SET layout = k.layout, updated_at = now()
+FROM widened k
+WHERE c.merchant_id = k.merchant_id AND k.changed;
+
 -- Saved dashboards drop every widget naming a dimension decline_cause
 -- renamed; a layout left without widgets is deleted, so its merchant gets the
 -- health overview.

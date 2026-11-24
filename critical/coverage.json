@@ -2426,7 +2426,7 @@
     {
       "id": "OR-J45-S09",
       "journey": "J45",
-      "name": "The decline-cause migration classifies existing attempts and NMI history months from their stored codes, merges months one reason now covers, keeps each attempt's action, and drops saved widgets naming a dimension it renamed"
+      "name": "The decline-cause migration classifies existing attempts and NMI history months from their stored codes, merges months one reason now covers, keeps each attempt's action, drops saved widgets naming a dimension it renamed, and widens saved declined filters to what they meant"
     },
     {
       "id": "OR-J45-S10",
