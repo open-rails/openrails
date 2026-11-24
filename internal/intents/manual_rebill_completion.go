@@ -35,6 +35,7 @@ type rebillDecline struct {
 	IssuerCode        string         `json:"issuer_code,omitempty"`
 	IssuerText        string         `json:"issuer_text,omitempty"`
 	CardBIN           string         `json:"card_bin,omitempty"`
+	DeclinedAt        *time.Time     `json:"declined_at,omitempty"`
 }
 
 // RecurringDecline is an NMI refusal of an accepted recurring charge: NMI's
@@ -44,6 +45,9 @@ type RecurringDecline struct {
 	ResponseCode int
 	Reference    string
 	Issuer       decline.Evidence
+	// At is when NMI declined the charge, as an order read dates it; zero
+	// when the decline was answered at once.
+	At time.Time
 }
 
 // Evidence is the refusal as the classifier reads it.
@@ -52,7 +56,11 @@ func (d RecurringDecline) Evidence() decline.Evidence {
 }
 
 func (f rebillDecline) decline() RecurringDecline {
-	return RecurringDecline{ResponseCode: f.ResponseCode, Reference: f.ProviderReference, Issuer: decline.Evidence{IssuerCode: f.IssuerCode, IssuerText: f.IssuerText, CardBIN: f.CardBIN}}
+	d := RecurringDecline{ResponseCode: f.ResponseCode, Reference: f.ProviderReference, Issuer: decline.Evidence{IssuerCode: f.IssuerCode, IssuerText: f.IssuerText, CardBIN: f.CardBIN}}
+	if f.DeclinedAt != nil {
+		d.At = f.DeclinedAt.UTC()
+	}
+	return d
 }
 
 // ValidateManualRebillTerminal is the archive/reload boundary for this exact
@@ -157,8 +165,13 @@ func (s *Store) RetainRecurringDecline(ctx context.Context, in gen.BillingProvid
 	if refusal.ResponseCode <= 0 || nmi.UncertainResponseCode(refusal.ResponseCode) {
 		return errors.New("ambiguous response cannot be retained as a decline")
 	}
-	raw, err := json.Marshal(rebillDecline{Binding: binding, ResponseCode: refusal.ResponseCode, ProviderReference: refusal.Reference,
-		IssuerCode: refusal.Issuer.IssuerCode, IssuerText: refusal.Issuer.IssuerText, CardBIN: refusal.Issuer.CardBIN})
+	fact := rebillDecline{Binding: binding, ResponseCode: refusal.ResponseCode, ProviderReference: refusal.Reference,
+		IssuerCode: refusal.Issuer.IssuerCode, IssuerText: refusal.Issuer.IssuerText, CardBIN: refusal.Issuer.CardBIN}
+	if !refusal.At.IsZero() {
+		at := refusal.At.UTC()
+		fact.DeclinedAt = &at
+	}
+	raw, err := json.Marshal(fact)
 	if err != nil {
 		return err
 	}
@@ -271,7 +284,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Billin
 				blocked = verdict.Reason
 			}
 			reason := "rebill declined"
-			err = h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: models.Rail(p.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
+			err = h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: models.Rail(p.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureID: in.ID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked, DeclinedAt: refusal.decline().At})
 			if err != nil {
 				return err
 			}

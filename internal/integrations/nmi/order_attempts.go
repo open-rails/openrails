@@ -27,6 +27,8 @@ type OrderAttempts struct {
 	DeclineCardBrand, DeclineCardLast4 string
 	// DeclineIssuer is the issuer's raw answer and the card's BIN.
 	DeclineIssuer decline.Evidence
+	// DeclineAt is when NMI declined the sale.
+	DeclineAt time.Time
 }
 
 // at is the transaction's first action time; a transaction without one is
@@ -143,6 +145,9 @@ func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string
 		}
 	}
 	out.Declined, out.DeclineCode, out.DeclineTransactionID = true, code, strings.TrimSpace(txn.TransactionID)
+	if at, ok := action.At(); ok {
+		out.DeclineAt = at.UTC()
+	}
 	card := txn.Evidence(action)
 	out.DeclineCardBrand, out.DeclineCardLast4 = card.CardBrand, card.CardLast4
 	out.DeclineIssuer = decline.Evidence{IssuerCode: card.IssuerCode, IssuerText: card.IssuerText, CardBIN: card.CardBIN}
