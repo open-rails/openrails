@@ -390,6 +390,11 @@ func unitPricedProduct(t *testing.T) {
 	require.Equal(t, order.ID.UUID(), *spends[0].Order, "the spend names its order")
 	require.Equal(t, "order_line", spends[0].Source)
 	require.Equal(t, order.Lines[0].ID.String(), spends[0].SourceID, "and its line")
+	var named, total int
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE order_id = $3), count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
+		" WHERE merchant_id = $1 AND book = 'general' AND order_line_id = $2", a.alpha.MerchantID().UUID(), order.Lines[0].ID.UUID(), order.ID.UUID()).Scan(&named, &total))
+	require.Positive(t, total, "the line's money moves in the general ledger, in dollars")
+	require.Equal(t, total, named, "and its legs name the order too")
 
 	status, raw = s.spend(t, sword, "sword")
 	require.Equal(t, http.StatusOK, status, "a retry answers the order the balance paid: %s", raw)

@@ -2,6 +2,7 @@ package purchasedcredits
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -114,6 +115,10 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		paidCurrency, err := fundingCurrency(g)
 		if err != nil {
 			return err
+		}
+		if reversalPathOf(books.CreditLotOf(g)) == reversalRefused {
+			// It waits, unapplied, until the lot is booked.
+			return refuseUnbookedUnitPack(ctx, q, g, paymentID, reversalID)
 		}
 		if _, _, err := s.lockBalance(ctx, q, mid.UUID(), g.CustomerID, currency); err != nil {
 			return err
@@ -254,7 +259,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		l := ledger.New(q, mid.UUID())
 		units := unitsMoved{withdrawn: withdrawn, retired: retired, expired: expired, revoked: revoked, repaid: repaid,
 			consumed: faceDelta - withdrawn - retired - expired - revoked - repaid, retiredAccount: retiredAccount}
-		if !books.CreditLotOf(g).Booked() {
+		if reversalPathOf(books.CreditLotOf(g)) == reversalLegacy {
 			// A lot from before the credit books keeps its reversals' cash in
 			// the units book until the books are rebuilt.
 			return postLegacyReversal(ctx, l, g, reversalID, reversesID, restoring, cashDelta, faceDelta, units, source, cashSource, lossSource)
@@ -342,6 +347,54 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 	return posted && err == nil, err
 }
 
+// reversalPath is how a reversal of a paid lot posts.
+type reversalPath int
+
+const (
+	// reversalInBooks: the units to units_refunded, the cash in the general
+	// ledger.
+	reversalInBooks reversalPath = iota
+	// reversalLegacy: a lot from before the credit books keeps its cash legs
+	// in the units book.
+	reversalLegacy
+	// reversalRefused: a pack of a merchant's unit the general ledger never
+	// booked has nowhere to keep its cash; the units book holds no money.
+	reversalRefused
+)
+
+func reversalPathOf(l books.CreditLot) reversalPath {
+	switch {
+	case l.Booked():
+		return reversalInBooks
+	case l.PaidCurrency != l.Unit:
+		return reversalRefused
+	}
+	return reversalLegacy
+}
+
+// UnbookedUnitPackFindingType is the finding a reversal of a pack of a
+// merchant's unit raises when the general ledger never booked the pack.
+const UnbookedUnitPackFindingType = "books.credit.unbooked_unit_pack"
+
+// refuseUnbookedUnitPack records, rather than applies, a reversal of a pack
+// of a merchant's unit the general ledger never booked (its payment's cash
+// did not apply: books.credit.unapplied).
+func refuseUnbookedUnitPack(ctx context.Context, q *gen.Queries, g gen.BillingCreditGrant, paymentID, reversalID uuid.UUID) error {
+	raw, err := json.Marshal(map[string]any{"credit_grant_id": g.ID, "payment_id": paymentID, "reversal_id": reversalID, "unit": g.Unit, "paid_currency": g.PaidCurrency})
+	if err != nil {
+		return err
+	}
+	action := "A reversal of this pack of a merchant's unit waits: the general ledger never booked the pack's price, and its unit holds no money to return. Book the lot's price (see books.credit.unapplied), then the reversal applies."
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: g.MerchantID, FindingType: UnbookedUnitPackFindingType, SubjectKey: "credit_grant:" + g.ID.String(),
+		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: raw,
+	})
+	if err != nil {
+		return fmt.Errorf("raise %s: %w", UnbookedUnitPackFindingType, err)
+	}
+	return nil
+}
+
 // reversalChargeback is payments.ReversalChargeback (payments imports this
 // package).
 const reversalChargeback = "chargeback"
@@ -389,6 +442,9 @@ func postUnits(ctx context.Context, l *ledger.Ledger, g gen.BillingCreditGrant, 
 // cash beside them and the difference between face and cash to promotion or
 // revenue.
 func postLegacyReversal(ctx context.Context, l *ledger.Ledger, g gen.BillingCreditGrant, reversalID uuid.UUID, reversesID *uuid.UUID, restoring bool, cashDelta, faceDelta int64, units unitsMoved, source, cashSource, lossSource string) error {
+	if g.PaidCurrency == nil || *g.PaidCurrency != g.Unit {
+		return fmt.Errorf("credit lot %s: its cash has no leg in its unit %s", g.ID, g.Unit)
+	}
 	post := func(account ledger.AccountType, amount int64, kind ledger.TransferType, incoming bool, label string) error {
 		from, to := account, ledger.UnitsRefundClearing
 		if !incoming {
