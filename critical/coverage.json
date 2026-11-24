@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 446,
+  "scenario_count": 447,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2067,6 +2067,11 @@
       "id": "OR-J25-S37",
       "journey": "J25",
       "name": "A billing pass that waited behind a balance's look leaves the watch that look moved on"
+    },
+    {
+      "id": "OR-J25-S05",
+      "journey": "J25",
+      "name": "A customer's running charges count toward its accrual_rate_cap at their rates while they run"
     },
     {
       "id": "OR-J29-S37",
