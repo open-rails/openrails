@@ -117,6 +117,11 @@ func (c *Client) customerToken(ctx context.Context, params billing.CustomerToken
 	if err := json.Unmarshal(raw, &granted); err != nil || granted.AccessToken == "" || granted.ExpiresIn <= 0 {
 		return nil, fmt.Errorf("%w: the token endpoint answered no access token", billing.ErrUnreachable)
 	}
+	// RFC 6749 §7.1: the type is case-insensitive. A DPoP token is usable
+	// only with the proof it was bound to.
+	if !strings.EqualFold(granted.TokenType, "Bearer") && !(strings.EqualFold(granted.TokenType, "DPoP") && req.Header.Get("DPoP") != "") {
+		return nil, fmt.Errorf("%w: the token endpoint answered token_type %q, not Bearer", billing.ErrUnreachable, granted.TokenType)
+	}
 	return &billing.CustomerToken{
 		AccessToken: granted.AccessToken, TokenType: granted.TokenType,
 		ExpiresAt: requested.Add(time.Duration(granted.ExpiresIn) * time.Second),
