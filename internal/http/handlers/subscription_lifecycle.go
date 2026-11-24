@@ -233,7 +233,7 @@ func resumeStripe(ctx context.Context, r *httprequest.Request, sub *models.Subsc
 	if err != nil {
 		return err
 	}
-	if err := r.State.StripeClients.WriteDisarmed(key); err != nil {
+	if err := r.State.StripeClients.WriteDisarmed(ctx, key); err != nil {
 		return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "the Stripe key cannot write, so Stripe cannot be told of the resume: "+err.Error())
 	}
 	var operation uuid.UUID

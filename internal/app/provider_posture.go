@@ -158,10 +158,10 @@ func (r *Runtime) refuseCredentials(mid billing.MerchantID, scope merchants.PSPS
 }
 
 // verifiesPosture reports whether the PSP's environment is proven with its
-// provider at load: every NMI account and Solana network, and every non-live
-// PSP.
+// provider at load: every NMI account, Stripe key (and its declared account)
+// and Solana network, and every non-live PSP.
 func verifiesPosture(scope merchants.PSPScope) bool {
-	return scope.Rail == string(models.RailNMI) || scope.Rail == string(models.RailSolana) || !config.LiveEnvironment(scope.Rail, scope.Environment)
+	return scope.Rail == string(models.RailNMI) || scope.Rail == string(models.RailStripe) || scope.Rail == string(models.RailSolana) || !config.LiveEnvironment(scope.Rail, scope.Environment)
 }
 
 // verifyPSPPosture reports whether the PSP's verdict is now known.
@@ -195,7 +195,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 			r.Log.With(fields...).ErrorContext(ctx, "provider posture: Stripe credentials unavailable; PSP disarmed", logx.Err(err))
 			return r.refuseCredentials(mid, scope, err)
 		}
-		status, check = r.StripeClients.VerifyPosture(ctx, secret, scope.AccountID), r.StripeClients.PostureCheckFor(secret, scope.AccountID)
+		status, check = r.StripeClients.VerifyPosture(ctx, mid.UUID(), scope.ID, scope.AccountID, secret), r.StripeClients.PostureCheckFor(secret, scope.AccountID)
 	case string(models.RailSolana):
 		if r.SolanaRPCResolver == nil {
 			return true
@@ -248,6 +248,7 @@ func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current mer
 	if len(changed) == 0 {
 		return
 	}
+	merchants.RegisterStripePosture(r.StripeClients, mid, previous, current)
 	r.Go("provider posture follow", func(ctx context.Context) {
 		ctx = merchant.WithID(ctx, mid)
 		scopes, err := r.Merchants.LivePSPScopes(ctx, mid)

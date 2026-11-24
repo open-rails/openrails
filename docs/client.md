@@ -271,16 +271,7 @@ several documents, anchors and tags are refused, and so are the retired keys
 committed file: an overlay or Vault supplies them
 ([standalone.md](standalone.md#configuration-reference)).
 
-**Environments.** Each PSP declares whether it moves real money; omitted, it is
-the rail's real-money one, so production declares none. NMI: `live`, `test` (an
-account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key
-prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`,
-`testnet`. A merchant may mix them. OpenRails asks the provider before arming a
-PSP and again once that proof is an hour old: NMI's `test_mode_status`, Stripe's
-key prefix and `api.stripe.com/v1/account` against `account_id`, Solana's genesis hash on
-every RPC endpoint. A PSP whose answer disagrees stays disarmed: reads work,
-writes fail before any byte is sent, and the `openrails_psp_posture` probe
-reports it. CCBill's sandbox has no signal, so its writes are always refused.
+**Environments.** Each PSP declares whether it moves real money; omitted, it is the rail's real-money one, so production declares none. NMI: `live`, `test` (an account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`, `testnet`. A merchant may mix them. OpenRails asks the provider before arming a PSP: NMI's `test_mode_status` and Solana's genesis hash on every RPC endpoint, again once that proof is an hour old; Stripe's `api.stripe.com/v1/account` against `account_id`, plus `api.stripe.com/v1/balance` for a test key, once per key and account. A PSP whose answer disagrees stays disarmed: reads work, writes fail before any byte is sent, and the `openrails_psp_posture` probe reports it. CCBill's sandbox has no signal, so its writes are always refused.
 
 **Webhooks.** Each provider posts to `/v1/webhooks/{rail}/{account_id}`
 (beneath the mount when embedded). `{rail}` is `nmi`, `stripe`, `ccbill` or
@@ -323,8 +314,9 @@ schedule keeps billing at NMI; OpenRails mirrors it and retries its declines.
 
 ### Stripe
 
-`account_id` is your `acct_…`; the key is checked against it, and a key of another
-account never arms. `secret_key` may be a restricted key. OpenRails registers the
+`account_id` is your `acct_…`; the key is checked against it, and a key of another account never arms. `secret_key` may be a restricted key with read access to its own account (`api.stripe.com/v1/account`; Stripe's refusal, which the posture probe reports, names the permission) and these permissions: `customer_write`, `payment_intent_write`, `setup_intent_write`, `payment_method_write`, `charge_write` (refunds), `subscription_write`, `invoice_write`, `checkout_session_write`, `customer_portal_write`, `webhook_write`, `payment_method_domain_write`, `product_read`, `plan_read` (prices), `dispute_read`, `event_read`, and `balance_read` on a test key.
+
+OpenRails registers the
 webhook endpoint itself when the configuration is in Vault, pinned to its Stripe
 API version, and keeps its events current. With a file it cannot keep the new
 signing secret, so register the endpoint once in the dashboard at
