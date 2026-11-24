@@ -576,10 +576,11 @@ func decideFromSnapshot(rail, railSubID string, localStart, localEnd *time.Time,
 	if remoteSub != nil && (remoteSub.Status == SubscriptionStatusCanceled || remoteSub.Status == SubscriptionStatusExpired) {
 		if stoppedRebillingOnly(snap.Provider, remoteSub) {
 			// CCBill's paid-through, or the period a rebill read with the
-			// cancellation paid when that ends later.
+			// cancellation paid when that ends later. A rebill its refund or
+			// chargeback in the read reverses paid for nothing.
 			paid := remoteSub.NextBillingAt
-			if renewTxn != nil {
-				if _, end := paidPeriod(txns, chargeCutoff, localStart, localEnd, remoteSub); end != nil && (paid == nil || end.After(*paid)) {
+			if kept := unreversedSales(txns); renewedSince(kept, chargeCutoff) {
+				if _, end := paidPeriod(kept, chargeCutoff, localStart, localEnd, remoteSub); end != nil && (paid == nil || end.After(*paid)) {
 					paid = end
 				}
 			}

@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -161,6 +162,69 @@ const ccbillStatusNotRebilling = "1"
 func stoppedRebillingOnly(provider Provider, r *RemoteSubscription) bool {
 	return provider == ProviderCCBill && r != nil && r.Status == SubscriptionStatusCanceled &&
 		(r.RawStatus == string(ccbill.DataLinkTxnCancellation) || r.RawStatus == ccbillStatusNotRebilling)
+}
+
+// unreversedSales is txns less each sale a refund or chargeback among them
+// reverses. CCBill's rows name no transaction, so a reversal takes the
+// latest sale before it of its amount, or of any amount when it names none.
+func unreversedSales(txns []RemoteTransaction) []RemoteTransaction {
+	reversed := map[int]bool{}
+	for _, r := range txns {
+		if !r.Success || r.Type != TransactionTypeRefund && r.Type != TransactionTypeChargeback {
+			continue
+		}
+		match := -1
+		for i, s := range txns {
+			if reversed[i] || !s.Success || s.Type != TransactionTypeSale && s.Type != TransactionTypeSettlement ||
+				s.OccurredAt.After(r.OccurredAt) || !sameAmount(s, r) {
+				continue
+			}
+			if match < 0 || s.OccurredAt.After(txns[match].OccurredAt) {
+				match = i
+			}
+		}
+		if match >= 0 {
+			reversed[match] = true
+		}
+	}
+	out := make([]RemoteTransaction, 0, len(txns))
+	for i, t := range txns {
+		if !reversed[i] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// sameAmount reports whether a reversal is of the sale's whole amount;
+// true when either names none.
+func sameAmount(sale, reversal RemoteTransaction) bool {
+	a, okA := new(big.Rat).SetString(strings.TrimSpace(sale.Amount))
+	b, okB := new(big.Rat).SetString(strings.TrimSpace(reversal.Amount))
+	switch {
+	case okA && okB:
+		return a.Abs(a).Cmp(b.Abs(b)) == 0
+	case sale.AmountCents != 0 && reversal.AmountCents != 0:
+		return abs(sale.AmountCents) == abs(reversal.AmountCents)
+	}
+	return true
+}
+
+func abs(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// renewedSince reports a successful sale at or after cutoff.
+func renewedSince(txns []RemoteTransaction, cutoff time.Time) bool {
+	for _, t := range txns {
+		if (t.Type == TransactionTypeSale || t.Type == TransactionTypeSettlement) && t.Success && !t.OccurredAt.Before(cutoff) {
+			return true
+		}
+	}
+	return false
 }
 
 // CCBillRemoteTransaction is one rebill, refund or chargeback export row.
