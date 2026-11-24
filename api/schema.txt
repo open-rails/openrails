@@ -34,6 +34,7 @@ migration 0035_dashboard_retired_mrr_measures.up.sql sha256:51fd4f28c5c9beb05812
 migration 0036_books_reversals.up.sql sha256:390b570664add0417f7c4e3905dd0a71d520563b924aca5535256045ba8ca8d8
 migration 0037_unit_order_revenue.up.sql sha256:5c5569cedec95ee75775645cea9ab575745c51fa5505d0c35f4bcaa5ca7c2769
 migration 0038_write_posture_comments.up.sql sha256:4e52a41d97043af3c86dffd550e7456735d0e4642669498ddadcc1a3512e29fe
+migration 0039_lease_in_flight_off_customers.up.sql sha256:c0290a0816eb44a2edef247a2116743b5ddfa57a2f4114056cf4b63b77d82edc
 migration 0040_migration_cohort_order.up.sql sha256:72f4a45e6f1533ec1dca16b01d24db219b14490cd071402e8fe61d02964e702a
 
 table billing.balance_watches
@@ -988,7 +989,6 @@ table billing.lease_in_flight
   column amount bigint NOT NULL
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint lease_in_flight_amount_check CHECK ((amount > 0))
-  constraint lease_in_flight_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
   constraint lease_in_flight_lease_id_fkey FOREIGN KEY (merchant_id, lease_id) REFERENCES billing.leases(merchant_id, id) ON DELETE CASCADE
   constraint lease_in_flight_limit_key_check CHECK (((limit_key ~ '^[a-z][a-z0-9_-]{0,63}$'::text) OR (limit_key ~ '^spend:[0-9a-f]{64}$'::text)))
   constraint lease_in_flight_pkey PRIMARY KEY (merchant_id, customer_id, limit_key, unit, lease_id)

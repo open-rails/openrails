@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/usageerasure"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -276,6 +277,28 @@ products:
 			require.EqualValues(t, 80, grant.SpentAmount, "50 of usage and 30 accrued before the lapse")
 			require.EqualValues(t, 20, grant.ExpiredAmount)
 		})
+	})
+
+	t.Run("OR-J24-S65/a-merchants-configuration-first-read-inside-a-balance-look-loads", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		usageMeter(t, w.alpha, 1)
+		customer := billing.CustomerID(uuid.New())
+		lapse := w.clock.Now().UTC().Add(time.Hour)
+		grants, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 100,
+			Source: "critical", SourceID: "lapsing", ExpiresAt: &lapse}})
+		require.NoError(t, err)
+		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "before", 30))...)
+		advanceTo(w, lapse.Add(10*time.Minute))
+		fleet := quietFleet(t, w)
+		// The process forgets the merchant's configuration, as one that has
+		// not read it since it started: the look reads it first, inside its
+		// transaction, and the load runs on its own.
+		embedded.Graph(w.engine).Runtime.MerchantConfig.Forget(w.alpha.MerchantID())
+		require.False(t, runPass(t, fleet), "every look of the pass succeeds")
+		grant, err := w.alpha.GetCreditGrant(t.Context(), grants[0].ID)
+		require.NoError(t, err)
+		require.EqualValues(t, 30, grant.SpentAmount, "the lot funds the usage before its lapse")
+		require.EqualValues(t, 70, grant.ExpiredAmount, "the look expired the rest")
 	})
 
 	t.Run("OR-J24-S62/usage-the-store-lost-is-not-a-price-that-fell", func(t *testing.T) {

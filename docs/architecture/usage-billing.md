@@ -29,12 +29,14 @@ enforce it, are [entitlements and limits](entitlements.md).
 admission's capture (`MoneyService.CaptureAdmission`); both are
 [entitlements and limits](entitlements.md). Items are numbered per lease: a resend
 answers from the sync's receipts, a changed item is `idempotency_key_reused`, a
-gap `usage_out_of_order`. A sync settles a bounded prefix (100 customers, 1.5 s);
+gap `usage_out_of_order`. A sync settles a bounded prefix (100 customers) in one insert;
 the gate sends the rest again. While ClickHouse is out of reach a sync answers 503
 and settles nothing (OR-J24-S48).
 
-**Pricing.** `MoneyService.PrepareUsageTx` validates, prices and locates under the
-customers' locks: each group sharing a period, meter cell and card print
+**Pricing.** `MoneyService.PrepareUsageTx` validates, prices and locates, taking a
+customer's lock only to open a session or first-use window or to charge a failed
+item (and locating that customer's items again under it): each group sharing a
+period, meter cell and card print
 (`cardPrint`) is priced provisionally at the period position the store holds,
 `R(Q+q) − R(Q)` never below zero (`marginalPrice`), shared by quantity; a
 `dynamic` card charges each item its stated amount. A capture of a request hold
@@ -42,9 +44,13 @@ is priced by the cards it pinned. Limits are located at `admitted_at`
 (`locateItems`); a failed item's grace is read from its windows' `limit_usage`
 and what it leaves is charged with its own ledger legs. `CommitUsageTx` skips
 events an earlier attempt inserted (`ExistingUsage`, by customer and event id at
-any `occurred_at`), inserts the rest and waits, then writes `usage_unposted`, the
-card prints, opened session and first-use windows and captures, in the caller's
-transaction. An event's identity never depends on a clock read per attempt: a
+any `occurred_at`), inserts the rest and waits, then writes the card prints,
+opened session and first-use windows and captures, in the caller's transaction.
+A `usage_unposted` mark that already covers the usage is only held by key share
+(`ShareUsageUnposted`): a posting, which locks it for update, waits for the
+intake or has read its events, and intakes never wait on each other. Concurrent
+intakes of one customer may price from the same period position: postings price
+the period's total, so only provisional amounts differ. An event's identity never depends on a clock read per attempt: a
 capture occurred when its request was admitted, an item an earlier attempt
 inserted keeps that attempt's `occurred_at`, `admitted_at` and pricing period
 (so its session and first-use windows), and an insert whose caller gave up still

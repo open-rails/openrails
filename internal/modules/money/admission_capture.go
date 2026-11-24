@@ -257,6 +257,9 @@ func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.
 	if err := s.CommitUsageTx(ctx, q, intake); err != nil {
 		return nil, err
 	}
+	if err := s.watchUsageTx(ctx, q, intake.Changed()); err != nil {
+		return nil, err
+	}
 	return &billing.CaptureReceipt{RequestID: row.RequestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Currency),
 		EstimatedAmount: row.EstimatedAmount, Amount: result.Amount, Charges: result.Charges}, nil
 }
