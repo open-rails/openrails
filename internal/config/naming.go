@@ -43,7 +43,7 @@ type NamingPolicy struct {
 // NormalizeNaming validates c and applies its defaults. A finite retention of
 // zero is immediate; the other modes take no duration.
 func NormalizeNaming(c NamingConfig) (NamingPolicy, error) {
-	p := NamingPolicy{Enabled: true, RenameInterval: 72 * time.Hour, FormerNames: FormerNamesFinite, FormerNameRetention: 90 * 24 * time.Hour}
+	p := NamingPolicy{Enabled: DefaultNamingEnabled, RenameInterval: DefaultRenameInterval, FormerNames: DefaultFormerNamesMode, FormerNameRetention: DefaultFormerNamesDuration}
 	if c.Enabled != nil {
 		p.Enabled = *c.Enabled
 	}

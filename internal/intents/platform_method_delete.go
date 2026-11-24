@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // The persisted operation name is retained for existing history. The payload
@@ -124,7 +125,7 @@ func (h *PlatformMethodDeleteHandler) resolve(ctx context.Context, in gen.Billin
 	if err != nil || cfg.AccountID != p.TenantID || cfg.Custodian != p.Instrument.Custodian || h.Rails.BasisTheoryTransport != nil && cfg.Environment != config.ClassTest {
 		return Ambiguous("accepted platform vault binding or credentials are unavailable")
 	}
-	client, err := basistheory.New(basistheory.Config{APIKey: cfg.APIKey, BaseURL: cfg.APIBaseURL, ReadOnly: h.Rails.Config != nil && config.IsProviderReadOnly(h.Rails.Config), Transport: h.Rails.BasisTheoryTransport})
+	client, err := basistheory.New(basistheory.Config{APIKey: cfg.APIKey, BaseURL: cfg.APIBaseURL, ReadOnly: writeposture.View{DB: h.DB}.Posture(ctx, current.MerchantID).ReadOnly(), Transport: h.Rails.BasisTheoryTransport})
 	if err != nil {
 		return Ambiguous("platform vault client is unavailable")
 	}

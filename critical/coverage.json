@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 717,
+  "scenario_count": 718,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3587,6 +3587,11 @@
       "id": "OR-J38-S84",
       "journey": "J38",
       "name": "A pull that runs past one lease period keeps its lease and others still skip; a dead holder's lease lapses on its own and the next pull takes it"
+    },
+    {
+      "id": "OR-J06-S72",
+      "journey": "J06",
+      "name": "Retired provider write mode and drain settings refuse boot and name their replacement"
     }
   ]
 }

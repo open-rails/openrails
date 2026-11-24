@@ -1025,7 +1025,7 @@ type BillingMerchantSlugAlias struct {
 	CreatedAt  time.Time
 }
 
-// One merchant's provider write posture; no row is full. The effective mode is the lower of this and provider_write_mode. Export sets the source readonly and restore the destination; an operator arms it back to full.
+// One merchant's provider write posture; no row is full. A copy of the billing book is readonly whatever it says. Export sets the source readonly and restore the destination; an operator arms it back to full.
 type BillingMerchantWritePosture struct {
 	MerchantID uuid.UUID
 	Mode       string
@@ -1994,7 +1994,7 @@ type BillingProviderIntent struct {
 	NextAttemptAt  time.Time
 	// The running attempt's claim. An in_flight row whose lease elapsed lost its attempt and becomes unknown_needs_verify: a provider read settles it before any retry.
 	LeaseExpiresAt *time.Time
-	// Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.
+	// Who wanted this mutation: user/admin-origin intents execute under a limited write posture (reactive completion), system-origin intents require full. Nothing executes under readonly.
 	Origin       string
 	OriginReason *string
 	// The invoker that produced a user/admin-origin intent: the party that acted, the subject itself when it acted itself. NULL for system-origin. Keys the anti-credential-compromise rate ceiling (per-invoker + per-merchant rolling-hour count of destructive ops).

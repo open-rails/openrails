@@ -109,7 +109,7 @@ func (s *PurchaseService) SaveStripeCard(ctx context.Context, psp uuid.UUID, tok
 	} else if !db.IsNotFound(err) {
 		return SavedCard{}, err
 	}
-	if (writeposture.View{Config: s.Config, DB: d}).Posture(ctx, account.params.MerchantID).ReadOnly() {
+	if (writeposture.View{DB: d}).Posture(ctx, account.params.MerchantID).ReadOnly() {
 		return SavedCard{}, errors.New("Stripe card save unavailable: provider writes are disabled")
 	}
 	account.params.CustomerRef, err = resolveStripeCustomerWith(ctx, s.RailCustomerService, account.service, user)

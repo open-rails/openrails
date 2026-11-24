@@ -28,10 +28,10 @@ import (
 //
 //	openrails intents [--status=pending|all|...] [--rail=...] [--type=...] [--merchant=...]
 //
-// Under mode=limited/readonly this is the dry-run view: the pending rows are
-// exactly the provider writes the executor will drain when the mode lifts —
-// user/admin-origin intents under mode=limited, system-origin only under
-// mode=full, nothing under readonly.
+// For a merchant whose write posture is limited or readonly this is the
+// dry-run view: the pending rows are exactly the provider writes the executor
+// will drain when the posture lifts — user/admin-origin intents under
+// limited, system-origin only under full, nothing under readonly.
 func newIntentsCmd() *cobra.Command {
 	var (
 		status       string
@@ -48,13 +48,14 @@ func newIntentsCmd() *cobra.Command {
 executed by its own River job. This command lists them for one merchant and
 writes nothing.
 
-EXECUTES UNDER is the lowest provider_write_mode that runs a row: limited for
-user- and admin-origin rows, full for system-origin ones; nothing runs under
-readonly. Under limited or readonly the pending rows, and the drain forecast
-printed after them, are exactly what the next mode change will send. Read it
-before raising the mode, and resolve anything you did not expect first.
+EXECUTES UNDER is the lowest merchant write posture that runs a row: limited
+for user- and admin-origin rows, full for system-origin ones; nothing runs
+under readonly. Under limited or readonly the pending rows, and the drain
+forecast printed after them, are exactly what "openrails merchant arm" will
+send. Read it before arming the merchant, and resolve anything you did not
+expect first.
 
-Statuses: pending (waiting; LAST FAILURE names a blocker such as the mode, an
+Statuses: pending (waiting; LAST FAILURE names a blocker such as the posture, an
 unarmed PSP or a provider outage, and the row drains when it lifts),
 in_flight, succeeded, failed_retryable, failed (terminal), unknown (the
 provider may have executed it), superseded and expired (past their relevance
@@ -232,8 +233,8 @@ var intentsStatusFilters = map[string]string{
 	intents.StatusExpired:            intents.StatusExpired,
 }
 
-// executesUnder reports the weakest operating mode that lets an intent of
-// this origin attempt its provider write (the GateExecution matrix).
+// executesUnder reports the weakest write posture that lets an intent of this
+// origin attempt its provider write (the GateExecution matrix).
 func executesUnder(origin string) string {
 	if intents.Origin(origin) == intents.OriginSystem {
 		return "full"
@@ -375,7 +376,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 			return err
 		}
 		if byMode["limited"] > 0 || byMode["full"] > 0 {
-			fmt.Printf("\nPending drain forecast: %d execute under mode=limited (or full), %d require mode=full; nothing executes under readonly.\n",
+			fmt.Printf("\nPending drain forecast: %d execute under a limited (or full) write posture, %d require full; nothing executes under readonly.\n",
 				byMode["limited"], byMode["full"])
 		}
 		return nil

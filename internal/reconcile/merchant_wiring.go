@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // The pull plane (provider refresh, unknown-cohort resolution, per-sub probes,
@@ -142,8 +143,8 @@ func (b MerchantFetcherBuilder) arm(ctx context.Context, mid billing.MerchantID,
 	}
 }
 
-func (b MerchantFetcherBuilder) readOnly() bool {
-	return b.Config != nil && config.IsProviderReadOnly(b.Config)
+func (b MerchantFetcherBuilder) readOnly(ctx context.Context, mid billing.MerchantID) bool {
+	return writeposture.View{DB: b.DB}.Posture(ctx, mid.UUID()).ReadOnly()
 }
 
 // resolveScopeCoverage is resolveScope plus the coverage record: how many PSPs
@@ -252,7 +253,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config, Log: b.Log}
+	factory := &railresolve.NMIFactory{Config: b.Config, Postures: writeposture.View{DB: b.DB}, Log: b.Log}
 	if b.NMIClients != nil {
 		factory.Transport = b.NMIClients.Transport
 	}
@@ -290,7 +291,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 		DataLinkPassword: password,
 		Sandbox:          scope.Environment == config.EnvironmentSandbox,
 	})
-	dl.ReadOnly = b.readOnly()
+	dl.ReadOnly = b.readOnly(ctx, mid)
 	dl.Pacing = b.DataLinkPacing
 	if sandbox := config.SandboxCCBillDataLinkURL(b.Config); sandbox != "" {
 		dl.BaseURL = sandbox

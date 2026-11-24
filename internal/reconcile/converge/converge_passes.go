@@ -557,11 +557,12 @@ const (
 	stuckVerifyAge     = 2 * time.Hour  // in_flight / unknown_needs_verify
 )
 
-// isModeParkedReason reports whether last_failure_reason records a deliberate
-// park by the operating mode / kill switch (intents.GateExecution "mode=..."
-// strings). Parked is not broken — each intent's job runs it when the
-// blocker lifts — so the finding is informational, not the admin queue.
-func isModeParkedReason(reason string) bool { return strings.Contains(reason, "mode=") }
+// isPostureParkedReason reports whether last_failure_reason records a
+// deliberate park by the merchant's write posture (intents.GateExecution and
+// the wire chokes name it). Parked is not broken — each intent's job runs it
+// when the posture lifts — so the finding is informational, not the admin
+// queue.
+func isPostureParkedReason(reason string) bool { return strings.Contains(reason, "write posture") }
 
 // stuckIntentFinding diagnoses one stuck rail intent. SubjectKey is the bare
 // intent id; Provider is the intent's own rail.
@@ -603,7 +604,7 @@ func stuckIntentFinding(si *gen.BillingProviderIntent, now time.Time) ConvergeFi
 		Evidence:   ev,
 		// surface-only: check and converge never touch the intent itself.
 	}
-	if si.LastFailureReason != nil && isModeParkedReason(*si.LastFailureReason) {
+	if si.LastFailureReason != nil && isPostureParkedReason(*si.LastFailureReason) {
 		f.Class = ClassAuto // no Repair → reconcile_required (informational)
 		f.Severity = "low"
 	}
