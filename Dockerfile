@@ -2,18 +2,18 @@
 # public.ecr.aws/docker/library if the default mirror is unavailable.
 ARG BASE_REGISTRY=mirror.gcr.io/library
 
-# Stage 1: admin console SPA into server/web/console/dist, which server/web/console/embed.go
+# Stage 1: admin console SPA into web/console/dist, which web/console/embed.go
 # go:embeds (#754). Node is a BUILD-time dependency only. Its output is static
 # files, so it runs once on the build platform for every target platform.
 FROM --platform=$BUILDPLATFORM ${BASE_REGISTRY}/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS billing-ui
 
 RUN npm install -g --ignore-scripts pnpm@11.0.0
-WORKDIR /src/sdk/billing-ui
-COPY sdk/billing-ui/ ./
+WORKDIR /src/web/billing-ui
+COPY web/billing-ui/ ./
 RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm --config.verify-deps-before-run=false run build
 FROM billing-ui AS console
-WORKDIR /src/server/web/console
-COPY server/web/console/ ./
+WORKDIR /src/web/console
+COPY web/console/ ./
 RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm --config.verify-deps-before-run=false run build
 
 
@@ -58,7 +58,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # Copy source code, then the console build into the dir go:embed reads.
 COPY . /app
-COPY --from=console /src/server/web/console/dist /app/server/web/console/dist
+COPY --from=console /src/web/console/dist /app/web/console/dist
 COPY --from=payment-page /src/web/pay/dist /app/web/pay/dist
 
 # Release identity (internal/buildinfo); unset falls back to "dev".
@@ -71,7 +71,7 @@ ARG TARGETARCH
 # Build the application with cache mount
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    test -f web/console/dist/index.html && test -f ../web/pay/dist/index.html && \
+    test -f ../web/console/dist/index.html && test -f ../web/pay/dist/index.html && \
     mkdir -p ../bin && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X github.com/open-rails/openrails/internal/buildinfo.version=${VERSION} -X github.com/open-rails/openrails/internal/buildinfo.commit=${COMMIT} -X github.com/open-rails/openrails/internal/buildinfo.date=${DATE}" \

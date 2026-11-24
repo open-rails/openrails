@@ -60,18 +60,18 @@ unit() {
 browser() {
   # The SDK and both consuming apps share this one SDK build. E2E behavior
   # runs only in critical/public_sdk_test.go against its real service fixture.
-  pnpm --dir sdk/billing-ui install --frozen-lockfile --ignore-scripts
-  pnpm --dir sdk/billing-ui critical:build
-  pnpm --dir sdk/billing-ui critical:static
-  pnpm --dir sdk/billing-ui contract:check
+  pnpm --dir web/billing-ui install --frozen-lockfile --ignore-scripts
+  pnpm --dir web/billing-ui critical:build
+  pnpm --dir web/billing-ui critical:static
+  pnpm --dir web/billing-ui contract:check
   local project
-  for project in server/web/console web/pay; do
+  for project in web/console web/pay; do
     pnpm --dir "$project" install --frozen-lockfile --ignore-scripts
     pnpm --dir "$project" build
     test -f "$project/dist/index.html"
     git diff --exit-code -- "$project/dist/.gitkeep"
   done
-  pnpm --dir server/web/console lint
+  pnpm --dir web/console lint
 }
 chart() {
   local helm="${HELM:-helm}" dir=deploy/helm/openrails values

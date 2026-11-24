@@ -6,7 +6,7 @@ v2. A security fix may change behaviour when that behaviour was the vulnerabilit
 
 | Contract | Snapshot | Covers |
 |---|---|---|
-| Go API | [`api/go.txt`](../api/go.txt) | every exported identifier of `openrails`, `billing`, `catalog`, `server`, `adapters/*`, `openrailstest` (with `nmimock`, `stripemock`) and `server/web/console`: one line per constant, variable, function, type, struct field (with its tag) and method. The server and AuthKit adapter modules release with the root under the same version. |
+| Go API | [`api/go.txt`](../api/go.txt) | every exported identifier of `openrails`, `billing`, `catalog`, `server`, `adapters/*`, `openrailstest` (with `nmimock`, `stripemock`), `web/console` and `web/pay`: one line per constant, variable, function, type, struct field (with its tag) and method. The server and AuthKit adapter modules release with the root under the same version. |
 | HTTP API | [`api/openapi.json`](../api/openapi.json) | every route in the catalog (`internal/http/routes`): method, path, auth tier, permission, request and response schemas, status and error codes, and the error-code registry |
 | Database schema | [`api/schema.txt`](../api/schema.txt) | every table, column, constraint, index, trigger and function the migrations install, read back from PostgreSQL 18 (monthly partitions left out) |
 

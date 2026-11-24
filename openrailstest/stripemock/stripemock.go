@@ -7,14 +7,18 @@
 //
 //	stripe := stripemock.New(stripemock.Options{Clock: clock.Now})
 //	defer stripe.Close()
-//	client, err := openrails.New(ctx, openrails.Config{
+//	engine, err := openrails.New(ctx, openrails.Config{
 //		ProviderWriteMode: openrails.ProviderWritesFull,
 //		ProviderSandbox:   &openrails.ProviderSandboxConfig{StripeAPIURL: stripe.URL()},
-//		Merchant: billing.MerchantDeclaration{Slug: "shop", DisplayName: "Shop", PSPs: map[string]billing.PSPConfig{
-//			"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
-//		}},
+//		Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{
+//			Slug: "shop", DisplayName: "Shop", PSPs: billing.PSPs{
+//				"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
+//			},
+//		}}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
-//	// … openrailshttp.Mount(mux, client, routes); srv := httptest.NewServer(mux)
+//	id, err := engine.DeclaredMerchant("shop")
+//	shop, err := engine.Merchant(id)
+//	// … openrailshttp.Mount(mux, engine, routes); srv := httptest.NewServer(mux)
 //	stripe.SendWebhooksTo(srv.URL+"/v1/webhooks/stripe/acct_test", "whsec_test")
 //
 // Without a publishable key, paying a checkout session's Stripe option

@@ -15,7 +15,7 @@ may access. Your app keeps its users and sign-in; a customer is your user's id.
 | HTTP only | any of the three | JSON over HTTP from any language | [Without the Go client](client.md#without-the-go-client) |
 
 Every path serves the same HTTP API and the same browser SDK,
-[`@openrails/billing-ui`](../sdk/billing-ui/README.md). The [client guide](client.md)
+[`@openrails/billing-ui`](../web/billing-ui/README.md). The [client guide](client.md)
 covers everything the client does; the rest of this page is the shortest
 working integration, embedded, as [`examples/embedded`](../examples/embedded) runs it.
 

@@ -4350,5 +4350,5 @@ pkg openrails/server, type NamingConfig struct, Enabled *bool
 pkg openrails/server, type NamingConfig struct, FormerNames FormerNamesConfig
 pkg openrails/server, type NamingConfig struct, RenameInterval *time.Duration
 pkg openrails/server, type Server struct
-pkg openrails/server/web/console, func FS() fs.FS
+pkg openrails/web/console, func FS() fs.FS
 pkg openrails/web/pay, func FS() fs.FS

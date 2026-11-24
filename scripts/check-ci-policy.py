@@ -18,15 +18,15 @@ cases = [
     ("example-gate", [("M", "examples/gate/main.go")], {"core", "browser", "security"}),
     ("example-guide", [("A", "examples/guide/checkout.go")], {"core", "browser", "security"}),
     ("license", [("M", "LICENSE")], set()),
-    ("isolated-ui", [("M", "server/web/console/src/components/button.tsx")], {"browser", "security"}),
-    ("client", [("M", "sdk/billing-ui/src/client/client.ts")], source),
+    ("isolated-ui", [("M", "web/console/src/components/button.tsx")], {"browser", "security"}),
+    ("client", [("M", "web/billing-ui/src/client/client.ts")], source),
     ("unknown", [("A", "new-domain/new.go")], source),
     ("fixture-module", [("M", "critical/server-fixture/server_test.go")], source),
     ("shared-dependency", [("M", "go.mod")], keys),
     ("query", [("M", "internal/db/queries/customer.sql")], source),
     ("deleted-doc", [("D", "README.md")], keys),
     ("renamed-doc", [("R", "README.md")], keys),
-    ("mixed", [("M", "README.md"), ("M", "sdk/billing-ui/src/client/client.ts")], source),
+    ("mixed", [("M", "README.md"), ("M", "web/billing-ui/src/client/client.ts")], source),
     ("empty", [], keys),
 ]
 for label, changes, expected in cases:

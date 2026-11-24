@@ -24,7 +24,7 @@ if [[ ! -w "$root/web/pay" ]]; then
   [[ $# -eq 1 ]] || { echo "error: pass an output dir (the source is read-only)" >&2; exit 2; }
   build_root="$(mktemp -d)"
   trap 'rm -rf "$build_root"' EXIT
-  for dir in sdk/billing-ui web/pay; do
+  for dir in web/billing-ui web/pay; do
     mkdir -p "$build_root/$dir"
     find "$root/$dir" -mindepth 1 -maxdepth 1 ! -name node_modules ! -name dist -exec cp -R {} "$build_root/$dir/" \;
   done
@@ -34,7 +34,7 @@ fi
 # install just ran with --frozen-lockfile; pnpm's own pre-run check is redundant
 # and crashes some pnpm 11 releases ("currentPnpmfiles is not iterable").
 run=(pnpm --config.verify-deps-before-run=false run)
-(cd "$build_root/sdk/billing-ui" && pnpm install --frozen-lockfile --ignore-scripts && "${run[@]}" build)
+(cd "$build_root/web/billing-ui" && pnpm install --frozen-lockfile --ignore-scripts && "${run[@]}" build)
 cd "$build_root/web/pay"
 # A path dependency is copied in at install, and pnpm keeps a copy it
 # thinks current: install afresh so the page takes this billing-ui build.

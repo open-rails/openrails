@@ -1,14 +1,14 @@
 # UI library
 
-`@openrails/billing-ui` (`sdk/billing-ui`) is OpenRails' browser side: a typed
+`@openrails/billing-ui` (`web/billing-ui`) is OpenRails' browser side: a typed
 client, React hooks and styled components for a customer's purchase and
 self-service, and the staff administration console. Hosts embed it in their own
-apps; the standalone server's console (`server/web/console`) and the hosted payment
+apps; the standalone server's console (`web/console`) and the hosted payment
 page (`web/pay`) are built from it. It ships at OpenRails' version, published to
 npm with provenance. Guides: [frontend](../client.md#orders-and-checkout),
-[billing administration](../../sdk/billing-ui/README.md#staff-administration) and the
-[package README](../../sdk/billing-ui/README.md). Paths starting `src/`,
-`tooling/` or `critical/` below are inside `sdk/billing-ui` unless marked otherwise.
+[billing administration](../../web/billing-ui/README.md#staff-administration) and the
+[package README](../../web/billing-ui/README.md). Paths starting `src/`,
+`tooling/` or `critical/` below are inside `web/billing-ui` unless marked otherwise.
 
 ## Concepts
 
@@ -60,9 +60,9 @@ refreshed every 30 seconds. Destructive acts use `TypedConfirmDialog` or a
 counted, typed confirmation. `AdminConsole` adds AuthKit's account administration
 (optional peer `@openrails/auth-ui`) around `BillingAdmin`.
 
-**Consumers in this repository.** `server/web/console` composes `BillingAdmin`
+**Consumers in this repository.** `web/console` composes `BillingAdmin`
 with AuthKit's members, roles, API keys and account panels into the `/admin`
-console; `task admin-build` builds it into `server/web/console/dist`, which the
+console; `task admin-build` builds it into `web/console/dist`, which the
 binary embeds. `web/pay` (`@openrails/payment-page`) wraps `OrderPayment` in the
 hosted pay page; its build in `web/pay/dist` is embedded by `web/pay/embed.go` and
 served by `Engine.CheckoutPage`. Its `captchaFetch` resends a pay refused

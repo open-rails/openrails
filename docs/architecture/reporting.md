@@ -94,7 +94,7 @@ widgets are not validated again on read.
 There is no revision check: the last save wins. Validation uses the wall clock
 (`time.Now`); only relative-range bucket counts depend on it.
 
-**Draw.** The console's dashboard page (`sdk/billing-ui/src/admin/pages/dashboard`)
+**Draw.** The console's dashboard page (`web/billing-ui/src/admin/pages/dashboard`)
 runs each widget's query through `POST /v1/metrics/query`, applies the range
 picker to widgets without `fixed_range`, and edits widgets
 (`widget-editor.tsx`) before a save.
@@ -117,7 +117,7 @@ picker to widgets without `fixed_range`, and edits widgets
 - Errors: `metrics_query_invalid`, `dashboard_invalid`, `service_unavailable`,
   `authentication_required`.
 - Guides: [metrics for LLMs](../client.md#metrics),
-  [billing administration](../../sdk/billing-ui/README.md#staff-administration).
+  [billing administration](../../web/billing-ui/README.md#staff-administration).
 
 ## Guarantees
 
@@ -172,7 +172,7 @@ Checks:
 - `Schema().Limits` reports `MaxBuckets` and `MaxLimit`, the same constants validation uses.
 - `DecodePut` decodes into `billing.DashboardWidget` with unknown fields refused, like the metrics API.
 - Renaming or removing a `Measures` entry fails no contract check; review such a change as a break.
-- Compare the console's hand-written `Dashboard` and `Widget` (`sdk/billing-ui/src/admin/lib/api/metrics.ts`) with `wire.ts`: `updated_at` and `updated_by` are optional there but `string | null` on the wire.
+- Compare the console's hand-written `Dashboard` and `Widget` (`web/billing-ui/src/admin/lib/api/metrics.ts`) with `wire.ts`: `updated_at` and `updated_by` are optional there but `string | null` on the wire.
 
 ### 6. Data lifecycle
 The engine owns no table. Every flow statement bounds its time column by the range;

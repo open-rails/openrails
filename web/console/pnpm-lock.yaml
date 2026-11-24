@@ -24,8 +24,8 @@ importers:
         specifier: 1.34.1
         version: 1.34.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@openrails/billing-ui':
-        specifier: link:../../../sdk/billing-ui
-        version: link:../../../sdk/billing-ui
+        specifier: link:../billing-ui
+        version: link:../billing-ui
       '@tanstack/react-query':
         specifier: ^5.101.4
         version: 5.101.4(react@19.2.7)

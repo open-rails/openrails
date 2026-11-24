@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@openrails/billing-ui": "file:../../sdk/billing-ui",
+    "@openrails/billing-ui": "file:../billing-ui",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "zod": "^4.6.6"

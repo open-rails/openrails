@@ -1,7 +1,7 @@
-// Package admin embeds the admin console build (`task admin-build` populates
-// dist/). Only dist/.gitkeep is committed, so Go builds without Node and FS
-// then returns nil.
-package admin
+// Package console embeds the admin console build (`task admin-build`
+// populates dist/). Only dist/.gitkeep is committed, so Go builds without Node
+// and FS then returns nil.
+package console
 
 import (
 	"embed"

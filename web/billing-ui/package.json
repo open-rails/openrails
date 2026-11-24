@@ -7,9 +7,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/open-rails/openrails.git",
-    "directory": "sdk/billing-ui"
+    "directory": "web/billing-ui"
   },
-  "homepage": "https://github.com/open-rails/openrails/tree/master/sdk/billing-ui#readme",
+  "homepage": "https://github.com/open-rails/openrails/tree/master/web/billing-ui#readme",
   "bugs": {
     "url": "https://github.com/open-rails/openrails/issues"
   },

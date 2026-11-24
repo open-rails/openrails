@@ -19,6 +19,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   for web/pay's Playwright suite. It may
   import the root's `internal/` packages; the root never imports it. In the repo it builds
   against the root's source (`replace … => ../`).
+- `web/` is the browser code, in the root module: `web/billing-ui` (the npm library
+  `@openrails/billing-ui`), and the payment page `web/pay` and admin console `web/console`,
+  which each `go:embed` their own `dist/` (only `dist/.gitkeep` is committed).
 - `examples/` and `adapters/authkit` are modules too. Check each on its own (`GOWORK=off`;
   `scripts/check.sh build` builds all four).
 - `scripts/release` releases root, server and the AuthKit adapter in lockstep: `prepare vX.Y.Z`
@@ -37,7 +40,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 
 ## v1 is frozen
 - From v1.0.0 three contracts change only by adding to them (`compatibility/README.md`):
-  the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `server/web/console`, `server`), the
+  the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `web/console`, `web/pay`, `server`), the
   HTTP API, and the database schema. `api/go.txt` lists both modules.
 - Each has a generated snapshot: `api/go.txt`, `api/openapi.json`, `api/schema.txt`.
   `go run ./scripts/contracts` verifies them (CI runs it with `-dsn`); `-write` rewrites
@@ -61,7 +64,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   (`Name`, `Doc`, `Args`, `Query`, `Cache`): one `*Client` method per admin, catalog-edit and
   merchant-config route. `HandWritten` routes and the methods no route has live in
   `client_handwritten.go`; any other exported method fails generation. Customer
-  self-service (`/v1/me`) is for browsers through `sdk/billing-ui`.
+  self-service (`/v1/me`) is for browsers through `web/billing-ui`.
 - Every route is declared once in the route catalog (`internal/http/routes`, one file
   per resource) with its tier, level (an admin route: read or write) or permission,
   request, responses and error codes. The catalog mounts the route and generates

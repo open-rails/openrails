@@ -15,7 +15,7 @@ what each customer may access. Your app keeps its users and sign-in.
 [The integration guide](docs/guide.md) is the overview and the shortest working
 integration. [The client guide](docs/client.md) covers everything the Go client
 does, on every path. The browser SDK is
-[`@openrails/billing-ui`](sdk/billing-ui/README.md). Generated references:
+[`@openrails/billing-ui`](web/billing-ui/README.md). Generated references:
 [routes](docs/api/routes.md), [error codes](docs/api/error-codes.md),
 [OpenAPI](api/openapi.json).
 
@@ -23,5 +23,5 @@ does, on every path. The browser SDK is
 
 OpenRails is under the Elastic License 2.0 ([LICENSE](LICENSE)): use, change
 and self-host it for any purpose, except offering it to others as a hosted or
-managed service. The browser SDK [`@openrails/billing-ui`](sdk/billing-ui) is MIT
-([sdk/billing-ui/LICENSE](sdk/billing-ui/LICENSE)).
+managed service. The browser SDK [`@openrails/billing-ui`](web/billing-ui) is MIT
+([web/billing-ui/LICENSE](web/billing-ui/LICENSE)).

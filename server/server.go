@@ -30,7 +30,7 @@ import (
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	httpserver "github.com/open-rails/openrails/server/internal/http"
 	"github.com/open-rails/openrails/server/internal/operator"
-	admin "github.com/open-rails/openrails/server/web/console"
+	"github.com/open-rails/openrails/web/console"
 	paypage "github.com/open-rails/openrails/web/pay"
 )
 
@@ -333,7 +333,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 	consoleAssets := deps.ConsoleAssets
 	if consoleEnabled && consoleAssets == nil {
-		consoleAssets = admin.FS()
+		consoleAssets = console.FS()
 	}
 	checkout, page := eng.CheckoutPage()
 	var admission func(context.Context, auth.Verified, config.CustomerBinding) error

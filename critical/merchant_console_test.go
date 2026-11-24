@@ -88,7 +88,7 @@ func consoleOperator(t *testing.T, a *authorityWorld) string {
 // real router and counted by method and path, which it returns.
 func consoleBrowser(t *testing.T, a *authorityWorld, config map[string]any, actions map[string]consoleAction, cases ...string) map[string]int {
 	t.Helper()
-	directory, err := filepath.Abs("../sdk/billing-ui")
+	directory, err := filepath.Abs("../web/billing-ui")
 	require.NoError(t, err)
 	app := filepath.Join(directory, "test-results", "admin-app")
 	_, err = os.Stat(filepath.Join(app, "app.js"))
