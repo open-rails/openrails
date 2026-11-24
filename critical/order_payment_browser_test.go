@@ -49,7 +49,7 @@ func orderPaymentBrowser(t *testing.T, browserCase string) (*solanaWorld, billin
 	})
 	mux.HandleFunc("GET /app.js", func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, app) })
 	mux.Handle("/v1/", api)
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.FileServer(http.Dir(filepath.Dir(app))).ServeHTTP(w, r)
 			return
