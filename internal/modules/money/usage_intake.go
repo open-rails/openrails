@@ -832,6 +832,8 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 	}
 	marks := map[account]*mark{}
 	var accounts []account
+	var zone *time.Location
+	var err error
 	for i, e := range b.events {
 		if e == nil {
 			continue
@@ -847,7 +849,12 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 		if len(e.Charges) == 0 {
 			continue
 		}
-		due := s.monthAfter(ctx, e.OccurredAt)
+		if zone == nil {
+			if zone, err = s.accountingZone(ctx); err != nil {
+				return err
+			}
+		}
+		due := monthAfter(zone, e.OccurredAt)
 		if m.since.IsZero() || e.PeriodStartsAt.Before(m.since) {
 			m.since = e.PeriodStartsAt
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,32 +47,42 @@ const (
 	usagePostingReversal = "reversal"
 )
 
-// accountingZone is the zone a merchant's months close in: its
-// accounting.timezone, UTC when it names none.
-func (s *MoneyService) accountingZone(ctx context.Context) *time.Location {
+// zones caches loaded zones by name.
+var zones sync.Map
+
+// accountingZone is the zone the merchant's months close in: its
+// accounting.timezone, UTC when it names none or no configuration is bound.
+// A configuration it cannot read is an error, never UTC.
+func (s *MoneyService) accountingZone(ctx context.Context) (*time.Location, error) {
 	cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx)
-	if err != nil || cfg.AccountingTimezone == "" {
-		return time.UTC
+	switch {
+	case errors.Is(err, merchantconfig.ErrNoSettings):
+		return time.UTC, nil
+	case err != nil:
+		return nil, err
+	case cfg.AccountingTimezone == "" || cfg.AccountingTimezone == "UTC":
+		return time.UTC, nil
 	}
-	zone, err := time.LoadLocation(cfg.AccountingTimezone)
+	if z, ok := zones.Load(cfg.AccountingTimezone); ok {
+		return z.(*time.Location), nil
+	}
+	z, err := time.LoadLocation(cfg.AccountingTimezone)
 	if err != nil {
-		return time.UTC
+		return nil, err
 	}
-	return zone
+	zones.Store(cfg.AccountingTimezone, z)
+	return z, nil
 }
 
-// monthAfter is the start of the month after the one t falls in, in the
-// merchant's accounting zone: when the close posts usage of t.
-func (s *MoneyService) monthAfter(ctx context.Context, t time.Time) time.Time {
-	z := s.accountingZone(ctx)
+// monthAfter is the start of the month after the one t falls in, in zone z:
+// when the close posts usage of t.
+func monthAfter(z *time.Location, t time.Time) time.Time {
 	l := t.In(z)
 	return time.Date(l.Year(), l.Month()+1, 1, 0, 0, 0, 0, z).UTC()
 }
 
-// monthStart is the start of the month t falls in, in the merchant's
-// accounting zone.
-func (s *MoneyService) monthStart(ctx context.Context, t time.Time) time.Time {
-	z := s.accountingZone(ctx)
+// monthStart is the start of the month t falls in, in zone z.
+func monthStart(z *time.Location, t time.Time) time.Time {
 	l := t.In(z)
 	return time.Date(l.Year(), l.Month(), 1, 0, 0, 0, 0, z).UTC()
 }
@@ -218,7 +229,12 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	}
 	for _, r := range rows {
 		if r.Later > 0 {
-			keep(r.PeriodStartsAt, s.monthAfter(ctx, cut))
+			zone, err := s.accountingZone(ctx)
+			if err != nil {
+				return false, err
+			}
+			keep(r.PeriodStartsAt, monthAfter(zone, cut))
+			break
 		}
 	}
 	moved := false
@@ -437,10 +453,14 @@ func (s *MoneyService) CloseUsage(ctx context.Context, customer uuid.UUID, curre
 	if err != nil {
 		return false, err
 	}
+	zone, err := s.accountingZone(ctx)
+	if err != nil {
+		return false, err
+	}
 	var posted bool
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).at(now).postUsageTx(ctx, gen.New(tx), mid.UUID(), customer, currency, s.monthStart(ctx, now), usagePostingClose)
+		posted, err = s.WithDatabase(s.db.NewWithPgxTx(tx)).at(now).postUsageTx(ctx, gen.New(tx), mid.UUID(), customer, currency, monthStart(zone, now), usagePostingClose)
 		return err
 	})
 	return posted, err
