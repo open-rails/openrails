@@ -256,7 +256,7 @@ own schema (`auth.database.schema`, default `profiles`).
 
 | Key | Meaning |
 |---|---|
-| `redis.addr` | `host:port` |
+| `redis.addr` | `host:port`. While a declared Redis does not answer, a DPoP proof or a JWT-bearer or client assertion is refused (503): another replica could not see it spent |
 | `redis.url` | instead of `addr`: `redis://` or `rediss://` with user, password and database |
 | `redis.username`, `redis.password`, `redis.db` | ACL user, password, database number |
 | `redis.tls`, `redis.ca_cert` | TLS against the system roots, or this PEM bundle (which implies TLS) |
@@ -273,9 +273,10 @@ boot. The ones a deployment sets:
 | Key | Meaning |
 |---|---|
 | `auth.default_tenant_id` | the server's operator account directory: a UUID generated once for the deployment and never changed ([the account directory](#the-account-directory)) |
-| `auth.token.issuer` | required; the server's own issuer. No billing URL stands in for it |
+| `auth.token.issuer` | required; the server's own issuer, https (http only on a loopback host). No billing URL stands in for it |
+| `auth.token.refresh_token_duration` | how long a session lasts from its sign-in: 30 days when unset; negative lasts until revoked |
 | `auth.token.allow_private_network_jwks` | fetch a trusted issuer's keys from a private address (local federation only) |
-| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`); file-watched |
+| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
 | `auth.keys.allow_ephemeral_dev_keys` | generate keys under `auth.keys.path`; one instance, local only |
 | `auth.keys.verify_only` | verify tokens, mint none |
 | `auth.resource.id` | the resource trusted issuers mint tokens for: their `aud` (RFC 8707). Turns trusted-issuer tokens on |
@@ -672,9 +673,7 @@ refused on `/v1/app` (`403 application_required`).
 `local_sign_in`, with the server's own accounts. The console exchanges the
 person's token for one bound to the chosen merchant (RFC 8693 through the
 server's `openrails-console` client), refused where they hold no role. Its
-session keeps the access token in memory and a rotating HttpOnly refresh cookie
-(`__Host-authkit_rt` on HTTPS); a revoked session answers
-`401 credential_revoked` at once. `admin_console.disabled` omits it.
+session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once. `admin_console.disabled` omits it.
 
 ### Customer contacts
 
