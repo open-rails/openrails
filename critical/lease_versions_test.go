@@ -247,7 +247,8 @@ func TestLeaseVersions(t *testing.T) {
 		order := oneUsageOrder(t, a, customer)
 		require.EqualValues(t, 30_000_000, order.Total)
 		dayEnd := time.Date(2026, 9, 24, 23, 59, 59, 999_999_000, time.UTC)
-		require.True(t, dayEnd.Equal(order.Usage.PeriodStartsAt), "dated at its day's end, not at its posting: %s", order.Usage.PeriodStartsAt)
+		require.True(t, dayEnd.Equal(owedAccruedAt(t, a.world, order.ID)), "dated at its day's end, not at its posting")
+		require.True(t, order.Usage.PeriodStartsAt.Before(dayEnd), "the order's period starts with the usage's: %s", order.Usage.PeriodStartsAt)
 	})
 
 	t.Run("OR-J24-S22/usage-after-a-credit-lot-lapses-never-draws-it", func(t *testing.T) {
@@ -407,7 +408,10 @@ func TestLeaseVersions(t *testing.T) {
 		// next finds nothing left.
 		require.True(t, leaseAdmit(t, w, lease, work("crossing", 5)).Allowed())
 		requireDenied(t, leaseAdmit(t, w, lease, work("after", 1)), billing.DenyLimitReached)
-		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, spentOn(customer, "crossing", "crossing-use", 5)), Views: []billing.ViewParams{workView(customer)}})
+		// The capture reports the admitted event type.
+		use := workReport(customer, "crossing-use", 5)
+		use.RequestID = ptr("crossing")
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, use), Views: []billing.ViewParams{workView(customer)}})
 		require.Empty(t, out.Usage.Refused)
 		require.EqualValues(t, -3, lineOf(t, viewOf(t, out, customer), "quota").Remaining, "the crossing request settles in full")
 	})

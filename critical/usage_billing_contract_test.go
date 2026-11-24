@@ -73,6 +73,15 @@ func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*
 	return a, p, customer
 }
 
+// owedAccruedAt is when the earliest owed item an order bills accrued.
+func owedAccruedAt(t *testing.T, w *world, order billing.OrderID) time.Time {
+	t.Helper()
+	var at time.Time
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT min(accrued_at) FROM "+pgx.Identifier{w.schema, "owed_items"}.Sanitize()+" WHERE order_id = $1",
+		order.UUID()).Scan(&at))
+	return at.UTC()
+}
+
 // postUsageMonth ends the month the usage occurred: it posts, and what it
 // leaves owed is billed as usage billing bills owed.
 func postUsageMonth(t *testing.T, w *world, fleet *river.Client[pgx.Tx]) {
@@ -436,8 +445,9 @@ func TestUsageBillingContracts(t *testing.T) {
 		}
 		require.NotNil(t, second.Usage)
 		require.EqualValues(t, 30_000_000, second.Total)
-		require.False(t, second.Usage.PeriodStartsAt.Before(first.Usage.PeriodEndsAt), "late usage is owed after the order that billed its day: %s < %s",
-			second.Usage.PeriodStartsAt, first.Usage.PeriodEndsAt)
+		require.False(t, owedAccruedAt(t, a.world, second.ID).Before(first.Usage.PeriodEndsAt), "late usage is owed after the order that billed its day")
+		require.True(t, second.Usage.PeriodEndsAt.After(first.Usage.PeriodEndsAt))
+		require.False(t, second.Usage.PeriodStartsAt.After(late.OccurredAt), "its order's period covers it: %s", second.Usage.PeriodStartsAt)
 	})
 	t.Run("OR-J26-S57/a-period-that-ends-within-a-day-bills-that-days-usage-in-it", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true)
@@ -456,6 +466,23 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.EqualValues(t, 10_000_000, order.Total)
 		turn := time.Date(2026, 9, 25, 14, 0, 0, 0, time.UTC)
 		require.True(t, order.Usage.PeriodStartsAt.Before(turn), "owed at %s, after its period ended", order.Usage.PeriodStartsAt)
+	})
+	t.Run("OR-J26-S63/a-usage-orders-period-covers-the-usage-it-bills", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, true, true)
+		occurred := a.clock.Now().UTC()
+		oneUsage(t, a.alpha, usageInput(customer, "in-its-period", 3))
+		fleet := startFleet(t, a.world)
+		// The close owes it at its pricing period's last instant; the order
+		// that bills it states the period its charge came from.
+		postUsageMonth(t, a.world, fleet)
+		runUsageDue(t, fleet)
+		order := oneUsageOrder(t, a, customer)
+		require.EqualValues(t, 30_000_000, order.Total)
+		require.NotNil(t, order.Usage)
+		require.False(t, order.Usage.PeriodStartsAt.After(occurred), "the period %s..%s covers the usage at %s",
+			order.Usage.PeriodStartsAt, order.Usage.PeriodEndsAt, occurred)
+		require.True(t, occurred.Before(order.Usage.PeriodEndsAt))
+		require.False(t, order.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill")
 	})
 	t.Run("OR-J26-S58/revoking-the-agreement-bills-todays-usage", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false, false)

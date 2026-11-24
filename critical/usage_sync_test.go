@@ -74,7 +74,9 @@ func syncLease(t *testing.T, client *openrails.Client, params billing.SyncLeases
 func settleUsage(t *testing.T, client *openrails.Client, lease billing.LeaseID, items ...billing.LeaseUsage) *billing.SyncLeasesResult {
 	t.Helper()
 	out := syncLease(t, client, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
-	require.Empty(t, out.Usage.Refused, "%+v", out.Usage.Refused)
+	for _, r := range out.Usage.Refused {
+		require.Failf(t, "usage refused", "item %d: %d %+v", r.N, r.Status, r.Error)
+	}
 	require.Equal(t, items[len(items)-1].N, out.Usage.ThroughN)
 	return out
 }
