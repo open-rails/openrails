@@ -987,6 +987,44 @@ func (q *Queries) LockDestructiveAction(ctx context.Context, arg LockDestructive
 	return i, err
 }
 
+const lockDestructiveActionNowait = `-- name: LockDestructiveActionNowait :one
+SELECT merchant_id, id, admission_sequence, kind, target, action_key, request_digest, origin, actor_issuer, actor_id, actor_key, credential, units, admitted_at, state, started_at, finished_at, completion_sequence, result FROM billing.destructive_actions
+WHERE merchant_id=$1::uuid AND id=$2::uuid FOR UPDATE NOWAIT
+`
+
+type LockDestructiveActionNowaitParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// The command, unless another transaction holds it: then 55P03 at once.
+func (q *Queries) LockDestructiveActionNowait(ctx context.Context, arg LockDestructiveActionNowaitParams) (BillingDestructiveAction, error) {
+	row := q.db.QueryRow(ctx, lockDestructiveActionNowait, arg.MerchantID, arg.ID)
+	var i BillingDestructiveAction
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.AdmissionSequence,
+		&i.Kind,
+		&i.Target,
+		&i.ActionKey,
+		&i.RequestDigest,
+		&i.Origin,
+		&i.ActorIssuer,
+		&i.ActorID,
+		&i.ActorKey,
+		&i.Credential,
+		&i.Units,
+		&i.AdmittedAt,
+		&i.State,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CompletionSequence,
+		&i.Result,
+	)
+	return i, err
+}
+
 const lockDestructiveAdmissions = `-- name: LockDestructiveAdmissions :exec
 SELECT pg_advisory_xact_lock(hashtextextended('openrails:destructive-admissions:' || 'billing.destructive_actions'::regclass::oid::text,0))
 `

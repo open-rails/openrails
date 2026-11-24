@@ -179,3 +179,21 @@ func TestHoldersFindAnExactUsernamePastContainingMatches(t *testing.T) {
 	_, err = Customers{Directory: live}.GetUserIDByUsername(merchant.WithID(t.Context(), mid), "bo")
 	require.ErrorIs(t, err, ErrUsernameUnknown, "a name nobody holds exactly")
 }
+
+func TestHoldersOfALargeMerchantAreUnknownPastTheWindow(t *testing.T) {
+	dir, customers := &people{cap: 1000}, &book{}
+	start := time.Now()
+	for i := range customerScan + 1 {
+		customers.add(uuid.New(), start.Add(-time.Duration(i)*time.Second))
+	}
+	// A host user, no customer, holds the name, among more matches than a
+	// search reads: the merchant's customers cannot all be read, so the
+	// directory is not searched for it.
+	dir.join("crowd")
+	for i := range searchWindow + 1 {
+		dir.join(fmt.Sprintf("crowd%04d", i))
+	}
+	held, err := Holders(t.Context(), Live{Lookup: dir, rows: customers}, mid, "crowd", Username)
+	require.NoError(t, err)
+	require.Empty(t, held)
+}

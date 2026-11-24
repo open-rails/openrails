@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 668,
+  "scenario_count": 670,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3342,6 +3342,16 @@
       "id": "OR-J19-S17",
       "journey": "J19",
       "name": "Two identical creates waiting on the catalog lock answer the one migration, recorded once"
+    },
+    {
+      "id": "OR-J19-S18",
+      "journey": "J19",
+      "name": "A price migration whose caller leaves after its source is archived is still recorded, and the identical retry answers it under the one command: two subscribers and the source, admitted once"
+    },
+    {
+      "id": "OR-J19-S19",
+      "journey": "J19",
+      "name": "An identical price migration created while the first records is refused at once with price_migration_in_progress, another destructive command of the merchant is admitted meanwhile, and once recorded the identical request answers it"
     }
   ]
 }

@@ -2169,6 +2169,12 @@
     ],
     "OR-J19-S17": [
       "TestPriceMigrationScale/OR-J19-S17/concurrent-identical-creates-answer-one-migration"
+    ],
+    "OR-J19-S18": [
+      "TestPriceMigrationScale/OR-J19-S18/a-create-whose-caller-leaves-after-its-archive-is-recorded-under-one-command"
+    ],
+    "OR-J19-S19": [
+      "TestPriceMigrationScale/OR-J19-S19/an-identical-create-while-the-first-records-is-refused-at-once-and-stalls-no-admission"
     ]
   }
 }

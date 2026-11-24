@@ -520,8 +520,9 @@ const holderSearch = 50
 
 // Holders are the contacts whose field (its username or email) is value,
 // ignoring case: the merchant's customers holding it when any does, else
-// the people the directory holds among the matches it reads in full. A
-// search's first matches can all merely contain value.
+// the people the directory holds among the matches it reads in full; none
+// when the merchant's customers cannot all be read. A search's first
+// matches can all merely contain value.
 func Holders(ctx context.Context, d Directory, mid billing.MerchantID, value string, field func(Contact) string) ([]Contact, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || d == nil {
@@ -539,7 +540,12 @@ func Holders(ctx context.Context, d Directory, mid billing.MerchantID, value str
 		return out
 	}
 	customers, err := d.SearchCustomers(ctx, mid, value, holderSearch)
-	if err != nil && !errors.Is(err, ErrSearchTooBroad) {
+	if errors.Is(err, ErrSearchTooBroad) {
+		// Its customers could not all be read: the holder is unknown, not
+		// whoever of the whole directory holds it.
+		return nil, nil
+	}
+	if err != nil {
 		return nil, err
 	}
 	if held := exact(customers); len(held) > 0 {

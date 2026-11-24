@@ -638,6 +638,7 @@ pkg openrails/billing, const CodePriceChangeTargetArchived ErrorCode = "price_ch
 pkg openrails/billing, const CodePriceIncreaseNoticeTooShort ErrorCode = "price_increase_notice_too_short"
 pkg openrails/billing, const CodePriceKeyCadenceConflict ErrorCode = "price_key_cadence_conflict"
 pkg openrails/billing, const CodePriceKeyNotFound ErrorCode = "price_key_not_found"
+pkg openrails/billing, const CodePriceMigrationInProgress ErrorCode = "price_migration_in_progress"
 pkg openrails/billing, const CodePriceMigrationNotFound ErrorCode = "price_migration_not_found"
 pkg openrails/billing, const CodePriceNotFound ErrorCode = "price_not_found"
 pkg openrails/billing, const CodePriceNotSellable ErrorCode = "price_not_sellable"

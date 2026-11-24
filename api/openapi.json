@@ -3858,6 +3858,7 @@
           "price_change_currency_mismatch",
           "price_change_target_archived",
           "price_key_not_found",
+          "price_migration_in_progress",
           "price_not_found",
           "product_not_found",
           "rate_limit_exceeded"
@@ -19314,6 +19315,7 @@
               "price_increase_notice_too_short",
               "price_key_cadence_conflict",
               "price_key_not_found",
+              "price_migration_in_progress",
               "price_migration_not_found",
               "price_not_found",
               "price_not_sellable",
@@ -25426,6 +25428,7 @@
               "price_increase_notice_too_short",
               "price_key_cadence_conflict",
               "price_key_not_found",
+              "price_migration_in_progress",
               "price_migration_not_found",
               "price_not_found",
               "price_not_sellable",
@@ -30108,6 +30111,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No price holds this key."
+    },
+    "price_migration_in_progress": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The same price migration is being created by another request; retry once it answers."
     },
     "price_migration_not_found": {
       "status": 404,

@@ -138,6 +138,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `price_increase_notice_too_short` | 422 | `invalid_request_error` | effective_at is inside the merchant's notice window for a price increase. |
 | `price_key_cadence_conflict` | 409 | `invalid_request_error` | The product's default price key is held by a price on another cadence. |
 | `price_key_not_found` | 404 | `invalid_request_error` | No price holds this key. |
+| `price_migration_in_progress` | 409 | `invalid_request_error` | The same price migration is being created by another request; retry once it answers. |
 | `price_migration_not_found` | 404 | `invalid_request_error` | The price migration does not exist. |
 | `price_not_found` | 404 | `invalid_request_error` | The price does not exist. |
 | `price_not_sellable` | 400 | `invalid_request_error` | None of the price's methods can sell it. |

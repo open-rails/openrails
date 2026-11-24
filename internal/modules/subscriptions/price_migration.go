@@ -579,7 +579,8 @@ type PendingMigration struct {
 
 // Admit resolves a migration and admits it as one destructive command, a
 // unit for each subscriber counted and each source it archives, before any
-// is read. prior is the migration the same request already recorded.
+// is read. prior is the migration the same request already recorded, its
+// command in Action.
 func (s *PriceMigrationService) Admit(ctx context.Context, p billing.CreatePriceMigrationParams) (*PendingMigration, *billing.PriceMigration, error) {
 	plan, err := s.resolve(ctx, p, false)
 	if err != nil {
@@ -638,8 +639,9 @@ func (s *PriceMigrationService) Record(ctx context.Context, pending *PendingMigr
 		}
 		if pending.Action != nil {
 			// The command's row orders identical requests: the second finds
-			// the first's migration.
-			if _, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid.UUID(), ID: pending.Action.ID}); err != nil {
+			// the first's migration. One already ended records nothing.
+			locked, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid.UUID(), ID: pending.Action.ID})
+			if err != nil {
 				return err
 			}
 			recorded, err := q.GetPriceMigrationByDestructiveAction(ctx, gen.GetPriceMigrationByDestructiveActionParams{MerchantID: mid.UUID(), DestructiveActionID: pending.Action.ID})
@@ -649,6 +651,9 @@ func (s *PriceMigrationService) Record(ctx context.Context, pending *PendingMigr
 			}
 			if !errors.Is(err, pgx.ErrNoRows) {
 				return err
+			}
+			if locked.State != string(destructive.StateStarted) {
+				return errCommandClosed
 			}
 			params.DestructiveActionID = &pending.Action.ID
 		}

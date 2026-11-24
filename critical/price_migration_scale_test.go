@@ -275,17 +275,22 @@ func TestPriceMigrationScale(t *testing.T) {
 			err       error
 		}
 		done := make(chan created, 2)
-		for range 2 {
+		blocked := func(n int) {
+			t.Helper()
+			require.Eventually(t, func() bool {
+				var waiting int
+				require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", holderPID).Scan(&waiting))
+				return waiting == n
+			}, 20*time.Second, 20*time.Millisecond, "waiting on the catalog lock")
+		}
+		// The second arrives once the first, admitted, waits to archive.
+		for i := range 2 {
 			go func() {
 				m, err := a.alpha.CreatePriceMigration(context.Background(), params)
 				done <- created{m, err}
 			}()
+			blocked(i + 1)
 		}
-		require.Eventually(t, func() bool {
-			var waiting int
-			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", holderPID).Scan(&waiting))
-			return waiting == 2
-		}, 20*time.Second, 20*time.Millisecond, "both wait on the catalog lock")
 		require.NoError(t, holder.Rollback(t.Context()))
 		var ids []billing.PriceMigrationID
 		for range 2 {
@@ -302,6 +307,105 @@ func TestPriceMigrationScale(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, migrations.Items, 1)
 		require.Equal(t, 2, migrations.Items[0].Scheduled)
+	})
+
+	t.Run("OR-J19-S18/a-create-whose-caller-leaves-after-its-archive-is-recorded-under-one-command", func(t *testing.T) {
+		a, p, alice := purchasedMembership(t)
+		bob := membershipAtPrice(t, a, p, alice.PriceID, a.bobToken, "outlived-bob")
+		target := migrationPrice(t, a, alice, "outlived-target", 30_000_000)
+		holder, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = holder.Rollback(context.Background()) }()
+		_, err = holder.Exec(t.Context(), "SELECT 1 FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id = $1 FOR UPDATE", bob.ID.UUID())
+		require.NoError(t, err)
+		var holderPID int
+		require.NoError(t, holder.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holderPID))
+		params := billing.CreatePriceMigrationParams{FromPriceID: alice.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			_, _ = a.alpha.CreatePriceMigration(ctx, params)
+			close(done)
+		}()
+		require.Eventually(t, func() bool {
+			var waiting int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", holderPID).Scan(&waiting))
+			return waiting > 0
+		}, 20*time.Second, 20*time.Millisecond, "the source is archived and recording waits on bob")
+		source, err := a.alpha.GetPrice(t.Context(), alice.PriceID)
+		require.NoError(t, err)
+		require.True(t, source.Archived)
+		// The caller leaves after the archive: the migration is still recorded.
+		cancel()
+		require.NoError(t, holder.Rollback(t.Context()))
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+			t.Fatal("the creation never ended")
+		}
+		var migrations *billing.ListPage[billing.PriceMigration]
+		require.Eventually(t, func() bool {
+			migrations, err = a.alpha.ListPriceMigrations(t.Context(), billing.PriceMigrationListParams{})
+			return err == nil && len(migrations.Items) == 1
+		}, 20*time.Second, 50*time.Millisecond, "recorded though its caller left")
+		require.Equal(t, 2, migrations.Items[0].Scheduled)
+		// The retry answers it under the one command: two subscribers and
+		// the source, admitted once.
+		again, err := a.alpha.CreatePriceMigration(t.Context(), params)
+		require.NoError(t, err)
+		require.Equal(t, migrations.Items[0].ID, again.ID)
+		var commands int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "destructive_actions"}.Sanitize()+
+			" WHERE merchant_id = $1 AND target = $2", a.alpha.MerchantID().UUID(), "price-migration/"+target.ID.String()).Scan(&commands))
+		require.Equal(t, 1, commands)
+		require.EqualValues(t, 3, migrationUnits(t, a.world, again.ID))
+	})
+
+	t.Run("OR-J19-S19/an-identical-create-while-the-first-records-is-refused-at-once-and-stalls-no-admission", func(t *testing.T) {
+		a, p, alice := purchasedMembership(t)
+		bob := membershipAtPrice(t, a, p, alice.PriceID, a.bobToken, "in-progress-bob")
+		target := migrationPrice(t, a, alice, "in-progress-target", 30_000_000)
+		other := migrationPrice(t, a, alice, "unrelated-price", 40_000_000)
+		holder, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = holder.Rollback(context.Background()) }()
+		_, err = holder.Exec(t.Context(), "SELECT 1 FROM "+pgx.Identifier{a.schema, "subscriptions"}.Sanitize()+" WHERE id = $1 FOR UPDATE", bob.ID.UUID())
+		require.NoError(t, err)
+		var holderPID int
+		require.NoError(t, holder.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holderPID))
+		params := billing.CreatePriceMigrationParams{FromPriceID: alice.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true, ArchiveSource: ptr(false)}
+		first := make(chan error, 1)
+		go func() {
+			_, err := a.alpha.CreatePriceMigration(context.Background(), params)
+			first <- err
+		}()
+		require.Eventually(t, func() bool {
+			var waiting int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))", holderPID).Scan(&waiting))
+			return waiting > 0
+		}, 20*time.Second, 20*time.Millisecond, "the first records and waits on bob")
+		// The identical request is answered at once, not queued behind it.
+		quick, stop := context.WithTimeout(t.Context(), 10*time.Second)
+		defer stop()
+		_, err = a.alpha.CreatePriceMigration(quick, params)
+		var refused *billing.StatusError
+		require.ErrorAs(t, err, &refused)
+		require.Equal(t, http.StatusConflict, refused.Status)
+		require.Equal(t, billing.CodePriceMigrationInProgress, refused.Code)
+		// Another destructive command of the merchant is admitted meanwhile.
+		archived, err := a.alpha.UpdatePrice(quick, other.ID, billing.UpdatePriceParams{Archived: catalog.Value(true)})
+		require.NoError(t, err)
+		require.True(t, archived.Archived)
+		require.NoError(t, holder.Rollback(t.Context()))
+		select {
+		case err := <-first:
+			require.NoError(t, err)
+		case <-time.After(30 * time.Second):
+			t.Fatal("the first creation never answered")
+		}
+		recorded, err := a.alpha.CreatePriceMigration(t.Context(), params)
+		require.NoError(t, err, "once recorded, the identical request answers it")
+		require.Equal(t, 2, recorded.Scheduled)
 	})
 
 	t.Run("OR-J19-S11/a-solana-subscription-is-blocked-and-nothing-is-sent", func(t *testing.T) {
@@ -435,7 +539,9 @@ func TestPriceMigrationScale(t *testing.T) {
 		require.NoError(t, err)
 		var holderPID int
 		require.NoError(t, holder.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holderPID))
-		params := billing.CreatePriceMigrationParams{FromPriceID: alice.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true}
+		// Nothing archived: once a source is, the creation outlives its caller
+		// (OR-J19-S18).
+		params := billing.CreatePriceMigrationParams{FromPriceID: alice.PriceID, ToPriceID: target.ID, AcknowledgeShortNotice: true, ArchiveSource: ptr(false)}
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() {

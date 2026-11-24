@@ -11,7 +11,7 @@ import (
 // subscriber it counts.
 var (
 	priceMigrationErrors       = codes("invalid_param", "price_change_currency_mismatch", "price_change_target_archived", "price_key_not_found", "price_not_found", "product_not_found")
-	priceMigrationCreateErrors = codes("catalog_revision_conflict", "idempotency_key_reused", "invalid_param", "price_change_currency_mismatch", "price_change_target_archived", "price_key_not_found", "price_not_found", "product_not_found", "rate_limit_exceeded")
+	priceMigrationCreateErrors = codes("catalog_revision_conflict", "idempotency_key_reused", "invalid_param", "price_change_currency_mismatch", "price_change_target_archived", "price_key_not_found", "price_migration_in_progress", "price_not_found", "product_not_found", "rate_limit_exceeded")
 )
 
 // subscriptionsRoutes is recurring agreements: reading, canceling, resuming
