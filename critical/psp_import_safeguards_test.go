@@ -5,6 +5,7 @@ package critical_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river/rivertype"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,17 +47,23 @@ func TestPSPImportSafeguards(t *testing.T) {
 		t.Cleanup(remove)
 		_, err = iw.alpha.ApplyPSPImport(t.Context(), id)
 		require.NoError(t, err)
-		require.Eventually(t, func() bool {
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
 			imp, err := iw.api.GetPSPImport(t.Context(), id)
-			if err == nil && imp.Status == billing.PSPImportFailed {
-				return true
+			if !assert.NoError(c, err) || imp.Status == billing.PSPImportFailed {
+				return
 			}
+			var jobs []string
 			for _, job := range iw.jobs(t, id) {
+				var errs []string
+				for _, e := range job.Errors {
+					errs = append(errs, e.Error)
+				}
+				jobs = append(jobs, fmt.Sprintf("%s attempt %d errors %q", job.State, job.Attempt, errs))
 				if job.State == rivertype.JobStateRetryable {
 					_, _ = iw.fleet.JobRetry(t.Context(), job.ID)
 				}
 			}
-			return false
+			assert.Equal(c, billing.PSPImportFailed, imp.Status, "error %v; jobs %v", deref(imp.Error), jobs)
 		}, 60*time.Second, 50*time.Millisecond, "the apply fails")
 		remove()
 
