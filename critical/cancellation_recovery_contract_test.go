@@ -279,4 +279,49 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		}, 20*time.Second, 100*time.Millisecond, "the resume follows it, as the two were committed")
 		subscriptionState(t, a, sub.ID, "active")
 	})
+	t.Run("OR-J17-S10/a-cancel-after-a-waiting-resume-supersedes-it", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		armDestructive(t, a, true)
+		held := stripe.Hold(func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/v1/subscriptions/"+remote
+		}, stripemock.HoldCommit)
+		t.Cleanup(held.Release)
+		fleet := startFleet(t, a.world)
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		cancel := func() {
+			t.Helper()
+			status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+			require.Equal(t, http.StatusOK, status, string(raw))
+		}
+		cancel()
+		select {
+		case <-held.Arrived():
+		case <-time.After(20 * time.Second):
+			t.Fatal("the cancel never reached Stripe")
+		}
+		// The member resumes while the cancel is in flight, then cancels again.
+		status, raw := a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		a.clock.Advance(time.Second)
+		cancel()
+		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
+		var resume string
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT status FROM "+intents+" WHERE merchant_id = $1 AND subscription_id = $2 AND intent_type = 'stripe_resume_subscription'",
+			a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&resume))
+		require.Equal(t, "superseded", resume, "the resume never reached Stripe, and the later cancel undoes it")
+		held.Release()
+		a.clock.Advance(2 * time.Minute)
+		require.Eventually(t, func() bool {
+			wakeJobs(t, fleet, "openrails.provider_operation")
+			var open int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+intents+" WHERE merchant_id = $1 AND subscription_id = $2"+
+				" AND intent_type IN ('stripe_cancel_subscription', 'stripe_resume_subscription') AND status NOT IN ('succeeded', 'superseded')",
+				a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&open))
+			return open == 0
+		}, 20*time.Second, 100*time.Millisecond, "every Stripe cancel and resume of the subscription settles")
+		require.Equal(t, true, stripe.Subscription(remote)["cancel_at_period_end"], "Stripe ends set to cancel, as the member last asked")
+		subscriptionState(t, a, sub.ID, "canceled")
+	})
 }

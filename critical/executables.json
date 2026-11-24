@@ -328,6 +328,9 @@
     "OR-J17-S09": [
       "TestCancellationRecoveryContracts/OR-J17-S09/a-stripe-resume-waits-for-the-cancel-in-flight-before-it"
     ],
+    "OR-J17-S10": [
+      "TestCancellationRecoveryContracts/OR-J17-S10/a-cancel-after-a-waiting-resume-supersedes-it"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],

@@ -235,7 +235,12 @@ func resumeStripe(ctx context.Context, r *httprequest.Request, sub *models.Subsc
 	var operation uuid.UUID
 	_, err := r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID,
 		Within: func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription, canceledAt time.Time) error {
-			row, err := intents.NewStore(r.State.DB.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
+			store := intents.NewStore(r.State.DB.NewWithPgxTx(tx))
+			// A cancel that never reached Stripe is undone before it is sent.
+			if _, err := store.SupersedeBySubject(ctx, intents.TypeStripeCancelSubscription, resumed.ID, "a later resume undoes it"); err != nil {
+				return err
+			}
+			row, err := store.Enqueue(ctx, intents.EnqueueParams{
 				MerchantID: resumed.MerchantID, Provider: string(models.RailStripe), IntentType: intents.TypeStripeResumeSubscription,
 				SubscriptionID: &resumed.ID, PspID: resumed.PspID, Payload: intents.StripeResumePayload{RailSubscriptionID: resumed.RailSubscriptionID},
 				IdempotencyKey: intents.StripeResumeIdempotencyKey(resumed.ID, canceledAt), NextAttemptAt: r.Clock.Now().UTC(), Origin: origin, OriginReason: "subscription resumed", Inline: true,

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 461,
+  "scenario_count": 462,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -462,6 +462,11 @@
       "id": "OR-J17-S09",
       "journey": "J17",
       "name": "A Stripe resume committed while its cancel is in flight waits for it: Stripe ends as the member last asked"
+    },
+    {
+      "id": "OR-J17-S10",
+      "journey": "J17",
+      "name": "A Stripe cancel or resume undoes the opposite one that never reached Stripe: a cancel after a waiting resume supersedes it, and Stripe ends set to cancel"
     },
     {
       "id": "OR-J18-S01",
