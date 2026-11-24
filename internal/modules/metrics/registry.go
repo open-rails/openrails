@@ -84,6 +84,7 @@ const (
 	FamMRRFlows       Family = "mrr_flows"       // flow over mrr_flows: movements by kind
 	FamMRRChurn       Family = "mrr_churn"       // flow over mrr_streak_flows' churn rows of the opening base, by churn_type
 	FamMRRStreak      Family = "mrr_streak"      // flow over mrr_streak_flows: the opening base's expansion, contraction, churn and corrections
+	FamMRRTrailing    Family = "mrr_trailing"    // the opening base and its churn over the three months ending at each bucket's end
 	FamScheduled      Family = "mrr_scheduled"   // flow over pending mrr_scheduled entries (effective_at)
 	FamCohort         Family = "mrr_cohort"      // mrr_cohort_flows by cohort month and months since it
 	FamCancellations  Family = "cancellations"   // flow over subscription_cancellations (decided_at)
@@ -154,7 +155,9 @@ type Measure struct {
 	ByCustomer string
 	// PerMonth is a rate over a period read as a monthly rate: the period's
 	// rate p over m months (in the accounting timezone) is 1 - (1 - p)^(1/m).
-	PerMonth bool
+	// Its period is the bucket's, or with Trailing the three months ending
+	// at the bucket's end.
+	PerMonth, Trailing bool
 	// Program is the dispute monitoring program whose ratio the measure is.
 	Program billing.DisputeProgram
 	// Untimed measures take no time grouping (their own dimensions order them).
@@ -345,7 +348,15 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.mrr_streak_flows sf`,
 		TimeExpr: `sf.bucket_at`,
-		DimExprs: map[string]string{"currency": `sf.currency`},
+		DimJoins: map[string]string{"churn_type": `CROSS JOIN (VALUES ('voluntary'), ('involuntary'), ('chargeback')) ct(churn_type)`},
+		DimExprs: map[string]string{"currency": `sf.currency`, "churn_type": `ct.churn_type`},
+	},
+	// Each window is the three months ending at a bucket's end (w.starts_at,
+	// w.ends_at), labelled by the bucket.
+	FamMRRTrailing: {
+		Kind:     "trailing",
+		From:     `billing.mrr_totals t`,
+		DimExprs: map[string]string{"currency": `t.currency`},
 	},
 	FamScheduled: {
 		Kind:      "flow",
@@ -988,10 +999,29 @@ var declared = []Measure{
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "cancel_type", "reversed"}},
 	{Name: "churned_subscribers", Class: ClassAdditive, Family: FamMRRChurn, Unit: "count", Internal: true,
 		Expr: `COALESCE(-SUM(sf.logos * ct.sign) FILTER (WHERE sf.streak_at < @period_start), 0)::bigint`, Dims: []string{"currency", "churn_type"}},
-	{Name: "subscriber_churn_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "churned_subscribers", Den: "subscribers_at_period_start", PerMonth: true,
-		Description: "monthly churn: of the customers with MRR at the period's start, the share whose MRR went to none in it, as a monthly rate (a period of m months in the accounting timezone with rate p reads 1 - (1 - p)^(1/m); a calendar month reads as counted), by churn_type, each type alone",
-		Formula:     "1 - (1 - churned customers of the opening base / customers with MRR at period start)^(1 / months in the period)",
+	{Name: "base_pruned", Class: ClassAdditive, Family: FamMRRStreak, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(-sf.logos) FILTER (WHERE sf.streak_at < @period_start AND sf.measure = 'correction'), 0)::bigint`, Dims: []string{"currency", "churn_type"}},
+	{Name: "churn_base", Class: ClassDifference, Unit: "count", Internal: true,
+		Num: "subscribers_at_period_start", Den: "base_pruned", Dims: []string{"currency", "churn_type"}},
+	{Name: "subscriber_churn_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "churned_subscribers", Den: "churn_base", PerMonth: true,
+		Description: "the period's own churn as a monthly rate: of the customers with MRR at its start, less those a prune took out in it (neither churned nor retained), the share whose MRR went to none in it; a period of m months in the accounting timezone with rate p reads 1 - (1 - p)^(1/m), a calendar month as counted; by churn_type, each type alone",
+		Formula:     "1 - (1 - churned customers of the opening base / (customers with MRR at period start - those pruned in it))^(1 / months in the period)",
 		Dims:        []string{"currency", "churn_type"}},
+	{Name: "trailing_base", Class: ClassSnapshot, Family: FamMRRTrailing, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(t.customers - COALESCE((SELECT SUM(f.logos) FROM billing.mrr_flows f
+			WHERE f.merchant_id = t.merchant_id AND f.currency = t.currency AND f.measure NOT IN ('churn_voluntary', 'churn_chargeback')
+			  AND f.bucket_at >= w.starts_at), 0)
+			+ COALESCE((SELECT SUM(sf.logos) FROM billing.mrr_streak_flows sf
+			WHERE sf.merchant_id = t.merchant_id AND sf.currency = t.currency AND sf.measure = 'correction'
+			  AND sf.bucket_at >= w.starts_at AND sf.bucket_at < w.ends_at AND sf.streak_at < w.starts_at), 0)), 0)::bigint`,
+		Dims: []string{"currency"}},
+	{Name: "trailing_churned", Class: ClassSnapshot, Family: FamMRRTrailing, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(-COALESCE((SELECT SUM(sf.logos) FROM billing.mrr_streak_flows sf
+			WHERE sf.merchant_id = t.merchant_id AND sf.currency = t.currency AND sf.measure = 'churn'
+			  AND sf.bucket_at >= w.starts_at AND sf.bucket_at < w.ends_at AND sf.streak_at < w.starts_at), 0)), 0)::bigint`,
+		Dims: []string{"currency"}},
+	{Name: "trailing_churn_rate", Class: ClassRatio, Unit: "ratio", Internal: true, Num: "trailing_churned", Den: "trailing_base", PerMonth: true, Trailing: true,
+		Dims: []string{"currency"}},
 	{Name: "base_mrr_drop", Class: ClassAdditive, Family: FamMRRStreak, Money: true, Unit: UnitMoney, Internal: true,
 		Expr: `COALESCE(-SUM(sf.amount) FILTER (WHERE sf.streak_at < @period_start AND sf.measure IN ('expansion', 'contraction', 'churn')), 0)::bigint`, Dims: []string{"currency"}},
 	{Name: "base_mrr_lost", Class: ClassAdditive, Family: FamMRRStreak, Money: true, Unit: UnitMoney, Internal: true,
@@ -1016,9 +1046,9 @@ var declared = []Measure{
 		Description: "average MRR per customer with MRR at t",
 		Formula:     "mrr / subscribers",
 		Dims:        []string{"currency"}},
-	{Name: "ltv", Class: ClassRatio, Money: true, Unit: UnitMoney, Direction: UpIsGood, Num: "arpa", Den: "subscriber_churn_rate",
-		Description: "lifetime value, revenue only: arpa / the monthly subscriber churn rate, at any grain or range",
-		Formula:     "arpa / subscriber_churn_rate (monthly)",
+	{Name: "ltv", Class: ClassRatio, Money: true, Unit: UnitMoney, Direction: UpIsGood, Num: "arpa", Den: "trailing_churn_rate",
+		Description: "lifetime value, revenue only: arpa / the monthly subscriber churn rate over the trailing three months ending at the bucket's end (the range's end without time), at every grain",
+		Formula:     "arpa / monthly subscriber churn over the trailing 3 months",
 		Dims:        []string{"currency"}},
 	{Name: "cohort_value", Class: ClassAdditive, Family: FamCohort, Unit: "count", Internal: true,
 		Dims: []string{"currency", "cohort", "months_since_start", "basis"}},

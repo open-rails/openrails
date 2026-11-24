@@ -68,6 +68,11 @@ SELECT DISTINCT m.merchant_id, m.customer_id, sqlc.arg(at)::timestamptz
 FROM billing.subscription_mrr m
 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.mrr > 0;
 
+-- name: RebuildMRRRollups :exec
+-- An archive from before the reporting rollups lacks them: they are rebuilt
+-- from what they derive from, as the migration built them.
+SELECT billing.rebuild_mrr_rollups(sqlc.arg(merchant_id)::uuid);
+
 -- name: SeedMRR :exec
 -- Adopts the subscriptions without MRR state (an archive from before MRR) as
 -- opening movements at at.

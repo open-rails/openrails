@@ -120,6 +120,8 @@ func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 			st, err = compileSnapshot(plan, merchantID, fam, spec, perCurrency)
 		case "cohort":
 			st, err = compileCohort(plan, merchantID, leaves)
+		case "trailing":
+			st, err = compileTrailing(plan, merchantID, fam, spec, leaves)
 		case "balance":
 			st, err = compileBalance(plan, merchantID, fam, spec, leaves)
 		case "depletion":
@@ -160,6 +162,7 @@ var merchantCols = map[Family]string{
 	FamMRR:            "t.merchant_id",
 	FamMRRProduct:     "pt.merchant_id",
 	FamMRRCustomers:   "ct.merchant_id",
+	FamMRRTrailing:    "t.merchant_id",
 	FamMRRFlows:       "f.merchant_id",
 	FamMRRChurn:       "sf.merchant_id",
 	FamMRRStreak:      "sf.merchant_id",
@@ -331,6 +334,65 @@ func retarget(leaves []*Measure, fam Family) []*Measure {
 		out[i] = &c
 	}
 	return out
+}
+
+// compileTrailing evaluates its leaves over each bucket's window: the three
+// months ending at the bucket's end (the range's end without time), read
+// from w.starts_at and w.ends_at, labelled by the bucket.
+func compileTrailing(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
+	var args []any
+	arg := func(v any) string { args = append(args, v); return fmt.Sprintf("$%d", len(args)) }
+	labels := []time.Time{plan.To}
+	if plan.HasTime {
+		labels = plan.Buckets
+	}
+	starts, ends := make([]time.Time, len(labels)), make([]time.Time, len(labels))
+	for i, b := range labels {
+		starts[i], ends[i] = trailingWindow(plan, b)
+	}
+	sel := []string{"w.bucket AS bucket"}
+	group := []string{"1"}
+	on := []string{merchantCols[fam] + " = " + arg(merchantID)}
+	for _, d := range plan.Dims {
+		expr, ok := spec.DimExprs[d]
+		if !ok {
+			return stmt{}, fmt.Errorf("metrics: family %s lacks dimension %s (registry bug)", fam, d)
+		}
+		sel = append(sel, expr+" AS dim_"+d)
+		group = append(group, fmt.Sprintf("%d", len(sel)))
+	}
+	for _, m := range leaves {
+		sel = append(sel, m.Expr+" AS m_"+m.Name)
+	}
+	for _, d := range sortedFilterDims(plan.Filters) {
+		expr, ok := spec.DimExprs[d]
+		if !ok {
+			return stmt{}, fmt.Errorf("metrics: family %s lacks filter dimension %s (registry bug)", fam, d)
+		}
+		on = append(on, fmt.Sprintf("%s = ANY(%s)", expr, arg(plan.Filters[d])))
+	}
+	sql := "SELECT " + strings.Join(sel, ",\n       ") +
+		"\nFROM unnest(" + arg(labels) + "::timestamptz[], " + arg(starts) + "::timestamptz[], " + arg(ends) + "::timestamptz[]) AS w(bucket, starts_at, ends_at)" +
+		"\nLEFT JOIN " + spec.From + " ON " + strings.Join(on, "\n  AND ") +
+		"\nGROUP BY " + strings.Join(group, ", ")
+	return stmt{family: fam, sql: sql, args: args, leaves: leaves, hasTime: true, snapshot: true}, nil
+}
+
+// trailingWindow is the three months ending at the end of the bucket
+// labelled b (the range's end for the range's own label), on the zone's
+// calendar.
+func trailingWindow(plan *Plan, b time.Time) (time.Time, time.Time) {
+	end := plan.To
+	if plan.HasTime {
+		if i := slices.IndexFunc(plan.Buckets, func(x time.Time) bool { return x.Equal(b) }); i >= 0 && i+1 < len(plan.Buckets) {
+			end = plan.Buckets[i+1]
+		}
+	}
+	local := end.In(plan.zone())
+	y, m, d := local.Date()
+	day := calendarutil.DayStart(y, m, d, plan.zone())
+	sy, sm, sd := time.Date(y, m-3, d, 0, 0, 0, 0, time.UTC).Date()
+	return calendarutil.DayStart(sy, sm, sd, plan.zone()).Add(end.Sub(day)), end
 }
 
 // compileCohort reads mrr_cohort_flows by the cohort month and the months

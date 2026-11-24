@@ -1563,6 +1563,9 @@
     "OR-J42-S30": [
       "TestReportingMRR/OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions"
     ],
+    "OR-J42-S31": [
+      "TestReportingMRR/OR-J42-S31/an-archive-from-before-the-reporting-rollups-restores-them-rebuilt-from-its-movements"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],

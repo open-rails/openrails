@@ -3,6 +3,7 @@
 package critical_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -11,9 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/disputerules"
+	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -27,6 +31,97 @@ func TestReportingMRR(t *testing.T) {
 	t.Run("OR-J53-S06/recurring-measures-over-four-months-equal-the-movements", recurringMeasures)
 	t.Run("OR-J53-S07/the-chargeback-ratio-tile-and-charts-carry-the-dispute-programs-levels", programLevels)
 	t.Run("OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions", mrrOnRollups)
+	t.Run("OR-J42-S31/an-archive-from-before-the-reporting-rollups-restores-them-rebuilt-from-its-movements", rollupsRebuiltOnRestore)
+}
+
+// An archive written before the reporting rollups carries none of them, nor
+// chargeback churn in its flows: the restore rebuilds each from what it
+// derives from, row for row what the source kept at commit, and the restore
+// check proves they agree. Cancel decisions come back from the status
+// transitions.
+func rollupsRebuiltOnRestore(t *testing.T) {
+	m := newDisputedMembership(t)
+	a, p := m.a, m.p
+	euro := mrrPlan(t, a.alpha, "rebuilt-eur", billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: "EUR", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
+	buyAs(t, a, p, a.aliceToken, euro, 120_000_000, "rebuilt-eur")
+	year := mrrPlan(t, a.alpha, "rebuilt-year", billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: "USD", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
+	bob := buyAs(t, a, p, a.bobToken, year, 120_000_000, "rebuilt-year")
+	a.clock.Advance(time.Hour)
+	status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+bob.ID.String()+"/cancel", a.bobToken, map[string]any{"reason": "Bob stops renewing"})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	_, err := a.alpha.ResumeSubscription(t.Context(), bob.ID)
+	require.NoError(t, err)
+	a.clock.Advance(time.Hour)
+	startFleet(t, a.world)
+	m.notice(t, "evt_rebuilt_chargeback", "charge.dispute.created", m.dispute("dp_rebuilt", "needs_response", "chargeback", "fraudulent"))
+	subscriptionState(t, a, m.sub.ID, "canceled")
+	waitDisputeJobs(t, a)
+
+	mid := a.alpha.MerchantID().UUID()
+	rollups := []string{"mrr_streak_flows", "mrr_product_totals", "mrr_customer_totals", "mrr_customer_flows", "mrr_flows"}
+	kept := map[string][]string{}
+	for _, table := range rollups {
+		kept[table] = booksRollup(t, a.world, table, mid)
+		require.NotEmpty(t, kept[table], table)
+	}
+	decisions := func(w *world) []string {
+		t.Helper()
+		rows, err := w.pool.Query(t.Context(), "SELECT COALESCE(cancel_type, 'unknown') || ' ' || (reversed_at IS NOT NULL)::text FROM "+booksTable(w, "subscription_cancellations")+
+			" WHERE merchant_id = $1 ORDER BY 1", mid)
+		require.NoError(t, err)
+		out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		return out
+	}
+	require.Equal(t, []string{"chargeback false", "user true"}, decisions(a.world))
+
+	archive := beforeReportingRollups(t, archiveBytes(t, a.alpha))
+	target, client := archiveTarget(t, a.world)
+	_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+	require.NoError(t, err, "the restore check passes on the rebuilt rollups")
+	for _, table := range rollups {
+		require.Equal(t, kept[table], booksRollup(t, target, table, mid), table)
+	}
+	require.Equal(t, decisions(a.world), decisions(target))
+}
+
+// beforeReportingRollups rewrites an archive into the shape exports had
+// before the reporting rollups: without their tables or the cancel
+// decisions, and with no chargeback churn in mrr_flows.
+func beforeReportingRollups(t *testing.T, archive []byte) []byte {
+	t.Helper()
+	dropped := map[string]bool{"mrr_streak_flows": true, "mrr_product_totals": true, "mrr_customer_totals": true, "mrr_customer_flows": true,
+		"subscription_cancellations": true}
+	flows := contract.Profiles[slices.IndexFunc(contract.Profiles, func(p contract.Profile) bool { return p.Name == "mrr_flows" })]
+	measureAt := slices.IndexFunc(flows.Columns, func(c contract.Column) bool { return c.Name == "measure" })
+	var out bytes.Buffer
+	var w *archivewire.Writer
+	var table string
+	seen := map[string]bool{}
+	_, err := archivewire.Read(bytes.NewReader(archive), func(h archivewire.Header) error {
+		var err error
+		w, err = archivewire.NewWriterWithTenant(&out, h.MerchantID, h.TenantID, h.CatalogRevision)
+		return err
+	}, func(r archivewire.Record) error {
+		if r.Kind == "table" {
+			table = r.Table
+			seen[table] = true
+			if dropped[table] {
+				return nil
+			}
+			return w.Table(table)
+		}
+		if dropped[table] || table == "mrr_flows" && r.Values[measureAt] != nil && *r.Values[measureAt] == "churn_chargeback" {
+			return nil
+		}
+		return w.Row(r.Values)
+	})
+	require.NoError(t, err)
+	for name := range dropped {
+		require.True(t, seen[name], "the archive carried %s", name)
+	}
+	require.NoError(t, w.Close())
+	return out.Bytes()
 }
 
 // Alice and Bob over four calendar months, M0 to M3, five to two months back:
@@ -117,7 +212,9 @@ func recurringMeasures(t *testing.T) {
 
 	// Each month's MRR, customers and ratios as it began. A month's churn
 	// counts only its opening base: Bob's second loss in M3 is not churn of
-	// the base he began it in.
+	// the base he began it in. LTV divides ARPA by the monthly churn of the
+	// three months ending at the bucket's end: none before M3's, whose base
+	// (as M1 began) all churned.
 	type opening struct {
 		mrr, subscribers int64
 		arpa, ltv        any
@@ -149,7 +246,7 @@ func recurringMeasures(t *testing.T) {
 		bucket(0): {},
 		bucket(1): {mrr: alice + 10_000_000, subscribers: 2, arpa: half(alice + 10_000_000), churn: 0.0,
 			nrr: ratio(alice+20_000_000, alice+10_000_000), grr: ratio(alice, alice+10_000_000)},
-		bucket(2): {mrr: alice + 20_000_000, subscribers: 2, arpa: half(alice + 20_000_000), ltv: alice + 20_000_000, churn: 0.5,
+		bucket(2): {mrr: alice + 20_000_000, subscribers: 2, arpa: half(alice + 20_000_000), churn: 0.5,
 			nrr: ratio(20_000_000, alice+20_000_000), grr: ratio(20_000_000, alice+20_000_000)},
 		bucket(3): {mrr: 20_000_000, subscribers: 1, arpa: int64(20_000_000), ltv: int64(20_000_000), churn: 1.0, nrr: 0.0, grr: 0.0},
 	}, began, "M0 begins with no MRR: no ratio")
@@ -165,9 +262,10 @@ func recurringMeasures(t *testing.T) {
 	require.Equal(t, map[string]float64{bucket(2) + " chargeback": 0.5, bucket(2) + " voluntary": 0, bucket(2) + " involuntary": 0,
 		bucket(3) + " chargeback": 0, bucket(3) + " voluntary": 1, bucket(3) + " involuntary": 0}, byType)
 
-	// Churn reads monthly at any grain: the day Alice charged back lost half
-	// its base, a monthly rate of 1 - 0.5^(days in M2); 90 days from M0's
-	// 6th lost half of theirs over their calendar months.
+	// Churn is the period's own, read monthly at any grain: the day Alice
+	// charged back lost half its base, a monthly rate of 1 - 0.5^(days in
+	// M2); 90 days from M0's 6th lost half of theirs over their calendar
+	// months.
 	for _, row := range metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"subscriber_churn_rate"}, By: []string{"time"}, Grain: "day",
 		Range: &billing.MetricsRange{From: month(2).Format(time.DateOnly), To: month(3).AddDate(0, 0, -1).Format(time.DateOnly)}, Filters: usd}) {
 		if fmt.Sprint(row["time"]) == on(2).Truncate(24*time.Hour).Format(time.RFC3339) {
@@ -175,12 +273,23 @@ func recurringMeasures(t *testing.T) {
 		}
 	}
 	from := month(0).AddDate(0, 0, 5)
-	quarter := only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"subscriber_churn_rate", "arpa", "ltv"},
+	quarter := only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"subscriber_churn_rate"},
 		Range: &billing.MetricsRange{From: from.Format(time.DateOnly), To: from.AddDate(0, 0, 89).Format(time.DateOnly)}, Filters: usd}))
 	spanned := float64(days(0)-5)/float64(days(0)) + 2 + float64(90-(days(0)-5)-days(1)-days(2))/float64(days(3))
-	monthly := 1 - math.Pow(0.5, 1/spanned)
-	require.InDelta(t, monthly, fraction(t, quarter["subscriber_churn_rate"]), 1e-12)
-	require.InEpsilon(t, float64(whole(t, quarter["arpa"]))/monthly, float64(whole(t, quarter["ltv"])), 1e-9, "LTV is ARPA over the monthly churn")
+	require.InDelta(t, 1-math.Pow(0.5, 1/spanned), fraction(t, quarter["subscriber_churn_rate"]), 1e-12)
+
+	// LTV over a range is ARPA at its end over the monthly churn of the
+	// three months ending there, whatever the range: ending M3's 10th, the
+	// window from M0's 10th lost Alice of its two.
+	tenth := month(3).AddDate(0, 0, 9)
+	for _, from := range []time.Time{month(3), tenth.AddDate(0, 0, -1)} {
+		lifetime := only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"arpa", "ltv", "subscriber_churn_rate"},
+			Range: &billing.MetricsRange{From: from.Format(time.DateOnly), To: tenth.AddDate(0, 0, -1).Format(time.DateOnly)}, Filters: usd}))
+		window := float64(days(0)-9)/float64(days(0)) + 2 + 9/float64(days(3))
+		require.EqualValues(t, 20_000_000, whole(t, lifetime["arpa"]))
+		require.InEpsilon(t, 20_000_000/(1-math.Pow(0.5, 1/window)), float64(whole(t, lifetime["ltv"])), 1e-9, "from %s", from)
+		require.Zero(t, fraction(t, lifetime["subscriber_churn_rate"]), "no churn in the range itself")
+	}
 
 	// One USD cohort, M0, of the two customers it acquired, at the end of
 	// each month since: Bob's return counts in it again.
@@ -313,12 +422,13 @@ func programLevels(t *testing.T) {
 	overviewAnswers(t, a.alpha, board.Widgets, "")
 }
 
-// Every MRR measure, by itself and by each dimension it declares, over time
-// and not, in UTC and in New York, plans on indexes: with sequential scans
-// off no relation is scanned whole, every scan's index condition names the
-// merchant, and a rollup kept by time is read by its time.
+// Every MRR measure, by itself, by each dimension it declares, by two, and
+// filtered by currency and by product, over time and not, in UTC and in New
+// York, plans on indexes: with sequential scans off no relation is scanned
+// whole, every scan's index condition names the merchant, and a rollup kept
+// by time is read by its time.
 func mrrOnRollups(t *testing.T) {
-	a, _, _ := purchasedMembership(t)
+	a, _, sub := purchasedMembership(t)
 	york, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)
 	byTime := map[string]string{"mrr_flows": "bucket_at", "mrr_product_flows": "bucket_at", "mrr_customer_flows": "bucket_at", "mrr_streak_flows": "bucket_at",
@@ -333,20 +443,35 @@ func mrrOnRollups(t *testing.T) {
 			i := slices.IndexFunc(metrics.Measures, func(m metrics.Measure) bool { return m.Name == name && !m.Internal })
 			require.GreaterOrEqual(t, i, 0, name)
 			measure := metrics.Measures[i]
-			cuts := [][]string{nil}
-			for _, d := range measure.Dims {
-				cuts = append(cuts, []string{d})
+			type variant struct {
+				by      []string
+				filters map[string][]string
 			}
-			for _, cut := range cuts {
+			variants := []variant{{}}
+			for _, d := range measure.Dims {
+				variants = append(variants, variant{by: []string{d}})
+			}
+			if slices.Contains(measure.Dims, "currency") {
+				variants = append(variants, variant{filters: map[string][]string{"currency": {"USD"}}})
+			}
+			if slices.Contains(measure.Dims, "product_id") {
+				variants = append(variants, variant{filters: map[string][]string{"product_id": {sub.ProductID.String()}}})
+			}
+			if len(measure.Dims) > 1 {
+				variants = append(variants, variant{by: measure.Dims[:2]})
+			}
+			for _, v := range variants {
 				for _, timed := range []bool{false, true} {
-					q := billing.QueryMetricsParams{Measures: []string{name}, By: cut, Range: window}
+					q := billing.QueryMetricsParams{Measures: []string{name}, By: v.by, Filters: v.filters, Range: window}
 					if name == "cohort_retention" {
 						if timed {
 							continue
 						}
 						q.By = []string{"cohort", "months_since_start"}
-						if len(cut) > 0 && !slices.Contains(q.By, cut[0]) {
-							q.By = append(q.By, cut...)
+						for _, d := range v.by {
+							if !slices.Contains(q.By, d) {
+								q.By = append(q.By, d)
+							}
 						}
 					}
 					if name == "scheduled_mrr" {
@@ -397,7 +522,7 @@ func mrrOnRollups(t *testing.T) {
 			}
 		}
 	}
-	require.Greater(t, planned, 100)
+	require.Greater(t, planned, 200)
 }
 
 // planNode is a node of an EXPLAIN (FORMAT JSON) plan.

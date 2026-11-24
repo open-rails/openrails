@@ -138,3 +138,34 @@ func TestMonthlyRates(t *testing.T) {
 		t.Errorf("a base lost whole stays lost, got %v", got)
 	}
 }
+
+// LTV's churn is the three months ending at each bucket's end, at every
+// grain: a day's ends at the next midnight, the range's at its end.
+func TestTrailingWindows(t *testing.T) {
+	york, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, york) }
+	plan, verr := ValidateIn(&Query{Measures: []string{"ltv"}, By: []string{"time"}, Grain: "day", Range: &QueryRange{From: "2026-05-30", To: "2026-05-31"}},
+		time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC), york)
+	if verr != nil {
+		t.Fatal(verr)
+	}
+	for _, c := range []struct{ bucket, from, to time.Time }{
+		{at(2026, time.May, 30), at(2026, time.March, 3), at(2026, time.May, 31)},
+		{at(2026, time.May, 31), at(2026, time.March, 1), at(2026, time.June, 1)},
+	} {
+		from, to := trailingWindow(plan, c.bucket)
+		if !from.Equal(c.from) || !to.Equal(c.to) {
+			t.Errorf("%s: [%s, %s), want [%s, %s)", c.bucket, from, to, c.from, c.to)
+		}
+	}
+	plan, verr = ValidateIn(&Query{Measures: []string{"ltv"}, Range: &QueryRange{From: "2026-05-01", To: "2026-05-31"}}, time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC), york)
+	if verr != nil {
+		t.Fatal(verr)
+	}
+	if from, to := trailingWindow(plan, plan.To); !from.Equal(at(2026, time.March, 1)) || !to.Equal(at(2026, time.June, 1)) {
+		t.Errorf("the range's window [%s, %s)", from, to)
+	}
+}

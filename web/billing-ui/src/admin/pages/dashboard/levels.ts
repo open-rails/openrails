@@ -1,30 +1,21 @@
 // A measure's threshold levels as the dashboard draws them: the levels in
-// force in a month (a network's program changes its levels on a date), and
-// the one a value reached, by the measure's direction.
+// force at an instant (a network's program changes its levels on a date),
+// and the one a value reached, by the measure's direction.
 import type { MetricsThreshold } from "#orck/admin/lib/api/metrics"
 import type { Direction } from "./registry"
 
-// monthOf is the calendar month (YYYY-MM) of an instant in timeZone.
-export function monthOf(iso: string, timeZone = "UTC"): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-  }).formatToParts(new Date(iso))
-  const part = (type: string) => parts.find((p) => p.type === type)?.value
-  return `${part("year")}-${part("month")}`
-}
-
-// inForce are the levels in force in month (YYYY-MM), lowest first.
+// inForce are the levels in force at the instant at (milliseconds), lowest
+// first: from it on, before until. A level's bounds are instants, so a
+// bucket in any timezone compares them with its own instants.
 export function inForce(
   levels: MetricsThreshold[],
-  month: string
+  at: number
 ): MetricsThreshold[] {
   return levels
     .filter(
       (l) =>
-        (!l.from || l.from.slice(0, 7) <= month) &&
-        (!l.until || month < l.until.slice(0, 7))
+        (!l.from || Date.parse(l.from) <= at) &&
+        (!l.until || at < Date.parse(l.until))
     )
     .sort((a, b) => a.value - b.value)
 }

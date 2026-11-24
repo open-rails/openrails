@@ -66,6 +66,8 @@ export const billingAdminMessages = {
   ", before another action.": ", before another action.",
   ", deleted: ": ", deleted: ",
   "; minimums not met": "; minimums not met",
+  "Levels in force at the range's end: ":
+    "Levels in force at the range's end: ",
   "Past ": "Past ",
   ".": ".",
   ". Active holds may prevent revocation. Payment refunds are managed separately.":

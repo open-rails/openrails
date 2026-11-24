@@ -74,7 +74,7 @@ import {
   measureLabel,
   type Registry,
 } from "./registry"
-import { band, inForce, monthOf, nearest, reached, severest } from "./levels"
+import { band, inForce, nearest, reached, severest } from "./levels"
 
 export function WidgetVizView({
   viz,
@@ -213,7 +213,10 @@ function KpiViz({
   // A program's ratio reads its level from the dispute monitor, whose
   // minimum counts the ratio alone does not know.
   const program = primary ? registry.measure(primary.name)?.program : undefined
-  const end = new Date(Date.parse(result.range.to) - 1).toISOString()
+  // The range's last instant: its ratio is read against the levels in force
+  // then, in the month the monitor counts.
+  const last = Date.parse(result.range.to) - 1
+  const end = new Date(last).toISOString()
   const monitor = useMonitorLevel(program, end)
   if (!primary) return <Empty label={adminText("no measure")} />
   const row = result.rows[0]
@@ -224,10 +227,7 @@ function KpiViz({
       : formatMeasure(row ? row[primary.index] : 0, primary.unit, currency)
   const delta = row ? statDelta(result, row, primary.index) : null
   const direction = registry.direction(primary.name)
-  const levels = inForce(
-    registry.thresholds(primary.name),
-    monthOf(end, result.timezone)
-  )
+  const levels = inForce(registry.thresholds(primary.name), last)
   const reading = row ? Number(row[primary.index] ?? NaN) : NaN
   const passed = reached(levels, reading, direction)
   const crossed = program
@@ -280,9 +280,9 @@ function KpiViz({
             "truncate text-[0.6875rem] tabular-nums",
             crossed ? cn("font-medium", tone) : "text-muted-foreground"
           )}
-          title={levels
+          title={`${adminText("Levels in force at the range's end: ")}${levels
             .map((t) => `${t.label} ${formatMeasure(t.value, primary.unit)}`)
-            .join(" · ")}
+            .join(" · ")}`}
         >
           {crossed ? (
             <>
@@ -544,7 +544,7 @@ function TimeSeriesViz({
         data={data}
         series={series}
         registry={registry}
-        timezone={result.timezone}
+        rangeEnd={result.range.to}
       />
     )
   return (
@@ -560,7 +560,7 @@ function TimeSeriesViz({
               data={data}
               series={group.series}
               registry={registry}
-              timezone={result.timezone}
+              rangeEnd={result.range.to}
             />
           </div>
         </section>
@@ -578,11 +578,11 @@ function TimeSeriesChart({
   data,
   series,
   registry,
-  timezone,
+  rangeEnd,
 }: Pivoted & {
   viz: "line" | "area" | "bar"
   registry: Registry
-  timezone?: string
+  rangeEnd?: string
 }) {
   const config: ChartConfig = {}
   series.forEach((s, i) => {
@@ -592,16 +592,22 @@ function TimeSeriesChart({
   const tickFormatter = (v: number) =>
     formatMeasure(v, unit, series[0]?.currency)
   // A measure's levels (a network's dispute program levels) cross its line,
-  // each bucket against the levels in force in its month; alone on its
-  // chart, each level shades the band towards worse.
-  const months = data.map((row) => monthOf(String(row.bucketISO), timezone))
+  // each bucket against the levels in force at its middle, so a month in any
+  // timezone reads its own month's; alone on its chart, each level shades
+  // the band towards worse.
+  const moments = data.map((row, i) => {
+    const start = Date.parse(String(row.bucketISO))
+    const next = data[i + 1]?.bucketISO
+    const end = next ? Date.parse(String(next)) : Date.parse(rangeEnd ?? "")
+    return Number.isFinite(end) ? (start + end) / 2 : start
+  })
   const measures = [...new Set(series.map((s) => s.measure))]
   const levelled = measures
     .map((measure) => ({
       measure,
       direction: registry.direction(measure),
       prefix: measures.length > 1 ? `${measureLabel(measure)} ` : "",
-      byRow: months.map((m) => inForce(registry.thresholds(measure), m)),
+      byRow: moments.map((at) => inForce(registry.thresholds(measure), at)),
     }))
     .filter((l) => l.byRow.some((levels) => levels.length > 0))
   const peak = Math.max(

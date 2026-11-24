@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 655,
+  "scenario_count": 656,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2726,7 +2726,12 @@
     {
       "id": "OR-J42-S30",
       "journey": "J42",
-      "name": "Every MRR measure, by itself and by each dimension it declares, over time and not, in UTC and in a non-UTC zone, plans on indexes with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time"
+      "name": "Every MRR measure, by itself, by each dimension it declares, by two, and filtered by currency and by product, over time and not, in UTC and in a non-UTC zone, plans on indexes with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time"
+    },
+    {
+      "id": "OR-J42-S31",
+      "journey": "J42",
+      "name": "An archive written before the reporting rollups (no streak flows, product totals, distinct customers, cancel decisions or chargeback churn flows) restores them rebuilt from its movements, product flows, customer MRR and status transitions, row for row as the source kept them, and the restore check proves they agree"
     },
     {
       "id": "OR-J28-S09",

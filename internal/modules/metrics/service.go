@@ -192,7 +192,9 @@ type group struct {
 	bucket time.Time // zero when the plan has no time grouping
 	dims   []string
 	vals   map[string]leaf // leaf measure -> value
-	months float64         // the group's period in calendar months, for PerMonth rates
+	// months is the group's period in calendar months, and trailing the
+	// three months ending at its end, for PerMonth rates.
+	months, trailing float64
 }
 
 func groupKey(bucket time.Time, dims []string) string {
@@ -493,6 +495,12 @@ func assemble(plan *Plan, groups map[string]*group) ([][]any, error) {
 			start, end = later(g.bucket, plan.From), earlier(ends[g.bucket.UnixNano()], plan.To)
 		}
 		g.months = monthsIn(start, end, plan.zone())
+		label := plan.To
+		if plan.HasTime {
+			label = g.bucket
+		}
+		from, to := trailingWindow(plan, label)
+		g.trailing = monthsIn(from, to, plan.zone())
 		row := make([]any, 0, 1+len(plan.Dims)+len(plan.Measures))
 		if plan.HasTime {
 			row = append(row, g.bucket.UTC().Format(time.RFC3339))
@@ -548,7 +556,7 @@ func measureValue(m *Measure, g *group) (any, error) {
 		}
 		quotient.Quo(quotient, den)
 		if m.PerMonth {
-			quotient = perMonth(quotient, g.months)
+			quotient = perMonth(quotient, g.period(m))
 		}
 		if m.Unit == UnitMoney {
 			cell, err := moneyCellFromRat(quotient)
@@ -594,7 +602,7 @@ func componentRat(m *Measure, g *group) (*big.Rat, bool) {
 		}
 		num.Quo(num, den)
 		if m.PerMonth {
-			return perMonth(num, g.months), true
+			return perMonth(num, g.period(m)), true
 		}
 		return num, true
 	}
@@ -607,6 +615,15 @@ func componentRat(m *Measure, g *group) (*big.Rat, bool) {
 		return r, true
 	}
 	return new(big.Rat).SetInt64(v.n), true
+}
+
+// period is m's period in months for g: the bucket's, or the trailing
+// window's.
+func (g *group) period(m *Measure) float64 {
+	if m.Trailing {
+		return g.trailing
+	}
+	return g.months
 }
 
 // perMonth is a rate p over a period of months as a monthly rate,
