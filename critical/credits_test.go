@@ -3,6 +3,8 @@
 package critical_test
 
 import (
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -54,8 +56,8 @@ func TestCredits(t *testing.T) {
 		require.Equal(t, captured[0].Receipt.Amount, replayed[0].Receipt.Amount)
 		balance(t, w.alpha, customer, 550, 450, 1000)
 		fleet := startFleet(t, w)
-		nextDay(w)
-		postDays(t, fleet)
+		nextMonth(w)
+		closeMonths(t, fleet)
 		balance(t, w.alpha, customer, 550, 0, 550)
 		transactions, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
@@ -67,5 +69,27 @@ func TestCredits(t *testing.T) {
 		foreign, err := w.beta.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Empty(t, foreign.Items)
+	})
+	t.Run("OR-J22-S12/a-staff-member-grants-a-full-batch-once-a-minute", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		staff := a.remote(t, a.alpha.MerchantID(), a.aliceToken)
+		batch := func(source string, n int) []billing.CreateCreditGrantParams {
+			items := make([]billing.CreateCreditGrantParams, n)
+			for i := range items {
+				items[i] = billing.CreateCreditGrantParams{CustomerID: billing.CustomerID(uuid.New()), Currency: "USD", Amount: 1000, Source: "critical", SourceID: fmt.Sprintf("%s-%d", source, i)}
+			}
+			return items
+		}
+		grants, err := staff.CreateCreditGrants(t.Context(), batch("promotion", billing.MaxBatchItems))
+		require.NoError(t, err, "a full batch is within a person's limit")
+		require.Len(t, grants, billing.MaxBatchItems)
+		_, err = staff.CreateCreditGrants(t.Context(), batch("past-the-minute", 1))
+		var failure *billing.StatusError
+		require.ErrorAs(t, err, &failure)
+		require.Equal(t, http.StatusTooManyRequests, failure.Status, "past one batch a minute the person is locked out")
+		// The merchant's application acting as itself is not metered.
+		grants, err = a.alphaRemote.CreateCreditGrants(t.Context(), batch("backend", billing.MaxBatchItems))
+		require.NoError(t, err)
+		require.Len(t, grants, billing.MaxBatchItems)
 	})
 }

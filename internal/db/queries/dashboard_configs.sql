@@ -20,5 +20,6 @@ RETURNING merchant_id, layout, updated_at, updated_by;
 -- metered usage and purchased credit lots. Decides the default dashboard.
 SELECT EXISTS (SELECT 1 FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid)::boolean AS has_subscriptions,
     EXISTS (SELECT 1 FROM billing.payments WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND payments.rail IN ('nmi', 'ccbill', 'stripe'))::boolean AS has_card_payments,
-    EXISTS (SELECT 1 FROM billing.usage_daily WHERE usage_daily.merchant_id = sqlc.arg(merchant_id)::uuid)::boolean AS has_usage,
-    EXISTS (SELECT 1 FROM billing.grants WHERE grants.merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase')::boolean AS has_credits;
+    (EXISTS (SELECT 1 FROM billing.usage_unposted WHERE usage_unposted.merchant_id = sqlc.arg(merchant_id)::uuid)
+     OR EXISTS (SELECT 1 FROM billing.usage_postings WHERE usage_postings.merchant_id = sqlc.arg(merchant_id)::uuid))::boolean AS has_usage,
+    EXISTS (SELECT 1 FROM billing.credit_grants WHERE credit_grants.merchant_id = sqlc.arg(merchant_id)::uuid AND funding_source IN ('purchase', 'recurring'))::boolean AS has_credits;

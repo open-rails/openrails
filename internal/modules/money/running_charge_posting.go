@@ -14,7 +14,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 )
 
 // A posting moves what a running charge accrued through an instant to the
@@ -31,23 +31,23 @@ const (
 	runningChargeInstantLayout = "2006-01-02T15:04:05.000000Z"
 )
 
-func init() { grants.PostRunningCharges = postRunningChargesThrough }
+func init() { credits.PostRunningCharges = postRunningChargesThrough }
 
 // runningChargePosting is what a posting's ledger write runs under: accrual is
 // held as of through, the lots that had not lapsed just before it are drawn,
-// and the balance legs carry the charge's resource. A usage accrual's posting
-// runs under it too.
+// and the balance legs carry the charge's resource. A usage posting runs
+// under it too.
 type runningChargePosting struct {
 	through  time.Time
 	resource string
-	// owed splits what an accrual's posting leaves owed by meter.
+	// owed splits what a usage posting leaves owed by meter.
 	owed []owedShare
-	// owedAt dates what an accrual's posting leaves owed: when its usage
+	// owedAt dates what a usage posting leaves owed: when its usage
 	// occurred. Zero dates it at the posting.
 	owedAt time.Time
 }
 
-// owedShare is one meter's weight in an accrual posting's owed remainder.
+// owedShare is one meter's weight in a usage posting's owed remainder.
 type owedShare struct {
 	meter  string
 	weight int64
@@ -132,7 +132,7 @@ func (s *MoneyService) postRunningChargeOnce(ctx context.Context, q *gen.Queries
 	return row, nil
 }
 
-// postRunningChargesThrough is grants.PostRunningCharges: it posts every
+// postRunningChargesThrough is credits.PostRunningCharges: it posts every
 // running charge of the customer in the currency through an instant, under the
 // customer lock, on the caller's clock.
 func postRunningChargesThrough(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, through, now time.Time) (bool, error) {
@@ -175,6 +175,6 @@ func (s *MoneyService) settleRunningCharges(ctx context.Context, q *gen.Queries,
 	if _, err := postRunningChargesThrough(ctx, q, merchantID, customer, currency, now, now); err != nil {
 		return err
 	}
-	_, err := s.postUsageAccrualsTx(ctx, q, merchantID, customer, currency, nil, nil, now)
+	_, err := s.postUsageTx(ctx, q, merchantID, customer, currency, now, usagePostingMovement)
 	return err
 }

@@ -25,6 +25,24 @@ SELECT count(*) FROM billing.product_access WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsProductAccess :exec
 DELETE FROM billing.product_access WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsDisputes :one
+SELECT count(*) FROM billing.disputes WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsDisputes :exec
+DELETE FROM billing.disputes WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsFraudReports :one
+SELECT count(*) FROM billing.fraud_reports WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsFraudReports :exec
+DELETE FROM billing.fraud_reports WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsNetworkActivity :one
+SELECT count(*) FROM billing.network_activity_daily WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsNetworkActivity :exec
+DELETE FROM billing.network_activity_daily WHERE merchant_id = $1;
+
 -- name: CountMerchantRowsPayments :one
 SELECT count(*) FROM billing.payments WHERE merchant_id = $1;
 
@@ -81,11 +99,11 @@ SELECT count(*) FROM billing.order_attempts WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsOrderAttempts :exec
 DELETE FROM billing.order_attempts WHERE merchant_id = $1;
 
--- name: CountMerchantRowsExternalProviderMutationLogs :one
-SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1;
+-- name: CountMerchantRowsOperationLog :one
+SELECT count(*) FROM billing.operation_log WHERE merchant_id = $1;
 
--- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
-DELETE FROM billing.provider_mutation_logs WHERE merchant_id = $1;
+-- name: PurgeMerchantRowsOperationLog :exec
+DELETE FROM billing.operation_log WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsProviderIntents :one
 SELECT count(*) FROM billing.provider_intents WHERE merchant_id = $1;
@@ -98,3 +116,15 @@ SELECT count(*) FROM billing.money_settings WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsMoneyAccounts :exec
 DELETE FROM billing.money_settings WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsCustomerContacts :one
+SELECT count(*) FROM billing.customer_contacts WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsCustomerContacts :exec
+DELETE FROM billing.customer_contacts WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsProvisioningTokens :one
+SELECT count(*) FROM billing.provisioning_tokens WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsProvisioningTokens :exec
+DELETE FROM billing.provisioning_tokens WHERE merchant_id = $1;

@@ -68,12 +68,10 @@ func newProviderRuntime(ctx context.Context, logger *slog.Logger, opts providerR
 		return nil, nil, fmt.Errorf("merchant configuration unavailable, so no rail can be armed: %w", err)
 	}
 	cleanup = func() { opened.Close(); _ = database.Close() }
-	stripeClients := stripeapi.NewFactory(nil)
-	if api := config.SandboxStripeAPIURL(cfg); api != "" {
-		stripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
-	}
+	// The factory the configuration's load registered Stripe posture with.
+	stripeClients := stripeapi.ConfiguredFactory(cfg)
 	if opened.Service != nil {
-		opened.Service.StripeClients = stripeClients
+		stripeClients = opened.Service.StripeClients
 	}
 	return &providerRuntime{
 		StripeClients: stripeClients,

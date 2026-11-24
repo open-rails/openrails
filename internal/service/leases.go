@@ -10,9 +10,9 @@ import (
 )
 
 // SyncLeases syncs one gate's lease in one transaction: its usage settles in
-// order, each want is answered with a hold or a refusal, the holds it returns
-// are taken back and the rest are sized from its traffic. allows is the
-// credential's customer scope.
+// order, its in-flight report is replaced, the request holds it releases are
+// released, and each view it names is answered. allows is the credential's
+// customer scope.
 func (s *Service) SyncLeases(ctx context.Context, params billing.SyncLeasesParams, allows func(billing.CustomerID) bool) (*billing.SyncLeasesResult, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {

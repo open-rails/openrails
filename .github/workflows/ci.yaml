@@ -195,14 +195,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Start PostgreSQL
-        run: bash scripts/ci-services.sh start postgres
+      - name: Start PostgreSQL and ClickHouse
+        run: bash scripts/ci-services.sh start postgres clickhouse
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:
           go-version-file: go.mod
           cache: true
-      - name: PostgreSQL is ready
+      - name: PostgreSQL and ClickHouse are ready
         run: bash scripts/ci-services.sh ready
       - name: Generated SQL bindings match the queries
         env:
@@ -227,16 +227,16 @@ jobs:
           name: regenerated-sqlc
           path: ${{ runner.temp }}/regenerated-sqlc.patch
       # api/, docs/api, the TypeScript wire types and compatibility/contract.json;
-      # the schema list is read from a database migrated on this server.
+      # the schema lists are read from databases migrated on these servers.
       - name: Reviewed contracts are current
         if: ${{ !cancelled() }}
-        run: go run ./scripts/contracts -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
+        run: go run ./scripts/contracts -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' -clickhouse 127.0.0.1:9000
       # Snapshots are written against a database; a drifted run offers them as a patch to review and commit.
       # The SQL bindings are the regenerated-sqlc patch's, so the two never overlap.
       - name: Regenerate the drifted contracts as a patch
         if: ${{ failure() }}
         run: |
-          go run ./scripts/contracts -write -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable'
+          go run ./scripts/contracts -write -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' -clickhouse 127.0.0.1:9000
           git add -A -- . ':(exclude)internal/db/gen' && git diff --cached --binary > "$RUNNER_TEMP/regenerated-contracts.patch"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
@@ -304,6 +304,7 @@ jobs:
       OPENRAILS_CRITICAL_REDIS_URL: redis://127.0.0.1:6379/0
       OPENRAILS_CRITICAL_VAULT_ADDR: http://127.0.0.1:8200
       OPENRAILS_CRITICAL_VAULT_TOKEN: critical-fixture-only
+      OPENRAILS_CRITICAL_CLICKHOUSE_ADDR: 127.0.0.1:9000
       OPENRAILS_CRITICAL_PAYMENT_ASSETS: ${{ github.workspace }}/web/pay/dist
     steps:
       - name: Set owned fixture paths
@@ -312,8 +313,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: Start owned PostgreSQL, Redis and Vault
-        run: bash scripts/ci-services.sh start postgres redis vault
+      - name: Start owned PostgreSQL, Redis, Vault and ClickHouse
+        run: bash scripts/ci-services.sh start postgres redis vault clickhouse
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod

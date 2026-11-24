@@ -239,18 +239,16 @@ FROM (
     FROM billing.running_charges rc
     WHERE rc.merchant_id = $2::uuid AND rc.stopped_at IS NULL
     UNION ALL
-    SELECT g.merchant_id, g.customer_id, g.currency::text, true
-    FROM billing.grants g
-    WHERE g.merchant_id = $2::uuid AND g.kind = 'credit' AND g.event = 'grant'
-      AND g.ends_at IS NOT NULL AND g.currency IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM billing.grants t WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede'))
-      AND NOT EXISTS (SELECT 1 FROM billing.ledger_transfers lt WHERE lt.merchant_id = g.merchant_id AND lt.grant_id = g.id AND lt.transfer_type = 'credit_expire')
+    SELECT g.merchant_id, g.customer_id, g.unit, true
+    FROM billing.credit_grants g
+    WHERE g.merchant_id = $2::uuid AND g.expires_at IS NOT NULL
+      AND g.revoked_at IS NULL AND g.units_credited > g.units_debited
     UNION ALL
     SELECT a.merchant_id, a.customer_id::uuid, a.currency, false
     FROM billing.ledger_accounts a
     LEFT JOIN billing.money_settings s
       ON s.merchant_id = a.merchant_id AND s.customer_id = a.customer_id AND s.currency = a.currency
-    WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_balance' AND a.customer_id IS NOT NULL
+    WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_units' AND a.customer_id IS NOT NULL
       AND (s.billing_mode IS DISTINCT FROM 'arrears' OR s.collection_revoked_at IS NOT NULL)
 ) w
 GROUP BY w.merchant_id, w.customer_id, w.currency
@@ -263,7 +261,7 @@ type RebuildBalanceWatchesParams struct {
 }
 
 // A restored merchant's balances are watched again: one with a running charge
-// or a credit lot not yet expired that lapses is due at once, a prepaid one
+// or a credit lot with units left that lapses is due at once, a prepaid one
 // when a change marks it due.
 func (q *Queries) RebuildBalanceWatches(ctx context.Context, arg RebuildBalanceWatchesParams) error {
 	_, err := q.db.Exec(ctx, rebuildBalanceWatches, arg.Now, arg.MerchantID)
@@ -397,7 +395,7 @@ const watchCustomerBalance = `-- name: WatchCustomerBalance :execrows
 INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at, look_each_change)
 SELECT a.merchant_id, a.customer_id::uuid, a.currency, to_timestamp(0), 0, $1::timestamptz, true
 FROM billing.ledger_accounts a
-WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_balance'
+WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_units'
   AND a.currency = $3::text AND a.customer_id = $4::uuid
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     next_check_at = to_timestamp(0),

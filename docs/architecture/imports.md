@@ -192,23 +192,18 @@ Checks:
 
 ### 9. Destructive-action safeguards
 
-Apply approves only corrections that keep access, never one a person
-dismissed. Cancels, past due, refunds and product moves wait for
-`ApproveProposals`, which admits each cancel through the destructive policy
-and spends the actor's allowance. Each Apply is one approval run in its
-requester's name, reversible by `openrails undo-run`. A billing-book import is
-an operator command: its cancels run under `reconcile.WithAdmittedCancels`, and
-absence cancels need `subscriptions_exhaustive` with a matching
-`expected_subscriptions`.
+Apply approves only corrections that keep access, never one a person dismissed. Cancels, past due, refunds and product moves wait for `ApproveProposals`, which admits each cancel through the destructive policy and spends the actor's allowance. Each Apply is one approval run in its requester's name, reversible by `openrails undo-run`. A billing-book import is one merchant-level command (`reconcile.DeclaredBook`): its cancels, the terminal declines it lands and its owed provider stops are `cancel_subscription` actions in the caller's name, admitted and started together (`destructive.Admissions.StartMerchantOperation`) against the merchant's and the deployment's budgets, not the caller's. Every cancel and terminal decline waits for the destructive switch, and one of a row the book did not create also for its PSP's cancellation cap, all or nothing: a held cancel parks the row `unverified`, a held terminal decline raises `life.terminal_outcome.held`. A book larger than the merchant's remaining budget is refused with 429 `rate_limit_exceeded` and `Retry-After`, opening no hold: a large migration runs in process, where the host's own work spends no allowance, or with raised `destructive_action_limits`. A merchant's books land one at a time, and a landing that fails after its admission, or whose admission's answer is lost, finishes its actions with no effect (`AbandonMerchantOperation`, which waits for an action's row without the deployment's admission lock). Absence cancels need `subscriptions_exhaustive` with a matching `expected_subscriptions`. A `failed` import is refused; a person creates it again.
 
 Checks:
 - `ListPullCorrections` (`internal/db/queries/reconciliation.sql`) selects only access-keeping kinds; OR-J38-S21, S25, S28, S32.
 - OR-J38-S71: proposal cancels spend the allowance once per subscription; a replay spends nothing.
+- OR-J34-S40: a book's cancel waits for the switch and the cap, spends the merchant's budget and records its actor, by the host or staff, and a book too large for the budget is refused for later; OR-J34-S35: a declined charge that spends dunning is an admitted cancel; OR-J34-S36: a lost admission answer counts nothing; OR-J34-S37: a merchant's books land one at a time; OR-J34-S38: an abandon stalls no other admission.
+- OR-J38-S76: a `failed` import cannot be applied.
 - `ImportDeclaredSubscriptions` refuses an exhaustive book whose `expected_subscriptions` differs from its count.
 
 ## Tests
 
-- `TestPSPImport`: OR-J38-S01 to S06, S08 to S13, S42.
+- `TestPSPImport`: OR-J38-S01 to S06, S08 to S13, S42; `TestPSPImportSafeguards`: S76, S77.
 - `TestPSPReconcile`: OR-J38-S20 to S29, S35, S71.
 - `TestMerchantConsole`: OR-J38-S30 to S34, S41.
 - `TestCCBillIdentity`: OR-J38-S37 to S40, S43; `TestCardGuard`: S36; `TestManualProviderRefresh`: S72.
@@ -220,4 +215,3 @@ Gaps:
 
 - The billing-book import has no scenario for classification at `as_of` (active, past due, `unverified`, stale cancel); tests use it to set up books.
 - Untested: `subscriptions_exhaustive` absence cancels, `historical_payments`, NMI standalone history through a PSP import, `life.import.no_recurring_anchor`, `life.import.schedule_unresolved`, `life.import.purchase_refused`.
-- The billing-book import records no actor, and its cancels skip the destructive switch and cancel budget without an admission step.

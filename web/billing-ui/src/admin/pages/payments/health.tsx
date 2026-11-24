@@ -42,7 +42,7 @@ import {
   checkRows,
   coverageQuery,
   coverageRows,
-  FAILED_CATEGORIES,
+  FAILED_OUTCOMES,
   FIRST_FAILED,
   formatChange,
   listURL,
@@ -332,14 +332,14 @@ function Reasons({ scope }: { scope: Scope }) {
           </TableHeader>
           <TableBody>
             {groups.map((g) => (
-              <React.Fragment key={g.category}>
+              <React.Fragment key={g.cause}>
                 <TableRow className="bg-muted/30">
                   <TableCell colSpan={2} className="font-medium">
                     <Link
                       className="hover:underline"
-                      to={link({ category: [g.category] })}
+                      to={link({ decline_cause: [g.cause] })}
                     >
-                      {g.category}
+                      {g.cause}
                     </Link>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
@@ -356,7 +356,7 @@ function Reasons({ scope }: { scope: Scope }) {
                       <Link
                         className="hover:underline"
                         to={link({
-                          category: [r.category],
+                          decline_cause: [r.cause],
                           reason: r.reason ? [r.reason] : [],
                         })}
                       >
@@ -368,7 +368,7 @@ function Reasons({ scope }: { scope: Scope }) {
                         <Link
                           className="font-mono text-xs hover:underline"
                           to={link({
-                            category: [r.category],
+                            decline_cause: [r.cause],
                             response_code: [r.code],
                           })}
                         >
@@ -490,7 +490,7 @@ function CheckTable({
                       {
                         ...NEW_CARD,
                         [dimension]: r.result ? [r.result] : [],
-                        category: FAILED_CATEGORIES,
+                        outcome: FAILED_OUTCOMES,
                       },
                       scope,
                       data?.range
@@ -873,12 +873,12 @@ function NMIHistory({ scope }: { scope: Scope }) {
               </TableHeader>
               <TableBody>
                 {refusals.map((r) => (
-                  <TableRow key={`${r.kind}|${r.category}|${r.reason}`}>
+                  <TableRow key={`${r.kind}|${r.cause}|${r.reason}`}>
                     <TableCell>
                       <span className="block text-xs text-muted-foreground">
                         {NMI_KINDS.find((k) => k.value === r.kind)?.label ??
                           r.kind}{" "}
-                        · {r.category}
+                        · {r.cause}
                       </span>
                       {r.reason}
                     </TableCell>

@@ -91,31 +91,6 @@ func (q *Queries) DeleteCustomerMessagesBefore(ctx context.Context, arg DeleteCu
 	return result.RowsAffected(), nil
 }
 
-const deleteEndedFailedUsageWindows = `-- name: DeleteEndedFailedUsageWindows :execrows
-DELETE FROM billing.failed_usage_windows w
-WHERE (w.merchant_id, w.customer_id, w.currency, w.invoker, w.window_key, w.window_start) IN (
-    SELECT e.merchant_id, e.customer_id, e.currency, e.invoker, e.window_key, e.window_start
-    FROM billing.failed_usage_windows e
-    WHERE e.merchant_id = $1::uuid AND e.window_end <= $2::timestamptz
-    ORDER BY e.window_end
-    LIMIT $3::int
-)
-`
-
-type DeleteEndedFailedUsageWindowsParams struct {
-	MerchantID uuid.UUID
-	Now        time.Time
-	RowLimit   int32
-}
-
-func (q *Queries) DeleteEndedFailedUsageWindows(ctx context.Context, arg DeleteEndedFailedUsageWindowsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteEndedFailedUsageWindows, arg.MerchantID, arg.Now, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteFinishedOutboxIntentsBefore = `-- name: DeleteFinishedOutboxIntentsBefore :execrows
 DELETE FROM billing.provider_intents
 WHERE merchant_id = $1::uuid
@@ -124,7 +99,7 @@ WHERE merchant_id = $1::uuid
     WHERE pi.merchant_id = $1::uuid
       AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
       AND pi.destructive_run_id IS NULL
-      AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
+      AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'stripe_resume_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
       AND pi.updated_at < $2::timestamptz
     ORDER BY pi.updated_at
     LIMIT $3::int
@@ -139,9 +114,8 @@ type DeleteFinishedOutboxIntentsBeforeParams struct {
 
 // Finished intents that only carried an instruction to a provider. An intent
 // that moved or refused money, enrolled a membership or erased a card is the
-// record of that: it is not one of these types and is never deleted here. A
-// mutation log entry that names a deleted intent keeps its own row and loses
-// the link.
+// record of that: it is not one of these types and is never deleted here. An
+// operation log entry of a deleted intent keeps its row and its operation id.
 func (q *Queries) DeleteFinishedOutboxIntentsBefore(ctx context.Context, arg DeleteFinishedOutboxIntentsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteFinishedOutboxIntentsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
@@ -258,27 +232,26 @@ func (q *Queries) DeleteLimitWindowsBefore(ctx context.Context, arg DeleteLimitW
 	return result.RowsAffected(), nil
 }
 
-const deleteMeterPeriodQuantitiesBefore = `-- name: DeleteMeterPeriodQuantitiesBefore :execrows
-DELETE FROM billing.meter_period_quantities q
-WHERE (q.merchant_id, q.customer_id, q.currency, q.meter_key, q.cell, q.period_starts_at) IN (
-    SELECT e.merchant_id, e.customer_id, e.currency, e.meter_key, e.cell, e.period_starts_at
-    FROM billing.meter_period_quantities e
-    WHERE e.merchant_id = $1::uuid AND e.period_starts_at < $2::timestamptz
-    ORDER BY e.period_starts_at
+const deleteOperationLogBefore = `-- name: DeleteOperationLogBefore :execrows
+DELETE FROM billing.operation_log
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT ol.id FROM billing.operation_log ol
+    WHERE ol.merchant_id = $1::uuid
+      AND ol.occurred_at < $2::timestamptz
+    ORDER BY ol.occurred_at
     LIMIT $3::int
-    FOR UPDATE SKIP LOCKED
 )
 `
 
-type DeleteMeterPeriodQuantitiesBeforeParams struct {
+type DeleteOperationLogBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
 	RowLimit   int32
 }
 
-// A row another writer holds waits for a later pass.
-func (q *Queries) DeleteMeterPeriodQuantitiesBefore(ctx context.Context, arg DeleteMeterPeriodQuantitiesBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteMeterPeriodQuantitiesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+func (q *Queries) DeleteOperationLogBefore(ctx context.Context, arg DeleteOperationLogBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOperationLogBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -305,32 +278,6 @@ type DeleteOrphanPeriodicLeasesParams struct {
 // never races a claim.
 func (q *Queries) DeleteOrphanPeriodicLeases(ctx context.Context, arg DeleteOrphanPeriodicLeasesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteOrphanPeriodicLeases, arg.RetentionDays, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const deleteProviderMutationLogsBefore = `-- name: DeleteProviderMutationLogsBefore :execrows
-DELETE FROM billing.provider_mutation_logs
-WHERE merchant_id = $1::uuid
-  AND id IN (
-    SELECT ml.id FROM billing.provider_mutation_logs ml
-    WHERE ml.merchant_id = $1::uuid
-      AND ml.created_at < $2::timestamptz
-    ORDER BY ml.created_at
-    LIMIT $3::int
-)
-`
-
-type DeleteProviderMutationLogsBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-func (q *Queries) DeleteProviderMutationLogsBefore(ctx context.Context, arg DeleteProviderMutationLogsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteProviderMutationLogsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -438,58 +385,6 @@ type DeleteSubscriptionTransitionsPastRetentionParams struct {
 
 func (q *Queries) DeleteSubscriptionTransitionsPastRetention(ctx context.Context, arg DeleteSubscriptionTransitionsPastRetentionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteSubscriptionTransitionsPastRetention, arg.MerchantID, arg.RetentionDays, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const deleteUsageDailyBefore = `-- name: DeleteUsageDailyBefore :execrows
-DELETE FROM billing.usage_daily d
-WHERE (d.merchant_id, d.customer_id, d.day_at, d.currency, d.event_type, d.meter_key, d.cell, d.invoker, d.outcome) IN (
-    SELECT e.merchant_id, e.customer_id, e.day_at, e.currency, e.event_type, e.meter_key, e.cell, e.invoker, e.outcome
-    FROM billing.usage_daily e
-    WHERE e.merchant_id = $1::uuid AND e.day_at < $2::timestamptz
-    ORDER BY e.day_at
-    LIMIT $3::int
-    FOR UPDATE SKIP LOCKED
-)
-`
-
-type DeleteUsageDailyBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-func (q *Queries) DeleteUsageDailyBefore(ctx context.Context, arg DeleteUsageDailyBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteUsageDailyBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const deleteUsageMinutesBefore = `-- name: DeleteUsageMinutesBefore :execrows
-DELETE FROM billing.usage_minutes m
-WHERE (m.merchant_id, m.customer_id, m.currency, m.minute_at) IN (
-    SELECT e.merchant_id, e.customer_id, e.currency, e.minute_at
-    FROM billing.usage_minutes e
-    WHERE e.merchant_id = $1::uuid AND e.minute_at < $2::timestamptz
-    ORDER BY e.minute_at
-    LIMIT $3::int
-    FOR UPDATE SKIP LOCKED
-)
-`
-
-type DeleteUsageMinutesBeforeParams struct {
-	MerchantID uuid.UUID
-	Cutoff     time.Time
-	RowLimit   int32
-}
-
-func (q *Queries) DeleteUsageMinutesBefore(ctx context.Context, arg DeleteUsageMinutesBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteUsageMinutesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -617,29 +512,17 @@ FROM (
         AND COALESCE(o.canceled_at, o.expired_at) < $8::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
-    (SELECT DISTINCT fw.merchant_id AS mid
-       FROM billing.failed_usage_windows fw
-      WHERE ($1::uuid IS NULL OR fw.merchant_id > $1::uuid)
-        AND fw.window_end <= $9::timestamptz
-      ORDER BY 1 LIMIT $3::int)
-    UNION
-    (SELECT DISTINCT mq.merchant_id AS mid
-       FROM billing.meter_period_quantities mq
-      WHERE ($1::uuid IS NULL OR mq.merchant_id > $1::uuid)
-        AND mq.period_starts_at < $10::timestamptz
-      ORDER BY 1 LIMIT $3::int)
-    UNION
     (SELECT DISTINCT wh.merchant_id AS mid
        FROM billing.webhook_health_daily wh
       WHERE ($1::uuid IS NULL OR wh.merchant_id > $1::uuid)
-        AND wh.day_at < $11::timestamptz
+        AND wh.day_at < $9::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT rf.merchant_id AS mid
        FROM billing.reconciliation_findings rf
       WHERE ($1::uuid IS NULL OR rf.merchant_id > $1::uuid)
         AND rf.resolved_at IS NOT NULL
-        AND GREATEST(rf.resolved_at, rf.last_seen_at) < $12::timestamptz
+        AND GREATEST(rf.resolved_at, rf.last_seen_at) < $10::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT pi.merchant_id AS mid
@@ -647,56 +530,44 @@ FROM (
       WHERE ($1::uuid IS NULL OR pi.merchant_id > $1::uuid)
         AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
         AND pi.destructive_run_id IS NULL
-        AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
-        AND pi.updated_at < $13::timestamptz
+        AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'stripe_resume_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
+        AND pi.updated_at < $11::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
-    (SELECT DISTINCT ml.merchant_id AS mid
-       FROM billing.provider_mutation_logs ml
-      WHERE ($1::uuid IS NULL OR ml.merchant_id > $1::uuid)
-        AND ml.created_at < $13::timestamptz
+    (SELECT DISTINCT ol.merchant_id AS mid
+       FROM billing.operation_log ol
+      WHERE ($1::uuid IS NULL OR ol.merchant_id > $1::uuid)
+        AND ol.occurred_at < $11::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT pk.merchant_id AS mid
        FROM billing.parked_provider_subscriptions pk
       WHERE ($1::uuid IS NULL OR pk.merchant_id > $1::uuid)
-        AND pk.released_at < $14::timestamptz
+        AND pk.released_at < $12::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT lw.merchant_id AS mid
        FROM billing.limit_windows lw
       WHERE ($1::uuid IS NULL OR lw.merchant_id > $1::uuid)
-        AND lw.window_ends_at < $15::timestamptz
+        AND lw.window_ends_at < $13::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT le.merchant_id AS mid
        FROM billing.leases le
       WHERE ($1::uuid IS NULL OR le.merchant_id > $1::uuid)
-        AND le.last_sync_at < $16::timestamptz
+        AND le.last_sync_at < $14::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT la.merchant_id AS mid
        FROM billing.limit_adjustments la
       WHERE ($1::uuid IS NULL OR la.merchant_id > $1::uuid)
-        AND la.created_at < $16::timestamptz
-      ORDER BY 1 LIMIT $3::int)
-    UNION
-    (SELECT DISTINCT ud.merchant_id AS mid
-       FROM billing.usage_daily ud
-      WHERE ($1::uuid IS NULL OR ud.merchant_id > $1::uuid)
-        AND ud.day_at < $17::timestamptz
-      ORDER BY 1 LIMIT $3::int)
-    UNION
-    (SELECT DISTINCT um.merchant_id AS mid
-       FROM billing.usage_minutes um
-      WHERE ($1::uuid IS NULL OR um.merchant_id > $1::uuid)
-        AND um.minute_at < $18::timestamptz
+        AND la.created_at < $14::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT cm.merchant_id AS mid
        FROM billing.customer_messages cm
       WHERE ($1::uuid IS NULL OR cm.merchant_id > $1::uuid)
-        AND cm.created_at < $19::timestamptz
+        AND cm.created_at < $15::timestamptz
       ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
@@ -712,16 +583,12 @@ type ListRetentionWorkMerchantsParams struct {
 	TransitionCutoff    time.Time
 	OrderAttemptCutoff  time.Time
 	UnpaidOrderCutoff   time.Time
-	Now                 time.Time
-	MeterCutoff         time.Time
 	CounterCutoff       time.Time
 	FindingCutoff       time.Time
 	ProviderWriteCutoff time.Time
 	ParkCutoff          time.Time
 	LimitWindowCutoff   time.Time
 	ReplayCutoff        time.Time
-	UsageCutoff         time.Time
-	UsageMinuteCutoff   time.Time
 	MessageCutoff       time.Time
 }
 
@@ -739,16 +606,12 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.TransitionCutoff,
 		arg.OrderAttemptCutoff,
 		arg.UnpaidOrderCutoff,
-		arg.Now,
-		arg.MeterCutoff,
 		arg.CounterCutoff,
 		arg.FindingCutoff,
 		arg.ProviderWriteCutoff,
 		arg.ParkCutoff,
 		arg.LimitWindowCutoff,
 		arg.ReplayCutoff,
-		arg.UsageCutoff,
-		arg.UsageMinuteCutoff,
 		arg.MessageCutoff,
 	)
 	if err != nil {

@@ -2,6 +2,9 @@ package alerting
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
@@ -48,8 +52,8 @@ type LedgerRepair struct {
 }
 
 // RecordLedgerRepair raises a consistency.ledger.unbooked finding. Its subject
-// is the IdempotencyKey, else the provider's transaction: a repeat observes
-// the same finding again.
+// is the IdempotencyKey, else the event itself: its operation, transaction and
+// the resources it names. A repeat observes the same finding again.
 func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, repair LedgerRepair) error {
 	if database == nil {
 		return fmt.Errorf("ledger repair: database is required")
@@ -88,10 +92,10 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	}
 	subject := strings.TrimSpace(repair.IdempotencyKey)
 	if subject == "" {
-		subject = strings.Join([]string{provider, operation, transaction}, ":")
-		if transaction == "" {
-			subject += ":" + uuid.NewString()
-		}
+		// The same unbookable event is the same finding; a transaction alone
+		// does not tell two refunds of it apart.
+		subject = strings.Join([]string{provider, operation, transaction}, ":") + ":" +
+			repairDigest(provider, operation, transaction, evidence["customer_id"], evidence["original_payment_id"], evidence["subscription_id"], evidence["error"], metadata)
 	}
 	action := strings.TrimSpace(provider + " " + operation)
 	if transaction != "" {
@@ -101,13 +105,31 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	if repair.Err != nil {
 		action += " " + repair.Err.Error()
 	}
-	if _, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+	rec, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingLedgerUnbooked, SubjectKey: subject, Severity: reconcile.SeverityCritical,
 		RecommendedAction: action, Evidence: evidence,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("ledger repair: %w", err)
 	}
+	alertRaised(ctx, database, rec, now)
 	return nil
+}
+
+// repairDigest names an unbookable event by its operation and the resources
+// it is about, so distinct events never share a finding.
+func repairDigest(parts ...any) string {
+	raw, _ := json.Marshal(parts)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:12])
+}
+
+// alertRaised tells the merchant's operator of a finding a person must look
+// at. The finding stays in the console whatever happens to its alert.
+func alertRaised(ctx context.Context, database *db.DB, rec reconcile.FindingRecord, now time.Time) {
+	if err := notifyFinding(ctx, database, rec, now); err != nil && ctx.Err() == nil && database.Log != nil {
+		database.Log.WarnContext(ctx, "alerting the operator failed; the finding stays in the console", logx.Err(err), "finding_id", rec.ID, "finding_type", rec.Type)
+	}
 }
 
 // CrankerGas is one Solana cranker wallet's SOL balance on a merchant's PSP.
@@ -131,7 +153,7 @@ func RecordCrankerGas(ctx context.Context, database *db.DB, now time.Time, gas C
 	if gas.Lamports >= gas.Threshold {
 		return store.ResolveRaisedFinding(ctx, FindingSolanaCrankerLowGas, gas.subject())
 	}
-	_, err := store.RaiseFinding(ctx, reconcile.RaisedFinding{
+	rec, err := store.RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingSolanaCrankerLowGas, SubjectKey: gas.subject(), Severity: reconcile.SeverityHigh,
 		RecommendedAction: fmt.Sprintf("Solana cranker %s on %s has %d lamports, below %d: top it up with SOL or its pulls fail. It resolves itself once a pull pass finds it funded.",
 			gas.Wallet, gas.Network, gas.Lamports, gas.Threshold),
@@ -141,6 +163,7 @@ func RecordCrankerGas(ctx context.Context, database *db.DB, now time.Time, gas C
 	if err != nil {
 		return fmt.Errorf("cranker gas: %w", err)
 	}
+	alertRaised(ctx, database, rec, now)
 	return nil
 }
 
@@ -160,7 +183,7 @@ func RecordMessageRateLimit(ctx context.Context, database *db.DB, now time.Time,
 		return fmt.Errorf("message rate limit: database is required")
 	}
 	customer := billing.CustomerID(limit.CustomerID).String()
-	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+	rec, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingCustomerMessagesRateLimited, SubjectKey: customer, Severity: reconcile.SeverityMedium,
 		RecommendedAction: fmt.Sprintf("Customer %s reached %d messages in %s, so a %s message was not sent. Find what records so many billing facts for them.",
 			customer, limit.Cap, limit.Window, limit.EventType),
@@ -170,6 +193,7 @@ func RecordMessageRateLimit(ctx context.Context, database *db.DB, now time.Time,
 	if err != nil {
 		return fmt.Errorf("message rate limit: %w", err)
 	}
+	alertRaised(ctx, database, rec, now)
 	return nil
 }
 
@@ -206,7 +230,7 @@ func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.T
 	if r.From == "" {
 		sender = "the deployment's sender"
 	}
-	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+	rec, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingCustomerMessagesSenderRefused, SubjectKey: subject, Severity: reconcile.SeverityHigh,
 		RecommendedAction: fmt.Sprintf("The mail server refused %s at %s (%d %s), so customer messages are not sent; each is retried. Fix the sender's credentials or let it send as this address.",
 			sender, r.Step, r.Code, r.Reply),
@@ -216,6 +240,7 @@ func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.T
 	if err != nil {
 		return fmt.Errorf("message sender refused: %w", err)
 	}
+	alertRaised(ctx, database, rec, now)
 	return nil
 }
 

@@ -2,7 +2,6 @@ package purchasedcredits
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -17,8 +16,8 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/limits"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -89,11 +88,7 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		}
 		existing, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: p.PaymentID})
 		if err == nil {
-			var spec grants.Spec
-			if err := json.Unmarshal(existing.SpecSnapshot, &spec); err != nil {
-				return err
-			}
-			if existing.CustomerID != p.CustomerID.UUID() || existing.ProductID == nil || *existing.ProductID != p.ProductID || intValue(existing.Amount) != p.Amount || stringValue(existing.Currency) != p.Currency || !existing.StartsAt.Equal(p.StartsAt) || !sameExpiry(existing.EndsAt, p.ExpiresAt) || spec.Deposit == nil || spec.Deposit.PaidAmount == nil || *spec.Deposit.PaidAmount != p.PaidAmount {
+			if existing.CustomerID != p.CustomerID.UUID() || existing.ProductID == nil || *existing.ProductID != p.ProductID || existing.Units != p.Amount || existing.Unit != p.Currency || !existing.StartsAt.Equal(p.StartsAt) || !sameExpiry(existing.ExpiresAt, p.ExpiresAt) || intValue(existing.PaidAmount) != p.PaidAmount {
 				return fmt.Errorf("payment credit terms changed: %w", billing.ErrIdempotencyKeyReused)
 			}
 			result = existing.ID
@@ -105,12 +100,22 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		if balance > math.MaxInt64-p.Amount {
 			return fmt.Errorf("credit purchase would overflow balance")
 		}
-		gl := grants.New(q, mid.UUID())
-		gl.SetClock(s.now)
-		grant, err := gl.Grant(ctx, grants.GrantInput{Customer: p.CustomerID.UUID(), Product: &p.ProductID,
-			Kind: grants.Credit, Source: grants.Purchase, SourceID: p.PaymentID.String(), Payment: &p.PaymentID,
-			StartsAt: p.StartsAt, EndsAt: p.ExpiresAt, Amount: &p.Amount, Currency: &p.Currency, Reason: &p.Description,
-			Spec: &grants.Spec{Deposit: &grants.DepositProvenance{Source: "payment", Invoker: p.CustomerID.String(), PaidAmount: &p.PaidAmount}}})
+		// A recurring price's line delivers its cycle's credit.
+		funding := credits.Purchase
+		if line.BillingIntervalHours != nil || line.BillingIntervalMonths != nil {
+			funding = credits.Recurring
+		}
+		var description *string
+		if p.Description != "" {
+			description = &p.Description
+		}
+		grant, err := credits.New(q, mid.UUID(), s.now).Issue(ctx, credits.Issue{
+			Customer: p.CustomerID.UUID(), Unit: p.Currency, Units: p.Amount, Funding: funding,
+			PaidAmount: &p.PaidAmount, PaidCurrency: &payment.Currency,
+			Source: "payment", SourceID: p.PaymentID.String(), Invoker: p.CustomerID.String(),
+			Product: &p.ProductID, OrderLine: &p.OrderLineID, Payment: &p.PaymentID, Description: description,
+			StartsAt: p.StartsAt, ExpiresAt: p.ExpiresAt,
+		})
 		if err != nil {
 			return err
 		}
@@ -141,12 +146,6 @@ func intValue(p *int64) int64 {
 	}
 	return *p
 }
-func stringValue(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
 func sameExpiry(a, b *time.Time) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -168,5 +167,9 @@ func (s *Service) lockBalance(ctx context.Context, q *gen.Queries, mid, customer
 	}
 	now := s.now()
 	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now)})
-	return balance, held.Held, err
+	if err != nil {
+		return 0, 0, err
+	}
+	unposted, err := ledger.UnpostedUsage(ctx, q, mid, customer, currency)
+	return balance, held.Held + unposted, err
 }

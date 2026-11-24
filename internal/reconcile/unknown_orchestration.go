@@ -28,7 +28,7 @@ import (
 // UnknownReconcileOptions bounds one reconcile pass over the `unknown` cohort.
 type UnknownReconcileOptions struct {
 	MaxPerRail    int           // cap subscriptions pulled per rail per run (0 -> 500)
-	DunningWindow time.Duration // a failed renewal within this of the period end is recoverable (0 -> DefaultDunningWindow)
+	DunningWindow time.Duration // a failed renewal within this of the period end is recoverable (0 -> each row's own window)
 	LookbackCap   time.Duration // never pull a window wider than this (0 -> 3y)
 	WindowSlack   time.Duration // pull from (oldest period end - slack) (0 -> 48h)
 	// Breaker refuses to read absence from an implausibly small roster. Zero
@@ -41,9 +41,6 @@ type UnknownReconcileOptions struct {
 func (o UnknownReconcileOptions) withDefaults() UnknownReconcileOptions {
 	if o.MaxPerRail <= 0 {
 		o.MaxPerRail = 500
-	}
-	if o.DunningWindow <= 0 {
-		o.DunningWindow = DefaultDunningWindow
 	}
 	if o.LookbackCap <= 0 {
 		o.LookbackCap = 3 * 365 * 24 * time.Hour
@@ -195,7 +192,12 @@ func reconcileUnknownPSP(ctx context.Context, database *db.DB, lc *subscriptions
 	}
 	decisions := make([]pendingDecision, 0, len(rows))
 	cancels := 0
+	policy := policyFor(models.ProviderCollectionPolicy(rail), merchantDunningPolicy(ctx, database))
 	for _, r := range rows {
+		window := opts.DunningWindow
+		if window <= 0 {
+			window = windowOf(policy, r.CurrentPeriodStartsAt, r.CurrentPeriodEndsAt)
+		}
 		state := SubscriptionState{
 			Status:             string(models.StatusUnverified),
 			Rail:               rail,
@@ -203,7 +205,7 @@ func reconcileUnknownPSP(ctx context.Context, database *db.DB, lc *subscriptions
 			PeriodStart:        r.CurrentPeriodStartsAt,
 			PeriodEnd:          r.CurrentPeriodEndsAt,
 		}
-		decision := Decide(state, EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, opts.DunningWindow)
+		decision := Decide(state, EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, window)
 		// NMI's bulk transaction report names no schedule, so the bulk
 		// snapshot can adopt a boundary but never prove its renewal
 		// charge; any non-terminal NMI answer is confirmed by the
@@ -222,7 +224,7 @@ func reconcileUnknownPSP(ctx context.Context, database *db.DB, lc *subscriptions
 				res.StillUnknown++
 				continue
 			}
-			decision = Decide(state, EvidenceBundle{Snapshot: psnap, EvidenceFloor: floor}, now, opts.DunningWindow)
+			decision = Decide(state, EvidenceBundle{Snapshot: psnap, EvidenceFloor: floor}, now, window)
 		}
 		if decision.Kind == TransitionCancel {
 			cancels++
@@ -397,6 +399,18 @@ func backfillSubscriptionPayments(ctx context.Context, database *db.DB, sub *mod
 				bill.Payment = &models.Payment{CustomerID: sub.CustomerID, SubscriptionID: &sub.ID, PspID: &sub.PspID, Rail: sub.Rail,
 					TransactionID: t.TransactionID, Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
 					MoneyMovement: models.MoneyMovementRail, PurchasedAt: t.OccurredAt, CreatedAt: now, Metadata: t.PaymentMetadata}
+				// The sale names its vault: the customer's one card in it is
+				// the card charged.
+				if t.CustomerRef != "" {
+					cards, err := d.Gen(ctx).ListCustomerCardsByRailCustomerRef(ctx, gen.ListCustomerCardsByRailCustomerRefParams{
+						MerchantID: sub.MerchantID, PspID: sub.PspID, CustomerID: sub.CustomerID, RailCustomerRef: t.CustomerRef})
+					if err != nil {
+						return err
+					}
+					if len(cards) == 1 {
+						bill.Payment.PaymentMethodID = &cards[0]
+					}
+				}
 				bill.Settled, bill.SettlementSource = true, "cash"
 			}
 			if result, err = observed.Record(ctx, d, bill, now); err != nil {

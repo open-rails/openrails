@@ -7,10 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/modules/alerting/alertjob"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
@@ -24,33 +23,14 @@ var _ reconcile.FindingNotifier = (*Service)(nil)
 // A set NotifiedAt blocks re-firing unless severity strictly escalates; every
 // resolution clears it, so a reopened finding notifies again.
 func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	if rec.Status != reconcile.FindingStatusRequiresReview || rec.Quiet() {
-		return nil
-	}
-	if rec.NotifiedAt != nil && reconcile.SeverityRank(rec.Severity) >= reconcile.SeverityRank(reconcile.Severity(rec.NotifiedSeverity)) {
-		return nil // already notified at this severity or worse; not a genuine escalation
-	}
-	// The episode claim and its alert's job commit together: concurrent or
-	// stale callers claim nothing, and a claimed episode is delivered with
-	// retries. The episode is the stored instant, so it is microseconds.
-	notifiedAt := s.now().Truncate(time.Microsecond)
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		n, err := s.db.NewWithPgxTx(tx).Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{
-			MerchantID: mid.UUID(), ID: rec.ID, NotifiedAt: notifiedAt, Severity: string(rec.Severity),
-		})
-		if err != nil || n == 0 {
-			return err
-		}
-		return s.queueFindingAlert(ctx, tx, mid.UUID(), rec.ID, rec.Severity, notifiedAt)
-	})
-	if err != nil {
-		return fmt.Errorf("claim finding notification: %w", err)
-	}
-	return nil
+	return notifyFinding(ctx, s.db, rec, s.now())
+}
+
+// notifyFinding claims rec's notification episode at now and queues its alert
+// in one transaction.
+func notifyFinding(ctx context.Context, database *db.DB, rec reconcile.FindingRecord, now time.Time) error {
+	return alertjob.Notify(ctx, database, alertjob.Finding{ID: rec.ID, Status: string(rec.Status), Severity: string(rec.Severity), Quiet: rec.Quiet(),
+		NotifiedAt: rec.NotifiedAt, NotifiedSeverity: rec.NotifiedSeverity}, now)
 }
 
 // findingAlert is rec's alert, fired when its episode was claimed.

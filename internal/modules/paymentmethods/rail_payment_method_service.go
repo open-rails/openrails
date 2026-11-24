@@ -658,6 +658,9 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	if pm == nil {
 		return errors.New("payment method is required")
 	}
+	if Discarded(pm) {
+		return nil
+	}
 	if pm.Custodian != models.CustodianPSP && pm.Custodian != models.CustodianHyperSwitch && !models.BasisTheoryCustody(pm.Custodian) {
 		return ErrPaymentMethodCustodianUnsupported
 	}
@@ -691,6 +694,12 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	default:
 		return ErrPaymentMethodDeleteProcessing
 	}
+}
+
+// Discarded reports a card CleanupPaymentMethodBestEffort removed: its
+// tombstone names no operation.
+func Discarded(pm *models.PaymentMethod) bool {
+	return pm != nil && pm.ParkReason == "removed:"+pm.ID.String()
 }
 
 // CleanupPaymentMethodBestEffort is the DIRECT delete for reactive decline-cleanup
@@ -735,7 +744,7 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 		return false, nil, fmt.Errorf("failed to check payment method usage: %w", err)
 	}
 	if liveCount > 0 {
-		return false, nil, fmt.Errorf("%w: %d active, pending, or past-due subscription(s)", ErrPaymentMethodInUse, liveCount)
+		return false, nil, fmt.Errorf("%w: %d subscription(s) not canceled", ErrPaymentMethodInUse, liveCount)
 	}
 
 	// #682 shared-vault handling: deleting the remote vault customer destroys
@@ -803,8 +812,7 @@ func (s *RailPaymentMethodService) countLiveSubscriptionsUsingPaymentMethod(ctx 
 
 	liveCount := 0
 	for _, sub := range subs {
-		switch sub.Status {
-		case models.StatusActive, models.StatusPending, models.StatusPastDue:
+		if sub.Status.Live() || sub.Status == models.StatusPending {
 			liveCount++
 		}
 	}

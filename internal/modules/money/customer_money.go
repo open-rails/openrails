@@ -61,9 +61,9 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 		for _, a := range accounts {
 			k := key{a.CustomerID, a.Currency}
 			switch ledger.AccountType(a.AccountType) {
-			case ledger.CustomerBalance:
+			case ledger.CustomerUnits:
 				balance[k], hasBalance[k] = a.Balance, true
-			case ledger.ArrearsLiability:
+			case ledger.CustomerOwed:
 				if a.Balance < 0 {
 					owed[k] = -a.Balance
 				}
@@ -124,7 +124,7 @@ func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, custom
 	now := s.now()
 	out := []billing.CustomerLimit{}
 	for _, a := range accounts {
-		if ledger.AccountType(a.AccountType) != ledger.CustomerBalance {
+		if ledger.AccountType(a.AccountType) != ledger.CustomerUnits {
 			continue
 		}
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: a.Currency,
@@ -132,8 +132,11 @@ func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, custom
 		if err != nil {
 			return nil, err
 		}
-		capacity, err := s.usageAdmissionCapacity(ctx, q, identity.CustomerID(customer), a.Currency, admissionCapacityFromRow(row))
+		capacity, err := s.withUnposted(ctx, q, mid.UUID(), customer, a.Currency, admissionCapacityFromRow(row))
 		if err != nil {
+			return nil, err
+		}
+		if capacity, err = s.usageAdmissionCapacity(ctx, q, identity.CustomerID(customer), a.Currency, capacity); err != nil {
 			return nil, err
 		}
 		line := billing.CustomerLimit{CustomerID: billing.CustomerID(customer), Limit: catalog.BalanceLimit, Unit: a.Currency,

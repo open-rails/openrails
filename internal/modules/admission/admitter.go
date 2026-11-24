@@ -10,10 +10,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -24,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/delinquency"
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // DefaultTrustLevel is assigned to actors with no explicit trust level — the
@@ -102,7 +105,10 @@ type AdmitRequest struct {
 	AccrualRateDeltaPerHour int64
 	Source                  string    // idempotency namespace (e.g. "usage")
 	SourceID                string    // idempotency id (request id) — the hold key
-	ExpiresAt               time.Time // the owner's declared job deadline; REQUIRED when EstimatedAmount > 0
+	ExpiresAt               time.Time // the owner's declared job deadline; REQUIRED when EstimatedAmount > 0 and no lease owns the hold
+	// LeaseID is the gate lease that owns the hold: it lives while the lease
+	// does.
+	LeaseID *uuid.UUID
 }
 
 // AdmitDecision is the unified outcome.
@@ -174,7 +180,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		}
 	}
 	replay, err := a.gate.CheckIdentity(ctx, q, spendgate.AdmitInput{Customer: req.CustomerID.UUID(), Currency: req.Currency,
-		RequestID: req.SourceID, Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt, Terms: terms, EstimateUsage: estimate})
+		RequestID: req.SourceID, Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt, Terms: terms, EstimateUsage: estimate, LeaseID: req.LeaseID})
 	if err != nil {
 		var conflict *spendgate.Conflict
 		if errors.As(err, &conflict) {
@@ -185,6 +191,15 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	if replay != nil {
 		return AdmitDecision{Allowed: true, EstimatedAmount: replay.EstimatedAmount, AvailableAmount: replay.AvailableAmount,
 			HoldExpiresAt: replay.ExpiresAt, Replayed: true, State: replay.State}, nil
+	}
+	if req.LeaseID != nil {
+		lease, err := q.GetLease(ctx, gen.GetLeaseParams{MerchantID: tid.UUID(), ID: *req.LeaseID})
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && lease.ClosedAt != nil {
+			return AdmitDecision{}, apperr.New(http.StatusConflict, billing.CodeLeaseNotHeld, "the lease is closed or never synced").WithParam("lease_id")
+		}
+		if err != nil {
+			return AdmitDecision{}, err
+		}
 	}
 
 	// A usage estimate is priced at the customer's current period quantities
@@ -206,7 +221,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	resolved, policy, sgReq := g.resolved, g.policy, g.request
 
 	// Usage limits the request counts toward: those in its currency claim its
-	// money estimate, named units what their rate cards count of its usage.
+	// money estimate, named units what their counts make of its usage.
 	claims, err := a.limitClaims(ctx, q, tid.UUID(), req)
 	if err != nil {
 		return AdmitDecision{}, err
@@ -220,7 +235,8 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		EstimateUsage: estimate, RateCards: pinned,
 		Terms: spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
 			Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour},
-		Limits: claims,
+		Limits:  claims,
+		LeaseID: req.LeaseID,
 	}
 	dec, err := a.gate.Admit(ctx, q, input)
 	if err != nil {
@@ -238,10 +254,6 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	}
 	if dec.Allowed {
 		return AdmitDecision{Allowed: true, EstimatedAmount: dec.EstimatedAmount, AvailableAmount: dec.AvailableAmount, HoldExpiresAt: dec.ExpiresAt, Replayed: dec.Replayed, State: dec.State}, nil
-	}
-	if dec.CapacityHeld {
-		return AdmitDecision{BlockedBy: "limit", DenyCode: billing.DenyCapacityHeld, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
-			RetryAfterSeconds: ceilSeconds(dec.RetryAfter)}, nil
 	}
 	if dec.BlockedLimit != nil {
 		out := AdmitDecision{BlockedBy: "limit", DenyCode: billing.DenyLimitReached, EstimatedAmount: req.EstimatedAmount, AvailableAmount: available,
@@ -275,8 +287,9 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 type gated struct {
 	trustLevel string
 	request    spendgate.Request
-	resolved   ResolvedPolicy
-	policy     spendgate.Policy
+	// resolved is the policy with its amounts in the request's currency.
+	resolved ResolvedPolicy
+	policy   spendgate.Policy
 }
 
 // gates resolves the request's trust level and policy and makes the checks
@@ -284,16 +297,7 @@ type gated struct {
 // delinquency, the delegated-invoker refusal and the accrual-rate cap. A
 // lease makes them when it issues a hold.
 func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) (gated, *AdmitDecision, error) {
-	// Trust level resolution: explicit > graduated (#298) > lowest default (#300).
-	trustLevel := req.TrustLevel
-	if trustLevel == "" {
-		if t, terr := a.money.GetTrustLevel(ctx, req.CustomerID, req.Currency); terr == nil && t != "" {
-			trustLevel = t
-		}
-		if trustLevel == "" {
-			trustLevel = DefaultTrustLevel
-		}
-	}
+	trustLevel := a.trustLevel(ctx, req)
 
 	// Delegated-invoker failed-usage cutoff (#497): direct payer credentials are
 	// not cut off here (their failures past grace are charged when recorded).
@@ -330,19 +334,11 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 		}
 	}
 
-	sgReq := spendgate.Request{Invoker: req.Invoker, TrustLevel: trustLevel, Roles: roleStrings(req.Roles), Measure: req.Resource}
-
 	// or#897: the merchant's bound billing policy is resolved FIRST, because its
 	// KIND decides whether prior debt reduces this payer's headroom at all. The
 	// merchant chose which policy binds to this payer; OpenRails measures and
 	// enforces it from the transaction's locked merchant settings snapshot.
-	resolved, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
-	if err != nil {
-		return gated{}, nil, err
-	}
-
-	// Cap windows (FX-normalized to the request currency).
-	policy, err := a.loader.Load(ctx, req.Currency, resolved)
+	sgReq, _, resolved, policy, err := a.policyOf(ctx, req, trustLevel)
 	if err != nil {
 		return gated{}, nil, err
 	}
@@ -375,6 +371,34 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 	}
 
 	return gated{trustLevel: trustLevel, request: sgReq, resolved: resolved, policy: policy}, nil, nil
+}
+
+// trustLevel is the request's trust level: explicit, else graduated, else
+// the lowest default.
+func (a *Admitter) trustLevel(ctx context.Context, req AdmitRequest) string {
+	if req.TrustLevel != "" {
+		return req.TrustLevel
+	}
+	if t, err := a.money.GetTrustLevel(ctx, req.CustomerID, req.Currency); err == nil && t != "" {
+		return t
+	}
+	return DefaultTrustLevel
+}
+
+// policyOf is the billing policy bound to the request's customer and trust
+// level, in the request's currency, with its spend windows loaded.
+func (a *Admitter) policyOf(ctx context.Context, req AdmitRequest, trustLevel string) (spendgate.Request, ResolvedPolicy, ResolvedPolicy, spendgate.Policy, error) {
+	sgReq := spendgate.Request{Invoker: req.Invoker, TrustLevel: trustLevel, Roles: roleStrings(req.Roles), Measure: req.Resource}
+	declared, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
+	if err != nil {
+		return sgReq, ResolvedPolicy{}, ResolvedPolicy{}, spendgate.Policy{}, err
+	}
+	resolved, err := a.loader.InCurrency(ctx, declared, req.Currency)
+	if err != nil {
+		return sgReq, declared, ResolvedPolicy{}, spendgate.Policy{}, err
+	}
+	policy, err := a.loader.Load(ctx, req.Currency, resolved)
+	return sgReq, declared, resolved, policy, err
 }
 
 func ceilSeconds(d time.Duration) int64 {

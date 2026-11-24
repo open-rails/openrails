@@ -8,115 +8,218 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/providerposture"
 )
 
 // APIBase is the Stripe REST root every production call site targets.
 const APIBase = "https://api.stripe.com"
 
-// PostureKey binds a verdict to the secret key, the API endpoint and the
-// connected account (Stripe-Account) a request acts for.
-func PostureKey(secretKey, endpoint, account string) providerposture.Key {
-	return providerposture.Key{Rail: "stripe", AccountID: account, Endpoint: endpoint, Credential: providerposture.Fingerprint(secretKey)}
+// PostureKey binds a verdict to the merchant's PSP, the account it declares
+// (acct_...) and its secret key: a change of any is a new key, checked anew.
+// A live key arms on Live, a test key on Simulated, and the verdict lasts: a
+// key's account and mode never change.
+func PostureKey(merchantID, pspID uuid.UUID, declared, secretKey string) providerposture.Key {
+	key := providerposture.Key{Rail: "stripe", MerchantID: merchantID, PSPID: pspID, AccountID: declared, Endpoint: APIBase, Credential: providerposture.Fingerprint(secretKey), Lasting: true}
+	if liveSecretKey(secretKey) {
+		key.Expect = providerposture.Live
+	}
+	return key
 }
 
-// PostureCheck reads the fixed Stripe API root and requires its authoritative signals: a test-mode key
-// prefix, the declared account's identity (when one is declared) and a live
-// API read reporting livemode=false for the same key.
-func PostureCheck(transport http.RoundTripper, secretKey, connected, declared string) providerposture.Check {
+// PostureCheck proves a key at the fixed Stripe API root: GET /v1/account
+// must name the declared account (another is Mismatched). A live key's mode
+// is its prefix; a test key also reads GET /v1/balance, whose livemode must be
+// false. A key Stripe refuses (401), or one lacking the permission a read
+// needs (403), is Refused with Stripe's answer, which names that permission.
+func PostureCheck(transport http.RoundTripper, secretKey, declared string) providerposture.Check {
 	return func(ctx context.Context) (providerposture.Verdict, error) {
+		live := liveSecretKey(secretKey)
 		switch {
-		case strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_"):
-			return providerposture.Live, errors.New("stripe live key")
-		case !strings.HasPrefix(secretKey, "sk_test_") && !strings.HasPrefix(secretKey, "rk_test_"):
-			return providerposture.Unknown, errors.New("stripe key has no test-mode prefix")
+		case !live && !strings.HasPrefix(secretKey, "sk_test_") && !strings.HasPrefix(secretKey, "rk_test_"):
+			return providerposture.Refused, errors.New("stripe key has no live or test-mode prefix")
+		case declared == "":
+			return providerposture.Refused, errors.New("stripe PSP declares no account to prove its key against")
 		}
 		client := &http.Client{Transport: transport, Timeout: DefaultTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		read := func(path string, target any) error {
+		read := func(path string, target any) (providerposture.Verdict, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, APIBase+path, nil)
 			if err != nil {
-				return err
+				return providerposture.Unknown, err
 			}
 			req.Header.Set("Authorization", "Bearer "+secretKey)
 			req.Header.Set(VersionHeader, APIVersion)
-			if connected != "" {
-				req.Header.Set("Stripe-Account", connected)
-			}
 			resp, err := client.Do(req)
 			if err != nil {
-				return fmt.Errorf("stripe posture read %s: %w", path, err)
+				return providerposture.Unknown, fmt.Errorf("stripe posture read %s: %w", path, err)
 			}
 			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("stripe posture read %s: http %d", path, resp.StatusCode)
+			switch {
+			case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+				return providerposture.Refused, fmt.Errorf("stripe refused GET %s (%d): %s", path, resp.StatusCode, refusalReason(resp.Body))
+			case resp.StatusCode != http.StatusOK:
+				return providerposture.Unknown, fmt.Errorf("stripe posture read %s: http %d", path, resp.StatusCode)
 			}
-			return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(target)
+			if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(target); err != nil {
+				return providerposture.Unknown, fmt.Errorf("stripe posture read %s: %w", path, err)
+			}
+			return providerposture.Unknown, nil
 		}
-		if declared != "" {
-			var account struct {
-				ID     string `json:"id"`
-				Object string `json:"object"`
-			}
-			if err := read("/v1/account", &account); err != nil {
-				return providerposture.Unknown, err
-			}
-			if account.Object != "account" || account.ID != declared {
-				return providerposture.Mismatched, errors.New("stripe key belongs to a different account than declared")
-			}
+		var account struct {
+			ID     string `json:"id"`
+			Object string `json:"object"`
+		}
+		if verdict, err := read("/v1/account", &account); err != nil {
+			return verdict, err
+		}
+		if account.Object != "account" || account.ID != declared {
+			return providerposture.Mismatched, errors.New("stripe key belongs to a different account than declared")
+		}
+		if live {
+			return providerposture.Live, nil
 		}
 		var balance struct {
 			Object   string `json:"object"`
 			Livemode *bool  `json:"livemode"`
 		}
-		if err := read("/v1/balance", &balance); err != nil {
-			return providerposture.Unknown, err
+		if verdict, err := read("/v1/balance", &balance); err != nil {
+			return verdict, err
 		}
 		if balance.Object != "balance" || balance.Livemode == nil {
 			return providerposture.Unknown, errors.New("stripe livemode read: unexpected response")
 		}
 		if *balance.Livemode {
-			return providerposture.Live, errors.New("stripe account reports livemode=true")
+			return providerposture.Live, errors.New("stripe account reports livemode=true for a test key")
 		}
 		return providerposture.Simulated, nil
 	}
 }
 
-// VerifyPosture verifies a loaded secret key now (startup, credential
-// create/rotate) and records the verdict for the transport gate.
-// The verdict is bound to the declared account (acct_...) it was checked for.
-func (f *Factory) VerifyPosture(ctx context.Context, secretKey, declared string) providerposture.Status {
-	return providerposture.Process().Verify(ctx, PostureKey(secretKey, APIBase, ""), f.PostureCheckFor(secretKey, declared))
+// keyText is a Stripe key as a refusal may quote it.
+var keyText = regexp.MustCompile(`\b[a-z]{2,4}_(live|test)_[0-9A-Za-z*]+`)
+
+// refusalReason is Stripe's message for a refused read, which names the
+// permission a restricted key lacks, with any key it quotes removed.
+func refusalReason(body io.Reader) string {
+	var answer struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.NewDecoder(io.LimitReader(body, 64<<10)).Decode(&answer) != nil || strings.TrimSpace(answer.Error.Message) == "" {
+		return "no reason given"
+	}
+	reason := keyText.ReplaceAllString(strings.TrimSpace(answer.Error.Message), "[key]")
+	if len(reason) > 300 {
+		reason = reason[:300]
+	}
+	return reason
 }
 
-// PostureCheckFor returns the startup check for a declared account's key.
+// RegisterPosture makes a PSP's key its declaration's registration when its
+// merchant's configuration loads (merchants.RegisterStripePosture), and
+// checks it unless its verdict stands: a write with the key waits for that
+// first check (requirePosture).
+func (f *Factory) RegisterPosture(declaration string, merchantID, pspID uuid.UUID, declared, secretKey string) {
+	providerposture.Process().Register(declaration, PostureKey(merchantID, pspID, declared, secretKey), f.PostureCheckFor(secretKey, declared))
+}
+
+// DropPosture drops a declaration's registration: its document is gone or
+// holds no key.
+func (f *Factory) DropPosture(declaration string) {
+	providerposture.Process().Unregister(declaration)
+}
+
+// VerifyPosture verifies a PSP's key now and records the verdict for the
+// transport gate: the key's mode, and that it belongs to the declared account.
+func (f *Factory) VerifyPosture(ctx context.Context, merchantID, pspID uuid.UUID, declared, secretKey string) providerposture.Status {
+	return providerposture.Process().Verify(ctx, PostureKey(merchantID, pspID, declared, secretKey), f.PostureCheckFor(secretKey, declared))
+}
+
+// PostureCheckFor returns the check of a declared account's key.
 func (f *Factory) PostureCheckFor(secretKey, declared string) providerposture.Check {
-	if f != nil && f.base != nil {
+	switch {
+	case f != nil && f.wired:
+		return PostureCheck(f.base, secretKey, declared)
+	case f != nil && f.base != nil:
 		return func(context.Context) (providerposture.Verdict, error) {
 			if liveSecretKey(secretKey) {
-				return providerposture.Live, errors.New("stripe live key with an injected transport")
+				// An injected transport is a fake provider: it moves no money.
+				return providerposture.Simulated, errors.New("stripe live key with an injected transport")
 			}
 			return providerposture.Simulated, nil
 		}
 	}
-	return PostureCheck(http.DefaultTransport, secretKey, "", declared)
+	return PostureCheck(http.DefaultTransport, secretKey, declared)
 }
 
-// requirePosture gates one test key's mutation on its verdict.
-// Requests to a literal loopback IP are fixtures (code-level test seams): they
-// still require a test-mode key prefix but cannot reach Stripe.
-func requirePosture(req *http.Request, transport http.RoundTripper) error {
-	secretKey := requestSecret(req)
-	endpoint := req.URL.Scheme + "://" + req.URL.Host
-	account := req.Header.Get("Stripe-Account")
-	if loopbackDestination(req) {
-		if liveSecretKey(secretKey) {
-			return fmt.Errorf("%w: stripe live key under sandbox posture", providerposture.ErrDisarmed)
-		}
+// WriteDisarmed is the refusal a write with secretKey for ctx's merchant would
+// meet at the transport, from what is known without asking Stripe: a live key
+// to a fake provider, a key no loaded PSP of the merchant declares, or one
+// whose every declaration's recorded verdict refuses writes. A key still
+// being checked is not refused here; its write's gate waits for it.
+func (f *Factory) WriteDisarmed(ctx context.Context, secretKey string) error {
+	fixture := f != nil && f.base != nil && !f.wired
+	switch {
+	case fixture && liveSecretKey(secretKey):
+		return fmt.Errorf("%w: stripe live key to a fake provider", providerposture.ErrDisarmed)
+	case fixture:
 		return nil
 	}
-	return providerposture.Process().Require(req.Context(), PostureKey(secretKey, endpoint, account), PostureCheck(transport, secretKey, account, ""))
+	mid, _ := merchant.FromContext(ctx)
+	return providerposture.Process().CredentialRefusal("stripe", APIBase, providerposture.Fingerprint(secretKey), mid.UUID())
+}
+
+// requirePosture gates a mutation on its key's verdict, from the check a PSP
+// of the request's merchant registered when its configuration loaded
+// (RegisterPosture): a live key's account, a test key's account and test
+// mode. A key no loaded PSP of the merchant declares is refused at once
+// (ErrPending, an ErrDisarmed that parks an intent); one whose first check is
+// running waits for it. A write for a connected account (Stripe-Account) is
+// never proven. A live key never reaches a fake provider (an injected
+// transport or a literal loopback IP); a test key's mutation there is a
+// fixture's.
+func (t *guardTransport) requirePosture(req *http.Request) error {
+	secretKey := requestSecret(req)
+	switch {
+	case t.fixture || loopbackDestination(req):
+		if liveSecretKey(secretKey) {
+			return fmt.Errorf("%w: stripe live key to a fake provider", providerposture.ErrDisarmed)
+		}
+		return nil
+	case req.Header.Get("Stripe-Account") != "":
+		return fmt.Errorf("%w: stripe writes for a connected account are not proven", providerposture.ErrDisarmed)
+	}
+	return providerposture.Process().RequireCredential(req.Context(), "stripe", req.URL.Scheme+"://"+req.URL.Host, providerposture.Fingerprint(secretKey), requestMerchant(req))
+}
+
+// gated reports a mutation the posture gate holds: not to a fake provider.
+func (t *guardTransport) gated(req *http.Request) bool {
+	return req.Method != http.MethodGet && req.Method != http.MethodHead && !t.fixture && !loopbackDestination(req)
+}
+
+// refused turns Stripe's 401 to a gated write into the refusal of its key:
+// Stripe did nothing, and the key's writes stop until a re-check or a new key
+// arms it. Any other answer is the caller's.
+func refused(req *http.Request, resp *http.Response) error {
+	if resp.StatusCode != http.StatusUnauthorized {
+		return nil
+	}
+	why := fmt.Errorf("stripe refused the key (401): %s", refusalReason(resp.Body))
+	_ = resp.Body.Close()
+	providerposture.Process().RefuseCredential("stripe", req.URL.Scheme+"://"+req.URL.Host, providerposture.Fingerprint(requestSecret(req)), requestMerchant(req), why)
+	return fmt.Errorf("%w: %w", providerposture.ErrDisarmed, why)
+}
+
+// requestMerchant is the merchant a request acts for, uuid.Nil when unnamed.
+func requestMerchant(req *http.Request) uuid.UUID {
+	mid, _ := merchant.FromContext(req.Context())
+	return mid.UUID()
 }
 
 // loopbackDestination reports a request to a literal loopback IP: a fixture.

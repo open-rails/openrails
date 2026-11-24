@@ -12,7 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/eventstore"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // DestructiveRunKindMerchantPurge is the merchant purge's kind in the general
@@ -24,9 +27,8 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // merchantOwnedTables are the openrails.* tables that carry the persisted
 // merchant_id column, IN PURGE ORDER: children before the rows they reference.
 //
-// The order is load-bearing, not cosmetic. prices→products, subscriptions→prices,
-// order_attempts→payments and provider_mutation_logs→provider_intents are all
-// RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
+// The order is load-bearing, not cosmetic. prices→products, subscriptions→prices
+// and order_attempts→payments are all RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
 // whole purge (SQLSTATE 23001) for any merchant that owned a product with a
 // price — i.e. every real one. Nothing caught it because the only test seeded a
 // single entitlement row.
@@ -38,11 +40,14 @@ var merchantOwnedTables = []string{
 	"notification_events", "customer_messages",
 	"payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
-	"provider_mutation_logs", "provider_intents",
-	"order_attempts", "product_access", "payments", "subscriptions",
+	"operation_log", "provider_intents",
+	"order_attempts", "product_access", "disputes", "fraud_reports", "payments", "network_activity_daily", "subscriptions",
 	"money_settings", "payment_methods", "psp_customers",
+	// The directory's copy of the merchant's customers and the tokens it
+	// pushes them with.
+	"customer_contacts", "provisioning_tokens",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
-	// tables are gone. The append-only ledger_transfers/grants are immutable
+	// tables are gone. The append-only ledger_transfers/grants/credit_grants are immutable
 	// (REVOKE DELETE) and intentionally NOT row-purged here — which is also why a
 	// merchant whose grants pin payments/products cannot be purged at all; see
 	// ErrPurgeBlockedByRetainedHistory. Products, prices and their owner bindings are retained
@@ -65,6 +70,12 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsProductAccess(ctx, id)
 	case "payments":
 		return q.CountMerchantRowsPayments(ctx, id)
+	case "disputes":
+		return q.CountMerchantRowsDisputes(ctx, id)
+	case "fraud_reports":
+		return q.CountMerchantRowsFraudReports(ctx, id)
+	case "network_activity_daily":
+		return q.CountMerchantRowsNetworkActivity(ctx, id)
 	case "payment_attempts":
 		return q.CountMerchantRowsPaymentAttempts(ctx, id)
 	case "rebill_cycles":
@@ -83,12 +94,16 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsRailCustomers(ctx, id)
 	case "order_attempts":
 		return q.CountMerchantRowsOrderAttempts(ctx, id)
-	case "provider_mutation_logs":
-		return q.CountMerchantRowsExternalProviderMutationLogs(ctx, id)
+	case "operation_log":
+		return q.CountMerchantRowsOperationLog(ctx, id)
 	case "provider_intents":
 		return q.CountMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.CountMerchantRowsMoneyAccounts(ctx, id)
+	case "customer_contacts":
+		return q.CountMerchantRowsCustomerContacts(ctx, id)
+	case "provisioning_tokens":
+		return q.CountMerchantRowsProvisioningTokens(ctx, id)
 	default:
 		return 0, fmt.Errorf("merchants: no count query for table %q", table)
 	}
@@ -109,6 +124,12 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsProductAccess(ctx, id)
 	case "payments":
 		return q.PurgeMerchantRowsPayments(ctx, id)
+	case "disputes":
+		return q.PurgeMerchantRowsDisputes(ctx, id)
+	case "fraud_reports":
+		return q.PurgeMerchantRowsFraudReports(ctx, id)
+	case "network_activity_daily":
+		return q.PurgeMerchantRowsNetworkActivity(ctx, id)
 	case "payment_attempts":
 		return q.PurgeMerchantRowsPaymentAttempts(ctx, id)
 	case "rebill_cycles":
@@ -127,12 +148,16 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsRailCustomers(ctx, id)
 	case "order_attempts":
 		return q.PurgeMerchantRowsOrderAttempts(ctx, id)
-	case "provider_mutation_logs":
-		return q.PurgeMerchantRowsExternalProviderMutationLogs(ctx, id)
+	case "operation_log":
+		return q.PurgeMerchantRowsOperationLog(ctx, id)
 	case "provider_intents":
 		return q.PurgeMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.PurgeMerchantRowsMoneyAccounts(ctx, id)
+	case "customer_contacts":
+		return q.PurgeMerchantRowsCustomerContacts(ctx, id)
+	case "provisioning_tokens":
+		return q.PurgeMerchantRowsProvisioningTokens(ctx, id)
 	default:
 		return fmt.Errorf("merchants: no purge query for table %q", table)
 	}
@@ -147,7 +172,7 @@ func notCaptured(counts map[string]int, secrets int) []string {
 		fmt.Sprintf("CONFIGURATION. %d Vault configuration documents are listed by name; no credential is ever read or written out. "+
 			"A purge deletes them from Vault, and nothing here can recreate them; a file holding the configuration stays the operator's.", secrets),
 		"CATALOG IDENTITY. Default and creator catalog IDs and owner-subject bindings are retained with the tombstoned merchant; product/price purge does not reassign or erase this ownership metadata.",
-		"THE APPEND-ONLY SPINE. ledger_transfers, ledger_accounts, grants, " +
+		"THE APPEND-ONLY SPINE. ledger_transfers, ledger_accounts, grants, credit_grants, credit_grant_events, " +
 			"subscription_status_transitions and the configuration history (change_log) are not purged (the app role holds no DELETE on them) " +
 			"and are not captured here either. After a purge they outlive the control-plane rows " +
 			"they referenced.",
@@ -159,9 +184,9 @@ func notCaptured(counts map[string]int, secrets int) []string {
 				"know which vault tokens exist to be revoked. Only the end user deletes their own "+
 				"instrument; a purge must not be used as a way to.", n))
 	}
-	if n := counts["provider_intents"] + counts["provider_mutation_logs"]; n > 0 {
+	if n := counts["provider_intents"] + counts["operation_log"]; n > 0 {
 		out = append(out, fmt.Sprintf(
-			"THE PROVIDER-WRITE AUDIT TRAIL (%d rows across provider_intents and provider_mutation_logs). "+
+			"THE PROVIDER-WRITE AUDIT TRAIL (%d rows across provider_intents and the operations history, operation_log). "+
 				"The record of every external write this deployment attempted for the merchant is "+
 				"destroyed with it, including intents queued but never fired.", n))
 	}
@@ -397,6 +422,10 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 	if cleanupPlan != nil && s.jobs == nil {
 		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: no job queue for its Vault cleanup", m.Slug)
 	}
+	store, err := s.postUsage(ctx, id)
+	if err != nil {
+		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: %w", m.Slug, err)
+	}
 	runID := uuid.New()
 	expected := int64(total)
 	note := fmt.Sprintf("merchant purge %s (%d rows) — one-way; restore path is PITR only", m.Slug, total)
@@ -489,6 +518,12 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 		s.config.Forget(id)
 	}
 	s.changed(id)
+	// The event store forgets the merchant's usage; what posted stays.
+	if store != nil {
+		if err := store.DeleteMerchant(merchant.WithID(ctx, id)); err != nil {
+			return billing.MerchantPurge{}, fmt.Errorf("merchants: purged merchant %s; its usage in the event store is not deleted, purge it again: %w", m.Slug, err)
+		}
+	}
 	return billing.MerchantPurge{RunID: billing.RunID(runID), Rows: total, CleanupQueued: cleanupPlan != nil}, nil
 }
 
@@ -524,4 +559,30 @@ func (s *Service) existingMerchantTables(ctx context.Context) ([]string, error) 
 		}
 	}
 	return out, nil
+}
+
+// postUsage posts the merchant's usage the ledger has not taken, whose money
+// the purge keeps, and answers the event store its usage is deleted from.
+func (s *Service) postUsage(ctx context.Context, id billing.MerchantID) (*eventstore.Store, error) {
+	var store *eventstore.Store
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		store = db.EventStoreOf(q)
+		rows, err := q.ListMerchantUsageUnposted(ctx, id.UUID())
+		if err != nil || len(rows) == 0 {
+			return err
+		}
+		usage := db.UsageLedgerOf(q)
+		if usage == nil {
+			return fmt.Errorf("%w: its unposted usage cannot post", billing.ErrEventStoreRequired)
+		}
+		now := time.Now().UTC()
+		for _, r := range rows {
+			if _, err := usage.PostUsage(ctx, q, id.UUID(), r.CustomerID, r.Currency, now, now); err != nil {
+				return fmt.Errorf("post usage of customer %s: %w", r.CustomerID, err)
+			}
+		}
+		return nil
+	})
+	return store, err
 }

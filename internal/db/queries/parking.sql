@@ -3,10 +3,9 @@
 
 -- name: LockParkCause :exec
 -- Park and Wake serialize on one cause: whichever commits first, the other
--- sees it. The merchant row's key share is taken first: a catalog write
--- holds that row for update and then wakes, so a park must wait for it
--- before holding a cause, never after (its finding's key check would
--- deadlock).
+-- sees it. A catalog write holds the merchant row FOR NO KEY UPDATE and then
+-- wakes; this key share, like a finding's key check, never waits on it, so
+-- a park holding a cause cannot deadlock with a waking catalog write.
 SELECT pg_advisory_xact_lock(hashtextextended('openrails.park:' || m.id::text || ':' || sqlc.arg(psp_id)::uuid::text
     || ':' || sqlc.arg(reason)::text || ':' || sqlc.arg(ref)::text, 0))
 FROM (SELECT id FROM billing.merchants WHERE id = sqlc.arg(merchant_id)::uuid FOR KEY SHARE) m;

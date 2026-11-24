@@ -63,7 +63,7 @@ func boundaryAdvanced(next time.Time, start, end *time.Time) bool {
 
 // DefaultDunningWindow bounds how far past the period end a FAILED renewal is
 // still recoverable (past_due) vs terminal: the built-in schedule's longest
-// window.
+// window, used only where no subscription's own window is given.
 var DefaultDunningWindow = collection.DefaultPolicy.LongestWindow()
 
 // SubscriptionState is the decider's view of the local row.
@@ -76,6 +76,9 @@ type SubscriptionState struct {
 	PeriodEnd          *time.Time // current_period_ends_at
 	GraceEndsAt        *time.Time
 	NextRetryScheduled bool // next_retry_at IS NOT NULL
+	// AdviceDeferred: the network's advice deferred the case to the next
+	// renewal, where the due pass ends it.
+	AdviceDeferred bool
 }
 
 // ChargeEvidence is the first-party billing evidence (billing.payments +
@@ -624,7 +627,7 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 
 	case string(models.StatusPastDue):
 		graceElapsed := sub.GraceEndsAt != nil && sub.GraceEndsAt.Before(now)
-		if graceElapsed && !sub.NextRetryScheduled {
+		if graceElapsed && !sub.NextRetryScheduled && !sub.AdviceDeferred {
 			// Certainty legs. No sweep plane produces them yet (FailMembership
 			// owns the inline decision), so convergence only ever parks.
 			if leg := ev.Charge.certaintyLeg(); leg != "" {

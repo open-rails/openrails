@@ -108,7 +108,7 @@ func timeToDraw(ratePerHour, amount int64) time.Duration {
 // firstInstantAtOrUnder is the first instant a balance that stands at
 // available at now is at or under floor, drawn at ratePerHour (positive) from
 // its credit lots soonest-expiring first, each lot dropping what is left of it
-// when it lapses: grants.CreditSpend's order. lots are the spendable lots at
+// when it lapses: credits.Lots.Spend's order. lots are the spendable lots at
 // now in that order. available counts what is already claimed against them
 // (holds, accrual), which is drawn first; money no lot holds is not counted.
 func firstInstantAtOrUnder(now time.Time, available int64, lots []creditLot, ratePerHour, floor int64) time.Time {

@@ -94,9 +94,9 @@ func NewVolumeBreaker(d *db.DB) *VolumeBreaker { return &VolumeBreaker{db: d} }
 // Check reports whether the destructive intent may execute now. held=true
 // means the executor must park it (stays pending). Fails closed: a check
 // error parks the intent rather than executing unexamined. Checks are
-// serialized per merchant, and an admitted intent's attempt is recorded by
-// admit in the same transaction, so concurrent executors cannot spend one
-// remaining budget twice.
+// serialized per merchant, and admit marks an admitted intent's attempt sent
+// (provider_intents.sent_attempt) in the same transaction, so concurrent
+// executors cannot spend one remaining budget twice.
 func (b *VolumeBreaker) Check(ctx context.Context, intent gen.BillingProviderIntent, now time.Time, admit func(context.Context, *db.DB) error) (held bool, reason string, err error) {
 	if b == nil || b.db == nil {
 		return false, "", fmt.Errorf("volume breaker: db not configured")

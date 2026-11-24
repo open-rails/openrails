@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -15,9 +16,9 @@ import (
 const secondsPerHour = int64(3600)
 
 // AccrualRateMeter measures a customer's current accrual rate, in micros per
-// hour, for the accrual_rate_cap quota. It sums the per-minute spend of the
-// policy's window, so it sees only settled usage: admission takes the host's
-// prospective delta for what is about to start.
+// hour, for the accrual_rate_cap quota: the per-minute spend of the policy's
+// window (settled usage) plus the rates of its running charges. Admission
+// takes the host's prospective delta for what is about to start.
 type AccrualRateMeter struct {
 	db  *db.DB
 	now func() time.Time
@@ -34,8 +35,9 @@ func (m *AccrualRateMeter) clock() time.Time {
 	return m.now().UTC()
 }
 
-// MeasuredRatePerHour returns the payer's accrual rate in micros per hour,
-// measured over window. A non-positive window is treated as one hour.
+// MeasuredRatePerHour returns the payer's accrual rate in micros per hour:
+// its usage measured over window (a non-positive window is one hour), plus
+// what its running charges accrue.
 func (m *AccrualRateMeter) MeasuredRatePerHour(ctx context.Context, payer identity.CustomerID, currency string, window time.Duration) (int64, error) {
 	if m == nil || m.db == nil {
 		return 0, nil
@@ -48,21 +50,21 @@ func (m *AccrualRateMeter) MeasuredRatePerHour(ctx context.Context, payer identi
 		return 0, err
 	}
 	since := m.clock().Add(-window)
-	var total int64
+	var total, running int64
+	if store := m.db.EventStore(); store != nil {
+		if total, err = store.MinuteAmount(ctx, billing.CustomerID(payer.UUID()), currency, since, time.Time{}); err != nil {
+			return 0, err
+		}
+	}
 	err = m.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var qerr error
-		total, qerr = m.db.Gen(ctx).SumUsageMinutesSince(ctx, gen.SumUsageMinutesSinceParams{
-			MerchantID: tid.UUID(),
-			CustomerID: payer.UUID(),
-			Currency:   currency,
-			Since:      since,
-		})
+		running, qerr = m.db.Gen(ctx).SumRunningChargeRates(ctx, gen.SumRunningChargeRatesParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency})
 		return qerr
 	})
 	if err != nil {
 		return 0, err
 	}
-	return RatePerHour(total, window), nil
+	return RatePerHour(total, window) + running, nil
 }
 
 // RatePerHour scales an amount accrued over window into micros per hour, in

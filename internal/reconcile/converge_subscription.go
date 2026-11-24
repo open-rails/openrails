@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -43,7 +44,58 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 		PeriodEnd:          sub.CurrentPeriodEndsAt,
 		GraceEndsAt:        sub.GraceEndsAt,
 		NextRetryScheduled: sub.NextRetryAt != nil,
+		AdviceDeferred:     sub.AdviceDeferred(),
 	}
+}
+
+// dunningWindowOf is how long past its period end a failed renewal of sub stays
+// recoverable: its dunning case's schedule when OpenRails runs its dunning,
+// the built-in one when the provider retries on its own, for its cycle.
+func dunningWindowOf(ctx context.Context, database *db.DB, sub *models.Subscription) (time.Duration, error) {
+	policy := collection.DefaultPolicy
+	if sub.CollectionPolicy != models.CollectionPolicyProvider {
+		var err error
+		if policy, err = subscriptions.CasePolicy(ctx, database, sub); err != nil {
+			return 0, err
+		}
+	}
+	return windowOf(policy, sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt), nil
+}
+
+// windowOf is a policy's dunning window for the cycle the period spans; an
+// unknown cycle gets its longest. A policy with no tiers is the built-in one.
+func windowOf(policy collection.Policy, start, end *time.Time) time.Duration {
+	if len(policy.Tiers) == 0 {
+		policy = collection.DefaultPolicy
+	}
+	if start != nil && end != nil {
+		if window, err := policy.Window(collection.CycleHoursBetween(*start, *end)); err == nil {
+			return window
+		}
+	}
+	return policy.LongestWindow()
+}
+
+// policyFor is the dunning policy a subscription's failures are judged by:
+// the merchant's when OpenRails runs its dunning, else the built-in one.
+func policyFor(collectionPolicy models.CollectionPolicy, merchantPolicy collection.Policy) collection.Policy {
+	if collectionPolicy == models.CollectionPolicyProvider {
+		return collection.DefaultPolicy
+	}
+	return merchantPolicy
+}
+
+// merchantDunningPolicy is the merchant's dunning policy, the built-in one
+// when it cannot be read: the window it gives is the one used before.
+func merchantDunningPolicy(ctx context.Context, database *db.DB) collection.Policy {
+	if database == nil {
+		return collection.DefaultPolicy
+	}
+	policy, err := subscriptions.DunningPolicy(ctx, database)
+	if err != nil {
+		return collection.DefaultPolicy
+	}
+	return policy
 }
 
 // ConvergeSubscriptionFromSnapshot converges one local subscription to fetched
@@ -72,7 +124,10 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, logger *slog.
 		return out, fmt.Errorf("converge subscription: db, lifecycle, subscription and snapshot are required")
 	}
 	if dunningWindow <= 0 {
-		dunningWindow = DefaultDunningWindow
+		var err error
+		if dunningWindow, err = dunningWindowOf(ctx, database, sub); err != nil {
+			return out, fmt.Errorf("converge subscription %s: %w", sub.ID, err)
+		}
 	}
 
 	d := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)

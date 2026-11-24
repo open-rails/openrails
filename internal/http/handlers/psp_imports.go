@@ -176,9 +176,16 @@ func LinkPSPImport(r *httprequest.Request) {
 
 // ApplyPSPImport handles POST /v1/merchant/psp-imports/{id}/apply: a person
 // queues the landing of the linked records and the approval, in their name,
-// of the import's corrections. A subscription whose plan no provider price
-// maps stays blocked until a person maps it, links and applies again.
-func ApplyPSPImport(r *httprequest.Request) {
+// of the import's corrections of the kinds they may approve, as proposal
+// approval asks (ProposalChangeRoutes): one of the import's open corrections
+// they may not approve refuses the request. A subscription whose plan no
+// provider price maps stays blocked until a person maps it, links and
+// applies again.
+func ApplyPSPImport(can StaffCan) func(r *httprequest.Request) {
+	return func(r *httprequest.Request) { applyPSPImport(r, can) }
+}
+
+func applyPSPImport(r *httprequest.Request, can StaffCan) {
 	id, ok := pathID(r, billing.ParsePSPImportID)
 	if !ok {
 		return
@@ -187,8 +194,13 @@ func ApplyPSPImport(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := im.RequestApply(r.Request.Context(), id, personActor(r))
-	if err != nil {
+	out, err := im.RequestApply(r.Request.Context(), id, personActor(r), changeAuthorizer(r, can))
+	var refused staffCanRefusal
+	switch {
+	case errors.As(err, &refused):
+		refuseStaffCan(r, refused.err)
+		return
+	case err != nil:
 		writePSPImportRefusal(r, err, "PSP import apply failed")
 		return
 	}

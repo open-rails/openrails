@@ -133,7 +133,11 @@ func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 	cancels := 0
 	for _, sub := range subs {
 		if snap := snaps[sub.ID]; snap != nil {
-			if Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, 0).Kind == TransitionCancel {
+			window, err := dunningWindowOf(ctx, database, sub)
+			if err != nil {
+				return fmt.Errorf("verify %s: %w", sub.ID, err)
+			}
+			if Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, window).Kind == TransitionCancel {
 				cancels++
 			}
 		}
@@ -240,7 +244,7 @@ func remoteSale(sale nmi.SaleAction, railSubID string) (RemoteTransaction, error
 		return RemoteTransaction{}, err
 	}
 	t := RemoteTransaction{TransactionID: sale.TransactionID, SubscriptionID: railSubID, Type: TransactionTypeSale, Success: sale.Success,
-		AmountCents: int64(amount), Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence}
+		AmountCents: int64(amount), Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence, CustomerRef: sale.Vault}
 	if !sale.Success {
 		t.Type, t.DeclineReason, t.DeclineCode = TransactionTypeDecline, sale.Evidence.Text, sale.Evidence.Code
 	}

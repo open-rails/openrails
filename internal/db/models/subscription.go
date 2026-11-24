@@ -42,7 +42,19 @@ const (
 	CancelTypeExpired    CancelType = "expired"    // User failed to rebill
 	CancelTypeChargeback CancelType = "chargeback" // Canceled due to chargeback
 	CancelTypeUpgrade    CancelType = "upgrade"    // Superseded by a tier upgrade
+	CancelTypeProvider   CancelType = "provider"   // The provider confirmed it ended
+	CancelTypeAbandoned  CancelType = "abandoned"  // Its first payment never completed
 )
+
+// Terminal reports whether a cancel of this kind is final: no renewal
+// revives it. A lapse (expired) and an upgrade are not.
+func (c CancelType) Terminal() bool {
+	switch c {
+	case CancelTypeChargeback, CancelTypeUser, CancelTypeMerchant, CancelTypeProvider, CancelTypeAbandoned:
+		return true
+	}
+	return false
+}
 
 type Subscription struct {
 	CollectionPolicy CollectionPolicy `json:"collection_policy"`
@@ -91,6 +103,10 @@ type Subscription struct {
 	TransientRetries int        `json:"transient_retries"`
 	NextRetryAt      *time.Time `json:"next_retry_at"` // When to try next rebill
 	GraceEndsAt      *time.Time `json:"grace_ends_at"` // Optional grace window end during dunning (rail-specific)
+	// RetryAdvisedAt is the earliest retry the network's advice allowed, when
+	// that advice set the scheduled retry. At or past the next renewal it
+	// deferred every retry: none is scheduled and the case ends at GraceEndsAt.
+	RetryAdvisedAt *time.Time `json:"retry_advised_at"`
 
 	// Cancellation information
 	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message
@@ -167,6 +183,13 @@ func (s *Subscription) ClearRetrySchedule() {
 	s.TransientRetries = 0
 	s.NextRetryAt = nil
 	s.GraceEndsAt = nil
+	s.RetryAdvisedAt = nil
+}
+
+// AdviceDeferred reports a dunning case the network's advice deferred to the
+// next renewal: no retry runs, and the case ends at GraceEndsAt.
+func (s *Subscription) AdviceDeferred() bool {
+	return s.Status == StatusPastDue && s.NextRetryAt == nil && s.RetryAdvisedAt != nil && s.GraceEndsAt != nil
 }
 
 // Validate checks activation preconditions. amountCents is integer minor

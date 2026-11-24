@@ -711,15 +711,17 @@ func (c *Client) ListCustomerLimits(ctx context.Context, params billing.Customer
 }
 
 // SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate).
-// A sync carries the lease's captured usage, numbered within the lease, its
-// wants of customers' capacity, the holds it returns and the hold versions
-// it applied; it answers how far the usage settled (a resend is matched by
-// lease and number), a hold or a refusal per want (capacity_held when only
-// other gates' holds stand in the way) and whether the lease is live. The
-// first sync under a new LeaseID creates the lease; one not synced within
-// seconds dies and its unused capacity is released, though its usage still
-// settles. A lease answers resends for 61 days after its last sync, and
-// settled usage posts as one deduction per customer and UTC day.
+// A sync carries the lease's usage, numbered within the lease, what its gate
+// has had in flight across a sync, the request holds of the lease it
+// releases and the customers whose views it asks for; it answers how far the
+// usage settled (a resend is matched by lease and number), each view (where
+// the customer stands on its limits, reserving nothing), the limit set of
+// each invoker's attributes, the pricing a gate costs requests with, and how
+// many of the merchant's leases are live. The first sync under a new LeaseID
+// creates the lease; a lease answers resends for 61 days after its last
+// sync. Settled usage posts to the ledger at each month's end in the
+// merchant's accounting zone and before any other movement of the customer's
+// balance.
 func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
 	var out billing.SyncLeasesResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/leases/sync", body: params}, &out); err != nil {
@@ -800,6 +802,25 @@ func (c *Client) ListPaymentAttempts(ctx context.Context, params billing.Payment
 func (c *Client) GetPaymentAttempt(ctx context.Context, id billing.PaymentAttemptID) (*billing.PaymentAttempt, error) {
 	var out billing.PaymentAttempt
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/payment-attempts/{id}", args: []string{id.String()}}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListDisputes is one page of the merchant's disputes (inquiries,
+// chargebacks and prevented disputes), newest first.
+func (c *Client) ListDisputes(ctx context.Context, params billing.DisputeListParams) (*billing.ListPage[billing.Dispute], error) {
+	var out billing.ListPage[billing.Dispute]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/disputes", query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetDispute reads one dispute.
+func (c *Client) GetDispute(ctx context.Context, id billing.DisputeID) (*billing.Dispute, error) {
+	var out billing.Dispute
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/disputes/{id}", args: []string{id.String()}}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -979,7 +1000,11 @@ func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhook
 	return &out, nil
 }
 
-// ImportBilling lands declared billing facts under the bound merchant.
+// ImportBilling lands declared billing facts under the bound merchant. The
+// book's cancels and the provider stops it owes are the caller's destructive
+// actions, admitted together: a cancel of a subscription the book did not
+// create also waits for the destructive-action switch and its PSP's
+// cancellation cap, keeping access meanwhile.
 func (c *Client) ImportBilling(ctx context.Context, params billing.DeclaredBilling) (*billing.BillingImportResult, error) {
 	var out billing.BillingImportResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/billing-import", body: params}, &out); err != nil {
@@ -1063,10 +1088,12 @@ func (c *Client) LinkPSPImport(ctx context.Context, id billing.PSPImportID, para
 // ApplyPSPImport lands the import's linked records as customers, payment
 // methods, subscriptions and payments, then approves its corrections (the
 // proposals that keep or extend access) in the caller's name. Only a person
-// signed in, or the in-process host, applies. It runs in the background. A
-// subscription lands on the provider price mapping its plan; one whose plan
-// is unmapped stays blocked until it is mapped (CreateProviderPrice), linked
-// and applied again.
+// signed in, or the in-process host, applies; one holding
+// merchant:customer:manage too approves the corrections that move a
+// subscription's price or terms, and without it an import with one open is
+// refused. It runs in the background. A subscription lands on the provider
+// price mapping its plan; one whose plan is unmapped stays blocked until it
+// is mapped (CreateProviderPrice), linked and applied again.
 func (c *Client) ApplyPSPImport(ctx context.Context, id billing.PSPImportID) (*billing.PSPImport, error) {
 	var out billing.PSPImport
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/psp-imports/{id}/apply", args: []string{id.String()}}, &out); err != nil {
@@ -1166,12 +1193,25 @@ func (c *Client) ListDestructiveHolds(ctx context.Context, params billing.Destru
 
 // ClearDestructiveHold clears an incident after review, recording who and
 // why. It needs a person other than the one whose action opened it, holding
-// root:admin-rate-limits:unlock and merchant configuration authority: over
+// merchant configuration authority and root:admin-rate-limits:unlock, or for
+// the merchant's contact-erasure hold merchant:provisioning:manage: over
 // HTTP a self-acting human's own credential; in process the handle ActingFor
 // names them, once the host has authenticated them.
 func (c *Client) ClearDestructiveHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error) {
 	var out billing.DestructiveHold
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/destructive-holds/{id}/clear", args: []string{id.String()}, body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearErasureHold clears the merchant's contact-erasure hold after review,
+// recording who and why; its waiting erasures then run. It needs a person
+// holding merchant:provisioning:manage: over HTTP a self-acting human's own
+// credential; in process the handle ActingFor names them.
+func (c *Client) ClearErasureHold(ctx context.Context, id billing.DestructiveHoldID, params billing.ClearDestructiveHoldParams) (*billing.DestructiveHold, error) {
+	var out billing.DestructiveHold
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/erasure-holds/{id}/clear", args: []string{id.String()}, body: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -1201,6 +1241,18 @@ func (c *Client) QueryMetrics(ctx context.Context, params billing.QueryMetricsPa
 func (c *Client) GetMetricsSchema(ctx context.Context) (*billing.MetricsSchema, error) {
 	var out billing.MetricsSchema
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/metrics/schema"}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListDisputePrograms is each card PSP's standing in the dispute monitoring
+// programs for the month containing params.At (now when unset): the counts,
+// the ratio so far and projected over the month, the level reached and the
+// thresholds in force.
+func (c *Client) ListDisputePrograms(ctx context.Context, params billing.DisputeProgramListParams) (*billing.ListPage[billing.DisputeStanding], error) {
+	var out billing.ListPage[billing.DisputeStanding]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/metrics/dispute-programs", query: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -1257,8 +1309,9 @@ func (c *Client) ListProposals(ctx context.Context, params billing.ProposalListP
 
 // ApproveProposals applies 1 to 100 proposals, each in its own transaction,
 // under one approval run that `openrails undo-run` reverses. Only a person
-// signed in, or the in-process host, approves. idempotencyKey is required: a
-// retry with it answers the first call's results.
+// signed in, or the in-process host, approves; a change that refunds,
+// revokes or cancels also needs merchant:customer:manage. idempotencyKey is
+// required: a retry with it answers the first call's results.
 func (c *Client) ApproveProposals(ctx context.Context, idempotencyKey string, params billing.ApproveProposalsParams) (*billing.ProposalResults, error) {
 	var out billing.ProposalResults
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/proposals/approve", idempotencyKey: idempotencyKey, body: params}, &out); err != nil {
@@ -1278,7 +1331,8 @@ func (c *Client) DismissProposals(ctx context.Context, params billing.DismissPro
 }
 
 // ResolveFinding approves (runs the recommendation) or ignores one open
-// finding.
+// finding. Approving a refund, cancellation or product-access recommendation
+// also needs what that action's own route needs: merchant:customer:manage.
 func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, params billing.ResolveFindingParams) (*billing.FindingResolution, error) {
 	var out billing.FindingResolution
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/findings/{id}/resolve", args: []string{id.String()}, body: params}, &out); err != nil {

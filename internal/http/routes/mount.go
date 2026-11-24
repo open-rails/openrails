@@ -90,7 +90,8 @@ type Env struct {
 	// payURL scopes customer routes to the order a pay URL's secret
 	// opened (the checkout origin).
 	payURL bool
-	// applicationPermissions are the mounted application routes' permission pairs.
+	// applicationPermissions are the mounted application and provisioning
+	// routes' permission pairs.
 	applicationPermissions []Pair
 	Log                    *slog.Logger
 }
@@ -103,7 +104,7 @@ func (e *Env) scimServer() *scim.Server {
 	}
 	if e.scim == nil {
 		rt := e.Runtime
-		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.scimMerchant, Now: func() time.Time {
+		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.scimMerchant, Admissions: rt.DestructiveAdmissions, Now: func() time.Time {
 			if rt.Clock != nil {
 				return rt.Clock.Now()
 			}
@@ -123,7 +124,7 @@ func newEnv(logger *slog.Logger, rt *app.Runtime, opts Options) *Env {
 	}
 	seen := map[Pair]bool{}
 	for _, route := range Catalog() {
-		if route.Auth == AuthApplication && env.on(route) && env.enabled(route.When) && !seen[route.Needs()] {
+		if (route.Auth == AuthApplication || route.Auth == AuthProvisioning) && env.on(route) && env.enabled(route.When) && !seen[route.Needs()] {
 			seen[route.Needs()] = true
 			env.applicationPermissions = append(env.applicationPermissions, route.Needs())
 		}
@@ -224,10 +225,27 @@ func (e *Env) gates(route Route) []router.Middleware {
 	default:
 		panic(MountError{Route: route.Key(), Reason: "declares no auth tier"})
 	}
+	if route.EventStore {
+		mw = append(mw, e.eventStore(route))
+	}
 	if route.Query != nil {
 		mw = append(mw, queryMW(route))
 	}
 	return mw
+}
+
+// eventStore answers event_store_required, after the route's gates, on a
+// deployment without the event store.
+func (e *Env) eventStore(route Route) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if err := e.Runtime.RequireEventStore(route.Key()); err != nil {
+				r.AbortAPIError(api.Coded(billing.CodeEventStoreRequired, err.Error()))
+				return
+			}
+			next(r)
+		}
+	}
 }
 
 // cardAttack is the captcha of a merchant under a card-testing attack, on

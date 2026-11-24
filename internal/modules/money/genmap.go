@@ -53,6 +53,11 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 		txType = "expiry"
 	case "credit_revoke", "credit_refund":
 		amount = -amount
+	case "usage_reversed":
+		// Back to a lot's balance, or (no lot) less owed.
+		if r.CreditGrantID == nil {
+			amount = -amount
+		}
 	}
 	// Every ledger transfer is posted.
 	status := "posted"
@@ -100,6 +105,12 @@ func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.Balance
 		txType = billing.BalanceTransactionReinstate
 	case "owed_payment", "owed_writeoff", "owed_repayment":
 		amount = -amount
+	case "usage_reversed":
+		// A spend given back to its lot, or (no lot) usage owed taken back.
+		txType = billing.BalanceTransactionSpend
+		if r.CreditGrantID == nil {
+			txType, amount = billing.BalanceTransactionOwedAccrual, -amount
+		}
 	}
 	out := billing.BalanceTransaction{
 		ID: billing.BalanceTransactionID(r.ID), Currency: catalog.Currency(r.Currency), Type: txType, Amount: amount,
@@ -108,8 +119,8 @@ func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.Balance
 	if r.CustomerID != nil {
 		out.CustomerID = billing.CustomerID(*r.CustomerID)
 	}
-	if r.GrantID != nil {
-		grant := billing.CreditGrantID(*r.GrantID)
+	if r.CreditGrantID != nil {
+		grant := billing.CreditGrantID(*r.CreditGrantID)
 		out.CreditGrantID = &grant
 	}
 	return out

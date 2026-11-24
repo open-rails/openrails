@@ -167,6 +167,10 @@ type solanaFixtureOptions struct {
 	network     string
 	// fx replaces the fixed FX wire.
 	fx http.RoundTripper
+	// dunning is the merchant's dunning policy.
+	dunning *billing.DunningPolicy
+	// alerts receives the merchant's operator alerts.
+	alerts *alertMailbox
 }
 
 func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOptions) *solanaWorld {
@@ -202,6 +206,13 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 		}
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"solana": openrails.SolanaPSP{Environment: billing.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}
+		if option.dunning != nil {
+			m.MerchantSettings.DunningPolicy = option.dunning
+		}
+		if option.alerts != nil {
+			m.AlertEmail = ptr("ops@alpha.example")
+			w.deps.Email = option.alerts
+		}
 		setCfgMerchant(&w.cfg, "alpha", m)
 		if recurring {
 			w.cfg.Solana = &openrails.SolanaConfig{Crankers: []openrails.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}

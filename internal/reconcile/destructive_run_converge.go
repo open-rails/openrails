@@ -258,6 +258,10 @@ func RollbackApprovalRun(ctx context.Context, database *db.DB, runID uuid.UUID, 
 		res.IntentsSuperseded = len(superseded)
 
 		// --- step 3: restore ---------------------------------------------------
+		// What the restore moves in MRR is a correction, not business.
+		if e = db.SetMRRCause(ctx, tq, db.MRRCauseUndo); e != nil {
+			return fmt.Errorf("name the restore's MRR cause: %w", e)
+		}
 		if res.SubscriptionsRestored, e = tq.RestoreSubscriptionsFromBeforeImages(ctx, gen.RestoreSubscriptionsFromBeforeImagesParams{
 			MerchantID: mid, RunID: runID, Now: now,
 		}); e != nil {

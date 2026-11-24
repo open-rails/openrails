@@ -452,6 +452,46 @@ func CalendarScheduleAnchor(schedule gen.BillingProviderSchedule, boundary time.
 	return &anchor, nil
 }
 
+// NextScheduledDue is the first due instant of sub's accepted provider
+// schedule after t, read without locks: when the provider bills next. ok is
+// false without an accepted schedule that dates it.
+func NextScheduledDue(ctx context.Context, q *gen.Queries, sub *models.Subscription, t time.Time) (time.Time, bool, error) {
+	if sub == nil || sub.RailSubscriptionID == "" {
+		return time.Time{}, false, nil
+	}
+	schedules, err := q.ListAcceptedProviderSchedules(ctx, gen.ListAcceptedProviderSchedulesParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, ProviderReference: sub.RailSubscriptionID})
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	for i, schedule := range schedules {
+		// A version governs from its first due until the next one's.
+		later := i+1 < len(schedules)
+		if later && !schedules[i+1].FirstDueAt.After(t) {
+			continue
+		}
+		anchor, index, err := scheduleTimebase(schedule)
+		if err != nil {
+			return time.Time{}, false, nil
+		}
+		hours, months := int(schedule.CadenceHours), int(schedule.CadenceMonths)
+		if hours > 0 {
+			index = max(index, int(t.Sub(anchor)/(time.Duration(hours)*time.Hour)))
+		} else {
+			index = max(index, ((t.Year()-anchor.Year())*12+int(t.Month()-anchor.Month()))/months-1)
+		}
+		next := scheduleBoundary(anchor, hours, months, index)
+		for !next.After(t) {
+			index++
+			next = scheduleBoundary(anchor, hours, months, index)
+		}
+		if later && schedules[i+1].FirstDueAt.Before(next) {
+			next = schedules[i+1].FirstDueAt.UTC()
+		}
+		return next, true, nil
+	}
+	return time.Time{}, false, nil
+}
+
 // NMI and CCBill expose billing days. Match that declared boundary to the
 // immutable accepted cadence; do not round an arbitrary changed retry date or
 // infer from the subscription's mutable paid-through value.

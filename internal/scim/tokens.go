@@ -147,25 +147,25 @@ func heldElsewhere(ctx context.Context, q *gen.Queries, mid billing.MerchantID, 
 	return nil
 }
 
-// Resolve is the merchant whose token r presents as its bearer;
-// ErrUnauthorized when it presents none OpenRails holds.
-func (t Tokens) Resolve(ctx context.Context, token string) (billing.MerchantID, error) {
+// Resolve is the merchant whose token r presents as its bearer, and the
+// token's id; ErrUnauthorized when it presents none OpenRails holds.
+func (t Tokens) Resolve(ctx context.Context, token string) (billing.MerchantID, billing.ProvisioningTokenID, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return billing.MerchantID{}, ErrUnauthorized
+		return billing.MerchantID{}, billing.ProvisioningTokenID{}, ErrUnauthorized
 	}
 	q := t.DB.GenDirectory()
 	row, err := q.ResolveProvisioningToken(ctx, tokenHash(token))
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return billing.MerchantID{}, ErrUnauthorized
+		return billing.MerchantID{}, billing.ProvisioningTokenID{}, ErrUnauthorized
 	case err != nil:
-		return billing.MerchantID{}, err
+		return billing.MerchantID{}, billing.ProvisioningTokenID{}, err
 	}
 	if err := q.TouchProvisioningToken(ctx, gen.TouchProvisioningTokenParams{MerchantID: row.MerchantID, ID: row.ID}); err != nil {
-		return billing.MerchantID{}, err
+		return billing.MerchantID{}, billing.ProvisioningTokenID{}, err
 	}
-	return billing.MerchantID(row.MerchantID), nil
+	return billing.MerchantID(row.MerchantID), billing.ProvisioningTokenID(row.ID), nil
 }
 
 // BearerToken is the credential of an Authorization: Bearer header.

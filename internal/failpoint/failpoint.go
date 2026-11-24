@@ -31,6 +31,9 @@ const (
 	// BeforeInline fires after a request's operation is accepted and before
 	// the request executes it inline; River's worker may claim it meanwhile.
 	BeforeInline Point = "before-inline"
+	// BeforeLock fires inside an operation's transaction, before it locks the
+	// row it changes.
+	BeforeLock Point = "before-lock"
 )
 
 // Site is one hit: the point, the operation and its subscription.

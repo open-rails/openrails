@@ -37,3 +37,13 @@ func ProviderRefundRevokes(ctx context.Context, d *db.DB, refunded, captured int
 		return captured > 0 && refunded >= captured, nil
 	}
 }
+
+// FraudWarningRefunds reports whether an actionable early fraud warning
+// refunds its charge: unless the merchant chose to record it only.
+func FraudWarningRefunds(ctx context.Context, d *db.DB) (bool, error) {
+	cfg, _, err := NewStore(d).Get(ctx)
+	if err != nil {
+		return false, fmt.Errorf("load fraud warning policy: %w", err)
+	}
+	return cfg.FraudWarningRefund != billing.FraudWarningRecord, nil
+}

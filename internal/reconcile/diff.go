@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -498,6 +499,9 @@ type diffOptions struct {
 	EvidenceFloor time.Time
 	// changes builds the proposals this diff raises.
 	changes *changeBuilder
+	// Dunning is the merchant's dunning policy, which decides the window of a
+	// subscription OpenRails duns; unset is the built-in one.
+	Dunning collection.Policy
 	// Pull is a PSP import's diff: it reads an unverified row as awaiting the
 	// provider, never as ended, and proposes corrections of the facts it
 	// holds. The engine does neither until #1204 deletes it.
@@ -920,7 +924,8 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time, opts
 		PeriodEnd:          s.CurrentPeriodEndsAt,
 		NextRetryScheduled: s.NextRetryAt != nil,
 	}
-	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.Rail, s.RailSubscriptionID), EvidenceFloor: opts.EvidenceFloor}, now, 0)
+	window := windowOf(policyFor(s.CollectionPolicy, opts.Dunning), s.CurrentPeriodStartsAt, s.CurrentPeriodEndsAt)
+	d := Decide(state, EvidenceBundle{Snapshot: perSubscriptionSnapshot(snap, s.Rail, s.RailSubscriptionID), EvidenceFloor: opts.EvidenceFloor}, now, window)
 	if d.Kind == TransitionNone {
 		return nil
 	}

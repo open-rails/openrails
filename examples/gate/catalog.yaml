@@ -7,11 +7,11 @@ limits:
     unit: units
     reset: {kind: rolling, window_seconds: 3600}
     overrun: admit_while_positive
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}] # adds quantity × weight ÷ per; both default to 1
   monthly:
     unit: units
     reset: {kind: billing_period}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   starter: {display_name: Starter, limits: {hourly: "1000", monthly: "100000"}}
   usage:

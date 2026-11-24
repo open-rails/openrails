@@ -10,7 +10,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id, quantity
+    money_movement, order_id, quantity, refund_reason, payment_method_id
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(channel)::text, sqlc.narg(rail)::text,
     sqlc.arg(transaction_id)::text, sqlc.arg(amount)::bigint, sqlc.arg(list_amount)::bigint,
@@ -26,7 +26,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int
+    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int, sqlc.narg(refund_reason)::text, sqlc.narg(payment_method_id)::uuid
 );
 
 -- name: CreatePaymentIfNotExists :execrows
@@ -37,7 +37,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id, quantity
+    money_movement, order_id, quantity, refund_reason, payment_method_id
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(channel)::text, sqlc.narg(rail)::text,
     sqlc.arg(transaction_id)::text, sqlc.arg(amount)::bigint, sqlc.arg(list_amount)::bigint,
@@ -53,7 +53,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int
+    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int, sqlc.narg(refund_reason)::text, sqlc.narg(payment_method_id)::uuid
 )
 ON CONFLICT DO NOTHING;
 
@@ -95,9 +95,10 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id
 -- Customer history needs completed display totals, not pending refund reservations.
 -- Scope ownership through the original charge before aggregating linked refunds.
 -- name: GetPaymentRefundTotals :many
--- Completed refunds against each listed charge, including refunds outside the
--- page the charges came from.
-SELECT original.id AS payment_id, sum(abs(refund.amount::numeric))::bigint AS amount_refunded
+-- Completed reversals against each listed charge, net, including those outside
+-- the page the charges came from: a won dispute gives back what its chargeback
+-- took.
+SELECT original.id AS payment_id, GREATEST(-sum(refund.amount::numeric), 0)::bigint AS amount_refunded
 FROM billing.payments original
 JOIN billing.payments refund ON refund.refunded_payment_id = original.id
     AND refund.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -219,13 +220,14 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(transaction_id)::text IS NULL OR p.transaction_id = sqlc.narg(transaction_id)::text)
   AND (sqlc.narg(kind)::text IS NULL OR COALESCE(p.reversal_kind,
         CASE WHEN p.refunded_payment_id IS NOT NULL OR p.amount < 0 THEN 'refund' ELSE 'charge' END) = sqlc.narg(kind)::text)
-  -- status is the wire's: a charge's succeeded refunds make it
-  -- partially_refunded or refunded.
+  -- status is the wire's: a charge's succeeded reversals, net (a won
+  -- dispute gives back its chargeback), make it partially_refunded or
+  -- refunded.
   AND (sqlc.narg(status)::text IS NULL OR sqlc.narg(status)::text = CASE
         WHEN p.status <> 'succeeded' THEN p.status
         WHEN p.reversal_kind IS NOT NULL OR p.refunded_payment_id IS NOT NULL OR p.amount <= 0 THEN 'succeeded'
-        ELSE (SELECT CASE WHEN COALESCE(sum(abs(r.amount::numeric)), 0) = 0 THEN 'succeeded'
-                          WHEN sum(abs(r.amount::numeric)) >= p.amount THEN 'refunded' ELSE 'partially_refunded' END
+        ELSE (SELECT CASE WHEN GREATEST(-COALESCE(sum(r.amount::numeric), 0), 0) = 0 THEN 'succeeded'
+                          WHEN -sum(r.amount::numeric) >= p.amount THEN 'refunded' ELSE 'partially_refunded' END
               FROM billing.payments r
               WHERE r.merchant_id = p.merchant_id AND r.refunded_payment_id = p.id AND r.status = 'succeeded' AND r.deleted_at IS NULL)
       END)

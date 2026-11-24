@@ -28,6 +28,15 @@ func (m *Mock) SetDecline(last4, code string) {
 	}
 }
 
+// SetIssuerCode sets the issuer's code the Query API reports behind future
+// Direct Post declines of every card ending in last4; "" restores 05 (51
+// behind 202).
+func (m *Mock) SetIssuerCode(last4, code string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.issuers[last4] = code
+}
+
 // ApprovePartially makes the issuer approve at most amount ("0.30") of any
 // sale on a card ending in last4; "" restores full approval.
 func (m *Mock) ApprovePartially(last4, amount string) {

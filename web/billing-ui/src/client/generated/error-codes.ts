@@ -54,6 +54,7 @@ export type OpenRailsErrorCode =
   | "embed_origins_required"
   | "entitlement_required"
   | "event_cursor_expired"
+  | "event_store_required"
   | "finding_action_failed"
   | "finding_not_actionable"
   | "finding_requires_merchant_config"
@@ -265,6 +266,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   embed_origins_required: { status: 400, type: "invalid_request_error", meaning: "An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins." },
   entitlement_required: { status: 403, type: "invalid_request_error", meaning: "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks." },
   event_cursor_expired: { status: 410, type: "invalid_request_error", meaning: "The event cursor is no longer retained; resynchronize current state." },
+  event_store_required: { status: 409, type: "invalid_request_error", meaning: "The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   finding_requires_merchant_config: { status: 409, type: "invalid_request_error", meaning: "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config." },
@@ -287,7 +289,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invalid_settlement_status_request: { status: 400, type: "invalid_request_error", meaning: "A settlement status read needs a customer and a price." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
   lease_not_found: { status: 404, type: "invalid_request_error", meaning: "No lease of the merchant has this id, which is older than the replay horizon; start a new lease." },
-  lease_not_held: { status: 409, type: "invalid_request_error", meaning: "The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease." },
+  lease_not_held: { status: 409, type: "invalid_request_error", meaning: "The admission names a lease that is closed or never synced, so it cannot own the hold." },
   limit_not_found: { status: 404, type: "invalid_request_error", meaning: "The catalog declares no limit under this key." },
   merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
   merchant_mismatch: { status: 412, type: "invalid_request_error", meaning: "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed." },

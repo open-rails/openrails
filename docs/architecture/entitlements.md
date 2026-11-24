@@ -3,8 +3,9 @@
 Entitlements and limits answer what a customer may use and how much. A customer
 holds a key while a live access window of theirs covers a product that grants the
 key; keys are derived when read. Declared limits, the prepaid balance and spend
-caps bound consumption over a period by holds set aside before work starts, by an
-admission or by the Go SDK's gate. A merchant's backend checks keys and limits;
+caps bound consumption over a period: an admission sets a hold aside before work
+starts, and the Go SDK's gate decides on views of where the customer stands,
+overshooting by at most a few seconds of other gates' traffic. A merchant's backend checks keys and limits;
 staff grant and revoke products; the remote Go SDK caches allowed answers. What
 usage costs is [usage billing](usage-billing.md).
 
@@ -22,10 +23,7 @@ usage costs is [usage billing](usage-billing.md).
 - **Seats**: a per-seat window's `quantity`; a check answers the most seats held.
 - **`valid_until`**: the next scheduled change that could alter a requested
   answer, null when none.
-- **Limit**: a declared cap in a named unit or a currency, with a reset and an
-  overrun, `require_estimate` or `admit_while_positive` (`catalog_limits`).
-  Products give it capacity (`catalog_product_limits`); a customer override
-  replaces their sum (`customer_limit_overrides`).
+- **Limit**: a declared cap in a named unit or a currency, with a reset and an overrun, `require_estimate` or `admit_while_positive` (`catalog_limits`). A named-unit limit's `counts` add each event's quantity × `weight` ÷ `per`, rounded half up, per meter and optional `filter` (`limits.Units`); a currency limit counts the rated amount. Products give it capacity (`catalog_product_limits`); a customer override replaces their sum (`customer_limit_overrides`).
 - **Reset kinds**: `fixed` (tiles of `window_seconds` from the subscription start
   or the first use), `billing_period`, `session` (opens at the first use),
   `rolling` (60 buckets), `rate` (refills continuously), `lifetime`.
@@ -34,11 +32,14 @@ usage costs is [usage billing](usage-billing.md).
   a fixed currency window kept as a limit window keyed `spend:` and a hash.
 - **Limit window**: one customer's settled units of one limit in one window
   (`limit_windows`), placed by the server clock.
-- **Hold**: capacity set aside for one customer in one currency (`limit_holds`),
-  one part per limit and window (`limit_hold_parts`). An admission's hold has a
-  `request_id`; a gate's hold belongs to a lease and one limit set.
-- **Lease**: a gate's claim on its holds (`leases`), one per process or per group
-  of processes sharing Redis. It dies 10 seconds after its last sync.
+- **Hold**: capacity set aside for one admitted request in one currency
+  (`limit_holds`), one part per limit and window (`limit_hold_parts`). A gate's
+  request near a limit is a hold of its lease (`lease_id`), with no deadline.
+- **Lease**: a gate's (or a batch job's) usage stream, in-flight report
+  (`lease_in_flight`) and request holds (`leases`), one per process. It is live
+  for 10 seconds after its last sync; a later sync makes it live again.
+- **View**: where one customer stands on every limit its requests may claim, as
+  one sync reads it (`billing.View`); it reserves nothing.
 
 ## How it works
 
@@ -71,45 +72,23 @@ grant a requested key.
 
 **SDK cache.** A remote handle with a static `APIKey` caches `CheckEntitlements` by default (`entitlementCheckCache`): a bounded 8 MiB in-process LRU, or Redis when `EntitlementCheckCacheOptions.Redis` is set. Only current exact-key checks use it. It stores each allowed key's answer, never a denial, and answers from the cache only when every requested key is allowed there; otherwise it asks OpenRails for the whole set, with `include_validity`. An entry lives `min(MaxAge, valid_until − evaluated_at)`, timed from before the request was sent; a response naming no merchant (`OpenRails-Bound-Merchant`) is refused, never stored. A check through an `Uncached` handle always asks; its answer replaces allowed entries, drops denied ones and, when it denies a key, advances the scope's generation, so a fill begun before it cannot restore a dropped entry.
 
-**Lease sync.** A gate settles usage and asks for holds on a lease sync
+**Lease sync.** A gate settles usage and asks for views on a lease sync
 (`POST /v1/app/leases/sync`, `leases.Syncer.Sync`): one transaction, bounded by
 `limits.SyncTimeout` (5 s) and a 2 s lock budget. It locks the lease (creating it
-on the first sync) and the customers it names in id order, settles new usage
-([usage billing](usage-billing.md)), releases what the gate returned or confirmed
-shrinking, answers wants, renews up to `maxRenewals` (64) other holds and stores
-`settled_through_n` and receipts.
+on the first sync) and the customers of its usage and releases in id order,
+settles new usage ([usage billing](usage-billing.md)), releases the request holds
+it names, replaces its in-flight report (changed rows only), answers views,
+limit sets and pricing (`views.go`), and stores `settled_through_n` and receipts.
+Views read usage only through `leases.UsageReader`.
 
-**Holds.** Every writer of holds and windows locks the customer
-(`LockCustomerForSpend`) and takes window rows in one order (`limits.Holder.Take`).
-A claim fits by its overrun (`limits.Fits`). A request is checked against
-`balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits.
-One that fits only if other leases' holds came back is `capacity_held`, and those
-holds are marked (`MarkLeaseHoldsContended`) to shrink at their next sync.
-`admission.Admitter` adds delinquency, the accrual-rate cap (`AccrualRateMeter`,
-summing `usage_minutes`) and the delegated-invoker cutoff. Settlement
-(`settleLimitsTx`) adds units to their windows in full, never clamped, and takes
-them from the live hold.
+**Holds.** Every writer of holds and windows locks the customer (`LockCustomerForSpend`, `FOR NO KEY UPDATE`, so a row naming the customer is written without waiting for it) and takes window rows in one order (`limits.Holder.Take`). A claim fits by its overrun (`limits.Fits`). A request is checked against `balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits; held is request holds plus what live leases report in flight. `admission.Admitter` adds delinquency, the accrual-rate cap (`AccrualRateMeter`, summing the event store's `usage_minutes`) and the delegated-invoker cutoff. Intake (`MoneyService.PrepareUsageTx`) counts units in their windows in full, never clamped, in the event store's `limit_usage`: a request hold's windows, or those current when the usage was admitted (`admitted_at`), and the spend windows of the invoker attributes it reports (none when its policy cannot be resolved, such as during an FX outage); reads take a window's units there, a rolling limit's buckets and a rate limit's level from its buckets (`limits.RateLevelOf`). A lease's report and holds count while it is live (`limits.LeaseLiveSince`), and a lease's hold also for a lease lifetime after it is made; no hold counts past 30 days (`limits.HeldSince`). A view request a sync cannot answer is refused alone (`refused_views`).
 
-**Lease holds.** `internal/modules/leases/holds.go` sizes a hold from traffic:
-demand until the next sync, at most 1/`HeadroomShare` of what is free, doubled
-after running dry, shrunk toward recent use. Growth applies at once. A smaller
-size carries a new `version` and is released once the gate reports it applied
-(`applied_version`), never below what open tickets `committed`. Readers count a
-lease's holds `LeaseGrace` (5 s) past its life (`limits.LeaseLiveSince`); no hold
-counts past 30 days (`limits.HeldSince`).
-
-**The gate.** `openrails.NewGate` keeps one lease and one hold per customer and
-limit set, in memory (`localGate`) or Redis (`sharedGate`). A warm decision prices
-the request with the hold's pinned cards at their `PriceBound`s
-(`holdPricing.cost`) and takes it from every part of the hold or none, with no
-I/O; a cold customer waits for one sync. Captured usage goes on the next sync
-(once a second), stored first by `GateDeps.Outbox`, or with Redis in a stream
-deduplicated by write key for 15 minutes.
+**The gate.** `openrails.NewGate` keeps one lease for its life and a view of each customer it serves (`gate_view.go`). A warm decision prices the request (named units by the view's counts, money at its `PriceBound`s) and takes it from every limit of its set or none, against the view less what the gate has in flight, with no I/O. Within a margin of four sync intervals of what the views show others adding it is decided on the server as a request hold of the lease; refused locally when it cannot fit. Tickets open across a sync, and usage a sync left unsettled, are reported in flight. A view older than two syncs decides one request until a sync answers; with OpenRails unreachable a view answered when the outage began keeps deciding within the gate's share (remaining under the request's policy, less running charges since, ÷ live leases). A view with anything in flight is never dropped. An idle gate stops syncing. Captured usage goes on the next sync, stored first by `GateDeps.Outbox`.
 
 ## Interfaces
 
 - **Check**: `Client.CheckEntitlements`, past the cache through `Client.Uncached` (`POST /v1/app/entitlements/check`, `merchant:entitlements:read`): up to 100 keys (`billing.MaxEntitlementChecks`) and 10 prefixes at one instant. Cache: `EntitlementCheckCacheOptions{MaxAge, Disabled, Redis}` on `RemoteOptions`, `DefaultEntitlementCheckMaxAge` (2 minutes); see [backend](../client.md#caching).
-- **Gate**: `openrails.NewGate(client, GateDeps{Redis, Outbox})`; `Gate.Admit`, `Consume`, `Record`, `ListCustomerLimits`, `Flush`, `Close`; `Ticket.Capture`, `Release`, `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../client.md#limits-admissions-and-the-gate)).
+- **Gate**: `openrails.NewGate(client, GateDeps{Outbox})`; `Gate.Admit`, `Consume`, `Record`, `ListCustomerLimits`, `Flush`, `Close`; `Ticket.Capture`, `Release`, `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../client.md#limits-admissions-and-the-gate)).
 - **Limits and admissions** (`merchant:usage:manage`, reads `merchant:usage:read`):
   `SyncLeases` (`POST /v1/app/leases/sync`); `Admit` (`POST /v1/app/admissions`),
   `CaptureAdmissions`, `ReleaseAdmissions`, `ExtendAdmissions`, `GetAdmission`,
@@ -129,7 +108,7 @@ deduplicated by write key for 15 minutes.
   `product.entitlements_changed` (`billing.ProductEntitlementsChangedEvent`),
   `balance.low`, `balance.depleted`. Guide:
   [entitlements follow the product](../client.md#entitlements-and-access).
-- **Configuration**: merchant `billing_policies`, `usage_gate_safe_spend`
+- **Configuration**: merchant `billing_policies`
   ([spend limits](../client.md#limits-admissions-and-the-gate)).
 
 ## Guarantees
@@ -153,7 +132,7 @@ Checks:
   chargeback and uncertain state.
 
 ### 3. Exact money
-Access windows and keys carry no amounts; credit lots in `grants` belong to [Credits](credits.md). Holds and limit windows are `int64` native units of one currency each. The one FX use converts a spend window's cap declared in another currency to the request's (`SpendgatePolicyLoader.convert`): a cap, never a ledger amount.
+Access windows and keys carry no amounts; credit lots (`credit_grants`) belong to [Credits](credits.md). Holds and limit windows are `int64` native units of one currency each. The one FX use converts a spend window's cap declared in another currency to the request's (`SpendgatePolicyLoader.convert`): a cap, never a ledger amount.
 Checks:
 - No `fx` import in `internal/modules/leases` or `internal/modules/limits`.
 
@@ -192,7 +171,7 @@ Checks:
 - `cacheableEntitlementKeys` sends checks with `at`, prefixes or invalid keys to
   the server, so validation answers alike.
 - OR-J23-S19: remote and embedded gates decide alike, warm without I/O.
-- `holdPricing` (`gate_cost.go`) builds on `limits.Meter` and `limits.Definition`.
+- `pricing` (`gate_cost.go`) builds on `limits.Meter` and `limits.Definition`.
 - `LocalClient`'s only admission methods in `api/go.txt` are the three `…Tx` forms
   above.
 
@@ -209,30 +188,17 @@ Checks:
 - OR-J31-S14 moves windows and adjustments in archives; OR-J29-S08 ages out leases.
 
 ### 7. Work scales with activity
-No job projects or expires keys or holds, and no table caches keys: they are derived on every read from indexes (`product_entitlements_entitlement_idx`, `product_access_customer_idx`, `product_access_product_idx`), a window ends by its own `ends_at`, and holds expire by time (`LeaseLiveSince`, `HeldSince`, `expires_at`). An exact check probes the products granting each key, then the customer's windows of each; a prefix read walks the customer's live windows once, seats included (`product_access_customer_idx`), then each held product's keys (`product_entitlements_product_idx`). Derived reads use custom plans (`plan_cache_mode`), so a customer with three products and one with thousands are each planned for their size. A staff grant or revocation queues one customer's convergence; a sync's 64 renewals spread a window that closes for every customer over syncs.
+No job projects or expires keys or holds, and no table caches keys: they are derived on every read from indexes (`product_entitlements_entitlement_idx`, `product_access_customer_idx`, `product_access_product_idx`), a window ends by its own `ends_at`, and holds and reports expire by time (`LeaseLiveSince`, `HeldSince`, `expires_at`). An exact check probes the products granting each key, then the customer's windows of each; a prefix read walks the customer's live windows once, seats included (`product_access_customer_idx`), then each held product's keys (`product_entitlements_product_idx`). Derived reads use custom plans (`plan_cache_mode`), so a customer with three products and one with thousands are each planned for their size. A staff grant or revocation queues one customer's convergence; a view carries each window's next, so a window that closes for every customer sends no request to the server.
 Checks:
 - `internal/river` has no job that reads `product_access` or
   `product_entitlements` for expiry, and none but retention scans `limit_windows`,
   `limit_holds` or `leases` across customers; a balance look reads one
   customer's holds.
 - OR-J27-S16: for a customer holding 10,000 of 40,000 products, exact checks start from `product_entitlements_entitlement_idx`, a prefix page touches at most 4 blocks per held product, and no read scans a table.
-- OR-J24-S30 and OR-J24-S34 bound a sync's renewals and settlement.
+- OR-J24-S34 bounds a sync's settlement.
 
 ### 8. Abuse protection
-Limits are themselves the consumption limit: holds bound spend and units before
-work starts; a delegated invoker cannot spend (`delegated_spend_not_allowed`) and
-is cut off past its wasted-spend limit (`failure_rate_limited`). The check, sync
-and admission routes take application credentials and bound each request (100
-keys, 10 prefixes and `prefix_limit` up to 10,000; `billing.MaxSyncUsageItems`,
-`MaxSyncWants`, `MaxAdmissionBatchItems`). `middleware.AdminOperationGrant`
-meters each invoker by item: 10 a minute, shared by `UpdateCustomer`,
-`AdjustCustomerLimit`, `CreateCreditGrants` and `CreateProductAccess` (at most
-100 grants a call, `billing.MaxBatchItems`); going over locks the invoker out for
-an hour. An application acting as itself is not metered. `/v1/me/entitlements`
-and `/v1/me/limits` take no OpenRails rate limit; the proxy owns a generic
-ceiling ([limits](../standalone.md#abuse-limits)). SDK Redis calls wait at most 25 ms (lookups and
-fills) or 250 ms (a live denial's eviction), at most 64 outstanding each, so a
-slow Redis falls back to OpenRails.
+Limits are themselves the consumption limit: holds and views bound spend and units before work starts; a delegated invoker cannot spend (`delegated_spend_not_allowed`) and is cut off past its wasted-spend limit (`failure_rate_limited`). The check, sync and admission routes take application credentials and bound each request (100 keys, 10 prefixes and `prefix_limit` up to 10,000; `billing.MaxSyncUsageItems`, `MaxSyncViews`, `MaxAdmissionBatchItems`). `middleware.AdminOperationGrant` meters each invoker by item: one full batch (`billing.MaxBatchItems`, 100 grants) a minute, shared by `UpdateCustomer`, `AdjustCustomerLimit`, `CreateCreditGrants` and `CreateProductAccess`; going over locks the invoker out for an hour. An application acting as itself is not metered. `/v1/me/entitlements` and `/v1/me/limits` take no OpenRails rate limit; the proxy owns a generic ceiling ([limits](../standalone.md#abuse-limits)). SDK Redis calls wait at most 25 ms (lookups and fills) or 250 ms (a live denial's eviction), at most 64 outstanding each, so a slow Redis falls back to OpenRails.
 Checks:
 - `ValidateCheck` (`internal/modules/entitlements/resource_checks.go`) refuses an oversize or malformed check before any read; `validate` (`internal/modules/leases/sync.go`) an oversize sync before any I/O.
 - The `CreateProductAccess` and `AdjustCustomerLimit` routes set
@@ -264,10 +230,9 @@ Checks:
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products).
-- **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to S18 (declarations, capacity, windows, overruns, spend caps, racing replicas), S19 to S32 (the gate in process and over Redis, lost replies, outbox, closing, a window's rollover).
-- **J24**, leases and holds: OR-J24-S03, S12 to S20, S23 to S35 (lease lifetime,
-  hold versions, sizing, bounded syncs).
-- Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14.
+- **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to S18 (declarations, capacity, windows, overruns, spend caps, racing replicas), S19 to S22, S24, S26, S27, S37 to S41 (the gate: lost replies, outbox, closing, in-flight reports, the bound, offline shares, near zero, idle stop, window resets), S33, S34 (a window and an accrual-rate cap in the policy's `policy_currency`), S35 (a limit counting two meters by weight, admitted and through a gate), S36 (a limit's `rate_cards` refused with their rename to `counts`); OR-J25-S05 (running charges under `accrual_rate_cap`).
+- **J24**, leases and views: OR-J24-S03, S14, S16, S18 to S20, S23 to S29, S31 to S34, S37, S38, S42 to S46 (lease lifetime, views, limit sets, admission windows, bounded syncs, view refusals, lock order).
+- Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14, OR-J31-S16 (stored limit rate cards migrate to counts).
 
 Other tests: `entitlement_check_cache_test.go` drives the cache against a test
 server (defaults, allowed keys only, live eviction, an in-flight fill refused
@@ -279,9 +244,5 @@ Gaps:
 - No scenario reads keys through `ListEntitlements` or `GET /v1/me/entitlements`;
   OR-J01-S02 only checks that they refuse a missing credential.
 - An `Uncached` check with `at` or prefixes leaves cached entries as they were.
-- No test reaches an `outstanding_cap` cap or uses `accrual_rate_cap`, or
-  declares a spend window in another currency.
-- The accrual-rate measure reads `usage_minutes` only, so running charges never
-  count toward an `accrual_rate_cap`; no test pins either way.
-- Nothing checks that partitioned reads name a time range, or that
-  `retention.Tables` matches the schema; both are review-only.
+- No test reaches an `outstanding_cap` cap, or declares a spend window in another currency than its policy's.
+- Nothing checks that partitioned reads name a time range; it is review-only. `TestTablesMatchSchema` holds `retention.Tables` to the schema.

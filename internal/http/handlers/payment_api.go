@@ -8,28 +8,22 @@ import (
 )
 
 // PaymentToAPI is a payment on the wire; refunds, when not nil, are the
-// reversals of a charge and set its refunded amount.
+// reversals of a charge and set its refunded amount: their net, so a won
+// dispute gives back what its chargeback took.
 func PaymentToAPI(p *models.Payment, refunds []*models.Payment) billing.Payment {
 	var amountRefunded int64
 	out := make([]billing.Payment, 0, len(refunds))
 	for _, r := range refunds {
 		if r.Status == "succeeded" {
-			amountRefunded += abs(r.Amount)
+			amountRefunded -= r.Amount
 		}
 		out = append(out, paymentView(r, 0))
 	}
-	payment := paymentView(p, amountRefunded)
+	payment := paymentView(p, max(amountRefunded, 0))
 	if refunds != nil {
 		payment.Refunds = out
 	}
 	return payment
-}
-
-func abs(v int64) int64 {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
 
 // paymentView is a payment on the wire, given the completed refunds against
@@ -73,6 +67,10 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		card.Last4 = *p.CardLast4
 	}
 	out.Card = card.Details()
+	if p.RefundReason != nil {
+		reason := billing.RefundReason(*p.RefundReason)
+		out.RefundReason = &reason
+	}
 	if p.RefundedPaymentID != nil {
 		original := billing.PaymentID(*p.RefundedPaymentID)
 		out.RefundedPaymentID = &original

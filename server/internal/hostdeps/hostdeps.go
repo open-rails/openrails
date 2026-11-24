@@ -1,6 +1,7 @@
 // Package hostdeps opens what the standalone server reaches outside its
-// process, from its configuration: the Postgres pool, Redis, the Vault
-// session and the SMTP sender. The engine borrows them; Close closes them.
+// process, from its configuration: the Postgres pool, Redis, ClickHouse, the
+// Vault session and the SMTP sender. The engine borrows them; Close closes
+// them.
 package hostdeps
 
 import (
@@ -77,6 +78,21 @@ func Open(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*Op
 			o.Deps.Redis = client
 			o.closes = append(o.closes, func() { _ = client.Close() })
 		}
+	}
+	if cfg.ClickHouse != nil {
+		conn, err := ClickHouse(cfg.ClickHouse)
+		if err != nil {
+			o.Close()
+			return nil, err
+		}
+		o.closes = append(o.closes, func() { _ = conn.Close() })
+		// The event store is waited for like the database: usage lives there.
+		if err := pingUntil(ctx, logger, conn.Ping); err != nil {
+			o.Close()
+			return nil, fmt.Errorf("clickhouse: %w", err)
+		}
+		logger.InfoContext(ctx, "ClickHouse declared", "addr", cfg.ClickHouse.Addr)
+		o.Deps.ClickHouse = conn
 	}
 	if cfg.Vault != nil {
 		if session, err := Vault(context.WithoutCancel(ctx), cfg.Vault); err != nil {

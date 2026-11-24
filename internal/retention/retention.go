@@ -11,13 +11,8 @@ import (
 const Day = 24 * time.Hour
 
 const (
-	// UsageBilledMonths is how long a month of usage is kept after the
-	// usage order that billed it.
-	UsageBilledMonths = 24
-	// UsageBillingLagMonths is how long after a month ends its usage is
-	// billed at the latest: the longest billing period is one month.
-	UsageBillingLagMonths = 1
-	// UsageIngestWindow is how far back usage may be dated when it settles.
+	// UsageIngestWindow is how far back usage may be dated when it is taken
+	// in.
 	UsageIngestWindow = 35 * Day
 	// UsageClockSkew is how far ahead of the server clock usage may be dated.
 	UsageClockSkew = 5 * time.Minute
@@ -42,8 +37,8 @@ const (
 	EventLog = 90 * Day
 	// SubscriptionTransitions keeps a subscription status change 25 months.
 	SubscriptionTransitions = 761 * Day
-	// ProviderWrites keeps a finished outbox intent (OutboxIntentTypes) and a
-	// mutation log entry 25 months.
+	// ProviderWrites keeps a finished outbox intent (OutboxIntentTypes) and an
+	// operation log entry 25 months.
 	ProviderWrites = 761 * Day
 	// PaymentAttempts keeps payment attempts, rebill cycles and NMI history
 	// months 25 months.
@@ -68,12 +63,6 @@ const (
 	Leases = Admissions
 	// LimitAdjustments keeps a limit adjustment's replay record 61 days.
 	LimitAdjustments = Admissions
-	// UsageMinutes keeps a minute of a customer's usage spend past the
-	// longest accrual-rate window, a day.
-	UsageMinutes = 25 * time.Hour
-	// MeterPeriodQuantities keeps a customer's meter quantity for a billing
-	// period 100 days past the period's start: a month plus the ingest window.
-	MeterPeriodQuantities = 100 * Day
 	// Carts keeps a cart 30 days past its last change.
 	Carts = 30 * Day
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past
@@ -124,12 +113,6 @@ func MonthStart(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
-// UsageDropBefore is a month boundary: a usage month goes when the month
-// after it, by whose end it was billed, ended UsageBilledMonths ago.
-func UsageDropBefore(now time.Time) time.Time {
-	return MonthStart(now).AddDate(0, -(UsageBilledMonths + UsageBillingLagMonths), 0)
-}
-
 // AdmissionsDropBefore is the oldest hold still kept.
 func AdmissionsDropBefore(now time.Time) time.Time { return now.UTC().Add(-Admissions) }
 
@@ -156,6 +139,7 @@ func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time
 var OutboxIntentTypes = []string{
 	"nmi_delete_subscription",
 	"stripe_cancel_subscription",
+	"stripe_resume_subscription",
 	"ccbill_cancel_subscription",
 	"nmi_payment_method_update",
 	"nmi_payment_source_update",

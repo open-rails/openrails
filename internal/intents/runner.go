@@ -144,6 +144,10 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 		r.supersede(ctx, logEntry, stats, intent.ID, rel.Reason)
 		return
 	}
+	if !rel.Until.IsZero() {
+		r.park(ctx, logEntry, stats, intent.ID, now, Deferred(rel.Reason, rel.Until))
+		return
+	}
 
 	if blocked, reason := GateExecution(ctx, r.Config, intent.MerchantID, Origin(intent.Origin)); blocked {
 		r.holdForWritePosture(ctx, logEntry, stats, intent, now, reason)
@@ -163,11 +167,9 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	// Volume breaker: destructive types park while the merchant is over its
 	// rolling execution budget or an operator finding is open. Fails closed:
 	// a breaker error parks rather than executing unexamined.
-	attemptLogged := false
 	if intent.DestructiveActionID == nil && IsDestructiveIntentType(intent.IntentType) {
 		held, reason, err := r.Breaker.Check(ctx, intent, now, func(ctx context.Context, d *db.DB) error {
-			attemptLogged = true
-			return NewStore(d).LogExternalMutation(ctx, r.mutationLogParams(intent, MutationLogPhaseAttempting, "", nil))
+			return NewStore(d).MarkSent(ctx, intent.MerchantID, intent.ID, intent.Attempts)
 		})
 		if err != nil {
 			r.park(withHistoryHold(ctx, "breaker_unavailable"), logEntry, stats, intent.ID, now, Parked("destructive-volume breaker check failed: "+err.Error()))
@@ -179,11 +181,9 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 		}
 	}
 
-	if !attemptLogged {
-		if err := r.logExternalMutation(ctx, intent, MutationLogPhaseAttempting, "", nil); err != nil {
-			r.park(ctx, logEntry, stats, intent.ID, now, Parked("mutation log unavailable: "+err.Error()))
-			return
-		}
+	if err := r.logOperation(ctx, intent, OperationAttempting, "", nil); err != nil {
+		r.park(ctx, logEntry, stats, intent.ID, now, Parked("operation log unavailable: "+err.Error()))
+		return
 	}
 	ctx, stopBeat := r.renewClaimWhile(ctx, logEntry, intent)
 	defer stopBeat() // A panic must not keep an abandoned claim alive.
@@ -192,15 +192,15 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	r.record(ctx, logEntry, stats, handler, intent, outcome, outcome.Reason, false)
 }
 
-// record persists what the handler did — the mutation-log result phase and the
-// ledger transition — on a context detached from the caller's cancellation
+// record persists what the handler did — the operation log's result phase and
+// the ledger transition — on a context detached from the caller's cancellation
 // (LedgerWriteContext): the provider call is already made, so its outcome must
 // land even when the caller has since timed out.
 func (r *Runner) record(ctx context.Context, logEntry *slog.Logger, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, reason string, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
-	if err := r.logExternalMutation(ctx, intent, mutationLogPhase(outcome), reason, outcome.Evidence); err != nil {
-		logEntry.ErrorContext(ctx, "intent ledger: external mutation result log failed", logx.Err(err))
+	if err := r.logOperation(ctx, intent, operationPhase(outcome), reason, outcome.Evidence); err != nil {
+		logEntry.ErrorContext(ctx, "intent ledger: operation result log failed", logx.Err(err))
 	}
 	r.apply(ctx, logEntry, stats, handler, intent, outcome, verifying)
 }
@@ -527,41 +527,24 @@ func (r *Runner) supersede(ctx context.Context, logEntry *slog.Logger, stats *St
 	logEntry.InfoContext(ctx, "intent superseded (no longer applicable)", "reason", reason)
 }
 
-func (r *Runner) logExternalMutation(ctx context.Context, intent gen.BillingProviderIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
-	return r.Store.LogExternalMutation(ctx, r.mutationLogParams(intent, phase, reason, evidence))
+func (r *Runner) logOperation(ctx context.Context, intent gen.BillingProviderIntent, phase OperationPhase, reason string, evidence map[string]any) error {
+	return r.Store.LogOperation(ctx, intent, phase, reason, operationEvidence(intent, evidence))
 }
 
-func (r *Runner) mutationLogParams(intent gen.BillingProviderIntent, phase MutationLogPhase, reason string, evidence map[string]any) MutationLogParams {
-	intentID := intent.ID
-	return MutationLogParams{
-		MerchantID:       intent.MerchantID,
-		Provider:         intent.Rail,
-		PspID:            derefUUID(intent.PspID),
-		CustodianID:      derefUUID(intent.CustodianID),
-		ProviderIntentID: &intentID,
-		IntentType:       intent.IntentType,
-		IdempotencyKey:   intent.IdempotencyKey,
-		Attempt:          intent.Attempts,
-		Phase:            phase,
-		Reason:           reason,
-		Evidence:         mutationLogEvidence(intent, evidence),
-	}
-}
-
-func mutationLogPhase(outcome Outcome) MutationLogPhase {
+func operationPhase(outcome Outcome) OperationPhase {
 	switch outcome.Class {
 	case OutcomeSucceeded:
-		return MutationLogPhaseSucceeded
+		return OperationSucceeded
 	case OutcomeAmbiguous:
-		return MutationLogPhaseUnknown
+		return OperationUnknown
 	case OutcomeParked:
-		return MutationLogPhaseParked
+		return OperationParked
 	default:
-		return MutationLogPhaseFailed
+		return OperationFailed
 	}
 }
 
-func mutationLogEvidence(intent gen.BillingProviderIntent, evidence map[string]any) map[string]any {
+func operationEvidence(intent gen.BillingProviderIntent, evidence map[string]any) map[string]any {
 	out := map[string]any{}
 	if intent.SubscriptionID != nil {
 		out["subscription_id"] = intent.SubscriptionID.String()

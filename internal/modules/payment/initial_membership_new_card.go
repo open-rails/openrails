@@ -38,7 +38,11 @@ func declinedCard(ctx context.Context, d *db.DB, merchantID, methodID uuid.UUID)
 	if err != nil {
 		return nil, err
 	}
-	return models.PaymentMethodFromGen(row)
+	method, err := models.PaymentMethodFromGen(row)
+	if err != nil || paymentmethods.Discarded(method) {
+		return nil, err
+	}
+	return method, nil
 }
 
 // enrollmentCard is declinedCard for an enrollment whose order attempt

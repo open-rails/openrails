@@ -119,10 +119,18 @@ func RunLocal(ctx context.Context, database *db.DB, admissions *Admissions, comm
 		return err
 	}
 	if !inherited {
-		action, err = admissions.Start(ctx, command.MerchantID, action.ID)
+		started, err := admissions.Start(ctx, command.MerchantID, action.ID)
+		if errors.Is(err, ErrHeld) {
+			// Refused before its first effect: nothing ran, so it holds no
+			// budget.
+			writeCtx, cancel := db.DetachedWriteContext(ctx, 10*time.Second)
+			defer cancel()
+			return errors.Join(err, admissions.Finish(writeCtx, command.MerchantID, action.ID, OutcomeNoEffect, ""))
+		}
 		if err != nil {
 			return err
 		}
+		action = started
 		ctx = BindAction(ctx, action)
 	}
 	callbackCompleted := false

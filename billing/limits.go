@@ -7,14 +7,14 @@ import (
 )
 
 // Limit is a usage limit the merchant declares: what counts toward it (its
-// Unit and RateCards), when its window resets, and how a request that would
+// Unit and Counts), when its window resets, and how a request that would
 // cross it is admitted. Products give it capacity.
 type Limit struct {
-	Key       string                  `json:"key"`
-	Unit      string                  `json:"unit"`
-	Reset     catalog.LimitReset      `json:"reset"`
-	Overrun   catalog.Overrun         `json:"overrun"`
-	RateCards []catalog.LimitRateCard `json:"rate_cards"`
+	Key     string               `json:"key"`
+	Unit    string               `json:"unit"`
+	Reset   catalog.LimitReset   `json:"reset"`
+	Overrun catalog.Overrun      `json:"overrun"`
+	Counts  []catalog.LimitCount `json:"counts"`
 	// Products are the products that give the limit capacity, by key.
 	Products []LimitProduct `json:"products"`
 	// Revision advances on every change to the limit.
@@ -31,12 +31,12 @@ type LimitProduct struct {
 }
 
 // SetLimitParams declares a limit whole. Overrun defaults to
-// require_estimate. A currency unit takes no rate cards.
+// require_estimate. A currency unit takes no counts.
 type SetLimitParams struct {
-	Unit      string                  `json:"unit"`
-	Reset     catalog.LimitReset      `json:"reset"`
-	Overrun   catalog.Overrun         `json:"overrun,omitempty"`
-	RateCards []catalog.LimitRateCard `json:"rate_cards,omitempty"`
+	Unit    string               `json:"unit"`
+	Reset   catalog.LimitReset   `json:"reset"`
+	Overrun catalog.Overrun      `json:"overrun,omitempty"`
+	Counts  []catalog.LimitCount `json:"counts,omitempty"`
 	// ExpectedRevision refuses the change with revision_mismatch unless the
 	// limit is at this revision; 0 expects no limit.
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
@@ -92,13 +92,9 @@ type AdjustCustomerLimitParams struct {
 type DenyCode string
 
 const (
-	// DenyLimitReached: the request would not fit a limit even if every other
-	// hold were returned. The refusal names the limit and when it resets.
+	// DenyLimitReached: the request does not fit a limit. The refusal names
+	// the limit and when it resets.
 	DenyLimitReached DenyCode = "limit_reached"
-	// DenyCapacityHeld: the request would fit but for capacity gates' lease
-	// holds keep; they shrink at their next sync. Retry after
-	// RetryAfterSeconds. A gate's want and an admission alike.
-	DenyCapacityHeld DenyCode = "capacity_held"
 	// DenyInsufficientBalance: the prepaid balance does not cover the request.
 	DenyInsufficientBalance DenyCode = "insufficient_balance"
 	// DenyInsufficientCredit: the request does not fit the credit line.

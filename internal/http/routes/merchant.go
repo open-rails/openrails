@@ -5,6 +5,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/http/router"
 )
 
 // merchantRoutes is the merchant itself: its configuration, outbound
@@ -20,7 +21,7 @@ var merchantRoutes = []Route{
 	{Method: PATCH, Path: "/v1/merchant/configuration", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "UpdateMerchantConfiguration", When: FeatureMerchantConfigManages, NoConn: true,
 		Doc: "UpdateMerchantConfiguration merges params into the merchant's configuration and returns it. It needs " +
 			"merchant configuration held in Vault: a configuration read from a file is read-only.",
-		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("card_vault_unknown", "charge_psp_incompatible", "charge_psp_unknown", "invalid_param", "merchant_unit_unsupported", "platform_vault_mixed_class", "platform_vault_unavailable", "platform_vault_unreachable", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
+		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("card_vault_unknown", "charge_psp_incompatible", "charge_psp_unknown", "event_store_required", "invalid_param", "merchant_unit_unsupported", "platform_vault_mixed_class", "platform_vault_unavailable", "platform_vault_unreachable", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
 
 	// What changed in the catalog and the configuration, and who changed it.
 	{Method: GET, Path: "/v1/merchant/changes", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListChanges",
@@ -70,8 +71,11 @@ var merchantRoutes = []Route{
 	// subscriptions, payments and payment methods wholesale, so it is the
 	// merchant's configuration; the import pins its own merchant connection.
 	{Method: POST, Path: "/v1/merchant/billing-import", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "ImportBilling", NoConn: true,
-		Doc:     "ImportBilling lands declared billing facts under the bound merchant.",
-		Request: billingimport.DeclaredBilling{}, Responses: []Reply{{200, billingimport.Result{}}}, Errors: codes("as_of_required", "invalid_param", "invalid_psp_reference", "resource_conflict"), Handler: h(handlers.ImportDeclaredBilling)},
+		Doc: "ImportBilling lands declared billing facts under the bound merchant. The book's cancels and the " +
+			"provider stops it owes are the caller's destructive actions, admitted together: a cancel of a " +
+			"subscription the book did not create also waits for the destructive-action switch and its PSP's " +
+			"cancellation cap, keeping access meanwhile.",
+		Request: billingimport.DeclaredBilling{}, Responses: []Reply{{200, billingimport.Result{}}}, Errors: codes("as_of_required", "invalid_param", "invalid_psp_reference", "rate_limit_exceeded", "resource_conflict"), Handler: h(handlers.ImportDeclaredBilling)},
 
 	// PSP imports: pull a PSP's subscribers read-only, link them to customers
 	// by the merchant's rules and mappings, and land the linked ones through
@@ -114,10 +118,12 @@ var merchantRoutes = []Route{
 		Args: []any{billing.PSPImportID{}},
 		Doc: "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and " +
 			"payments, then approves its corrections (the proposals that keep or extend access) in the caller's " +
-			"name. Only a person signed in, or the in-process host, applies. It runs in the background. A " +
+			"name. Only a person signed in, or the in-process host, applies; one holding merchant:customer:manage " +
+			"too approves the corrections that move a subscription's price or terms, and without it an import " +
+			"with one open is refused. It runs in the background. A " +
 			"subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked " +
 			"until it is mapped (CreateProviderPrice), linked and applied again.",
-		Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("invalid_param", "person_required", "psp_import_in_progress", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ApplyPSPImport)},
+		Responses: []Reply{{202, billing.PSPImport{}}}, Errors: codes("finding_not_actionable", "invalid_param", "person_required", "psp_import_in_progress", "resource_conflict", "resource_not_found", "service_unavailable"), Bind: func(e *Env) router.Handler { return h(handlers.ApplyPSPImport(e.staffCan)) }},
 	{Method: POST, Path: "/v1/merchant/psp-import-mappings", Group: MerchantConfig, Level: LevelUpdate, Auth: AuthMerchant, Name: "SetPSPImportMappings",
 		Doc: "SetPSPImportMappings maps the merchant's own identifiers (a legacy user or order id) to customers, " +
 			"for import rules to read.",

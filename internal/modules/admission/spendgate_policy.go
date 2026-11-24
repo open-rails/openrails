@@ -32,9 +32,10 @@ func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, payer identit
 
 // Load turns an already-resolved policy into the payer-scope windows the SQL
 // gate enforces, in requestCurrency. Only window_spend_cap declares NEW-spend
-// windows; an outstanding_cap policy caps debt, not velocity.
+// windows; an outstanding_cap policy caps debt, not velocity. A window that
+// names no currency is in the policy's policy_currency, else the request's.
 func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string, resolved ResolvedPolicy) (spendgate.Policy, error) {
-	pw, err := l.convert(ctx, spendgate.ScopePayer, resolved.SpendWindows, requestCurrency)
+	pw, err := l.convert(ctx, spendgate.ScopePayer, resolved.SpendWindows, resolved.PolicyCurrency, requestCurrency)
 	if err != nil {
 		return spendgate.Policy{}, err
 	}
@@ -44,9 +45,31 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string
 	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{Scope: spendgate.ScopePayer, Windows: pw}}}, nil
 }
 
+// InCurrency is resolved as it binds a request in requestCurrency. Its
+// outstanding cap, like its collection threshold in usage billing, binds only
+// money in its policy_currency: another currency keeps the account's own
+// limit. Its accrual-rate cap, a velocity like its windows, is converted. A
+// blank policy_currency is the request's.
+func (l *SpendgatePolicyLoader) InCurrency(ctx context.Context, resolved ResolvedPolicy, requestCurrency string) (ResolvedPolicy, error) {
+	from := strings.TrimSpace(resolved.PolicyCurrency)
+	to := money.NormalizeCurrency(requestCurrency)
+	if from == "" || money.NormalizeCurrency(from) == to {
+		return resolved, nil
+	}
+	resolved.OutstandingCapAmount = 0
+	if resolved.AccrualRateCapPerHour > 0 {
+		conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(from), to, resolved.AccrualRateCapPerHour)
+		if err != nil {
+			return ResolvedPolicy{}, err
+		}
+		resolved.AccrualRateCapPerHour = conv
+	}
+	return resolved, nil
+}
+
 // convert maps budgets.BudgetWindow → spendgate.Window, FX-converting the limit to
-// requestCurrency when the window carries a different currency.
-func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Scope, ws []budgets.BudgetWindow, requestCurrency string) ([]spendgate.Window, error) {
+// requestCurrency when the window's currency (else policyCurrency) differs.
+func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Scope, ws []budgets.BudgetWindow, policyCurrency, requestCurrency string) ([]spendgate.Window, error) {
 	reqCur := money.NormalizeCurrency(requestCurrency)
 	out := make([]spendgate.Window, 0, len(ws))
 	for _, w := range ws {
@@ -54,7 +77,11 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 			continue
 		}
 		limit := w.Limit
-		if c := strings.TrimSpace(w.Currency); c != "" && money.NormalizeCurrency(c) != reqCur {
+		c := strings.TrimSpace(w.Currency)
+		if c == "" {
+			c = strings.TrimSpace(policyCurrency)
+		}
+		if c != "" && money.NormalizeCurrency(c) != reqCur {
 			conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(c), reqCur, w.Limit)
 			if err != nil {
 				return nil, err
@@ -72,7 +99,7 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 }
 
 // payerCapacity is the affordability snapshot the spendgate is evaluated
-// against: spendable balance (ledger customer_balance counters, O(1)) plus the
+// against: spendable balance (ledger customer_units counters, O(1)) plus the
 // arrears credit line still available, used as the gate's negative floor.
 // In-flight request reservations are already included in capacity.Held.
 //
@@ -83,13 +110,20 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 //     DEBT, so outstanding owed is SUBTRACTED. $155 unpaid against a $200 line
 //     leaves $45. Before or#878/or#897 the raw limit was passed and — because
 //     arrears debt lives on the arrears account rather than as a negative
-//     customer_balance — the cap never bit at all.
+//     customer_units — the cap never bit at all.
 //   - window_spend_cap: the line is untouched by prior debt. The cloud business
 //     caps NEW spend per window; an unpaid invoice feeds delinquency (the TIME
 //     axis, or#878) and the merchant's own shutoff, not admission.
 //
 // The policy's declared OutstandingCapAmount wins when set; zero defers to the
 // payer's own arrears credit limit, which stays the per-account lever.
+// Available is what the customer may spend before any credit line: its
+// balance after every hold, less what it owes when it prepays.
+func Available(capacity money.AdmissionCapacity) int64 {
+	available, _, _ := payerCapacity(capacity, ResolvedPolicy{})
+	return available
+}
+
 func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (available, creditLine, outstanding int64) {
 	available = capacity.Balance - capacity.Held
 	outstanding = capacity.OutstandingOwed

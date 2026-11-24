@@ -20,8 +20,7 @@ func deletionMethodUnused(ctx context.Context, q *gen.Queries, mid, id uuid.UUID
 		return err
 	}
 	for _, row := range paid {
-		s := row.BillingSubscription
-		if string(s.Status) == string(models.StatusActive) || string(s.Status) == string(models.StatusPending) || string(s.Status) == string(models.StatusPastDue) {
+		if status := models.SubscriptionStatus(row.BillingSubscription.Status); status.Live() || status == models.StatusPending {
 			return paymentmethods.ErrPaymentMethodInUse
 		}
 	}

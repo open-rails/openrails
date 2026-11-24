@@ -20,6 +20,13 @@ func transactionContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, transactionContextKey{}, true)
 }
 
+// InCallerTransaction reports that ctx belongs to a transaction this package
+// opened: work that must commit on its own runs before it.
+func InCallerTransaction(ctx context.Context) bool {
+	marked, _ := ctx.Value(transactionContextKey{}).(bool)
+	return marked
+}
+
 // CommittedMerchantTx is for durable custody and queue handoff. It commits
 // independently on the request's compatible, idle lazy pin, or a scoped pool connection when no
 // pin exists. It never joins or commits an existing caller-owned transaction.
@@ -29,7 +36,7 @@ func (p *Pool) CommittedMerchantTx(ctx context.Context, id billing.MerchantID, f
 	if p == nil || p.raw == nil || id.IsZero() {
 		return fmt.Errorf("db: committed merchant transaction requires pool and merchant")
 	}
-	if marked, _ := ctx.Value(transactionContextKey{}).(bool); marked {
+	if InCallerTransaction(ctx) {
 		return ErrCallerTransaction
 	}
 	if current, ok := merchant.FromContext(ctx); ok && current != id {

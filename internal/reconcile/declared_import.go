@@ -157,6 +157,7 @@ func ImportDeclaredSubscriptions(
 	asOf time.Time,
 	history *DeclaredHistory,
 	authority FactsAuthority,
+	book *DeclaredBook,
 ) (map[string]DeclaredOutcome, error) {
 	if authority != HostFacts && authority != ProviderFacts {
 		return nil, fmt.Errorf("declared import: unknown facts authority %q", authority)
@@ -164,12 +165,12 @@ func ImportDeclaredSubscriptions(
 	if history != nil {
 		ctx = context.WithValue(ctx, declaredHistoryKey{}, history)
 	}
-	// The operator's declared book is an admitted command: its cancels carry
-	// its own authority.
-	ctx = WithAdmittedCancels(ctx)
-	if database == nil || lc == nil {
-		return nil, fmt.Errorf("declared import: db and lifecycle are required")
+	if database == nil || lc == nil || book == nil {
+		return nil, fmt.Errorf("declared import: db, lifecycle and book are required")
 	}
+	// Its cancels and provider stops are the book's admitted effects.
+	book.begin()
+	ctx = withDeclaredBook(ctx, book)
 	if asOf.IsZero() {
 		return nil, fmt.Errorf("declared import: AsOf horizon is required")
 	}
@@ -410,6 +411,9 @@ func ImportDeclaredSubscriptions(
 		if err != nil {
 			return out, fmt.Errorf("declared import: load %s: %w", subID, err)
 		}
+		if outcome == DeclaredImported {
+			book.create(sub)
+		}
 		if schedule := f.AcceptedSchedule; schedule != nil {
 			bill, err := scheduleBill(ctx, q, sub, price, string(schedule.Currency), schedule.Amount, schedule.Quantity, schedule.IntervalHours)
 			if err != nil {
@@ -441,13 +445,15 @@ func ImportDeclaredSubscriptions(
 			// transaction (no crash window, no out-of-band healing needed).
 			if f.CancelScheduleLive && deferDelete != nil &&
 				rails.RemoteDeleteOnTerminalCancel(models.Rail(f.Rail)) {
-				if err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-					if err := gen.New(tx).MarkProviderStopPending(ctx, gen.MarkProviderStopPendingParams{
-						ID: subID, MerchantID: merchantID, At: asOf,
-					}); err != nil {
-						return err
-					}
-					return deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, f.Customer.String(), subID, asOf)
+				if err := book.stopProvider(ctx, database, sub, func(ctx context.Context) error {
+					return database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+						if err := gen.New(tx).MarkProviderStopPending(ctx, gen.MarkProviderStopPendingParams{
+							ID: subID, MerchantID: merchantID, At: asOf,
+						}); err != nil {
+							return err
+						}
+						return deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, f.Customer.String(), subID, asOf)
+					})
 				}); err != nil {
 					return out, fmt.Errorf("declared import: schedule remote delete for %s: %w", f.SourceID, err)
 				}
@@ -456,7 +462,7 @@ func ImportDeclaredSubscriptions(
 			// Fresh ambiguous rows and every pre-existing row (incremental
 			// re-import) converge against the declared snapshot at AsOf. A row
 			// canceled between dumps carries a roster-dead entry, so the
-			// decider lands the terminal transition (cancel_type 'expired' at
+			// decider lands the terminal transition (cancel_type 'provider' at
 			// AsOf; faithful cancel types apply to first import only);
 			// already-terminal rows take no transition but still backfill
 			// charges. No first-pull floor: the declaration is the
@@ -467,7 +473,8 @@ func ImportDeclaredSubscriptions(
 			err := retainingUnresolved(ctx, database, sub, snap.Transactions, func(kept []RemoteTransaction) error {
 				factSnap := *snap
 				factSnap.Transactions = kept
-				return database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				mark := book.mark()
+				err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 					txdb := db.NewWithPgxTx(logger, tx)
 					_, err := convergeSubscriptionFromSnapshotLookback(ctx, logger, txdb, lc, sub, &factSnap, asOf, 0, declaredImportLookback, time.Time{})
 					if err != nil || outcome != DeclaredImported {
@@ -482,6 +489,10 @@ func ImportDeclaredSubscriptions(
 					}
 					return lc.EnsureRenewalGrace(ctx, txdb, locked)
 				})
+				if err != nil {
+					book.reset(mark)
+				}
+				return err
 			})
 			if err != nil {
 				var pgErr *pgconn.PgError
@@ -498,7 +509,10 @@ func ImportDeclaredSubscriptions(
 		}
 		out[f.SourceID] = DeclaredOutcome{Code: outcome}
 	}
-	return out, nil
+	if book.needsAdmission() {
+		return out, ErrDeclaredAdmission
+	}
+	return out, book.end(ctx, database)
 }
 
 // insertDeclaredCanceled writes an explicitly-canceled fact directly: settled
@@ -521,7 +535,7 @@ func insertDeclaredCanceled(
 	case DeclaredCancelChargeback:
 		cancelType = string(models.CancelTypeChargeback)
 	case DeclaredCancelProviderTerminated:
-		cancelType = string(models.CancelTypeExpired)
+		cancelType = string(models.CancelTypeProvider)
 	default:
 		return uuid.Nil, fmt.Errorf("unsupported cancel kind %q", f.CancelKind)
 	}

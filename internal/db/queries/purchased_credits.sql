@@ -1,8 +1,4 @@
--- name: GetPurchasedCreditGrant :one
-SELECT * FROM billing.grants
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND payment_id=sqlc.arg(payment_id)::uuid
-  AND kind='credit' AND event='grant'
-  AND spec_snapshot->'deposit'->'paid_amount' IS NOT NULL;
+-- What reversals of purchased credit lots posted, from the lots' ledger legs.
 
 -- name: GetPurchasedCreditRefundState :one
 SELECT
@@ -10,8 +6,8 @@ SELECT
  COALESCE(sum(CASE transfer_type WHEN 'credit_refund' THEN amount WHEN 'credit_refund_restore' THEN -amount ELSE 0 END),0)::bigint AS withdrawn,
  count(*)::bigint AS sequence
 FROM billing.ledger_transfers
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND grant_id=sqlc.arg(grant_id)::uuid
- AND operation='purchased_credit_refund';
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid
+ AND operation='purchased_credit_refund' AND book='units';
 
 -- name: GetPurchasedCreditReversalState :one
 SELECT
@@ -24,13 +20,13 @@ SELECT
  COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund_cash_restore'),0)::bigint AS recovery,
  count(*)::bigint AS legs
 FROM billing.ledger_transfers lt
-WHERE lt.merchant_id=sqlc.arg(merchant_id)::uuid AND lt.grant_id=sqlc.arg(grant_id)::uuid
- AND lt.operation='purchased_credit_refund' AND lt.source_id=sqlc.arg(reversal_id)::text;
+WHERE lt.merchant_id=sqlc.arg(merchant_id)::uuid AND lt.credit_grant_id=sqlc.arg(credit_grant_id)::uuid
+ AND lt.operation='purchased_credit_refund' AND lt.source_id=sqlc.arg(reversal_id)::text AND lt.book='units';
 
 -- name: GetPurchasedCreditRecoveryTotal :one
 SELECT COALESCE(sum(amount),0)::bigint AS amount
 FROM billing.ledger_transfers
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND grant_id=sqlc.arg(grant_id)::uuid
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid
  AND operation='purchased_credit_refund' AND transfer_type='credit_refund_cash_restore'
  AND source='cash_restore:' || sqlc.arg(reversal_id)::text;
 
@@ -42,12 +38,12 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND refunded_payment_id=sqlc.arg(p
 
 -- name: GetPurchasedCreditRetiredBalance :one
 SELECT
- COALESCE(sum(CASE WHEN cr.account_type='expired_credits' THEN lt.amount WHEN dr.account_type='expired_credits' THEN -lt.amount ELSE 0 END),0)::bigint AS expired,
- COALESCE(sum(CASE WHEN cr.account_type='revoked_credits' THEN lt.amount WHEN dr.account_type='revoked_credits' THEN -lt.amount ELSE 0 END),0)::bigint AS revoked
+ COALESCE(sum(CASE WHEN cr.account_type='units_expired' THEN lt.amount WHEN dr.account_type='units_expired' THEN -lt.amount ELSE 0 END),0)::bigint AS expired,
+ COALESCE(sum(CASE WHEN cr.account_type='units_revoked' THEN lt.amount WHEN dr.account_type='units_revoked' THEN -lt.amount ELSE 0 END),0)::bigint AS revoked
 FROM billing.ledger_transfers lt
 JOIN billing.ledger_accounts dr ON dr.merchant_id=lt.merchant_id AND dr.id=lt.debit_account_id
 JOIN billing.ledger_accounts cr ON cr.merchant_id=lt.merchant_id AND cr.id=lt.credit_account_id
-WHERE lt.merchant_id=sqlc.arg(merchant_id)::uuid AND lt.grant_id=sqlc.arg(grant_id)::uuid;
+WHERE lt.merchant_id=sqlc.arg(merchant_id)::uuid AND lt.credit_grant_id=sqlc.arg(credit_grant_id)::uuid;
 
 -- name: GetPurchasedCreditRepaidOwed :one
 -- Owed the lot repaid and still stands repaid: repayments, less what reversals
@@ -58,4 +54,4 @@ SELECT COALESCE(sum(CASE
     WHEN operation='purchased_credit_refund' AND source LIKE 'repaid_owed_restore:%' THEN amount
     ELSE 0 END),0)::bigint AS amount
 FROM billing.ledger_transfers
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND grant_id=sqlc.arg(grant_id)::uuid;
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid AND book='units';

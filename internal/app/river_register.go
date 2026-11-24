@@ -89,6 +89,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}
 	// A balance's look, queued by the change that crossed one of its lines
 	// and for the instant its last look named.
+	if err := addWorker(workers, &riverjobs.UsageErasureWorker{DB: r.DB}); err != nil {
+		return fmt.Errorf("add usage erasure worker: %w", err)
+	}
 	if err := addWorker(workers, &riverjobs.BalanceLookWorker{DB: r.DB, Money: r.MoneyService}); err != nil {
 		return fmt.Errorf("add balance look worker: %w", err)
 	}
@@ -97,6 +100,15 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		DB: r.DB, Config: r.Config, Clock: clock, Alerts: r.AlertService,
 	}); err != nil {
 		return fmt.Errorf("add customer converge worker: %w", err)
+	}
+	// A PSP's dispute monitoring programs, queued by each chargeback and
+	// fraud report, and by a sale while one of its findings is open.
+	if err := addWorker(workers, &riverjobs.DisputeMonitorWorker{DB: r.DB, Disputes: r.Disputes}); err != nil {
+		return fmt.Errorf("add dispute monitor worker: %w", err)
+	}
+	// What a chargeback or fraud report calls for, once the gates admit it.
+	if err := addWorker(workers, &riverjobs.DisputeResponseWorker{DB: r.DB, Disputes: r.Disputes}); err != nil {
+		return fmt.Errorf("add dispute response worker: %w", err)
 	}
 	// Health findings and timed access lapses, for merchants with activity.
 	if err := addWorker(workers, &riverjobs.MerchantHealthWorker{
@@ -175,6 +187,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}
+	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
+		return fmt.Errorf("add contact erasure worker: %w", err)
+	}
 	// Usage orders: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
 	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
@@ -194,10 +209,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	// Undeclared accounts alert their operator again while unresolved.
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture(), Log: r.Log}
-	accruals := &riverjobs.UsageAccrualWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
+	closing := &riverjobs.UsageCloseWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	scans := []riverjobs.Scan{
-		// A day's usage posts once its day ends, before anything bills it.
-		{Kind: riverjobs.KindUsageAccruals, Run: accruals.Pass, DueBy: accruals.DueBy},
+		// A month's usage posts once its month ends, before anything bills it.
+		{Kind: riverjobs.KindUsageClose, Run: closing.Pass, DueBy: closing.DueBy},
 		{Kind: riverjobs.KindDunning, Run: dunning.Pass, DueBy: dunning.DueBy},
 		{Kind: riverjobs.KindSubscriptionVerificationRetry, Run: r.Verifier.RetryDue},
 		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},
@@ -213,6 +228,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
+		// Cancellations at period end leave MRR at their end.
+		riverjobs.Scan{Kind: riverjobs.KindMRRDue, Run: (&riverjobs.MRRDueWorker{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
 	)
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)
@@ -273,6 +290,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
 		intents.NewStripeCancelHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
+		intents.NewStripeResumeHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
 		intents.NewStripePaymentMethodDomainHandler(r.Config, r.RailConfigs, r.StripeClients),
 		rebill,
 		// Order collection rides the intent ledger like every other money
@@ -451,6 +469,7 @@ func (r *Runtime) refreshWorkers(clock clockwork.Clock) (*riverjobs.ProviderRefr
 		NMIClients:     r.NMIClients,
 		DataLinkPacing: r.DataLinkPacing(),
 		Verifier:       r.Verifier,
+		Disputes:       r.Disputes,
 		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
 			mid, err := merchant.Require(ctx)
 			if err != nil {
