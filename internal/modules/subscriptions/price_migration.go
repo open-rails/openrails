@@ -759,7 +759,7 @@ func (s *PriceMigrationService) notify(ctx context.Context, d *db.DB, change *mo
 		event = models.NotificationSubscriptionPlanChangeScheduled
 		data.ToProductID, data.ToProductName = billing.ProductID(toProduct.ID), toProduct.DisplayName
 	}
-	n := &models.NotificationEvent{ID: uuid.NewSHA1(change.ID, []byte("scheduled-notification")), CustomerID: sub.CustomerID, EventType: event, Data: data, CreatedAt: s.now()}
+	n := &models.NotificationEvent{ID: uuidutil.ChildV7(change.ID, "scheduled-notification"), CustomerID: sub.CustomerID, EventType: event, Data: data, CreatedAt: s.now()}
 	return NewNotificationService(d).CreateIfAbsent(ctx, n)
 }
 

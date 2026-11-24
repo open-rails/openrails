@@ -213,7 +213,7 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	customer := billing.CustomerID(uuid.New())
+	customer := billing.CustomerID(uuid.Must(uuid.NewV7()))
 	if in.CustomerID != "" {
 		if customer, err = billing.ParseCustomerID(in.CustomerID); err != nil {
 			reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -225,7 +225,7 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 	if in.CancelURL != "" {
 		payURL.CancelURL = &in.CancelURL
 	}
-	order, err := h.shop.CreateOrder(ctx, uuid.NewString(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: payURL})
+	order, err := h.shop.CreateOrder(ctx, uuid.Must(uuid.NewV7()).String(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: payURL})
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

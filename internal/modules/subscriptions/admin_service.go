@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -334,7 +335,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 				}
 			}
 			if err := NewNotificationService(txdb).CreateIfAbsent(ctx, &models.NotificationEvent{
-				ID: uuid.NewSHA1(subscription.ID, []byte("cancel:admin:"+now.UTC().Format(time.RFC3339Nano))), CustomerID: subscription.CustomerID, EventType: models.NotificationPremiumEnded, CreatedAt: now,
+				ID: uuidutil.DerivedV7(now, subscription.ID, "cancel:admin:"+now.UTC().Format(time.RFC3339Nano)), CustomerID: subscription.CustomerID, EventType: models.NotificationPremiumEnded, CreatedAt: now,
 				Data: billing.NotificationData{Reason: string(PremiumEndReasonAdmin), SubscriptionID: billing.SubscriptionID(subscription.ID), ProductID: billing.ProductID(subscription.ProductID)},
 			}); err != nil {
 				return fmt.Errorf("record cancellation notification: %w", err)

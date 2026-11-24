@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // A change to a usage order evaluates its payer in the same transaction:
@@ -224,7 +225,7 @@ func EvaluateTx(ctx context.Context, d *db.DB, customerID uuid.UUID, currency st
 	}); err != nil {
 		return Transition{}, false, err
 	}
-	if err := notify(ctx, d, transition, exposure, now, uuid.NewSHA1(tid.UUID(), []byte(dedupe+":notification"))); err != nil {
+	if err := notify(ctx, d, transition, exposure, now, uuidutil.DerivedV7(uuidutil.TimeOf(customerID), tid.UUID(), dedupe+":notification")); err != nil {
 		return Transition{}, false, err
 	}
 	// One line per transition: the decision an operator is asked to explain.
