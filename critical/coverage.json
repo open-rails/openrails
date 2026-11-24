@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 681,
+  "scenario_count": 685,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3407,6 +3407,26 @@
       "id": "OR-J40-S26",
       "journey": "J40",
       "name": "A credit lot whose payment brought no cash defers nothing, raises books.credit.unapplied and commits"
+    },
+    {
+      "id": "OR-J04-S80",
+      "journey": "J04",
+      "name": "Two billing passes started together: one runs its scans and the other exits without a report; the running pass holds a lease row, not a database session"
+    },
+    {
+      "id": "OR-J04-S81",
+      "journey": "J04",
+      "name": "A billing pass whose holder died leaves a lease that lapses on its own; a pass started meanwhile exits, and the next takes what is due"
+    },
+    {
+      "id": "OR-J38-S83",
+      "journey": "J38",
+      "name": "Of concurrent pulls of one merchant one runs and the others skip, another merchant's pull runs beside it, and a provider refresh waits for the running pull; the pull holds a lease row, not a database session"
+    },
+    {
+      "id": "OR-J38-S84",
+      "journey": "J38",
+      "name": "A pull that runs past one lease period keeps its lease and others still skip; a dead holder's lease lapses on its own and the next pull takes it"
     }
   ]
 }

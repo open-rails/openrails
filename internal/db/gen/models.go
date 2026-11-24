@@ -983,6 +983,18 @@ type BillingMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
+// A merchant's exclusive work while it runs, one row per kind: pull is one mutating provider pull at a time (a provider refresh or a prune), across every replica and the operator's CLI. Its holder renews expires_at while the work runs and deletes the row when it ends; a holder that stops renewing loses it at expires_at.
+type BillingMerchantLease struct {
+	MerchantID uuid.UUID
+	Kind       string
+	// The run holding it: a token each claim draws.
+	Holder uuid.UUID
+	// When another run may take it over unless its holder renews it first.
+	ExpiresAt time.Time
+	// When its holder took it.
+	ClaimedAt time.Time
+}
+
 // Former merchant names. An unexpired alias forwards to its merchant and blocks every other claim of the name; expires_at NULL keeps it forever. Written by a rename, removed when its merchant takes the name back, when it expires and is claimed, or when its merchant leaves the directory.
 type BillingMerchantSlugAlias struct {
 	Slug       string
@@ -1676,11 +1688,11 @@ type BillingPaymentMethodVersion struct {
 	CreatedAt   time.Time
 }
 
-// Global by design: which fleet (River schema) queues a periodic kind's pass for the database; one row per kind, taken over once expired, deleted 30 days after it expired.
+// Global by design: which fleet (River schema) queues a periodic kind's pass for the database, one row per kind, taken over once expired; and which run of a pass is running, renewed while it runs and deleted when it ends. A row is deleted 30 days after it expired.
 type BillingPeriodicLease struct {
-	// The periodic job's id: its job kind, or the name its schedule gave.
+	// The periodic job's id: its job kind, or the name its schedule gave; a running pass's is its kind with .run.
 	Kind string
-	// The holding fleet's River schema; a fleet renews its own lease.
+	// The holding fleet's River schema, which renews its own lease; or a running pass's token.
 	Holder string
 	// When another fleet may take the kind over: a fraction of the period after the claim.
 	ExpiresAt time.Time

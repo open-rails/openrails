@@ -1,53 +1,24 @@
--- A merchant's own units (credits, tokens, an in-game currency) are bought
--- with money, given and spent. They are prepaid, never owed: usage its lots
--- cannot take is forgiven; an order in a unit is paid from the customer's
--- balance, never by a payment; and what a pack of a unit cost is money, in a
--- registry currency.
-
--- The registry's currencies (internal/currency); every other code a balance
--- may count is a merchant's unit.
-ALTER TABLE billing.orders DROP CONSTRAINT orders_complete_payment_check;
-ALTER TABLE billing.orders ADD CONSTRAINT orders_complete_payment_check CHECK (status <> 'complete' OR total = 0 OR payment_id IS NOT NULL OR origin = 'usage' OR collection_owner <> 'engine'
-    OR currency NOT IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR'));
-COMMENT ON CONSTRAINT orders_complete_payment_check ON billing.orders IS 'A complete order was paid by its payment, unless it was free, is a usage order, is collected by a provider, or is in a merchant''s unit: the customer''s balance paid it, in credit_spend legs naming the order.';
-
-ALTER TABLE billing.ledger_accounts ADD CONSTRAINT ledger_accounts_owed_currency_check CHECK (account_type <> 'customer_owed'
-    OR currency IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR'));
-COMMENT ON CONSTRAINT ledger_accounts_owed_currency_check ON billing.ledger_accounts IS 'Nothing is owed in a merchant''s unit: an arrears account holds a registry currency.';
-
-ALTER TABLE billing.credit_grants ADD CONSTRAINT credit_grants_paid_currency_registry_check CHECK (paid_currency IS NULL
-    OR paid_currency IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR'));
-COMMENT ON COLUMN billing.credit_grants.paid_amount IS 'What was paid for the lot, in paid_currency (a registry currency); NULL for a gift. A pack of a merchant''s unit is paid in any currency: its rate is paid_amount over units, bonus units included.';
-
--- A posting of usage in a merchant's unit forgives what the lots cannot take,
--- and a reversal takes back forgiveness before it credits.
-ALTER TABLE billing.usage_postings ADD COLUMN forgiven bigint NOT NULL DEFAULT 0;
-ALTER TABLE billing.usage_postings ALTER COLUMN forgiven DROP DEFAULT;
-ALTER TABLE billing.usage_postings ADD CONSTRAINT usage_postings_forgiven_check CHECK (forgiven = 0
-    OR currency NOT IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR')
-    AND (reason <> 'reversal' AND forgiven > 0 AND forgiven <= amount OR reason = 'reversal' AND forgiven < 0 AND forgiven >= amount));
-COMMENT ON COLUMN billing.usage_postings.forgiven IS 'Of amount, what the ledger did not take: usage in a merchant''s unit its lots could not cover, never owed (positive); a reversal''s share that took back forgiveness rather than credit (negative). Zero in a registry currency.';
-ALTER TABLE billing.usage_postings ADD COLUMN forgiven_lines jsonb,
-    ADD CONSTRAINT usage_postings_forgiven_lines_check CHECK ((forgiven = 0) = (forgiven_lines IS NULL)
-        AND (forgiven_lines IS NULL OR jsonb_typeof(forgiven_lines) = 'array' AND octet_length(forgiven_lines::text) <= 262144));
-COMMENT ON COLUMN billing.usage_postings.forgiven_lines IS 'How forgiven is shared, as the posting computed it: [{invoker, event_type, meter_key, cell, amount}], by what the period charged each before the cut, to the largest remainder; a reversal takes back from the period''s shares the same way. NULL when nothing was forgiven.';
-CREATE INDEX usage_postings_forgiven_idx ON billing.usage_postings (merchant_id, cut_at) WHERE forgiven <> 0;
-
--- Which of a merchant's own units the units book counts, at the scale every
--- amount in it was written at: a configuration that later rescales or
--- removes one is caught at load, after a restart too.
-CREATE TABLE billing.ledger_units (
-    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
-    unit text NOT NULL CHECK (unit ~ '^[A-Z][A-Z0-9]{3,11}$' AND unit NOT IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR')),
-    scale integer NOT NULL CHECK (scale >= 0 AND scale <= 6),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (merchant_id, unit)
+-- Exclusive work holds a lease row its holder renews while it runs, not a
+-- session's advisory lock: no connection is held for it, and a holder that
+-- dies stops renewing, so its lease lapses.
+CREATE TABLE billing.merchant_leases (
+    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE CASCADE,
+    kind text NOT NULL CHECK (kind IN ('pull')),
+    holder uuid NOT NULL,
+    expires_at timestamptz NOT NULL,
+    claimed_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (merchant_id, kind)
 );
-COMMENT ON TABLE billing.ledger_units IS 'A merchant''s own unit as the units book first counted it: written when a catalog write first names it or the book first holds it, under the units lock a settings change takes, with the scale its document in the file or Vault then declared. Loading a configuration that rescales or removes it serves this scale instead, with a finding. Retention: permanent, never pruned.';
-CREATE TRIGGER immutable_ledger_units BEFORE DELETE OR UPDATE ON billing.ledger_units FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
-CREATE TRIGGER immutable_ledger_units_truncate BEFORE TRUNCATE ON billing.ledger_units FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact();
+COMMENT ON TABLE billing.merchant_leases IS 'A merchant''s exclusive work while it runs, one row per kind: pull is one mutating provider pull at a time (a provider refresh or a prune), across every replica and the operator''s CLI. Its holder renews expires_at while the work runs and deletes the row when it ends; a holder that stops renewing loses it at expires_at.';
+COMMENT ON COLUMN billing.merchant_leases.holder IS 'The run holding it: a token each claim draws.';
+COMMENT ON COLUMN billing.merchant_leases.expires_at IS 'When another run may take it over unless its holder renews it first.';
+COMMENT ON COLUMN billing.merchant_leases.claimed_at IS 'When its holder took it.';
 
--- The restore guard names the new table.
+COMMENT ON TABLE billing.periodic_leases IS 'Global by design: which fleet (River schema) queues a periodic kind''s pass for the database, one row per kind, taken over once expired; and which run of a pass is running, renewed while it runs and deleted when it ends. A row is deleted 30 days after it expired.';
+COMMENT ON COLUMN billing.periodic_leases.kind IS 'The periodic job''s id: its job kind, or the name its schedule gave; a running pass''s is its kind with .run.';
+COMMENT ON COLUMN billing.periodic_leases.holder IS 'The holding fleet''s River schema, which renews its own lease; or a running pass''s token.';
+
+-- A billing restore's destination holds no running pull.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $_$
 DECLARE item record; occupied boolean;
@@ -113,7 +84,6 @@ BEGIN
                   'ledger_rollup_pending',
                   'ledger_transfers',
                   'ledger_type_totals',
-                  'ledger_units',
                   'limit_adjustments',
                   'limit_hold_parts',
                   'limit_holds',
@@ -121,6 +91,7 @@ BEGIN
                   'maintenance_runs',
                   'mandates',
                   'merchant_destructive_policy',
+                  'merchant_leases',
                   'money_settings',
                   'mrr_cohort_flows',
                   'mrr_flows',

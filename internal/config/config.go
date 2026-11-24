@@ -332,8 +332,8 @@ type DatabaseConfig struct {
 	// Normal request-time and scheduled partition maintenance is unchanged.
 	SkipMigrations bool
 	// LeaseConns caps the separate pool, copied from Deps.Postgres's
-	// configuration, that renews idempotency leases. Zero is four
-	// connections.
+	// configuration, that renews leases: idempotency claims, the billing pass
+	// and merchant pulls. Zero is four connections.
 	LeaseConns int
 }
 

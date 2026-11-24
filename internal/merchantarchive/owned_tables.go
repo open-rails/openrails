@@ -135,6 +135,7 @@ var ownedTables = []string{
 	"webhook_health",
 	"webhook_health_daily",
 	"periodic_leases",
+	"merchant_leases",
 }
 
 // OwnedTables is the inventory, for the contracts check that keeps it equal

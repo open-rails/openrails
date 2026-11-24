@@ -31,8 +31,9 @@ type Deps struct {
 	Postgres *pgxpool.Pool
 	// PostgresSession is the direct connection configuration for a transaction-
 	// pooled Postgres. It connects to the same database and role without the
-	// pooler, for migrations, notifications and session locks. When supplied,
-	// merchant scope on the application pool is transaction-local.
+	// pooler, for migrations, listeners and session locks (usage policy writes,
+	// billing imports). When supplied, merchant scope on the application pool
+	// is transaction-local.
 	PostgresSession *pgxpool.Config
 	// MerchantGroups reads live ownership metadata for explicit bound merchant
 	// declarations. It authenticates no request and is never closed by the engine.
