@@ -13380,6 +13380,8 @@
                 "merchant:events:read",
                 "merchant:metrics:read",
                 "merchant:orders:manage",
+                "merchant:provisioning:manage",
+                "merchant:provisioning:read",
                 "merchant:usage:manage",
                 "merchant:usage:read",
                 "root:admin-rate-limits:unlock",
@@ -13397,6 +13399,8 @@
                 "root:merchants:restore",
                 "root:metrics:read",
                 "root:orders:manage",
+                "root:provisioning:manage",
+                "root:provisioning:read",
                 "root:usage:manage",
                 "root:usage:read",
                 "root:worker-health:read"

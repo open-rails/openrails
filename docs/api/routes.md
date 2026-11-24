@@ -4,7 +4,7 @@
 
 Every route of the HTTP API (186), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
+**Tier** is what the route checks before its handler: `public` (nothing), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or an application holding the route's permission, as `application`). Every route of a tier that checks a permission names one; the route catalog refuses one that does not.
 
 **Permission** is, for a staff or programmatic route, what its caller holds (`billing.Permissions`): the `merchant:` name in the scope of the merchant the request acts on, or the `root:` name in the Auth's root scope.
 
@@ -223,7 +223,7 @@ The caller's none/read/update access to staff areas and effective application pe
 
 ## Programmatic (`/v1/app`)
 
-The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, admissions use `request_id`, lease syncs use the lease's item numbers and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group; they name no permission.
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, admissions use `request_id`, lease syncs use the lease's item numbers and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group. An application needs `merchant:provisioning:read` for their reads and `merchant:provisioning:manage` for their writes; a provisioning token is its own grant. An erasure (`DELETE /Users/{id}`, alone or in a Bulk) spends its actor's destructive budget, and a Bulk whose erasures exceed it applies nothing.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
@@ -245,18 +245,18 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | GET | `/v1/app/limits` | application | `merchant:usage:read`<br>`root:usage:read` | — | 200 `ListPage<CustomerLimit>` |  |
 | POST | `/v1/app/leases/sync` | application | `merchant:usage:manage`<br>`root:usage:manage` | `SyncLeasesParams` | 200 `SyncLeasesResult` |  |
 | GET | `/v1/app/events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `EventPage` |  |
-| GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
-| GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
-| GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
-| GET | `/v1/app/scim/v2/Schemas` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
-| GET | `/v1/app/scim/v2/Schemas/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
-| POST | `/v1/app/scim/v2/Users` | provisioning | — | `application/scim+json` | 201 `application/scim+json` | when `customer_provisioning` |
-| GET | `/v1/app/scim/v2/Users` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
-| GET | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 200 `application/scim+json` | when `customer_provisioning` |
-| PUT | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
-| PATCH | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
-| DELETE | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 204 — | when `customer_provisioning` |
-| POST | `/v1/app/scim/v2/Bulk` | provisioning | — | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | `merchant:provisioning:read`<br>`root:provisioning:read` | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | `merchant:provisioning:read`<br>`root:provisioning:read` | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | `merchant:provisioning:read`<br>`root:provisioning:read` | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Schemas` | provisioning | `merchant:provisioning:read`<br>`root:provisioning:read` | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Schemas/{id}` | provisioning | `merchant:provisioning:read`<br>`root:provisioning:read` | — | 200 `application/scim+json` | when `customer_provisioning` |
+| POST | `/v1/app/scim/v2/Users` | provisioning | `merchant:provisioning:manage`<br>`root:provisioning:manage` | `application/scim+json` | 201 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Users` | provisioning | `merchant:provisioning:read`<br>`root:provisioning:read` | — | 200 `application/scim+json` | when `customer_provisioning` |
+| GET | `/v1/app/scim/v2/Users/{id}` | provisioning | `merchant:provisioning:read`<br>`root:provisioning:read` | — | 200 `application/scim+json` | when `customer_provisioning` |
+| PUT | `/v1/app/scim/v2/Users/{id}` | provisioning | `merchant:provisioning:manage`<br>`root:provisioning:manage` | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
+| PATCH | `/v1/app/scim/v2/Users/{id}` | provisioning | `merchant:provisioning:manage`<br>`root:provisioning:manage` | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
+| DELETE | `/v1/app/scim/v2/Users/{id}` | provisioning | `merchant:provisioning:manage`<br>`root:provisioning:manage` | — | 204 — | when `customer_provisioning` |
+| POST | `/v1/app/scim/v2/Bulk` | provisioning | `merchant:provisioning:manage`<br>`root:provisioning:manage` | `application/scim+json` | 200 `application/scim+json` | when `customer_provisioning` |
 
 ## Provider webhooks
 
