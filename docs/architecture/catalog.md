@@ -23,12 +23,14 @@ What a merchant sells: products, prices, meters, rate cards and usage limits, an
    `readCatalogState`): list the existing objects it changes.
 2. Admit them, if any, as one destructive command (`destructive.CatalogChange`).
 3. Commit in one merchant transaction (`catalogMutation`): lock the revision
-   (`LockCatalogRevision`), record edit ownership (`recordCatalogEdit`), refuse
-   a new recurring benefit overlap (`catalog_benefit_overlap`), finish the
-   admission.
+   (`LockCatalogRevision`), record edit ownership (`recordCatalogEdit`) and the
+   change's history (`recordCatalogHistory`), refuse a new recurring benefit
+   overlap (`catalog_benefit_overlap`), finish the admission.
 4. If the catalog moved since planning, or a changed object was not admitted
    (`errCatalogSnapshotMoved`), release the admission as no-effect and plan
    again, up to three times, then answer `409 catalog_revision_conflict`.
+
+**History.** The commit compares the catalog before and after (`readCatalogState`) and appends one `change_log` entry per changed object (`catalogHistory`, `internal/service/catalog_history.go`) through `history.Record`, in the same transaction, so an entry commits and rolls back with its change. A product, price key, meter or limit gets `create`, `update`, `archive`, `unarchive` or `delete` with each changed field before and after; a product's keys get `key_add`, `key_remove` and `key_rename` entries of their own (a rename is what `replaceEntitlements` reported). Every entry but a delete carries the object's revision after the change: a product's, which a price change never moves, or a price key's. The actor is the route gate's invoker (`staff:<id>`) or `system`; the source is `console` for a signed-in person, `api`, `catalog_apply` for a document (with its `application_id`) or `cli` for the operator's apply.
 
 The `catalog_authored_*` triggers advance `merchants.catalog_revision` on every
 row written, unless `openrails.catalog_batch_merchant_id` names the merchant (a
@@ -215,6 +217,8 @@ Checks:
 
 `products`, `product_entitlements`, `prices`, `price_key_movements`, `catalog_applications`, `catalog_restore_receipts` and `price_migrations` are permanent, the rest state; none is partitioned. Products and prices soft-delete.
 
+`change_log`, the history of every catalog and configuration change, is permanent and append-only (`immutable_change_log`): no update or delete, a merchant purge keeps it, and the merchant archive moves it. It is not in the billing restore guard: a destination records its own configuration's history as soon as that configuration loads, and a restore adds the archive's entries to it, once per merchant (the restore receipt makes a replay a no-op).
+
 Checks:
 - `internal/retention/tables.go` lists every catalog table (by hand: nothing
   checks it against the schema).
@@ -275,6 +279,7 @@ Journeys:
 - OR-J15-S08, OR-J15-S12, OR-J29-S05, OR-J01-S05, OR-J01-S07, OR-J04-S02.
 - OR-J19-S01 to OR-J19-S07 (`TestPriceMigrationContracts`): only eligible subscribers move, at the paid boundary; a failed NMI push retries; cancel leaves applied and ineligible ones; an admitted renewal keeps its terms; a move that no longer applies is skipped and settles; notice follows cost per unit of time and a one-time target is refused; a Stripe push keeps seats and replays a lost create.
 - OR-J14-S07: a calendar subscription previews as blocked. OR-J01-S02 covers the migration routes.
+- OR-J43-S01, S02, S05, S06, S07 (`TestConfigurationHistory`): an edit and its entry commit and roll back together; a document records each changed object once; the list filters by object and time; a product's revision moves with its keys, not its prices, and its entries carry it; a stale `expected_revision` is refused.
 
 Other tests: `TestBillingIntervalUnits`; rate cards in
 `internal/modules/money/rating_test.go`, OR-J24-S09, OR-J24-S10; Solana plans

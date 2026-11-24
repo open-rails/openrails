@@ -751,6 +751,7 @@ export const billingAdminMessages = {
   "Review batch": "Review batch",
   "Review complete. Applying sends this exact document; this is not a database diff.":
     "Review complete. Applying sends this exact document; this is not a database diff.",
+  Revision: "Revision",
   Revoke: "Revoke",
   "Revoke product access": "Revoke product access",
   "Revoke remaining credit": "Revoke remaining credit",
