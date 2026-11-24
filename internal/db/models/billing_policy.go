@@ -57,7 +57,7 @@ type BillingPolicy struct {
 	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 
 	// CollectionThresholdAmount (micros) is when this payer's accrued arrears is
-	// invoiced. Overrides the merchant-wide invoice.collection_threshold for payers
+	// invoiced. Overrides its currency's usage_billing collection_threshold for payers
 	// bound to this policy; unset defers to it. Orthogonal to Kind.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
 

@@ -309,8 +309,8 @@ const CardVaultPlatform = "platform"
 // terms and privacy) and sender details; notices pick a URL by purpose
 // (MerchantProfile.NotificationURL), else support_url. AlertEmail receives
 // high and critical findings. UsageBilling is the default billing day (it
-// seeds new accounts only) and per-currency credit limits, minimum invoices
-// and delinquency floors; CollectionThreshold, BillingPeriodBoundary and
+// seeds new accounts only) and per-currency credit limits, minimum invoices,
+// collection thresholds and delinquency floors; BillingPeriodBoundary and
 // ArrearsGraceDays govern when usage arrears are billed and become
 // delinquent. BillingPolicies are named spend policies and
 // BillingPolicyBindings decide which customers get which.
@@ -319,7 +319,6 @@ const CardVaultPlatform = "platform"
 type MerchantSettings struct {
 	UsageBilling            *UsageBillingSettings `json:"usage_billing,omitempty"`
 	Profile                 *MerchantProfile      `json:"profile,omitempty"`
-	CollectionThreshold     *int64                `json:"collection_threshold,omitempty,string"`
 	BillingPeriodBoundary   string                `json:"billing_period_boundary,omitempty"`
 	AlertEmail              *string               `json:"alert_email,omitempty"`
 	RepriceNoticeWindowDays *int                  `json:"reprice_notice_window_days,omitempty"`
@@ -398,9 +397,10 @@ type BillingPolicy struct {
 	// direct-payer overage is charged. Allowed on either kind.
 	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
 	// PolicyCurrency is the currency of the policy's amounts and of a spend or
-	// bad-spend window that names none; absent, the request's. Admission
-	// converts the caps to the request's currency; the collection threshold
-	// and outstanding cap bind usage billed in it.
+	// bad-spend window that names none; absent, the request's. The outstanding
+	// cap and collection threshold bind only money in it, in admission and
+	// usage billing; windows and the accrual-rate cap are converted to the
+	// request's currency.
 	PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
 }
 

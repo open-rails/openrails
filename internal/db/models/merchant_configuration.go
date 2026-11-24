@@ -12,7 +12,6 @@ type MerchantConfiguration struct {
 
 	// Usage billing settings: the billing period and collection knobs.
 	// Missing values use money service defaults.
-	CollectionThreshold   *int64 `json:"collection_threshold,omitempty"`
 	BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
 
 	// ArrearsGraceDays is how many days past a usage order's due_at a payer keeps

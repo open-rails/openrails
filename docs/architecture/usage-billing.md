@@ -47,7 +47,10 @@ that period bills it. Until then the unposted amount counts as held.
 **Billing.** With `usage_billing_enabled`, the usage pass (`UsageOrderWorker`)
 bills each account whose `money_settings.usage_due_at` has come (its bill date, or
 a threshold crossing) as a usage order (`BillDueUsageAccount`), then queues due
-collections as `order_collection` operations. A running charge's accrual is
+collections as `order_collection` operations. The threshold is its currency's
+`usage_billing` `collection_threshold`, else its credit limit; a billing policy's
+outstanding cap and `collection_threshold_amount` bind only an account in the
+policy's `policy_currency`, as they do in admission (OR-J26-S61). A running charge's accrual is
 computed on read and posts at its stop, at 00:00 UTC and before other balance
 movements (`postRunningChargesThrough`).
 

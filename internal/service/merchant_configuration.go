@@ -226,9 +226,6 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.UsageBilling != nil {
 		current.UsageBilling = patch.UsageBilling
 	}
-	if patch.CollectionThreshold != nil {
-		current.CollectionThreshold = patch.CollectionThreshold
-	}
 	if patch.BillingPeriodBoundary != "" {
 		current.BillingPeriodBoundary = patch.BillingPeriodBoundary
 	}

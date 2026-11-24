@@ -18,6 +18,9 @@ type UsageBillingCurrency struct {
 	Currency             catalog.Currency `json:"currency"`
 	CreditLimit          int64            `json:"credit_limit,string"`
 	MinimumInvoiceAmount int64            `json:"minimum_invoice_amount,string"`
+	// CollectionThreshold invoices arrears in the currency once they reach it,
+	// before the credit limit: nil is the credit limit.
+	CollectionThreshold *int64 `json:"collection_threshold,string"`
 	// DelinquencyFloor is the smallest overdue balance in the currency that
 	// can make a customer delinquent: nil is one unit of the currency, 0
 	// delinquent once anything is overdue.

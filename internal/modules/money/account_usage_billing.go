@@ -485,8 +485,8 @@ func (s *MoneyService) resolveUsageTerms(ctx context.Context, q *gen.Queries, ro
 		terms.creditLimit = policy.OutstandingCapAmount
 	}
 	terms.threshold = terms.creditLimit
-	if v := settings.Config.CollectionThreshold; v != nil && *v > 0 && *v < terms.threshold {
-		terms.threshold = *v
+	if cur != nil && cur.CollectionThreshold != nil && *cur.CollectionThreshold > 0 && *cur.CollectionThreshold < terms.threshold {
+		terms.threshold = *cur.CollectionThreshold
 	}
 	if v := policy.CollectionThresholdAmount; inPolicyCurrency && v != nil && *v > 0 {
 		terms.threshold = min(*v, terms.creditLimit)

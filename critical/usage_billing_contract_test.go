@@ -506,6 +506,35 @@ func TestUsageBillingContracts(t *testing.T) {
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "dollar debt is held to the dollar floor, not the policy's euro one")
 	})
+	t.Run("OR-J26-S61/a-policys-cap-in-another-currency-binds-no-dollar-money", func(t *testing.T) {
+		// A yen policy caps debt at ¥1,000 and collects at ¥1,000; the dollar
+		// account has its own $5,000 line and collects at $30.
+		a, p, customer := usageBillingWorld(t, true, false, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.UsageBilling.Currencies = []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 5_000_000_000, MinimumInvoiceAmount: 1_000_000,
+				CollectionThreshold: ptr(int64(30_000_000)), DelinquencyFloor: ptr(int64(0))}}
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "yen", Kind: "outstanding_cap", PolicyCurrency: "JPY", OutstandingCapAmount: 10_000_000, CollectionThresholdAmount: ptr(int64(10_000_000))}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "yen"}}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		// $30 of dollar usage reaches the dollar threshold and is collected at
+		// once: the yen threshold, at the fixture's rate of 1 $1,000, withholds
+		// nothing.
+		oneUsage(t, a.alpha, usageInput(customer, "dollar-work", 3))
+		fleet := startFleet(t, a.world)
+		runUsageDue(t, fleet)
+		require.Eventually(t, func() bool {
+			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+		}, 15*time.Second, 20*time.Millisecond, "the dollar threshold collects")
+		require.EqualValues(t, 30_000_000, oneUsageOrder(t, a, customer).Total)
+		p.money(t, 1, 3000)
+		// A $1,500 request is within the dollar line, which the yen cap does
+		// not bind.
+		results, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(a.world, customer, "past-the-yen-cap", 1_500_000_000)})
+		require.NoError(t, err)
+		require.True(t, results[0].Allowed(), "%+v", results[0].Admission)
+	})
 	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")

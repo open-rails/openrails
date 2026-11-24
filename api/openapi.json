@@ -20087,10 +20087,6 @@
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
           },
-          "collection_threshold": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "billing_period_boundary": {
             "type": "string"
           },
@@ -27196,10 +27192,6 @@
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
           },
-          "collection_threshold": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "billing_period_boundary": {
             "type": "string"
           },
@@ -27619,6 +27611,17 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "collection_threshold": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "delinquency_floor": {
             "oneOf": [
               {
@@ -27635,6 +27638,7 @@
           "currency",
           "credit_limit",
           "minimum_invoice_amount",
+          "collection_threshold",
           "delinquency_floor"
         ]
       },

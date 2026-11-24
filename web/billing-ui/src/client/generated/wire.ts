@@ -1440,7 +1440,6 @@ export type MerchantConfigurationState = {
   display_name: string
   usage_billing?: UsageBillingSettings
   profile?: MerchantProfile
-  collection_threshold?: string
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
@@ -2819,7 +2818,6 @@ export type UpdateMerchantConfigurationParams = {
   display_name?: string
   usage_billing?: UsageBillingSettings
   profile?: MerchantProfile
-  collection_threshold?: string
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
@@ -2906,6 +2904,7 @@ export type UsageBillingCurrency = {
   currency: string
   credit_limit: string
   minimum_invoice_amount: string
+  collection_threshold: string | null
   delinquency_floor: string | null
 }
 

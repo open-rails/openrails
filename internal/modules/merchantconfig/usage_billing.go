@@ -27,7 +27,7 @@ func NormalizeUsageBilling(in billing.UsageBillingSettings) (billing.UsageBillin
 			return in, fmt.Errorf("usage_billing.currencies names %s twice", c.Currency)
 		}
 		seen[string(c.Currency)] = true
-		if c.CreditLimit < 0 || c.MinimumInvoiceAmount < 0 || (c.DelinquencyFloor != nil && *c.DelinquencyFloor < 0) {
+		if c.CreditLimit < 0 || c.MinimumInvoiceAmount < 0 || (c.DelinquencyFloor != nil && *c.DelinquencyFloor < 0) || (c.CollectionThreshold != nil && *c.CollectionThreshold < 0) {
 			return in, fmt.Errorf("usage_billing amounts must be nonnegative")
 		}
 		if c.CreditLimit > 0 && c.MinimumInvoiceAmount > c.CreditLimit {

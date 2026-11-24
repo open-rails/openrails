@@ -45,24 +45,24 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string
 	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{Scope: spendgate.ScopePayer, Windows: pw}}}, nil
 }
 
-// InCurrency is resolved with its amounts (the outstanding cap and the
-// accrual-rate cap) moved from its policy_currency to requestCurrency, as its
-// windows are. A blank policy_currency is the request's.
+// InCurrency is resolved as it binds a request in requestCurrency. Its
+// outstanding cap, like its collection threshold in usage billing, binds only
+// money in its policy_currency: another currency keeps the account's own
+// limit. Its accrual-rate cap, a velocity like its windows, is converted. A
+// blank policy_currency is the request's.
 func (l *SpendgatePolicyLoader) InCurrency(ctx context.Context, resolved ResolvedPolicy, requestCurrency string) (ResolvedPolicy, error) {
 	from := strings.TrimSpace(resolved.PolicyCurrency)
 	to := money.NormalizeCurrency(requestCurrency)
 	if from == "" || money.NormalizeCurrency(from) == to {
 		return resolved, nil
 	}
-	for _, amount := range []*int64{&resolved.OutstandingCapAmount, &resolved.AccrualRateCapPerHour} {
-		if *amount <= 0 {
-			continue
-		}
-		conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(from), to, *amount)
+	resolved.OutstandingCapAmount = 0
+	if resolved.AccrualRateCapPerHour > 0 {
+		conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(from), to, resolved.AccrualRateCapPerHour)
 		if err != nil {
 			return ResolvedPolicy{}, err
 		}
-		*amount = conv
+		resolved.AccrualRateCapPerHour = conv
 	}
 	return resolved, nil
 }

@@ -2586,7 +2586,6 @@ pkg openrails/billing, type MerchantSettings struct, BillingPolicyBindings []Bil
 pkg openrails/billing, type MerchantSettings struct, CardVault string `json:"card_vault,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, ChargePSPs []string `json:"charge_psps,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
-pkg openrails/billing, type MerchantSettings struct, CollectionThreshold *int64 `json:"collection_threshold,omitempty,string"`
 pkg openrails/billing, type MerchantSettings struct, Currencies []MerchantCurrency `json:"currencies,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, DelegatedInvokerWastedSpendLimits []BudgetWindow `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
@@ -4047,6 +4046,7 @@ pkg openrails/billing, type UsageBillingAccountUpdate struct, BillingAnchor cata
 pkg openrails/billing, type UsageBillingAccountUpdate struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type UsageBillingAccountUpdate struct, MinimumInvoiceAmount catalog.Field[int64] `json:"minimum_invoice_amount,omitzero"`
 pkg openrails/billing, type UsageBillingCurrency struct
+pkg openrails/billing, type UsageBillingCurrency struct, CollectionThreshold *int64 `json:"collection_threshold,string"`
 pkg openrails/billing, type UsageBillingCurrency struct, CreditLimit int64 `json:"credit_limit,string"`
 pkg openrails/billing, type UsageBillingCurrency struct, Currency catalog.Currency `json:"currency"`
 pkg openrails/billing, type UsageBillingCurrency struct, DelinquencyFloor *int64 `json:"delinquency_floor,string"`

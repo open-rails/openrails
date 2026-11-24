@@ -104,15 +104,11 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			return Settings{}, fmt.Errorf("profile.statement_descriptor must be at most 64 characters")
 		}
 	}
-	if in.CollectionThreshold != nil && *in.CollectionThreshold < 0 {
-		return Settings{}, fmt.Errorf("collection_threshold must be >= 0")
-	}
 	for name, v := range map[string]*int{"reprice_notice_window_days": in.RepriceNoticeWindowDays, "arrears_grace_days": in.ArrearsGraceDays} {
 		if v != nil && *v < 0 {
 			return Settings{}, fmt.Errorf("%s must be >= 0", name)
 		}
 	}
-	cfg.CollectionThreshold = in.CollectionThreshold
 	cfg.RepriceNoticeWindowDays, cfg.ArrearsGraceDays = in.RepriceNoticeWindowDays, in.ArrearsGraceDays
 	if in.BillingPeriodBoundary != "" {
 		if NormalizeBillingBoundary(in.BillingPeriodBoundary) == "" {
