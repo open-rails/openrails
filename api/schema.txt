@@ -13,6 +13,7 @@ migration 0009_order_keys_and_cancel_kinds.up.sql sha256:d9f399efae661b1fc5f50ed
 migration 0010_credit_grants.up.sql sha256:fdab284c9d4a8a721620c8b9c9bd34796ccbe679afc1c79e39299857c0e4e340
 migration 0011_disputes.up.sql sha256:2c2f3eea9343cece49fd8c8aa0b6a93a6e0292ee3d67d9a518e821b8da68451f
 migration 0012_operation_log.up.sql sha256:230a94a136e3e0229505fbc58dbc87a052b9b6d3112ac24ae08795870e55b9e7
+migration 0013_limit_counts.up.sql sha256:d674b513c1dc9874c7580fa1625bc80d3474023d1bb165d6942b0c2a8bcd81d8
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -96,7 +97,7 @@ table billing.catalog_field_owners
   column actor text NOT NULL
   column set_at timestamp with time zone NOT NULL
   constraint catalog_field_owners_actor_check CHECK (((actor <> ''::text) AND (octet_length(actor) <= 255)))
-  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'required_entitlements'::text, 'credit_grant'::text, 'rate_cards'::text, 'limits'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'billing_interval_months'::text, 'provider_access_default'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'sell_via'::text, 'provider'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text]))) OR ((object = 'limit'::text) AND (field = ANY (ARRAY['unit'::text, 'reset'::text, 'overrun'::text, 'rate_cards'::text])))))
+  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'required_entitlements'::text, 'credit_grant'::text, 'rate_cards'::text, 'limits'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'billing_interval_months'::text, 'provider_access_default'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'sell_via'::text, 'provider'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text]))) OR ((object = 'limit'::text) AND (field = ANY (ARRAY['unit'::text, 'reset'::text, 'overrun'::text, 'counts'::text])))))
   constraint catalog_field_owners_key_check CHECK (((key <> ''::text) AND (octet_length(key) <= 255)))
   constraint catalog_field_owners_manager_check CHECK ((manager = ANY (ARRAY['apply'::text, 'edit'::text])))
   constraint catalog_field_owners_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -113,17 +114,17 @@ table billing.catalog_limits
   column window_seconds integer
   column reset_anchor text
   column overrun text NOT NULL
-  column rate_cards jsonb NOT NULL
   column revision bigint NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column counts jsonb NOT NULL
   constraint catalog_limits_anchor_check CHECK (((reset_anchor IS NOT NULL) = (reset_kind = 'fixed'::text)))
-  constraint catalog_limits_currency_rate_cards_check CHECK (((unit ~ '^[a-z]'::text) OR (rate_cards = '[]'::jsonb)))
+  constraint catalog_limits_counts_check CHECK ((jsonb_typeof(counts) = 'array'::text))
+  constraint catalog_limits_currency_counts_check CHECK (((unit ~ '^[a-z]'::text) OR (counts = '[]'::jsonb)))
   constraint catalog_limits_key_check CHECK (((key ~ '^[a-z][a-z0-9_-]{0,63}$'::text) AND (key <> 'balance'::text)))
   constraint catalog_limits_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint catalog_limits_overrun_check CHECK ((overrun = ANY (ARRAY['require_estimate'::text, 'admit_while_positive'::text])))
   constraint catalog_limits_pkey PRIMARY KEY (merchant_id, key)
-  constraint catalog_limits_rate_cards_check CHECK ((jsonb_typeof(rate_cards) = 'array'::text))
   constraint catalog_limits_reset_anchor_check CHECK ((reset_anchor = ANY (ARRAY['subscription'::text, 'first_use'::text])))
   constraint catalog_limits_reset_kind_check CHECK ((reset_kind = ANY (ARRAY['fixed'::text, 'billing_period'::text, 'session'::text, 'rolling'::text, 'rate'::text, 'lifetime'::text])))
   constraint catalog_limits_revision_check CHECK ((revision >= 1))

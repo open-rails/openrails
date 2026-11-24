@@ -29,7 +29,7 @@ limits:
     unit: units
     reset: {kind: fixed, window_seconds: 86400, anchor: first_use}
     overrun: admit_while_positive
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   plan: {display_name: Plan, limits: {quota: "100"}}
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
@@ -43,7 +43,7 @@ limits:
   burst:
     unit: units
     reset: {kind: session, window_seconds: 20}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   plan: {display_name: Plan, limits: {burst: "100"}}
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
@@ -57,7 +57,7 @@ limits:
   quarter:
     unit: units
     reset: {kind: fixed, window_seconds: 7776000, anchor: first_use}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   plan: {display_name: Plan, limits: {quarter: "100"}}
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
@@ -72,7 +72,7 @@ limits:
   minute:
     unit: units
     reset: {kind: fixed, window_seconds: 60, anchor: subscription}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
 `
@@ -87,23 +87,23 @@ limits:
   quota:
     unit: units
     reset: {kind: fixed, window_seconds: 86400, anchor: first_use}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
   weekly:
     unit: units
     reset: {kind: fixed, window_seconds: 604800, anchor: subscription}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
   recent:
     unit: units
     reset: {kind: rolling, window_seconds: 3600}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
   visit:
     unit: units
     reset: {kind: session, window_seconds: 3600}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
   ever:
     unit: units
     reset: {kind: lifetime}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   plan: {display_name: Plan, limits: {quota: "100", weekly: "500", recent: "100", visit: "100", ever: "1000"}}
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}

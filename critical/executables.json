@@ -520,6 +520,12 @@
     "OR-J23-S34": [
       "TestLimitHolds/OR-J23-S34/a-policys-accrual-rate-cap-is-in-its-policy-currency"
     ],
+    "OR-J23-S35": [
+      "TestLimitHolds/OR-J23-S35/a-limit-counting-two-meters-by-weight-admits-and-refuses-at-their-weighted-total"
+    ],
+    "OR-J23-S36": [
+      "TestUsageLimits/OR-J23-S36/a-catalog-naming-a-limits-rate-cards-is-refused-with-their-rename"
+    ],
     "OR-J24-S01": [
       "TestUsageContracts/OR-J24-S01/replay-retains-one-immutable-rated-event"
     ],
@@ -768,6 +774,11 @@
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-transfer-naming-another-customers-lot",
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/a-migrated-purchase-deposit-replays",
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders"
+    ],
+    "OR-J31-S16": [
+      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/converts-per-unit-cards",
+      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/refuses-a-card-counts-cannot-express",
+      "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts"
     ],
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 531,
+  "scenario_count": 534,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1004,6 +1004,11 @@
       "name": "Credit lots move out of grants with their ids and the remainders and pending-refund shares the old formulas gave (the reservation net of reversals already settled), old data the move cannot place refuses it with nothing moved, and a migrated purchase deposit replays"
     },
     {
+      "id": "OR-J31-S16",
+      "journey": "J31",
+      "name": "Stored limit rate cards migrate to counts: a per-unit card becomes one count and a matrix one per priced cell with its filter, the limit's field owner renames, and a card counts cannot express refuses the migration with nothing changed"
+    },
+    {
       "id": "OR-J31-S09",
       "journey": "J31",
       "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
@@ -1342,6 +1347,16 @@
       "id": "OR-J23-S34",
       "journey": "J23",
       "name": "A billing policy's amounts are in its policy_currency: an accrual-rate cap in yen gates USD usage at its converted rate"
+    },
+    {
+      "id": "OR-J23-S35",
+      "journey": "J23",
+      "name": "A limit counting two meters by weight (output four times input, a large model's output six more) admits and refuses at the weighted total in Admit and in a gate, and settles each count rounded half up"
+    },
+    {
+      "id": "OR-J23-S36",
+      "journey": "J23",
+      "name": "A catalog naming a limit's rate_cards is refused with their rename to counts, as YAML and over HTTP, and applies nothing; the one-to-one count applies"
     },
     {
       "id": "OR-J29-S07",

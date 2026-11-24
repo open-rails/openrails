@@ -35,11 +35,11 @@ limits:
   hourly:
     unit: units
     reset: {kind: fixed, window_seconds: 3600, anchor: first_use}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
   daily:
     unit: units
     reset: {kind: fixed, window_seconds: 86400, anchor: first_use}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   plan: {display_name: Plan, limits: {hourly: "100", daily: "60"}}
   metered: {display_name: Metered, rate_cards: [{meter: work, price: {model: dynamic, currency: USD}}]}
@@ -56,11 +56,11 @@ limits:
   hourly:
     unit: units
     reset: {kind: fixed, window_seconds: 3600, anchor: first_use}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
   daily:
     unit: units
     reset: {kind: fixed, window_seconds: 86400, anchor: first_use}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   plan: {display_name: Plan, limits: {hourly: "100", daily: "60"}}
   metered: {display_name: Metered, rate_cards: [{meter: calls, price: {model: dynamic, currency: USD}}]}
@@ -76,16 +76,16 @@ limits:
     unit: usage_units
     reset: {kind: session, window_seconds: 8}
     overrun: admit_while_positive
-    rate_cards:
-    - meter: input-tokens
-      price: {model: per_unit, per_unit: {divide_by: 1000, matrix: {dimension: model, cells: {small: {unit_amount: "1"}, large: {unit_amount: "5"}}}}}
+    counts:
+    - {meter: input-tokens, per: 1000, filter: {model: [small]}}
+    - {meter: input-tokens, weight: 5, per: 1000, filter: {model: [large]}}
   weekly:
     unit: usage_units
     reset: {kind: fixed, window_seconds: 604800, anchor: first_use}
     overrun: admit_while_positive
-    rate_cards:
-    - meter: input-tokens
-      price: {model: per_unit, per_unit: {divide_by: 1000, matrix: {dimension: model, cells: {small: {unit_amount: "1"}, large: {unit_amount: "5"}}}}}
+    counts:
+    - {meter: input-tokens, per: 1000, filter: {model: [small]}}
+    - {meter: input-tokens, weight: 5, per: 1000, filter: {model: [large]}}
 products:
   pro: {display_name: Pro, limits: {session: "1000", weekly: "1500"}}
   chat: {display_name: Chat, rate_cards: [{meter: input-tokens, price: {model: dynamic, currency: USD}}]}
@@ -100,7 +100,7 @@ limits:
   tick:
     unit: units
     reset: {kind: fixed, window_seconds: 180, anchor: subscription}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   member:
     display_name: Member

@@ -334,16 +334,14 @@ func (f *fakeSync) want(lease billing.LeaseID, want billing.LeaseWant, committed
 }
 
 func (f *fakeSync) hold(customer billing.CustomerID, held map[string]int64, version int64) billing.Hold {
-	h := billing.Hold{CustomerID: customer, LimitSet: fakeSet, Currency: "USD", Limits: []billing.HoldLimit{}, RateCards: []billing.HoldRateCard{}, PriceBounds: []billing.PriceBound{}, Safe: f.safe, Version: version}
-	unit := catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 1, DivideBy: 1}}
+	h := billing.Hold{CustomerID: customer, LimitSet: fakeSet, Currency: "USD", Limits: []billing.HoldLimit{}, Counts: []billing.HoldCount{}, RateCards: []billing.HoldRateCard{}, PriceBounds: []billing.PriceBound{}, Safe: f.safe, Version: version}
 	for _, l := range f.limitsOf() {
 		if l == "balance" {
 			h.Limits = append(h.Limits, billing.HoldLimit{Limit: l, Unit: "USD", Held: held[l], Overrun: catalog.OverrunRequireEstimate})
 			continue
 		}
-		limit := l
 		h.Limits = append(h.Limits, billing.HoldLimit{Limit: l, Unit: "units", Held: held[l], Overrun: catalog.OverrunRequireEstimate})
-		h.RateCards = append(h.RateCards, billing.HoldRateCard{Limit: &limit, Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum, Price: unit})
+		h.Counts = append(h.Counts, billing.HoldCount{Limit: l, Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum, Weight: 1, Per: 1})
 	}
 	if f.money {
 		h.RateCards = append(h.RateCards, billing.HoldRateCard{Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum,
@@ -945,15 +943,13 @@ func nilRedisForTest() redis.UniversalClient {
 
 func dayHold(customer billing.CustomerID, start time.Time, daily, balance, version int64) billing.Hold {
 	end := start.Add(24 * time.Hour)
-	limit := "daily"
 	return billing.Hold{CustomerID: customer, LimitSet: fakeSet, Currency: "USD", Version: version,
 		Limits: []billing.HoldLimit{
 			{Limit: "daily", Unit: "units", Held: daily, Overrun: catalog.OverrunRequireEstimate, WindowStartsAt: &start, WindowEndsAt: &end},
 			{Limit: "balance", Unit: "USD", Held: balance, Overrun: catalog.OverrunRequireEstimate},
 		},
+		Counts: []billing.HoldCount{{Limit: "daily", Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum, Weight: 1, Per: 1}},
 		RateCards: []billing.HoldRateCard{
-			{Limit: &limit, Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum,
-				Price: catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 1, DivideBy: 1}}},
 			{Meter: "work", EventType: "work", ValueProperty: "units", Aggregation: catalog.AggregationSum,
 				Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 10, DivideBy: 1}}},
 		},
