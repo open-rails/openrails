@@ -73,9 +73,6 @@ const (
 	// Merchant orders: previewed, created and withdrawn.
 	MerchantOrdersManage Permission = "merchant:orders:manage"
 	RootOrdersManage     Permission = "root:orders:manage"
-	// A customer by openrails.dev account.
-	MerchantCustomersRead Permission = "merchant:customers:read"
-	RootCustomersRead     Permission = "root:customers:read"
 	// SCIM provisioning (/v1/app/scim/v2): a merchant's directory reading
 	// and pushing its users, its customers' contacts.
 	MerchantProvisioningRead   Permission = "merchant:provisioning:read"
@@ -95,7 +92,6 @@ func Permissions() []Permission {
 		MerchantEntitlementsRead, RootEntitlementsRead, MerchantCatalogRead, RootCatalogRead,
 		MerchantUsageRead, RootUsageRead, MerchantUsageManage, RootUsageManage,
 		MerchantEventsRead, RootEventsRead, MerchantOrdersManage, RootOrdersManage,
-		MerchantCustomersRead, RootCustomersRead,
 		MerchantProvisioningRead, RootProvisioningRead, MerchantProvisioningManage, RootProvisioningManage,
 		RootAdminRateLimitsUnlock,
 	}

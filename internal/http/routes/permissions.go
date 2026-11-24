@@ -60,7 +60,6 @@ var (
 	needUsage        = Pair{billing.MerchantUsageManage, billing.RootUsageManage}
 	needEvents       = Pair{billing.MerchantEventsRead, billing.RootEventsRead}
 	needOrders       = Pair{billing.MerchantOrdersManage, billing.RootOrdersManage}
-	needCustomers    = Pair{billing.MerchantCustomersRead, billing.RootCustomersRead}
 
 	needProvisioningRead = Pair{billing.MerchantProvisioningRead, billing.RootProvisioningRead}
 	needProvisioning     = Pair{billing.MerchantProvisioningManage, billing.RootProvisioningManage}
