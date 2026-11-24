@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -48,6 +49,9 @@ type fakeViews struct {
 	settleNone bool
 	dropAdmit  int
 	slow       time.Duration
+	// busyUntil answers every sync before it 503, as a server that could
+	// not take its locks in time.
+	busyUntil time.Time
 }
 
 type fakeLimit struct {
@@ -277,6 +281,10 @@ func (f *fakeViews) sync(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	now := time.Now()
+	if now.Before(f.busyUntil) {
+		writeFakeError(w, 503, billing.CodeServiceUnavailable, "the sync could not take its locks in time; retry it")
+		return
+	}
 	f.syncs = append(f.syncs, p)
 	lease := f.leases[p.LeaseID]
 	if lease == nil {
@@ -1196,6 +1204,48 @@ func TestGateCloseEndsItsLease(t *testing.T) {
 			if !closed {
 				t.Fatalf("round %d: Close returned with its lease open", i)
 			}
+		}
+	})
+}
+
+// A transient failure never drops captured usage: Close retries within its
+// bound and settles it. Usage still unsent when the bound ends is named in
+// Close's error.
+func TestGateCloseRidesOutTransientFailures(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 2)
+	synctest.Test(t, func(t *testing.T) {
+		customer := billing.CustomerID(uuid.New())
+		use := func(g *Gate, prefix string, n int) {
+			for i := range n {
+				tk := mustAdmit(t, g, work(customer, fmt.Sprintf("%s-%d", prefix, i), 2))
+				if err := tk.Capture(t.Context(), capture(2)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		g := newTestGate(t, f, GateDeps{})
+		warm(t, g, customer)
+		f.set(func(f *fakeViews) { f.busyUntil = time.Now().Add(3 * time.Second) })
+		use(g, "brief", 5)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := g.Close(ctx); err != nil {
+			t.Fatalf("Close through a brief outage: %v", err)
+		}
+		if got := f.settledOf(customer, "quota"); got != 11 {
+			t.Fatalf("%d units settled, want 11: Close dropped captured usage", got)
+		}
+
+		g = newTestGate(t, f, GateDeps{})
+		warm(t, g, customer)
+		f.set(func(f *fakeViews) { f.busyUntil = time.Now().Add(time.Hour) })
+		use(g, "long", 2)
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := g.Close(ctx)
+		if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "2 usage items unsent") {
+			t.Fatalf("Close past its bound: %v, want ErrUnavailable naming 2 unsent items", err)
 		}
 	})
 }
