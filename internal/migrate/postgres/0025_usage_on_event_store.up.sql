@@ -68,13 +68,13 @@ CREATE TABLE billing.usage_postings (
     period_ends_at timestamptz NOT NULL,
     cut_at timestamptz NOT NULL,
     reason text NOT NULL CHECK (reason IN ('close', 'movement', 'reversal')),
-    amount bigint NOT NULL CHECK (amount <> 0),
+    amount bigint NOT NULL,
     lines jsonb NOT NULL CHECK (jsonb_typeof(lines) = 'array' AND octet_length(lines::text) <= 262144),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT usage_postings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
     CONSTRAINT usage_postings_period_ends_at_check CHECK (period_ends_at > period_starts_at),
-    CONSTRAINT usage_postings_amount_check CHECK ((reason = 'reversal') = (amount < 0))
+    CONSTRAINT usage_postings_amount_check CHECK (amount <> 0 AND (reason = 'reversal') = (amount < 0))
 );
 COMMENT ON TABLE billing.usage_postings IS 'One posting of a customer''s usage in one pricing period to the ledger: the price of the period''s deduplicated usage before cut_at, less what its earlier postings took. A posting draws the balance first, one credit_spend per lot, and leaves the rest owed in one owed_accrual, at (usage_posting, usage_posting:<id>, 1); a reversal credits a period whose price fell, as usage_reversed. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.usage_postings.cut_at IS 'Usage that occurred before it is in the posting: the month''s end in the merchant''s accounting zone, or the balance movement the posting preceded.';
@@ -157,6 +157,7 @@ BEGIN
                   'customer_limit_overrides',
                   'customer_low_balance_lines',
                   'customer_messages',
+                  'customer_mrr',
                   'customers',
                   'dashboard_configs',
                   'destructive_actions',
@@ -180,6 +181,13 @@ BEGIN
                   'mandates',
                   'merchant_destructive_policy',
                   'money_settings',
+                  'mrr_cohort_flows',
+                  'mrr_flows',
+                  'mrr_movement_lines',
+                  'mrr_movements',
+                  'mrr_product_flows',
+                  'mrr_scheduled',
+                  'mrr_totals',
                   'nmi_bulk_checkpoints',
                   'nmi_history_months',
                   'nmi_history_reads',
@@ -218,8 +226,9 @@ BEGIN
                   'solana_pay_references',
                   'solana_subscriptions',
                   'stored_card_checks',
-                  'subscription_status_transitions',
                   'subscription_billing_changes',
+                  'subscription_mrr',
+                  'subscription_status_transitions',
                   'subscription_verifications',
                   'subscriptions',
                   'usage_card_prints',
