@@ -9,8 +9,9 @@ import type { CreditGrant } from "#orck/admin/lib/api/credit-types"
 import {
   currencyScale,
   formatDate,
-  formatNativeAmount,
+  formatScaledAmount,
   shortId,
+  type UnitScales,
 } from "#orck/admin/lib/format"
 import { CursorPager } from "#orck/admin/components/cursor-pager"
 import { useCursorPages } from "#orck/admin/lib/cursor-pages"
@@ -51,9 +52,12 @@ import { errorText } from "#orck/admin/lib/error-text"
 export function CustomerCreditSupportSection({
   customerId,
   currencies,
+  units,
 }: {
   customerId: string
   currencies: string[]
+  /** The scales of the merchant's own units the customer holds. */
+  units: UnitScales
 }) {
   const { activeMerchant } = useAuth()
   const merchant = activeMerchant?.slug ?? ""
@@ -63,6 +67,7 @@ export function CustomerCreditSupportSection({
       merchant={merchant}
       customer={customerId}
       initialCurrency={currencies[0] ?? "USD"}
+      units={units}
     />
   )
 }
@@ -71,10 +76,12 @@ function CreditSupport({
   merchant,
   customer,
   initialCurrency,
+  units,
 }: {
   merchant: string
   customer: string
   initialCurrency: string
+  units: UnitScales
 }) {
   const { id: adminId, text: adminText } = useAdminUI()
 
@@ -105,7 +112,7 @@ function CreditSupport({
       ledgerPages.cursor
     )
   )
-  const decimals = currencyScale(currency)
+  const decimals = units[currency] ?? currencyScale(currency)
 
   return (
     <Card>
@@ -229,7 +236,7 @@ function CreditSupport({
                         grant.refunded_amount,
                       ].map((amount, index) => (
                         <TableCell key={index} className="tabular-nums">
-                          {formatNativeAmount(amount, grant.currency)}
+                          {formatScaledAmount(amount, grant.currency, units)}
                         </TableCell>
                       ))}
                       <TableCell>{grant.state}</TableCell>
@@ -306,7 +313,7 @@ function CreditSupport({
                     </TableCell>
                     <TableCell>{tx.type.replaceAll("_", " ")}</TableCell>
                     <TableCell className="tabular-nums">
-                      {formatNativeAmount(tx.amount, tx.currency)}
+                      {formatScaledAmount(tx.amount, tx.currency, units)}
                     </TableCell>
                     <TableCell>{tx.source || "—"}</TableCell>
                   </TableRow>
@@ -336,6 +343,7 @@ function CreditSupport({
           merchant={merchant}
           customer={customer}
           grant={revokeGrant}
+          units={units}
           onClose={() => setRevokeGrant(null)}
         />
       )}
@@ -472,11 +480,13 @@ function RevokeCreditDialog({
   merchant,
   customer,
   grant,
+  units,
   onClose,
 }: {
   merchant: string
   customer: string
   grant: CreditGrant
+  units: UnitScales
   onClose: () => void
 }) {
   const { toast, creditMutations } = useAdminServices()
@@ -503,7 +513,7 @@ function RevokeCreditDialog({
           </DialogTitle>
           <DialogDescription>
             <AdminMessage id={"Revoke the unspent remainder of"} />{" "}
-            {formatNativeAmount(grant.remaining_amount, grant.currency)}
+            {formatScaledAmount(grant.remaining_amount, grant.currency, units)}
             <AdminMessage
               id={
                 ". Active holds may prevent revocation. Payment refunds are managed separately."
@@ -523,7 +533,7 @@ function RevokeCreditDialog({
               toast.success(
                 result.replayed
                   ? "Credit was already revoked"
-                  : `${formatNativeAmount(result.revoked_amount, result.currency)} revoked`
+                  : `${formatScaledAmount(result.revoked_amount, result.currency, units)} revoked`
               )
               onClose()
             } catch (error) {
