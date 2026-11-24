@@ -16,6 +16,7 @@ guards() {
   bash scripts/check-one-pull-entry.sh
   bash scripts/check-borrowed-connections.sh
   bash scripts/check-logging.sh
+  bash scripts/check-image-digests.sh
   bash scripts/scan-injected-code.sh --all
   go run ./scripts/contracts -lint
   go run ./scripts/docscheck

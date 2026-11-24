@@ -42,8 +42,9 @@ env:
   # The smoke database, binfmt and BuildKit come from Google's Docker Hub
   # mirror, as do the Dockerfile's digest-pinned official base images.
   # BASE_REGISTRY remains overrideable without changing any digest.
-  BINFMT_IMAGE: mirror.gcr.io/tonistiigi/binfmt:latest
-  BUILDKIT_IMAGE: mirror.gcr.io/moby/buildkit:buildx-stable-1
+  # Every image a job pulls is pinned by digest (scripts/check-image-digests.sh).
+  BINFMT_IMAGE: mirror.gcr.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 # latest
+  BUILDKIT_IMAGE: mirror.gcr.io/moby/buildkit@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c # buildx-stable-1
 
 jobs:
   verify-source:
@@ -95,7 +96,7 @@ jobs:
       pull-requests: write # posts the Trivy report to the PR
     services:
       postgres:
-        image: mirror.gcr.io/library/postgres:18-alpine
+        image: mirror.gcr.io/library/postgres@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71 # 18-alpine
         env:
           POSTGRES_DB: openrails_db
           POSTGRES_USER: smoke
@@ -108,7 +109,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       garnet:
-        image: ghcr.io/microsoft/garnet:latest
+        image: ghcr.io/microsoft/garnet@sha256:9ea4c7f379e0366e5647c94ddbe17710d3aba434a92d974658dd90e4a3efc4ed # latest
         ports:
           - 6380:6379
     steps:
@@ -310,7 +311,9 @@ jobs:
     if: github.event_name != 'pull_request' && !inputs.snapshot
     permissions:
       contents: read
-      packages: write # GHCR
+      packages: write # GHCR, and its attestation
+      id-token: write # signs the provenance attestations
+      attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -398,3 +401,30 @@ jobs:
           done
           scripts/ci-retry.sh docker buildx imagetools create "${hub[@]}" "${IMAGE}@${AMD64}" "${IMAGE}@${ARM64}"
           scripts/ci-retry.sh docker buildx imagetools create "${ghcr[@]}" "${IMAGE}:${TAG}"
+
+      # The digest each registry serves the release tag as, attested below
+      # (gh attestation verify, docs/standalone.md "Kubernetes and Helm").
+      - name: Read published digests
+        id: published
+        env:
+          TAG: ${{ needs.verify-source.outputs.tag }}
+        run: |
+          for pair in "hub=${IMAGE}" "ghcr=${GHCR_IMAGE}"; do
+            digest="$(docker buildx imagetools inspect "${pair#*=}:${TAG}" --format '{{json .Manifest}}' | jq -r .digest)"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest for ${pair#*=}:${TAG}" >&2; exit 1; }
+            echo "${pair%%=*}=${digest}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Attest Docker Hub image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.published.outputs.hub }}
+          push-to-registry: true
+
+      - name: Attest GHCR image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.published.outputs.ghcr }}
+          push-to-registry: true

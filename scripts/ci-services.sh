@@ -13,7 +13,7 @@ state="${RUNNER_TEMP:?}/ci-services"
 
 start_postgres() {
   local image
-  image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
+  image="$(scripts/ci-pull-image.sh postgres@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71)" # 18-alpine
   # Public recovery cases open several independent engines. Bound WAL for
   # this disposable tmpfs; PostgreSQL's default 1 GiB target can exhaust it.
   docker run -d --pull never --name critical-postgres -p 5432:5432 \
@@ -26,7 +26,7 @@ start_postgres() {
 
 start_redis() {
   local image
-  image="$(scripts/ci-pull-image.sh redis:7-alpine)"
+  image="$(scripts/ci-pull-image.sh redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe)" # 7-alpine
   docker run -d --pull never --name critical-redis -p 127.0.0.1:6379:6379 "$image"
   timeout 60 bash -c 'until docker exec critical-redis redis-cli ping; do sleep 1; done'
 }
@@ -35,7 +35,7 @@ start_redis() {
 # Each test mounts its own KV v2 engine (internal/vaulttest).
 start_vault() {
   local image
-  image="$(scripts/ci-pull-image.sh hashicorp/vault:2.1.1)"
+  image="$(scripts/ci-pull-image.sh hashicorp/vault@sha256:47f14a6acb98f48d798a07df7c83f23a6e636e1cf724c5f8ff165cb32667a1e2)" # 2.1.1
   docker run -d --pull never --name critical-vault -p 8200:8200 \
     -e VAULT_DEV_ROOT_TOKEN_ID="${OPENRAILS_CRITICAL_VAULT_TOKEN:?}" "$image"
   timeout 60 bash -c 'until curl -fsS http://127.0.0.1:8200/v1/sys/health >/dev/null; do sleep 1; done'

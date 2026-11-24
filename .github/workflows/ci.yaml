@@ -434,10 +434,14 @@ jobs:
     uses: ./.github/workflows/docker-publish.yaml
     with:
       snapshot: true
+    # A caller grants at least what the called jobs declare; its publish job
+    # (attestations) runs only on release tags.
     permissions:
       contents: read
       packages: write
       pull-requests: write
+      id-token: write
+      attestations: write
 
   gate:
     name: ${{ (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}

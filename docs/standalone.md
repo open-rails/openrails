@@ -1351,6 +1351,12 @@ ingress:
 
 A change to `config` or `files` rolls the pods.
 
+**Verifying the image.** Each release image carries a signed build-provenance attestation of its digest in both registries. Check it before pinning that digest in `image.digest`:
+
+```sh
+gh attestation verify oci://docker.io/openrails/openrails:vX.Y.Z --repo open-rails/openrails
+```
+
 **Secrets.** `secrets.env` takes CloudNativePG's app Secret directly
 (`DB_URL: {name: openrails-db-app, key: uri}`). With External Secrets Operator,
 name each target key after its variable; with the Vault Agent Injector render one
