@@ -79,7 +79,7 @@ func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency s
 	return applied, nil
 }
 
-// LockCustomer takes the per-customer spend lock (the customers row FOR UPDATE
+// LockCustomer takes the per-customer spend lock (the customers row FOR NO KEY UPDATE
 // money's lockBalance takes), so lot-consuming/reversing writes serialize with
 // spends. Only effective inside a tx.
 func (l *Ledger) LockCustomer(ctx context.Context, customer uuid.UUID) error {

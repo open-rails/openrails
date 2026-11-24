@@ -877,7 +877,7 @@ type BillingMrrCohortFlow struct {
 	Logos      int64
 }
 
-// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary, a part of churn) with their sum, count and logo change; scheduled churn, contraction and expansion added, reversed, effected and superseded. A read groups the buckets into the merchant's local days with AT TIME ZONE; MRR at an instant is mrr_totals less the movements of the buckets from it on.
+// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary, a part of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days with AT TIME ZONE; MRR at an instant is mrr_totals less the movements of the buckets from it on.
 type BillingMrrFlow struct {
 	MerchantID uuid.UUID
 	Currency   string
@@ -936,7 +936,7 @@ type BillingMrrProductFlow struct {
 	Subscribers int64
 }
 
-// MRR a subscription will lose or gain at a date: churn from a cancellation at period end, contraction or expansion from a scheduled change at its renewal. scheduled until it is effected, reversed (a resume, a canceled change) or superseded (a later cancel or change). At most one is scheduled per subscription. Retention: permanent, never pruned.
+// MRR a subscription will lose or gain at a date: churn from a cancellation at period end, contraction or expansion from a scheduled change at its renewal. scheduled until it is effected, reversed (a resume, a canceled change) or superseded (a later cancel or change). At most one is scheduled per subscription. A report counts what was added in a period by scheduled_at and what was reversed, effected or superseded by resolved_at. Retention: permanent, never pruned.
 type BillingMrrScheduled struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
@@ -2137,7 +2137,7 @@ type BillingSubscriptionBillingChange struct {
 	OperationID          *uuid.UUID
 }
 
-// What each subscription adds to MRR now, kept by trg_subscriptions_track_mrr for every writer: its price's list amount normalised to a month (billing.price_mrr) times its seats, while it is live or canceled with its end ahead; a pending subscription, a trial and an ended one add 0. The recorded_ columns are what the customer's MRR last counted; a row that differs (dirty) is settled into a movement at commit.
+// What each subscription adds to MRR now, kept by trg_subscriptions_track_mrr for every writer: its price's MRR for its seats (billing.price_mrr), while it is live or canceled with its end ahead; a pending subscription, a trial and an ended one add 0. The recorded_ columns are what the customer's MRR last counted; a row that differs (dirty) is settled into a movement at commit.
 type BillingSubscriptionMrr struct {
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID

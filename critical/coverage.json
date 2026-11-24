@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 482,
+  "scenario_count": 486,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2131,7 +2131,7 @@
     {
       "id": "OR-J42-S01",
       "journey": "J42",
-      "name": "New, expansion, contraction, churn and reactivation are each recorded once at the customer level, normalised to a month (a day's 730 hours, a year's twelfth, calendar months) and per currency"
+      "name": "New, expansion, contraction, churn and reactivation are each recorded once at the customer level, normalised to a month (an hourly cadence's 730.485 hours, rounded once; calendar months divided) and per currency"
     },
     {
       "id": "OR-J42-S02",
@@ -2156,7 +2156,27 @@
     {
       "id": "OR-J42-S06",
       "journey": "J42",
-      "name": "MRR at a past local day's start, across a daylight-saving change, read from 15-minute buckets equals its movements; the rollup and due reads take indexes, never a sequential scan"
+      "name": "MRR at a past local day's start, across a daylight-saving change, read from 15-minute buckets equals its movements; with sequential scans off each report read, the scheduled ones included, and the due read still plan on an index"
+    },
+    {
+      "id": "OR-J42-S07",
+      "journey": "J42",
+      "name": "An engine upgrade replacing its subscription in one transaction nets to one expansion caused upgrade, with both subscriptions as its lines"
+    },
+    {
+      "id": "OR-J42-S08",
+      "journey": "J42",
+      "name": "A prune is a correction, not churn, and supersedes the pruned subscription's scheduled churn; undoing it is a correction back that schedules the churn again"
+    },
+    {
+      "id": "OR-J42-S09",
+      "journey": "J42",
+      "name": "A bulk import of thousands of subscriptions in one transaction settles once: reads of subscription_mrr and its time grow with the book, not its square"
+    },
+    {
+      "id": "OR-J42-S10",
+      "journey": "J42",
+      "name": "The migration's backfill adopts a book written before MRR as backfilled openings in one settlement, its reads and time growing with the book"
     },
     {
       "id": "OR-J28-S09",

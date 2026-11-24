@@ -36,7 +36,7 @@ SELECT (EXTRACT(EPOCH FROM clock_timestamp() - transaction_timestamp()) * 100000
 -- need not wait. No row when skipped.
 SELECT id FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-FOR UPDATE SKIP LOCKED;
+FOR NO KEY UPDATE SKIP LOCKED;
 
 -- name: UpdateLeaseSettlement :exec
 UPDATE billing.leases

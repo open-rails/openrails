@@ -632,7 +632,7 @@ func (q *Queries) SyncElapsed(ctx context.Context) (int64, error) {
 const tryLockCustomerForSpend = `-- name: TryLockCustomerForSpend :one
 SELECT id FROM billing.customers
 WHERE merchant_id = $1::uuid AND id = $2::uuid
-FOR UPDATE SKIP LOCKED
+FOR NO KEY UPDATE SKIP LOCKED
 `
 
 type TryLockCustomerForSpendParams struct {

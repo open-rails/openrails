@@ -370,7 +370,8 @@ type MerchantSettings struct {
 // AccountingSettings date a merchant's books.
 type AccountingSettings struct {
 	// Timezone is the IANA zone (Europe/Berlin) whose days and months MRR
-	// rollups count in; empty is UTC. A change dates only later days.
+	// reports group in; empty is UTC. Rollups are kept in UTC quarter hours,
+	// so a change regroups every day and month, past ones too.
 	Timezone string `json:"timezone,omitempty"`
 }
 
