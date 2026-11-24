@@ -120,30 +120,42 @@ ALTER TABLE billing.nmi_history_months
     );
 COMMENT ON TABLE billing.nmi_history_months IS 'Authorizations NMI answered per PSP, month_at (the month''s first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and answer: a refusal''s reason from the one classifier, with its outcome and decline_cause, or an approval (reason empty). A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.';
 
-DROP TABLE decline_causes;
-DROP TABLE issuer_reasons;
-
 -- A case's retry the network's advice set, or deferred past the next renewal.
 ALTER TABLE billing.subscriptions ADD COLUMN retry_advised_at timestamptz;
 COMMENT ON COLUMN billing.subscriptions.retry_advised_at IS 'The earliest retry the network''s advice allowed, when that advice set the scheduled retry: at or past the next renewal it deferred every retry, and the case ends at grace_ends_at. NULL when the dunning policy set it.';
 
--- A saved filter on what used to be declined keeps its meaning: an
--- authorization's outcome declined then covered every refusal and error, a
--- rebill's first_outcome declined every refusal but a processing error.
-WITH widened AS (
-    SELECT c.merchant_id,
-        jsonb_agg(CASE
-            WHEN w.widget #> '{query,filters,outcome}' ? 'declined'
-                THEN jsonb_set(w.widget, '{query,filters,outcome}',
-                    (SELECT jsonb_agg(DISTINCT v ORDER BY v) FROM jsonb_array_elements_text((w.widget #> '{query,filters,outcome}') || '["refused", "error"]'::jsonb) AS v))
-            WHEN w.widget #> '{query,filters,first_outcome}' ? 'declined'
-                THEN jsonb_set(w.widget, '{query,filters,first_outcome}',
-                    (SELECT jsonb_agg(DISTINCT v ORDER BY v) FROM jsonb_array_elements_text((w.widget #> '{query,filters,first_outcome}') || '["refused"]'::jsonb) AS v))
-            ELSE w.widget END ORDER BY w.position) AS layout,
-        bool_or(COALESCE(w.widget #> '{query,filters,outcome}' ? 'declined', false)
-            OR COALESCE(w.widget #> '{query,filters,first_outcome}' ? 'declined', false)) AS changed
+-- A saved filter on what used to be declined or error keeps its meaning. An
+-- authorization's outcome declined covered every refusal and error. A
+-- rebill's first_outcome error covered the reasons that were system errors,
+-- three of which are refused now (invalid_request, merchant_config,
+-- duplicate_transaction), and declined every other failure: either one alone
+-- also filters first_failure_reason to its reasons.
+WITH sets AS (
+    SELECT '[""]'::jsonb || jsonb_agg(reason ORDER BY reason) FILTER (WHERE reason IN ('processing_error', 'communication_error', 'issuer_unavailable', 'invalid_request', 'merchant_config', 'duplicate_transaction')) AS errored,
+        '[""]'::jsonb || jsonb_agg(reason ORDER BY reason) FILTER (WHERE reason NOT IN ('processing_error', 'communication_error', 'issuer_unavailable', 'invalid_request', 'merchant_config', 'duplicate_transaction')) AS declined
+    FROM decline_causes
+), widened AS (
+    SELECT c.merchant_id, jsonb_agg(f.widget ORDER BY w.position) AS layout, bool_or(f.widget IS DISTINCT FROM w.widget) AS changed
     FROM billing.dashboard_configs c
+    CROSS JOIN sets
     CROSS JOIN LATERAL jsonb_array_elements(c.layout) WITH ORDINALITY AS w(widget, position)
+    CROSS JOIN LATERAL (SELECT CASE WHEN COALESCE(w.widget #> '{query,filters,outcome}' ? 'declined', false)
+        THEN jsonb_set(w.widget, '{query,filters,outcome}',
+            (SELECT jsonb_agg(DISTINCT v ORDER BY v) FROM jsonb_array_elements_text((w.widget #> '{query,filters,outcome}') || '["refused", "error"]'::jsonb) AS v))
+        ELSE w.widget END AS widget) o
+    CROSS JOIN LATERAL (SELECT o.widget #> '{query,filters,first_outcome}' AS fo, o.widget #> '{query,filters,first_failure_reason}' AS reasons) y
+    CROSS JOIN LATERAL (SELECT CASE
+        WHEN COALESCE(y.fo ? 'declined' AND y.fo ? 'error', false)
+            THEN jsonb_set(o.widget, '{query,filters,first_outcome}',
+                (SELECT jsonb_agg(DISTINCT v ORDER BY v) FROM jsonb_array_elements_text(y.fo || '["refused"]'::jsonb) AS v))
+        WHEN COALESCE(y.fo ? 'declined' OR y.fo ? 'error', false)
+            THEN jsonb_set(jsonb_set(o.widget, '{query,filters,first_outcome}',
+                    (SELECT jsonb_agg(DISTINCT v ORDER BY v) FROM jsonb_array_elements_text(y.fo || '["refused"]'::jsonb) AS v)),
+                '{query,filters,first_failure_reason}',
+                (SELECT COALESCE(jsonb_agg(r ORDER BY r), '[]'::jsonb)
+                    FROM jsonb_array_elements_text(CASE WHEN y.fo ? 'declined' THEN sets.declined ELSE sets.errored END) AS r
+                    WHERE y.reasons IS NULL OR y.reasons ? r))
+        ELSE o.widget END AS widget) f
     WHERE jsonb_typeof(c.layout) = 'array'
     GROUP BY c.merchant_id
 )
@@ -176,3 +188,6 @@ UPDATE billing.dashboard_configs c
 SET layout = k.layout, updated_at = now()
 FROM cleaned k
 WHERE c.merchant_id = k.merchant_id AND k.layout <> '[]'::jsonb;
+
+DROP TABLE decline_causes;
+DROP TABLE issuer_reasons;
