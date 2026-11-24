@@ -22,7 +22,7 @@ migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650
 migration 0024_payment_method_versions_restrict.up.sql sha256:6f8bf0877070c35443e2a094f6d7c3a9806b276ffa71d5cc4cef7959456fe80b
 migration 0025_usage_on_event_store.up.sql sha256:5332fadccb74fa286a91e9a8d4fce6ee5680c979809e6cfadd2e84b9a7ac3f4f
 migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c321d951aac93b728ca4
-migration 0027_stripe_fees.up.sql sha256:124071948ce1ca3332d97a52cc9b57bc8a7436a5995d115535f472335dc90cd9
+migration 0027_stripe_fees.up.sql sha256:b648366baf2bea9fc2041a5d89661e32f406ef284e1e27c4b95554063eb6be10
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -5140,12 +5140,14 @@ function billing.queue_stripe_fee_read()
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
   AS $function$
+  DECLARE fresh boolean;
   BEGIN
       IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NULL; END IF;
       IF TG_TABLE_NAME = 'payments' THEN
           IF NEW.rail IS DISTINCT FROM 'stripe' OR NEW.psp_id IS NULL OR NEW.money_movement <> 'rail' OR NEW.status <> 'succeeded'
              OR NEW.amount = 0 OR NEW.deleted_at IS NOT NULL OR NEW.transaction_id = ''
              OR coalesce(NEW.reversal_kind IN ('chargeback', 'dispute_reversal'), false)
+             OR NEW.reversal_kind = 'refund' AND NEW.transaction_id !~ '^(re|pyr)_'
              OR TG_OP = 'UPDATE' AND OLD.status = 'succeeded' AND OLD.money_movement = 'rail' THEN
               RETURN NULL;
           END IF;
@@ -5153,9 +5155,16 @@ function billing.queue_stripe_fee_read()
           VALUES (NEW.merchant_id, NEW.psp_id, NEW.transaction_id, CASE WHEN NEW.reversal_kind = 'refund' THEN 'refund' ELSE 'payment' END, now())
           ON CONFLICT DO NOTHING;
       ELSIF NEW.rail = 'stripe' AND NEW.provider_ref <> '' THEN
-          INSERT INTO billing.stripe_fee_reads (merchant_id, psp_id, ref, kind, due_at)
+          fresh := TG_OP = 'INSERT';
+          IF NOT fresh THEN
+              fresh := OLD.status IS DISTINCT FROM NEW.status;
+          END IF;
+          INSERT INTO billing.stripe_fee_reads AS r (merchant_id, psp_id, ref, kind, due_at)
           VALUES (NEW.merchant_id, NEW.psp_id, NEW.provider_ref, 'dispute', now())
-          ON CONFLICT (merchant_id, psp_id, ref) DO UPDATE SET due_at = now(), attempts = 0, last_error = NULL;
+          ON CONFLICT (merchant_id, psp_id, ref) DO UPDATE SET kind = 'dispute',
+              due_at = CASE WHEN fresh THEN now() ELSE r.due_at END,
+              attempts = CASE WHEN fresh THEN 0 ELSE r.attempts END,
+              last_error = CASE WHEN fresh THEN NULL ELSE r.last_error END;
       END IF;
       RETURN NULL;
   END;

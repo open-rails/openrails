@@ -2228,7 +2228,7 @@ type BillingStripeFeeRead struct {
 	// The Stripe object as the payment or dispute names it: a charge, payment intent or invoice for a payment, a refund, or a dispute.
 	Ref  string
 	Kind string
-	// When it is read next; a failed read waits longer each time, a dispute that changes is read again at once.
+	// When it is read next; a failed read waits longer each time, and a dispute whose status changes is read again at once.
 	DueAt     time.Time
 	Attempts  int32
 	LastError *string

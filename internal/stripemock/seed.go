@@ -391,6 +391,12 @@ func (m *Mock) ChargeDispute(id, charge, status, reason string) Object {
 			"balance_transactions":   []Object{m.disputeBalanceLocked(id, ch)}}
 		m.disputes[id] = d
 	}
+	if status == "won" && d["status"] != "won" {
+		// A won dispute returns the charge and the dispute fee.
+		ch := m.charges[charge]
+		d["balance_transactions"] = append(d["balance_transactions"].([]Object),
+			m.balanceLocked("adjustment", "dispute_reversal", id, ch["amount"].(int64), fmt.Sprint(ch["currency"]), func(int64) int64 { return -DisputeFee }))
+	}
 	d["status"], d["reason"] = status, reason
 	return clone(d)
 }

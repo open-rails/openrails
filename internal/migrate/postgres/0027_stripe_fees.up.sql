@@ -17,21 +17,25 @@ CREATE TABLE billing.stripe_fee_reads (
 );
 COMMENT ON TABLE billing.stripe_fee_reads IS 'A Stripe charge, refund or dispute whose balance transactions the general ledger has yet to read for their fees: queued by the payment or dispute that records it, read by the billing pass''s stripe_fees scan, deleted once its fees post.';
 COMMENT ON COLUMN billing.stripe_fee_reads.ref IS 'The Stripe object as the payment or dispute names it: a charge, payment intent or invoice for a payment, a refund, or a dispute.';
-COMMENT ON COLUMN billing.stripe_fee_reads.due_at IS 'When it is read next; a failed read waits longer each time, a dispute that changes is read again at once.';
+COMMENT ON COLUMN billing.stripe_fee_reads.due_at IS 'When it is read next; a failed read waits longer each time, and a dispute whose status changes is read again at once.';
 
 CREATE INDEX stripe_fee_reads_due_at_idx ON billing.stripe_fee_reads (due_at, merchant_id, psp_id, ref);
 
--- A Stripe payment that moved money, a Stripe refund, or a Stripe dispute
--- (again on each change) queues its fee read. A chargeback's own payment rows
--- read through their dispute.
+-- A Stripe payment that moved money and a Stripe refund (a re_ or pyr_
+-- object) queue their fee read. A chargeback's own payment rows, and a
+-- dispute's prevention refund (booked under the dispute's id), read through
+-- their dispute. Each notice of a Stripe dispute queues its read unless one
+-- waits; one that changes its status reads it at once and afresh.
 CREATE FUNCTION billing.queue_stripe_fee_read() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+DECLARE fresh boolean;
 BEGIN
     IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NULL; END IF;
     IF TG_TABLE_NAME = 'payments' THEN
         IF NEW.rail IS DISTINCT FROM 'stripe' OR NEW.psp_id IS NULL OR NEW.money_movement <> 'rail' OR NEW.status <> 'succeeded'
            OR NEW.amount = 0 OR NEW.deleted_at IS NOT NULL OR NEW.transaction_id = ''
            OR coalesce(NEW.reversal_kind IN ('chargeback', 'dispute_reversal'), false)
+           OR NEW.reversal_kind = 'refund' AND NEW.transaction_id !~ '^(re|pyr)_'
            OR TG_OP = 'UPDATE' AND OLD.status = 'succeeded' AND OLD.money_movement = 'rail' THEN
             RETURN NULL;
         END IF;
@@ -39,9 +43,16 @@ BEGIN
         VALUES (NEW.merchant_id, NEW.psp_id, NEW.transaction_id, CASE WHEN NEW.reversal_kind = 'refund' THEN 'refund' ELSE 'payment' END, now())
         ON CONFLICT DO NOTHING;
     ELSIF NEW.rail = 'stripe' AND NEW.provider_ref <> '' THEN
-        INSERT INTO billing.stripe_fee_reads (merchant_id, psp_id, ref, kind, due_at)
+        fresh := TG_OP = 'INSERT';
+        IF NOT fresh THEN
+            fresh := OLD.status IS DISTINCT FROM NEW.status;
+        END IF;
+        INSERT INTO billing.stripe_fee_reads AS r (merchant_id, psp_id, ref, kind, due_at)
         VALUES (NEW.merchant_id, NEW.psp_id, NEW.provider_ref, 'dispute', now())
-        ON CONFLICT (merchant_id, psp_id, ref) DO UPDATE SET due_at = now(), attempts = 0, last_error = NULL;
+        ON CONFLICT (merchant_id, psp_id, ref) DO UPDATE SET kind = 'dispute',
+            due_at = CASE WHEN fresh THEN now() ELSE r.due_at END,
+            attempts = CASE WHEN fresh THEN 0 ELSE r.attempts END,
+            last_error = CASE WHEN fresh THEN NULL ELSE r.last_error END;
     END IF;
     RETURN NULL;
 END;
