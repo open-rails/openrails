@@ -11,6 +11,23 @@ VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(curre
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     since_at = LEAST(u.since_at, EXCLUDED.since_at), due_at = LEAST(u.due_at, EXCLUDED.due_at), updated_at = EXCLUDED.updated_at;
 
+-- name: ShareUsageUnposted :many
+-- A sync's hold on the unposted marks of its customers in a currency, taken
+-- after its events are inserted: a posting, which locks its mark FOR
+-- UPDATE, either waits for the sync to commit or has already read its
+-- events. Syncs never wait on each other here.
+SELECT customer_id, since_at, due_at FROM billing.usage_unposted
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+ORDER BY customer_id
+FOR KEY SHARE;
+
+-- name: ListUsageUnpostedOf :many
+-- Many customers' unposted marks in a currency.
+SELECT customer_id, since_at FROM billing.usage_unposted
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]);
+
 -- name: LockUsageUnposted :one
 SELECT * FROM billing.usage_unposted
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
@@ -54,11 +71,21 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 RETURNING customer_id, currency, since_at;
 
 -- name: InsertUsagePosting :one
-INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at)
+INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines,
+    ingested_through, forgiven, forgiven_lines, created_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(period_starts_at)::timestamptz,
     sqlc.arg(period_ends_at)::timestamptz, sqlc.arg(cut_at)::timestamptz, sqlc.arg(reason)::text, sqlc.arg(amount)::bigint,
-    sqlc.arg(lines)::jsonb, sqlc.arg(now)::timestamptz)
+    sqlc.arg(lines)::jsonb, sqlc.arg(ingested_through)::timestamptz, sqlc.arg(forgiven)::bigint, sqlc.narg(forgiven_lines)::jsonb,
+    sqlc.arg(now)::timestamptz)
 RETURNING *;
+
+-- name: ListForgivenUsagePostings :many
+-- The merchant's postings that forgave usage or took forgiveness back, cut
+-- after one instant and through another.
+SELECT * FROM billing.usage_postings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND forgiven <> 0
+  AND cut_at > sqlc.arg(cut_after)::timestamptz AND cut_at <= sqlc.arg(cut_through)::timestamptz
+ORDER BY cut_at, id;
 
 -- name: ListUsagePostings :many
 -- A customer's postings in a currency of the periods from one start on.
@@ -66,6 +93,12 @@ SELECT * FROM billing.usage_postings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text AND period_starts_at >= sqlc.arg(period_starts_at)::timestamptz
 ORDER BY period_starts_at, created_at, id;
+
+-- name: ListUsagePostingsOf :many
+-- Many customers' postings in a currency of the periods from one start on.
+SELECT customer_id, period_starts_at, amount FROM billing.usage_postings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+  AND currency = sqlc.arg(currency)::text AND period_starts_at >= sqlc.arg(period_starts_at)::timestamptz;
 
 -- name: ListUsagePostingsByIDs :many
 SELECT * FROM billing.usage_postings

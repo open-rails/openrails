@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
@@ -33,6 +32,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Request is the HTTP request a route handler answers and its response
@@ -188,7 +188,7 @@ const maxRequestIDLength = 128
 func EnsureRequestID(r *http.Request) string {
 	requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
 	if requestID == "" || len(requestID) > maxRequestIDLength {
-		requestID = uuid.NewString()
+		requestID = uuidutil.NewV7().String()
 	}
 	r.Header.Set("X-Request-ID", requestID)
 	return requestID

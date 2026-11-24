@@ -35,7 +35,11 @@ func CreatePriceMigration(r *httprequest.Request) {
 	if !r.BindJSON(&body) || !priceMigrationsReady(r) {
 		return
 	}
-	out, err := r.State.PriceMigrationService.Create(r.Request.Context(), body)
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.CreatePriceMigration(r.Request.Context(), body)
 	if err != nil {
 		writeRefusal(r, err, "price migration failed")
 		return

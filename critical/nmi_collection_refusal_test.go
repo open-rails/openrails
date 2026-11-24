@@ -51,6 +51,7 @@ func TestNMICollectionRefusal(t *testing.T) {
 					})
 				}
 				oneUsage(t, a.alpha, usageInput(customer, "unsent-collection", 3))
+				a.clock.Advance(time.Second)
 				fleet := startFleet(t, a.world)
 				runUsageDue(t, fleet)
 				var state string

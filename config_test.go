@@ -50,7 +50,6 @@ func TestEngineConfigCopiesEveryField(t *testing.T) {
 // The values Config's fields take are the engine's.
 func TestConfigValuesAreTheEngines(t *testing.T) {
 	for public, engine := range map[string]string{
-		string(ProviderWritesFull): config.ProviderWriteModeFull, string(ProviderWritesLimited): config.ProviderWriteModeLimited, string(ProviderWritesReadOnly): config.ProviderWriteModeReadOnly,
 		string(billing.EnvironmentLive): config.EnvironmentLive, string(billing.EnvironmentTest): config.EnvironmentTest, string(billing.EnvironmentSandbox): config.EnvironmentSandbox,
 		string(billing.EnvironmentMainnet): config.EnvironmentMainnet, string(billing.EnvironmentDevnet): config.EnvironmentDevnet, string(billing.EnvironmentTestnet): config.EnvironmentTestnet,
 		QueueBilling: riverjobs.QueueBilling, QueuePSPImport: riverjobs.QueuePSPImport,

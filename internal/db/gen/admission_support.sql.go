@@ -86,6 +86,87 @@ func (q *Queries) ListCustomerBillingPolicyAssignments(ctx context.Context, arg 
 	return items, nil
 }
 
+const listMerchantUnitsInUse = `-- name: ListMerchantUnitsInUse :many
+SELECT DISTINCT u.code::text AS code
+FROM (
+    SELECT a.currency AS code FROM billing.ledger_accounts a WHERE a.merchant_id = $1::uuid AND a.customer_id IS NULL
+    UNION ALL SELECT p.currency FROM billing.prices p WHERE p.merchant_id = $1::uuid
+    UNION ALL SELECT pr.credit_grant ->> 'currency' FROM billing.products pr WHERE pr.merchant_id = $1::uuid AND pr.credit_grant IS NOT NULL
+    UNION ALL SELECT c.price ->> 'currency' FROM billing.catalog_rate_cards c WHERE c.merchant_id = $1::uuid
+    UNION ALL SELECT l.unit FROM billing.ledger_units l WHERE l.merchant_id = $1::uuid
+) u
+WHERE u.code IS NOT NULL AND u.code <> ALL($2::text[])
+ORDER BY 1
+`
+
+type ListMerchantUnitsInUseParams struct {
+	MerchantID uuid.UUID
+	Registry   []string
+}
+
+// The merchant's own units something counts: a balance (whose deposit made a
+// system account in it, and the units book recorded), a price, a product's
+// credit or a rate card. Every code outside the registry is a unit. A
+// settings change may not remove or rescale one.
+func (q *Queries) ListMerchantUnitsInUse(ctx context.Context, arg ListMerchantUnitsInUseParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listMerchantUnitsInUse, arg.MerchantID, arg.Registry)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		items = append(items, code)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUncountedCatalogUnits = `-- name: ListUncountedCatalogUnits :many
+SELECT DISTINCT u.code::text AS code
+FROM (
+    SELECT p.currency AS code FROM billing.prices p WHERE p.merchant_id = $1::uuid
+    UNION ALL SELECT pr.credit_grant ->> 'currency' FROM billing.products pr WHERE pr.merchant_id = $1::uuid AND pr.credit_grant IS NOT NULL
+    UNION ALL SELECT c.price ->> 'currency' FROM billing.catalog_rate_cards c WHERE c.merchant_id = $1::uuid
+) u
+WHERE u.code IS NOT NULL AND u.code <> ALL($2::text[])
+  AND NOT EXISTS (SELECT 1 FROM billing.ledger_units l WHERE l.merchant_id = $1::uuid AND l.unit = u.code)
+ORDER BY 1
+`
+
+type ListUncountedCatalogUnitsParams struct {
+	MerchantID uuid.UUID
+	Registry   []string
+}
+
+// The merchant's own units its catalog names (a price, a product's credit or
+// a rate card) that the units book has not recorded.
+func (q *Queries) ListUncountedCatalogUnits(ctx context.Context, arg ListUncountedCatalogUnitsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listUncountedCatalogUnits, arg.MerchantID, arg.Registry)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		items = append(items, code)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setCustomerBillingPolicy = `-- name: SetCustomerBillingPolicy :execrows
 
 UPDATE billing.customers SET billing_policy = $1::text

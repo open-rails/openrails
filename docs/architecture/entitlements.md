@@ -74,14 +74,20 @@ grant a requested key.
 
 **Lease sync.** A gate settles usage and asks for views on a lease sync
 (`POST /v1/app/leases/sync`, `leases.Syncer.Sync`): one transaction, bounded by
-`limits.SyncTimeout` (5 s) and a 2 s lock budget. It locks the lease (creating it
-on the first sync) and the customers of its usage and releases in id order,
-settles new usage ([usage billing](usage-billing.md)), releases the request holds
-it names, replaces its in-flight report (changed rows only), answers views,
-limit sets and pricing (`views.go`), and stores `settled_through_n` and receipts.
+`limits.SyncTimeout` (5 s) and a 2 s lock budget, that takes no customer's lock.
+It locks the lease (creating it on the first sync), settles new usage
+([usage billing](usage-billing.md)), releases the request holds it names,
+replaces its in-flight report (changed rows of its own), and stores
+`settled_through_n` and receipts. Once it committed, it watches the balances its
+usage moved (`MoneyService.WatchUsage`) and answers views, limit sets and pricing
+(`views.go`) in one read-only snapshot, reading every customer's money, recent
+spend and limit usage in one batch each. Every writer inserts usage into the event
+store before it commits the end of what held it (an in-flight line, a request
+hold), and readers take PostgreSQL before the event store, so an item counts
+twice at worst, never not at all; the view covers every item the receipts name.
 Views read usage only through `leases.UsageReader`.
 
-**Holds.** Every writer of holds and windows locks the customer (`LockCustomerForSpend`, `FOR NO KEY UPDATE`, so a row naming the customer is written without waiting for it) and takes window rows in one order (`limits.Holder.Take`). A claim fits by its overrun (`limits.Fits`). A request is checked against `balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits; held is request holds plus what live leases report in flight. `admission.Admitter` adds delinquency, the accrual-rate cap (`AccrualRateMeter`, summing the event store's `usage_minutes`) and the delegated-invoker cutoff. Intake (`MoneyService.PrepareUsageTx`) counts units in their windows in full, never clamped, in the event store's `limit_usage`: a request hold's windows, or those current when the usage was admitted (`admitted_at`), and the spend windows of the invoker attributes it reports (none when its policy cannot be resolved, such as during an FX outage); reads take a window's units there, a rolling limit's buckets and a rate limit's level from its buckets (`limits.RateLevelOf`). A lease's report and holds count while it is live (`limits.LeaseLiveSince`), and a lease's hold also for a lease lifetime after it is made; no hold counts past 30 days (`limits.HeldSince`). A view request a sync cannot answer is refused alone (`refused_views`).
+**Holds.** Every writer of holds and every opener of a window locks the customer (`LockCustomerForSpend`, `FOR NO KEY UPDATE`, so a row naming the customer is written without waiting for it) and takes window rows in one order (`limits.Holder.Take`); intake, which only appends usage, takes it only to open a window or charge a failure. A claim fits by its overrun (`limits.Fits`). A request is checked against `balance`, its spend windows (`spendgate.SpendClaims`), then its declared limits; held is request holds plus what live leases report in flight. `admission.Admitter` adds delinquency, the accrual-rate cap (`AccrualRateMeter`, summing the event store's `usage_minutes`) and the delegated-invoker cutoff. Intake (`MoneyService.PrepareUsageTx`) counts units in their windows in full, never clamped, in the event store's `limit_usage`: a request hold's windows, or those current when the usage was admitted (`admitted_at`), and the spend windows of the invoker attributes it reports (none when its policy cannot be resolved, such as during an FX outage); reads take a window's units there, a rolling limit's buckets and a rate limit's level from its buckets (`limits.RateLevelOf`). A lease's report and holds count while it is live (`limits.LeaseLiveSince`), and a lease's hold also for a lease lifetime after it is made; no hold counts past 30 days (`limits.HeldSince`). A view request a sync cannot answer is refused alone (`refused_views`).
 
 **The gate.** `openrails.NewGate` keeps one lease for its life and a view of each customer it serves (`gate_view.go`). A warm decision prices the request (named units by the view's counts, money at its `PriceBound`s) and takes it from every limit of its set or none, against the view less what the gate has in flight, with no I/O. Within a margin of four sync intervals of what the views show others adding it is decided on the server as a request hold of the lease; refused locally when it cannot fit. Tickets open across a sync, and usage a sync left unsettled, are reported in flight. A view older than two syncs decides one request until a sync answers; with OpenRails unreachable a view answered when the outage began keeps deciding within the gate's share (remaining under the request's policy, less running charges since, ÷ live leases). A view with anything in flight is never dropped. An idle gate stops syncing. Captured usage goes on the next sync, stored first by `GateDeps.Outbox`.
 
@@ -154,7 +160,7 @@ Checks:
 - Each `/v1/app` route in `internal/http/routes/limits.go` and each admission route
   in `metering.go` has a `Permission` pair; `AdjustCustomerLimit` is
   `Group: Admin, Level: LevelUpdate`.
-- `syncRun.usageItem` and `syncRun.lockCustomers` apply `Syncer.Allows`.
+- `syncRun.checkItem`, `checkView` and `report` apply `Syncer.Allows`.
 - `entitlementCacheScopeOf` (`entitlement_check_cache.go`) and `newRemoteHandle`
   (`remote.go`), which enables the cache only for an `APIKey`.
 - Every query in `internal/db/queries/entitlement_checks.sql`, `product_access.sql`, `limits.sql`, `leases.sql` and `limit_holds.sql`, advisory locks aside, filters on `merchant_id`.

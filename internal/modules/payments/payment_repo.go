@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/disputejob"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -176,10 +177,33 @@ func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) er
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
+	if params.Amount > 0 && params.RefundedPaymentID == nil {
+		if err := s.receive(ctx, params.MerchantID, params.ID); err != nil {
+			return err
+		}
+	}
 	if err := s.queueSaleMonitor(ctx, params); err != nil {
 		return err
 	}
 	return convergejob.Queue(ctx, s.db, tid, payment.CustomerID)
+}
+
+// receive books the money a payment just stored brought, on the handle that
+// stored it: in its transaction. The merchant's books start with the first.
+func (s *PaymentService) receive(ctx context.Context, merchantID, paymentID uuid.UUID) error {
+	q := s.db.Gen(ctx)
+	// Stored now() stands for an unset purchase instant: read the row back.
+	row, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: merchantID, ID: paymentID})
+	if err != nil {
+		return err
+	}
+	if err := books.ReceivePayment(ctx, q, row); err != nil {
+		return err
+	}
+	if _, ok := books.ReceiptOf(row); !ok {
+		return nil
+	}
+	return books.Started(ctx, q, row.MerchantID, row.Currency, s.now())
 }
 
 // queueSaleMonitor re-evaluates the PSP's flagged dispute programs once a
@@ -219,6 +243,11 @@ func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.
 	rows, err := s.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil || rows == 0 {
 		return false, err
+	}
+	if params.Amount > 0 && params.RefundedPaymentID == nil {
+		if err := s.receive(ctx, params.MerchantID, params.ID); err != nil {
+			return false, err
+		}
 	}
 	if err := s.queueSaleMonitor(ctx, params); err != nil {
 		return false, err
@@ -458,6 +487,7 @@ func (s *PaymentService) completeRefundReservation(ctx context.Context, reservat
 		ID:            reservationID,
 		TransactionID: refundTransactionID,
 		Metadata:      meta,
+		SettledAt:     s.now(),
 	})
 	if err != nil {
 		return err
@@ -525,7 +555,11 @@ func (s *PaymentService) completeProviderAttempt(ctx context.Context, attemptID 
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-	// The attempt settled at the rail: a sale on its PSP.
+	// The attempt settled at the rail: its money is booked, and it is a sale
+	// on its PSP.
+	if err := s.receive(ctx, queryMerchant.UUID(), attemptID); err != nil {
+		return err
+	}
 	settled, err := s.db.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: queryMerchant.UUID(), ID: attemptID})
 	if err != nil {
 		return err
@@ -536,6 +570,7 @@ func (s *PaymentService) completeProviderAttempt(ctx context.Context, attemptID 
 	return disputejob.QueueMonitorIfFlagged(ctx, s.db, queryMerchant.UUID(), *settled.PspID, settled.PurchasedAt)
 }
 
+// completeProviderAttemptInPlace books no money: the real charge row did.
 func (s *PaymentService) completeProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -301,7 +302,11 @@ func recordPurchase(ctx context.Context, d *db.DB, merchantID uuid.UUID, p plann
 	if err != nil {
 		return false, err
 	}
-	return result.Created, grantPurchaseAccess(ctx, q, merchantID, p, result.Payment.ID)
+	if err := grantPurchaseAccess(ctx, q, merchantID, p, result.Payment.ID); err != nil {
+		return false, err
+	}
+	// A timed line's revenue is recognised over the access it was granted.
+	return result.Created, books.ApplyOrder(ctx, d, result.Order.ID, nil)
 }
 
 // grantPurchaseAccess grants each product its lines bought, from paid_at to

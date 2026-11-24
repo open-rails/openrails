@@ -50,6 +50,7 @@ const VIZ_LABELS: Record<WidgetViz, string> = {
   bar: "Bar chart",
   donut: "Donut chart",
   table: "Table",
+  cohort: "Cohort heatmap",
   heading: "Section heading",
   programs: "Dispute programs",
 }

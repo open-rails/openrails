@@ -7,22 +7,23 @@ One page per OpenRails system: what it does, how it works, and how it keeps the 
 | System | Covers | Page |
 |---|---|---|
 | Books | The units book (prepaid balances, credit lots, usage owed) and the general ledger, per merchant and currency | [books.md](books.md) |
+| Revenue recognition | Revenue schedules, recognised monthly in the accounting timezone; deferred revenue and breakage; adjustments for refunds and chargebacks | in [books.md](books.md#cash-and-revenue-recognition) |
 | Catalog | Products, prices, meters, rate cards and limits; the catalog document and applying it; price migrations; the catalog assistant | [catalog.md](catalog.md) |
 | Orders and checkout | Orders (one-off, renewal, usage), carts, previews, the payment page | [orders.md](orders.md) |
 | Subscriptions | The state machine, renewals, cancel and resume, plan and seat changes | [subscriptions.md](subscriptions.md) |
-| Recurring revenue (MRR) | MRR movements at every subscription change, scheduled churn, the rollups | in [subscriptions.md](subscriptions.md) |
+| Recurring revenue (MRR) | MRR movements at every subscription change, scheduled churn and contraction, MRR at risk, the rollups | [mrr.md](mrr.md) |
 | Collection and dunning | Retry schedules, the decline table and network advice, arrears delinquency | [dunning.md](dunning.md) |
 | Refunds and disputes | Refunds, chargebacks, won disputes, payments recorded from outside | [refunds.md](refunds.md) |
-| Payment health | Decline causes and authorization rates; dispute and refund monitoring | in [reporting.md](reporting.md) and [refunds.md](refunds.md) |
+| Payment health | Decline causes and network advice, authorization rates; dispute monitoring and prevention | in [dunning.md](dunning.md), [reporting.md](reporting.md#health-overview) and [refunds.md](refunds.md#dispute-monitoring) |
 | Usage billing | Meters, rate cards, the usage event store, settlement priced on totals, usage orders in arrears, running charges | [usage-billing.md](usage-billing.md) |
 | Entitlements and limits | Product keys and access; limits per window, the balance limit, spend limits; views and holds; the Go SDK's entitlement cache and gate | [entitlements.md](entitlements.md) |
-| Credits | Credit lots: staff grants, packs and deposits, recurring credits, expiry, spending from a balance | [credits.md](credits.md) |
+| Credits and merchant currencies | Credit lots: staff grants, packs and deposits, recurring credits, expiry, spending from a balance; units a merchant defines, bought, given and spent | [credits.md](credits.md) |
 | Payment providers | NMI, Stripe, CCBill, Solana: charges, refunds, provider-run subscriptions, webhook signatures, staying in sync | [payment-providers.md](payment-providers.md) |
 | Cards and payment methods | Card vaults, saved cards, charge agreements, the card-number firewall | [payment-methods.md](payment-methods.md) |
 | Imports | Subscribers from a PSP, legacy billing books | [imports.md](imports.md) |
 | Customer directory (SCIM) | Customer contacts, pushed over SCIM or read in process | [customer-directory.md](customer-directory.md) |
 | Merchant configuration | Registration, configuration (file or Vault, including merchant-defined currencies and the accounting timezone), PSPs and custodians, archive and restore | [merchant-configuration.md](merchant-configuration.md) |
-| History | Configuration changes (`change_log`) and provider operations (`operation_log`), append-only | in [merchant-configuration.md](merchant-configuration.md) and [payment-providers.md](payment-providers.md) |
+| History | Configuration history (`change_log`) and operations history (`operation_log`), append-only | [history.md](history.md) |
 | Events | The event log and host events | [events.md](events.md) |
 | Customer messages | Email to customers, the account inbox, templates, per-event settings, the delivery log | [customer-messages.md](customer-messages.md) |
 | Findings and alerts | The staff review queue (findings, proposals, parking) and alert delivery | [findings.md](findings.md) |

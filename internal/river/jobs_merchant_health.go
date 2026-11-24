@@ -65,7 +65,7 @@ func (w MerchantHealthWorker) Work(ctx context.Context, _ *river.Job[MerchantHea
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts
 	}
-	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	postures := writeposture.View{DB: w.DB}
 	var workErr error
 	after := uuid.Nil
 	for {

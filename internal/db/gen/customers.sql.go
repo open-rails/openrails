@@ -12,6 +12,25 @@ import (
 	"github.com/google/uuid"
 )
 
+const countCustomersUpTo = `-- name: CountCustomersUpTo :one
+SELECT count(*) FROM (
+  SELECT 1 FROM billing.customers WHERE merchant_id = $1::uuid LIMIT $2::int
+) c
+`
+
+type CountCustomersUpToParams struct {
+	MerchantID uuid.UUID
+	RowLimit   int32
+}
+
+// The merchant's customers, counted no further than row_limit.
+func (q *Queries) CountCustomersUpTo(ctx context.Context, arg CountCustomersUpToParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCustomersUpTo, arg.MerchantID, arg.RowLimit)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCustomer = `-- name: CreateCustomer :exec
 INSERT INTO billing.customers (id, merchant_id, issuer)
 VALUES ($1, $2, $3)

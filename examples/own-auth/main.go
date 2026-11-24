@@ -45,8 +45,7 @@ func newShop(ctx context.Context, db *pgxpool.Pool) (*shop, error) {
 	// Two merchants on one engine and no Issuer: each request acts at the
 	// merchant its session's BoundScope names.
 	bill, err := openrails.New(ctx, openrails.Config{
-		Database:          openrails.DatabaseConfig{Schema: "billing"},
-		ProviderWriteMode: openrails.ProviderWritesFull,
+		Database: openrails.DatabaseConfig{Schema: "billing"},
 		Merchants: []billing.MerchantDeclaration{
 			{MerchantDocument: billing.MerchantDocument{Slug: "acme", DisplayName: "Acme"}},
 			{MerchantDocument: billing.MerchantDocument{Slug: "globex", DisplayName: "Globex"}},

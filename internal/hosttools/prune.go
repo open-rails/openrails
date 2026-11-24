@@ -94,11 +94,12 @@ func Prune(ctx context.Context, logger *slog.Logger, opts PruneOptions) error {
 	defer cleanup()
 	merchantID := opts.MerchantID
 	ctx = merchant.WithID(ctx, merchantID)
-	release, err := waitForMerchantPullLock(ctx, rt.DB, merchantID)
+	lease, err := waitForMerchantPullLock(ctx, rt.DB, merchantID)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer lease.Release()
+	ctx = lease.Context()
 	apply := opts.ExpectRows != nil
 	started := time.Now().UTC()
 	return rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {

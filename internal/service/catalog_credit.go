@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -16,11 +17,15 @@ func normalizeCreditGrant(spec *catalogwire.CreditGrantSpec) (*catalogwire.Credi
 	}
 	out := *spec
 	out.Currency = catalogwire.Currency(moneyutil.NormalizeCurrency(string(out.Currency)))
-	if err := moneyutil.ValidateCurrency(string(out.Currency)); err != nil {
+	unit := currency.IsUnitCode(string(out.Currency))
+	if err := moneyutil.ValidateCurrency(string(out.Currency)); err != nil && !unit {
 		return nil, apperr.Invalidf("credit_grant: %v", err)
 	}
 	if (out.Amount != nil) == out.FromPayment {
 		return nil, apperr.Invalidf("credit_grant requires exactly one of amount or from_payment")
+	}
+	if unit && out.FromPayment {
+		return nil, apperr.Invalidf("credit_grant.from_payment credits the payment's own currency: a pack of a merchant's unit names its amount")
 	}
 	if out.Amount != nil {
 		if *out.Amount <= 0 {
@@ -56,7 +61,11 @@ func validateCreditPrice(credit *catalogwire.CreditGrantSpec, price billing.Crea
 	if price.Quantity != nil {
 		return apperr.Invalidf("credit products do not support per-seat prices")
 	}
-	if !strings.EqualFold(string(credit.Currency), string(price.Currency)) {
+	if currency.IsUnitCode(string(price.Currency)) {
+		return apperr.Invalidf("a credit product is bought with money, never with a merchant's unit")
+	}
+	// Any currency buys a pack of a merchant's unit, at the pack's amount.
+	if !strings.EqualFold(string(credit.Currency), string(price.Currency)) && !currency.IsUnitCode(string(credit.Currency)) {
 		return apperr.Invalidf("credit_grant currency must match the price currency")
 	}
 	if price.CustomerAmount != nil && !credit.FromPayment {

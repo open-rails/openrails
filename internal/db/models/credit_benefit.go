@@ -4,6 +4,9 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/currency"
 )
 
 // CreditGrantSnapshot is the prepaid value promised by one accepted payment.
@@ -36,6 +39,38 @@ func (s *CreditGrantSnapshot) Validate() error {
 		return errors.New("fulfilled credit dates contradict accepted expiration policy")
 	}
 	return nil
+}
+
+// AcceptCreditGrant is what a product's credit policy promises for one unit
+// of a price in priceCurrency at priceAmount: credit in the price's currency,
+// its amount or the payment itself, or a pack of a merchant's unit, which the
+// policy counts and any currency buys.
+func AcceptCreditGrant(policy *catalog.CreditGrantSpec, priceCurrency string, priceAmount int64) (*CreditGrantSnapshot, error) {
+	if policy == nil {
+		return nil, nil
+	}
+	code := strings.ToUpper(strings.TrimSpace(string(policy.Currency)))
+	priceCurrency = strings.ToUpper(strings.TrimSpace(priceCurrency))
+	switch {
+	case currency.IsUnitCode(priceCurrency):
+		return nil, errors.New("credit is bought with money, never with a merchant's unit")
+	case code != priceCurrency && !currency.IsUnitCode(code):
+		return nil, errors.New("purchased credit currency must match payment currency")
+	case code != priceCurrency && policy.Amount == nil:
+		return nil, errors.New("a pack of a merchant's unit names its amount")
+	}
+	amount := priceAmount
+	if policy.Amount != nil {
+		amount = *policy.Amount
+	} else if !policy.FromPayment {
+		return nil, errors.New("credit benefit requires an amount or from_payment")
+	}
+	days := 365
+	if policy.ExpiresAfterDays != nil {
+		days = *policy.ExpiresAfterDays
+	}
+	out := &CreditGrantSnapshot{Amount: amount, Currency: code, ExpiresAfterDays: days}
+	return out, out.Validate()
 }
 
 // CloneCreditGrantSnapshot copies an optional agreement without sharing dates.

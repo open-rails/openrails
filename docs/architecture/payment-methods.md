@@ -201,7 +201,7 @@ is attributed by `origin` and `actor`, and a user-origin removal must be the
 signed-in customer's (`validatePaymentMethodDeleteAuthority`).
 
 Checks:
-- OR-J12-S07: in `readonly` provider-write mode a removal sends nothing.
+- OR-J12-S07: under a `readonly` write posture a removal sends nothing.
 - OR-J12-S06: removal is refused while a subscription uses the card.
 - `requestedPaymentMethodDelete` (`internal/intents/payment_method_delete_authority.go`) is the only path past the maintenance kill switch.
 

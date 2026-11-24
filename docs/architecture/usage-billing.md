@@ -24,21 +24,32 @@ Usage billing decides what usage costs and bills it in arrears. Usage lives in t
 admission's capture (`MoneyService.CaptureAdmission`); both are
 [entitlements and limits](entitlements.md). Items are numbered per lease: a resend
 answers from the sync's receipts, a changed item is `idempotency_key_reused`, a
-gap `usage_out_of_order`. A sync settles a bounded prefix (100 customers, 1.5 s);
+gap `usage_out_of_order`. A sync settles a bounded prefix (100 customers) in one insert;
 the gate sends the rest again. While ClickHouse is out of reach a sync answers 503
 and settles nothing (OR-J24-S48).
 
-**Pricing.** `MoneyService.PrepareUsageTx` validates, prices and locates under the
-customers' locks: each group sharing a period, meter cell and card print
+**Pricing.** `MoneyService.PrepareUsageTx` validates, prices and locates, taking a
+customer's lock only to open a session or first-use window or to charge a failed
+item (and locating that customer's items again under it): each group sharing a
+period, meter cell and card print
 (`cardPrint`) is priced provisionally at the period position the store holds,
 `R(Q+q) − R(Q)` never below zero (`marginalPrice`), shared by quantity; a
 `dynamic` card charges each item its stated amount. A capture of a request hold
 is priced by the cards it pinned. Limits are located at `admitted_at`
 (`locateItems`); a failed item's grace is read from its windows' `limit_usage`
 and what it leaves is charged with its own ledger legs. `CommitUsageTx` skips
-events an earlier attempt inserted (`ExistingUsage`), inserts the rest and waits,
-then writes `usage_unposted`, the card prints, opened session and first-use
-windows and captures, in the caller's transaction.
+events an earlier attempt inserted (`ExistingUsage`, by customer and event id at
+any `occurred_at`), inserts the rest and waits, then writes the card prints,
+opened session and first-use windows and captures, in the caller's transaction.
+A `usage_unposted` mark that already covers the usage is only held by key share
+(`ShareUsageUnposted`): a posting, which locks it for update, waits for the
+intake or has read its events, and intakes never wait on each other. Concurrent
+intakes of one customer may price from the same period position: postings price
+the period's total, so only provisional amounts differ. An event's identity never depends on a clock read per attempt: a
+capture occurred when its request was admitted, an item an earlier attempt
+inserted keeps that attempt's `occurred_at`, `admitted_at` and pricing period
+(so its session and first-use windows), and an insert whose caller gave up still
+finishes before the intake lets go of its locks (OR-J24-S58 to S60).
 
 **Posting.** `MoneyService.postUsageTx` is the one choke point: under the
 customer lock, per pricing period from `usage_unposted.since_at`, the price of
@@ -48,15 +59,26 @@ postings took (`postingDelta`): balance first, one `credit_spend` per lot live
 before the cut, the rest one `owed_accrual` split by meter and dated before the
 period's end and the cut, never before the last usage order's end. It runs at
 each month's end (`UsageCloseWorker`, the first scan of the hourly billing pass)
-and before any other movement of that balance (`db.UsageLedger`). A period whose
-price fell (a volume tier) is carried and credited (`usage_reversed`) once its
-late window closes. Until then the balance holds what is unposted
-(`unpostedUsage`).
+and before any other movement of that balance (`db.UsageLedger`). Each posting
+records how far it read the store (`usage_postings.ingested_through`); a later one
+takes, of the usage that occurred before an earlier cut and was ingested by then,
+no less than what posted, and prices what came since on top (`takenQuantities`).
+So a period whose price fell (a volume tier) is carried and credited
+(`usage_reversed`) once its late window closes, while usage the store lost (a
+restore, another store attached, a purge) is never credited back (OR-J24-S62).
+Usage under a card print its intake never recorded is priced by the card in force
+that names it, else left out (OR-J24-S64). Until then the balance holds what is
+unposted (`unpostedUsage`). A merchant's own unit is never owed: a posting in
+one takes what the lots hold and forgives the rest (`usage_postings.forgiven`),
+and a reversal takes forgiveness back before it credits
+([credits](credits.md)).
 
 **Billing.** With `usage_billing_enabled`, the usage pass (`UsageOrderWorker`)
 bills each account whose `money_settings.usage_due_at` has come (its bill date, or
 a threshold crossing) as a usage order (`BillDueUsageAccount`), then queues due
-collections as `order_collection` operations. The threshold is its currency's
+collections as `order_collection` operations. An order bills the pending owed
+items of its window; its period starts where their charges began (a posting's
+pricing period, a running charge's last posting) and ends at its close. The threshold is its currency's
 `usage_billing` `collection_threshold`, else its credit limit; a billing policy's
 outstanding cap and `collection_threshold_amount` bind only an account in the
 policy's `policy_currency`, as they do in admission (OR-J26-S61). A running charge's accrual is
@@ -102,9 +124,10 @@ Does not apply: usage comes from the merchant's backend, not a provider; a usage
 Amounts are `int64` native units of their currency end to end. A period is
 priced on its total, so its postings sum to R of its quantity however the usage
 arrived, and history's 15-minute buckets, so any zone's days, sum to what posts.
-Each item is one event (UUIDv5 of
-merchant, lease and number, or of the request id); a resend inserts nothing, and
-postings read `FINAL`, so a duplicate copy never counts. Each posting has its own
+Each item is one event (a UUIDv7 derived from
+merchant, lease and number at the lease's time, or from the request id), sorted by customer and event
+id; a resend inserts nothing, and postings read `FINAL`, so a duplicate copy never
+counts. Each posting has its own
 ledger key (`OpUsagePosting`, `usage_posting:<id>`, `1`). Postings are per
 currency; the one FX use, a spend window's cap, is in
 [entitlements and limits](entitlements.md).
@@ -115,7 +138,7 @@ Checks:
 - `postPeriod` fails if the ledger already holds the posting.
 - No `fx` import in `internal/modules/money/usage_intake.go`, `usage_price.go` or
   `usage_posting.go`.
-- Resends post once: OR-J24-S01, OR-J24-S06 to S08, OR-J24-S47, OR-J23-S21.
+- Resends post once: OR-J24-S01, OR-J24-S06 to S08, OR-J24-S47, OR-J24-S58 to S60, OR-J23-S21.
 
 ### 4. Access control and tenant isolation
 Running-charge routes declare the `merchant:usage:manage` or `merchant:usage:read`
@@ -147,7 +170,9 @@ Classes, in each table comment and `internal/retention/tables.go`: permanent
 expire by TTL (`retention.EventStoreTTLs`): raw events 100 days, period
 quantities 100 days, minutes 2 days, history buckets 25 months, limit windows 61 days
 after they end. A SCIM deletion clears a customer's invoker and metadata there
-(`EraseCustomer`, OR-J24-S53).
+under its lock; a run stopped part way converges when run again (`EraseCustomer`,
+OR-J24-S53, OR-J24-S63). A merchant purge deletes the merchant's usage there in a
+job queued with it (`openrails.merchant_usage_purge`, OR-J32-S07).
 Checks:
 - The table comments and `internal/retention/tables.go` agree on each class.
 
@@ -156,8 +181,8 @@ The close reads only customers due (`usage_unposted_due_at_idx`), in keyset
 pages of 200. The usage pass reads due accounts
 (`money_settings_usage_due_at_idx`) and due collections
 (`next_collection_attempt_at`). A sync reads one customer's period position and
-its views' limit rows in one query each; a balance reads the store only for a
-customer with unposted usage.
+its views' limit rows in one query each; a balance, a balance look and a lot's
+expiry read the store only for a customer with unposted usage (OR-J25-S43).
 Checks:
 - `UsageCloseWorker.Pass` pages `ListDueUsageUnposted`; an idle pass reads no row.
 - OR-J26-S40 and OR-J26-S52 bound the usage pass.
@@ -178,11 +203,11 @@ Checks:
 ## Tests
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
-- **J24**, intake and posting: OR-J24-S01, S02, S04 to S11, S21, S22, S36, S47 to S55 (replay, pricing on totals, month-end posting, owed dating, lots, the store out of reach, start refusals, erasure, archive, tenancy). Its lease scenarios are in [entitlements and limits](entitlements.md).
+- **J24**, intake and posting: OR-J24-S01, S02, S04 to S11, S21, S22, S36, S47 to S64 (replay, pricing on totals, month-end posting, owed dating, lots, the store out of reach, start refusals, erasure, archive, tenancy, recovery from lost commits and a store that lost usage). Its lease scenarios are in [entitlements and limits](entitlements.md).
 - **J25**, running charges and balance looks: OR-J25-S01 to S05, S37, S40 to S42.
 - **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58.
 
-Other tests: `internal/modules/money/rating_test.go` prices every accepted model; `usage_price_test.go` a period's total and history by bucket and zone; `internal/modules/limits/window_test.go` a rate level from buckets.
+Other tests: `internal/modules/money/rating_test.go` prices every accepted model; `usage_price_test.go` a period's total and history by bucket and zone; `usage_posting_test.go` the unposted mark and what a posting takes after the store lost usage; `internal/modules/limits/window_test.go` a rate level from buckets.
 
 Gaps:
 - Nothing checks that `retention.Tables` matches the schema; it is review-only.

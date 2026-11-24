@@ -104,6 +104,10 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	if err != nil {
 		return err
 	}
+	units, err := s.Profiles.Registry(ctx)
+	if err != nil {
+		return err
+	}
 	greet := contact.Name
 	if greet == "" {
 		greet = contact.Username
@@ -114,7 +118,7 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	}
 	content, err := s.render(ctx, settings, messageData(fact{
 		EventType: m.EventType, Data: data, OccurredAt: *m.OccurredAt, CustomerID: m.CustomerID,
-		Customer: greet, ProductName: product, Profile: profile,
+		Customer: greet, ProductName: product, Profile: profile, Units: units,
 	}))
 	var retry hostError
 	switch {

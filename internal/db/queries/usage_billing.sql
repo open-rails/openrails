@@ -96,12 +96,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(c
     AND (usage_billing_anchor IS NOT NULL OR usage_minimum_invoice_amount IS NOT NULL)
 ORDER BY customer_id, currency;
 
--- name: LatestUsageOrderEnd :one
-SELECT COALESCE(MAX(period_ends_at),'0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS period_end FROM billing.orders
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND customer_id=sqlc.arg(customer_id)::uuid
-    AND currency=sqlc.arg(currency)::text AND origin='usage'
-    AND period_starts_at=sqlc.arg(period_start)::timestamptz;
-
 -- name: LatestUsageOrderEndInCurrency :one
 -- Where the customer's usage orders in the currency end: owed dated before
 -- it would fall in a period an order already billed.

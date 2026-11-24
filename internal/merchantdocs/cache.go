@@ -19,7 +19,7 @@ import (
 // reach every replica at once.
 const Recheck = 30 * time.Second
 
-// loadTimeout bounds a background reload.
+// loadTimeout bounds a load.
 const loadTimeout = 30 * time.Second
 
 // SyncFunc reconciles a freshly loaded set with the identities Postgres
@@ -54,14 +54,33 @@ type Cache struct {
 }
 
 type entry struct {
-	load       sync.Mutex
-	mu         sync.RWMutex
-	set        Set
-	loaded     bool
-	checked    time.Time
+	mu      sync.RWMutex
+	set     Set
+	loaded  bool
+	checked time.Time
+	// loading is the load running, begun the begun-th; failed is a first
+	// load that failed, answered until loadRetry has passed.
+	loading    *loading
+	begun      uint64
+	failed     error
+	failedAt   time.Time
 	refreshing atomic.Bool
 	again      atomic.Bool
 }
+
+// loading is one load of a merchant's configuration, which its callers wait
+// for.
+type loading struct {
+	seq  uint64
+	done chan struct{}
+	set  Set
+	err  error
+}
+
+// loadRetry is how long a first load that failed answers its error before a
+// caller starts another: a failure every caller would meet (a source or
+// database out of reach) is not run again for each of them.
+const loadRetry = 5 * time.Second
 
 // NewCache serves source. A file never changes underneath, so only a
 // writable source is rechecked.
@@ -197,15 +216,82 @@ func (c *Cache) Forget(id billing.MerchantID) {
 	delete(c.entries, id)
 }
 
+// load reads the merchant's configuration from its source and reconciles it
+// with PostgreSQL on the cache's own context, never the caller's: a load is
+// the process's, so it neither joins the caller's transaction or connection
+// nor ends when the caller gives up. Callers share the load running; a
+// forced one waits for a load begun after it was asked for. Each caller waits
+// within its own ctx.
 func (c *Cache) load(ctx context.Context, id billing.MerchantID, e *entry, force bool) (Set, error) {
-	e.load.Lock()
-	defer e.load.Unlock()
-	e.mu.RLock()
-	previous, loaded := e.set, e.loaded
-	e.mu.RUnlock()
-	if loaded && !force {
-		return previous, nil
+	e.mu.Lock()
+	asked := e.begun
+	for {
+		if e.loaded && !force {
+			set := e.set
+			e.mu.Unlock()
+			return set, nil
+		}
+		if !e.loaded && !force && e.failed != nil && c.now().Sub(e.failedAt) < loadRetry {
+			set, err := e.set, e.failed
+			e.mu.Unlock()
+			return set, err
+		}
+		l := e.loading
+		if l == nil {
+			var err error
+			if l, err = c.begin(id, e); err != nil {
+				set := e.set
+				e.mu.Unlock()
+				return set, err
+			}
+		}
+		e.mu.Unlock()
+		select {
+		case <-l.done:
+		case <-ctx.Done():
+			e.mu.RLock()
+			set := e.set
+			e.mu.RUnlock()
+			return set, ctx.Err()
+		}
+		if !force || l.seq > asked {
+			return l.set, l.err
+		}
+		// A forced load must read the source after it was asked for.
+		e.mu.Lock()
 	}
+}
+
+// begin starts a load of the merchant; e.mu is held.
+func (c *Cache) begin(id billing.MerchantID, e *entry) (*loading, error) {
+	c.mu.Lock()
+	if c.base.Err() != nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("%w: the merchant configuration cache is closed", ErrUnavailable)
+	}
+	c.reloads.Add(1)
+	c.mu.Unlock()
+	e.begun++
+	l := &loading{seq: e.begun, done: make(chan struct{})}
+	e.loading = l
+	go func() {
+		defer c.reloads.Done()
+		ctx, cancel := context.WithTimeout(c.base, loadTimeout)
+		defer cancel()
+		l.set, l.err = c.loadNow(ctx, id, e)
+		e.mu.Lock()
+		e.loading = nil
+		e.mu.Unlock()
+		close(l.done)
+	}()
+	return l, nil
+}
+
+// loadNow is one load: the source read, then the reconciliation.
+func (c *Cache) loadNow(ctx context.Context, id billing.MerchantID, e *entry) (Set, error) {
+	e.mu.RLock()
+	previous := e.set
+	e.mu.RUnlock()
 	if err := c.held(); err != nil {
 		return previous, err
 	}
@@ -222,6 +308,8 @@ func (c *Cache) load(ctx context.Context, id billing.MerchantID, e *entry, force
 	if err != nil {
 		if e.loaded {
 			e.checked = now
+		} else {
+			e.failed, e.failedAt = err, now
 		}
 		return e.set, err
 	}
@@ -235,7 +323,7 @@ func (c *Cache) load(ctx context.Context, id billing.MerchantID, e *entry, force
 			c.Log.WarnContext(ctx, "merchant config: an undeclared account still holds billing", "merchant_id", id.String(), "account", path, "reason", why)
 		}
 	}
-	e.set, e.loaded, e.checked = set, true, now
+	e.set, e.loaded, e.checked, e.failed = set, true, now, nil
 	return set, nil
 }
 
@@ -341,6 +429,16 @@ func (c *Cache) MerchantMessages(ctx context.Context, id billing.MerchantID) (bi
 }
 
 // MerchantSettings is the merchant document's display name and settings.
+// StoredCurrencies are the units the merchant's document declares in the
+// source now, read past the cache (db.MerchantConfig).
+func (c *Cache) StoredCurrencies(ctx context.Context, id billing.MerchantID) ([]billing.MerchantCurrency, error) {
+	set, err := c.source.Load(ctx, id)
+	if err != nil || !set.HasMerchant {
+		return nil, err
+	}
+	return set.Merchant.Value.Currencies, nil
+}
+
 func (c *Cache) MerchantSettings(ctx context.Context, id billing.MerchantID) (string, billing.MerchantSettings, error) {
 	set, err := c.Get(ctx, id)
 	if err != nil {

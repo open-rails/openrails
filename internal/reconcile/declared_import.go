@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // The DeclaredBilling import lands a host-declared snapshot of its legacy
@@ -548,7 +549,7 @@ func insertDeclaredCanceled(
 	}
 	feedback := "imported: declared " + string(f.CancelKind)
 
-	id := uuid.New()
+	id := uuidutil.NewV7()
 	priceID := f.PriceID
 	if _, err := q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		CollectionPolicy:            string(f.CollectionPolicy),

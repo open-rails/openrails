@@ -22,7 +22,8 @@ import (
 // whose notice is armed, or when a funding lifts it over one whose notice was
 // sent. Any other change queues nothing. A watch it queues is also marked due,
 // so the billing pass looks at it if the look fails. Every caller holds the
-// customer's LockCustomerForSpend, which the look takes too. Only the units
+// customer's LockCustomerForSpend, which the look takes too (WatchAvailable's
+// hold the watch instead). Only the units
 // book reaches it: a general-ledger posting changes no spendable balance.
 func WatchChange(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, funded bool, now time.Time) error {
 	key := gen.GetBalanceWatchParams{MerchantID: merchant, CustomerID: customer, Currency: currency}
@@ -49,8 +50,23 @@ func WatchChange(ctx context.Context, q *gen.Queries, merchant, customer uuid.UU
 	if !look {
 		return nil
 	}
-	// A watch already due has its look queued, or failed for the billing
-	// pass: the look reads this change under the customer's lock.
+	return markDue(ctx, q, merchant, customer, currency, now)
+}
+
+// WatchAvailable is WatchChange for usage, given the watch its caller holds
+// against a look (ShareBalanceWatches) and the available amount it read
+// after taking it.
+func WatchAvailable(ctx context.Context, q *gen.Queries, w gen.BillingBalanceWatch, available int64, now time.Time) error {
+	if !w.LookEachChange && !crossed(w, available, false) {
+		return nil
+	}
+	return markDue(ctx, q, w.MerchantID, w.CustomerID, w.Currency, now)
+}
+
+// markDue marks the watch due and queues its look. A watch already due has
+// its look queued, or failed for the billing pass: the look reads this
+// change after it.
+func markDue(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, now time.Time) error {
 	marked, err := q.MarkBalanceWatchDue(ctx, gen.MarkBalanceWatchDueParams{MerchantID: merchant, CustomerID: customer, Currency: currency, Now: now})
 	if err != nil || marked == 0 {
 		return err

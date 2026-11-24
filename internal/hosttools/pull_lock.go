@@ -10,19 +10,19 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
-// pullLockPoll is how often a waiting prune asks for the merchant's lock again.
+// pullLockPoll is how often a waiting prune asks for the merchant's lease again.
 const pullLockPoll = 2 * time.Second
 
-// waitForMerchantPullLock takes the lock the scheduled pull holds, waiting
+// waitForMerchantPullLock takes the lease the scheduled pull holds, waiting
 // while another pull of the merchant runs, so a prune never runs beside one.
-func waitForMerchantPullLock(ctx context.Context, database *db.DB, merchantID billing.MerchantID) (release func(), err error) {
+func waitForMerchantPullLock(ctx context.Context, database *db.DB, merchantID billing.MerchantID) (*db.RunLease, error) {
 	for waited := false; ; waited = true {
-		release, held, err := reconcile.LockMerchantPull(ctx, database, merchantID.UUID())
+		lease, err := reconcile.LockMerchantPull(ctx, database, merchantID.UUID())
 		if err != nil {
 			return nil, fmt.Errorf("merchant pull lock: %w", err)
 		}
-		if held {
-			return release, nil
+		if lease != nil {
+			return lease, nil
 		}
 		if !waited {
 			database.Log.InfoContext(ctx, "another pull of this merchant is running; waiting for it to finish", "merchant_id", merchantID.String())

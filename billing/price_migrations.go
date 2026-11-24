@@ -74,7 +74,10 @@ const (
 // PriceMigration moves the subscribers of one price, or of every version of
 // a price key, to another price. Each subscription moves at its first renewal
 // on or after EffectiveAt, carrying the move as its scheduled change until
-// then; nothing is prorated or charged early.
+// then; nothing is prorated or charged early. Creating one admits, as one
+// destructive command, a unit for every subscriber it counts and every
+// source it archives, before reading any; it archives the sources, then
+// counts the subscribers again and records them.
 type PriceMigration struct {
 	ID PriceMigrationID `json:"id"`
 	// FromPriceID is the price whose subscribers move; or ProductKey and
@@ -85,9 +88,9 @@ type PriceMigration struct {
 	ToPriceID      PriceID           `json:"to_price_id"`
 	EffectiveAt    time.Time         `json:"effective_at"`
 	FallbackPolicy MigrationFallback `json:"fallback_policy"`
-	// Matched is counted at creation. Skipped counts the subscriptions skipped
-	// at creation and the moves that no longer applied when pushed; Scheduled,
-	// Applied, Canceled and Blocked count the moves now.
+	// Matched is counted at creation. Skipped counts the subscriptions the
+	// migration made no move for and the moves that no longer applied when
+	// pushed; Scheduled, Applied, Canceled and Blocked count the moves now.
 	Matched    int        `json:"matched"`
 	Skipped    int        `json:"skipped"`
 	Scheduled  int        `json:"scheduled"`
@@ -96,6 +99,12 @@ type PriceMigration struct {
 	Blocked    int        `json:"blocked"`
 	CreatedAt  time.Time  `json:"created_at"`
 	CanceledAt *time.Time `json:"canceled_at"`
+	// Preparing is true while the migration still reaches its subscribers, a
+	// page at a time after the first; the counts grow until it is false.
+	Preparing bool `json:"preparing"`
+	// Warnings, on the answer that created it, are what it could not do: a
+	// source still on sale. Empty otherwise.
+	Warnings []string `json:"warnings"`
 }
 
 // CreatePriceMigrationParams names the subscribers to move and where.
@@ -154,11 +163,14 @@ type PriceMigrationRailCounts struct {
 }
 
 // PriceMigrationPreview is what creating the migration would do, with
-// nothing written.
+// nothing written. Matched counts every subscriber; the first Classified of
+// them, at most 1,000, are classified into Scheduled, Skipped, Blocked,
+// ByRail and Outcomes.
 type PriceMigrationPreview struct {
 	ToPriceID   *PriceID                             `json:"to_price_id"`
 	EffectiveAt time.Time                            `json:"effective_at"`
 	Matched     int                                  `json:"matched"`
+	Classified  int                                  `json:"classified"`
 	Scheduled   int                                  `json:"scheduled"`
 	Skipped     int                                  `json:"skipped"`
 	Blocked     int                                  `json:"blocked"`

@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -23,11 +24,19 @@ type fact struct {
 	// ProductName is the subscription's product when the fact names none.
 	ProductName string
 	Profile     models.MerchantProfileConfiguration
+	// Units are the merchant's own units, whose amounts show at their scale.
+	Units currency.Registry
 }
 
 // messageData is f as a message renders it.
 func messageData(f fact) billing.MessageData {
 	d, p := f.Data, f.Profile
+	shown := func(v *int64, code catalog.Currency) string {
+		if u, ok := f.Units.Unit(string(code)); ok && v != nil {
+			return moneyutil.FormatUnits(*v, u)
+		}
+		return money(v, code)
+	}
 	product := d.ProductName
 	if product == "" {
 		product = f.ProductName
@@ -46,10 +55,10 @@ func messageData(f fact) billing.MessageData {
 		Event: billing.MessageEvent{
 			OccurredAt: day(&f.OccurredAt), Reason: d.Reason,
 			ProductName: product, FromProductName: d.FromProductName, ToProductName: d.ToProductName,
-			Amount: money(d.Amount, d.Currency), OldAmount: money(d.OldAmount, d.Currency), NewAmount: money(d.NewAmount, d.Currency),
-			AmountDue: money(d.AmountDue, d.Currency), OverdueAmount: money(d.OverdueAmount, d.Currency),
-			AvailableAmount: money(d.AvailableAmount, d.Currency), OwedAmount: money(d.OwedAmount, d.Currency),
-			LowBalanceAmount: money(d.LowBalanceAmount, d.Currency),
+			Amount: shown(d.Amount, d.Currency), OldAmount: shown(d.OldAmount, d.Currency), NewAmount: shown(d.NewAmount, d.Currency),
+			AmountDue: shown(d.AmountDue, d.Currency), OverdueAmount: shown(d.OverdueAmount, d.Currency),
+			AvailableAmount: shown(d.AvailableAmount, d.Currency), OwedAmount: shown(d.OwedAmount, d.Currency),
+			LowBalanceAmount: shown(d.LowBalanceAmount, d.Currency),
 			EndedAt:          day(d.EndedAt), EffectiveAt: day(d.EffectiveAt), PeriodStartsAt: day(d.PeriodStartsAt), PeriodEndsAt: day(d.PeriodEndsAt),
 			DueAt: day(d.DueAt), NextAttemptAt: day(d.NextAttemptAt), RunwayEndsAt: day(d.RunwayEndsAt), OverdueStartedAt: day(d.OverdueStartedAt),
 			OrderNumber: count(d.OrderNumber), OverdueOrders: count(int64(d.OverdueOrders)), Quantity: quantity(d.Quantity),

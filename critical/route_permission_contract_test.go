@@ -340,7 +340,7 @@ func TestRoutePermissions(t *testing.T) {
 		iw.await(t, imp.ID, billing.PSPImportApplied)
 		applied, err := iw.alpha.GetFinding(t.Context(), correct.ID)
 		require.NoError(t, err)
-		require.NotNil(t, applied.Resolution)
+		require.NotNil(t, applied.Resolution, "the apply left the correction open; notes %q, evidence %v", deref(applied.Notes), applied.Evidence)
 		require.Equal(t, "approved", *applied.Resolution)
 	})
 	t.Run("OR-J01-S25/an-approval-is-one-operation-however-many-changes-it-carries", func(t *testing.T) {
@@ -621,11 +621,11 @@ func TestDirectoryAuthority(t *testing.T) {
 			require.Equal(t, "succeeded", state)
 			require.Nil(t, contactName(id))
 		}
-		// An erasure that ran at once left its drain queued, to run it again
-		// had the run not finished.
+		// Each erasure that ran at once left its own drain queued, to run it
+		// again had the run not finished.
 		drains, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds(destructive.DrainErasuresKind).States(rivertype.JobStateScheduled))
 		require.NoError(t, err)
-		require.NotEmpty(t, drains.Jobs, "a started erasure queues its drain")
+		require.Len(t, drains.Jobs, 2, "each started erasure queues its own drain")
 
 		// The third waits: the User is gone from the directory at once, its
 		// values stay, and the merchant's erasure hold opens.
@@ -671,7 +671,7 @@ func TestDirectoryAuthority(t *testing.T) {
 		require.NoError(t, err)
 		for i, grant := range grants {
 			staff := a.remote(t, a.alpha.MerchantID(), roleKey(t, a, "support-"+strconv.Itoa(i), billing.MerchantCustomerManage))
-			_, err := staff.RevokeCreditGrant(t.Context(), grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			_, err := staff.RevokeCreditGrant(t.Context(), "", grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 			if i < 2 {
 				require.NoError(t, err)
 				continue
@@ -745,21 +745,19 @@ func raiseRecommendation(t *testing.T, a *authorityWorld, subject string, rec re
 	return billing.FindingID(finding.ID)
 }
 
-// raiseProposal opens a pull finding of alpha's proposing a change of kind:
-// the approve route decides on its kind before anything runs.
+// raiseProposal opens a pull proposal of alpha's, as a pull writes one, whose
+// change is of kind and names nothing to change: the approve route decides on
+// its kind before anything runs.
 func raiseProposal(t *testing.T, a *authorityWorld, kind billing.ChangeKind) billing.FindingID {
 	t.Helper()
 	database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
 	require.NoError(t, err)
 	var finding reconcile.FindingRecord
 	require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
-		finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: reconcile.FindingLocalActiveRemoteDead,
-			SubjectKey: "subscription:" + uuid.NewString(), Severity: reconcile.SeverityHigh, Evidence: map[string]any{}})
+		finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).UpsertFinding(ctx, uuid.New(), reconcile.Finding{Type: reconcile.FindingLocalActiveRemoteDead,
+			SubjectKey: "subscription:" + uuid.NewString(), Severity: reconcile.SeverityHigh, Status: reconcile.FindingStatusRequiresReview,
+			Change: &reconcile.Change{FindingChange: billing.FindingChange{Kind: kind}}})
 		return err
 	}))
-	change, err := json.Marshal(reconcile.Change{FindingChange: billing.FindingChange{Kind: kind}})
-	require.NoError(t, err)
-	_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "reconciliation_findings"}.Sanitize()+" SET change = $1 WHERE merchant_id = $2 AND id = $3", change, a.alpha.MerchantID().UUID(), finding.ID)
-	require.NoError(t, err)
 	return billing.FindingID(finding.ID)
 }

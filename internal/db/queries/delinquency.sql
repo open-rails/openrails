@@ -59,13 +59,18 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)
 
 -- name: NotifyOverdueOrders :exec
 -- Tells the payer once about each of its open usage orders in the currency
--- past its due date; the notice id is the order's, so a later evaluation adds
--- none. One with a collection in flight waits for its outcome.
+-- past its due date; the notice id derives from the order's (uuidutil.ChildV7
+-- of "invoice_overdue": its timestamp, then SHA-256 of the order id and name),
+-- so a later evaluation adds none. One with a collection in flight waits for
+-- its outcome.
 INSERT INTO billing.notification_events (id, merchant_id, customer_id, event_type, data, created_at)
-SELECT md5('invoice_overdue:' || o.id::text)::uuid, o.merchant_id, o.customer_id, 'order_overdue',
+SELECT encode(set_byte(set_byte(n.b, 6, (get_byte(n.b, 6) & 15) | 112), 8, (get_byte(n.b, 8) & 63) | 128), 'hex')::uuid,
+       o.merchant_id, o.customer_id, 'order_overdue',
        jsonb_build_object('order_id', 'ord_' || o.id::text, 'amount_due', (o.total - o.amount_paid)::text, 'currency', o.currency, 'due_at', o.due_at),
        sqlc.arg(now)::timestamptz
 FROM billing.orders o
+CROSS JOIN LATERAL (SELECT CASE WHEN get_byte(uuid_send(o.id), 6) >> 4 = 7 THEN substring(uuid_send(o.id) FROM 1 FOR 6) ELSE decode('000000000000', 'hex') END
+    || substring(sha256(uuid_send(o.id) || convert_to('invoice_overdue', 'UTF8')) FROM 1 FOR 10) AS b) n
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(customer_id)::uuid
   AND o.currency = sqlc.arg(currency)::text
   AND o.origin = 'usage' AND o.status = 'open' AND o.amount_paid < o.total

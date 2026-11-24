@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/money/fees"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/pull"
@@ -175,9 +176,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
-	// A merchant purge's Vault cleanup, queued with the purge.
+	// A merchant purge's Vault cleanup and event store deletion, queued with
+	// the purge.
 	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
+	}
+	if err := addWorker(workers, &riverjobs.MerchantUsagePurgeWorker{DB: r.DB}); err != nil {
+		return fmt.Errorf("add merchant usage purge worker: %w", err)
 	}
 	// Customer messages: each pending one's job, queued by the dispatcher or
 	// its periodic backstop, and the job that sends it.
@@ -187,8 +192,15 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
 		return fmt.Errorf("add customer message worker: %w", err)
 	}
+	// MRR risk: the backstop of the drain each queued change wakes.
+	if err := addWorker(workers, &riverjobs.MRRRiskWorker{Risk: r.MRRRisk}); err != nil {
+		return fmt.Errorf("add mrr risk worker: %w", err)
+	}
 	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
 		return fmt.Errorf("add contact erasure worker: %w", err)
+	}
+	if err := addWorker(workers, &riverjobs.PriceMigrationWorker{Migrations: r.PriceMigrationService}); err != nil {
+		return fmt.Errorf("add price migration worker: %w", err)
 	}
 	// Usage orders: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
@@ -210,6 +222,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	realerts := &riverjobs.ConfigRealertWorker{DB: r.DB, Clock: clock, Alerts: r.AlertService, Reload: r.reloadMerchantConfig}
 	storedCards := &riverjobs.StoredCardRefreshDueWorker{DB: r.DB, Clock: clock, Merchants: func() *merchants.Service { return r.Merchants }, Posture: r.Posture(), Log: r.Log}
 	closing := &riverjobs.UsageCloseWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
+	// Deferred revenue recognised at each month boundary in the merchant's
+	// accounting timezone, at each schedule's end and at an early end.
+	recognition := &riverjobs.RevenueRecognitionWorker{DB: r.DB, Clock: clock, Log: r.Log}
 	scans := []riverjobs.Scan{
 		// A month's usage posts once its month ends, before anything bills it.
 		{Kind: riverjobs.KindUsageClose, Run: closing.Pass, DueBy: closing.DueBy},
@@ -218,6 +233,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},
 		{Kind: riverjobs.KindDelinquency, Run: delinquency.Pass, DueBy: delinquency.DueBy},
 		{Kind: riverjobs.KindOrderExpiry, Run: expiry.Pass, DueBy: expiry.DueBy},
+		{Kind: riverjobs.KindRevenueRecognition, Run: recognition.Pass, DueBy: recognition.DueBy},
 	}
 	if r.declares(riverjobs.WithUsageBilling) {
 		scans = append(scans, riverjobs.Scan{Kind: money.KindUsageOrders, Run: usage.Pass, DueBy: usage.DueBy})
@@ -230,11 +246,13 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		riverjobs.Scan{Kind: riverjobs.KindOperationWakes, Run: (&riverjobs.OperationWakes{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
 		// Cancellations at period end leave MRR at their end.
 		riverjobs.Scan{Kind: riverjobs.KindMRRDue, Run: (&riverjobs.MRRDueWorker{DB: r.DB, Clock: clock, Log: r.Log}).Pass},
+		// Stripe's fees on the charges, refunds and disputes recorded since.
+		riverjobs.Scan{Kind: riverjobs.KindStripeFees, Run: (&fees.StripeReader{DB: r.DB, Rails: r.RailConfigs, Stripe: r.StripeClients, Log: r.Log}).Pass},
 	)
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)
 	}
-	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Scans: scans, Clock: clock, Log: r.Log}); err != nil {
+	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Leases: r.leaseDB, Scans: scans, Clock: clock, Log: r.Log}); err != nil {
 		return fmt.Errorf("add billing pass worker: %w", err)
 	}
 	r.riverCompositionMu.Lock()
@@ -278,7 +296,7 @@ func (w jobLogged[T]) Work(ctx context.Context, job *river.Job[T]) error {
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// Every provider intent arms per merchant at drain time: NMI through
 	// CollectionResolver, CCBill and Stripe through RailConfigs.
-	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // an unarmed rail parks
+	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.RailConfigs, clock) // an unarmed rail parks
 	ccbillCancel.DataLinkBaseURL = config.SandboxCCBillDataLinkURL(r.Config)
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
 	rebill.DeferDelete = newProviderCancelScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
@@ -367,7 +385,7 @@ func (r *Runtime) StripeEngines() intents.StripeEngineServiceResolver {
 
 // Posture reads merchants' provider write postures.
 func (r *Runtime) Posture() writeposture.View {
-	return writeposture.View{Config: r.Config, DB: r.DB}
+	return writeposture.View{DB: r.DB}
 }
 
 // IntentRunner returns a Runner for synchronous enqueue+execute from request
@@ -421,6 +439,9 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	if r.Messages == nil {
 		return fmt.Errorf("billing worker runtime customer messages are required")
 	}
+	if r.MRRRisk == nil {
+		return fmt.Errorf("billing worker runtime mrr risk is required")
+	}
 	return nil
 }
 
@@ -460,6 +481,7 @@ func (r *Runtime) refreshWorkers(clock clockwork.Clock) (*riverjobs.ProviderRefr
 	refresh := &riverjobs.ProviderRefreshWorker{
 		StripeClients:  r.StripeClients,
 		DB:             r.DB,
+		Leases:         r.leaseDB,
 		Config:         r.Config,
 		Clock:          clock,
 		Merchants:      r.Merchants, // per-merchant store-armed pulls

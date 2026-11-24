@@ -43,8 +43,7 @@ The `server/` module (`github.com/open-rails/openrails/server`): the `openrails`
 (`--config`, `OPENRAILS_CONFIG`), a logged `.env`, the environment (`DB_URL` is
 `db.url`), files under `VAULT_SECRETS_PATH` and flags (`WithOverride`). Unknown keys
 and retired names (`ENV`, `API_URL`, `MERCHANT_CONFIG_SOURCE`, …) refuse boot;
-`Validate` checks the result. `--provider-write-mode` or `provider_write_mode` is
-required. One-off commands load less: `LoadForCommand`, `LoadDatabaseForCommand`,
+`Validate` checks the result. One-off commands load less: `LoadForCommand`, `LoadDatabaseForCommand`,
 `LoadDirectoryForCommand`.
 
 ### Boot merchants
@@ -81,7 +80,7 @@ Without the default manifest the server boots control-plane only.
 
 `Server.Run` binds job producers (`InitRiver`) before listening on `:3053`, starts the
 workers, and on stop fails `/health/ready` (`Drain`) and keeps serving for
-`DrainDelay`, then finishes within `ShutdownTimeout`. `Serve` runs no workers. A host
+`drainDelay` (5s), then finishes within `shutdownTimeout` (20s). `Serve` runs no workers. A host
 with its own router mounts `Routes` (checked by `embedhttp.ValidateRouteTable`) and
 adds `RiverJobs` to its fleet.
 

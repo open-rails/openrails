@@ -43,9 +43,8 @@ const (
 	CodeRateLimitExceeded      ErrorCode = "rate_limit_exceeded"
 	CodeInternalError          ErrorCode = "internal_error"
 	CodeServiceUnavailable     ErrorCode = "service_unavailable"
-	// CodeProviderWritesDisabled: the merchant's provider writes are off
-	// (provider_write_mode, or the merchant's write posture); the message
-	// names why.
+	// CodeProviderWritesDisabled: the merchant's write posture holds its
+	// provider writes; the message names why.
 	CodeProviderWritesDisabled ErrorCode = "provider_writes_disabled"
 	CodeIdempotencyKeyReused   ErrorCode = "idempotency_key_reused"
 	CodeIdempotencyKeyInUse    ErrorCode = "idempotency_key_in_use"
@@ -88,6 +87,7 @@ const (
 const (
 	CodeScheduledChangeExists       ErrorCode = "scheduled_change_exists"
 	CodePriceMigrationNotFound      ErrorCode = "price_migration_not_found"
+	CodePriceMigrationInProgress    ErrorCode = "price_migration_in_progress"
 	CodePriceChangeCurrencyMismatch ErrorCode = "price_change_currency_mismatch"
 	CodePriceChangeTargetArchived   ErrorCode = "price_change_target_archived"
 	CodePriceIncreaseNoticeTooShort ErrorCode = "price_increase_notice_too_short"
@@ -323,7 +323,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeRateLimitExceeded, 429, limit, "Too many requests; Retry-After says when to try again."},
 	{CodeInternalError, 500, fault, "OpenRails failed; request_id identifies the failure in its logs."},
 	{CodeServiceUnavailable, 503, fault, "A dependency is temporarily unavailable; retry."},
-	{CodeProviderWritesDisabled, 503, fault, "Provider writes are off for the merchant, so it takes no payment; the message names why (provider_write_mode or the merchant's write posture)."},
+	{CodeProviderWritesDisabled, 503, fault, "Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture)."},
 	{CodeIdempotencyKeyReused, 422, invalid, "The idempotency key already committed with different terms."},
 	{CodeIdempotencyKeyInUse, 409, invalid, "The request first sent with this Idempotency-Key is still running; retry once it finishes."},
 	{CodeInsufficientCredits, 402, card, "The customer's credit balance does not cover the operation."},
@@ -450,6 +450,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeSolanaRPCUnavailable, 502, fault, "The Solana RPC endpoints did not answer; retry."},
 	{CodeScheduledChangeExists, 409, invalid, "The subscription already has a scheduled change."},
 	{CodePriceMigrationNotFound, 404, invalid, "The price migration does not exist."},
+	{CodePriceMigrationInProgress, 409, invalid, "The same price migration is being created by another request; retry once it answers."},
 	{CodePriceChangeCurrencyMismatch, 422, invalid, "The target price must be in the subscription's currency."},
 	{CodePriceChangeTargetArchived, 422, invalid, "The target price is archived."},
 	{CodePriceIncreaseNoticeTooShort, 422, invalid, "effective_at is inside the merchant's notice window for a price increase."},

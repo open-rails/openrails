@@ -1,19 +1,18 @@
 package openrails
 
 import (
+	"cmp"
+	"strings"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 )
 
 // Config is the engine's configuration: plain data. Everything that reaches
-// outside the process is in Deps. ProviderWriteMode is required. Whether money
-// is real is each PSP's declared environment, never the deployment's.
+// outside the process is in Deps. Whether money is real is each PSP's
+// declared environment, never the deployment's; how much OpenRails may write
+// to providers is each merchant's write posture.
 type Config struct {
-	// ProviderWriteMode is how much OpenRails may do against payment
-	// providers: ProviderWritesFull (normal operation), ProviderWritesLimited
-	// (no system-initiated provider writes) or ProviderWritesReadOnly (no
-	// provider writes: it never charges anyone). Required.
-	ProviderWriteMode ProviderWriteMode
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool
 	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
@@ -97,20 +96,6 @@ type Config struct {
 	WebhookSecretOverlap string
 }
 
-// ProviderWriteMode is how much OpenRails may do against payment providers.
-type ProviderWriteMode string
-
-const (
-	// ProviderWritesFull is normal operation.
-	ProviderWritesFull ProviderWriteMode = "full"
-	// ProviderWritesLimited makes no system-initiated provider writes:
-	// dunning, invoice collection and the other proactive operations wait,
-	// while purchase and customer or staff actions run.
-	ProviderWritesLimited ProviderWriteMode = "limited"
-	// ProviderWritesReadOnly makes no provider writes: it never charges anyone.
-	ProviderWritesReadOnly ProviderWriteMode = "readonly"
-)
-
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
 // The role of the pool New runs with owns every object in them.
 type DatabaseConfig struct {
@@ -128,8 +113,8 @@ type DatabaseConfig struct {
 	// maintenance is unchanged.
 	SkipMigrations bool
 	// LeaseConns caps the separate pool, copied from Deps.Postgres's
-	// configuration, that renews idempotency leases. Zero is four
-	// connections.
+	// configuration, that renews leases: idempotency claims, the billing pass
+	// and merchant pulls. Zero is four connections.
 	LeaseConns int
 }
 
@@ -299,12 +284,52 @@ func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 	return config.ParseMerchantDocument(raw)
 }
 
+// The values New gives a setting left zero, the engine's own defaults (the
+// standalone server's loader applies the same ones). RateLimits and Captcha
+// keep nil as their own default: the built-in limits and challenge.
+const (
+	defaultSchema             = config.DefaultSchema             // "billing"; RiverSchema is the schema plus "_river"
+	defaultLeaseConns         = config.DefaultLeaseConns         // 4
+	defaultClickHouseDatabase = config.DefaultClickHouseDatabase // "openrails"
+	defaultVaultScopePrefix   = config.DefaultVaultScopePrefix   // "openrails"
+	defaultVaultTransitMount  = config.DefaultVaultTransitMount  // "transit"
+	// defaultEventRetention is 2160h (90 days), defaultWebhookSecretOverlap 24h.
+	defaultEventRetention       = config.DefaultEventRetention
+	defaultWebhookSecretOverlap = config.DefaultWebhookSecretOverlap
+)
+
+// withDefaults is cfg with every zero setting that has a default set to it.
+func (cfg Config) withDefaults() Config {
+	cfg.Database = cfg.Database.withDefaults()
+	cfg.ClickHouse = cfg.ClickHouse.withDefaults()
+	cfg.EventRetention = cmp.Or(strings.TrimSpace(cfg.EventRetention), defaultEventRetention.String())
+	cfg.WebhookSecretOverlap = cmp.Or(strings.TrimSpace(cfg.WebhookSecretOverlap), defaultWebhookSecretOverlap.String())
+	if cfg.Vault != nil {
+		vault := *cfg.Vault
+		vault.ScopePrefix = cmp.Or(vault.ScopePrefix, defaultVaultScopePrefix)
+		vault.TransitMount = cmp.Or(vault.TransitMount, defaultVaultTransitMount)
+		cfg.Vault = &vault
+	}
+	return cfg
+}
+
+func (d DatabaseConfig) withDefaults() DatabaseConfig {
+	d.Schema = cmp.Or(strings.ToLower(strings.TrimSpace(d.Schema)), defaultSchema)
+	d.RiverSchema = cmp.Or(strings.TrimSpace(d.RiverSchema), config.RiverSchemaFor(d.Schema))
+	d.LeaseConns = cmp.Or(d.LeaseConns, defaultLeaseConns)
+	return d
+}
+
+func (c ClickHouseConfig) withDefaults() ClickHouseConfig {
+	c.Database = cmp.Or(strings.TrimSpace(c.Database), defaultClickHouseDatabase)
+	return c
+}
+
 // engineConfig is cfg as the engine reads it. Each settings type converts as
 // a whole, so a field one side lacks fails to compile; ReadCache is the
 // handles', not the engine's.
 func engineConfig(cfg Config) config.Config {
 	out := config.Config{
-		ProviderWriteMode:       string(cfg.ProviderWriteMode),
 		EngineAdmissionHold:     cfg.EngineAdmissionHold,
 		UsageBillingEnabled:     cfg.UsageBillingEnabled,
 		Database:                config.DatabaseConfig(cfg.Database),

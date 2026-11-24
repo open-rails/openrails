@@ -8,8 +8,7 @@
 //	gateway := nmimock.New(nmimock.Options{Clock: clock.Now})
 //	defer gateway.Close()
 //	engine, err := openrails.New(ctx, openrails.Config{
-//		ProviderWriteMode: openrails.ProviderWritesFull,
-//		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
+//		ProviderSandbox: &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
 //		Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{
 //			Slug: "shop", DisplayName: "Shop", PSPs: billing.PSPs{
 //				"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
@@ -178,6 +177,8 @@ type Schedule struct {
 	Deleted, Paused bool
 	// Custom is a custom-amount schedule: its plan shows an empty plan_name.
 	Custom bool
+	// UnstatedPayments is a schedule whose plan states no plan_payments.
+	UnstatedPayments bool
 }
 
 // AddPlan stores a recurring plan the account already has.

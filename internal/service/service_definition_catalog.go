@@ -66,6 +66,11 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 	if err != nil {
 		return nil, err
 	}
+	if credit != nil {
+		if err := s.ownUnit(ctx, "credit_grant.currency", string(credit.Currency)); err != nil {
+			return nil, err
+		}
+	}
 	req.CreditGrant = credit
 	now := time.Now().UTC()
 	tid, err := merchant.Require(ctx)
@@ -225,6 +230,11 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 		credit, err := normalizeCreditGrant(req.CreditGrant)
 		if err != nil {
 			return nil, err
+		}
+		if credit != nil {
+			if err := s.ownUnit(ctx, "credit_grant.currency", string(credit.Currency)); err != nil {
+				return nil, err
+			}
 		}
 		req.CreditGrant = credit
 		current, err := products.GetByID(ctx, id.UUID())
@@ -394,11 +404,68 @@ func (s *Service) createPriceCommand(ctx context.Context, req billing.CreatePric
 		return nil, apperr.Invalidf("exactly one of product_id, product_key and product_data is required")
 	}
 	if req.ProductData != nil {
+		// A Solana plan is published here, before the catalog transaction and
+		// its lock; the transaction only binds it.
+		links, err := s.inlinePriceLinks(ctx, req)
+		if err != nil {
+			return nil, err
+		}
 		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.Price, error) {
+			scoped.catalogPreparedLinks = links
 			return scoped.createPrice(ctx, req)
 		})
 	}
 	return s.createPrice(ctx, req)
+}
+
+// inlinePriceLinks are the provider links of a price created with its
+// product, made outside any transaction: the product's id follows from its
+// key and the price's from its terms, so neither needs to exist yet.
+func (s *Service) inlinePriceLinks(ctx context.Context, req billing.CreatePriceParams) (map[[2]string]map[string]map[string]string, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	products, prices, err := s.requireCatalogServices()
+	if err != nil {
+		return nil, err
+	}
+	productKey := strings.TrimSpace(req.ProductData.Key)
+	if productKey == "" {
+		return nil, apperr.Invalidf("product_data requires key and display_name")
+	}
+	product, err := products.GetByKey(ctx, productKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		product, err = &models.Product{ID: uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), productKey), Key: productKey}, nil
+	}
+	if err != nil {
+		return nil, productLookup(err)
+	}
+	req.ProductData = nil
+	req.ProductID = billing.ProductID(product.ID)
+	req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
+	defaultRecurringAccess(&req)
+	if err := validateCatalogPriceTerms(req); err != nil {
+		return nil, err
+	}
+	key, _ := resolvePriceKey(product, req)
+	priceID := newPriceID(product.ID, key, req)
+	existing, err := prices.FindByTerms(ctx, req, key)
+	if err == nil {
+		priceID = existing.ID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	links, err := s.createPriceLinks(ctx, req, priceID, existing)
+	if err != nil {
+		return nil, err
+	}
+	return map[[2]string]map[string]map[string]string{{productKey, key}: links}, nil
 }
 
 func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
@@ -422,7 +489,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// is case-insensitive, so without this a caller-supplied "usd" validated
 	// fine and then failed the prices_currency_check CHECK at INSERT.
 	req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
-	if err := s.unitRefusal(ctx, "currency", string(req.Currency)); err != nil {
+	if err := s.ownUnit(ctx, "currency", string(req.Currency)); err != nil {
 		return nil, err
 	}
 	defaultRecurringAccess(&req)
@@ -463,13 +530,20 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 		return nil, apperr.Invalidf("price key %q is a provider price; create ours under a key of its own", key)
 	}
 	rails := map[string]map[string]string{}
-	if prepared, ok := s.catalogPreparedLinks[[2]string{product.Key, req.Key}]; s.localCatalogOnly && ok {
+	if prepared, ok := s.catalogPreparedLinks[[2]string{product.Key, key}]; ok {
 		rails = cloneRails(prepared)
+	} else if s.catalogWriteLocked {
+		// A provider call never runs under the catalog lock.
+		return nil, fmt.Errorf("price %q has no provider links prepared before the catalog transaction", key)
 	} else if rails, err = s.createPriceLinks(ctx, req, priceID, existing); err != nil {
 		return nil, err
 	}
 
 	price, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*models.Price, error) {
+		// Under the catalog lock a configuration edit takes to remove a unit.
+		if err := scoped.ownUnit(ctx, "currency", string(req.Currency)); err != nil {
+			return nil, err
+		}
 		products, err := scoped.requireProductService()
 		if err != nil {
 			return nil, err
@@ -681,6 +755,20 @@ func defaultRecurringAccess(req *billing.CreatePriceParams) {
 }
 
 func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
+	if currency.IsUnitCode(string(req.Currency)) {
+		if req.BillingIntervalHours != nil || req.BillingIntervalMonths != nil || req.TrialUnitAmount != nil || req.TrialDurationHours != nil || req.CustomerAmount != nil || req.Quantity != nil || len(req.SellVia) > 0 {
+			return apperr.Invalidf("a price in a merchant's unit is a one-off price the customer's balance pays: it has no billing interval, trial, customer_amount, quantity or sell_via")
+		}
+		if req.UnitAmount < 0 {
+			return apperr.Invalidf("unit_amount must be non-negative")
+		}
+		for _, hours := range []*int{req.AccessDurationHours} {
+			if hours != nil && (*hours <= 0 || *hours > syntax.MaxDurationHours) {
+				return apperr.Invalidf("access_duration_hours must be between 1 and %d hours or null", syntax.MaxDurationHours)
+			}
+		}
+		return nil
+	}
 	if req.BillingIntervalMonths != nil {
 		if req.BillingIntervalHours != nil || *req.BillingIntervalMonths < 1 || *req.BillingIntervalMonths > 1200 {
 			return apperr.Invalidf("billing_interval_months must be 1 to 1200 and cannot be combined with billing_interval_hours")

@@ -35,7 +35,7 @@ Each write type is a `Handler` (`Execute`, `Verify`, `CheckRelevance`,
    destructive switch and the `VolumeBreaker`. A refusal parks it, refunding the
    attempt, for `ParkRetryInterval` (5 minutes); one no longer relevant is
    superseded, and a collection held by write posture goes unknown and is read back.
-3. A destructive type's breaker admission sets `provider_intents.sent_attempt` under its lock, for the claim's own attempt only; a park clears it. The `attempting` entry goes to `operation_log` ahead, on its own statement, and `Execute` runs; its result is written ahead too, and a hold commits with the intent's transition. An entry over the log's bounds keeps the start of its reason and evidence and says `truncated`. A charge first calls `Store.RequireClaim` on its own connection: the claim must still hold a lease beyond `ProviderCallHold` (30 s).
+3. A destructive type's breaker admission sets `provider_intents.sent_attempt` under its lock, for the claim's own attempt only; a park clears it. The `attempting` entry goes to `operation_log` ([history](history.md)) ahead, on its own statement, and `Execute` runs; its result is written ahead too, and a hold commits with the intent's transition. An entry over the log's bounds keeps the start of its reason and evidence and says `truncated`. A charge first calls `Store.RequireClaim` on its own connection: the claim must still hold a lease beyond `ProviderCallHold` (30 s).
 4. The outcome is written on a detached context (`LedgerWriteContext`):
    `succeeded`, `failed_retryable` (provably not executed), `unknown_needs_verify`,
    `failed_terminal`, or parked. A lapsed lease becomes unknown, never a
@@ -118,9 +118,11 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
 
 ### Posture
 
-- **Write posture** (`writeposture.View`): the lower of `provider_write_mode`
-  and `merchant_write_posture`; `readonly` in a database whose book was never
-  armed (`openrails book arm`). `GateExecution` runs user, admin and provider
+- **Write posture** (`writeposture.View`): the merchant's
+  `merchant_write_posture` (`full` without a row); `readonly` in a database whose
+  book was never armed (`openrails book arm`). Each wire choke (the Stripe
+  transport, the NMI, CCBill, Basis Theory, HyperSwitch and Solana clients)
+  reads the posture of the merchant it writes for. `GateExecution` runs user, admin and provider
   origins under `limited`, system origin only under `full`, nothing under
   `readonly`. The transports refuse writes again in `readonly`
   (`ErrProviderReadOnly` in `stripeapi` and the NMI client).
@@ -143,7 +145,7 @@ Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`
 - **CLI**: `openrails intents resolve`, `openrails provider-refresh`,
   `openrails book arm`, `openrails merchant hold`, `openrails undo-run`,
   `openrails solana-pay resolve`.
-- **Configuration**: `provider_write_mode`, `webhook_secret_overlap`, `provider_sandbox.ccbill_webhook_sources`, `solana.crankers`, each PSP's `environment`; probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs: [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
+- **Configuration**: `webhook_secret_overlap`, `provider_sandbox.ccbill_webhook_sources`, `solana.crankers`, each PSP's `environment`; probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs: [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
 
 ## Guarantees
 

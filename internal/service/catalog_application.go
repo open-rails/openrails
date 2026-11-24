@@ -63,7 +63,7 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 	if err := s.refuseUsageCatalog(params); err != nil {
 		return nil, err
 	}
-	if err := s.refuseCatalogUnits(ctx, params); err != nil {
+	if err := s.checkCatalogUnits(ctx, params); err != nil {
 		return nil, err
 	}
 	if err := params.Validate(); err != nil {
@@ -145,6 +145,10 @@ const maxCatalogSnapshotAttempts = 3
 func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, prepared *catalogApplicationPreparation, force bool) (*billing.CatalogApplicationReceipt, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.CatalogApplicationReceipt, error) {
 		scoped.catalogApplying = true
+		// Under the catalog lock a configuration edit takes to remove a unit.
+		if err := scoped.checkCatalogUnits(ctx, params); err != nil {
+			return nil, err
+		}
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err

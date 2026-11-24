@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/notificationinbox"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -186,6 +187,9 @@ func RenewalPaid(ctx context.Context, d *db.DB, merchantID, orderID, attemptID u
 		if err := fundCreditLine(ctx, d, line, *payment, now, clock); err != nil {
 			return err
 		}
+	}
+	if err := books.ApplyOrder(ctx, d, orderID, nil); err != nil {
+		return err
 	}
 	if err := orderEvent(ctx, q, &order, "order.completed", now, map[string]any{"number": number, "payment_id": payment.String()}); err != nil {
 		return err

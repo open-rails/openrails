@@ -197,6 +197,8 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 			line.Refusal = refusal(RefusalUnavailable, "A trial price is not sold in an order.")
 		case price.IsRecurring() && price.Amount <= 0:
 			line.Refusal = refusal(RefusalUnavailable, "A free recurring price is not sold in an order.")
+		case price.IsRecurring() && InMerchantUnit(price.Currency):
+			line.Refusal = refusal(RefusalUnavailable, "A price in a merchant's unit is paid once, from the balance.")
 		default:
 			line.Quantity, line.Refusal = lineQuantity(price, line.Ownership, l.Quantity)
 		}
@@ -459,24 +461,8 @@ func claimRefusal(c gen.BillingOwnershipClaim) *billing.OrderLineRefusal {
 
 // creditSnapshot is a credit product's frozen benefit for one unit.
 func creditSnapshot(product *models.Product, price *models.Price) (*models.CreditGrantSnapshot, error) {
-	policy := product.CreditGrant
 	if price.IsRecurring() && price.ProviderOwned {
 		return nil, fmt.Errorf("recurring credit benefits require an engine-owned price")
 	}
-	currency := strings.ToUpper(strings.TrimSpace(string(policy.Currency)))
-	if currency != strings.ToUpper(strings.TrimSpace(price.Currency)) {
-		return nil, fmt.Errorf("purchased credit currency must match payment currency")
-	}
-	amount := price.Amount
-	if policy.Amount != nil {
-		amount = *policy.Amount
-	} else if !policy.FromPayment {
-		return nil, fmt.Errorf("credit benefit requires an amount or from_payment")
-	}
-	days := 365
-	if policy.ExpiresAfterDays != nil {
-		days = *policy.ExpiresAfterDays
-	}
-	out := &models.CreditGrantSnapshot{Amount: amount, Currency: currency, ExpiresAfterDays: days}
-	return out, out.Validate()
+	return models.AcceptCreditGrant(product.CreditGrant, price.Currency, price.Amount)
 }

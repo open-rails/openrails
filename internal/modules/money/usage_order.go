@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -86,15 +87,23 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: payerID}); err != nil {
 			return fmt.Errorf("lock usage payer: %w", err)
 		}
-		// Running charges are owed through the window's end, as far as it has
-		// come, and usage as it accrued, before the window is billed.
-		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {
-			return err
-		}
+		// Usage is owed as it accrued, and running charges through the
+		// window's end as far as it has come, before the window is billed.
 		if _, err := s.WithDatabase(d).at(now).postUsageTx(ctx, q, merchantID, payerID, cur, now, usagePostingMovement); err != nil {
 			return err
 		}
-		existing, err := q.GetUsageOrderByPeriod(ctx, gen.GetUsageOrderByPeriodParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto})
+		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {
+			return err
+		}
+		// The order bills the window's owed items; its period runs from where
+		// their charges began (a pricing period's start) to the window's end.
+		start, err := q.EarliestPendingOwedCharge(ctx, gen.EarliestPendingOwedChargeParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur,
+			WindowStartsAt: pfrom, WindowEndsAt: pto})
+		if err != nil {
+			return err
+		}
+		existing, err := q.GetUsageOrderOfWindow(ctx, gen.GetUsageOrderOfWindowParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur,
+			PeriodEndsAt: pto, WindowStartsAt: pfrom})
 		if err == nil {
 			out = &existing
 			return nil
@@ -139,7 +148,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		u := usage.Order{CustomerID: payerID, Currency: cur, PeriodStart: pfrom, PeriodEnd: pto, DueAt: now, Paid: receivable - due,
+		u := usage.Order{CustomerID: payerID, Currency: cur, PeriodStart: earlier(start.UTC(), pfrom), PeriodEnd: pto, DueAt: now, Paid: receivable - due,
 			Lines: lines, CollectionMethod: CollectionChargeAutomatically}
 		if profile != nil {
 			if profile.NetTermsDays > 0 {
@@ -165,7 +174,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 				return err
 			}
 			if err := q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-				ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, "order_due", merchantID.String(), order.ID.String()),
+				ID:         uuidutil.DerivedV7(uuidutil.TimeOf(order.ID), uuidutil.DeterministicNamespace, uuidutil.Name("order_due", merchantID.String(), order.ID.String())),
 				MerchantID: merchantID, CustomerID: payerID,
 				EventType: string(models.NotificationOrderDue), Data: data, CreatedAt: now,
 			}); err != nil {
@@ -333,9 +342,17 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		if in.PaidAt != nil {
 			paidAt = in.PaidAt.UTC().Truncate(time.Microsecond)
 		}
-		// The owed payment settles the arrears liability (DR
-		// units_sold / CR customer_owed) at the remittance's
-		// unique coordinate.
+		// The money arrives (DR external_receipts / CR unapplied_cash),
+		// then the owed payment settles the arrears liability (DR
+		// units_sold / CR customer_owed) at the remittance's unique
+		// coordinate.
+		id := uuidutil.NewV7()
+		if e := books.New(q, mid.UUID()).Receive(ctx, books.Receipt{Payment: id, Customer: order.CustomerID, Order: &in.OrderID, Amount: in.Amount, Currency: order.Currency, At: paidAt}); e != nil {
+			return e
+		}
+		if e := books.Started(ctx, q, mid.UUID(), order.Currency, now); e != nil {
+			return e
+		}
 		coord := ledger.Coord{Operation: ledger.OpManualOrderPayment, Source: "manual_invoice_payment", SourceID: in.TransactionID}
 		tr, e := s.moneyLedger(q, mid.UUID()).PayOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), in.Amount, coord, &in.OrderID)
 		if e != nil {
@@ -344,7 +361,6 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		if tr.Amount != in.Amount || tr.OrderID == nil || *tr.OrderID != in.OrderID {
 			return billing.ErrIdempotencyKeyReused
 		}
-		id := uuidutil.NewV7()
 		if e := q.InsertOrderPayment(ctx, gen.InsertOrderPaymentParams{ID: id, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: in.OrderID,
 			LedgerTransferID: tr.ID, Channel: string(models.ChannelManual), TransactionID: in.TransactionID, Amount: in.Amount, Currency: order.Currency, PaidAt: paidAt, Now: now}); e != nil {
 			if db.IsUniqueViolation(e) {

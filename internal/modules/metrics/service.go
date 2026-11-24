@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -17,6 +18,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // Service executes validated metrics plans. Merchant scoping is structural:
@@ -64,6 +67,19 @@ type RangeOut = billing.MetricsResultRange
 // int64, a ratio a float64 (nil when its denominator is zero).
 type Result = billing.MetricsResult
 
+// Zone is the accounting timezone of the merchant in context, UTC when no
+// settings are bound.
+func (s *Service) Zone(ctx context.Context) (*time.Location, error) {
+	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
+	if errors.Is(err, merchantconfig.ErrNoSettings) {
+		return time.UTC, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return time.LoadLocation(settings.Config.AccountingTimezone)
+}
+
 // Execute runs a validated plan and returns the merged tabular result.
 func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 	rows, err := s.run(ctx, plan)
@@ -71,9 +87,10 @@ func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 		return nil, err
 	}
 	res := &Result{
-		Range:   RangeOut{From: plan.From, To: plan.To},
-		Columns: columns(plan),
-		Rows:    rows,
+		Timezone: plan.zone().String(),
+		Range:    RangeOut{From: plan.From.UTC(), To: plan.To.UTC()},
+		Columns:  columns(plan),
+		Rows:     rows,
 	}
 	if plan.HasTime {
 		res.Grain = plan.Grain
@@ -81,22 +98,32 @@ func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 	if plan.Compare != "" {
 		prev := *plan
 		if plan.Compare == "previous_year" {
-			prev.From, prev.To = plan.From.AddDate(-1, 0, 0), plan.To.AddDate(-1, 0, 0)
+			prev.From, prev.To = yearBefore(plan.From, plan.zone()), yearBefore(plan.To, plan.zone())
 		} else {
 			prev.From, prev.To = plan.From.Add(-plan.To.Sub(plan.From)), plan.From
 		}
 		prev.Compare = ""
 		if prev.HasTime {
-			prev.Buckets = bucketLabels(prev.From, prev.To, prev.Grain)
+			prev.Buckets = bucketLabels(prev.From, prev.To, prev.Grain, prev.zone())
 		}
 		prevRows, err := s.run(ctx, &prev)
 		if err != nil {
 			return nil, err
 		}
-		res.CompareRange = &RangeOut{From: prev.From, To: prev.To}
+		res.CompareRange = &RangeOut{From: prev.From.UTC(), To: prev.To.UTC()}
 		res.CompareRows = prevRows
 	}
 	return res, nil
+}
+
+// yearBefore is t a year earlier on zone's calendar: a day's start is the
+// same date's start, by date rather than wall clock.
+func yearBefore(t time.Time, zone *time.Location) time.Time {
+	if t.Equal(calendarutil.DateStart(t, zone)) {
+		y, m, d := t.In(zone).Date()
+		return calendarutil.DayStart(y-1, m, d, zone).UTC()
+	}
+	return t.In(zone).AddDate(-1, 0, 0).UTC()
 }
 
 func columns(plan *Plan) []Column {
@@ -165,6 +192,9 @@ type group struct {
 	bucket time.Time // zero when the plan has no time grouping
 	dims   []string
 	vals   map[string]leaf // leaf measure -> value
+	// months is the group's period in calendar months, and trailing the
+	// three months ending at its end, for PerMonth rates.
+	months, trailing float64
 }
 
 func groupKey(bucket time.Time, dims []string) string {
@@ -448,10 +478,29 @@ func assemble(plan *Plan, groups map[string]*group) ([][]any, error) {
 		}
 	}
 	rows := make([][]any, 0, len(groups))
+	// Each bucket ends where the next starts, the last at the range end.
+	ends := map[int64]time.Time{}
+	for i, b := range plan.Buckets {
+		ends[b.UnixNano()] = plan.To
+		if i+1 < len(plan.Buckets) {
+			ends[b.UnixNano()] = plan.Buckets[i+1]
+		}
+	}
 	for _, g := range groups {
 		if len(plan.Dims) > 0 && !signal[strings.Join(g.dims, "\x00")] {
 			continue
 		}
+		start, end := plan.From, plan.To
+		if plan.HasTime {
+			start, end = later(g.bucket, plan.From), earlier(ends[g.bucket.UnixNano()], plan.To)
+		}
+		g.months = monthsIn(start, end, plan.zone())
+		label := plan.To
+		if plan.HasTime {
+			label = g.bucket
+		}
+		from, to := trailingWindow(plan, label)
+		g.trailing = monthsIn(from, to, plan.zone())
 		row := make([]any, 0, 1+len(plan.Dims)+len(plan.Measures))
 		if plan.HasTime {
 			row = append(row, g.bucket.UTC().Format(time.RFC3339))
@@ -506,6 +555,9 @@ func measureValue(m *Measure, g *group) (any, error) {
 			return nil, nil
 		}
 		quotient.Quo(quotient, den)
+		if m.PerMonth {
+			quotient = perMonth(quotient, g.period(m))
+		}
 		if m.Unit == UnitMoney {
 			cell, err := moneyCellFromRat(quotient)
 			if err != nil {
@@ -548,7 +600,11 @@ func componentRat(m *Measure, g *group) (*big.Rat, bool) {
 		if den.Sign() == 0 {
 			return nil, false
 		}
-		return num.Quo(num, den), true
+		num.Quo(num, den)
+		if m.PerMonth {
+			return perMonth(num, g.period(m)), true
+		}
+		return num, true
 	}
 	v := g.vals[m.Name]
 	if v.float {
@@ -559,6 +615,75 @@ func componentRat(m *Measure, g *group) (*big.Rat, bool) {
 		return r, true
 	}
 	return new(big.Rat).SetInt64(v.n), true
+}
+
+// period is m's period in months for g: the bucket's, or the trailing
+// window's.
+func (g *group) period(m *Measure) float64 {
+	if m.Trailing {
+		return g.trailing
+	}
+	return g.months
+}
+
+// perMonth is a rate p over a period of months as a monthly rate,
+// 1 - (1 - p)^(1/months): a calendar month's rate is itself.
+func perMonth(p *big.Rat, months float64) *big.Rat {
+	if months <= 0 || months == 1 {
+		return p
+	}
+	f, _ := p.Float64()
+	if f >= 1 {
+		return big.NewRat(1, 1)
+	}
+	return new(big.Rat).SetFloat64(-math.Expm1(math.Log1p(-f) / months))
+}
+
+// monthsIn is how many calendar months of zone [start, end) spans: each
+// month counts the share of its days covered, a day whatever its hours.
+func monthsIn(start, end time.Time, zone *time.Location) float64 {
+	var n float64
+	y, m, _ := start.In(zone).Date()
+	for cur := calendarutil.DayStart(y, m, 1, zone); cur.Before(end); {
+		ny, nm, _ := time.Date(y, m+1, 1, 0, 0, 0, 0, time.UTC).Date()
+		next := calendarutil.DayStart(ny, nm, 1, zone)
+		days := float64(time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day())
+		lo, hi := 0.0, days
+		if start.After(cur) {
+			lo = dayOfMonth(start, zone)
+		}
+		if end.Before(next) {
+			hi = dayOfMonth(end, zone)
+		}
+		if hi > lo {
+			n += (hi - lo) / days
+		}
+		cur, y, m = next, ny, nm
+	}
+	return n
+}
+
+// dayOfMonth is t's place in its month in zone, in days: its date's day
+// less one, plus the share of that day gone.
+func dayOfMonth(t time.Time, zone *time.Location) float64 {
+	y, m, d := t.In(zone).Date()
+	start := calendarutil.DayStart(y, m, d, zone)
+	ny, nm, nd := time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC).Date()
+	return float64(d-1) + float64(t.Sub(start))/float64(calendarutil.DayStart(ny, nm, nd, zone).Sub(start))
+}
+
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+func earlier(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
 }
 
 // moneyCellFromRat rounds an exact quotient half away from zero to whole

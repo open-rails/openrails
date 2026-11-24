@@ -1,7 +1,6 @@
 {
   "go_api": {
     ".": [
-      "const (\n\tProviderWritesFull ProviderWriteMode = \"full\"\n\n\tProviderWritesLimited ProviderWriteMode = \"limited\"\n\n\tProviderWritesReadOnly ProviderWriteMode = \"readonly\"\n)",
       "const (\n\tQueueBilling   = \"billing\"\n\tQueuePSPImport = \"psp_import\"\n)",
       "const (\n\tReadCatalog Read = \"catalog\"\n\n\tReadMeters Read = \"meters\"\n\n\tReadPublicConfig Read = \"public_config\"\n\n\tReadMerchantConfiguration Read = \"merchant_configuration\"\n)",
       "const DefaultEntitlementCheckMaxAge = 2 * time.Minute",
@@ -119,10 +118,11 @@
       "func (c *Client) QueryMetrics(ctx context.Context, params billing.QueryMetricsParams) (*billing.MetricsResult, error)",
       "func (c *Client) RecordExternalPayment(ctx context.Context, params billing.RecordExternalPaymentParams) (*billing.Payment, error)",
       "func (c *Client) RefundPayment(ctx context.Context, idempotencyKey string, id billing.PaymentID, params billing.RefundPaymentParams) (*billing.Payment, error)",
+      "func (c *Client) ReinstateCreditGrant(ctx context.Context, idempotencyKey string, id billing.CreditGrantID, params billing.ReinstateCreditGrantParams) (*billing.CreditGrant, error)",
       "func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string) ([]billing.AdmissionResult, error)",
       "func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, params billing.ResolveFindingParams) (*billing.FindingResolution, error)",
       "func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID) (*billing.Subscription, error)",
-      "func (c *Client) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, params billing.RevokeCreditGrantParams) (*billing.CreditGrant, error)",
+      "func (c *Client) RevokeCreditGrant(ctx context.Context, idempotencyKey string, id billing.CreditGrantID, params billing.RevokeCreditGrantParams) (*billing.CreditGrant, error)",
       "func (c *Client) RevokeProductAccess(ctx context.Context, id billing.ProductAccessID, params billing.RevokeProductAccessParams) error",
       "func (c *Client) SetCustodian(ctx context.Context, key string, params billing.SetCustodianParams) (*billing.Custodian, error)",
       "func (c *Client) SetDashboard(ctx context.Context, params billing.SetDashboardParams) (*billing.Dashboard, error)",
@@ -197,7 +197,7 @@
       "type CardVaultConfig struct {\n\tKind billing.CardVaultKind\n\n\tTenantID string\n\n\tKVMount string\n}",
       "type ClickHouseConfig struct {\n\tDatabase string\n}",
       "type Client struct {\n}",
-      "type Config struct {\n\tProviderWriteMode ProviderWriteMode\n\n\tEngineAdmissionHold bool\n\n\tUsageBillingEnabled bool\n\n\tDatabase DatabaseConfig\n\n\tClickHouse ClickHouseConfig\n\n\tMerchants []billing.MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCheckoutOrigin string\n\n\tRateLimits RateLimitsConfig\n\n\tCaptcha *CaptchaConfig\n\n\tUserActionRateLimit UserActionRateLimitConfig\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig\n\n\tVault *VaultConfig\n\n\tCardVault *CardVaultConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tSolana *SolanaConfig\n\n\tLLM *LLMConfig\n\n\tReadCache ReadCache\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tEventRetention string\n\n\tWebhookSecretOverlap string\n}",
+      "type Config struct {\n\tEngineAdmissionHold bool\n\n\tUsageBillingEnabled bool\n\n\tDatabase DatabaseConfig\n\n\tClickHouse ClickHouseConfig\n\n\tMerchants []billing.MerchantDeclaration\n\n\tPublicBillingBaseURL string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCheckoutOrigin string\n\n\tRateLimits RateLimitsConfig\n\n\tCaptcha *CaptchaConfig\n\n\tUserActionRateLimit UserActionRateLimitConfig\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig\n\n\tVault *VaultConfig\n\n\tCardVault *CardVaultConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tSolana *SolanaConfig\n\n\tLLM *LLMConfig\n\n\tReadCache ReadCache\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tEventRetention string\n\n\tWebhookSecretOverlap string\n}",
       "type CustomerBinding struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n}",
       "type CustomerProof struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\n\tIssuer *string\n}",
       "type CustomerRoutes struct {\n\tPrefix string\n\n\tAuth auth.Authenticator\n\n\tResolve func(*http.Request, auth.Verified) (CustomerBinding, error)\n}",
@@ -219,7 +219,6 @@
       "type NotificationRecipient struct {\n\tMerchantID billing.MerchantID\n\tCustomerID billing.CustomerID\n\tIssuer     string\n}",
       "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n\n\tCCBillWebhookSources []string\n}",
-      "type ProviderWriteMode string",
       "type RateLimit struct {\n\tRequestsPerMinute int\n}",
       "type RateLimitsConfig map[string]*RateLimit",
       "type Read string",
@@ -297,7 +296,7 @@
       "const (\n\tCodeProductNotFound          ErrorCode = \"product_not_found\"\n\tCodePriceNotFound            ErrorCode = \"price_not_found\"\n\tCodePriceKeyNotFound         ErrorCode = \"price_key_not_found\"\n\tCodePriceKeyCadenceConflict  ErrorCode = \"price_key_cadence_conflict\"\n\tCodePriceNotSellable         ErrorCode = \"price_not_sellable\"\n\tCodeProviderPriceUnreadable  ErrorCode = \"provider_price_unreadable\"\n\tCodeTrialUnsupportedOnRail   ErrorCode = \"trial_unsupported_on_rail\"\n\tCodeProductTierGroupConflict ErrorCode = \"product_tier_group_conflict\"\n\tCodeProductTierGroupInUse    ErrorCode = \"product_tier_group_in_use\"\n\tCodeCatalogRevisionConflict  ErrorCode = \"catalog_revision_conflict\"\n\tCodeUsageMeterNotFound       ErrorCode = \"usage_meter_not_found\"\n\tCodeDefaultRateCardNotFound  ErrorCode = \"default_rate_card_not_found\"\n\tCodeRateCardProductNotFound  ErrorCode = \"rate_card_product_not_found\"\n\tCodeUsageRateCardInvalid     ErrorCode = \"usage_rate_card_invalid\"\n\tCodeUsageMeterInvalid        ErrorCode = \"usage_meter_invalid\"\n\tCodeMeterInUse               ErrorCode = \"meter_in_use\"\n\tCodeMeterRateCardConflict    ErrorCode = \"meter_rate_card_conflict\"\n\tCodePurchaseReviewResolved   ErrorCode = \"purchase_review_resolved\"\n)",
       "const (\n\tCodeProviderCancelHeld ErrorCode = \"provider_cancel_held\"\n\n\tCodePaymentMethodSameVault ErrorCode = \"payment_method_same_vault\"\n\n\tCodePaymentDuplicateRefused ErrorCode = \"payment_duplicate_refused\"\n)",
       "const (\n\tCodeRequestBodyTooLarge ErrorCode = \"request_body_too_large\"\n\n\tCodeInvalidRequestBody ErrorCode = \"invalid_request_body\"\n)",
-      "const (\n\tCodeScheduledChangeExists       ErrorCode = \"scheduled_change_exists\"\n\tCodePriceMigrationNotFound      ErrorCode = \"price_migration_not_found\"\n\tCodePriceChangeCurrencyMismatch ErrorCode = \"price_change_currency_mismatch\"\n\tCodePriceChangeTargetArchived   ErrorCode = \"price_change_target_archived\"\n\tCodePriceIncreaseNoticeTooShort ErrorCode = \"price_increase_notice_too_short\"\n)",
+      "const (\n\tCodeScheduledChangeExists       ErrorCode = \"scheduled_change_exists\"\n\tCodePriceMigrationNotFound      ErrorCode = \"price_migration_not_found\"\n\tCodePriceMigrationInProgress    ErrorCode = \"price_migration_in_progress\"\n\tCodePriceChangeCurrencyMismatch ErrorCode = \"price_change_currency_mismatch\"\n\tCodePriceChangeTargetArchived   ErrorCode = \"price_change_target_archived\"\n\tCodePriceIncreaseNoticeTooShort ErrorCode = \"price_increase_notice_too_short\"\n)",
       "const (\n\tCodeSubscriptionChangeInFlight ErrorCode = \"subscription_change_in_flight\"\n\n\tCodeSubscriptionChangeRefused ErrorCode = \"subscription_change_refused\"\n\n\tCodeSubscriptionChangeIdempotencyConflict ErrorCode = \"subscription_change_idempotency_conflict\"\n\n\tCodeSubscriptionChangeIdempotencyKeyRequired ErrorCode = \"subscription_change_idempotency_key_required\"\n\n\tCodeSubscriptionChangeCycleUnknown ErrorCode = \"subscription_change_cycle_unknown\"\n\n\tCodeSubscriptionChangePeriodUnknown ErrorCode = \"subscription_change_period_unknown\"\n\n\tCodeSubscriptionChangeCreditExceedsPrice ErrorCode = \"subscription_change_credit_exceeds_price\"\n\n\tCodeSubscriptionChangeRenewalDue ErrorCode = \"subscription_change_renewal_due\"\n\n\tCodeSubscriptionChangeAlreadyScheduled ErrorCode = \"subscription_change_already_scheduled\"\n\n\tCodeSubscriptionChangeCadenceUnsupported ErrorCode = \"subscription_change_cadence_unsupported\"\n\n\tCodeSubscriptionChangeRequiresLinkedPlan ErrorCode = \"subscription_change_requires_linked_plan\"\n\n\tCodeSubscriptionChangeTargetInactive ErrorCode = \"subscription_change_target_inactive\"\n\n\tCodeSubscriptionChangeUnsupportedOnRail ErrorCode = \"subscription_change_unsupported_on_rail\"\n\n\tCodeSubscriptionChangeProviderConflict ErrorCode = \"subscription_change_provider_conflict\"\n\n\tCodeStoredCredentialRequired ErrorCode = \"stored_credential_required\"\n)",
       "const (\n\tCodeSubscriptionNotFound     ErrorCode = \"subscription_not_found\"\n\tCodeSubscriptionNotActive    ErrorCode = \"subscription_not_active\"\n\tCodeCancelUnsupportedOnRail  ErrorCode = \"cancel_unsupported_on_rail\"\n\tCodeRebillTermsCommitted     ErrorCode = \"rebill_terms_committed\"\n\tCodeCustomerEmailRequired    ErrorCode = \"customer_email_required\"\n\tCodeSolanaTransactionRefused ErrorCode = \"solana_transaction_refused\"\n\tCodeSolanaRPCUnavailable     ErrorCode = \"solana_rpc_unavailable\"\n)",
       "const (\n\tCodeSubscriptionResumable ErrorCode = \"subscription_resumable\"\n\n\tCodeSubscriptionPaidThrough ErrorCode = \"subscription_paid_through\"\n)",
@@ -329,6 +328,7 @@
       "const (\n\tLogObjectProduct LogObjectType = \"product\"\n\n\tLogObjectPrice LogObjectType = \"price\"\n\tLogObjectMeter LogObjectType = \"meter\"\n\tLogObjectLimit LogObjectType = \"limit\"\n\n\tLogObjectMerchant LogObjectType = \"merchant\"\n\n\tLogObjectMessages  LogObjectType = \"messages\"\n\tLogObjectPSP       LogObjectType = \"psp\"\n\tLogObjectCustodian LogObjectType = \"custodian\"\n)",
       "const (\n\tLogSourceAPI          LogSource = \"api\"\n\tLogSourceCustomer     LogSource = \"customer\"\n\tLogSourceConsole      LogSource = \"console\"\n\tLogSourceCatalogApply LogSource = \"catalog_apply\"\n\tLogSourceCLI          LogSource = \"cli\"\n\n\tLogSourceReload       LogSource = \"reload\"\n\tLogSourceJob          LogSource = \"job\"\n\tLogSourceIntent       LogSource = \"intent\"\n\tLogSourceWebhook      LogSource = \"webhook\"\n\tLogSourceProviderRead LogSource = \"provider_read\"\n)",
       "const (\n\tLowBalanceLineCustomer LowBalanceLineSource = \"customer\"\n\n\tLowBalanceLineMerchant LowBalanceLineSource = \"merchant\"\n\n\tLowBalanceLineDefault LowBalanceLineSource = \"default\"\n)",
+      "const (\n\tMRRRiskPastDue MRRRiskReason = \"past_due\"\n\n\tMRRRiskNeedsPaymentMethod MRRRiskReason = \"needs_payment_method\"\n\n\tMRRRiskUnverified MRRRiskReason = \"unverified\"\n\n\tMRRRiskCardExpiring MRRRiskReason = \"card_expiring\"\n\n\tMRRRiskDelinquent MRRRiskReason = \"delinquent\"\n)",
       "const (\n\tMandateActive MandateStatus = \"active\"\n\n\tMandateRequiresReconsent MandateStatus = \"requires_reconsent\"\n\n\tMandateRevoked MandateStatus = \"revoked\"\n\tMandateEnded   MandateStatus = \"ended\"\n)",
       "const (\n\tMandateEndReplaced          MandateEndReason = \"replaced\"\n\tMandateEndBrandChanged      MandateEndReason = \"brand_changed\"\n\tMandateEndClosed            MandateEndReason = \"closed\"\n\tMandateEndCustomerRevoked   MandateEndReason = \"customer_revoked\"\n\tMandateEndSubscriptionEnded MandateEndReason = \"subscription_ended\"\n\n\tMandateEndPaymentMethodRemoved MandateEndReason = \"payment_method_removed\"\n\n\tMandateEndDisputed MandateEndReason = \"disputed\"\n)",
       "const (\n\tMandateRecurring MandateKind = \"recurring\"\n\n\tMandateUnscheduled MandateKind = \"unscheduled\"\n\n\tMandateCardOnFile MandateKind = \"card_on_file\"\n)",
@@ -620,6 +620,7 @@
       "func ErrorCodeFrom(err error) (ErrorCode, bool)",
       "func ErrorCodes() []ErrorCodeInfo",
       "func LookupErrorCode(code ErrorCode) (ErrorCodeInfo, bool)",
+      "func MRRRiskReasons() []MRRRiskReason",
       "func NewCard(number string, expMonth, expYear int, cvc string) (*Card, error)",
       "func NewPriceID(productKey, priceKey string, version int64) (PriceID, error)",
       "func NormalizeMerchantSlug(s string) string",
@@ -692,7 +693,7 @@
       "type ApproveProposalsParams struct {\n\tIDs   []FindingID `json:\"ids\"`\n\tNotes string      `json:\"notes\"`\n}",
       "type AskCatalogParams struct {\n\tQuestion string `json:\"question\"`\n}",
       "type AttemptOutcome string",
-      "type Balance struct {\n\tCustomerID         CustomerID       `json:\"customer_id\"`\n\tCurrency           catalog.Currency `json:\"currency\"`\n\tBillingMode        BillingMode      `json:\"billing_mode\"`\n\tBalanceAmount      int64            `json:\"balance_amount,string\"`\n\tHeldAmount         int64            `json:\"held_amount,string\"`\n\tAccruedAmount      int64            `json:\"accrued_amount,string\"`\n\tAvailableAmount    int64            `json:\"available_amount,string\"`\n\tOwedAmount         int64            `json:\"owed_amount,string\"`\n\tAccrualRatePerHour int64            `json:\"accrual_rate_per_hour,string\"`\n\tAsOf               time.Time        `json:\"as_of\"`\n\tDepletesAt         *time.Time       `json:\"depletes_at\"`\n}",
+      "type Balance struct {\n\tCustomerID CustomerID       `json:\"customer_id\"`\n\tCurrency   catalog.Currency `json:\"currency\"`\n\n\tUnit               *MerchantCurrency `json:\"unit\"`\n\tBillingMode        BillingMode       `json:\"billing_mode\"`\n\tBalanceAmount      int64             `json:\"balance_amount,string\"`\n\tHeldAmount         int64             `json:\"held_amount,string\"`\n\tAccruedAmount      int64             `json:\"accrued_amount,string\"`\n\tAvailableAmount    int64             `json:\"available_amount,string\"`\n\tOwedAmount         int64             `json:\"owed_amount,string\"`\n\tAccrualRatePerHour int64             `json:\"accrual_rate_per_hour,string\"`\n\tAsOf               time.Time         `json:\"as_of\"`\n\tDepletesAt         *time.Time        `json:\"depletes_at\"`\n}",
       "type BalanceHostEvent struct {\n\tCustomerID         CustomerID       `json:\"customer_id\"`\n\tCurrency           catalog.Currency `json:\"currency\"`\n\tAvailableAmount    int64            `json:\"available_amount,string\"`\n\tOwedAmount         int64            `json:\"owed_amount,string\"`\n\tAccrualRatePerHour int64            `json:\"accrual_rate_per_hour,string\"`\n\tUsageRatePerHour   int64            `json:\"usage_rate_per_hour,string\"`\n\tLowBalanceAmount   int64            `json:\"low_balance_amount,string\"`\n\tAsOf               time.Time        `json:\"as_of\"`\n\tDepletesAt         *time.Time       `json:\"depletes_at\"`\n\tRunwayEndsAt       *time.Time       `json:\"runway_ends_at\"`\n}",
       "type BalanceNoticeAmount struct {\n\tCurrency catalog.Currency `json:\"currency\"`\n\tAmount   int64            `json:\"amount,string\"`\n}",
       "type BalanceNoticeSettings struct {\n\tRunwayHours *int                  `json:\"runway_hours,omitempty\"`\n\tLowAmounts  []BalanceNoticeAmount `json:\"low_amounts,omitempty\"`\n}",
@@ -910,6 +911,8 @@
       "type LogSource string",
       "type LowBalanceLine struct {\n\tCurrency    catalog.Currency `json:\"currency\"`\n\tAmount      *int64           `json:\"amount,string\"`\n\tRunwayHours *int             `json:\"runway_hours\"`\n}",
       "type LowBalanceLineSource string",
+      "type MRRRisk struct {\n\tReasons     []MRRRiskReason `json:\"reasons\"`\n\tEntryReason MRRRiskReason   `json:\"entry_reason\"`\n\tSince       time.Time       `json:\"since\"`\n}",
+      "type MRRRiskReason string",
       "type Mandate struct {\n\tID         MandateID  `json:\"id\"`\n\tCustomerID CustomerID `json:\"customer_id\"`\n\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id\"`\n\tPSPID           PSPID            `json:\"psp_id\"`\n\tKind            MandateKind      `json:\"kind\"`\n\n\tSubscriptionID *SubscriptionID   `json:\"subscription_id\"`\n\tCurrency       *catalog.Currency `json:\"currency\"`\n\tStatus         MandateStatus     `json:\"status\"`\n\tEndReason      *MandateEndReason `json:\"end_reason\"`\n\tEndedAt        *time.Time        `json:\"ended_at\"`\n\n\tCardBrand *string `json:\"card_brand\"`\n\n\tInitialTransactionID *string `json:\"initial_transaction_id\"`\n\n\tNetworkTransactionID *string `json:\"network_transaction_id\"`\n\tTransactionLinkID    *string `json:\"transaction_link_id\"`\n\n\tStoringAttemptID *PaymentAttemptID `json:\"storing_attempt_id\"`\n\tAcceptedAt       time.Time         `json:\"accepted_at\"`\n\tCreatedAt        time.Time         `json:\"created_at\"`\n}",
       "type MandateEndReason string",
       "type MandateHostEvent struct {\n\tMandateID      MandateID        `json:\"mandate_id\"`\n\tKind           MandateKind      `json:\"kind\"`\n\tCustomerID     CustomerID       `json:\"customer_id\"`\n\tCurrency       catalog.Currency `json:\"currency\"`\n\tSubscriptionID *SubscriptionID  `json:\"subscription_id\"`\n\tRevokedAt      time.Time        `json:\"revoked_at\"`\n}",
@@ -966,13 +969,13 @@
       "type MetricsExample struct {\n\tIntent string             `json:\"intent\"`\n\tQuery  QueryMetricsParams `json:\"query\"`\n}",
       "type MetricsGroup string",
       "type MetricsLimits struct {\n\tMaxBuckets int `json:\"max_buckets\"`\n\tMaxLimit   int `json:\"max_limit\"`\n}",
-      "type MetricsMeasure struct {\n\tName        string              `json:\"name\"`\n\tClass       MetricsClass        `json:\"class\"`\n\tUnit        string              `json:\"unit\"`\n\tGroup       MetricsGroup        `json:\"group\"`\n\tDirection   MetricsDirection    `json:\"direction\"`\n\tThresholds  []MetricsThreshold  `json:\"thresholds\"`\n\tDescription string              `json:\"description\"`\n\tFormula     string              `json:\"formula\"`\n\tDims        []string            `json:\"dims\"`\n\tDimValues   map[string][]string `json:\"dim_values,omitempty\"`\n\tMoney       bool                `json:\"money,omitempty\"`\n}",
+      "type MetricsMeasure struct {\n\tName        string              `json:\"name\"`\n\tClass       MetricsClass        `json:\"class\"`\n\tUnit        string              `json:\"unit\"`\n\tGroup       MetricsGroup        `json:\"group\"`\n\tDirection   MetricsDirection    `json:\"direction\"`\n\tThresholds  []MetricsThreshold  `json:\"thresholds\"`\n\tDescription string              `json:\"description\"`\n\tFormula     string              `json:\"formula\"`\n\tDims        []string            `json:\"dims\"`\n\tDimValues   map[string][]string `json:\"dim_values,omitempty\"`\n\tMoney       bool                `json:\"money,omitempty\"`\n\n\tUTCDays bool `json:\"utc_days,omitempty\"`\n\n\tProgram DisputeProgram `json:\"program,omitempty\"`\n}",
       "type MetricsOrder struct {\n\tMeasure   string `json:\"measure,omitempty\"`\n\tDimension string `json:\"dimension,omitempty\"`\n\tDir       string `json:\"dir,omitempty\"`\n}",
-      "type MetricsRange struct {\n\tFrom string `json:\"from,omitempty\"`\n\tTo   string `json:\"to,omitempty\"`\n\tLast string `json:\"last,omitempty\"`\n}",
-      "type MetricsResult struct {\n\tGrain        string              `json:\"grain,omitempty\"`\n\tRange        MetricsResultRange  `json:\"range\"`\n\tColumns      []MetricsColumn     `json:\"columns\"`\n\tRows         [][]any             `json:\"rows\"`\n\tCompareRange *MetricsResultRange `json:\"compare_range,omitempty\"`\n\tCompareRows  [][]any             `json:\"compare_rows,omitempty\"`\n}",
+      "type MetricsRange struct {\n\tFrom string `json:\"from,omitempty\"`\n\tTo   string `json:\"to,omitempty\"`\n\tLast string `json:\"last,omitempty\"`\n\tNext string `json:\"next,omitempty\"`\n}",
+      "type MetricsResult struct {\n\tGrain        string              `json:\"grain,omitempty\"`\n\tTimezone     string              `json:\"timezone\"`\n\tRange        MetricsResultRange  `json:\"range\"`\n\tColumns      []MetricsColumn     `json:\"columns\"`\n\tRows         [][]any             `json:\"rows\"`\n\tCompareRange *MetricsResultRange `json:\"compare_range,omitempty\"`\n\tCompareRows  [][]any             `json:\"compare_rows,omitempty\"`\n}",
       "type MetricsResultRange struct {\n\tFrom time.Time `json:\"from\"`\n\tTo   time.Time `json:\"to\"`\n}",
       "type MetricsSchema struct {\n\tMeasures   []MetricsMeasure   `json:\"measures\"`\n\tDimensions []MetricsDimension `json:\"dimensions\"`\n\tGrains     []string           `json:\"grains\"`\n\tDeferred   []string           `json:\"deferred\"`\n\tCaveats    []string           `json:\"caveats\"`\n\tExamples   []MetricsExample   `json:\"examples\"`\n\tLimits     MetricsLimits      `json:\"limits\"`\n\tQueryShape string             `json:\"query_shape\"`\n}",
-      "type MetricsThreshold struct {\n\tValue float64 `json:\"value\"`\n\tLabel string  `json:\"label\"`\n}",
+      "type MetricsThreshold struct {\n\tValue float64    `json:\"value\"`\n\tLabel string     `json:\"label\"`\n\tFrom  *time.Time `json:\"from,omitempty\"`\n\tUntil *time.Time `json:\"until,omitempty\"`\n}",
       "type MigrationFallback string",
       "type MyOrderPayURLParams struct {\n\tEmbedded bool `json:\"embedded\"`\n}",
       "type NewPriceDraft struct {\n\tProductKey  string            `json:\"product_key\"`\n\tReviewText  string            `json:\"review_text\"`\n\tCreatePrice CreatePriceParams `json:\"create_price\"`\n}",
@@ -1081,13 +1084,13 @@
       "type PriceID string",
       "type PriceKeyMovement struct {\n\tEffectiveAt time.Time `json:\"effective_at\"`\n\tArchived    bool      `json:\"archived\"`\n\tPrice       Price     `json:\"price\"`\n}",
       "type PriceListParams struct {\n\tPageRequest\n\tIDs        []PriceID        `form:\"ids,comma\"`\n\tProductID  ProductID        `form:\"product_id\"`\n\tProductKey string           `form:\"product_key\"`\n\tKey        string           `form:\"key\"`\n\tCurrency   catalog.Currency `form:\"currency\"`\n\tRecurring  *bool            `form:\"recurring\"`\n\tArchived   *bool            `form:\"archived\"`\n}",
-      "type PriceMigration struct {\n\tID PriceMigrationID `json:\"id\"`\n\n\tFromPriceID    *PriceID          `json:\"from_price_id\"`\n\tProductKey     *string           `json:\"product_key\"`\n\tPriceKey       *string           `json:\"price_key\"`\n\tToPriceID      PriceID           `json:\"to_price_id\"`\n\tEffectiveAt    time.Time         `json:\"effective_at\"`\n\tFallbackPolicy MigrationFallback `json:\"fallback_policy\"`\n\n\tMatched    int        `json:\"matched\"`\n\tSkipped    int        `json:\"skipped\"`\n\tScheduled  int        `json:\"scheduled\"`\n\tApplied    int        `json:\"applied\"`\n\tCanceled   int        `json:\"canceled\"`\n\tBlocked    int        `json:\"blocked\"`\n\tCreatedAt  time.Time  `json:\"created_at\"`\n\tCanceledAt *time.Time `json:\"canceled_at\"`\n}",
+      "type PriceMigration struct {\n\tID PriceMigrationID `json:\"id\"`\n\n\tFromPriceID    *PriceID          `json:\"from_price_id\"`\n\tProductKey     *string           `json:\"product_key\"`\n\tPriceKey       *string           `json:\"price_key\"`\n\tToPriceID      PriceID           `json:\"to_price_id\"`\n\tEffectiveAt    time.Time         `json:\"effective_at\"`\n\tFallbackPolicy MigrationFallback `json:\"fallback_policy\"`\n\n\tMatched    int        `json:\"matched\"`\n\tSkipped    int        `json:\"skipped\"`\n\tScheduled  int        `json:\"scheduled\"`\n\tApplied    int        `json:\"applied\"`\n\tCanceled   int        `json:\"canceled\"`\n\tBlocked    int        `json:\"blocked\"`\n\tCreatedAt  time.Time  `json:\"created_at\"`\n\tCanceledAt *time.Time `json:\"canceled_at\"`\n\n\tPreparing bool `json:\"preparing\"`\n\n\tWarnings []string `json:\"warnings\"`\n}",
       "type PriceMigrationCancel struct {\n\tPriceMigration      PriceMigration   `json:\"price_migration\"`\n\tCanceled            int              `json:\"canceled\"`\n\tRailReleaseRequired []SubscriptionID `json:\"rail_release_required\"`\n}",
       "type PriceMigrationDisposition string",
       "type PriceMigrationID uuid.UUID",
       "type PriceMigrationListParams struct {\n\tPageRequest\n\n\tIDs []PriceMigrationID `form:\"ids,comma\"`\n\n\tProductKey string `form:\"product_key\"`\n\tPriceKey   string `form:\"price_key\"`\n}",
       "type PriceMigrationOutcome struct {\n\tSubscriptionID SubscriptionID            `json:\"subscription_id\"`\n\tRail           Rail                      `json:\"rail\"`\n\tDisposition    PriceMigrationDisposition `json:\"disposition\"`\n\tReason         *string                   `json:\"reason\"`\n}",
-      "type PriceMigrationPreview struct {\n\tToPriceID   *PriceID                             `json:\"to_price_id\"`\n\tEffectiveAt time.Time                            `json:\"effective_at\"`\n\tMatched     int                                  `json:\"matched\"`\n\tScheduled   int                                  `json:\"scheduled\"`\n\tSkipped     int                                  `json:\"skipped\"`\n\tBlocked     int                                  `json:\"blocked\"`\n\tByRail      map[string]*PriceMigrationRailCounts `json:\"by_rail\"`\n\tOutcomes    []PriceMigrationOutcome              `json:\"outcomes\"`\n}",
+      "type PriceMigrationPreview struct {\n\tToPriceID   *PriceID                             `json:\"to_price_id\"`\n\tEffectiveAt time.Time                            `json:\"effective_at\"`\n\tMatched     int                                  `json:\"matched\"`\n\tClassified  int                                  `json:\"classified\"`\n\tScheduled   int                                  `json:\"scheduled\"`\n\tSkipped     int                                  `json:\"skipped\"`\n\tBlocked     int                                  `json:\"blocked\"`\n\tByRail      map[string]*PriceMigrationRailCounts `json:\"by_rail\"`\n\tOutcomes    []PriceMigrationOutcome              `json:\"outcomes\"`\n}",
       "type PriceMigrationRailCounts struct {\n\tAuto           int `json:\"auto\"`\n\tRequiresAction int `json:\"requires_action\"`\n\tSkipped        int `json:\"skipped\"`\n}",
       "type PriceProvider struct {\n\tAccessDurationDefault bool              `json:\"access_duration_default\"`\n\tPSP                   string            `json:\"psp\"`\n\tPSPID                 PSPID             `json:\"psp_id\"`\n\tRail                  Rail              `json:\"rail\"`\n\tIDs                   map[string]string `json:\"ids\"`\n\tRetired               bool              `json:\"retired\"`\n\tSyncStatus            SyncStatus        `json:\"sync_status\"`\n\tDrift                 []DriftField      `json:\"drift\"`\n}",
       "type Product struct {\n\tRevision int64     `json:\"revision\"`\n\tID       ProductID `json:\"id\"`\n\n\tKey         string `json:\"key\"`\n\tDisplayName string `json:\"display_name\"`\n\tDescription string `json:\"description\"`\n\n\tEntitlements []string `json:\"entitlements\"`\n\n\tRequiredEntitlements []string                 `json:\"required_entitlements\"`\n\tCreditGrant          *catalog.CreditGrantSpec `json:\"credit_grant,omitempty\"`\n\tTierGroup            *string                  `json:\"tier_group\"`\n\tTierRank             int                      `json:\"tier_rank\"`\n\n\tOwnership *catalog.Ownership `json:\"ownership\"`\n\tArchived  bool               `json:\"archived\"`\n\n\tPrices    []Price   `json:\"prices\"`\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
@@ -1125,6 +1128,7 @@
       "type RefundPaymentParams struct {\n\tAmount       int64        `json:\"amount,omitempty,string\"`\n\tFull         bool         `json:\"full,omitempty\"`\n\tReason       string       `json:\"reason,omitempty\"`\n\tRefundReason RefundReason `json:\"refund_reason,omitempty\"`\n\tRevokeAccess bool         `json:\"revoke_access,omitempty\"`\n}",
       "type RefundReason string",
       "type Refusal struct {\n\tDenyCode          DenyCode   `json:\"deny_code\"`\n\tLimit             *string    `json:\"limit\"`\n\tResetsAt          *time.Time `json:\"resets_at\"`\n\tRetryAfterSeconds *int64     `json:\"retry_after_seconds\"`\n}",
+      "type ReinstateCreditGrantParams struct {\n\tReason string `json:\"reason\"`\n}",
       "type ReleaseAdmissionBatchParams struct {\n\tRequestIDs []string `json:\"request_ids\"`\n}",
       "type RenameMerchantParams struct {\n\tName string `json:\"name\"`\n}",
       "type Renewal struct {\n\tID             RenewalID        `json:\"id\"`\n\tSubscriptionID SubscriptionID   `json:\"subscription_id\"`\n\tCustomerID     CustomerID       `json:\"customer_id\"`\n\tPSPID          PSPID            `json:\"psp_id\"`\n\tRail           Rail             `json:\"rail\"`\n\tOwner          string           `json:\"owner\"`\n\tDueAt          time.Time        `json:\"due_at\"`\n\tAmount         int64            `json:\"amount,string\"`\n\tCurrency       catalog.Currency `json:\"currency\"`\n\n\tFirstOutcome string     `json:\"first_outcome\"`\n\tOutcome      string     `json:\"outcome\"`\n\tMissedAt     *time.Time `json:\"missed_at\"`\n\tMissReason   string     `json:\"miss_reason\"`\n\tCollectedAt  *time.Time `json:\"collected_at\"`\n\n\tRecoveredBy string    `json:\"recovered_by\"`\n\tClosesAt    time.Time `json:\"closes_at\"`\n\n\tAttempts []PaymentAttempt `json:\"attempts\"`\n}",
@@ -1157,7 +1161,7 @@
       "type StartRunningChargeParams struct {\n\tReference       string           `json:\"reference\"`\n\tCustomerID      CustomerID       `json:\"customer_id\"`\n\tCurrency        catalog.Currency `json:\"currency\"`\n\tRatePerHour     int64            `json:\"rate_per_hour,string\"`\n\tStartedAt       *time.Time       `json:\"started_at,omitempty\"`\n\tMinimumAmount   int64            `json:\"minimum_amount,omitempty,string\"`\n\tOverdraftAmount int64            `json:\"overdraft_amount,omitempty,string\"`\n\tResource        string           `json:\"resource,omitempty\"`\n}",
       "type StatusError struct {\n\tStatus int\n\tErrorDetails\n\tRetryAfter string\n}",
       "type StopRunningChargeParams struct {\n\tStoppedAt *time.Time `json:\"stopped_at,omitempty\"`\n}",
-      "type Subscription struct {\n\tCollectionPolicy string           `json:\"collection_policy\"`\n\tRecovery         *PaymentRecovery `json:\"recovery,omitempty\"`\n\n\tDunning             *SubscriptionDunning `json:\"dunning\"`\n\tDeletionScheduledAt *time.Time           `json:\"deletion_scheduled_at,omitempty\"`\n\tID                  SubscriptionID       `json:\"id\"`\n\tCustomerID          CustomerID           `json:\"customer_id\"`\n\n\tCustomerContact *CustomerContact `json:\"customer_contact,omitempty\"`\n\tProductID       ProductID        `json:\"product_id\"`\n\tPriceID         PriceID          `json:\"price_id\"`\n\n\tQuantity *int `json:\"quantity\"`\n\n\tMRR                *SubscriptionMRR   `json:\"mrr\"`\n\tPSPID              PSPID              `json:\"psp_id\"`\n\tRail               Rail               `json:\"rail\"`\n\tRailSubscriptionID *string            `json:\"rail_subscription_id\"`\n\tStatus             SubscriptionStatus `json:\"status\"`\n\n\tScheduledChange *ScheduledChange `json:\"scheduled_change\"`\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id\"`\n\n\tMandateID             *MandateID      `json:\"mandate_id\"`\n\tStartedAt             time.Time       `json:\"started_at\"`\n\tEndedAt               *time.Time      `json:\"ended_at\"`\n\tCurrentPeriodStartsAt *time.Time      `json:\"current_period_starts_at\"`\n\tCurrentPeriodEndsAt   *time.Time      `json:\"current_period_ends_at\"`\n\tCanceledAt            *time.Time      `json:\"canceled_at\"`\n\tCancelType            *string         `json:\"cancel_type\"`\n\tCancelFeedback        *string         `json:\"cancel_feedback\"`\n\tResumable             bool            `json:\"resumable\"`\n\tCancelScheduled       bool            `json:\"cancel_scheduled\"`\n\tCancelMode            string          `json:\"cancel_mode\"`\n\tPrice                 *Price          `json:\"price,omitempty\"`\n\tProduct               *ProductSummary `json:\"product,omitempty\"`\n\n\tCard *CardDetails `json:\"card,omitempty\"`\n\n\tCancelPortalURL *string `json:\"cancel_portal_url,omitempty\"`\n\n\tAccess *SubscriptionAccess `json:\"access,omitempty\"`\n\n\tNextAction *NextAction `json:\"next_action\"`\n\tCreatedAt  time.Time   `json:\"created_at\"`\n\tUpdatedAt  time.Time   `json:\"updated_at\"`\n}",
+      "type Subscription struct {\n\tCollectionPolicy string           `json:\"collection_policy\"`\n\tRecovery         *PaymentRecovery `json:\"recovery,omitempty\"`\n\n\tDunning             *SubscriptionDunning `json:\"dunning\"`\n\tDeletionScheduledAt *time.Time           `json:\"deletion_scheduled_at,omitempty\"`\n\tID                  SubscriptionID       `json:\"id\"`\n\tCustomerID          CustomerID           `json:\"customer_id\"`\n\n\tCustomerContact *CustomerContact `json:\"customer_contact,omitempty\"`\n\tProductID       ProductID        `json:\"product_id\"`\n\tPriceID         PriceID          `json:\"price_id\"`\n\n\tQuantity *int `json:\"quantity\"`\n\n\tMRR *SubscriptionMRR `json:\"mrr\"`\n\n\tMRRRisk            *MRRRisk           `json:\"mrr_risk\"`\n\tPSPID              PSPID              `json:\"psp_id\"`\n\tRail               Rail               `json:\"rail\"`\n\tRailSubscriptionID *string            `json:\"rail_subscription_id\"`\n\tStatus             SubscriptionStatus `json:\"status\"`\n\n\tScheduledChange *ScheduledChange `json:\"scheduled_change\"`\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id\"`\n\n\tMandateID             *MandateID      `json:\"mandate_id\"`\n\tStartedAt             time.Time       `json:\"started_at\"`\n\tEndedAt               *time.Time      `json:\"ended_at\"`\n\tCurrentPeriodStartsAt *time.Time      `json:\"current_period_starts_at\"`\n\tCurrentPeriodEndsAt   *time.Time      `json:\"current_period_ends_at\"`\n\tCanceledAt            *time.Time      `json:\"canceled_at\"`\n\tCancelType            *string         `json:\"cancel_type\"`\n\tCancelFeedback        *string         `json:\"cancel_feedback\"`\n\tResumable             bool            `json:\"resumable\"`\n\tCancelScheduled       bool            `json:\"cancel_scheduled\"`\n\tCancelMode            string          `json:\"cancel_mode\"`\n\tPrice                 *Price          `json:\"price,omitempty\"`\n\tProduct               *ProductSummary `json:\"product,omitempty\"`\n\n\tCard *CardDetails `json:\"card,omitempty\"`\n\n\tCancelPortalURL *string `json:\"cancel_portal_url,omitempty\"`\n\n\tAccess *SubscriptionAccess `json:\"access,omitempty\"`\n\n\tNextAction *NextAction `json:\"next_action\"`\n\tCreatedAt  time.Time   `json:\"created_at\"`\n\tUpdatedAt  time.Time   `json:\"updated_at\"`\n}",
       "type SubscriptionAccess struct {\n\tKind           string         `json:\"kind\"`\n\tProductID      ProductID      `json:\"product_id\"`\n\tSourceType     string         `json:\"source_type,omitempty\"`\n\tSourceID       string         `json:\"source_id,omitempty\"`\n\tSubscriptionID SubscriptionID `json:\"subscription_id,omitzero\"`\n\tRail           Rail           `json:\"rail,omitempty\"`\n\tStartsAt       time.Time      `json:\"starts_at\"`\n\tEndsAt         *time.Time     `json:\"ends_at,omitempty\"`\n}",
       "type SubscriptionChange struct {\n\tStatus         string          `json:\"status\"`\n\tEffective      string          `json:\"effective,omitempty\"`\n\tPriceID        PriceID         `json:\"price_id\"`\n\tQuantity       *int            `json:\"quantity\"`\n\tRail           Rail            `json:\"rail\"`\n\tSubscriptionID *SubscriptionID `json:\"subscription_id,omitempty\"`\n\n\tNextAction *NextAction `json:\"next_action,omitempty\"`\n\n\tTransactionID *string    `json:\"transaction_id\"`\n\tMessage       string     `json:\"message,omitempty\"`\n\tDelayedStart  *time.Time `json:\"delayed_start,omitempty\"`\n\n\tCurrency         catalog.Currency `json:\"currency,omitempty\"`\n\tAmountDueNow     int64            `json:\"amount_due_now,string\"`\n\tNextChargeAmount int64            `json:\"next_charge_amount,string\"`\n\tNextChargeDate   *time.Time       `json:\"next_charge_date,omitempty\"`\n}",
       "type SubscriptionChangeOption struct {\n\tProduct ProductSummary            `json:\"product\"`\n\tPrice   Price                     `json:\"price\"`\n\tPreview SubscriptionChangePreview `json:\"preview\"`\n}",
@@ -1173,7 +1177,7 @@
       "type SubscriptionHistoryOperation struct {\n\tID      string `json:\"id\"`\n\tKind    string `json:\"kind\"`\n\tPhase   string `json:\"phase\"`\n\tAttempt int    `json:\"attempt\"`\n\tReason  string `json:\"reason,omitempty\"`\n}",
       "type SubscriptionHistoryTransition struct {\n\tFromStatus    *SubscriptionStatus `json:\"from_status\"`\n\tToStatus      SubscriptionStatus  `json:\"to_status\"`\n\tDecision      string              `json:\"decision,omitempty\"`\n\tCancelType    string              `json:\"cancel_type,omitempty\"`\n\tFromPeriodEnd *time.Time          `json:\"from_period_end\"`\n\tToPeriodEnd   *time.Time          `json:\"to_period_end\"`\n}",
       "type SubscriptionID uuid.UUID",
-      "type SubscriptionListParams struct {\n\tPageRequest\n\n\tIDs        []SubscriptionID   `form:\"ids,comma\"`\n\tCustomerID CustomerID         `form:\"customer_id\"`\n\tStatus     SubscriptionStatus `form:\"status\"`\n\n\tDunning bool             `form:\"dunning\"`\n\tRail    Rail             `form:\"rail\"`\n\tPriceID PriceID          `form:\"price_id\"`\n\tSort    SubscriptionSort `form:\"sort\"`\n\n\tCreatedAfter   time.Time `form:\"created_after\"`\n\tCreatedBefore  time.Time `form:\"created_before\"`\n\tCanceledAfter  time.Time `form:\"canceled_after\"`\n\tCanceledBefore time.Time `form:\"canceled_before\"`\n\tExpiresBefore  time.Time `form:\"expires_before\"`\n\n\tScheduledChangeBefore time.Time `form:\"scheduled_change_before\"`\n}",
+      "type SubscriptionListParams struct {\n\tPageRequest\n\n\tIDs        []SubscriptionID   `form:\"ids,comma\"`\n\tCustomerID CustomerID         `form:\"customer_id\"`\n\tStatus     SubscriptionStatus `form:\"status\"`\n\n\tDunning bool             `form:\"dunning\"`\n\tRail    Rail             `form:\"rail\"`\n\tPriceID PriceID          `form:\"price_id\"`\n\tSort    SubscriptionSort `form:\"sort\"`\n\n\tCreatedAfter   time.Time `form:\"created_after\"`\n\tCreatedBefore  time.Time `form:\"created_before\"`\n\tCanceledAfter  time.Time `form:\"canceled_after\"`\n\tCanceledBefore time.Time `form:\"canceled_before\"`\n\tExpiresBefore  time.Time `form:\"expires_before\"`\n\n\tScheduledChangeBefore time.Time `form:\"scheduled_change_before\"`\n\n\tAtRisk     bool          `form:\"at_risk\"`\n\tRiskReason MRRRiskReason `form:\"risk_reason\"`\n}",
       "type SubscriptionMRR struct {\n\tAmount   int64            `json:\"amount,string\"`\n\tCurrency catalog.Currency `json:\"currency\"`\n\n\tScheduled *ScheduledMRR `json:\"scheduled\"`\n}",
       "type SubscriptionRetryNowResult struct {\n\tSubscription Subscription `json:\"subscription\"`\n\tStatus       string       `json:\"status\"`\n\tReplayed     bool         `json:\"replayed\"`\n}",
       "type SubscriptionSort string",
@@ -1384,7 +1388,7 @@
       "type Options struct {\n\tClock func() time.Time\n}",
       "type Plan struct {\n\tID, Name, Amount string\n\tDays, Months     int\n}",
       "type Sale struct {\n\tTransactionID, OrderID, Vault, Last4 string\n\n\tAmount   string\n\tCurrency catalog.Currency\n\n\tDeclined string\n\tAt       time.Time\n}",
-      "type Schedule struct {\n\tID, Vault, Plan, Amount string\n\n\tBook    string\n\tCreated time.Time\n\tOrder   string\n\n\tEmail string\n\n\tDays, Months int\n\n\tCalendarAnchor  time.Time\n\tNextBilling     time.Time\n\tDeleted, Paused bool\n\n\tCustom bool\n}",
+      "type Schedule struct {\n\tID, Vault, Plan, Amount string\n\n\tBook    string\n\tCreated time.Time\n\tOrder   string\n\n\tEmail string\n\n\tDays, Months int\n\n\tCalendarAnchor  time.Time\n\tNextBilling     time.Time\n\tDeleted, Paused bool\n\n\tCustom bool\n\n\tUnstatedPayments bool\n}",
       "type Vault struct {\n\tID, BillingID string\n\n\tBook  string\n\tCard  Card\n\tExtra []Billing\n\n\tNoBrand bool\n\n\tEmail, FirstName, LastName, ShippingID string\n\n\tCreated time.Time\n}"
     ],
     "openrailstest/stripemock": [
@@ -1454,7 +1458,7 @@
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
       "type AdminConsole struct {\n\tDisabled bool\n\n\tIssuers map[string]ConsoleIssuer\n}",
-      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
+      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth authkit.Config\n\n\tLocalSignIn bool\n\n\tNaming NamingConfig\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tAddr string\n\n\tPrivateAddr string\n}",
       "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tConsoleAssets fs.FS\n}",
       "type FormerNamesConfig struct {\n\tMode     FormerNamesMode\n\tDuration *time.Duration\n}",
@@ -1614,7 +1618,7 @@
       "type Subscription struct {\n\tCollectionPolicy CollectionPolicy `json:\"collection_policy\"`\n\tID               uuid.UUID        `json:\"id\"`\n\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\n\tCustomerID uuid.UUID `json:\"customer_id,omitempty\"`\n\tProductID  uuid.UUID `json:\"product_id\"`\n\tPriceID    uuid.UUID `json:\"price_id\"`\n\n\tScheduledChange *ScheduledChange `json:\"-\"`\n\n\tQuantity *int `json:\"quantity\"`\n\n\tAccessDurationHoursSnapshot   *int `json:\"access_duration_hours_snapshot\"`\n\tProviderAccessDefaultSnapshot bool `json:\"provider_access_default_snapshot\"`\n\n\tStatus                SubscriptionStatus `json:\"status\"`\n\tStartedAt             time.Time          `json:\"started_at\"`\n\tEndedAt               *time.Time         `json:\"ended_at\"`\n\tCurrentPeriodStartsAt *time.Time         `json:\"current_period_starts_at\"`\n\tCurrentPeriodEndsAt   *time.Time         `json:\"current_period_ends_at\"`\n\n\tRail               Rail   `json:\"rail\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n\n\tPspID uuid.UUID `json:\"psp_id\"`\n\n\tPaymentMethodID *uuid.UUID `json:\"payment_method_id\"`\n\n\tLastRetryAt   *time.Time `json:\"last_retry_at\"`\n\tRetryAttempts *int       `json:\"retry_attempts\"`\n\n\tTransientRetries int        `json:\"transient_retries\"`\n\tNextRetryAt      *time.Time `json:\"next_retry_at\"`\n\tGraceEndsAt      *time.Time `json:\"grace_ends_at\"`\n\n\tRetryAdvisedAt *time.Time `json:\"retry_advised_at\"`\n\n\tCancelFeedback *string     `json:\"cancel_feedback\"`\n\tCancelType     *CancelType `json:\"cancel_type\"`\n\tCanceledAt     *time.Time  `json:\"canceled_at\"`\n\n\tDeletionScheduledAt *time.Time `json:\"deletion_scheduled_at,omitempty\"`\n\n\tLifecycleRev int64 `json:\"-\"`\n\n\tRowVersion int64 `json:\"-\"`\n\n\tDunningPolicy []byte `json:\"-\"`\n\n\tPrice         *Price         `json:\"price,omitempty\"`\n\tPaymentMethod *PaymentMethod `json:\"payment_method,omitempty\"`\n\n\tProduct *Product `json:\"product,omitempty\"`\n\n\tMetadata json.RawMessage `json:\"gateway_response,omitempty\"`\n\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}"
     ],
     "internal/destructive": [
-      "type DrainErasuresArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n}",
+      "type DrainErasuresArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tFollows int64 `json:\"follows,omitempty\" river:\"unique\"`\n\n\tRecovers string `json:\"recovers,omitempty\" river:\"unique\"`\n}",
       "type userActionRateEvidence struct {\n\tWindow                 string `json:\"window\"`\n\tHourlyCustomers        int64  `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64  `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64  `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64  `json:\"maximum_daily_customers\"`\n\tRetryAfterSeconds      int64  `json:\"retry_after_seconds\"`\n}"
     ],
     "internal/disputejob": [
@@ -1768,7 +1772,8 @@
     ],
     "internal/merchants": [
       "type SecretCleanupArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRunID      uuid.UUID `json:\"run_id\" river:\"unique\"`\n}",
-      "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}"
+      "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}",
+      "type UsagePurgeArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}"
     ],
     "internal/modules/admission/spendgate": [
       "type Policy struct {\n\tScopes []ScopedWindows `json:\"scopes\"`\n}",
@@ -1829,6 +1834,7 @@
     ],
     "internal/modules/money": [
       "type CustomerInvoiceProfile struct {\n\tNetTermsDays     int                     `json:\"net_terms_days\"`\n\tCollectionMethod string                  `json:\"collection_method\"`\n\tPONumber         string                  `json:\"po_number,omitempty\"`\n\tTax              map[string]any          `json:\"tax,omitempty\"`\n\tBillingContacts  []models.InvoiceContact `json:\"billing_contacts,omitempty\"`\n\tMemo             string                  `json:\"memo,omitempty\"`\n}",
+      "type ForgivenLine struct {\n\tInvoker   string `json:\"invoker\"`\n\tEventType string `json:\"event_type\"`\n\tMeterKey  string `json:\"meter_key\"`\n\tCell      string `json:\"cell\"`\n\tAmount    int64  `json:\"amount\"`\n}",
       "type PostingLine struct {\n\tMeterKey string `json:\"meter_key\"`\n\tCell     string `json:\"cell\"`\n\tPrint    string `json:\"print\"`\n\tRequests int64  `json:\"requests\"`\n\tQuantity int64  `json:\"quantity\"`\n\tStated   int64  `json:\"stated\"`\n\tAmount   int64  `json:\"amount\"`\n}",
       "type UsageAccountKey struct {\n\tDueAt      time.Time `json:\"due_at\"`\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\tCurrency   string    `json:\"currency\"`\n}",
       "type UsageOrderArgs struct {\n\tBill    *UsageAccountKey `json:\"bill,omitempty\"`\n\tCollect *UsageOrderKey   `json:\"collect,omitempty\"`\n}",
@@ -1838,11 +1844,20 @@
       "type ratingCard struct {\n\tMeterKey    string              `json:\"meter_key\"`\n\tEventType   string              `json:\"event_type,omitempty\"`\n\tValueKey    string              `json:\"value_property\"`\n\tAggregation catalog.Aggregation `json:\"aggregation\"`\n\tGroupBy     map[string]string   `json:\"group_by,omitempty\"`\n\tFilter      map[string][]string `json:\"filter,omitempty\"`\n\tAllowance   *catalog.Allowance  `json:\"allowance,omitempty\"`\n\tPrice       catalog.RatePrice   `json:\"price\"`\n}",
       "type runningChargeCursor struct {\n\tID uuid.UUID `json:\"i\"`\n}"
     ],
+    "internal/modules/money/books": [
+      "type MisbalancedReversal struct {\n\tPaymentID uuid.UUID `json:\"payment_id\"`\n\tKind      string    `json:\"kind\"`\n\tCurrency  string    `json:\"currency\"`\n\tAmount    int64     `json:\"amount\"`\n\tMoved     int64     `json:\"moved\"`\n}",
+      "type Overapplication struct {\n\tPaymentID string `json:\"payment_id\"`\n\tCurrency  string `json:\"currency\"`\n\tReceived  int64  `json:\"received\"`\n\tApplied   int64  `json:\"applied\"`\n}",
+      "type UnpostedPayment struct {\n\tPaymentID uuid.UUID `json:\"payment_id\"`\n\n\tKind     string `json:\"kind\"`\n\tCurrency string `json:\"currency\"`\n\tAmount   int64  `json:\"amount\"`\n}",
+      "type UnscheduledLine struct {\n\tOrderID     uuid.UUID `json:\"order_id\"`\n\tOrderLineID uuid.UUID `json:\"order_line_id\"`\n\tCurrency    string    `json:\"currency\"`\n\tAmount      int64     `json:\"amount\"`\n\tReason      string    `json:\"reason\"`\n}"
+    ],
+    "internal/modules/money/fees": [
+      "type balanceTransaction struct {\n\tID       string `json:\"id\"`\n\tFee      int64  `json:\"fee\"`\n\tCurrency string `json:\"currency\"`\n\tCreated  int64  `json:\"created\"`\n}"
+    ],
     "internal/modules/money/ledger": [
       "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tBook       string    `json:\"book\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
       "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
-      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n\tRollups      []RollupDrift        `json:\"rollup_drifts\"`\n\tSigns        []SignBreach         `json:\"sign_breaches\"`\n\n\tSides []SideWarning `json:\"side_warnings\"`\n}",
-      "type LotDrift struct {\n\tCreditGrantID    uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID       uuid.UUID `json:\"merchant_id\"`\n\tCustomerID       uuid.UUID `json:\"customer_id\"`\n\tUnit             string    `json:\"unit\"`\n\tStoredCredited   int64     `json:\"stored_credited\"`\n\tLoggedCredited   int64     `json:\"logged_credited\"`\n\tStoredDebited    int64     `json:\"stored_debited\"`\n\tLoggedDebited    int64     `json:\"logged_debited\"`\n\tStoredReserved   int64     `json:\"stored_reserved\"`\n\tExpectedReserved int64     `json:\"expected_reserved\"`\n}",
+      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n\tRollups      []RollupDrift        `json:\"rollup_drifts\"`\n\tSigns        []SignBreach         `json:\"sign_breaches\"`\n\n\tSides        []SideWarning           `json:\"side_warnings\"`\n\tApplications []books.Overapplication `json:\"overapplied_payments\"`\n\tUnscheduled  []books.UnscheduledLine `json:\"unscheduled_lines\"`\n\n\tAwaiting    []books.UnscheduledLine     `json:\"awaiting_lines\"`\n\tUnposted    []books.UnpostedPayment     `json:\"unposted_payments\"`\n\tMisbalanced []books.MisbalancedReversal `json:\"misbalanced_reversals\"`\n}",
+      "type LotDrift struct {\n\tCreditGrantID    uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID       uuid.UUID `json:\"merchant_id\"`\n\tCustomerID       uuid.UUID `json:\"customer_id\"`\n\tUnit             string    `json:\"unit\"`\n\tStoredCredited   int64     `json:\"stored_credited\"`\n\tLoggedCredited   int64     `json:\"logged_credited\"`\n\tStoredDebited    int64     `json:\"stored_debited\"`\n\tLoggedDebited    int64     `json:\"logged_debited\"`\n\tStoredReserved   int64     `json:\"stored_reserved\"`\n\tExpectedReserved int64     `json:\"expected_reserved\"`\n\n\tStoredDeferredCredited int64 `json:\"stored_deferred_credited\"`\n\tLoggedDeferredCredited int64 `json:\"logged_deferred_credited\"`\n\tStoredDeferredDebited  int64 `json:\"stored_deferred_debited\"`\n\tLoggedDeferredDebited  int64 `json:\"logged_deferred_debited\"`\n}",
       "type RollupDrift struct {\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tBucket        *time.Time `json:\"bucket,omitempty\"`\n\tTransferType  string     `json:\"transfer_type,omitempty\"`\n\tProductID     *uuid.UUID `json:\"product_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
       "type SideWarning struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tClass         string     `json:\"class\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}",
       "type SignBreach struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}"
@@ -1901,6 +1916,7 @@
       "type ManualRebillPayload struct {\n\tOrderCaptchaSubjects     []string                `json:\"order_captcha_subjects,omitempty\"`\n\tInitiator                charge.Initiator        `json:\"initiator\"`\n\tRequestedPaymentMethodID *uuid.UUID              `json:\"requested_payment_method_id,omitempty\"`\n\tRenewal                  RenewalTerms            `json:\"renewal\"`\n\tPaymentMethodID          uuid.UUID               `json:\"payment_method_id\"`\n\tInstrument               charge.FrozenInstrument `json:\"instrument\"`\n\tRail                     string                  `json:\"rail\"`\n\tRailSubscriptionID       string                  `json:\"rail_subscription_id\"`\n\tOrderReference           string                  `json:\"order_reference\"`\n\tAttempt                  int                     `json:\"attempt\"`\n\tFailureCount             int                     `json:\"failure_count\"`\n\tAmountMinor              moneyutil.Cents         `json:\"amount_minor,string\"`\n}",
       "type NMIInitialScheduleTerms struct {\n\tPlanID       string               `json:\"plan_id\"`\n\tStartDate    string               `json:\"start_date\"`\n\tDayFrequency int                  `json:\"day_frequency\"`\n\tPlanPayments int                  `json:\"plan_payments\"`\n\tCard         NMIInitialCardholder `json:\"card\"`\n}",
       "type NMIUpgradePayload struct {\n\tStaff              *StaffChange    `json:\"staff,omitempty\"`\n\tLegacyEntitlements map[string]*int `json:\"legacy_entitlements,omitzero\"`\n\n\tAccessEndsAt              *time.Time              `json:\"access_ends_at,omitempty\"`\n\tAccessDurationHours       *int                    `json:\"access_duration_hours\"`\n\tProviderAccessDefault     bool                    `json:\"provider_access_default,omitempty\"`\n\tAction                    string                  `json:\"action\"`\n\tInstrument                charge.FrozenInstrument `json:\"instrument\"`\n\tRequestedPrice            string                  `json:\"requested_price\"`\n\tPSP                       string                  `json:\"psp\"`\n\tUserID                    string                  `json:\"user_id\"`\n\tEmail                     string                  `json:\"email\"`\n\tOldSubscriptionID         uuid.UUID               `json:\"old_subscription_id\"`\n\tOldPriceID                uuid.UUID               `json:\"old_price_id\"`\n\tOldProviderSubscriptionID string                  `json:\"old_provider_subscription_id\"`\n\tNewPaymentID              uuid.UUID               `json:\"new_payment_id\"`\n\tPriceID                   uuid.UUID               `json:\"price_id\"`\n\tProductID                 uuid.UUID               `json:\"product_id\"`\n\tProductName               string                  `json:\"product_name\"`\n\tPaymentMethodID           uuid.UUID               `json:\"payment_method_id\"`\n\tRecurringIntervalHours    int                     `json:\"recurring_interval_hours\"`\n\tRecurringIntervalMonths   int                     `json:\"recurring_interval_months,omitempty\"`\n\tCalendarAnchor            *time.Time              `json:\"calendar_anchor,omitempty\"`\n\tRecurringAmount           int64                   `json:\"recurring_amount,string\"`\n\tProrationAmount           int64                   `json:\"proration_amount,string\"`\n\tCurrency                  string                  `json:\"currency\"`\n\tPeriodStart               time.Time               `json:\"period_start\"`\n\tPeriodEnd                 time.Time               `json:\"period_end\"`\n\n\tEntitlements json.RawMessage `json:\"entitlements,omitempty\"`\n\n\tTargetPlanID string `json:\"target_plan_id,omitempty\"`\n}",
+      "type PriceMigrationArgs struct {\n\tMerchantID  uuid.UUID    `json:\"merchant_id\"`\n\tMigrationID uuid.UUID    `json:\"price_migration_id\"`\n\tSources     []uuid.UUID  `json:\"sources\"`\n\tThrough     uuid.UUID    `json:\"through\"`\n\tAcknowledge bool         `json:\"acknowledge_short_notice\"`\n\tAfter       cohortCursor `json:\"after\"`\n}",
       "type RefundResult struct {\n\tID            string            `json:\"id\"`\n\tAmount        int64             `json:\"amount\"`\n\tCurrency      string            `json:\"currency\"`\n\tChargeID      string            `json:\"charge\"`\n\tStatus        string            `json:\"status\"`\n\tReason        string            `json:\"reason\"`\n\tFailureReason string            `json:\"failure_reason\"`\n\tMetadata      map[string]string `json:\"metadata\"`\n}",
       "type RenewalTerms struct {\n\tRail                  models.Rail                 `json:\"rail,omitempty\"`\n\tLegacyEntitlements    map[string]*int             `json:\"legacy_entitlements,omitzero\"`\n\tProviderAccessDefault bool                        `json:\"provider_access_default,omitempty\"`\n\tAccessDurationHours   *int                        `json:\"access_duration_hours\"`\n\tCreditGrant           *models.CreditGrantSnapshot `json:\"credit_grant,omitempty\"`\n\tPSPID                 uuid.UUID                   `json:\"psp_id\"`\n\tSubscriptionID        uuid.UUID                   `json:\"subscription_id\"`\n\tCustomerID            uuid.UUID                   `json:\"customer_id\"`\n\tFromPriceID           uuid.UUID                   `json:\"from_price_id\"`\n\tFromProductID         uuid.UUID                   `json:\"from_product_id\"`\n\tPriceID               uuid.UUID                   `json:\"price_id\"`\n\tProductID             uuid.UUID                   `json:\"product_id\"`\n\tProductName           string                      `json:\"product_name\"`\n\n\tQuantity                *int       `json:\"quantity,omitempty\"`\n\tAmount                  int64      `json:\"amount,string\"`\n\tCurrency                string     `json:\"currency\"`\n\tPeriodStart             time.Time  `json:\"period_start\"`\n\tPeriodEnd               time.Time  `json:\"period_end\"`\n\tRecurringIntervalMonths *int       `json:\"recurring_interval_months,omitempty\"`\n\tCalendarAnchor          *time.Time `json:\"calendar_anchor,omitempty\"`\n\tCalendarAccessDefault   bool       `json:\"calendar_access_default,omitempty\"`\n\n\tEntitlements json.RawMessage `json:\"entitlements,omitempty\"`\n\n\tScheduledChangeID *uuid.UUID `json:\"scheduled_change_id,omitempty\"`\n}",
       "type ReplacedMembership struct {\n\tSubscriptionID uuid.UUID `json:\"subscription_id\"`\n\tPriceID        uuid.UUID `json:\"price_id\"`\n\tPeriodEnd      time.Time `json:\"period_end\"`\n\tCredit         int64     `json:\"credit,string\"`\n}",
@@ -1913,6 +1929,7 @@
       "type StripeScheduleState struct {\n\tID             string                `json:\"id\"`\n\tSubscriptionID string                `json:\"subscription_id\"`\n\tStatus         string                `json:\"status\"`\n\tEndBehavior    string                `json:\"end_behavior,omitempty\"`\n\tTierChangeKey  string                `json:\"tier_change_key,omitempty\"`\n\tPhases         []StripeSchedulePhase `json:\"phases\"`\n}",
       "type StripeSubscriptionState struct {\n\tID              string `json:\"id\"`\n\tStatus          string `json:\"status\"`\n\tItemID          string `json:\"item_id\"`\n\tPriceID         string `json:\"price_id\"`\n\tInternalPriceID string `json:\"internal_price_id,omitempty\"`\n\tTierChangeKey   string `json:\"tier_change_key,omitempty\"`\n\tScheduleID      string `json:\"schedule_id,omitempty\"`\n\tLatestInvoiceID string `json:\"latest_invoice_id,omitempty\"`\n\tPeriodStart     int64  `json:\"period_start,omitempty\"`\n\tPeriodEnd       int64  `json:\"period_end,omitempty\"`\n}",
       "type SubscriptionCollectionPayload struct {\n\tOrderCaptchaSubjects     []string                  `json:\"order_captcha_subjects,omitempty\"`\n\tInitiator                charge.Initiator          `json:\"initiator\"`\n\tRequestedPaymentMethodID *uuid.UUID                `json:\"requested_payment_method_id,omitempty\"`\n\tRenewal                  RenewalTerms              `json:\"renewal\"`\n\tPreviousPeriodEnd        time.Time                 `json:\"previous_period_end\"`\n\tAcceptedAt               time.Time                 `json:\"accepted_at\"`\n\tPaymentMethodID          uuid.UUID                 `json:\"payment_method_id\"`\n\tInstrument               charge.FrozenInstrument   `json:\"instrument\"`\n\tHyperSwitch              charge.HyperSwitchBinding `json:\"hyperswitch\"`\n\tAttempt                  int                       `json:\"attempt\"`\n\tFailureCount             int                       `json:\"failure_count\"`\n\tAmountMinor              moneyutil.Cents           `json:\"amount_minor,string\"`\n\tOrderReference           string                    `json:\"order_reference\"`\n\n\tOrderID uuid.UUID `json:\"order_id,omitzero\"`\n}",
+      "type cohortCursor struct {\n\tPriceID uuid.UUID `json:\"price_id\"`\n\tID      uuid.UUID `json:\"id\"`\n}",
       "type stripeBillEnvelope struct {\n\tID           string          `json:\"id\"`\n\tSubscription json.RawMessage `json:\"subscription\"`\n\tCustomer     json.RawMessage `json:\"customer\"`\n\tParent       struct {\n\t\tSubscriptionDetails struct {\n\t\t\tSubscription json.RawMessage `json:\"subscription\"`\n\t\t} `json:\"subscription_details\"`\n\t} `json:\"parent\"`\n\tMetadata          map[string]string `json:\"metadata\"`\n\tCurrency          string            `json:\"currency\"`\n\tStatus            string            `json:\"status\"`\n\tReason            string            `json:\"billing_reason\"`\n\tTotal             int64             `json:\"total\"`\n\tAmountDue         int64             `json:\"amount_due\"`\n\tAmountPaid        int64             `json:\"amount_paid\"`\n\tAmountRemaining   int64             `json:\"amount_remaining\"`\n\tAmountOffStripe   int64             `json:\"amount_paid_off_stripe\"`\n\tStartingBalance   int64             `json:\"starting_balance\"`\n\tPrePaymentCredit  int64             `json:\"pre_payment_credit_notes_amount\"`\n\tPostPaymentCredit int64             `json:\"post_payment_credit_notes_amount\"`\n\tCreated           int64             `json:\"created\"`\n\tDueAt             int64             `json:\"due_date\"`\n\tTransitions       struct {\n\t\tFinalizedAt int64 `json:\"finalized_at\"`\n\t\tPaidAt      int64 `json:\"paid_at\"`\n\t} `json:\"status_transitions\"`\n\tLines    stripeBillList `json:\"lines\"`\n\tPayments stripeBillList `json:\"payments\"`\n}",
       "type stripeBillList struct {\n\tData    []json.RawMessage `json:\"data\"`\n\tHasMore bool              `json:\"has_more\"`\n}",
       "type stripeEngineIntent struct {\n\tObject             string            `json:\"object\"`\n\tLiveMode           *bool             `json:\"livemode\"`\n\tID                 string            `json:\"id\"`\n\tStatus             string            `json:\"status\"`\n\tCustomer           json.RawMessage   `json:\"customer\"`\n\tPaymentMethod      json.RawMessage   `json:\"payment_method\"`\n\tAmount             int64             `json:\"amount\"`\n\tAmountReceived     int64             `json:\"amount_received\"`\n\tCurrency           string            `json:\"currency\"`\n\tSetupFutureUsage   string            `json:\"setup_future_usage\"`\n\tCaptureMethod      string            `json:\"capture_method\"`\n\tConfirmationMethod string            `json:\"confirmation_method\"`\n\tLatestCharge       json.RawMessage   `json:\"latest_charge\"`\n\tMetadata           map[string]string `json:\"metadata\"`\n\tClientSecret       string            `json:\"client_secret\"`\n\tCancellationReason string            `json:\"cancellation_reason\"`\n\tLastPaymentError   *struct {\n\t\tCode               string          `json:\"code\"`\n\t\tDeclineCode        string          `json:\"decline_code\"`\n\t\tAdviceCode         string          `json:\"advice_code\"`\n\t\tNetworkAdviceCode  string          `json:\"network_advice_code\"`\n\t\tNetworkDeclineCode string          `json:\"network_decline_code\"`\n\t\tPaymentMethod      json.RawMessage `json:\"payment_method\"`\n\t} `json:\"last_payment_error\"`\n}",
@@ -2513,7 +2530,9 @@
     },
     "config.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "config": "github.com/open-rails/openrails/internal/config"
+      "cmp": "cmp",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "strings": "strings"
     },
     "customer_proof.go": {
       "auth": "github.com/open-rails/authkit/auth",
@@ -2648,7 +2667,6 @@
       "path": "path",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
       "regexp": "regexp",
-      "slog": "log/slog",
       "sort": "sort",
       "strings": "strings",
       "time": "time",
@@ -2731,6 +2749,8 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/db/models/credit_benefit.go": {
+      "catalog": "github.com/open-rails/openrails/catalog",
+      "currency": "github.com/open-rails/openrails/internal/currency",
       "errors": "errors",
       "strings": "strings",
       "time": "time"
@@ -2788,6 +2808,7 @@
     "internal/destructive/erasure.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -2852,6 +2873,7 @@
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v2": "github.com/ClickHouse/clickhouse-go/v2"
     },
     "internal/history/attribution.go": {
@@ -3206,7 +3228,6 @@
     "internal/intents/ccbill_cancel.go": {
       "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
-      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
@@ -3220,7 +3241,8 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/collection_payload.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
@@ -3302,7 +3324,8 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
+      "v5": "github.com/jackc/pgx/v5",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/initial_membership_refusal.go": {
       "bytes": "bytes",
@@ -3475,7 +3498,8 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
+      "v5": "github.com/jackc/pgx/v5",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/intents/price_migration_push.go": {
       "context": "context",
@@ -3601,6 +3625,7 @@
     "internal/merchantarchive/archive.go": {
       "archivewire": "github.com/open-rails/openrails/internal/archivewire",
       "billing": "github.com/open-rails/openrails/billing",
+      "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "contract": "github.com/open-rails/openrails/internal/merchantarchive/contract",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -3667,6 +3692,10 @@
       "sort": "sort",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/merchants/usage_purge.go": {
+      "river": "github.com/riverqueue/river",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/admission/spendgate/gate.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -3846,6 +3875,7 @@
       "identity": "github.com/open-rails/openrails/internal/billingidentity",
       "json": "encoding/json",
       "limits": "github.com/open-rails/openrails/internal/modules/limits",
+      "logx": "github.com/open-rails/openrails/internal/logx",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
@@ -3869,13 +3899,16 @@
     "internal/modules/metrics/service.go": {
       "big": "math/big",
       "billing": "github.com/open-rails/openrails/billing",
+      "calendarutil": "github.com/open-rails/openrails/internal/shared/calendarutil",
       "cmp": "cmp",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
       "fmt": "fmt",
       "json": "encoding/json",
       "math": "math",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
       "sort": "sort",
       "strconv": "strconv",
       "strings": "strings",
@@ -3883,6 +3916,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/metrics/validate.go": {
+      "calendarutil": "github.com/open-rails/openrails/internal/shared/calendarutil",
       "fmt": "fmt",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "regexp": "regexp",
@@ -3901,7 +3935,6 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "identity": "github.com/open-rails/openrails/internal/billingidentity",
       "json": "encoding/json",
-      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
       "river": "github.com/riverqueue/river",
@@ -3930,6 +3963,39 @@
       "strings": "strings",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/modules/money/books/audit.go": {
+      "context": "context",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "strconv": "strconv",
+      "uuid": "github.com/google/uuid"
+    },
+    "internal/modules/money/fees/stripe.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "logx": "github.com/open-rails/openrails/internal/logx",
+      "math": "math",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "recommend": "github.com/open-rails/openrails/internal/reconcile/recommend",
+      "slog": "log/slog",
+      "strings": "strings",
+      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
+      "time": "time",
+      "url": "net/url",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/modules/money/invoice_profile.go": {
       "context": "context",
       "fmt": "fmt",
@@ -3942,6 +4008,7 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/money/ledger/diagnostics.go": {
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
       "context": "context",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -4007,6 +4074,22 @@
       "utf8": "unicode/utf8",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/money/usage_history.go": {
+      "big": "math/big",
+      "billing": "github.com/open-rails/openrails/billing",
+      "calendarutil": "github.com/open-rails/openrails/internal/shared/calendarutil",
+      "cmp": "cmp",
+      "context": "context",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "slices": "slices",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/money/usage_price.go": {
       "catalog": "github.com/open-rails/openrails/catalog",
@@ -4335,6 +4418,7 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5",
       "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
@@ -4375,6 +4459,39 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
+    "internal/modules/subscriptions/price_migration.go": {
+      "alertjob": "github.com/open-rails/openrails/internal/modules/alerting/alertjob",
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "big": "math/big",
+      "billing": "github.com/open-rails/openrails/billing",
+      "bytes": "bytes",
+      "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
+      "catalogwire": "github.com/open-rails/openrails/catalog",
+      "clockwork": "github.com/jonboulle/clockwork",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "destructive": "github.com/open-rails/openrails/internal/destructive",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "json": "encoding/json",
+      "logx": "github.com/open-rails/openrails/internal/logx",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "river": "github.com/riverqueue/river",
+      "slices": "slices",
+      "slog": "log/slog",
+      "strings": "strings",
+      "time": "time",
+      "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
+      "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/modules/subscriptions/rebill_terms.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
       "errors": "errors",
@@ -4390,6 +4507,7 @@
       "calendarutil": "github.com/open-rails/openrails/internal/shared/calendarutil",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "context": "context",
+      "currency": "github.com/open-rails/openrails/internal/currency",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
@@ -4793,6 +4911,7 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/destructive_run_converge.go": {
@@ -4805,6 +4924,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "time": "time",
       "uuid": "github.com/google/uuid",
+      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/destructive_run_undo.go": {
@@ -5091,7 +5211,8 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5",
-      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
+      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/scim/bulk.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -5256,9 +5377,15 @@
       "time": "time"
     },
     "internal/usageerasure/usageerasure.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "errors": "errors",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/wakejobs/wakejobs.go": {
       "context": "context",
@@ -5383,10 +5510,12 @@
     },
     "server/cmd/openrails/ledger_audit.go": {
       "billing": "github.com/open-rails/openrails/billing",
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
       "cobra": "github.com/spf13/cobra",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
       "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
@@ -5443,13 +5572,15 @@
       "cmp": "cmp",
       "context": "context",
       "fmt": "fmt",
+      "iam": "github.com/open-rails/authkit/iam",
       "io": "io",
       "net": "net",
       "slices": "slices",
       "strconv": "strconv",
       "strings": "strings",
       "time": "time",
-      "url": "net/url"
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
     },
     "server/internal/http/console_merchants.go": {
       "adminconsole": "github.com/open-rails/openrails/server/internal/adminconsole",

@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
@@ -502,6 +503,14 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		}
 		currency := normalizeCurrency(p.Currency)
 		ml := ledger.New(q, intent.MerchantID)
+		// The money arrives before it settles what is owed.
+		if err := books.New(q, intent.MerchantID).Receive(ctx, books.Receipt{Payment: p.PaymentID, Customer: p.CustomerID, Order: &p.OrderID,
+			PSP: &p.Instrument.PSPID, Amount: chargedAmount, Currency: currency, At: now}); err != nil {
+			return err
+		}
+		if err := books.Started(ctx, q, intent.MerchantID, currency, now); err != nil {
+			return err
+		}
 		coord := ledger.Coord{Operation: ledger.OpOrderPayment, Source: "invoice_charge", SourceID: intent.IdempotencyKey}
 		transfer, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, Currency: currency,
@@ -514,12 +523,13 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		if err != nil {
 			return err
 		}
+		var change *models.MoneyTransaction
 		if excess := chargedAmount - p.Amount; excess > 0 {
 			payer := identity.CustomerIDFromString(p.CustomerID.String())
 			key := "invoice-rounding:" + intent.ID.String()
 			reason := "Rounding credit from order " + billing.OrderID(p.OrderID).String()
 			// Change the card paid beyond the order is credit bought at face.
-			_, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
+			change, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
 				CustomerID: &payer, Invoker: payer.String(), Currency: currency, Amount: excess,
 				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason, Funding: credits.Purchase,
 			})
@@ -533,6 +543,9 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			Amount: chargedAmount, Currency: currency, PaidAt: now, Now: now, TokenType: optionalString(payments.DefaultTokenType(rail, p.Instrument.Custodian)),
 		}); err != nil {
 			return fmt.Errorf("record order payment: %w", err)
+		}
+		if err := NewMoneyService(h.DB, h.Clock).fundChange(ctx, q, intent.MerchantID, change, p.PaymentID); err != nil {
+			return err
 		}
 		if err := recordCollectionAttempt(ctx, q, intent, p, rail, attempts.Attempt{Approved: true, TransactionID: transactionID}, now); err != nil {
 			return err
@@ -624,7 +637,7 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 			return err
 		}
 		// The collection attempt names its outcome: a replay records it once.
-		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), uuid.NewSHA1(intent.ID, []byte("collection_outcome")), row, action, failureCode, now); err != nil {
+		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), uuidutil.ChildV7(intent.ID, "collection_outcome"), row, action, failureCode, now); err != nil {
 			return err
 		}
 		return complete()
@@ -827,7 +840,7 @@ func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 		return err
 	}
 	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-		ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, string(models.NotificationUsageCharged), merchantID.String(), payment.String()),
+		ID:         uuidutil.DerivedV7(uuidutil.TimeOf(payment), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationUsageCharged), merchantID.String(), payment.String())),
 		MerchantID: merchantID, CustomerID: order.CustomerID, EventType: string(models.NotificationUsageCharged), Data: raw, CreatedAt: now,
 	})
 }

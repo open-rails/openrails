@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -29,6 +30,12 @@ import (
 //     general ledger never refuses one: it raises books.sign_breach.
 //  6. Side warnings: one with no sign rule whose type total sits opposite its
 //     class's normal side. Reported, never a failure.
+//  7. Applications: no payment's cash is applied beyond its receipt
+//     (books.CheckApplications), and every completed revenue line has its
+//     revenue schedule (books.CheckSchedules). A line from before the books
+//     started, or a provider's tax and shipping, is a warning.
+//  8. Postings: every receipt and settled reversal of one stored since the
+//     books started has its general-ledger posting (books.CheckPostings).
 //
 // Each takes an explicitly selected merchant; ledger-audit calls once per merchant.
 
@@ -81,13 +88,17 @@ type LotDrift struct {
 	LoggedDebited    int64     `json:"logged_debited"`
 	StoredReserved   int64     `json:"stored_reserved"`
 	ExpectedReserved int64     `json:"expected_reserved"`
+	// The lot's money in its paid currency: legs on its deferred account.
+	StoredDeferredCredited int64 `json:"stored_deferred_credited"`
+	LoggedDeferredCredited int64 `json:"logged_deferred_credited"`
+	StoredDeferredDebited  int64 `json:"stored_deferred_debited"`
+	LoggedDeferredDebited  int64 `json:"logged_deferred_debited"`
 }
 
 func (d LotDrift) String() string {
-	return fmt.Sprintf("lot drift: credit_grant=%s credited stored=%s logged=%s, debited stored=%s logged=%s, reserved stored=%s expected=%s",
-		d.CreditGrantID, moneyutil.FormatAmount(d.StoredCredited, d.Unit), moneyutil.FormatAmount(d.LoggedCredited, d.Unit),
-		moneyutil.FormatAmount(d.StoredDebited, d.Unit), moneyutil.FormatAmount(d.LoggedDebited, d.Unit),
-		moneyutil.FormatAmount(d.StoredReserved, d.Unit), moneyutil.FormatAmount(d.ExpectedReserved, d.Unit))
+	return fmt.Sprintf("lot drift: credit_grant=%s credited stored=%d logged=%d, debited stored=%d logged=%d, reserved stored=%d expected=%d, deferred credited stored=%d logged=%d, deferred debited stored=%d logged=%d",
+		d.CreditGrantID, d.StoredCredited, d.LoggedCredited, d.StoredDebited, d.LoggedDebited, d.StoredReserved, d.ExpectedReserved,
+		d.StoredDeferredCredited, d.LoggedDeferredCredited, d.StoredDeferredDebited, d.LoggedDeferredDebited)
 }
 
 // RollupDrift is one ledger_type_totals row (Bucket nil) or ledger_daily
@@ -163,12 +174,20 @@ type IntegrityReport struct {
 	Rollups      []RollupDrift        `json:"rollup_drifts"`
 	Signs        []SignBreach         `json:"sign_breaches"`
 	// Sides are warnings: they never make the report fail.
-	Sides []SideWarning `json:"side_warnings"`
+	Sides        []SideWarning           `json:"side_warnings"`
+	Applications []books.Overapplication `json:"overapplied_payments"`
+	Unscheduled  []books.UnscheduledLine `json:"unscheduled_lines"`
+	// Awaiting are warnings: revenue lines unscheduled by design, until the
+	// books' rebuild or a tax booking.
+	Awaiting    []books.UnscheduledLine     `json:"awaiting_lines"`
+	Unposted    []books.UnpostedPayment     `json:"unposted_payments"`
+	Misbalanced []books.MisbalancedReversal `json:"misbalanced_reversals"`
 }
 
-// OK reports whether the books are intact; side warnings do not count.
+// OK reports whether the books are intact; side warnings and awaiting lines
+// do not count.
 func (r IntegrityReport) OK() bool {
-	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0
+	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0 && len(r.Applications) == 0 && len(r.Unscheduled) == 0 && len(r.Unposted) == 0 && len(r.Misbalanced) == 0
 }
 
 // CheckIntegrity runs every diagnostic for one explicitly selected merchant.
@@ -185,6 +204,18 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 		return r, err
 	}
 	if r.Rollups, err = CheckRollupDrift(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Applications, err = books.CheckApplications(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Unscheduled, r.Awaiting, err = books.CheckSchedules(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Unposted, err = books.CheckPostings(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Misbalanced, err = books.CheckReversalCash(ctx, q, merchant); err != nil {
 		return r, err
 	}
 	if r.Signs, err = CheckSignBreaches(ctx, q, merchant); err != nil {
@@ -251,6 +282,8 @@ func CheckLotDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]LotDr
 			StoredCredited: row.StoredCredited, LoggedCredited: row.LoggedCredited,
 			StoredDebited: row.StoredDebited, LoggedDebited: row.LoggedDebited,
 			StoredReserved: row.StoredReserved, ExpectedReserved: row.ExpectedReserved,
+			StoredDeferredCredited: row.StoredDeferredCredited, LoggedDeferredCredited: row.LoggedDeferredCredited,
+			StoredDeferredDebited: row.StoredDeferredDebited, LoggedDeferredDebited: row.LoggedDeferredDebited,
 		})
 	}
 	return out, nil

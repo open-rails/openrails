@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // A balance watch is the one stored instant per watched balance (every
@@ -316,10 +317,19 @@ func (s *MoneyService) sampleUsageRate(ctx context.Context, q *gen.Queries, watc
 		since = later(since, *prev)
 		rate = decayRate(watch.UsageRatePerHour, now.Sub(*prev))
 	}
+	// Only a customer with unposted usage reads the event store: one without
+	// any looks while it is out of reach.
 	var spent int64
 	if store := s.eventStore(q); store != nil {
-		if spent, err = store.MinuteAmount(ctx, billing.CustomerID(watch.CustomerID), watch.Currency, since, now); err != nil {
+		_, err := q.GetUsageUnposted(ctx, gen.GetUsageUnpostedParams{MerchantID: watch.MerchantID, CustomerID: watch.CustomerID, Currency: watch.Currency})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
 			return 0, now, err
+		default:
+			if spent, err = store.MinuteAmount(ctx, billing.CustomerID(watch.CustomerID), watch.Currency, since, now); err != nil {
+				return 0, now, err
+			}
 		}
 	}
 	// Spent within one time constant of an hour is that much per hour.
@@ -656,8 +666,8 @@ func enqueueBalanceEvent(ctx context.Context, q *gen.Queries, merchantID uuid.UU
 }
 
 // notifyBalance writes the customer's notification event of a crossing, its
-// id derived from the crossing so a retried look writes it once. The
-// application delivers it.
+// id derived from the crossing so a retried look writes it once. It is
+// emailed when the merchant turns its type on.
 func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, kind models.NotificationEventType, event billing.BalanceHostEvent) error {
 	available, owed, line := event.AvailableAmount, event.OwedAmount, event.LowBalanceAmount
 	data, err := json.Marshal(billing.NotificationData{
@@ -668,7 +678,7 @@ func notifyBalance(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, ki
 	}
 	customer := event.CustomerID.UUID()
 	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-		ID:         uuid.NewSHA1(customer, []byte(string(kind)+":"+string(event.Currency)+":"+event.AsOf.Format(runningChargeInstantLayout))),
+		ID:         uuidutil.DerivedV7(event.AsOf, customer, string(kind)+":"+string(event.Currency)+":"+event.AsOf.Format(runningChargeInstantLayout)),
 		MerchantID: merchantID, CustomerID: customer, EventType: string(kind), Data: data, CreatedAt: event.AsOf,
 	})
 }

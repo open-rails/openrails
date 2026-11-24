@@ -601,7 +601,7 @@ func TestBooks(t *testing.T) {
 		require.NoError(t, err)
 		accounts, err := pgx.CollectRows(rows, pgx.RowTo[string])
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"customer_units units held", "units_sold units issued"}, accounts)
+		require.ElementsMatch(t, []string{"customer_units units held", "units_granted units issued"}, accounts, "a gift's units are granted")
 		var moved int
 		require.NoError(t, target.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(target, "ledger_transfers")+" WHERE merchant_id=$1 AND book='units' AND effective_at=created_at", mid).Scan(&moved))
 		require.Equal(t, 1, moved, "a transfer is the units book's, effective when it posted")
@@ -626,6 +626,7 @@ func TestBooks(t *testing.T) {
 			spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture(request, 400)})
 			require.NoError(t, err)
 			require.NoError(t, spent[0].Err())
+			w.clock.Advance(time.Second)
 			var errs [2]error
 			var group sync.WaitGroup
 			start := make(chan struct{})
@@ -655,18 +656,27 @@ func TestBooks(t *testing.T) {
 		require.Len(t, res.Imported, 2, "%v", res.Reasons)
 		rows, err := w.pool.Query(t.Context(), "SELECT id, customer_id FROM "+booksTable(w, "subscriptions")+" WHERE merchant_id=$1 ORDER BY id", mid)
 		require.NoError(t, err)
-		type member struct{ sub, customer uuid.UUID }
+		type member struct{ Sub, Customer uuid.UUID }
 		members, err := pgx.CollectRows(rows, pgx.RowToStructByPos[member])
 		require.NoError(t, err)
 		require.Len(t, members, 2)
 		booksOpen(t, w, mid, "USD")
+		// A CCBill membership holds no seats (subscriptions_quantity_check):
+		// its MRR changes with its price, here to one twice the member's.
+		var product uuid.UUID
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT product_id FROM "+booksTable(w, "subscriptions")+" WHERE merchant_id=$1 AND id=$2", mid, members[0].Sub).Scan(&product))
+		_, err = a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: billing.ProductID(product), Key: "ccbill-double", PSP: "ccbill", FlexID: "critical-double-flex",
+			Currency: "USD", UnitAmount: ptr(int64(2 * ccbillMemberMRR)), BillingIntervalHours: ptr(720)})
+		require.NoError(t, err)
+		var double uuid.UUID
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(w, "prices")+" WHERE merchant_id=$1 AND product_id=$2 AND key='ccbill-double'", mid, product).Scan(&double))
 		seat := func(ctx context.Context, tx pgx.Tx, sub uuid.UUID) error {
-			_, err := tx.Exec(ctx, "UPDATE "+booksTable(w, "subscriptions")+" SET quantity=COALESCE(quantity, 1)+1, updated_at=now() WHERE merchant_id=$1 AND id=$2", mid, sub)
+			_, err := tx.Exec(ctx, "UPDATE "+booksTable(w, "subscriptions")+" SET price_id=$3, updated_at=now() WHERE merchant_id=$1 AND id=$2", mid, sub, double)
 			return err
 		}
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 			for i, m := range members {
-				if err := booksAccrue(ctx, q, w, mid, m.customer, fmt.Sprintf("open-%d", i)); err != nil {
+				if err := booksAccrue(ctx, q, w, mid, m.Customer, fmt.Sprintf("open-%d", i)); err != nil {
 					return err
 				}
 			}
@@ -676,20 +686,20 @@ func TestBooks(t *testing.T) {
 		// inside the ledger step, it holds the totals both post to.
 		release := booksHold(t, w, mid, "usage_revenue")
 		first := booksCommit(t, w, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error {
-			if err := booksAccrue(ctx, q, w, mid, members[0].customer, "posted-first"); err != nil {
+			if err := booksAccrue(ctx, q, w, mid, members[0].Customer, "posted-first"); err != nil {
 				return err
 			}
-			return seat(ctx, tx, members[0].sub)
+			return seat(ctx, tx, members[0].Sub)
 		})
 		first.blocked(t, w, "the transaction that posted first")
 		// The second adds a seat, then posts: its commit settles the ledger
 		// before MRR too, so it waits on the first's totals holding nothing
 		// the first needs.
 		second := booksCommit(t, w, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error {
-			if err := seat(ctx, tx, members[1].sub); err != nil {
+			if err := seat(ctx, tx, members[1].Sub); err != nil {
 				return err
 			}
-			return booksAccrue(ctx, q, w, mid, members[1].customer, "seated-first")
+			return booksAccrue(ctx, q, w, mid, members[1].Customer, "seated-first")
 		})
 		second.blocked(t, w, "the transaction that seated first")
 		release()
@@ -1257,8 +1267,10 @@ func beforeBooks(t *testing.T, archive []byte) []byte {
 			require.NotEmpty(t, old, *v[typeAt])
 			v[typeAt] = &old
 		case "ledger_transfers":
+			// Before the books: no book, effective_at, order line or product,
+			// nor the revenue schedule that came after them.
 			require.Len(t, v, len(transfers.Columns))
-			v = v[:len(v)-4]
+			v = v[:len(v)-5]
 		}
 		return w.Row(v)
 	})

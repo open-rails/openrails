@@ -27,3 +27,32 @@ SELECT billing_policy::text FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id) AND billing_policy IS NOT NULL
   AND NOT (billing_policy = ANY(COALESCE(sqlc.arg(names)::text[], '{}')))
 LIMIT 1;
+
+-- name: ListMerchantUnitsInUse :many
+-- The merchant's own units something counts: a balance (whose deposit made a
+-- system account in it, and the units book recorded), a price, a product's
+-- credit or a rate card. Every code outside the registry is a unit. A
+-- settings change may not remove or rescale one.
+SELECT DISTINCT u.code::text AS code
+FROM (
+    SELECT a.currency AS code FROM billing.ledger_accounts a WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id IS NULL
+    UNION ALL SELECT p.currency FROM billing.prices p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+    UNION ALL SELECT pr.credit_grant ->> 'currency' FROM billing.products pr WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.credit_grant IS NOT NULL
+    UNION ALL SELECT c.price ->> 'currency' FROM billing.catalog_rate_cards c WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
+    UNION ALL SELECT l.unit FROM billing.ledger_units l WHERE l.merchant_id = sqlc.arg(merchant_id)::uuid
+) u
+WHERE u.code IS NOT NULL AND u.code <> ALL(sqlc.arg(registry)::text[])
+ORDER BY 1;
+
+-- name: ListUncountedCatalogUnits :many
+-- The merchant's own units its catalog names (a price, a product's credit or
+-- a rate card) that the units book has not recorded.
+SELECT DISTINCT u.code::text AS code
+FROM (
+    SELECT p.currency AS code FROM billing.prices p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+    UNION ALL SELECT pr.credit_grant ->> 'currency' FROM billing.products pr WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.credit_grant IS NOT NULL
+    UNION ALL SELECT c.price ->> 'currency' FROM billing.catalog_rate_cards c WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
+) u
+WHERE u.code IS NOT NULL AND u.code <> ALL(sqlc.arg(registry)::text[])
+  AND NOT EXISTS (SELECT 1 FROM billing.ledger_units l WHERE l.merchant_id = sqlc.arg(merchant_id)::uuid AND l.unit = u.code)
+ORDER BY 1;

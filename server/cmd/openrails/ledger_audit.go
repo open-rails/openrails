@@ -13,7 +13,9 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
@@ -70,7 +72,12 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 			// the predicate that scopes the check.
 			rep, err := ledger.CheckIntegrity(ctx, database.Qx(ctx), target.id.UUID())
 			res.Report = rep
-			return err
+			if err != nil {
+				return err
+			}
+			// A payment stored past its poster, or a reversal posted for other
+			// cash, is recorded as a finding, closed once it is right.
+			return books.SyncPostingFindings(ctx, gen.New(database.Qx(ctx)), target.id.UUID(), rep.Unposted, rep.Misbalanced)
 		})
 		if runErr != nil {
 			res.Err = runErr.Error()
@@ -108,6 +115,21 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 				}
 				for _, d := range res.Report.Rollups {
 					parts = append(parts, d.String())
+				}
+				for _, o := range res.Report.Applications {
+					parts = append(parts, o.String())
+				}
+				for _, u := range res.Report.Unscheduled {
+					parts = append(parts, u.String())
+				}
+				for _, u := range res.Report.Awaiting {
+					parts = append(parts, u.String())
+				}
+				for _, u := range res.Report.Unposted {
+					parts = append(parts, u.String())
+				}
+				for _, m := range res.Report.Misbalanced {
+					parts = append(parts, m.String())
 				}
 				for _, b := range res.Report.Signs {
 					parts = append(parts, b.String())

@@ -76,11 +76,11 @@ func consoleStaff(t *testing.T, a *authorityWorld, name string, perms ...billing
 
 // consoleOperator holds what a person reviewing an import needs: merchant
 // configuration, the catalog to map prices, and customer support to see
-// whom a record links.
-func consoleOperator(t *testing.T, a *authorityWorld) string {
+// whom a record links; more adds to it.
+func consoleOperator(t *testing.T, a *authorityWorld, more ...billing.Permission) string {
 	t.Helper()
-	return consoleStaff(t, a, "console-operator", billing.MerchantConfigRead, billing.MerchantConfigManage,
-		billing.MerchantCatalogRead, billing.MerchantCatalogManage, billing.MerchantCustomerRead)
+	return consoleStaff(t, a, "console-operator", append([]billing.Permission{billing.MerchantConfigRead, billing.MerchantConfigManage,
+		billing.MerchantCatalogRead, billing.MerchantCatalogManage, billing.MerchantCustomerRead}, more...)...)
 }
 
 // consoleBrowser drives the built BillingAdmin in Chromium. This server only
@@ -371,7 +371,10 @@ func TestMerchantConsole(t *testing.T) {
 		}
 		iw.nmi.DeleteSchedule(gone)
 
-		counts := consoleBrowser(t, iw.authorityWorld, map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, iw.authorityWorld)}, "first": first.ID.String()},
+		// Approving the access-ending change needs customer support's manage
+		// permission, as the cancel route it runs does.
+		staff := consoleOperator(t, iw.authorityWorld, billing.MerchantCustomerManage)
+		counts := consoleBrowser(t, iw.authorityWorld, map[string]any{"tokens": map[string]string{"staff": staff}, "first": first.ID.String()},
 			nil, "console-proposals-group-approve-held-dismiss")
 		for _, step := range []string{"link", "apply"} {
 			require.Zero(t, counts["POST /v1/merchant/psp-imports/"+first.ID.String()+"/"+step], "the console offers no %s of a superseded import", step)
@@ -491,7 +494,7 @@ func TestMerchantConsole(t *testing.T) {
 		grants, err := a.alpha.CreateCreditGrants(t.Context(), in)
 		require.NoError(t, err)
 		for _, grant := range grants {
-			_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), "", grant.ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 		}
 		require.Error(t, err, "the sixth revoke is held")
 		holds, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
@@ -523,6 +526,20 @@ func TestMerchantConsole(t *testing.T) {
 		cleared, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{IDs: []billing.DestructiveHoldID{holds.Items[0].ID}})
 		require.NoError(t, err)
 		require.NotNil(t, cleared.Items[0].ClearedAt)
+	})
+
+	t.Run("OR-J38-S85/console-dashboard-shows-merchant-units-at-their-scale", func(t *testing.T) {
+		// Alice buys a pack of each of alpha's units, CREDITS (scale 2) and
+		// GOLD (scale 0), by card: credits sold in units the registry does
+		// not know.
+		s, _ := unitPaymentWorld(t, 0)
+		credits := s.pack(t, "credits-20", "CREDITS", 2000, 365, unitPrice{"usd", 20_000_000, "USD"})
+		gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
+		s.buy(t, credits["usd"], 20_000_000, "console-buy-credits")
+		s.buy(t, gold["usd"], 20_000_000, "console-buy-gold")
+		staff := consoleStaff(t, s.a, "console-metrics", billing.MerchantMetricsRead, billing.MerchantConfigRead)
+		counts := consoleBrowser(t, s.a, map[string]any{"tokens": map[string]string{"staff": staff}}, nil, "console-dashboard-shows-merchant-units")
+		require.NotZero(t, counts["GET /v1/merchant/configuration"], "the dashboard reads the declared units")
 	})
 
 	t.Run("OR-J38-S34/console-failed-pull-and-read-only-access", func(t *testing.T) {

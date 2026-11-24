@@ -220,8 +220,14 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
   await page.addStyleTag({
     content: "#app { max-width: 1230px; margin: auto }",
   })
-  for (const section of ["Revenue and cash", "Recurring", "Payment health"])
+  for (const section of [
+    "Revenue and cash",
+    "Recurring",
+    "Retention",
+    "Payment health",
+  ])
     await expect(page.getByRole("heading", { name: section })).toBeVisible()
+  await expect(page.locator('[data-widget="cohort-retention"]')).toBeVisible()
   await expect(
     page
       .locator('[data-widget="cash-by-psp"]')
@@ -494,4 +500,19 @@ test("console-proposals-group-approve-held-dismiss", async ({
     .click()
   await expect(late.getByTestId("outcome")).toContainText("Already resolved")
   await stale.close()
+})
+
+test("console-dashboard-shows-merchant-units", async ({ page }) => {
+  // Credits sold in the merchant's own units read at each unit's scale with
+  // its name, never as an unregistered currency.
+  for (const [currency, amount] of [
+    ["CREDITS", "20.00 Credits"],
+    ["GOLD", "400 Gold coins"],
+  ]) {
+    await open(page, `/?currency=${currency}`)
+    await expect(
+      page.locator('[data-widget="kpi-credits-sold"]')
+    ).toContainText(amount)
+    await expect(page.getByText("unregistered currency")).toHaveCount(0)
+  }
 })

@@ -140,22 +140,6 @@ func TestTransactionPooler(t *testing.T) {
 		}
 	})
 
-	t.Run("provider-lock-stays-with-the-direct-session", func(t *testing.T) {
-		id := ids[0].UUID()
-		release, held, err := reconcile.LockMerchantPull(ctx, database, id)
-		require.NoError(t, err)
-		require.True(t, held)
-		t.Cleanup(release)
-		_, held, err = reconcile.LockMerchantPull(ctx, database, id)
-		require.NoError(t, err)
-		require.False(t, held)
-		release()
-		again, held, err := reconcile.LockMerchantPull(ctx, database, id)
-		require.NoError(t, err)
-		require.True(t, held)
-		again()
-	})
-
 	t.Run("embedded-engine-migrates-and-runs-river", func(t *testing.T) {
 		schema := "pooler_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 		defer func() {
@@ -165,8 +149,7 @@ func TestTransactionPooler(t *testing.T) {
 			require.NoError(t, err)
 		}()
 		cfg := openrails.Config{
-			Database:          openrails.DatabaseConfig{Schema: schema, RiverSchema: schema},
-			ProviderWriteMode: openrails.ProviderWritesReadOnly,
+			Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema},
 			Merchants: []billing.MerchantDeclaration{
 				{MerchantDocument: billing.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
 				{MerchantDocument: billing.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
@@ -186,6 +169,23 @@ func TestTransactionPooler(t *testing.T) {
 		require.NotEqual(t, alpha, beta)
 		require.NoError(t, bill.Start(ctx))
 		require.NoError(t, bill.Ready(ctx))
+		// A pull's lease is a row through the pooler, never a direct session.
+		leases, err := db.NewWithPGXPoolAndSessions(slog.Default(), pool, schema, direct)
+		require.NoError(t, err)
+		lease, err := reconcile.LockMerchantPull(ctx, leases, alpha.UUID())
+		require.NoError(t, err)
+		require.NotNil(t, lease)
+		other, err := reconcile.LockMerchantPull(ctx, leases, alpha.UUID())
+		require.NoError(t, err)
+		require.Nil(t, other, "one pull of a merchant at a time")
+		var lockSessions int
+		require.NoError(t, baselinePool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE application_name = 'openrails-pooler-test-session' AND query NOT LIKE 'LISTEN %'`).Scan(&lockSessions))
+		require.Zero(t, lockSessions)
+		lease.Release()
+		again, err := reconcile.LockMerchantPull(ctx, leases, alpha.UUID())
+		require.NoError(t, err)
+		require.NotNil(t, again)
+		again.Release()
 		table := pgx.Identifier{schema, "river_job"}.Sanitize()
 		for _, kind := range []string{riverjobs.KindCleanupExpiredData, riverjobs.KindBillingPass} {
 			require.EventuallyWithT(t, func(c *assert.CollectT) {

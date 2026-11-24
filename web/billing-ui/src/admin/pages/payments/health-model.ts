@@ -68,7 +68,7 @@ const compared = (
 })
 
 const CYCLE_MEASURES = [
-  "rebill_first_failure_rate",
+  "first_try_rebill_approval_rate",
   "dunning_recovery_rate",
   "rebill_rate",
 ]
@@ -76,28 +76,32 @@ const cycleTiles = (scope: Scope) => compared(CYCLE_MEASURES, scope)
 
 export const TILES: Tile[] = [
   {
-    id: "new-card-decline",
-    title: "New-card decline rate",
-    measure: "attempt_failure_rate",
-    better: "lower",
-    query: (scope) => compared(["attempt_failure_rate"], scope, NEW_CARD),
+    id: "new-card-authorization",
+    title: "New-card authorization rate",
+    measure: "authorization_rate",
+    better: "higher",
+    query: (scope) => compared(["authorization_rate"], scope, NEW_CARD),
     list: "attempts",
     listFilters: { ...NEW_CARD, outcome: FAILED_OUTCOMES },
   },
   {
     id: "purchase-failure",
-    title: "New-card purchase failure rate",
-    measure: "purchase_failure_rate",
+    title: "Failed new-card purchases",
+    measure: "purchases",
     better: "lower",
-    query: (scope) => compared(["purchase_failure_rate"], scope),
+    query: (scope) =>
+      compared(["purchases"], scope, {
+        card_entry: ["new"],
+        outcome: ["failed"],
+      }),
     list: "attempts",
-    listFilters: { card_entry: ["new"] },
+    listFilters: { card_entry: ["new"], outcome: FAILED_OUTCOMES },
   },
   {
-    id: "rebill-first-failure",
-    title: "Rebill first-attempt failure rate",
-    measure: "rebill_first_failure_rate",
-    better: "lower",
+    id: "first-try-rebill",
+    title: "First-try rebill approval",
+    measure: "first_try_rebill_approval_rate",
+    better: "higher",
     query: cycleTiles,
     list: "cycles",
     listFilters: { first_outcome: FIRST_FAILED },
@@ -183,8 +187,8 @@ export const trendQueries = (scope: Scope) => {
     filters: scoped(scope, filters),
   })
   return {
-    newCard: weekly("attempt_failure_rate", NEW_CARD),
-    rebill: weekly("rebill_first_failure_rate"),
+    newCard: weekly("authorization_rate", NEW_CARD),
+    rebill: weekly("first_try_rebill_approval_rate"),
   }
 }
 
@@ -262,8 +266,8 @@ export function reasonGroups(result: MetricsResult | undefined): ReasonGroup[] {
 
 export const checkQueries = (scope: Scope) => {
   const by = (dim: string): QueryMetricsParams => ({
-    measures: ["attempts", "attempt_failure_rate"],
-    by: [dim],
+    measures: ["attempts"],
+    by: [dim, "outcome"],
     range: { last: scope.last },
     filters: scoped(scope, NEW_CARD),
   })
@@ -276,19 +280,29 @@ export interface CheckRow {
   failureRate: number | null
 }
 
+// checkRows folds attempts by a check's result and outcome into each
+// result's attempts and the share that failed.
 export function checkRows(result: MetricsResult | undefined): CheckRow[] {
   if (!result) return []
   const idx = indexColumns(result.columns)
   const dim = idx.dims[0]?.index ?? -1
+  const outcome = idx.dims.find((d) => d.name === "outcome")?.index ?? -1
   const count = idx.measures.find((m) => m.name === "attempts")?.index ?? -1
-  const rate =
-    idx.measures.find((m) => m.name === "attempt_failure_rate")?.index ?? -1
-  if (dim < 0 || count < 0 || rate < 0) return []
-  return result.rows
-    .map((r) => ({
-      result: String(r[dim] ?? ""),
-      attempts: Number(r[count] ?? 0),
-      failureRate: r[rate] === null ? null : Number(r[rate]),
+  if (dim < 0 || outcome < 0 || count < 0) return []
+  const byResult = new Map<string, { attempts: number; failed: number }>()
+  for (const r of result.rows) {
+    const key = String(r[dim] ?? "")
+    const n = Number(r[count] ?? 0)
+    const row = byResult.get(key) ?? { attempts: 0, failed: 0 }
+    row.attempts += n
+    if (FAILED_OUTCOMES.includes(String(r[outcome]))) row.failed += n
+    byResult.set(key, row)
+  }
+  return [...byResult]
+    .map(([key, r]) => ({
+      result: key,
+      attempts: r.attempts,
+      failureRate: r.attempts ? r.failed / r.attempts : null,
     }))
     .sort((a, b) => b.attempts - a.attempts)
 }

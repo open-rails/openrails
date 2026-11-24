@@ -63,6 +63,9 @@ type MerchantConfig interface {
 	MerchantSettings(ctx context.Context, id billing.MerchantID) (displayName string, settings billing.MerchantSettings, err error)
 	// MerchantMessages is the messages document the merchant serves.
 	MerchantMessages(ctx context.Context, id billing.MerchantID) (billing.MessageSettings, error)
+	// StoredCurrencies are the units the merchant's document declares in its
+	// file or Vault now, read past any cache: what another replica wrote.
+	StoredCurrencies(ctx context.Context, id billing.MerchantID) ([]billing.MerchantCurrency, error)
 }
 
 // SetMerchantConfig binds the merchant configuration every handle derived
@@ -87,6 +90,21 @@ func (d *DB) MerchantConfig() MerchantConfig {
 	d.river.mu.RLock()
 	defer d.river.mu.RUnlock()
 	return d.river.config
+}
+
+// MerchantConfigOf is the merchant configuration bound to the DB whose
+// transaction q runs in; nil outside one.
+func MerchantConfigOf(q *gen.Queries) MerchantConfig {
+	if q == nil {
+		return nil
+	}
+	tx, ok := q.DBTX().(schemaTx)
+	if !ok || tx.river == nil {
+		return nil
+	}
+	tx.river.mu.RLock()
+	defer tx.river.mu.RUnlock()
+	return tx.river.config
 }
 
 // ErrRiverTablesMissing reports a River schema that was never migrated.

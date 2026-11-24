@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	billing "github.com/open-rails/openrails/internal/config"
 )
 
@@ -57,9 +59,6 @@ type Config struct {
 	// PrivatePort is the private listener's, on Host: the operator's
 	// /metrics. 0 serves none.
 	PrivatePort int
-	// DrainDelay and ShutdownTimeout are server.Config's.
-	DrainDelay      time.Duration
-	ShutdownTimeout time.Duration
 	// MerchantManifestOverlays are YAML files in the merchant manifest's own
 	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
 	// merged over the boot manifest in order; later wins.
@@ -101,10 +100,6 @@ type fileConfig struct {
 	Host        string `koanf:"host"`
 	PrivatePort port   `koanf:"private_port"`
 
-	DrainDelay      time.Duration `koanf:"drain_delay"`
-	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
-
-	ProviderWriteMode   string `koanf:"provider_write_mode"`
 	UsageBillingEnabled bool   `koanf:"usage_billing_enabled"`
 	EventRetention      string `koanf:"event_retention"`
 
@@ -149,24 +144,105 @@ type fileConfig struct {
 	Naming      billing.NamingConfig `koanf:"naming"`
 }
 
-// defaults is the file before any source is read: the listener and the
-// engine's protective limits, with no security exception. There is no
-// default database: one is always named (databaseURL).
+// defaults is the file before any source is read: every key that has a
+// default, with its value. They run a local server against the Compose
+// dependencies (`docker compose up -d postgres garnet`) with nothing else
+// configured; none is a security exception, and a production deploy that
+// leaves one unset fails loudly or is unharmed. A default that follows
+// another key is a rule below, applied once every source is read.
 func defaults() *fileConfig {
 	return &fileConfig{
 		Host: "0.0.0.0",
 		Port: 3053,
-		// Long enough for endpoints to drop the instance before it stops
-		// accepting; together within Kubernetes' default 30s grace period.
-		DrainDelay:      5 * time.Second,
-		ShutdownTimeout: 20 * time.Second,
-		DB:              &DBConfig{},
-		Database:        databaseFile{Schema: billing.DefaultSchema},
-		Logger:          LoggerConfig{Level: "info", Format: "json"},
-		RateLimits:      billing.DefaultRateLimits(),
-		Captcha:         billing.DefaultCaptcha(),
+		// public_billing_base_url: defaultPublicBillingBaseURL.
+		EventRetention:       billing.DefaultEventRetention.String(),
+		WebhookSecretOverlap: billing.DefaultWebhookSecretOverlap.String(),
+		// db.url: defaultDatabaseURL; db.sslmode: defaultSSLMode.
+		DB: &DBConfig{LeaseConns: billing.DefaultLeaseConns},
+		// database.river_schema: the schema plus "_river".
+		Database: databaseFile{Schema: billing.DefaultSchema},
+		// No redis: rate limits and lockouts live in memory, for one instance.
+		// No clickhouse.addr: no event store, so usage is off.
+		ClickHouse: &clickHouseFile{Database: billing.DefaultClickHouseDatabase, ClickHouseLogin: ClickHouseLogin{Username: "default"}},
+		// vault.scope_prefix and vault.transit_mount: vaultDefaults.
+		Logger:     LoggerConfig{Level: "info", Format: "json"},
+		RateLimits: billing.DefaultRateLimits(),
+		Captcha:    billing.DefaultCaptcha(),
+		// naming.former_names.duration: defaultFormerNamesDuration.
+		Naming: billing.NamingConfig{Enabled: ptr(billing.DefaultNamingEnabled), RenameInterval: ptr(billing.DefaultRenameInterval),
+			FormerNames: billing.FormerNamesConfig{Mode: billing.DefaultFormerNamesMode}},
+		// auth: authDefaults.
 	}
 }
+
+// defaultDatabaseURL is Compose's Postgres, used when no db key is set. A
+// deploy that forgets its database fails to connect; it never reaches
+// another.
+const defaultDatabaseURL = "postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable"
+
+// defaultPublicBillingBaseURL is the local server: http://localhost:<port>.
+func defaultPublicBillingBaseURL(port int) string {
+	return "http://localhost:" + strconv.Itoa(port)
+}
+
+// defaultSSLMode verifies the server's certificate and name off this
+// machine; a loopback host or a Unix socket only requires TLS.
+func defaultSSLMode(host string) string {
+	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
+		return "require"
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return "require"
+	}
+	return "verify-full"
+}
+
+// defaultFormerNamesDuration is how long a former name forwards: finite
+// retention only.
+func defaultFormerNamesDuration(n *billing.NamingConfig) {
+	if n.FormerNames.Mode == billing.FormerNamesFinite && n.FormerNames.Duration == nil {
+		n.FormerNames.Duration = ptr(billing.DefaultFormerNamesDuration)
+	}
+}
+
+// vaultDefaults are a declared vault section's unset mounts.
+func vaultDefaults(v *vaultFile) {
+	v.ScopePrefix = cmp.Or(v.ScopePrefix, billing.DefaultVaultScopePrefix)
+	v.TransitMount = cmp.Or(v.TransitMount, billing.DefaultVaultTransitMount)
+}
+
+// localTenantID is the platform account directory of a server whose token
+// issuer is on this machine. A deployed server names its own.
+var localTenantID = iam.TenantID(uuid.MustParse("51336692-ef57-4cdb-a189-a8d388465c11"))
+
+// authDefaults are AuthKit's settings the server defaults: the token issuer
+// is public_billing_base_url, and a loopback issuer's account directory is
+// localTenantID (elsewhere boot refuses an unnamed one). AuthKit's refresh
+// sessions last 30 days and its tables live in "profiles". Registration
+// stays the server's: closed, or invite_only with local_sign_in.
+func authDefaults(a *authkit.Config, publicBillingBaseURL string) {
+	a.Token.Issuer = cmp.Or(strings.TrimSpace(a.Token.Issuer), publicBillingBaseURL)
+	if a.DefaultTenantID.IsZero() && loopbackURL(a.Token.Issuer) {
+		a.DefaultTenantID = localTenantID
+	}
+	a.Token.RefreshTokenDuration = cmp.Or(a.Token.RefreshTokenDuration, 30*24*time.Hour)
+	a.Database.Schema = cmp.Or(a.Database.Schema, "profiles")
+}
+
+// loopbackURL reports a URL whose host is this machine.
+func loopbackURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(u.Hostname(), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(u.Hostname())
+	return ip != nil && ip.IsLoopback()
+}
+
+func ptr[T any](v T) *T { return &v }
 
 // databaseFile is the database section: the engine's schemas. The lease
 // pool's size is db.lease_conns.
@@ -221,18 +297,6 @@ func (c DBConfig) ConnectionString() string {
 	return u.String()
 }
 
-// defaultSSLMode verifies the server's certificate and name off this
-// machine; a loopback host or a Unix socket only requires TLS.
-func defaultSSLMode(host string) string {
-	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
-		return "require"
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return "require"
-	}
-	return "verify-full"
-}
-
 // RedisConfig is the redis section: Addr, or a redis:// or rediss:// URL.
 type RedisConfig struct {
 	// Addr is host:port.
@@ -256,7 +320,7 @@ type RedisConfig struct {
 // database.
 type clickHouseFile struct {
 	ClickHouseLogin `koanf:",squash"`
-	// Database is the event store's database; empty is "openrails".
+	// Database is the event store's database.
 	Database string `koanf:"database"`
 }
 
@@ -336,8 +400,8 @@ type VaultLogin struct {
 	AuthMount string `koanf:"auth_mount"`
 }
 
-// databaseURL is db.url, or the URL db's parts assemble. A missing part
-// refuses boot: nothing stands in for it.
+// databaseURL is db.url, or the URL db's parts assemble, or with neither
+// defaultDatabaseURL. A missing part refuses boot: nothing stands in for it.
 func databaseURL(db *DBConfig) (string, error) {
 	if db == nil {
 		db = &DBConfig{}
@@ -358,7 +422,7 @@ func databaseURL(db *DBConfig) (string, error) {
 	case 0:
 		return db.ConnectionString(), nil
 	case 4:
-		return "", fmt.Errorf("no database configured: set db.url (DB_URL), or db.host, db.port, db.database and db.username (DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME)")
+		return defaultDatabaseURL, nil
 	default:
 		return "", fmt.Errorf("database: db.url (DB_URL) is unset and its parts are incomplete: set %s", strings.Join(missing, ", "))
 	}
@@ -388,6 +452,7 @@ func (v *vaultFile) split() (*VaultLogin, *billing.VaultConfig) {
 		return nil, nil
 	}
 	login := v.VaultLogin
+	vaultDefaults(v)
 	return &login, &billing.VaultConfig{KVMount: v.KVMount, ScopePrefix: v.ScopePrefix, TransitMount: v.TransitMount}
 }
 
@@ -397,6 +462,9 @@ func (f *fileConfig) config() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	f.PublicBillingBaseURL = cmp.Or(strings.TrimSpace(f.PublicBillingBaseURL), defaultPublicBillingBaseURL(int(f.Port)))
+	authDefaults(&auth, f.PublicBillingBaseURL)
+	defaultFormerNamesDuration(&f.Naming)
 	if _, err := f.Logger.Handler(io.Discard); err != nil {
 		return nil, err
 	}
@@ -408,7 +476,6 @@ func (f *fileConfig) config() (*Config, error) {
 	}
 	return &Config{
 		Config: &billing.Config{
-			ProviderWriteMode:   f.ProviderWriteMode,
 			UsageBillingEnabled: f.UsageBillingEnabled,
 			EventRetention:      f.EventRetention,
 			Database: billing.DatabaseConfig{
@@ -447,8 +514,6 @@ func (f *fileConfig) config() (*Config, error) {
 		Host:                     f.Host,
 		Port:                     int(f.Port),
 		PrivatePort:              int(f.PrivatePort),
-		DrainDelay:               f.DrainDelay,
-		ShutdownTimeout:          f.ShutdownTimeout,
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		RouteGroups:              f.RouteGroups,
 		AdminConsole:             f.AdminConsole,
@@ -500,9 +565,6 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.PrivatePort < 0 || cfg.PrivatePort > 65535 || (cfg.PrivatePort != 0 && cfg.PrivatePort == cfg.Port) {
 		return fmt.Errorf("invalid private_port %d: must be 1-65535 and not port", cfg.PrivatePort)
-	}
-	if cfg.DrainDelay < 0 || cfg.ShutdownTimeout < 0 {
-		return fmt.Errorf("drain_delay and shutdown_timeout must not be negative")
 	}
 	if err := billing.Validate(cfg.Config); err != nil {
 		return err

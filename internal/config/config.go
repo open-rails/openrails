@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/url"
 	"path"
@@ -27,14 +26,10 @@ type configContextKey string
 const ConfigContextKey configContextKey = "config"
 
 // Config is the engine's configuration: plain data. Everything that reaches
-// outside the process is in Deps. ProviderWriteMode is required. Whether money
-// is real is each PSP's declared environment, never the deployment's.
+// outside the process is in Deps. Whether money is real is each PSP's
+// declared environment, never the deployment's; how much it may write to
+// providers is each merchant's write posture.
 type Config struct {
-	// ProviderWriteMode is how much OpenRails may do against payment
-	// providers: "full" (normal operation), "limited" (no system-initiated
-	// provider writes) or "readonly" (no provider writes: it never charges
-	// anyone). Required.
-	ProviderWriteMode string
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool
 	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
@@ -332,8 +327,8 @@ type DatabaseConfig struct {
 	// Normal request-time and scheduled partition maintenance is unchanged.
 	SkipMigrations bool
 	// LeaseConns caps the separate pool, copied from Deps.Postgres's
-	// configuration, that renews idempotency leases. Zero is four
-	// connections.
+	// configuration, that renews leases: idempotency claims, the billing pass
+	// and merchant pulls. Zero is four connections.
 	LeaseConns int
 }
 
@@ -343,9 +338,6 @@ type ClickHouseConfig struct {
 	// Database holds the event store's tables. Empty is "openrails".
 	Database string
 }
-
-// DefaultClickHouseDatabase is the event store's database when none is named.
-const DefaultClickHouseDatabase = "openrails"
 
 // ClickHouseDatabase is the event store's database: ClickHouse.Database, or
 // DefaultClickHouseDatabase.
@@ -357,10 +349,6 @@ func ClickHouseDatabase(c *Config) string {
 	}
 	return DefaultClickHouseDatabase
 }
-
-// DefaultSchema is the Postgres schema used when none is configured. All SQL
-// is authored in it; any other schema is reached by internal/sqlschema.
-const DefaultSchema = "billing"
 
 // MigratekitApp is the migratekit app/tracking key written to
 // public.migrations.app for OpenRails' own (non-River, non-AuthKit) migrations.
@@ -378,7 +366,7 @@ func RiverSchemaName(c *Config) string {
 			return s
 		}
 	}
-	return SchemaName(c) + "_river"
+	return RiverSchemaFor(SchemaName(c))
 }
 
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
@@ -833,22 +821,6 @@ type RateLimitsConfig map[string]*RateLimit
 // RateLimitBuckets are the buckets RateLimitsConfig may name.
 var RateLimitBuckets = []string{"purchase", "payment", "subscribe", "webhook", "catalog-ask"}
 
-// Provider write modes (#346, #355) — see Config.ProviderWriteMode.
-const (
-	ProviderWriteModeFull     = "full"
-	ProviderWriteModeLimited  = "limited"
-	ProviderWriteModeReadOnly = "readonly"
-)
-
-// ValidProviderWriteModes contains all valid provider write values ("" = unset;
-// dev only).
-var ValidProviderWriteModes = map[string]bool{
-	"":                        true,
-	ProviderWriteModeFull:     true,
-	ProviderWriteModeLimited:  true,
-	ProviderWriteModeReadOnly: true,
-}
-
 // RateLimit is one bucket's limit over a fixed one-minute window.
 type RateLimit struct {
 	RequestsPerMinute int
@@ -942,11 +914,6 @@ func Validate(cfg *Config) error {
 		return err
 	}
 
-	// A typo (e.g. "redaonly") must never silently boot with full behavior.
-	providerWriteMode := cfg.normalizedProviderWriteMode()
-	if !ValidProviderWriteModes[providerWriteMode] {
-		return fmt.Errorf("invalid provider_write_mode %q: must be one of full, limited, readonly", providerWriteMode)
-	}
 	if err := ValidateDatabase(cfg.Database); err != nil {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
@@ -1109,42 +1076,6 @@ func (set PSPSet) ActiveRailByType(rail models.Rail) (string, *ResolvedPSP, erro
 	return "", nil, nil
 }
 
-func (cfg *Config) normalizedProviderWriteMode() string {
-	if cfg == nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode))
-}
-
-// GetProviderWriteMode returns the normalized provider write mode. Unset or
-// invalid values normalize to READONLY — fail closed (Paul 2026-07-02): a boot
-// that never declared its write policy (or typoed it before Validate runs)
-// must not execute provider writes. Explicit full|limited is the only way to
-// enable them.
-func GetProviderWriteMode(cfg *Config) string {
-	mode := cfg.normalizedProviderWriteMode()
-	if mode == "" || !ValidProviderWriteModes[mode] {
-		return ProviderWriteModeReadOnly
-	}
-	return mode
-}
-
-// IsLimitedMode returns true if proactive payment-provider operations
-// (dunning charges/cancellations, usage order collection, Solana
-// pulls, catalog provider-object writes) are disabled, leaving only reactive,
-// user-initiated operations. True in limited and readonly modes.
-func IsLimitedMode(cfg *Config) bool {
-	mode := GetProviderWriteMode(cfg)
-	return mode == ProviderWriteModeLimited || mode == ProviderWriteModeReadOnly
-}
-
-// IsProviderReadOnly returns true if EVERY provider write — even reactive,
-// user-initiated ones — must be blocked (provider_write_mode=readonly). Reads
-// (query APIs, verification) stay allowed.
-func IsProviderReadOnly(cfg *Config) bool {
-	return GetProviderWriteMode(cfg) == ProviderWriteModeReadOnly
-}
-
 // ValidatePublicURL permits HTTP only for explicitly authorized loopback hosts.
 func ValidatePublicURL(raw string, allowLoopback, originOnly bool) error {
 	u, err := url.Parse(raw)
@@ -1193,26 +1124,3 @@ func DefaultRateLimits() RateLimitsConfig {
 // DefaultCaptcha is the captcha configuration applied when Config.Captcha is
 // nil: no account, so no challenge.
 func DefaultCaptcha() *CaptchaConfig { return &CaptchaConfig{Provider: CaptchaProviderTurnstile} }
-
-// LogStartupStatus writes the operator-facing posture banners for long-running
-// OpenRails processes. Keep this out of Load so one-off CLIs do not look like
-// they started the payment server.
-func LogStartupStatus(logger *slog.Logger, cfg *Config) {
-	logOperatingModeStatus(logger, cfg)
-}
-
-func logOperatingModeStatus(logger *slog.Logger, cfg *Config) {
-	switch GetProviderWriteMode(cfg) {
-	case ProviderWriteModeReadOnly:
-		logger.Warn("⚠️  PROVIDER_WRITE_MODE=readonly - ZERO payment-provider writes; even user-initiated charges fail loudly")
-		logger.Info("   Reconciliation/forensics posture: provider reads + local serving only")
-		logger.Info("   Set provider_write_mode=limited or provider_write_mode=full to allow writes")
-	case ProviderWriteModeLimited:
-		logger.Warn("⚠️  PROVIDER_WRITE_MODE=limited - No proactive payment-provider operations will be performed")
-		logger.Info("   Dunning charges/cancellations, usage order collection, Solana pulls and catalog provider writes are paused")
-		logger.Info("   Reactive operations (purchase, vault saves, user/admin cancels, webhooks) work normally")
-		logger.Info("   Set provider_write_mode=full to resume proactive operations")
-	case ProviderWriteModeFull:
-		logger.Info("Provider write mode: full (complete behavior - charges, dunning, deletes all run)")
-	}
-}

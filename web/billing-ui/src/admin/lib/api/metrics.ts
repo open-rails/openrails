@@ -21,6 +21,8 @@ export interface MetricsRange {
   // Relative trailing window ending today ("7d", "12w", "6m", "1y") —
   // mutually exclusive with from/to; saved widgets prefer it.
   last?: string
+  // A window starting today (what is scheduled ahead), like last.
+  next?: string
 }
 
 export interface OrderTerm {
@@ -53,6 +55,9 @@ export type MetricsCell = string | number | null
 
 export interface MetricsResult {
   grain?: string
+  // The merchant's accounting timezone: each time cell is the instant its
+  // bucket starts there.
+  timezone?: string
   range: { from: string; to: string }
   columns: MetricsColumn[]
   rows: MetricsCell[][]
@@ -71,6 +76,7 @@ export type WidgetViz =
   | "bar"
   | "donut"
   | "table"
+  | "cohort"
   | "heading"
   | "programs"
 
@@ -87,6 +93,7 @@ export const CHART_VIZ: WidgetViz[] = [
   "bar",
   "donut",
   "table",
+  "cohort",
 ]
 
 export interface WidgetGrid {

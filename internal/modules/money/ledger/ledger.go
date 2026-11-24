@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/open-rails/openrails/billing"
+	unit "github.com/open-rails/openrails/internal/currency"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 )
@@ -34,8 +38,10 @@ const (
 	// UnitsRevoked holds the unspent remainder clawed back when a credit grant
 	// is revoked (UnitsExpired is time-lapse): frozen and reversible, not
 	// refunded; a refund moves it out to UnitsSold.
-	UnitsRevoked        = books.UnitsRevoked
-	UnitsGranted        = books.UnitsGranted
+	UnitsRevoked = books.UnitsRevoked
+	UnitsGranted = books.UnitsGranted
+	// UnitsRefunded is where a refunded lot's units go.
+	UnitsRefunded       = books.UnitsRefunded
 	UnitsRefundClearing = books.UnitsRefundClearing
 	UnitsRefundLoss     = books.UnitsRefundLoss
 )
@@ -47,13 +53,20 @@ const (
 type TransferType = books.TransferType
 
 const (
-	DepositBonus            TransferType = "deposit_bonus" // merchant-funded credit, not processor cash
-	CreditPurchaseRevenue   TransferType = "credit_purchase_revenue"
-	CreditRefund            TransferType = "credit_refund"
-	CreditRefundRestore     TransferType = "credit_refund_restore"
+	// DepositBonus and CreditPurchaseRevenue are history: a pack's bonus is
+	// part of its rate now, its money the general ledger's.
+	DepositBonus          TransferType = "deposit_bonus"
+	CreditPurchaseRevenue TransferType = "credit_purchase_revenue"
+	// CreditRefund takes a refunded lot's units left to units_refunded, and
+	// CreditRefundFunding its units already retired, owed or consumed;
+	// CreditRefundRestore and CreditRefundFunding return them.
+	CreditRefund        TransferType = "credit_refund"
+	CreditRefundRestore TransferType = "credit_refund_restore"
+	CreditRefundFunding TransferType = "credit_refund_funding"
+	// CreditRefundCash and CreditRefundCashRestore are history: a refund's
+	// cash is the general ledger's.
 	CreditRefundCash        TransferType = "credit_refund_cash"
 	CreditRefundCashRestore TransferType = "credit_refund_cash_restore"
-	CreditRefundFunding     TransferType = "credit_refund_funding"
 	Deposit                 TransferType = "deposit"       // units_sold -> customer_units
 	CreditSpend             TransferType = "credit_spend"  // customer_units -> units_redeemed
 	CreditExpire            TransferType = "credit_expire" // unspent lot remainder, time-lapsed
@@ -84,8 +97,9 @@ var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseReven
 var fundingTransfers = map[TransferType]bool{Deposit: true, DepositBonus: true, CreditReinstate: true, OwedPayment: true}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
-// ledger_transfers_credit_grant_id_transfer_type_key.
-var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire, CreditRevoke}
+// ledger_transfers_credit_grant_id_transfer_type_key. A reinstated lot can be
+// revoked again.
+var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire}
 
 // Operation is the kind of money write that posted a transfer, part of the
 // idempotency coordinate. The engine composes it and a caller supplies only
@@ -98,6 +112,9 @@ const (
 	OpCapture  Operation = "capture"  // elapsed running-charge spend
 	OpWithdraw Operation = "withdraw" // history only
 	OpDeposit  Operation = "deposit"  // credit grant / top-up
+
+	// OpOrder is an order line in a merchant's unit, paid from the balance.
+	OpOrder Operation = "order"
 
 	OpCreditExpire    Operation = "credit_expire"
 	OpCreditRevoke    Operation = "credit_revoke"
@@ -127,6 +144,19 @@ type Coord = books.Coord
 
 // MaxCoordBytes bounds each part of a coordinate; ledger_transfers checks it.
 const MaxCoordBytes = books.MaxCoordBytes
+
+// ErrMerchantUnitOwed refuses debt in a merchant's own unit: its units are
+// prepaid, never owed.
+var ErrMerchantUnitOwed = errors.New("ledger: nothing is owed in a merchant's unit")
+
+// ErrUndeclaredUnit refuses an account in a unit the merchant does not
+// declare.
+var ErrUndeclaredUnit = errors.New("ledger: the merchant does not declare the unit")
+
+// UnitsLock is the transaction lock key the units book takes when it first
+// counts a merchant's unit, and a catalog write or settings change that could
+// remove or rescale one takes, so neither sees the other half done.
+func UnitsLock(merchant uuid.UUID) string { return "merchant-units:" + merchant.String() }
 
 // ErrInsufficientFunds is returned when a posting transfer would push the debit
 // account below its sign-constraint floor.
@@ -182,6 +212,9 @@ func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, 
 // outstanding owed is one counter read, not a sum over history. Not
 // debits_must_not_exceed_credits: its negative balance IS the debt.
 func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
+	if unit.IsUnitCode(currency) {
+		return uuid.Nil, fmt.Errorf("%w: %s", ErrMerchantUnitOwed, currency)
+	}
 	c := customer
 	id, _, err := l.ensureAccount(ctx, CustomerOwed, currency, &c)
 	return id, err
@@ -245,7 +278,55 @@ func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency stri
 	if acct, ok := books.Lookup(t); !ok || acct.Book != books.Units {
 		return uuid.Nil, false, fmt.Errorf("ledger: %q is not a units-book account", t)
 	}
+	if err := l.CountUnits(ctx, currency); err != nil {
+		return uuid.Nil, false, err
+	}
 	return books.EnsureAccount(ctx, l.q, l.merchant, t, currency, customer, nil)
+}
+
+// CountUnits records each of codes that is one of the merchant's units and
+// the book has not counted yet (ledger_units), at the scale the merchant's
+// document in its file or Vault declares now, read past any replica's cache,
+// under UnitsLock: a settings change that would remove or rescale it either
+// commits first, and this reads its result, or sees the record. A path that
+// may count a unit first calls it before it locks any customer, so the units
+// lock always comes first.
+func (l *Ledger) CountUnits(ctx context.Context, codes ...string) error {
+	var missing []string
+	for _, code := range codes {
+		if !unit.IsUnitCode(code) || slices.Contains(missing, code) {
+			continue
+		}
+		if _, err := l.q.GetLedgerUnitScale(ctx, gen.GetLedgerUnitScaleParams{MerchantID: l.merchant, Unit: code}); errors.Is(err, pgx.ErrNoRows) {
+			missing = append(missing, code)
+		} else if err != nil {
+			return err
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := l.q.LockCatalogKey(ctx, UnitsLock(l.merchant)); err != nil {
+		return err
+	}
+	config := db.MerchantConfigOf(l.q)
+	if config == nil {
+		return fmt.Errorf("%w: %s (no merchant configuration is bound)", ErrUndeclaredUnit, strings.Join(missing, ", "))
+	}
+	declared, err := config.StoredCurrencies(ctx, billing.MerchantID(l.merchant))
+	if err != nil {
+		return fmt.Errorf("ledger: read the merchant's units: %w", err)
+	}
+	for _, code := range missing {
+		i := slices.IndexFunc(declared, func(u billing.MerchantCurrency) bool { return strings.EqualFold(string(u.Code), code) })
+		if i < 0 || declared[i].Scale < 0 || declared[i].Scale > unit.MaxUnitScale {
+			return fmt.Errorf("%w: %s", ErrUndeclaredUnit, code)
+		}
+		if err := l.q.InsertLedgerUnit(ctx, gen.InsertLedgerUnitParams{MerchantID: l.merchant, Unit: code, Scale: int32(declared[i].Scale)}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Transfer is one double-entry movement to append.
@@ -361,11 +442,14 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 	return l.q.LedgerAccountBalance(ctx, gen.LedgerAccountBalanceParams{AccountID: account, MerchantID: l.merchant})
 }
 
-// Deposit credits the customer's balance from the rail-clearing account
-// (DR units_sold / CR customer_units). grantID attributes the deposit
-// to its credit lot (uuid.Nil for a non-lot deposit).
-func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	clearing, err := l.EnsureSystemAccount(ctx, UnitsSold, currency)
+// DepositFrom credits the customer's balance from units_sold (a lot bought)
+// or units_granted (a lot given). grantID attributes the deposit to its
+// credit lot (uuid.Nil for a non-lot deposit).
+func (l *Ledger) DepositFrom(ctx context.Context, from AccountType, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	if from != UnitsSold && from != UnitsGranted {
+		return gen.BillingLedgerTransfer{}, fmt.Errorf("ledger: a deposit's units are sold or granted, not %s", from)
+	}
+	clearing, err := l.EnsureSystemAccount(ctx, from, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}

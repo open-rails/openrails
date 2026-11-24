@@ -31,7 +31,7 @@ import (
 func archiveTarget(t *testing.T, source *world, configure ...func(*world)) (*world, *openrails.Client) {
 	t.Helper()
 	configure = append([]func(*world){func(w *world) {
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		w.deps.StripeTransport = source.deps.StripeTransport
 	}}, configure...)
 	target := newWorld(t, configure...)
@@ -332,6 +332,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &paid))
 		require.Equal(t, billing.OrderComplete, paid.Status, string(raw))
 		oneUsage(t, source.alpha, usageInput(customer, "archived-work", 3))
+		source.clock.Advance(time.Second)
 		runUsageDue(t, startFleet(t, source.world))
 		require.Eventually(t, func() bool {
 			rows, err := source.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})

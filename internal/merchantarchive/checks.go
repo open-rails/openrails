@@ -34,6 +34,7 @@ var excludedTables = map[string]string{
 	"merchants":                     "destination identity is explicitly provisioned",
 	"merchant_slug_aliases":         "former names are directory identity, not billing history",
 	"periodic_leases":               "deployment-wide fleet leases on periodic work",
+	"merchant_leases":               "a running pull's lease at the source; the destination's pulls take their own",
 	"solana_crankers":               "the deployment's Solana cranker pins",
 	"destructive_action_switch":     "deployment-wide safety switch",
 	"book_identity":                 "the deployment's database identity",
@@ -72,6 +73,7 @@ var excludedTables = map[string]string{
 	"psp_import_mappings":           "the merchant's own identifiers; it maps them again for an import",
 	"provider_catalog_objects":      "provider observations; the destination observes again",
 	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
+	"mrr_risk_due":                  "MRR risk work queue: the destination's next change of a card or delinquency queues again",
 	"ledger_type_totals":            "derived: the transfers rebuild it as they are restored, and the restore check proves it",
 	"ledger_daily":                  "derived: the transfers rebuild it as they are restored, and the restore check proves it",
 	"ledger_rollup_pending":         "transaction scratch, empty at commit",
@@ -93,6 +95,7 @@ var excludedColumns = map[string]string{
 	"event_store":                   "singleton store_id attached_at",
 	"merchant_write_posture":        "merchant_id mode reason set_by set_at",
 	"periodic_leases":               "kind holder expires_at claimed_at",
+	"merchant_leases":               "merchant_id kind holder expires_at claimed_at",
 	"solana_crankers":               "name public_key pinned_at",
 	"merchants":                     "id slug status permission_group_id tenant_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at",
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
@@ -313,7 +316,7 @@ var preflightChecks = []rowCheck{
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
-	if err := destructiveArchiveBarrier(ctx, tx, id); err != nil {
+	if err := destructiveArchiveBarrier(ctx, tx, id, nil); err != nil {
 		return err
 	}
 	for _, c := range preflightChecks {
@@ -324,15 +327,29 @@ func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	return validateReferences(ctx, tx, id)
 }
 
+// registryCurrencies is OpenRails' registry as an SQL array: every other code
+// a balance or credit grant names is a merchant's unit.
+var registryCurrencies = func() string {
+	codes := make([]string, 0, len(moneyutil.CurrencyCodes()))
+	for _, code := range moneyutil.CurrencyCodes() {
+		codes = append(codes, "'"+code+"'")
+	}
+	return "ARRAY[" + strings.Join(codes, ",") + "]::text[]"
+}()
+
 // referenceChecks: the ledger intentionally has no control-plane FKs. Archive
 // restoration still refuses missing/cross-payer retained business references.
 var referenceChecks = []rowCheck{
 	// Current available prices obey the same product/price contract as ordinary
 	// catalog writes; incompatible archived history remains portable.
+	// A pack of a merchant's unit sells in any registry currency; no credit
+	// product sells in a unit.
 	{"prices", `NOT archived AND EXISTS (SELECT 1 FROM billing.products pr
    WHERE pr.merchant_id=$1 AND pr.id=prices.product_id AND NOT pr.archived AND (
     (prices.customer_amount IS NOT NULL AND (pr.credit_grant IS NULL OR NOT COALESCE((pr.credit_grant->>'from_payment')::boolean,false)))
-    OR (pr.credit_grant IS NOT NULL AND (prices.currency IS DISTINCT FROM pr.credit_grant->>'currency'
+    OR (pr.credit_grant IS NOT NULL AND (
+       (prices.currency IS DISTINCT FROM pr.credit_grant->>'currency' AND pr.credit_grant->>'currency' = ANY(` + registryCurrencies + `))
+       OR prices.currency <> ALL(` + registryCurrencies + `)
        OR (prices.customer_amount IS NULL AND prices.amount<=0)))))`},
 
 	// A native lot retains its payment's accepted promise. The product's current
@@ -341,7 +358,7 @@ var referenceChecks = []rowCheck{
   SELECT 1 FROM billing.credit_grants g JOIN billing.order_lines l ON l.merchant_id=$1 AND l.order_id=payments.order_id AND l.product_id=g.product_id
   WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.source_id=payments.id::text
     AND g.customer_id=payments.customer_id AND g.product_id=l.product_id
-    AND g.unit=payments.currency AND g.units=(payments.credit_grant_snapshot->>'amount')::bigint
+    AND g.unit=payments.credit_grant_snapshot->>'currency' AND g.units=(payments.credit_grant_snapshot->>'amount')::bigint
     AND g.paid_amount=payments.amount AND g.paid_currency=payments.currency AND payments.amount>0
     AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
     AND g.expires_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
@@ -390,6 +407,9 @@ var referenceChecks = []rowCheck{
                AND m.rail_customer_ref=provider_intents.payload->'instrument'->>'rail_customer_ref'
                AND m.status IN ('removed','closed','replaced')
                AND m.park_reason IS NOT DISTINCT FROM ('removed:' || provider_intents.id::text))))`},
+	// A general-ledger leg of an order in a merchant's unit is in the paid
+	// currency of a lot that paid it: of the lot it names (a spend, a
+	// reversal's share), else of one that paid its line (a recognition).
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
 	 OR (credit_grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.credit_grants g
    WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND (
@@ -398,9 +418,20 @@ var referenceChecks = []rowCheck{
        AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
-	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id AND o.currency=ledger_transfers.currency))
+	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id
+	   AND (o.currency=ledger_transfers.currency
+	     OR ledger_transfers.book='general' AND o.currency <> ALL(` + registryCurrencies + `)
+	       AND (ledger_transfers.credit_grant_id IS NOT NULL AND EXISTS(SELECT 1 FROM billing.credit_grants g
+	           JOIN billing.ledger_transfers s ON s.merchant_id=g.merchant_id AND s.credit_grant_id=g.id
+	           WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND g.paid_currency=ledger_transfers.currency AND s.book='units' AND s.order_id=o.id)
+	         OR ledger_transfers.credit_grant_id IS NULL AND EXISTS(SELECT 1 FROM billing.ledger_transfers s
+	           JOIN billing.credit_grants g ON g.merchant_id=s.merchant_id AND g.id=s.credit_grant_id
+	           WHERE s.merchant_id=$1 AND s.source='order_line' AND s.source_id=ledger_transfers.order_line_id::text AND s.book='units'
+	             AND g.paid_currency=ledger_transfers.currency)))))
 	 OR (order_line_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.id=ledger_transfers.order_line_id AND l.order_id=ledger_transfers.order_id))
-	 OR (product_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=ledger_transfers.product_id))`},
+	 OR (product_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=ledger_transfers.product_id))
+	 OR (revenue_schedule_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id=$1 AND s.id=ledger_transfers.revenue_schedule_id
+	     AND s.order_line_id=ledger_transfers.order_line_id AND s.customer_id=ledger_transfers.customer_id AND s.currency=ledger_transfers.currency))`},
 	// Restore preserves historical denormalized tiers, but a live subscription
 	// must still agree with its product, as required by the ordinary tier
 	// derivation and product-update guards. Include remaining paid access.
@@ -500,15 +531,22 @@ func orderCollectionCanonical(row gen.ListOrderCollectionsForArchiveRow) bool {
 		row.PaymentStatus != nil && *row.PaymentStatus == "succeeded" && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount
 }
 
-// Deployment admission/hold history never travels in a merchant artifact.
-// Refuse moving a book while it could discard live authority or recent budget.
-func destructiveArchiveBarrier(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
-	held, err := gen.New(tx).HasDestructiveArchiveBarrier(ctx, gen.HasDestructiveArchiveBarrierParams{MerchantID: id.UUID(), Since: time.Now().UTC().Add(-24 * time.Hour)})
+// archiveUndoWindow is how long a restore waits after a prune or approval
+// run that can still be undone.
+const archiveUndoWindow = 24 * time.Hour
+
+// destructiveArchiveBarrier refuses moving a merchant's book while a
+// destructive action may still take effect or an incident it would escape is
+// open; deployment admission and hold history never travel with it. A restore
+// (undoSince set) also waits for a run that can still be undone and ran after
+// undoSince.
+func destructiveArchiveBarrier(ctx context.Context, tx pgx.Tx, id billing.MerchantID, undoSince *time.Time) error {
+	table, err := gen.New(tx).DestructiveArchiveBarrier(ctx, gen.DestructiveArchiveBarrierParams{MerchantID: id.UUID(), UndoSince: undoSince})
 	if err != nil {
 		return err
 	}
-	if held {
-		return &Error{Code: "unsupported_state", Table: "destructive_actions", Count: 1}
+	if table != "" {
+		return &Error{Code: "unsupported_state", Table: table, Count: 1}
 	}
 	return nil
 }

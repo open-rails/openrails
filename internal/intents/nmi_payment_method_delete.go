@@ -118,7 +118,7 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 		return parkedBeforeEffect(fmt.Sprintf("nmi client not configured for provider %q: %v", intent.Rail, err))
 	}
 	if client.ReadOnly {
-		return parkedBeforeEffect("nmi client is read-only (mode=readonly)")
+		return parkedBeforeEffect("nmi client is read-only (readonly write posture)")
 	}
 
 	vaultID := strings.TrimSpace(pm.RailCustomerRef)
@@ -163,7 +163,7 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 	if err != nil {
 		switch {
 		case errors.Is(err, nmi.ErrProviderReadOnly):
-			return parkedBeforeEffect("nmi provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("nmi provider writes blocked (readonly write posture)")
 		case errors.Is(err, nmi.ErrV5Missing):
 			// NMI confirmed the target was already gone.
 			return h.complete(ctx, intent, p, map[string]any{"already_absent": true, "vault_id": vaultID})

@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -452,33 +453,23 @@ func (l *linker) prefetch(ctx context.Context, page []gen.BillingPspImportRecord
 	return nil
 }
 
-// directoryLimit bounds one directory search: more holders is ambiguous anyway.
-const directoryLimit = 10
-
 // directory is the customers whose directory email or username is key.
 func (l *linker) directory(ctx context.Context, fact, key string) ([]uuid.UUID, error) {
 	cacheKey := fact + "\x1f" + strings.ToLower(key)
 	if found, ok := l.dir[cacheKey]; ok {
 		return found, nil
 	}
-	if l.im.Directory == nil {
-		return nil, nil
+	field := identity.Email
+	if fact == FactUsername {
+		field = identity.Username
 	}
-	contacts, err := l.im.Directory.Search(ctx, l.mid, key, directoryLimit)
+	held, err := identity.Holders(ctx, l.im.Directory, l.mid, key, field)
 	if err != nil {
 		return nil, fmt.Errorf("directory: %w", err)
 	}
-	seen := map[uuid.UUID]bool{}
-	var found []uuid.UUID
-	for _, c := range contacts {
-		value := c.Email
-		if fact == FactUsername {
-			value = c.Username
-		}
-		if strings.EqualFold(strings.TrimSpace(value), key) && !seen[c.CustomerID] {
-			seen[c.CustomerID] = true
-			found = append(found, c.CustomerID)
-		}
+	found := make([]uuid.UUID, 0, len(held))
+	for _, c := range held {
+		found = append(found, c.CustomerID)
 	}
 	l.dir[cacheKey] = found
 	return found, nil

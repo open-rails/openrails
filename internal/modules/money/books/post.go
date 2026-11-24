@@ -246,7 +246,10 @@ type Posting struct {
 	// customer-scoped leg names the same customer.
 	Customer                               *uuid.UUID
 	Order, OrderLine, Product, CreditGrant *uuid.UUID
-	Invoker, Resource                      *string
+	// RevenueSchedule is the schedule whose deferred revenue the transfer
+	// funds, recognises or reduces.
+	RevenueSchedule   *uuid.UUID
+	Invoker, Resource *string
 }
 
 // Post appends one general-ledger transfer, once at its coordinate. applied
@@ -271,7 +274,7 @@ func (b *Books) Post(ctx context.Context, p Posting) (tr gen.BillingLedgerTransf
 		Amount: p.Amount, Currency: p.Currency, TransferType: string(p.Type),
 		Operation: string(p.Coord.Operation), Source: p.Coord.Source, SourceID: p.Coord.SourceID,
 		CreditGrantID: p.CreditGrant, CustomerID: p.Customer, InvokerID: p.Invoker, Resource: p.Resource,
-		OrderID: p.Order, OrderLineID: p.OrderLine, ProductID: p.Product, EffectiveAt: at,
+		OrderID: p.Order, OrderLineID: p.OrderLine, ProductID: p.Product, EffectiveAt: at, RevenueScheduleID: p.RevenueSchedule,
 	})
 	if err == nil {
 		return tr, true, nil
@@ -286,7 +289,8 @@ func (b *Books) Post(ctx context.Context, p Posting) (tr gen.BillingLedgerTransf
 			return tr, false, fmt.Errorf("books: resolve transfer at %s: %w", p.Coord, err)
 		}
 		if tr.DebitAccountID != debit || tr.CreditAccountID != credit || tr.Amount != p.Amount || !tr.EffectiveAt.Equal(at) ||
-			!sameUUID(tr.OrderID, p.Order) || !sameUUID(tr.ProductID, p.Product) || !sameText(tr.InvokerID, p.Invoker) || !sameText(tr.Resource, p.Resource) {
+			!sameUUID(tr.OrderID, p.Order) || !sameUUID(tr.ProductID, p.Product) || !sameUUID(tr.RevenueScheduleID, p.RevenueSchedule) ||
+			!sameText(tr.InvokerID, p.Invoker) || !sameText(tr.Resource, p.Resource) {
 			return tr, false, fmt.Errorf("%w at %s", ErrCoordinateReused, p.Coord)
 		}
 		return tr, false, nil

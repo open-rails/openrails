@@ -31,11 +31,11 @@ func hostHeldCredits(t *testing.T) (*authorityWorld, []billing.CreditGrant, bill
 	require.NoError(t, err)
 	require.Len(t, grants, 7)
 	for i := range 5 {
-		revoked, err := a.alphaRemote.RevokeCreditGrant(t.Context(), grants[i].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+		revoked, err := a.alphaRemote.RevokeCreditGrant(t.Context(), "", grants[i].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 		require.NoError(t, err)
 		require.Equal(t, billing.CreditGrantRevoked, revoked.State)
 	}
-	_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+	_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), "", grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 	require.Error(t, err)
 	holds, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
 	require.NoError(t, err)
@@ -76,12 +76,12 @@ func TestDestructiveControls(t *testing.T) {
 		require.Equal(t, grants[5].ID.UUID().String(), target)
 		require.Nil(t, clearedBy)
 		var revoker *string
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT actor FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" WHERE merchant_id = $1 AND supersedes_id = $2 AND event = 'revoke'",
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT actor FROM "+pgx.Identifier{a.schema, "credit_grant_events"}.Sanitize()+" WHERE merchant_id = $1 AND credit_grant_id = $2 AND event = 'revoke'",
 			a.alpha.MerchantID().UUID(), grants[0].ID.UUID()).Scan(&revoker))
 		require.NotNil(t, revoker, "a credit grant's revoke names the staff member who made it")
 		require.NotEmpty(t, *revoker)
 		for range 2 {
-			_, err := a.alphaRemote.RevokeCreditGrant(t.Context(), grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			_, err := a.alphaRemote.RevokeCreditGrant(t.Context(), "", grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 			require.Error(t, err)
 		}
 		current, err := a.alpha.GetCreditGrant(t.Context(), grants[5].ID)
@@ -110,10 +110,10 @@ func TestDestructiveControls(t *testing.T) {
 		lowGrants, err := low.alpha.CreateCreditGrants(t.Context(), few)
 		require.NoError(t, err)
 		for i := range 2 {
-			_, err := low.alphaRemote.RevokeCreditGrant(t.Context(), lowGrants[i].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			_, err := low.alphaRemote.RevokeCreditGrant(t.Context(), "", lowGrants[i].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 			require.NoError(t, err)
 		}
-		_, err = low.alphaRemote.RevokeCreditGrant(t.Context(), lowGrants[2].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+		_, err = low.alphaRemote.RevokeCreditGrant(t.Context(), "", lowGrants[2].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 		require.Error(t, err)
 		lowHolds, err := low.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
 		require.NoError(t, err)
@@ -180,7 +180,7 @@ func TestDestructiveControls(t *testing.T) {
 		_, _, clearedBy := holdEvidence(t, a, hold)
 		require.Equal(t, &holdReviewer, clearedBy, "the clear records the person the host named")
 		for range 2 {
-			result, err := a.alphaRemote.RevokeCreditGrant(t.Context(), grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
+			result, err := a.alphaRemote.RevokeCreditGrant(t.Context(), "", grants[5].ID, billing.RevokeCreditGrantParams{Reason: "operator correction"})
 			require.NoError(t, err)
 			require.EqualValues(t, 100, result.RevokedAmount)
 		}
@@ -209,7 +209,7 @@ func TestDestructiveControls(t *testing.T) {
 		require.ErrorAs(t, err, &refusal)
 		require.Equal(t, billing.CodePermissionRequired, refusal.Code)
 		// Finding presentation operations cannot clear financial authority.
-		_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), grants[6].ID, billing.RevokeCreditGrantParams{Reason: "another correction"})
+		_, err = a.alphaRemote.RevokeCreditGrant(t.Context(), "", grants[6].ID, billing.RevokeCreditGrantParams{Reason: "another correction"})
 		require.Error(t, err)
 		stored, err := a.alpha.ListDestructiveHolds(t.Context(), billing.DestructiveHoldListParams{})
 		require.NoError(t, err)

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 612,
+  "scenario_count": 741,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -141,17 +141,32 @@
     {
       "id": "OR-J05-S07",
       "journey": "J05",
-      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing"
+      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing; a unit a balance counts is neither removed nor rescaled, and a Vault edit outside OpenRails that removes it keeps serving its declaration with a finding"
     },
     {
       "id": "OR-J05-S08",
       "journey": "J05",
-      "name": "A merchant unit is refused merchant_unit_unsupported by credit grants, balances, prices and catalog credit grants and rate cards, and a catalog cannot price in one; nothing is written"
+      "name": "A merchant's unit is never owed, never the price of a credit pack and never a recurring price; a credit limit in one, a pack paid from_payment and the amount shorthand are refused; a unit the merchant does not declare is an unknown currency anywhere a document or request names it"
     },
     {
       "id": "OR-J05-S09",
       "journey": "J05",
       "name": "Another merchant does not see a merchant's units: the same code is its own unit at its own scale, and another merchant's code is an unknown currency"
+    },
+    {
+      "id": "OR-J05-S10",
+      "journey": "J05",
+      "name": "A unit the units book counts keeps the scale it recorded (ledger_units) when a restart loads a file that rescales it: the balance reads at the recorded scale and the operator gets the refused-document finding"
+    },
+    {
+      "id": "OR-J05-S11",
+      "journey": "J05",
+      "name": "A catalog write that first names a unit (a price, a pack's credit, a rate card) records its scale under the units lock, so a restart on a file that rescales it keeps that scale before any balance holds it"
+    },
+    {
+      "id": "OR-J05-S12",
+      "journey": "J05",
+      "name": "A unit's first count reads its declaration in Vault under the units lock, not a replica's stale copy"
     },
     {
       "id": "OR-J06-S01",
@@ -751,7 +766,7 @@
     {
       "id": "OR-J24-S31",
       "journey": "J24",
-      "name": "A sync that cannot take its locks within its lock budget is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
+      "name": "A sync takes no customer lock: one beside another transaction holding the customer's spend lock settles at once; one that cannot take its locks within its lock budget (a posting holding the unposted mark) is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
     },
     {
       "id": "OR-J24-S32",
@@ -766,7 +781,7 @@
     {
       "id": "OR-J24-S34",
       "journey": "J24",
-      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers within a time budget, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
+      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers in one insert, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
     },
     {
       "id": "OR-J24-S36",
@@ -877,6 +892,46 @@
       "id": "OR-J24-S57",
       "journey": "J24",
       "name": "Usage history folds into the days of the merchant's accounting zone (23:30 in Kolkata is that day), a zone change regroups the past, and the days sum to what posts"
+    },
+    {
+      "id": "OR-J24-S58",
+      "journey": "J24",
+      "name": "A capture retried after a commit that was lost, and a lease item that names no occurred_at resent after one, each find the event the first attempt inserted and charge once"
+    },
+    {
+      "id": "OR-J24-S59",
+      "journey": "J24",
+      "name": "An item resent after a commit that was lost counts in the session window its first attempt opened, not one opened at the resend"
+    },
+    {
+      "id": "OR-J24-S60",
+      "journey": "J24",
+      "name": "A sync whose caller gives up while its insert is sent still finishes the insert before it lets go of its locks: the resend inserts nothing and the rollups count each item once"
+    },
+    {
+      "id": "OR-J24-S61",
+      "journey": "J24",
+      "name": "A lot lapsing mid-month funds exactly the usage and running charges before its lapse, however much usage came after it; only that usage is owed"
+    },
+    {
+      "id": "OR-J24-S62",
+      "journey": "J24",
+      "name": "Usage the event store lost after it posted is not a price that fell: usage since is charged on top of what posted, and nothing that posted is credited back"
+    },
+    {
+      "id": "OR-J24-S63",
+      "journey": "J24",
+      "name": "A usage erasure that stopped between folding the history and deleting its invokers' rows, run again, leaves each event in the history once"
+    },
+    {
+      "id": "OR-J24-S64",
+      "journey": "J24",
+      "name": "Usage priced under a card print whose intake never committed holds up no posting: a print a card in force names is recorded again, and one nothing names is left out"
+    },
+    {
+      "id": "OR-J24-S65",
+      "journey": "J24",
+      "name": "A merchant's configuration first read inside a balance look's transaction loads on its own: the look expires the lapsed lot and the pass succeeds"
     },
     {
       "id": "OR-J25-S01",
@@ -1132,6 +1187,11 @@
       "id": "OR-J32-S06",
       "journey": "J32",
       "name": "Merchant purge removes the directory's contacts and provisioning tokens"
+    },
+    {
+      "id": "OR-J32-S07",
+      "journey": "J32",
+      "name": "A merchant purge whose deletion from the event store fails commits and queues the job that deletes it, which River retries until the store takes it"
     },
     {
       "id": "OR-J34-S01",
@@ -1799,6 +1859,11 @@
       "name": "The dashboard keeps every stat label within two lines at any column width, legends a one-rail donut and names PSPs by key; staff lists name the customer and plan, and still list by id with the directory down; customer controls find a customer by name and offer its currencies; a membership with no other plan offers Change subscription disabled, saying why; ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; at 1440 the findings table shows Resolve unscrolled; a missing customer, subscription or payment is reported once, by its page"
     },
     {
+      "id": "OR-J38-S85",
+      "journey": "J38",
+      "name": "The dashboard shows credits sold in the merchant's own units at each unit's scale with its name (20.00 Credits, 400 Gold coins), read from the declared units, never as an unregistered currency"
+    },
+    {
       "id": "OR-J38-S75",
       "journey": "J38",
       "name": "A subscription end the provider confirmed is stored as the provider's: read back, a later renewal is kept for refund review and does not reopen it"
@@ -1867,6 +1932,21 @@
       "id": "OR-J34-S40",
       "journey": "J34",
       "name": "A billing import, by the host or staff, cancels only through the destructive switch, the PSP cancellation cap and an admission on the merchant's budget recording its actor"
+    },
+    {
+      "id": "OR-J34-S41",
+      "journey": "J34",
+      "name": "An archive exports right after a catalog edit: a completed action or an ordinary edit never bars it"
+    },
+    {
+      "id": "OR-J34-S42",
+      "journey": "J34",
+      "name": "An archive export beside a destructive action whose effect may still land is refused"
+    },
+    {
+      "id": "OR-J34-S43",
+      "journey": "J34",
+      "name": "A restore waits a day, by the deployment's clock, after a prune that can still be undone"
     },
     {
       "id": "OR-J34-S34",
@@ -2092,6 +2172,11 @@
       "id": "OR-J26-S62",
       "journey": "J26",
       "name": "A usage order whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
+    },
+    {
+      "id": "OR-J26-S63",
+      "journey": "J26",
+      "name": "A usage order's period covers the usage it bills, from its pricing period's start to the bill"
     },
     {
       "id": "OR-J37-S60",
@@ -2459,6 +2544,11 @@
       "name": "A customer's running charges count toward its accrual_rate_cap at their rates while they run"
     },
     {
+      "id": "OR-J25-S43",
+      "journey": "J25",
+      "name": "While ClickHouse is out of reach a balance look at a customer without unposted usage expires its lapsed lot"
+    },
+    {
       "id": "OR-J29-S37",
       "journey": "J29",
       "name": "A provider operation scheduled ahead is no stuck finding however long ago it was queued; one a day past its attempt, or parked or failing for a day, is"
@@ -2496,7 +2586,7 @@
     {
       "id": "OR-J22-S09",
       "journey": "J22",
-      "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
+      "name": "Credit a won dispute restores stays with the customer: an earlier refund that found the mixed order's credit line already returned keeps the share it settled with"
     },
     {
       "id": "OR-J22-S10",
@@ -2569,6 +2659,16 @@
       "name": "One transaction posting for two merchants in either order, two held at commit, both commit"
     },
     {
+      "id": "OR-J40-S40",
+      "journey": "J40",
+      "name": "A Stripe charge's fee and a dispute fee post once, exactly; a fee read again posts nothing new; a won dispute's and a refund's returned fees post back; a read that keeps failing waits for its finding and is read again once it is fixed; and a fee settled in another currency than the charge posts in that currency"
+    },
+    {
+      "id": "OR-J40-S41",
+      "journey": "J40",
+      "name": "A dispute's prevention refund is read through its dispute, never as a refund, even when it is booked after the dispute was read; the dispute's later change still posts its fees"
+    },
+    {
       "id": "OR-J42-S01",
       "journey": "J42",
       "name": "New, expansion, contraction, churn and reactivation are each recorded once at the customer level, normalised to a month (calendar and named cadences divided by their months, a week 52/12, other windows 730.485 hours) and per currency"
@@ -2617,6 +2717,76 @@
       "id": "OR-J42-S10",
       "journey": "J42",
       "name": "The migration's backfill adopts a book written before MRR as backfilled openings in one settlement, its reads growing with the book"
+    },
+    {
+      "id": "OR-J42-S11",
+      "journey": "J42",
+      "name": "A declined renewal puts the subscription's MRR at risk as past due, listed and in mrr_at_risk; a paid retry closes the case recovered; dunning exhausted on a later renewal closes the next case churned, involuntary; the recovery rate is a half"
+    },
+    {
+      "id": "OR-J42-S12",
+      "journey": "J42",
+      "name": "A non-retryable decline puts MRR at risk as needing a payment method; a new card moves the same case to past due, and the paid retry recovers it"
+    },
+    {
+      "id": "OR-J42-S13",
+      "journey": "J42",
+      "name": "A card that expires before the renewal it pays for enters at risk on the period change that passes its expiry and leaves when the account updater refreshes it"
+    },
+    {
+      "id": "OR-J42-S14",
+      "journey": "J42",
+      "name": "A provider subscription OpenRails could not confirm is at risk while unverified and recovered when a read verifies its renewal"
+    },
+    {
+      "id": "OR-J42-S15",
+      "journey": "J42",
+      "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk with the overdue amount beside it; paying the debt recovers it"
+    },
+    {
+      "id": "OR-J42-S16",
+      "journey": "J42",
+      "name": "The risk drain holds a customer's subscriptions while an NMI decline for the same customer queues it and waits: both commit, and the decline, queued after the claim, is re-evaluated by the next drain"
+    },
+    {
+      "id": "OR-J42-S17",
+      "journey": "J42",
+      "name": "A subscription at risk canceled at period end keeps its case open while it adds MRR; a resume continues the same case; canceled again, the end closes it churned, voluntary, once, at the end"
+    },
+    {
+      "id": "OR-J42-S18",
+      "journey": "J42",
+      "name": "A new default card that expires before the renewal puts the subscription following the default at risk through the queued change; an NMI schedule naming no card of its own is never at risk on the default"
+    },
+    {
+      "id": "OR-J42-S19",
+      "journey": "J42",
+      "name": "An upgrade of a subscription at risk closes its case superseded, counted in no recovery rate, and its replacement opens its own case"
+    },
+    {
+      "id": "OR-J42-S21",
+      "journey": "J42",
+      "name": "A merchant archive carries an open risk case, its episodes and at-risk MRR; the restore queues every customer with MRR, whom the target's drain re-evaluates"
+    },
+    {
+      "id": "OR-J42-S22",
+      "journey": "J42",
+      "name": "A customer whose risk evaluation fails alone is set aside with an mrr.risk.evaluation_failed finding while the rest of the merchant drains; set aside, it is skipped; a later evaluation takes its changes and closes the finding"
+    },
+    {
+      "id": "OR-J42-S23",
+      "journey": "J42",
+      "name": "A subscription at risk for its card, canceled at period end, still reads its card: a new expiry clears card_expiring and the case closes recovered"
+    },
+    {
+      "id": "OR-J42-S30",
+      "journey": "J42",
+      "name": "Every MRR measure, by itself, by each dimension it declares, by two, and filtered by currency and by product, over time and not, in UTC and in a non-UTC zone, plans on indexes with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time"
+    },
+    {
+      "id": "OR-J42-S31",
+      "journey": "J42",
+      "name": "An archive written before the reporting rollups (no streak flows, product totals, distinct customers, cancel decisions or chargeback churn flows) restores them rebuilt from its movements, product flows, customer MRR and status transitions, row for row as the source kept them, and the restore check proves they agree"
     },
     {
       "id": "OR-J28-S09",
@@ -2829,6 +2999,101 @@
       "name": "A replayed NMI chargeback batch, its reversal already booked, reverses and revokes nothing again: access the merchant restored after the dispute survives it"
     },
     {
+      "id": "OR-J48-S01",
+      "journey": "J48",
+      "name": "A pack buys a merchant's unit at its own price-to-units ratio, bonus packs included: one lot per pack records its units, what was paid and in what currency, deposited from units_sold; the balance shows at the unit's scale, and the lots move with a billing archive"
+    },
+    {
+      "id": "OR-J48-S02",
+      "journey": "J48",
+      "name": "The same units bought in another currency credit the same unit balance; each lot records the currency that paid it and nothing converts"
+    },
+    {
+      "id": "OR-J48-S03",
+      "journey": "J48",
+      "name": "A plan's allowance delivers its units each paid cycle as a recurring lot, and a staff gift in a unit is granted from units_granted with nothing paid"
+    },
+    {
+      "id": "OR-J48-S04",
+      "journey": "J48",
+      "name": "An order priced in a merchant's unit is paid from the customer's balance as it is created, with no payment or provider, and grants its product's keys; its key answers a retry with the same order; a balance short of it is refused insufficient_credits and creates nothing"
+    },
+    {
+      "id": "OR-J48-S05",
+      "journey": "J48",
+      "name": "Usage priced in a unit by rate card holds and draws the unit balance, soonest-expiring lot first, and a card naming no currency prices no unit; usage the units cannot cover is never owed"
+    },
+    {
+      "id": "OR-J48-S06",
+      "journey": "J48",
+      "name": "A lapsed pack is never drawn and its unspent units expire in the unit, once; usage captured while a lot lived posts before it lapses, so the lot pays it and only the rest expires"
+    },
+    {
+      "id": "OR-J48-S07",
+      "journey": "J48",
+      "name": "Refunding a pack's payment takes that lot's unspent units first, refuses a refund whose share is spent, books a chargeback's spent share as consumed, and a won dispute returns what the chargeback took, with no cash leg in the unit"
+    },
+    {
+      "id": "OR-J48-S08",
+      "journey": "J48",
+      "name": "Admission holds a unit balance: a request beyond what is left, or one that holds nothing once it is all held, is refused, and a dollar failed-usage limit binds no unit; a capture prices its overrun in full, its posting takes what the lots hold and records the rest forgiven (usage_postings.forgiven, usage_charged charge: forgiven), never owed, and the customer reads its usage in the unit"
+    },
+    {
+      "id": "OR-J48-S09",
+      "journey": "J48",
+      "name": "Reversals of a multi-line order's pack apply in the order they settle: a chargeback settling before an earlier pending refund takes the line's share first, the refund then takes the rest, each share is recorded once, in the general ledger, and a won dispute restores what the chargeback took"
+    },
+    {
+      "id": "OR-J48-S10",
+      "journey": "J48",
+      "name": "A period in a unit whose volume price falls below what posted is credited once its late window closes, taking back what the period forgave, from the shares its posting stored, before crediting what the lots paid beyond its price"
+    },
+    {
+      "id": "OR-J48-S11",
+      "journey": "J48",
+      "name": "A lease sync's usage in a merchant's unit is refused currency_unsupported and moves nothing: usage in a unit arrives through an admission's capture"
+    },
+    {
+      "id": "OR-J48-S12",
+      "journey": "J48",
+      "name": "The first balance in a unit waits for the units lock a settings change takes before it locks any customer, and records the unit's scale; a gift in a counted unit takes no lock"
+    },
+    {
+      "id": "OR-J48-S13",
+      "journey": "J48",
+      "name": "An order priced in a merchant's unit, paid from lots bought in dollars and euros, has one revenue schedule per paid currency, each funded with exactly the lots' money its spends released: an item recognised at once, a 30-day pass ratably over its window; applying the order again makes nothing new, and the schedules move with a billing archive, whose export refuses a leg naming the order in money no lot paid it with"
+    },
+    {
+      "id": "OR-J48-S14",
+      "journey": "J48",
+      "name": "A chargeback of a pack whose units paid for a 30-day pass takes the consumed share of its cash from the pass's schedule as a price reduction with catch-up; winning the dispute restores it, its contra and deferred parts each under its own label, and recognition resumes at the restored price"
+    },
+    {
+      "id": "OR-J48-S15",
+      "journey": "J48",
+      "name": "A unit-priced line paid only with given units has no revenue schedule and moves nothing in the general ledger"
+    },
+    {
+      "id": "OR-J48-S16",
+      "journey": "J48",
+      "name": "Money of a lot released into a unit-priced line's schedule after it was made adds to its funding when the order is applied again, also when a chargeback took some back and the funding returns to a level it reached before; ledger-audit fails money released under a schedule that does not exist"
+    },
+    {
+      "id": "OR-J48-S17",
+      "journey": "J48",
+      "name": "A $15 refund at Stripe of a $20 pack of 400 GOLD whose 200 GOLD paid for a 30-day pass takes the 200 left and $5 of the pass's schedule against refunds, as a price reduction with catch-up"
+    },
+    {
+      "id": "OR-J48-S18",
+      "journey": "J48",
+      "name": "A full chargeback of a pack whose units paid $5 of usage and a $10 pass takes the $15 it spent pro rata: the pass's schedule to zero and $5 against usage revenue"
+    },
+    {
+      "id": "OR-J48-S19",
+      "journey": "J48",
+      "name": "A statue paid from a dollar lot and a euro lot: a chargeback of the euro pack reduces the statue's euro schedule alone, and the dollar schedule stands"
+    },
+    {
       "id": "OR-J53-S01",
       "journey": "J53",
       "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a removed measure is refused naming its replacement"
@@ -2836,12 +3101,32 @@
     {
       "id": "OR-J53-S02",
       "journey": "J53",
-      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure are dropped"
+      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure, or mrr by a dimension it no longer takes, are dropped"
     },
     {
       "id": "OR-J53-S03",
       "journey": "J53",
       "name": "Every money measure splits by currency unless one currency is named, by PSP and by time too, and money beside a measure with no currency is refused rather than summed"
+    },
+    {
+      "id": "OR-J53-S04",
+      "journey": "J53",
+      "name": "A sale and usage at 23:30 in a merchant's accounting timezone, ten hours behind UTC, count on that local day: date ranges and day buckets start at its midnights and the result names the zone"
+    },
+    {
+      "id": "OR-J53-S05",
+      "journey": "J53",
+      "name": "A day chart across a midnight clock change has one row per local day, the changed day starting at its transition with the sale made on it; the catalogue marks measures read from rollups kept per UTC date"
+    },
+    {
+      "id": "OR-J53-S06",
+      "journey": "J53",
+      "name": "Two customers over four months: monthly MRR movements and subscriber movements equal the movements recorded; MRR, subscribers, ARPA, LTV, subscriber churn of the opening base by type, NRR and GRR as each month began; churn read monthly by day and over 90 days; the cohort's retention of the members it acquired, by subscribers and MRR; MRR by product at a past date; subscribers counted once across currencies; scheduled churn and its reversal; cancel decisions by the month they were made, type and reversal; the overview's MRR tiles"
+    },
+    {
+      "id": "OR-J53-S07",
+      "journey": "J53",
+      "name": "A card merchant's chargeback ratio tile is Visa's VAMP ratio, naming its program, and Payment health charts the VAMP and ECM ratios against their levels in force each month (VAMP's excessive level 2.2% before April 2026, 1.5% from); one chargeback under VAMP's minimum count reaches no level whatever its ratio"
     },
     {
       "id": "OR-J43-S01",
@@ -3062,6 +3347,366 @@
       "id": "OR-J45-S15",
       "journey": "J45",
       "name": "A new card on a case the old card's advice deferred is not held to that advice: its plain decline keeps dunning, and the case ends as the card failed, not issuer_deferred"
+    },
+    {
+      "id": "OR-J41-S01",
+      "journey": "J41",
+      "name": "A monthly plan bought mid-month posts its cash to its PSP's clearing account, defers it, and recognises at the month boundary and the period end"
+    },
+    {
+      "id": "OR-J41-S02",
+      "journey": "J41",
+      "name": "An annual calendar plan recognises a twelfth a month across a leap February; a non-UTC accounting zone's boundary follows DST"
+    },
+    {
+      "id": "OR-J41-S03",
+      "journey": "J41",
+      "name": "Lifetime access is recognised at once, a time-limited pass ratably over its window, and seats are funded per seat"
+    },
+    {
+      "id": "OR-J41-S04",
+      "journey": "J41",
+      "name": "A Stripe invoice with non-cash credit, NMI and CCBill rebills and a Solana pull in USDC book cash to their PSPs and recognise from payment"
+    },
+    {
+      "id": "OR-J41-S05",
+      "journey": "J41",
+      "name": "A seat increase defers its charge over the rest of the period"
+    },
+    {
+      "id": "OR-J41-S06",
+      "journey": "J41",
+      "name": "An idle recognition pass takes no schedule; a replayed boundary or order posts once"
+    },
+    {
+      "id": "OR-J41-S07",
+      "journey": "J41",
+      "name": "An external payment books to external_receipts; a payment beyond its bill stays unapplied"
+    },
+    {
+      "id": "OR-J41-S08",
+      "journey": "J41",
+      "name": "An immediate cancellation without a refund forfeits the remainder"
+    },
+    {
+      "id": "OR-J41-S09",
+      "journey": "J41",
+      "name": "A usage order's card and remitted payments book their cash and leave it for the receivable"
+    },
+    {
+      "id": "OR-J41-S10",
+      "journey": "J41",
+      "name": "Revoked access ends its schedule; an undone revocation takes the forfeit back"
+    },
+    {
+      "id": "OR-J41-S11",
+      "journey": "J41",
+      "name": "A late payment on an expired order whose product another order holds stays unapplied"
+    },
+    {
+      "id": "OR-J41-S12",
+      "journey": "J41",
+      "name": "A purchase is applied over the access its grant gives; a replay applies an order with no schedule"
+    },
+    {
+      "id": "OR-J41-S13",
+      "journey": "J41",
+      "name": "A prune that hides booked money or a recognising subscription raises a finding its undo resolves"
+    },
+    {
+      "id": "OR-J41-S14",
+      "journey": "J41",
+      "name": "An end before the schedule exists reaches it: a charge after a cancellation is forfeited at payment"
+    },
+    {
+      "id": "OR-J41-S15",
+      "journey": "J41",
+      "name": "ledger-audit warns of revenue lines completed before the books started and of a provider's tax line, skips a merchant's own unit, and fails a line completed since"
+    },
+    {
+      "id": "OR-J41-S16",
+      "journey": "J41",
+      "name": "An order applied again after a payment sorting earlier arrives applies no payment beyond what it brought"
+    },
+    {
+      "id": "OR-J41-S17",
+      "journey": "J41",
+      "name": "An imported purchase is applied over the access its import grants"
+    },
+    {
+      "id": "OR-J41-S18",
+      "journey": "J41",
+      "name": "A partial refund while the service runs is a price reduction with catch-up"
+    },
+    {
+      "id": "OR-J41-S19",
+      "journey": "J41",
+      "name": "A full refund that revokes access takes unrecognised revenue first"
+    },
+    {
+      "id": "OR-J41-S20",
+      "journey": "J41",
+      "name": "A chargeback reduces its schedule and the won dispute restores it, its deferral forfeited at once"
+    },
+    {
+      "id": "OR-J41-S21",
+      "journey": "J41",
+      "name": "A refund row written past the poster commits; ledger-audit names it and raises a finding"
+    },
+    {
+      "id": "OR-J41-S22",
+      "journey": "J41",
+      "name": "A duplicate capture's refund returns it from unapplied cash"
+    },
+    {
+      "id": "OR-J41-S23",
+      "journey": "J41",
+      "name": "A refund of a payment from before the books is never refused; its sign breach is a finding"
+    },
+    {
+      "id": "OR-J41-S24",
+      "journey": "J41",
+      "name": "A usage order's refund takes what its payment left unapplied first, contra beyond; its chargeback posts the cash side alone"
+    },
+    {
+      "id": "OR-J41-S25",
+      "journey": "J41",
+      "name": "Refunds in pieces each reduce the price from where the last left it"
+    },
+    {
+      "id": "OR-J41-S26",
+      "journey": "J41",
+      "name": "A refund of a two-line bill takes each line pro rata"
+    },
+    {
+      "id": "OR-J41-S27",
+      "journey": "J41",
+      "name": "A mixed credit order's refund, chargeback and won dispute move each dollar once: the lot's share first"
+    },
+    {
+      "id": "OR-J41-S28",
+      "journey": "J41",
+      "name": "An end undone after a refund reinstates no forfeit it never made"
+    },
+    {
+      "id": "OR-J41-S29",
+      "journey": "J41",
+      "name": "A refund the rail confirms later is dated when it settled, its credit lot's legs with its own"
+    },
+    {
+      "id": "OR-J41-S30",
+      "journey": "J41",
+      "name": "A timed line refunded before its access is granted is not unscheduled"
+    },
+    {
+      "id": "OR-J41-S31",
+      "journey": "J41",
+      "name": "A reversal's share of a credit lot, card credits or a merchant's own unit, is decided when it settles: a refund that found the lot returned takes none of what a won dispute restores"
+    },
+    {
+      "id": "OR-J41-S32",
+      "journey": "J41",
+      "name": "A reversal whose postings, its own and its lot's, move other cash than its amount fails ledger-audit and raises a finding"
+    },
+    {
+      "id": "OR-J41-S33",
+      "journey": "J41",
+      "name": "A usage order's payment, the merchant's first receipt, starts the books, so a reversal of it stored past the poster is named"
+    },
+    {
+      "id": "OR-J41-S34",
+      "journey": "J41",
+      "name": "A refund after an early end forfeited revenue takes the forfeit first, and the end undone reinstates only what is left of it"
+    },
+    {
+      "id": "OR-J41-S35",
+      "journey": "J41",
+      "name": "A won dispute's recovery that names no chargeback commits and restores the chargeback that occurred first"
+    },
+    {
+      "id": "OR-J41-S36",
+      "journey": "J41",
+      "name": "A provider's discount on a bill with a credit line reduces the other lines alone: the lot keeps its own price"
+    },
+    {
+      "id": "OR-J41-S37",
+      "journey": "J41",
+      "name": "A refund of a pack of a merchant's unit the books never booked withdraws its units at once, records its share, books its cash against the payment and raises books.credit.unbooked_unit_pack"
+    },
+    {
+      "id": "OR-J40-S10",
+      "journey": "J40",
+      "name": "A $50 pack of 55 credits defers its price from its payment; 11 credits release exactly $10 and the last credit releases the remainder"
+    },
+    {
+      "id": "OR-J40-S11",
+      "journey": "J40",
+      "name": "A lapsed pack's unreleased money is breakage, a revoked pack's is forfeited, and reinstating it reverses the forfeit and lets it be revoked again"
+    },
+    {
+      "id": "OR-J40-S12",
+      "journey": "J40",
+      "name": "A gift's spend grosses usage up against promotional credit; owed is receivable and is repaid at face from a gift and from a bonus pack"
+    },
+    {
+      "id": "OR-J40-S13",
+      "journey": "J40",
+      "name": "A refund of unspent credit returns its deferred money, a chargeback of spent credit is contra-revenue, and a won dispute reverses it"
+    },
+    {
+      "id": "OR-J40-S14",
+      "journey": "J40",
+      "name": "An archive with a reinstated pack and a pack from before the credit books restores, each lot keeping its money"
+    },
+    {
+      "id": "OR-J40-S15",
+      "journey": "J40",
+      "name": "A won dispute repays again only owed still outstanding: the rest returns to the balance with its money, and the payment refunds after"
+    },
+    {
+      "id": "OR-J40-S16",
+      "journey": "J40",
+      "name": "Two partial recoveries of a chargeback, with and without reopened owed, follow the units they restore and end exact"
+    },
+    {
+      "id": "OR-J40-S17",
+      "journey": "J40",
+      "name": "Owed that accrued partly before the credit books is repaid through the receivable first and the rest as revenue, from a gift and a pack"
+    },
+    {
+      "id": "OR-J40-S18",
+      "journey": "J40",
+      "name": "Refunds in pieces strand no deferred money, and a merchant-unit lot refunds its units in the unit and its money in its paid currency"
+    },
+    {
+      "id": "OR-J40-S19",
+      "journey": "J40",
+      "name": "A revocation retried under its idempotency key after a reinstatement replays, and a lapsed lot is not reinstated"
+    },
+    {
+      "id": "OR-J40-S25",
+      "journey": "J40",
+      "name": "A credit lot applied beyond its payment's cash fails ledger-audit, as a bill's lines would"
+    },
+    {
+      "id": "OR-J40-S26",
+      "journey": "J40",
+      "name": "A credit lot whose payment brought no cash defers nothing, raises books.credit.unapplied and commits"
+    },
+    {
+      "id": "OR-J04-S80",
+      "journey": "J04",
+      "name": "Two billing passes started together: one runs its scans and the other exits without a report; the running pass holds a lease row, not a database session"
+    },
+    {
+      "id": "OR-J04-S81",
+      "journey": "J04",
+      "name": "A billing pass whose holder died leaves a lease that lapses on its own; a pass started meanwhile exits, and the next takes what is due"
+    },
+    {
+      "id": "OR-J38-S83",
+      "journey": "J38",
+      "name": "Of concurrent pulls of one merchant one runs and the others skip, another merchant's pull runs beside it, and a provider refresh waits for the running pull; the pull holds a lease row, not a database session"
+    },
+    {
+      "id": "OR-J38-S84",
+      "journey": "J38",
+      "name": "A pull that runs past one lease period keeps its lease and others still skip; a dead holder's lease lapses on its own and the next pull takes it"
+    },
+    {
+      "id": "OR-J06-S72",
+      "journey": "J06",
+      "name": "Retired provider write mode and drain settings refuse boot and name their replacement"
+    },
+    {
+      "id": "OR-J07-S10",
+      "journey": "J07",
+      "name": "A customer search finds the merchant's customers however many people of the host's directory who are not its customers match first"
+    },
+    {
+      "id": "OR-J37-S71",
+      "journey": "J37",
+      "name": "A price created with its product publishes its Solana plan before the catalog transaction: another catalog edit commits while the publication waits on the chain, and a retry binds the same plan"
+    },
+    {
+      "id": "OR-J19-S08",
+      "journey": "J19",
+      "name": "A migration push NMI can never take (a schedule on a named plan, or one stating no plan_payments) blocks its move with a finding, settles its migration and is never sent again"
+    },
+    {
+      "id": "OR-J19-S09",
+      "journey": "J19",
+      "name": "A price migration archives its sources as a catalog edit: a later catalog document still declaring a source on sale reports the conflict and does not sell it again"
+    },
+    {
+      "id": "OR-J19-S10",
+      "journey": "J19",
+      "name": "A migration of 101 CCBill subscribers admits every one before reading any, blocks the first page with its creation and the rest by its page job, records cancel_at_period_end without canceling any, and a second migration past the actor's ceiling is refused whole"
+    },
+    {
+      "id": "OR-J19-S11",
+      "journey": "J19",
+      "name": "A Solana subscriber's move is blocked, its migration settles, and nothing is sent to the chain"
+    },
+    {
+      "id": "OR-J19-S12",
+      "journey": "J19",
+      "name": "A migration by price key moves every earlier version's subscribers with a price-change notice; one to another product sends a plan-change notice naming it and applies at renewal"
+    },
+    {
+      "id": "OR-J19-S13",
+      "journey": "J19",
+      "name": "Canceling a migration whose Stripe move was pushed lists the subscription in rail_release_required and leaves Stripe's schedule in place"
+    },
+    {
+      "id": "OR-J19-S14",
+      "journey": "J19",
+      "name": "A creation interrupted while reaching its subscribers records nothing, not even the moves it made, and its retry moves everyone once and answers again with the same migration"
+    },
+    {
+      "id": "OR-J04-S78",
+      "journey": "J04",
+      "name": "OrderPayment reads back a pay whose answer was lost with getOrderPaymentAttempt under its key, and retries a pay that never arrived under the same key: one attempt"
+    },
+    {
+      "id": "OR-J04-S79",
+      "journey": "J04",
+      "name": "OrderPayment reads a Solana order awaiting its wallet and confirms it at most twice a minute, well under the purchase limit"
+    },
+    {
+      "id": "OR-J07-S11",
+      "journey": "J07",
+      "name": "A kept customer search lists the contact whose username is the query first, then the newest customers, and the list keeps that order"
+    },
+    {
+      "id": "OR-J38-S82",
+      "journey": "J38",
+      "name": "A CCBill postback names its customer by a username more than one search's worth of the host's users contain, not leaving it unattributable"
+    },
+    {
+      "id": "OR-J19-S15",
+      "journey": "J19",
+      "name": "A migration's subscribers and the source it archives are one destructive command: staff one unit short is refused whole, nothing recorded or archived; at exactly the limit it succeeds with no hold"
+    },
+    {
+      "id": "OR-J19-S16",
+      "journey": "J19",
+      "name": "A cancel ends a migration's walk whose next page never ran: it is no longer preparing, the subscriber it never reached counts as skipped, and the page's job, run later, changes nothing"
+    },
+    {
+      "id": "OR-J19-S17",
+      "journey": "J19",
+      "name": "Two identical creates waiting on the catalog lock answer the one migration, recorded once"
+    },
+    {
+      "id": "OR-J19-S18",
+      "journey": "J19",
+      "name": "A price migration whose caller leaves after its source is archived is still recorded, and the identical retry answers it under the one command: two subscribers and the source, admitted once"
+    },
+    {
+      "id": "OR-J19-S19",
+      "journey": "J19",
+      "name": "An identical price migration created while the first records is refused at once with price_migration_in_progress, another destructive command of the merchant is admitted meanwhile, and once recorded the identical request answers it"
     }
   ]
 }

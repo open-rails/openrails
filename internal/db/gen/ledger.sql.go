@@ -61,7 +61,7 @@ func (q *Queries) GetLedgerAccount(ctx context.Context, arg GetLedgerAccountPara
 }
 
 const getLedgerSpendByCoords = `-- name: GetLedgerSpendByCoords :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id, revenue_schedule_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
@@ -116,12 +116,13 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 		&i.EffectiveAt,
 		&i.OrderLineID,
 		&i.ProductID,
+		&i.RevenueScheduleID,
 	)
 	return i, err
 }
 
 const getLedgerTransferAtCoordinate = `-- name: GetLedgerTransferAtCoordinate :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id, revenue_schedule_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND book = $2::text
   AND customer_id IS NOT DISTINCT FROM $3::uuid
@@ -186,12 +187,13 @@ func (q *Queries) GetLedgerTransferAtCoordinate(ctx context.Context, arg GetLedg
 		&i.EffectiveAt,
 		&i.OrderLineID,
 		&i.ProductID,
+		&i.RevenueScheduleID,
 	)
 	return i, err
 }
 
 const getLedgerTransferByCoords = `-- name: GetLedgerTransferByCoords :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id, revenue_schedule_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND book = 'units'
   AND customer_id = $2::uuid
@@ -250,15 +252,33 @@ func (q *Queries) GetLedgerTransferByCoords(ctx context.Context, arg GetLedgerTr
 		&i.EffectiveAt,
 		&i.OrderLineID,
 		&i.ProductID,
+		&i.RevenueScheduleID,
 	)
 	return i, err
+}
+
+const getLedgerUnitScale = `-- name: GetLedgerUnitScale :one
+SELECT scale FROM billing.ledger_units WHERE merchant_id = $1::uuid AND unit = $2::text
+`
+
+type GetLedgerUnitScaleParams struct {
+	MerchantID uuid.UUID
+	Unit       string
+}
+
+// The scale the units book counts a merchant's unit at, once it counts it.
+func (q *Queries) GetLedgerUnitScale(ctx context.Context, arg GetLedgerUnitScaleParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getLedgerUnitScale, arg.MerchantID, arg.Unit)
+	var scale int32
+	err := row.Scan(&scale)
+	return scale, err
 }
 
 const insertGeneralLedgerTransfer = `-- name: InsertGeneralLedgerTransfer :one
 INSERT INTO billing.ledger_transfers (
     merchant_id, book, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to, operation, source, source_id, credit_grant_id, customer_id,
-    invoker_id, resource, order_id, order_line_id, product_id, effective_at
+    invoker_id, resource, order_id, order_line_id, product_id, effective_at, revenue_schedule_id
 ) VALUES (
     $1::uuid, 'general', $2::uuid, $3::uuid,
     $4::bigint, $5::text, $6::text,
@@ -266,31 +286,32 @@ INSERT INTO billing.ledger_transfers (
     $10::uuid, $11::uuid,
     $12::text, $13::text, $14::uuid,
     $15::uuid, $16::uuid,
-    $17::timestamptz
+    $17::timestamptz, $18::uuid
 )
 ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
 DO NOTHING
-RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id
+RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id, revenue_schedule_id
 `
 
 type InsertGeneralLedgerTransferParams struct {
-	MerchantID      uuid.UUID
-	DebitAccountID  uuid.UUID
-	CreditAccountID uuid.UUID
-	Amount          int64
-	Currency        string
-	TransferType    string
-	Operation       string
-	Source          string
-	SourceID        string
-	CreditGrantID   *uuid.UUID
-	CustomerID      *uuid.UUID
-	InvokerID       *string
-	Resource        *string
-	OrderID         *uuid.UUID
-	OrderLineID     *uuid.UUID
-	ProductID       *uuid.UUID
-	EffectiveAt     time.Time
+	MerchantID        uuid.UUID
+	DebitAccountID    uuid.UUID
+	CreditAccountID   uuid.UUID
+	Amount            int64
+	Currency          string
+	TransferType      string
+	Operation         string
+	Source            string
+	SourceID          string
+	CreditGrantID     *uuid.UUID
+	CustomerID        *uuid.UUID
+	InvokerID         *string
+	Resource          *string
+	OrderID           *uuid.UUID
+	OrderLineID       *uuid.UUID
+	ProductID         *uuid.UUID
+	EffectiveAt       time.Time
+	RevenueScheduleID *uuid.UUID
 }
 
 // InsertGeneralLedgerTransfer is the general ledger's one durable write, at
@@ -315,6 +336,7 @@ func (q *Queries) InsertGeneralLedgerTransfer(ctx context.Context, arg InsertGen
 		arg.OrderLineID,
 		arg.ProductID,
 		arg.EffectiveAt,
+		arg.RevenueScheduleID,
 	)
 	var i BillingLedgerTransfer
 	err := row.Scan(
@@ -339,6 +361,7 @@ func (q *Queries) InsertGeneralLedgerTransfer(ctx context.Context, arg InsertGen
 		&i.EffectiveAt,
 		&i.OrderLineID,
 		&i.ProductID,
+		&i.RevenueScheduleID,
 	)
 	return i, err
 }
@@ -416,7 +439,7 @@ INSERT INTO billing.ledger_transfers (
 )
 ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
 DO NOTHING
-RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id
+RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id, revenue_schedule_id
 `
 
 type InsertLedgerTransferParams struct {
@@ -482,8 +505,27 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		&i.EffectiveAt,
 		&i.OrderLineID,
 		&i.ProductID,
+		&i.RevenueScheduleID,
 	)
 	return i, err
+}
+
+const insertLedgerUnit = `-- name: InsertLedgerUnit :exec
+INSERT INTO billing.ledger_units (merchant_id, unit, scale)
+VALUES ($1::uuid, $2::text, $3::int)
+ON CONFLICT (merchant_id, unit) DO NOTHING
+`
+
+type InsertLedgerUnitParams struct {
+	MerchantID uuid.UUID
+	Unit       string
+	Scale      int32
+}
+
+// Records a merchant's unit as the units book first counts it.
+func (q *Queries) InsertLedgerUnit(ctx context.Context, arg InsertLedgerUnitParams) error {
+	_, err := q.db.Exec(ctx, insertLedgerUnit, arg.MerchantID, arg.Unit, arg.Scale)
+	return err
 }
 
 const ledgerAccountBalance = `-- name: LedgerAccountBalance :one
@@ -866,7 +908,7 @@ func (q *Queries) ListLedgerSignBreaches(ctx context.Context, merchantID uuid.UU
 }
 
 const listLedgerTransfersByCustomer = `-- name: ListLedgerTransfersByCustomer :many
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id, revenue_schedule_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
@@ -925,6 +967,7 @@ func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLed
 			&i.EffectiveAt,
 			&i.OrderLineID,
 			&i.ProductID,
+			&i.RevenueScheduleID,
 		); err != nil {
 			return nil, err
 		}
@@ -937,7 +980,7 @@ func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLed
 }
 
 const listLedgerTransfersByIDs = `-- name: ListLedgerTransfersByIDs :many
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id, revenue_schedule_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
   AND customer_id = $3::uuid AND book = 'units'
 ORDER BY created_at DESC, id DESC
@@ -981,6 +1024,7 @@ func (q *Queries) ListLedgerTransfersByIDs(ctx context.Context, arg ListLedgerTr
 			&i.EffectiveAt,
 			&i.OrderLineID,
 			&i.ProductID,
+			&i.RevenueScheduleID,
 		); err != nil {
 			return nil, err
 		}
@@ -1054,6 +1098,36 @@ func (q *Queries) ListLedgerTypeTotalDrifts(ctx context.Context, merchantID uuid
 			&i.StoredDebits,
 			&i.LoggedDebits,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLedgerUnits = `-- name: ListLedgerUnits :many
+SELECT unit, scale FROM billing.ledger_units WHERE merchant_id = $1::uuid ORDER BY unit
+`
+
+type ListLedgerUnitsRow struct {
+	Unit  string
+	Scale int32
+}
+
+// The merchant's units the units book counts, and their scales.
+func (q *Queries) ListLedgerUnits(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerUnitsRow, error) {
+	rows, err := q.db.Query(ctx, listLedgerUnits, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLedgerUnitsRow
+	for rows.Next() {
+		var i ListLedgerUnitsRow
+		if err := rows.Scan(&i.Unit, &i.Scale); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

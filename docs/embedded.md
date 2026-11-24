@@ -23,8 +23,7 @@ if err != nil {
 }
 
 cfg := openrails.Config{
-	Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
-	ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
+	Database: openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 	Merchants: []billing.MerchantDeclaration{{
 		MerchantDocument: merchant,
 		Issuer:           issuer, // your users, signed in at your AuthKit, are this merchant's customers and staff
@@ -77,7 +76,7 @@ if err := bill.Start(ctx); err != nil {
 | `Engine.Probes()` | named checks of the optional parts, for your supervisor: `openrails_psp_posture`, `openrails_configuration`, `openrails_solana_crankers`, `openrails_job_progress` |
 | `Engine.Close(ctx)` | stops what `Start` started. Close the engine before your pool; OpenRails never closes `Deps.Postgres`. |
 
-`New` fails only on what it cannot serve without: PostgreSQL and its migrations, an unset or unknown `ProviderWriteMode`, an invalid River schema, a test seam beside a live PSP. Anything else is refused alone and the rest serves: an optional setting is turned off, a merchant whose document is invalid is not provisioned, a PSP that does not check is not armed. `openrails_configuration` names what is not served and why; Vault, PSP posture and Redis reconnect in the background.
+`New` fails only on what it cannot serve without: PostgreSQL and its migrations, an invalid River schema, a test seam beside a live PSP. Anything else is refused alone and the rest serves: an optional setting is turned off, a merchant whose document is invalid is not provisioned, a PSP that does not check is not armed. `openrails_configuration` names what is not served and why; Vault, PSP posture and Redis reconnect in the background.
 
 ### Health
 
@@ -108,10 +107,9 @@ Go. Libraries never read the environment.
 
 | Field | Meaning |
 |---|---|
-| `ProviderWriteMode` | Required. `ProviderWritesFull`, `ProviderWritesLimited` (OpenRails initiates no provider writes; customers still buy) or `ProviderWritesReadOnly` (nothing is written to any provider). |
 | `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
 | `UsageBillingEnabled` | Bills owed usage automatically ([usage](client.md#usage-and-running-charges)). Deploy every worker first. |
-| `Database` | `DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews idempotency leases (default 4), part of your connection budget. |
+| `Database` | `DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
 | `ClickHouse` | `ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)). |
 | `PublicBillingBaseURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
@@ -131,7 +129,12 @@ Go. Libraries never read the environment.
 | `EventRetention` | How long the event log keeps facts (default 90 days). |
 | `WebhookSecretOverlap` | How long a rotated webhook secret still verifies (default 24 h, at most 168 h). |
 
-Several instances must agree on the schemas, `ProviderWriteMode`, `Merchants`,
+How much OpenRails writes to a merchant's providers is the merchant's write
+posture, kept in the database: `openrails merchant hold` and
+`openrails merchant arm`, run with the engine's database and schema, change it
+([write safety](standalone.md#write-safety-and-the-kill-switch)).
+
+Several instances must agree on the schemas, `Merchants`,
 `RateLimits`, `Captcha`, `TrustedProxies`, `ReturnOrigins` and the mounted
 `Routes` (a route some instances lack answers 404 there).
 
@@ -262,22 +265,18 @@ and no sticky session.
   and clocks within five minutes, and share periodic passes through leases in
   `periodic_leases`.
 
-Size PostgreSQL `max_connections` for every pool, plus, per instance, `DatabaseConfig.LeaseConns` and the sessions OpenRails dials outside the pool: one per listener once started (customer messages, dispute responses, Solana Pay, the subscription verifier and, with Vault configuration, configuration edits) and one for each session lock it holds (a billing pass, a provider refresh, a usage-policy edit).
+Size PostgreSQL `max_connections` for every pool, plus `DatabaseConfig.LeaseConns` per instance, plus each instance's direct sessions:
+
+- **Listeners**, held while the instance runs: five on an instance running workers (unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes), and on every instance one for configuration edits with Vault configuration.
+- **Short session locks**: one while a usage policy write runs, one while a billing import lands, and `New`'s migration pool while it migrates.
+
+The billing pass and a merchant's pulls hold no session: each holds a lease row, renewed on the lease pool while it runs and lapsing within two minutes of its holder dying.
 
 ## PgBouncer
 
-With transaction pooling, give `Postgres` the PgBouncer pool and set
-`poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe` on
-it; set `PostgresSession` to a `pgxpool.ParseConfig` result for the same database
-and role through PostgreSQL's direct endpoint. OpenRails scopes the merchant to
-each transaction and uses direct sessions for migrations, listeners and session
-locks. Its own River workers poll in this mode; a host fleet on the PgBouncer
-pool sets `river.Config.PollOnly`.
+With transaction pooling, give `Postgres` the PgBouncer pool and set `poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe` on it; set `PostgresSession` to a `pgxpool.ParseConfig` result for the same database and role through PostgreSQL's direct endpoint. OpenRails scopes the merchant to each transaction, and everything else it runs, leases included, goes through the pooler. `PostgresSession` serves only the listeners and short session locks above: each instance's direct floor is five sessions with workers, one more with Vault configuration. Its own River workers poll in this mode; a host fleet on the PgBouncer pool sets `river.Config.PollOnly`.
 
-`LISTEN` needs a session: a transaction-pooled connection drops its
-notifications. Without `PostgresSession` the listeners (customer messages,
-dispute responses, configuration edits) run on the `Postgres` pool, so behind
-PgBouncer that pool must be in session mode.
+`LISTEN` needs a session: a transaction-pooled connection drops its notifications. Without `PostgresSession` the listeners dial with the `Postgres` pool's settings, so behind PgBouncer that pool must be in session mode.
 
 ## Routes
 

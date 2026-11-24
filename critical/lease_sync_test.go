@@ -211,6 +211,7 @@ func TestLeaseSyncs(t *testing.T) {
 		require.NoError(t, released[0].Err())
 
 		// A top-up posts the month so far first.
+		w.clock.Advance(time.Minute)
 		fund(t, w.alpha, customer, "top-up", 500)
 		balance(t, w.alpha, customer, 1300, 0, 1300)
 		require.Len(t, usageDeductions(t, w.alpha, customer), 1)
@@ -282,7 +283,12 @@ func TestLeaseSyncs(t *testing.T) {
 
 		// A closed lease owns no new hold; usage against it still settles,
 		// in full, and its report stays clear.
-		v := leaseAdmit(t, w, lease, usageAdmission(w, customer, "after-close", "compute", map[string]int64{"units": 1}, nil))
+		late := usageAdmission(w, customer, "after-close", "compute", map[string]int64{"units": 1}, nil)
+		late.LeaseID, late.ExpiresAt = &lease, nil
+		verdicts, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{late})
+		require.NoError(t, err)
+		require.Len(t, verdicts, 1)
+		v := verdicts[0]
 		require.NotNil(t, v.Error)
 		require.Equal(t, http.StatusConflict, v.Status)
 		require.Equal(t, billing.CodeLeaseNotHeld, v.Error.Code)

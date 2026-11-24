@@ -100,6 +100,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `oat_`, …).
+- Customer messages: OpenRails holds each customer's contact (read live from the host's directory, or the SCIM copy in `customer_contacts`) and emails customers their billing messages (`internal/modules/messages`, through `Deps.Email`); the merchant's `messages` document turns each event type on or off. In-app notices go to AuthKit's inbox (`Deps.Notifications`); OpenRails keeps no inbox. Removing customer email is the owner's call, never a side effect of other work.
 - Vocabulary: customer (not payer or user); subject (the native account acted as), invoker (the party actually acting, may be foreign), credential (how it was proven); `canceled`.
 
 ## Money
@@ -210,7 +211,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
   state), stated in its table comment; the `retention` package doc lists the periods.
   `limit_holds` and `limit_hold_parts` are partitioned by month, so every read of
-  them names a time range. Usage keeps no events: settlement writes aggregates only.
+  them names a time range.
 - External writes are `provider_intents` and their write-ahead `operation_log`; per-PSP state is
   `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
   with its `order_lines`, provider-run renewals included (`billing.Order`'s doc);
@@ -218,9 +219,11 @@ through `host-four`; these are placeholders, not customer or repository names.
   charges its own metered price with a `running_charges` row.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 - Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded
-  migrations); money stays in PostgreSQL. Whether `Deps.ClickHouse` is set decides usage: without
-  it the event-backed routes (`Route.EventStore`), catalog declarations and settings answer
-  409 `event_store_required`.
+  migrations); money stays in PostgreSQL. Usage posts to the ledger at each month's end in
+  `accounting.timezone` and before any other movement of the balance, as the period's total
+  price less earlier postings (`usage_postings`); money reads use `FINAL`. Whether
+  `Deps.ClickHouse` is set decides usage: without it the event-backed routes
+  (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
   Hard deletes only for privacy erasure and derived or short-lived rows.
 - Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and
@@ -267,8 +270,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   `_CLICKHOUSE_ADDR`, all owned and disposable; each world creates its own ClickHouse
   database). `critical/coverage.json` lists the scenarios and
   `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests
-  registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` runs one against
-  disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all.
+  registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` (or `--journey Jxx`)
+  runs a selection against disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all. A
+  `Validate` dispatch with `critical: "J24 OR-J04-S80"` runs only those in CI and qualifies nothing.
 - A behaviour change gets a scenario that fails first, and sweeps `critical/` for the codes,
   constants and statuses it changed. Green-in-my-package is not green.
 - A test that needs PostgreSQL, Redis, Vault or a fixture process is tagged `integration`, like

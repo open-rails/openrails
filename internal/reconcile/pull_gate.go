@@ -2,13 +2,11 @@ package reconcile
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
@@ -24,30 +22,16 @@ func OverwriteHeld(ctx context.Context, database *db.DB, cfg *config.Config, mer
 	if !verdict.Allowed {
 		return verdict.Reason, false
 	}
-	if posture := (writeposture.View{Config: cfg, DB: database}).Posture(ctx, merchantID); posture.ReadOnly() {
+	if posture := (writeposture.View{DB: database}).Posture(ctx, merchantID); posture.ReadOnly() {
 		return posture.Reason, verdict.EnforceArmed
 	}
 	return "", verdict.EnforceArmed
 }
 
-// LockMerchantPull takes the merchant's pull lock: one mutating pull per
-// merchant at a time, across every replica and the operator's CLI. held is
-// false while another pull has it. The lock lives on its own connection until
-// release.
-func LockMerchantPull(ctx context.Context, database *db.DB, merchantID uuid.UUID) (release func(), held bool, err error) {
-	conn, err := database.ConnectSession(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	q := gen.New(conn)
-	if held, err = q.TryLockProviderRefresh(ctx, merchantID); err != nil || !held {
-		_ = conn.Close(context.WithoutCancel(ctx))
-		return nil, false, err
-	}
-	return func() {
-		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = q.UnlockProviderRefresh(unlockCtx, merchantID)
-		_ = conn.Close(unlockCtx)
-	}, true, nil
+// LockMerchantPull takes the merchant's pull lease: one mutating pull per
+// merchant at a time, across every replica and the operator's CLI. It is nil
+// while another pull holds it. The pull runs under its Context, which ends if
+// the lease is lost; leases is the pool that renews it.
+func LockMerchantPull(ctx context.Context, leases *db.DB, merchantID uuid.UUID) (*db.RunLease, error) {
+	return leases.TryMerchantLease(ctx, merchantID, db.LeasePull, db.RunLeaseTTL)
 }
