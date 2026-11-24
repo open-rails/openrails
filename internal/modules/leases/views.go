@@ -67,8 +67,13 @@ func (r *syncRun) views() error {
 	type pricingKey struct{ currency, eventType string }
 	var priced []pricingKey
 	for i, vp := range r.p.Views {
-		if over, err := r.pastBudget(workBudget); err != nil || over {
+		over, err := r.pastBudget(workBudget)
+		if err != nil {
 			return err
+		}
+		if over {
+			// The rest are answered null and asked again.
+			break
 		}
 		if r.Allows != nil && !r.Allows(vp.CustomerID) {
 			continue
@@ -174,7 +179,7 @@ func (v *viewing) line(customer uuid.UUID, c limits.Claim, next *limits.Window, 
 	out := billing.ViewLimit{Limit: c.Key, Unit: c.Unit, Reset: &reset, Overrun: cmp.Or(c.Overrun, catalog.OverrunRequireEstimate),
 		Capacity: s.Capacity, Used: s.Settled, Held: s.Held, Remaining: s.Remaining(), ResetsAt: resets,
 		Settled: r.settled[settledKey{customer, c.Key}]}
-	if c.Unit == customerCurrency(c) {
+	if syntax.LimitUnitCurrency(c.Unit) {
 		out.Recent = recent
 	}
 	// A window that ends is the gate's to switch at its end; one that never
@@ -191,14 +196,6 @@ func (v *viewing) line(customer uuid.UUID, c limits.Claim, next *limits.Window, 
 		}
 	}
 	return out, nil
-}
-
-// customerCurrency is a claim's currency when it counts money: its unit.
-func customerCurrency(c limits.Claim) string {
-	if syntax.LimitUnitCurrency(c.Unit) {
-		return c.Unit
-	}
-	return ""
 }
 
 // limitSet resolves what a request with the ViewParams' attributes claims,

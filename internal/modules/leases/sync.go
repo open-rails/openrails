@@ -736,7 +736,7 @@ func (r *syncRun) count(item money.UsageItem, units map[string]int64) {
 	customer := item.Customer.UUID()
 	for key, n := range units {
 		if key == catalog.BalanceLimit {
-			key = balanceKey(item.Currency)
+			key = balanceKey(money.NormalizeCurrency(item.Currency))
 		}
 		k := settledKey{customer, key}
 		r.settled[k] = satAdd(r.settled[k], n)

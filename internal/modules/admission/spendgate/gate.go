@@ -422,6 +422,9 @@ func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) er
 		if row.State != "open" {
 			return ErrNotFound
 		}
+		if row.LeaseID != nil {
+			return &ValidationError{Param: "request_id", Message: "a gate's hold lives with its lease and has no deadline to extend"}
+		}
 		if row.ExpiresAt != nil && !row.ExpiresAt.After(g.Now()) {
 			return ErrExpired
 		}
