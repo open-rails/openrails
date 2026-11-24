@@ -573,6 +573,22 @@ open again for another card.
 | `MarkOrderUncollectible` | stop collecting and keep the debt |
 | `ListRenewals`, `GetRenewal` | renewal bills OpenRails runs |
 
+### Content-Security-Policy
+
+The payment page sends its own policy: its scripts, the PSPs' field origins, the captcha provider's, and `frame-ancestors` naming only the merchant's `checkout.embed_origins` (`'none'` without them). It needs nothing from you.
+
+A page of yours that renders billing-ui runs the same PSP scripts in your origin. Beside your own sources, its policy allows the PSPs your merchants use:
+
+| Directive | Sources |
+|---|---|
+| `script-src` | Stripe `https://js.stripe.com https://*.js.stripe.com`; NMI Collect.js `https://secure.nmi.com https://secure.networkmerchants.com`; the Basis Theory card vault `https://*.basistheory.com` |
+| `frame-src` | the same, Stripe's `https://hooks.stripe.com` (a bank's challenge), and the checkout origin when the page frames a pay URL (`<EmbeddedPayment>`) |
+| `connect-src` | the billing client's `baseUrl` origin, `https://api.stripe.com`, the NMI origins, `https://*.basistheory.com` |
+| `style-src`, `font-src` | the NMI origins: Collect.js styles its fields |
+| `frame-ancestors` | `'self'`: no other site frames a page that takes cards |
+
+A page that frames a pay URL and sends `Permissions-Policy` lists the checkout origin under `payment`, so Apple Pay and Google Pay work in the frame.
+
 ## Subscriptions
 
 A subscription's `status` is its billing lifecycle (`active`, `past_due`,
