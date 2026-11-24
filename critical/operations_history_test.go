@@ -5,6 +5,7 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,6 +17,9 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -414,4 +418,73 @@ FROM `+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+` WHERE merchant_id 
 		require.Equal(t, source.ID, changeOf(t, retired[0]).PriceID)
 	})
 
+	t.Run("OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent", func(t *testing.T) {
+		a, journal := newNMIWorld(t)
+		enableLifecycleMaintenance(t, a)
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var method billing.PaymentMethod
+		require.NoError(t, json.Unmarshal(raw, &method))
+		vaults := journal.core.Vaults()
+		require.Len(t, vaults, 1)
+		// NMI holds the delete the breaker admitted.
+		arrived, release := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		journal.core.Intercept(func(r *http.Request) bool {
+			return r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/v5/customers/"+vaults[0].ID)
+		}, func(r *http.Request, next func() *http.Response) (*http.Response, error) {
+			once.Do(func() { close(arrived) })
+			<-release
+			return next(), nil
+		})
+		defer journal.core.ClearIntercepts()
+		var releaseOnce sync.Once
+		unblock := func() { releaseOnce.Do(func() { close(release) }) }
+		defer unblock()
+		finished := make(chan struct{})
+		go func() {
+			defer close(finished)
+			_, _, _ = a.do(context.Background(), http.MethodDelete, "/v1/me/payment-methods/"+method.ID.String(), a.aliceToken, nil)
+		}()
+		select {
+		case <-arrived:
+		case <-time.After(15 * time.Second):
+			t.Fatal("the delete never reached NMI")
+		}
+		var intent uuid.UUID
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+			" WHERE intent_type = 'nmi_vault_delete' AND payload->>'payment_method_id' = $1", method.ID.UUID().String()).Scan(&intent))
+		state, attempts, sent := intentAttempt(t, a.world, intent)
+		require.Equal(t, "in_flight", state)
+		require.NotNil(t, sent)
+		require.Equal(t, attempts, *sent)
+
+		// The queries the breaker and the runner run: an executor whose claim
+		// is gone marks nothing, and a park of the admitted attempt, as the
+		// runner parks one whose operation log is unavailable, clears the mark.
+		store, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		q := store.Gen(ctx)
+		stale, err := q.MarkProviderIntentSent(ctx, gen.MarkProviderIntentSentParams{MerchantID: a.alpha.MerchantID().UUID(), ID: intent, Attempt: attempts + 1})
+		require.NoError(t, err)
+		require.Zero(t, stale, "a claim of another attempt marks nothing")
+		parked, err := q.ParkProviderIntent(ctx, gen.ParkProviderIntentParams{MerchantID: a.alpha.MerchantID().UUID(), ID: intent, NextAttemptAt: a.clock.Now().Add(time.Hour), Reason: ptr("operation log unavailable")})
+		require.NoError(t, err)
+		require.EqualValues(t, 1, parked)
+		state, after, sent := intentAttempt(t, a.world, intent)
+		require.Equal(t, "pending", state)
+		require.Equal(t, attempts-1, after, "a park refunds the attempt")
+		require.Nil(t, sent, "so its next claim of the same attempt is not counted as sent")
+
+		unblock()
+		select {
+		case <-finished:
+		case <-time.After(20 * time.Second):
+			t.Fatal("the held delete never returned")
+		}
+	})
 }

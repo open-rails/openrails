@@ -1603,6 +1603,9 @@
     ],
     "OR-J43-S12": [
       "TestOperationsHistory/OR-J43-S12/a-price-migrations-source-archive-waits-for-the-catalog-lock"
+    ],
+    "OR-J43-S13": [
+      "TestOperationsHistory/OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent"
     ]
   }
 }

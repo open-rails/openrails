@@ -169,7 +169,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	// a breaker error parks rather than executing unexamined.
 	if intent.DestructiveActionID == nil && IsDestructiveIntentType(intent.IntentType) {
 		held, reason, err := r.Breaker.Check(ctx, intent, now, func(ctx context.Context, d *db.DB) error {
-			return NewStore(d).MarkSent(ctx, intent.MerchantID, intent.ID)
+			return NewStore(d).MarkSent(ctx, intent.MerchantID, intent.ID, intent.Attempts)
 		})
 		if err != nil {
 			r.park(withHistoryHold(ctx, "breaker_unavailable"), logEntry, stats, intent.ID, now, Parked("destructive-volume breaker check failed: "+err.Error()))

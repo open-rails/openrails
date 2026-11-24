@@ -35,7 +35,7 @@ Each write type is a `Handler` (`Execute`, `Verify`, `CheckRelevance`,
    destructive switch and the `VolumeBreaker`. A refusal parks it, refunding the
    attempt, for `ParkRetryInterval` (5 minutes); one no longer relevant is
    superseded, and a collection held by write posture goes unknown and is read back.
-3. A destructive type's breaker admission sets `provider_intents.sent_attempt` under its lock. The `attempting` entry goes to `operation_log` ahead, on its own statement, and `Execute` runs; its result is written ahead too, and a hold commits with the intent's transition. A charge first calls `Store.RequireClaim` on its own connection: the claim must still hold a lease beyond `ProviderCallHold` (30 s).
+3. A destructive type's breaker admission sets `provider_intents.sent_attempt` under its lock, for the claim's own attempt only; a park clears it. The `attempting` entry goes to `operation_log` ahead, on its own statement, and `Execute` runs; its result is written ahead too, and a hold commits with the intent's transition. A charge first calls `Store.RequireClaim` on its own connection: the claim must still hold a lease beyond `ProviderCallHold` (30 s).
 4. The outcome is written on a detached context (`LedgerWriteContext`):
    `succeeded`, `failed_retryable` (provably not executed), `unknown_needs_verify`,
    `failed_terminal`, or parked. A lapsed lease becomes unknown, never a

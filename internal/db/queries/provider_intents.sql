@@ -79,6 +79,11 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN 0
         ELSE billing.provider_intents.attempts
     END,
+    -- A revived intent's attempts restart, and with them the sent mark.
+    sent_attempt = CASE
+        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
+        ELSE billing.provider_intents.sent_attempt
+    END,
     last_failure_reason = CASE
         WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
         ELSE billing.provider_intents.last_failure_reason
@@ -221,10 +226,12 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 -- Park: the attempt was deliberately NOT made (mode gate, kill switch,
 -- unconfigured client). The intent goes back to pending with the reason
 -- recorded and the claim's attempts bump undone — a park is not a failure and
--- must not escalate backoff.
+-- must not escalate backoff — and the breaker's sent mark cleared, or the
+-- next claim of the same attempt would count as sent.
 -- name: ParkProviderIntent :execrows
 UPDATE billing.provider_intents
 SET status = 'pending',
+    sent_attempt = NULL,
 	result_evidence = CASE WHEN sqlc.narg(recovery_evidence)::jsonb IS NULL THEN result_evidence
 	  ELSE COALESCE(result_evidence, '{}'::jsonb) || sqlc.narg(recovery_evidence)::jsonb END,
     attempts = GREATEST(attempts - 1, 0),
@@ -314,9 +321,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       );
 
 -- name: MarkProviderIntentSent :execrows
--- The breaker admits the in-flight intent's current attempt to the provider.
+-- The breaker admits the in-flight intent's current attempt to the provider:
+-- only the claim that holds it, never a stale executor's.
 UPDATE billing.provider_intents SET sent_attempt = attempts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'in_flight';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'in_flight'
+  AND attempts = sqlc.arg(attempt)::int;
 
 -- name: LockDestructiveBreaker :exec
 -- Serializes one merchant's breaker admissions; an admission marks its

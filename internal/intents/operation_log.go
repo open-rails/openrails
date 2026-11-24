@@ -61,15 +61,15 @@ func (s *Store) LogOperation(ctx context.Context, intent gen.BillingProviderInte
 }
 
 // MarkSent records, in the breaker's transaction and under its lock, that
-// the intent's current attempt goes to the provider: the breaker counts it
-// from then.
-func (s *Store) MarkSent(ctx context.Context, merchantID, id uuid.UUID) error {
-	rows, err := s.db.Gen(ctx).MarkProviderIntentSent(ctx, gen.MarkProviderIntentSentParams{MerchantID: merchantID, ID: id})
+// the claim holding attempt goes to the provider: the breaker counts it from
+// then. A claim that lost the intent marks nothing.
+func (s *Store) MarkSent(ctx context.Context, merchantID, id uuid.UUID, attempt int32) error {
+	rows, err := s.db.Gen(ctx).MarkProviderIntentSent(ctx, gen.MarkProviderIntentSentParams{MerchantID: merchantID, ID: id, Attempt: attempt})
 	if err != nil {
 		return err
 	}
 	if rows != 1 {
-		return fmt.Errorf("intents: %s is no longer in flight", id)
+		return fmt.Errorf("intents: attempt %d of %s is no longer in flight", attempt, id)
 	}
 	return nil
 }

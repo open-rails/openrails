@@ -552,6 +552,11 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
         WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN 0
         ELSE billing.provider_intents.attempts
     END,
+    -- A revived intent's attempts restart, and with them the sent mark.
+    sent_attempt = CASE
+        WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
+        ELSE billing.provider_intents.sent_attempt
+    END,
     last_failure_reason = CASE
         WHEN billing.provider_intents.status IN ('superseded', 'expired') THEN NULL
         ELSE billing.provider_intents.last_failure_reason
@@ -2432,16 +2437,19 @@ func (q *Queries) MarkProviderIntentFailedTerminal(ctx context.Context, arg Mark
 const markProviderIntentSent = `-- name: MarkProviderIntentSent :execrows
 UPDATE billing.provider_intents SET sent_attempt = attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND status = 'in_flight'
+  AND attempts = $3::int
 `
 
 type MarkProviderIntentSentParams struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
+	Attempt    int32
 }
 
-// The breaker admits the in-flight intent's current attempt to the provider.
+// The breaker admits the in-flight intent's current attempt to the provider:
+// only the claim that holds it, never a stale executor's.
 func (q *Queries) MarkProviderIntentSent(ctx context.Context, arg MarkProviderIntentSentParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markProviderIntentSent, arg.MerchantID, arg.ID)
+	result, err := q.db.Exec(ctx, markProviderIntentSent, arg.MerchantID, arg.ID, arg.Attempt)
 	if err != nil {
 		return 0, err
 	}
@@ -2555,6 +2563,7 @@ func (q *Queries) MarkProviderIntentUnknown(ctx context.Context, arg MarkProvide
 const parkProviderIntent = `-- name: ParkProviderIntent :execrows
 UPDATE billing.provider_intents
 SET status = 'pending',
+    sent_attempt = NULL,
 	result_evidence = CASE WHEN $1::jsonb IS NULL THEN result_evidence
 	  ELSE COALESCE(result_evidence, '{}'::jsonb) || $1::jsonb END,
     attempts = GREATEST(attempts - 1, 0),
@@ -2580,7 +2589,8 @@ type ParkProviderIntentParams struct {
 // Park: the attempt was deliberately NOT made (mode gate, kill switch,
 // unconfigured client). The intent goes back to pending with the reason
 // recorded and the claim's attempts bump undone — a park is not a failure and
-// must not escalate backoff.
+// must not escalate backoff — and the breaker's sent mark cleared, or the
+// next claim of the same attempt would count as sent.
 func (q *Queries) ParkProviderIntent(ctx context.Context, arg ParkProviderIntentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, parkProviderIntent,
 		arg.RecoveryEvidence,

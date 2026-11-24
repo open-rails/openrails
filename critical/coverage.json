@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 504,
+  "scenario_count": 505,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2522,6 +2522,11 @@
       "id": "OR-J43-S12",
       "journey": "J43",
       "name": "A price migration's source archive waits for the catalog lock another writer holds, then is recorded once, as the migration's, with the key's move to nothing"
+    },
+    {
+      "id": "OR-J43-S13",
+      "journey": "J43",
+      "name": "A parked or stale claim never counts as sent: a stale executor marks nothing, and a park of an admitted attempt clears its mark"
     }
   ]
 }
