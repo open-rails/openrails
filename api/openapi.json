@@ -1611,6 +1611,7 @@
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "catalog_revision_conflict",
+          "merchant_unit_unsupported",
           "price_not_sellable",
           "product_not_found",
           "product_tier_group_conflict",
@@ -2359,6 +2360,7 @@
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
+          "merchant_unit_unsupported",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -5814,6 +5816,7 @@
           "currency_unsupported",
           "idempotency_key_reused",
           "invalid_param",
+          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6181,6 +6184,7 @@
           "currency_unsupported",
           "invalid_cursor",
           "invalid_customer_id",
+          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6250,6 +6254,7 @@
         "x-openrails-errors": [
           "currency_unsupported",
           "invalid_customer_id",
+          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6414,7 +6419,8 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "currency_unsupported",
-          "invalid_cursor"
+          "invalid_cursor",
+          "merchant_unit_unsupported"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -10239,6 +10245,7 @@
           "charge_psp_incompatible",
           "charge_psp_unknown",
           "invalid_param",
+          "merchant_unit_unsupported",
           "platform_vault_mixed_class",
           "platform_vault_unavailable",
           "platform_vault_unreachable",
@@ -16776,12 +16783,19 @@
           },
           "client_country": {
             "type": "string"
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantCurrency"
+            }
           }
         },
         "required": [
           "payment",
           "merchant",
-          "client_country"
+          "client_country",
+          "currencies"
         ]
       },
       "CustomerContact": {
@@ -18175,6 +18189,7 @@
               "limit_not_found",
               "merchant_config_read_only",
               "merchant_mismatch",
+              "merchant_unit_unsupported",
               "merchant_unresolved",
               "message_send_failed",
               "message_template_invalid",
@@ -19898,6 +19913,12 @@
               "$ref": "#/components/schemas/BudgetWindow"
             }
           },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantCurrency"
+            }
+          },
           "platform_vault": {
             "$ref": "#/components/schemas/PlatformVaultState"
           }
@@ -19906,6 +19927,28 @@
           "revision",
           "display_name",
           "platform_vault"
+        ]
+      },
+      "MerchantCurrency": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "scale": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "scale"
         ]
       },
       "MerchantProfile": {
@@ -24236,6 +24279,7 @@
               "limit_not_found",
               "merchant_config_read_only",
               "merchant_mismatch",
+              "merchant_unit_unsupported",
               "merchant_unresolved",
               "message_send_failed",
               "message_template_invalid",
@@ -26985,6 +27029,12 @@
             "items": {
               "$ref": "#/components/schemas/BudgetWindow"
             }
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantCurrency"
+            }
           }
         }
       },
@@ -28100,6 +28150,11 @@
       "status": 412,
       "type": "invalid_request_error",
       "meaning": "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed."
+    },
+    "merchant_unit_unsupported": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The currency is one of the merchant's own units, which the operation does not take: it takes a currency from OpenRails' registry."
     },
     "merchant_unresolved": {
       "status": 403,

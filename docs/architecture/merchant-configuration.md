@@ -69,6 +69,7 @@ points at; routes callbacks to their PSP; and moves a book between deployments. 
   one, and fingerprint credentials (`CredentialFingerprinter`) to catch one gateway
   account declared twice. A refused document keeps its previous version serving
   (`keepServed`) and opens `consistency.merchant_config.not_served`.
+- **Currencies.** `merchantconfig.NormalizeCurrencies` checks `settings.currencies` (`currency.Unit`) into the merchant's `currency.Registry` (`merchantconfig.Settings.Currencies`): OpenRails' registry and the merchant's own units. `Registry.Money` refuses a unit where money is taken; `refuseUnits` refuses one in a money setting, and the service checks (`registryCurrency`, `refuseCatalogUnits`) answer `merchant_unit_unsupported`.
 - **Follow-ups.** `syncMerchantConfig` normalizes settings (`merchantconfig.Normalize`)
   and applies `secrets.scim_token` (`scim.Declare`); `followPSPPosture`,
   `followStripeWebhooks` and others react to the change.
@@ -254,6 +255,7 @@ Checks:
   target refused atomically; S03 no charge before arming; S04 unresolved work refuses
   export; S06, S09 NMI and Stripe state verbatim; S08, S11 older archives; S10 restored
   Solana pull; S12, S13 baseline adoption; S14 limit windows; S40 notification export.
+- **J05** (merchant units): OR-J05-S06 units served with their scale; S07 invalid or colliding units refused at load and on edit; S08 refused where money is taken; S09 invisible to another merchant.
 - **J06** (PSP configuration): OR-J06-S01 to S06 and S08; S07 is in
   [imports](imports.md); S30, S31 and S60 to S65 are in
   [payment providers](payment-providers.md).

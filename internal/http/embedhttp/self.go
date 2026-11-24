@@ -46,7 +46,7 @@ func wrapCustomerRoutes(logger *slog.Logger, rt *app.Runtime, mux *router.Table,
 	limiter := middleware.RateLimitHTTP(logger, rateLimits, captchaCfg, state, store, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {
 		return middleware.ChainHTTP(entry.Handler,
-			middleware.WithRoutePath(embeddedMount+entry.Path),
+			middleware.WithRoutePath(entry.Path),
 			middleware.RecoverHTTP(logger),
 			middleware.SecurityHeadersHTTP(),
 			// #765: this handler's entire surface is browser tier — always the

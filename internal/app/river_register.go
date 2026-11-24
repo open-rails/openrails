@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -28,7 +27,8 @@ import (
 
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
 // OpenRails' own River and the host fleet's RiverJobs use this registry.
-func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *river.Workers) error {
+func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *river.Workers) error {
+	workers := &workerSet{river: registry}
 	if err := r.validateBillingWorkerRuntime(); err != nil {
 		return err
 	}
@@ -248,13 +248,21 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Scans: scans, Clock: clock, Log: r.Log}); err != nil {
 		return fmt.Errorf("add billing pass worker: %w", err)
 	}
+	r.riverCompositionMu.Lock()
+	r.riverWorkers = workers.added
+	r.riverCompositionMu.Unlock()
 	return nil
 }
 
+// workerSet is a River registry and the workers added to it.
+type workerSet struct {
+	river *river.Workers
+	added []any
+}
+
 // addWorker registers an OpenRails worker. Its timeout is its kind's budget,
-// which job health reads; the client's JobTimeout is the host's. A worker
-// that reaches a nil logger is refused.
-func addWorker[T river.JobArgs](workers *river.Workers, worker river.Worker[T]) error {
+// which job health reads; the client's JobTimeout is the host's.
+func addWorker[T river.JobArgs](workers *workerSet, worker river.Worker[T]) error {
 	var args T
 	want := riverjobs.Timeout(args.Kind())
 	if want == 0 {
@@ -263,10 +271,11 @@ func addWorker[T river.JobArgs](workers *river.Workers, worker river.Worker[T]) 
 	if got := worker.Timeout(&river.Job[T]{JobRow: &rivertype.JobRow{Kind: args.Kind()}}); got != want {
 		return fmt.Errorf("%s: timeout %s is not its kind's budget %s", args.Kind(), got, want)
 	}
-	if unset := logx.Unset(worker); len(unset) > 0 {
-		return fmt.Errorf("%s: no logger at %s", args.Kind(), strings.Join(unset, ", "))
+	if err := river.AddWorkerSafely(workers.river, jobLogged[T]{worker}); err != nil {
+		return err
 	}
-	return river.AddWorkerSafely(workers, jobLogged[T]{worker})
+	workers.added = append(workers.added, worker)
+	return nil
 }
 
 // jobLogged logs its worker's job with the job's kind, id and attempt.

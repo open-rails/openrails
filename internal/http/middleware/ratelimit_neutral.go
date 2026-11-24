@@ -460,17 +460,9 @@ func resolveRateLimitPolicy(cfg config.RateLimitsConfig, req *http.Request) (*co
 	return nil, bucket
 }
 
-// ClassifyBucket maps a request path+method to a rate-limit bucket; "" for
-// a route OpenRails does not limit. It normalizes
-// the embedded (/billing/v1/...) and standalone (/v1/...) prefixes to one matcher.
+// ClassifyBucket maps a route catalog path and method to a rate-limit
+// bucket; "" for a route OpenRails does not limit.
 func ClassifyBucket(path, method string) string {
-	if strings.HasPrefix(path, "/billing") {
-		path = strings.TrimPrefix(path, "/billing")
-		if path == "" {
-			path = "/"
-		}
-	}
-
 	method = strings.ToUpper(method)
 	switch {
 	case method == http.MethodPost && path == "/v1/console/catalog/ask":

@@ -39,3 +39,18 @@ const (
 	ProviderRefundRevokeOnAny  ProviderRefundAccess = "revoke_on_any"
 	ProviderRefundKeep         ProviderRefundAccess = "keep"
 )
+
+// MerchantCurrency is a unit the merchant defines (credits, API tokens, an
+// in-game currency): a balance its customers hold, never money. Code is four
+// to twelve upper-case letters or digits starting with a letter, never a
+// currency in OpenRails' registry; three-letter codes are ISO 4217's. Name is
+// how it reads ("Gold coins"); Symbol is its display mark, without a currency
+// sign, the code when omitted. An amount in it is an integer count of
+// 10^-Scale units: Scale 0 (the default) counts whole units, at most 6.
+// Each merchant's units are its own: another merchant does not know them.
+type MerchantCurrency struct {
+	Code   catalog.Currency `json:"code"`
+	Name   string           `json:"name"`
+	Symbol string           `json:"symbol,omitempty"`
+	Scale  int              `json:"scale"`
+}

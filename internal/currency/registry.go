@@ -1,5 +1,6 @@
 // Package currency owns the fixed native-unit scales shared by catalog input,
-// billing APIs, provider conversions, and generated client metadata.
+// billing APIs, provider conversions, and generated client metadata, and the
+// units a merchant defines beside them.
 package currency
 
 import (
@@ -13,10 +14,13 @@ type Units struct {
 	Code          string
 	Decimals      int
 	MinorDecimals int
-	Kind          string // fiat or crypto
+	Kind          string // fiat, crypto or KindUnit
 	// Stablecoin marks a token pegged to a fiat currency: what a buyer pays
 	// with, never what a price is in.
 	Stablecoin bool
+	// Name and Symbol present a merchant's unit; the registry's have none.
+	Name   string
+	Symbol string
 }
 
 // NativeShift is the decimal shift from settlement units to native units.

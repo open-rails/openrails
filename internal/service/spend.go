@@ -23,7 +23,7 @@ import (
 
 // GetBalance returns a customer's money in one currency.
 func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, currency string) (*billing.Balance, error) {
-	currency, err := requireCurrency(currency)
+	currency, err := s.registryCurrency(ctx, "currency", currency)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	currency, err := requireCurrency(currency)
+	currency, err := s.registryCurrency(ctx, "currency", currency)
 	if err != nil {
 		return err
 	}
@@ -233,7 +233,7 @@ func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	currency, err := requireCurrency(currency)
+	currency, err := s.registryCurrency(ctx, "currency", currency)
 	if err != nil {
 		return nil, err
 	}

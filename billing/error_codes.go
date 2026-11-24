@@ -222,6 +222,7 @@ const (
 	CodeAdmissionCaptured              ErrorCode = "admission_captured"
 	CodeHoldNotFound                   ErrorCode = "hold_not_found"
 	CodeCurrencyUnsupported            ErrorCode = "currency_unsupported"
+	CodeMerchantUnitUnsupported        ErrorCode = "merchant_unit_unsupported"
 	CodeRunningChargeNotFound          ErrorCode = "running_charge_not_found"
 	CodeInvalidSettlementStatusRequest ErrorCode = "invalid_settlement_status_request"
 	CodeCustomerNotFound               ErrorCode = "customer_not_found"
@@ -457,6 +458,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeAdmissionCaptured, 409, invalid, "The admission was captured; it can no longer be released."},
 	{CodeHoldNotFound, 404, invalid, "The admission holds nothing open: it was captured, released or lapsed."},
 	{CodeCurrencyUnsupported, 400, invalid, "The currency is not in OpenRails' registry."},
+	{CodeMerchantUnitUnsupported, 400, invalid, "The currency is one of the merchant's own units, which the operation does not take: it takes a currency from OpenRails' registry."},
 	{CodeRunningChargeNotFound, 404, invalid, "No running charge was started under this reference."},
 	{CodeInvalidSettlementStatusRequest, 400, invalid, "A settlement status read needs a customer and a price."},
 
