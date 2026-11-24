@@ -34,6 +34,7 @@ sql:
       - "internal/migrate/postgres/0034_reporting_mrr.up.sql"
       - "internal/migrate/postgres/0035_dashboard_retired_mrr_measures.up.sql"
       - "internal/migrate/postgres/0036_books_reversals.up.sql"
+      - "internal/migrate/postgres/0037_mrr_totals_settle.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

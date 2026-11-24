@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -32,6 +33,68 @@ func TestReportingMRR(t *testing.T) {
 	t.Run("OR-J53-S07/the-chargeback-ratio-tile-and-charts-carry-the-dispute-programs-levels", programLevels)
 	t.Run("OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions", mrrOnRollups)
 	t.Run("OR-J42-S31/an-archive-from-before-the-reporting-rollups-restores-them-rebuilt-from-its-movements", rollupsRebuiltOnRestore)
+	t.Run("OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles", mrrLeaves)
+}
+
+// MRR leaving a product, a currency and a customer settles, each fall moving
+// the product totals and the distinct customers down: Alice's euro plan ends
+// at once while her dollar day plan stays, so she stays a customer; Bob's
+// only plan ends at once; then Alice cancels the day plan and the billing
+// pass's MRR scan churns her at its end. None is left.
+func mrrLeaves(t *testing.T) {
+	a, p := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
+	daily := mrrPlan(t, a.alpha, "s32-daily", billing.CreatePriceParams{UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
+	yearly := func(key string, currency catalog.Currency) billing.PriceID {
+		return mrrPlan(t, a.alpha, key, billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: currency, BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
+	}
+	euro, year := yearly("s32-euro", "EUR"), yearly("s32-year", "USD")
+	day := buyAs(t, a, p, a.aliceToken, daily, 10_000_000, "s32-day")
+	eur := buyAs(t, a, p, a.aliceToken, euro, 120_000_000, "s32-eur")
+	bob := buyAs(t, a, p, a.bobToken, year, 120_000_000, "s32-bob")
+	mid := a.alpha.MerchantID().UUID()
+	customers := func() int64 {
+		t.Helper()
+		var n int64
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE((SELECT customers FROM "+booksTable(a.world, "mrr_customer_totals")+" WHERE merchant_id = $1), 0)",
+			mid).Scan(&n))
+		var flows int64
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(logos), 0)::bigint FROM "+booksTable(a.world, "mrr_customer_flows")+" WHERE merchant_id = $1",
+			mid).Scan(&flows))
+		require.Equal(t, n, flows, "the distinct customers are their flows summed")
+		return n
+	}
+	products := func() map[string]int64 {
+		t.Helper()
+		rows, err := a.pool.Query(t.Context(), "SELECT currency || ' ' || mrr::text || ' ' || subscribers::text FROM "+booksTable(a.world, "mrr_product_totals")+
+			" WHERE merchant_id = $1", mid)
+		require.NoError(t, err)
+		listed, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		out := map[string]int64{}
+		for _, row := range listed {
+			out[row]++
+		}
+		return out
+	}
+	require.EqualValues(t, 2, customers())
+	require.Equal(t, map[string]int64{"USD " + strconv.Itoa(dailyTenMRR) + " 1": 1, "EUR 10000000 1": 1, "USD 10000000 1": 1}, products())
+
+	a.clock.Advance(time.Hour)
+	_, err := a.alpha.CancelSubscription(t.Context(), eur.ID, billing.CancelSubscriptionParams{Reason: "Merchant ends the euro plan", RevokeAccess: true})
+	require.NoError(t, err, "a product's MRR falls")
+	require.EqualValues(t, 2, customers(), "Alice keeps MRR in dollars")
+	_, err = a.alpha.CancelSubscription(t.Context(), bob.ID, billing.CancelSubscriptionParams{Reason: "Merchant ends Bob's only plan", RevokeAccess: true})
+	require.NoError(t, err, "a customer's last MRR leaves")
+	require.EqualValues(t, 1, customers())
+
+	customerCancel(t, a, day.ID)
+	a.clock.Advance(day.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+	fleet := startFleet(t, a.world)
+	runRegistered(t, fleet, "openrails.billing_pass", 2)
+	require.Eventually(t, func() bool { return customers() == 0 }, 20*time.Second, 20*time.Millisecond, "the period's end churns Alice")
+	require.Equal(t, map[string]int64{"USD 0 0": 2, "EUR 0 0": 1}, products())
+	require.EqualValues(t, 0, whole(t, only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"subscribers"},
+		Range: &billing.MetricsRange{From: a.clock.Now().AddDate(0, 0, -1).Format(time.DateOnly), To: a.clock.Now().Format(time.DateOnly)}}))["subscribers"]))
 }
 
 // An archive written before the reporting rollups carries none of them, nor
