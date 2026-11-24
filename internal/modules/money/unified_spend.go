@@ -11,6 +11,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 )
 
 // Unified credit-line model. An account spends prepaid balance first, then
@@ -138,6 +139,17 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			return 0, 0, false, aerr
 		}
 		applied = applied || owedApplied
+		// What it leaves owed is usage revenue receivable, dated as its owed
+		// item is.
+		if owedApplied {
+			at := now
+			if s.posting != nil && !s.posting.owedAt.IsZero() {
+				at = s.posting.owedAt
+			}
+			if err := books.New(q, tenantID).AccrueUsage(ctx, payerID, cur, fromOwed, key.Coord(), at, nil); err != nil {
+				return 0, 0, false, err
+			}
+		}
 		if err := s.insertOwedItemsTx(ctx, q, tenantID, payerID, cur, key, fromOwed, now); err != nil {
 			return 0, 0, false, err
 		}

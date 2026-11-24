@@ -340,12 +340,12 @@ func (q *Queries) ListOrderReceipts(ctx context.Context, arg ListOrderReceiptsPa
 const listOverappliedPayments = `-- name: ListOverappliedPayments :many
 SELECT source_id AS payment_id, currency,
        COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
-       COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
+       COALESCE(sum(amount) FILTER (WHERE transfer_type IN ('cash_applied', 'usage_collected')), 0)::bigint AS applied
 FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid AND book = 'general' AND source = 'payment'
-  AND transfer_type IN ('cash_received', 'cash_applied')
+  AND transfer_type IN ('cash_received', 'cash_applied', 'usage_collected')
 GROUP BY source_id, currency
-HAVING COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0) > COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)
+HAVING COALESCE(sum(amount) FILTER (WHERE transfer_type IN ('cash_applied', 'usage_collected')), 0) > COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)
 ORDER BY source_id, currency
 `
 
@@ -357,8 +357,9 @@ type ListOverappliedPaymentsRow struct {
 }
 
 // A payment whose cash the general ledger applied beyond what it received:
-// to its bill's lines at (application, payment, id) and to the credit lot it
-// bought at (credit_issue, payment, id).
+// to its bill's lines at (application, payment, id), to the credit lot it
+// bought at (credit_issue, payment, id) and to the owed a usage order's
+// payment settles at (usage_collection*, payment, id).
 func (q *Queries) ListOverappliedPayments(ctx context.Context, merchantID uuid.UUID) ([]ListOverappliedPaymentsRow, error) {
 	rows, err := q.db.Query(ctx, listOverappliedPayments, merchantID)
 	if err != nil {

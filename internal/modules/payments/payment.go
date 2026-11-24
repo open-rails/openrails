@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
+	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -94,7 +95,7 @@ func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) er
 			if err := scoped.insert(ctx, payment); err != nil {
 				return err
 			}
-			return scoped.syncPurchasedCreditRefund(ctx, *payment.RefundedPaymentID)
+			return scoped.syncReversals(ctx, *payment.RefundedPaymentID)
 		})
 	}
 	return s.insert(ctx, payment)
@@ -188,7 +189,7 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 				return err
 			}
 		}
-		if err := scoped.syncPurchasedCreditRefund(ctx, originalPaymentID); err != nil {
+		if err := scoped.syncReversals(ctx, originalPaymentID); err != nil {
 			return err
 		}
 		if reversalKind == ReversalRefund && refund.Metadata["admin_refund_idempotency_key"] == nil {
@@ -398,7 +399,7 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 			return err
 		}
 		if reservation.RefundedPaymentID != nil {
-			if err := scoped.syncPurchasedCreditRefund(ctx, *reservation.RefundedPaymentID); err != nil {
+			if err := scoped.syncReversals(ctx, *reservation.RefundedPaymentID); err != nil {
 				return err
 			}
 		}
@@ -408,6 +409,20 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 		return scoped.queueRefundReceipt(ctx, result, false)
 	})
 	return result, err
+}
+
+// syncReversals books what a payment's settled reversals do beyond the cash:
+// to the credit lot it bought, and to the owed a usage order's payment paid
+// (owed.SyncUsageReversals).
+func (s *PaymentService) syncReversals(ctx context.Context, paymentID uuid.UUID) error {
+	if err := s.syncPurchasedCreditRefund(ctx, paymentID); err != nil {
+		return err
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return owed.SyncUsageReversals(ctx, s.db, mid.UUID(), paymentID, s.now())
 }
 
 // syncPurchasedCreditRefund uses each settled reversal's identity. A dispute
@@ -503,12 +518,6 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	if orig.MoneyMovement != models.MoneyMovementRail {
 		return errors.New("payment records no money movement at the rail and is not refundable")
 	}
-	// A usage order's payment settled a ledger debt; refunding it would
-	// reopen the debt, which the ledger does not do.
-	if orig.LedgerTransferID != nil {
-		return errors.New("a usage order's payment is not refundable")
-	}
-
 	refundedTotal, err := s.GetRefundTotalByPaymentID(ctx, orig.ID)
 	if err != nil {
 		return fmt.Errorf("failed to calculate refunded total: %w", err)
@@ -555,7 +564,7 @@ func (s *PaymentService) LinkRefundedPayment(ctx context.Context, paymentID, ori
 		if err := scoped.linkRefundedPayment(ctx, paymentID, originalPaymentID); err != nil {
 			return err
 		}
-		return scoped.syncPurchasedCreditRefund(ctx, originalPaymentID)
+		return scoped.syncReversals(ctx, originalPaymentID)
 	})
 }
 

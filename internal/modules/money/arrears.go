@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 )
 
 // Arrears transaction types (postpaid usage ledger).
@@ -91,6 +92,9 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 		ml := s.moneyLedger(q, tenantID)
 		tr, err := ml.AccrueOwed(ctx, payerID, cur, amount, key.Coord(), nil)
 		if err != nil {
+			return err
+		}
+		if err := books.New(q, tenantID).AccrueUsage(ctx, payerID, cur, amount, key.Coord(), now, nil); err != nil {
 			return err
 		}
 		trx = moneyTransactionFromTransfer(tr)

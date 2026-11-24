@@ -491,15 +491,14 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 		owedAt: later(earlier(earlier(end, cut).Add(-time.Microsecond), now), billed)}
 	key := MustIdempotencyKey(OpUsagePosting, usagePostingSourcePrefix+row.ID.String(), "1")
 	payer := identity.CustomerID(customer)
-	_, accrued, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
+	_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
 	if err != nil {
 		return err
 	}
 	if !applied {
 		return fmt.Errorf("usage posting %s: the ledger already held it", row.ID)
 	}
-	// What it left owed is usage revenue receivable, dated as its owed is.
-	return books.New(q, merchantID).AccrueUsage(ctx, customer, currency, accrued, key.Coord(), posting.posting.owedAt, nil)
+	return nil
 }
 
 // reversePeriod credits what a period posted beyond its price, as a lot that

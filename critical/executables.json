@@ -2166,6 +2166,29 @@
     ],
     "OR-J40-S26": [
       "TestCreditBooksEdges/OR-J40-S26/a-lot-whose-payment-brought-no-cash-defers-nothing-and-raises-a-finding"
+    ],
+    "OR-J40-S20": [
+      "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/card",
+      "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/remittance",
+      "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance"
+    ],
+    "OR-J40-S21": [
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/waived",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/uncollectible-then-collected",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/uncollectible-then-waived",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived"
+    ],
+    "OR-J40-S22": [
+      "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path"
+    ],
+    "OR-J40-S27": [
+      "TestUsageReceivable/OR-J40-S27/owed-from-before-the-books-is-collected-as-revenue-beside-running-charges"
+    ],
+    "OR-J40-S28": [
+      "TestUsageReceivable/OR-J40-S28/a-chargeback-of-a-usage-payment-reopens-owed-and-its-won-dispute-settles-it-again"
+    ],
+    "OR-J40-S29": [
+      "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled"
     ]
   }
 }

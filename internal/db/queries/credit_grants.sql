@@ -264,10 +264,11 @@ LIMIT 1;
 
 -- name: GetPaymentCashApplication :one
 -- What a payment's receipt brought and what the general ledger applied of
--- it: to its bill's lines at (application, payment, id) and to the credit lot
--- it bought at (credit_issue, payment, id).
+-- it: to its bill's lines at (application, payment, id), to the credit lot
+-- it bought at (credit_issue, payment, id) and to the owed a usage order's
+-- payment settles at (usage_collection*, payment, id).
 SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
-       COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
+       COALESCE(sum(amount) FILTER (WHERE transfer_type IN ('cash_applied', 'usage_collected')), 0)::bigint AS applied
 FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment'
-  AND source_id = sqlc.arg(payment_id)::text AND transfer_type IN ('cash_received', 'cash_applied');
+  AND source_id = sqlc.arg(payment_id)::text AND transfer_type IN ('cash_received', 'cash_applied', 'usage_collected');

@@ -124,6 +124,9 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 				for _, warning := range res.Report.Sides {
 					parts = append(parts, warning.String())
 				}
+				for _, warning := range res.Report.Receivables {
+					parts = append(parts, warning.String())
+				}
 				detail = strings.Join(parts, "; ")
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",

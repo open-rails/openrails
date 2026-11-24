@@ -19,9 +19,7 @@ against an order with no provider call.
 - **Refund intent**: a `provider_intents` row of type `nmi_refund` or
   `stripe_refund` carrying `intents.RefundPayload`, keyed by
   `intents.RefundIdempotencyKey`.
-- **Refundable** (`PaymentService.ValidateRefund`): a succeeded charge with
-  `money_movement = 'rail'`, not a usage order's payment (`ledger_transfer_id`),
-  whose non-failed reversals plus this amount stay within it.
+- **Refundable** (`PaymentService.ValidateRefund`): a succeeded charge with `money_movement = 'rail'` whose non-failed reversals plus this amount stay within it. A usage order's payment (`ledger_transfer_id`) is refundable and can be charged back: a refund leaves its owed settled, a chargeback owes it again (`owed.SyncUsageReversals`, [books](books.md)).
 - **Credit line**: the order line that bought a credit lot; reversals return its
   money first ([prepaid credits](prepaid-credits.md)).
 - **External payment**: a `payments` row with `channel = 'manual'`.

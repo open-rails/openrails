@@ -195,6 +195,9 @@ const (
 	// BalanceTransactionOwedRepayment pays debt from newly funded credit; Amount is the
 	// (negative) change to both the balance and what is owed.
 	BalanceTransactionOwedRepayment BalanceTransactionType = "owed_repayment"
+	// BalanceTransactionOwedReopened owes again what a usage order payment paid,
+	// once it is charged back.
+	BalanceTransactionOwedReopened BalanceTransactionType = "owed_reopened"
 )
 
 // BalanceTransaction is one movement on a customer's balance. Amount is

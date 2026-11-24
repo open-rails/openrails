@@ -104,3 +104,35 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 	}
 	return failing, warnings, nil
 }
+
+// ReceivableDrift is a customer whose units owed differs from what the
+// general ledger holds receivable in a currency: a warning, since owed that
+// accrued before the books has no receivable.
+type ReceivableDrift struct {
+	CustomerID uuid.UUID `json:"customer_id"`
+	Currency   string    `json:"currency"`
+	Owed       int64     `json:"owed"`
+	Receivable int64     `json:"receivable"`
+}
+
+func (d ReceivableDrift) String() string {
+	return fmt.Sprintf("receivable: customer=%s owed=%s receivable=%s (warning)",
+		d.CustomerID, moneyutil.FormatAmount(d.Owed, d.Currency), moneyutil.FormatAmount(d.Receivable, d.Currency))
+}
+
+// CheckReceivables returns the merchant's customers whose units owed and
+// general-ledger receivable differ.
+func CheckReceivables(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]ReceivableDrift, error) {
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("books: merchant is required")
+	}
+	rows, err := gen.New(q).ListUsageReceivableDrift(ctx, merchant)
+	if err != nil {
+		return nil, fmt.Errorf("books: receivable check: %w", err)
+	}
+	var out []ReceivableDrift
+	for _, r := range rows {
+		out = append(out, ReceivableDrift{CustomerID: r.CustomerID, Currency: r.Currency, Owed: r.Owed, Receivable: r.Receivable})
+	}
+	return out, nil
+}

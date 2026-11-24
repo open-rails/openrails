@@ -276,6 +276,10 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 		if transfer.OrderID == nil || *transfer.OrderID != orderID || transfer.Amount != due {
 			return fmt.Errorf("%w: recovered ledger identity conflicts", ErrUsageRecoveryHeld)
 		}
+		if err := books.New(q, mid.UUID()).CollectUsage(ctx, books.UsageCollection{Payment: paymentID, Customer: order.CustomerID, Order: &orderID,
+			Currency: order.Currency, Amount: due, At: facts.PaidAt}); err != nil {
+			return err
+		}
 		var change *models.MoneyTransaction
 		if surplus := charged - due; surplus > 0 {
 			payer := identity.CustomerID(order.CustomerID)
