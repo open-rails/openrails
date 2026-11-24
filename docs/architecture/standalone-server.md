@@ -22,8 +22,8 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
   default `DefaultMerchantConfigManifestPath`) and its overlays.
 - **Operator**: `server/internal/operator`, the operations the CLI and the
   `server.Server` methods share.
-- **Console**: the SPA at `/admin`, built from `server/web/console` (package `admin`,
-  `admin.FS`) and served by `adminconsole.Handler`.
+- **Console**: the SPA at `/admin`, built from `web/console` (package `console`,
+  `console.FS`) and served by `adminconsole.Handler`.
 
 ## How it works
 
@@ -168,7 +168,7 @@ Checks:
 - OR-J32-S03: deleting a merchant closes its credentials' authority.
 
 ### 5. Contracts match the code
-`api/go.txt` lists `pkg openrails/server` and `pkg openrails/server/web/console`. The
+`api/go.txt` lists `pkg openrails/server` and `pkg openrails/web/console`. The
 HTTP surface is the engine's catalog plus AuthKit's routes and `/admin`, so the
 in-process and remote clients see the same API. The image, chart and modules share one
 version.
