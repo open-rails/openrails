@@ -76,11 +76,11 @@ func consoleStaff(t *testing.T, a *authorityWorld, name string, perms ...billing
 
 // consoleOperator holds what a person reviewing an import needs: merchant
 // configuration, the catalog to map prices, and customer support to see
-// whom a record links.
-func consoleOperator(t *testing.T, a *authorityWorld) string {
+// whom a record links; more adds to it.
+func consoleOperator(t *testing.T, a *authorityWorld, more ...billing.Permission) string {
 	t.Helper()
-	return consoleStaff(t, a, "console-operator", billing.MerchantConfigRead, billing.MerchantConfigManage,
-		billing.MerchantCatalogRead, billing.MerchantCatalogManage, billing.MerchantCustomerRead)
+	return consoleStaff(t, a, "console-operator", append([]billing.Permission{billing.MerchantConfigRead, billing.MerchantConfigManage,
+		billing.MerchantCatalogRead, billing.MerchantCatalogManage, billing.MerchantCustomerRead}, more...)...)
 }
 
 // consoleBrowser drives the built BillingAdmin in Chromium. This server only
@@ -371,7 +371,10 @@ func TestMerchantConsole(t *testing.T) {
 		}
 		iw.nmi.DeleteSchedule(gone)
 
-		counts := consoleBrowser(t, iw.authorityWorld, map[string]any{"tokens": map[string]string{"staff": consoleOperator(t, iw.authorityWorld)}, "first": first.ID.String()},
+		// Approving the access-ending change needs customer support's manage
+		// permission, as the cancel route it runs does.
+		staff := consoleOperator(t, iw.authorityWorld, billing.MerchantCustomerManage)
+		counts := consoleBrowser(t, iw.authorityWorld, map[string]any{"tokens": map[string]string{"staff": staff}, "first": first.ID.String()},
 			nil, "console-proposals-group-approve-held-dismiss")
 		for _, step := range []string{"link", "apply"} {
 			require.Zero(t, counts["POST /v1/merchant/psp-imports/"+first.ID.String()+"/"+step], "the console offers no %s of a superseded import", step)
