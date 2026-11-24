@@ -252,6 +252,9 @@
     "adapters/http": [
       "func Mount(target any, engine *openrails.Engine, selection openrails.Routes) error"
     ],
+    "adapters/smtpmail": [
+      "func EmailSender(s *smtp.Sender) openrails.EmailSender"
+    ],
     "billing": [
       "const (\n\tAccessNone   AccessLevel = \"none\"\n\tAccessRead   AccessLevel = \"read\"\n\tAccessUpdate AccessLevel = \"update\"\n)",
       "const (\n\tAdmissionBlockedByMoney  AdmissionBlock = \"money\"\n\tAdmissionBlockedByBudget AdmissionBlock = \"budget\"\n\tAdmissionBlockedByAbuse  AdmissionBlock = \"abuse\"\n\n\tAdmissionBlockedByLimit AdmissionBlock = \"limit\"\n)",
@@ -1972,6 +1975,15 @@
       "fmt": "fmt",
       "http": "net/http",
       "openrails": "github.com/open-rails/openrails",
+      "strings": "strings"
+    },
+    "adapters/smtpmail/smtpmail.go": {
+      "cmp": "cmp",
+      "context": "context",
+      "errors": "errors",
+      "mail": "net/mail",
+      "openrails": "github.com/open-rails/openrails",
+      "smtp": "github.com/open-rails/helpers/smtp",
       "strings": "strings"
     },
     "billing/access_tenure.go": {
