@@ -431,52 +431,41 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 		return err
 	}
 	purchased := purchasedcredits.New(s.db, s.clock)
-	// ListRefunds is newest first. Apply negative events oldest first, then
-	// their positive recoveries, so every recovery finds its exact effect.
-	// A reversal that took no credit is applied again on every pass: passes
-	// repeat until none posts, so credit a recovery reopens is settled now,
-	// not by whichever later event syncs next.
-	for {
-		posted := false
-		for i := len(rows) - 1; i >= 0; i-- {
-			row := rows[i]
-			if PaymentStatusSucceeded(row.Status) && row.Amount < 0 {
-				p, err := purchased.ApplyReversal(ctx, paymentID, row.ID, nil)
-				if err != nil {
-					return err
-				}
-				posted = posted || p
-			}
-		}
-		for i := len(rows) - 1; i >= 0; i-- {
-			row := rows[i]
-			if !PaymentStatusSucceeded(row.Status) || row.Amount <= 0 {
-				continue
-			}
-			var reversed *uuid.UUID
-			if raw, ok := row.Metadata["reverses_payment_id"].(string); ok {
-				id, err := uuid.Parse(raw)
-				if err != nil || id == uuid.Nil {
-					return errors.New("dispute recovery has invalid reversal identity")
-				}
-				reversed = &id
-			}
-			p, err := purchased.ApplyReversal(ctx, paymentID, row.ID, reversed)
-			if err != nil {
+	// ListRefunds is newest first. Each settled reversal's share of the lot
+	// is decided once, the first time it is seen: negative events oldest
+	// first, then their recoveries, so every recovery finds its reversal's.
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if PaymentStatusSucceeded(row.Status) && row.Amount < 0 {
+			if _, err := purchased.ApplyReversal(ctx, paymentID, row.ID, nil); err != nil {
 				return err
 			}
-			posted = posted || p
-		}
-		if !posted {
-			mid, err := merchant.Require(ctx)
-			if err != nil {
-				return err
-			}
-			// What the payment's pending refunds reserve of its lot follows
-			// every settled reversal.
-			return credits.New(s.db.Gen(ctx), mid.UUID(), s.now).SyncReservation(ctx, paymentID)
 		}
 	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if !PaymentStatusSucceeded(row.Status) || row.Amount <= 0 {
+			continue
+		}
+		var reversed *uuid.UUID
+		if raw, ok := row.Metadata["reverses_payment_id"].(string); ok {
+			id, err := uuid.Parse(raw)
+			if err != nil || id == uuid.Nil {
+				return errors.New("dispute recovery has invalid reversal identity")
+			}
+			reversed = &id
+		}
+		if _, err := purchased.ApplyReversal(ctx, paymentID, row.ID, reversed); err != nil {
+			return err
+		}
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	// What the payment's pending refunds reserve of its lot follows every
+	// settled reversal.
+	return credits.New(s.db.Gen(ctx), mid.UUID(), s.now).SyncReservation(ctx, paymentID)
 }
 
 func (s *PaymentService) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) (*models.Payment, error) {

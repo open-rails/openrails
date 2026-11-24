@@ -200,7 +200,10 @@ func (s *PaymentService) receive(ctx context.Context, merchantID, paymentID uuid
 	if err := books.ReceivePayment(ctx, q, row); err != nil {
 		return err
 	}
-	return books.Started(ctx, q, row, s.now())
+	if _, ok := books.ReceiptOf(row); !ok {
+		return nil
+	}
+	return books.Started(ctx, q, row.MerchantID, row.Currency, s.now())
 }
 
 // queueSaleMonitor re-evaluates the PSP's flagged dispute programs once a

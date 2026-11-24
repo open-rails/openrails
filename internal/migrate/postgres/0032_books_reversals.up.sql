@@ -16,6 +16,29 @@ CREATE TRIGGER immutable_books_starts BEFORE DELETE OR UPDATE ON billing.books_s
 CREATE TRIGGER immutable_books_starts_truncate BEFORE TRUNCATE ON billing.books_starts
     FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 
+-- The share of a credit lot each reversal took, or each recovery restored,
+-- decided once when it first settled, nothing included: a later pass never
+-- revisits it.
+CREATE TABLE billing.credit_reversal_shares (
+    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
+    reversal_id uuid NOT NULL,
+    credit_grant_id uuid NOT NULL,
+    cash bigint NOT NULL CHECK (cash >= 0),
+    units bigint NOT NULL CHECK (units >= 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT credit_reversal_shares_pkey PRIMARY KEY (merchant_id, reversal_id, credit_grant_id),
+    CONSTRAINT credit_reversal_shares_reversal_id_fkey FOREIGN KEY (merchant_id, reversal_id) REFERENCES billing.payments (merchant_id, id),
+    CONSTRAINT credit_reversal_shares_credit_grant_id_fkey FOREIGN KEY (merchant_id, credit_grant_id) REFERENCES billing.credit_grants (merchant_id, id)
+);
+COMMENT ON TABLE billing.credit_reversal_shares IS 'One row per settled reversal of a paid credit lot''s payment: the share of the lot it took, or a recovery restored, decided when it first settled, zero included. A later reversal or recovery never changes it. Retention: permanent, never pruned.';
+COMMENT ON COLUMN billing.credit_reversal_shares.cash IS 'The lot''s money it moved, in the lot''s paid_currency.';
+COMMENT ON COLUMN billing.credit_reversal_shares.units IS 'The lot''s units it moved, in the lot''s unit.';
+
+CREATE TRIGGER immutable_credit_reversal_shares BEFORE DELETE OR UPDATE ON billing.credit_reversal_shares
+    FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_credit_reversal_shares_truncate BEFORE TRUNCATE ON billing.credit_reversal_shares
+    FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact();
+
 -- What of a schedule's recognised revenue an early end forfeited and no undone
 -- end has taken back: all an undone end can reinstate. A reversal's contra
 -- never becomes one.
@@ -37,7 +60,8 @@ DROP TRIGGER immutable_revenue_schedule_facts ON billing.revenue_schedules;
 CREATE TRIGGER immutable_revenue_schedule_facts BEFORE DELETE OR UPDATE ON billing.revenue_schedules
     FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('funded', 'recognized_net', 'ended_at', 'recognized_through_at', 'next_recognition_at', 'reinstatements', 'forfeited', 'updated_at');
 
--- The books' start is restored with the rest of a merchant.
+-- The books' start and the lots' reversal shares are restored with the rest
+-- of a merchant.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $_$
 DECLARE item record; occupied boolean;
@@ -79,6 +103,7 @@ BEGIN
                   'catalog_restore_receipts',
                   'credit_grant_events',
                   'credit_grants',
+                  'credit_reversal_shares',
                   'custodians',
                   'customer_delinquency',
                   'customer_invoice_profiles',

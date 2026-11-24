@@ -91,6 +91,69 @@ func (q *Queries) GetLotReversalCash(ctx context.Context, arg GetLotReversalCash
 	return i, err
 }
 
+const listMisbalancedReversals = `-- name: ListMisbalancedReversals :many
+WITH started AS (
+    SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = $1::uuid) AS at
+)
+SELECT p.id, p.currency, p.amount, p.reversal_kind, m.cash::bigint AS moved
+FROM billing.payments p
+CROSS JOIN started s
+JOIN billing.payments o ON o.merchant_id = p.merchant_id AND o.id = p.refunded_payment_id
+CROSS JOIN LATERAL (
+    SELECT count(*) AS legs,
+           COALESCE(sum(t.amount) FILTER (WHERE d.account_type IN ('cash_clearing', 'external_receipts')), 0)
+         - COALESCE(sum(t.amount) FILTER (WHERE c.account_type IN ('cash_clearing', 'external_receipts')), 0) AS cash
+    FROM billing.ledger_transfers t
+    JOIN billing.ledger_accounts d ON d.merchant_id = t.merchant_id AND d.id = t.debit_account_id
+    JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+    WHERE t.merchant_id = p.merchant_id AND t.customer_id = p.customer_id AND t.currency = p.currency AND t.book = 'general'
+      AND t.source_id = p.id::text AND (t.source = 'payment' OR t.operation = 'purchased_credit_refund')
+) m
+WHERE p.merchant_id = $1::uuid AND p.deleted_at IS NULL AND p.created_at >= s.at
+  AND p.status = 'succeeded' AND p.amount <> 0
+  AND o.reversal_kind IS NULL AND o.amount > 0 AND o.status IN ('succeeded', 'refunded') AND o.deleted_at IS NULL
+  AND (o.channel = 'manual' OR o.money_movement = 'rail' AND o.psp_id IS NOT NULL)
+  AND m.legs > 0 AND m.cash <> p.amount
+ORDER BY p.created_at, p.id
+`
+
+type ListMisbalancedReversalsRow struct {
+	ID           uuid.UUID
+	Currency     string
+	Amount       int64
+	ReversalKind *string
+	Moved        int64
+}
+
+// A settled reversal of a receipt, stored since the merchant's books
+// started, whose general-ledger postings (its own and its credit lot's)
+// moved other cash than its amount. One with none is ListUnpostedPayments'.
+func (q *Queries) ListMisbalancedReversals(ctx context.Context, merchantID uuid.UUID) ([]ListMisbalancedReversalsRow, error) {
+	rows, err := q.db.Query(ctx, listMisbalancedReversals, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMisbalancedReversalsRow
+	for rows.Next() {
+		var i ListMisbalancedReversalsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Currency,
+			&i.Amount,
+			&i.ReversalKind,
+			&i.Moved,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPaymentBooksLegs = `-- name: ListPaymentBooksLegs :many
 SELECT t.source_id, t.operation, t.transfer_type, t.revenue_schedule_id, sum(t.amount)::bigint AS amount
 FROM billing.ledger_transfers t
@@ -286,23 +349,23 @@ func (q *Queries) RecordBooksStart(ctx context.Context, arg RecordBooksStartPara
 	return err
 }
 
-const resolvePostedPaymentFindings = `-- name: ResolvePostedPaymentFindings :execrows
+const resolveVanishedBooksFindings = `-- name: ResolveVanishedBooksFindings :execrows
 UPDATE billing.reconciliation_findings
 SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
-WHERE merchant_id = $1::uuid AND finding_type = 'books.entry.missing'
+WHERE merchant_id = $1::uuid AND finding_type = $2::text
   AND status IN ('reconcile_required', 'requires_review')
-  AND NOT (subject_key = ANY($2::text[]))
+  AND NOT (subject_key = ANY($3::text[]))
 `
 
-type ResolvePostedPaymentFindingsParams struct {
-	MerchantID uuid.UUID
-	Missing    []string
+type ResolveVanishedBooksFindingsParams struct {
+	MerchantID  uuid.UUID
+	FindingType string
+	Reported    []string
 }
 
-// A books.entry.missing finding whose payment is no longer missing its
-// posting closes.
-func (q *Queries) ResolvePostedPaymentFindings(ctx context.Context, arg ResolvePostedPaymentFindingsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, resolvePostedPaymentFindings, arg.MerchantID, arg.Missing)
+// A posting finding whose subject the audit no longer reports closes.
+func (q *Queries) ResolveVanishedBooksFindings(ctx context.Context, arg ResolveVanishedBooksFindingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveVanishedBooksFindings, arg.MerchantID, arg.FindingType, arg.Reported)
 	if err != nil {
 		return 0, err
 	}

@@ -179,14 +179,15 @@ type IntegrityReport struct {
 	Unscheduled  []books.UnscheduledLine `json:"unscheduled_lines"`
 	// Awaiting are warnings: revenue lines unscheduled by design, until the
 	// books' rebuild or a tax booking.
-	Awaiting []books.UnscheduledLine `json:"awaiting_lines"`
-	Unposted []books.UnpostedPayment `json:"unposted_payments"`
+	Awaiting    []books.UnscheduledLine     `json:"awaiting_lines"`
+	Unposted    []books.UnpostedPayment     `json:"unposted_payments"`
+	Misbalanced []books.MisbalancedReversal `json:"misbalanced_reversals"`
 }
 
 // OK reports whether the books are intact; side warnings and awaiting lines
 // do not count.
 func (r IntegrityReport) OK() bool {
-	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0 && len(r.Applications) == 0 && len(r.Unscheduled) == 0 && len(r.Unposted) == 0
+	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0 && len(r.Applications) == 0 && len(r.Unscheduled) == 0 && len(r.Unposted) == 0 && len(r.Misbalanced) == 0
 }
 
 // CheckIntegrity runs every diagnostic for one explicitly selected merchant.
@@ -212,6 +213,9 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 		return r, err
 	}
 	if r.Unposted, err = books.CheckPostings(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Misbalanced, err = books.CheckReversalCash(ctx, q, merchant); err != nil {
 		return r, err
 	}
 	if r.Signs, err = CheckSignBreaches(ctx, q, merchant); err != nil {

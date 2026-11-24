@@ -23,6 +23,7 @@ var ownedTables = []string{
 	"change_log",
 	"credit_grant_events",
 	"credit_grants",
+	"credit_reversal_shares",
 	"order_attempts",
 	"operation_log",
 	"custodians",

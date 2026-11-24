@@ -1401,7 +1401,7 @@
       "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first"
     ],
     "OR-J22-S09": [
-      "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-goes-to-a-refund-that-found-none"
+      "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-stays-when-a-refund-found-none"
     ],
     "OR-J22-S12": [
       "TestCredits/OR-J22-S12/a-staff-member-grants-a-full-batch-once-a-minute"
@@ -2205,6 +2205,24 @@
     ],
     "OR-J41-S30": [
       "TestRevenueReversals/OR-J41-S30/a-timed-line-refunded-before-its-access-is-not-unscheduled"
+    ],
+    "OR-J41-S31": [
+      "TestRevenueReversals/OR-J41-S31/a-reversals-share-of-a-credit-lot-is-decided-when-it-settles"
+    ],
+    "OR-J41-S32": [
+      "TestRevenueReversals/OR-J41-S32/a-reversal-posted-for-other-cash-than-its-amount-fails-ledger-audit"
+    ],
+    "OR-J41-S33": [
+      "TestRevenueReversals/OR-J41-S33/a-usage-payment-starts-the-books"
+    ],
+    "OR-J41-S34": [
+      "TestRevenueReversals/OR-J41-S34/a-refund-after-an-early-end-takes-the-forfeit-first"
+    ],
+    "OR-J41-S35": [
+      "TestRevenueReversals/OR-J41-S35/a-recovery-naming-no-chargeback-restores-the-oldest-and-never-fails"
+    ],
+    "OR-J41-S36": [
+      "TestRevenueReversals/OR-J41-S36/a-provider-discount-never-reaches-a-credit-line"
     ]
   }
 }

@@ -11,6 +11,27 @@ import (
 	"github.com/google/uuid"
 )
 
+const creditReversalDecided = `-- name: CreditReversalDecided :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.credit_reversal_shares
+    WHERE merchant_id = $1::uuid AND reversal_id = $2::uuid AND credit_grant_id = $3::uuid
+)::boolean AS decided
+`
+
+type CreditReversalDecidedParams struct {
+	MerchantID    uuid.UUID
+	ReversalID    uuid.UUID
+	CreditGrantID uuid.UUID
+}
+
+// Whether a reversal's, or a recovery's, share of the lot is decided.
+func (q *Queries) CreditReversalDecided(ctx context.Context, arg CreditReversalDecidedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, creditReversalDecided, arg.MerchantID, arg.ReversalID, arg.CreditGrantID)
+	var decided bool
+	err := row.Scan(&decided)
+	return decided, err
+}
+
 const getPurchasedCreditPendingRefunds = `-- name: GetPurchasedCreditPendingRefunds :one
 SELECT COALESCE(sum(-amount),0)::bigint AS amount
 FROM billing.payments
@@ -189,4 +210,29 @@ func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPu
 		&i.Legs,
 	)
 	return i, err
+}
+
+const recordCreditReversalShare = `-- name: RecordCreditReversalShare :exec
+INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, cash, units)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::bigint, $5::bigint)
+`
+
+type RecordCreditReversalShareParams struct {
+	MerchantID    uuid.UUID
+	ReversalID    uuid.UUID
+	CreditGrantID uuid.UUID
+	Cash          int64
+	Units         int64
+}
+
+// Decides a reversal's share of the lot once; a second decision fails.
+func (q *Queries) RecordCreditReversalShare(ctx context.Context, arg RecordCreditReversalShareParams) error {
+	_, err := q.db.Exec(ctx, recordCreditReversalShare,
+		arg.MerchantID,
+		arg.ReversalID,
+		arg.CreditGrantID,
+		arg.Cash,
+		arg.Units,
+	)
+	return err
 }

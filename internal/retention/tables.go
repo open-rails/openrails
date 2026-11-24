@@ -48,6 +48,7 @@ var Tables = map[string]Table{
 	"grants":                        {Permanent, permanent},
 	"credit_grants":                 {Permanent, permanent},
 	"credit_grant_events":           {Permanent, permanent},
+	"credit_reversal_shares":        {Permanent, permanent},
 	"payments":                      {Permanent, permanent},
 	"disputes":                      {Permanent, permanent},
 	"fraud_reports":                 {Permanent, permanent},

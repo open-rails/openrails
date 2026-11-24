@@ -82,12 +82,13 @@ func CashAccount(p gen.BillingPayment) Ref {
 	return Ref{Type: ExternalReceipts}
 }
 
-// Started records, once, that the merchant's books started: when the payment
-// writer first booked a receipt, by its clock. A later receipt, or a booking
-// of an older payment, never moves it.
-func Started(ctx context.Context, q *gen.Queries, p gen.BillingPayment, now time.Time) error {
-	if _, ok := ReceiptOf(p); !ok || CheckCurrency(p.Currency) != nil {
+// Started records, once, that the merchant's books started: when a payment
+// writer first booked a receipt, by its clock. Every writer that books a
+// receipt calls it; a later receipt, or a booking of an older payment, never
+// moves it.
+func Started(ctx context.Context, q *gen.Queries, merchant uuid.UUID, currency string, now time.Time) error {
+	if CheckCurrency(currency) != nil {
 		return nil
 	}
-	return q.RecordBooksStart(ctx, gen.RecordBooksStartParams{MerchantID: p.MerchantID, StartedAt: now.UTC().Truncate(time.Microsecond)})
+	return q.RecordBooksStart(ctx, gen.RecordBooksStartParams{MerchantID: merchant, StartedAt: now.UTC().Truncate(time.Microsecond)})
 }

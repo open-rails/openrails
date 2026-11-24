@@ -342,6 +342,9 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		if e := books.New(q, mid.UUID()).Receive(ctx, books.Receipt{Payment: id, Customer: order.CustomerID, Order: &in.OrderID, Amount: in.Amount, Currency: order.Currency, At: paidAt}); e != nil {
 			return e
 		}
+		if e := books.Started(ctx, q, mid.UUID(), order.Currency, now); e != nil {
+			return e
+		}
 		coord := ledger.Coord{Operation: ledger.OpManualOrderPayment, Source: "manual_invoice_payment", SourceID: in.TransactionID}
 		tr, e := s.moneyLedger(q, mid.UUID()).PayOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), in.Amount, coord, &in.OrderID)
 		if e != nil {

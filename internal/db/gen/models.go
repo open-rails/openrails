@@ -53,6 +53,14 @@ type BillingBookIdentity struct {
 	TaggingStartedAt time.Time
 }
 
+// One row per merchant: when its general ledger booked its first receipt, by the clock that stamps payments and orders. ledger-audit checks the postings of what was stored since; what came before waits for the books' rebuild. Retention: permanent, never pruned.
+type BillingBooksStart struct {
+	MerchantID uuid.UUID
+	// When the first receipt was booked, by the payment writer's clock.
+	StartedAt time.Time
+	CreatedAt time.Time
+}
+
 // A customer's cart: up to 100 lines ({price_id, quantity, amount}, in the order added), priced live as an order preview. Every change goes through one function in one transaction and sets last_changed_at; an order made from the cart takes its lines. Retention: carts are deleted 30 days after last_changed_at.
 type BillingCart struct {
 	MerchantID uuid.UUID
@@ -238,6 +246,18 @@ type BillingCreditGrantEvent struct {
 	CreatedAt   time.Time
 	// The Idempotency-Key the event was made under, if any: a retry under it replays the event.
 	RequestKey *string
+}
+
+// One row per settled reversal of a paid credit lot's payment: the share of the lot it took, or a recovery restored, decided when it first settled, zero included. A later reversal or recovery never changes it. Retention: permanent, never pruned.
+type BillingCreditReversalShare struct {
+	MerchantID    uuid.UUID
+	ReversalID    uuid.UUID
+	CreditGrantID uuid.UUID
+	// The lot's money it moved, in the lot's paid_currency.
+	Cash int64
+	// The lot's units it moved, in the lot's unit.
+	Units     int64
+	CreatedAt time.Time
 }
 
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.

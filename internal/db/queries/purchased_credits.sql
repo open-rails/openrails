@@ -69,3 +69,15 @@ SELECT COALESCE(sum(CASE
     ELSE 0 END),0)::bigint AS amount
 FROM billing.ledger_transfers
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid AND book='units';
+
+-- name: CreditReversalDecided :one
+-- Whether a reversal's, or a recovery's, share of the lot is decided.
+SELECT EXISTS (
+    SELECT 1 FROM billing.credit_reversal_shares
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND reversal_id = sqlc.arg(reversal_id)::uuid AND credit_grant_id = sqlc.arg(credit_grant_id)::uuid
+)::boolean AS decided;
+
+-- name: RecordCreditReversalShare :exec
+-- Decides a reversal's share of the lot once; a second decision fails.
+INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, cash, units)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(reversal_id)::uuid, sqlc.arg(credit_grant_id)::uuid, sqlc.arg(cash)::bigint, sqlc.arg(units)::bigint);

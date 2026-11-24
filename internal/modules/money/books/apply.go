@@ -104,7 +104,13 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		if err != nil {
 			return err
 		}
-		amounts[i], done[i] = l.Amount, credit || slices.Contains(scheduled, l.ID)
+		if credit {
+			// Nor does a provider's discount reach it: the lot's price is
+			// its own.
+			done[i] = true
+			continue
+		}
+		amounts[i], done[i] = l.Amount, slices.Contains(scheduled, l.ID)
 	}
 	// What each payment's earlier applications and reversals took of it.
 	paid, before := make([]int64, len(receipts)), make([]int64, len(receipts))
