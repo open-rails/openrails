@@ -24,7 +24,7 @@ type Definition struct {
 	Unit      string
 	Reset     catalog.LimitReset
 	Overrun   catalog.Overrun
-	RateCards []catalog.LimitRateCard
+	Counts    []catalog.LimitCount
 	Revision  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -38,7 +38,7 @@ type Row struct {
 	WindowSeconds *int32
 	ResetAnchor   *string
 	Overrun       string
-	RateCards     []byte
+	Counts        []byte
 	Revision      int64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -54,9 +54,9 @@ func (r Row) Decode() (Definition, error) {
 	if r.ResetAnchor != nil {
 		d.Reset.Anchor = catalog.ResetAnchor(*r.ResetAnchor)
 	}
-	d.RateCards = []catalog.LimitRateCard{}
-	if err := json.Unmarshal(r.RateCards, &d.RateCards); err != nil {
-		return d, fmt.Errorf("limit %q rate cards: %w", r.Key, err)
+	d.Counts = []catalog.LimitCount{}
+	if err := json.Unmarshal(r.Counts, &d.Counts); err != nil {
+		return d, fmt.Errorf("limit %q counts: %w", r.Key, err)
 	}
 	return d, nil
 }
@@ -319,7 +319,7 @@ func (c Customer) holder() Holder {
 
 // Applies reports whether def counts a request in currency of eventType
 // ("" for a host-stated request): a limit in the currency counts every one,
-// a named-unit limit those its rate cards read. Only a customer some product
+// a named-unit limit those its counts read. Only a customer some product
 // or override gives capacity in is subject to it.
 func Applies(def Definition, meters map[string]Meter, currency, eventType string) bool {
 	if syntax.LimitUnitCurrency(def.Unit) {
@@ -330,7 +330,7 @@ func Applies(def Definition, meters map[string]Meter, currency, eventType string
 
 // Claims are what a request makes of the declared limits the customer is
 // subject to: every limit in its currency claims amount, and every limit
-// whose rate cards read its usage claims the units the usage counts. A
+// whose counts read its usage claims the units the usage counts. A
 // host-stated request with no usage claims no named-unit limit; its capture
 // counts there.
 func (c Customer) Claims(ctx context.Context, defs []Definition, meters map[string]Meter, currency string, amount int64, usage *Usage) ([]Claim, error) {

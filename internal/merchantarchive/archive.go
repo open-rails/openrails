@@ -242,6 +242,9 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 					args[i] = *v
 				}
 			}
+			if p.Name == contract.PriceKeyMovements.Name {
+				return restoreMove(ctx, tx, args)
+			}
 			if dropBefore, ok := partitionDropBefore[p.Name]; ok {
 				args = append(args, dropBefore(restoreNow))
 			}
@@ -318,6 +321,24 @@ VALUES($1,true) ON CONFLICT(merchant_id) DO UPDATE SET restore_required=true`, i
 		return Result{}, classify(err)
 	}
 	return result, nil
+}
+
+// restoreMove records an archived price key movement (merchant_id, id, key,
+// price_id, effective_at, created_at, archived) as the change_log move the
+// upgrade made of each movement, with its id: by then its price is restored.
+func restoreMove(ctx context.Context, tx pgx.Tx, row []any) error {
+	tag, err := tx.Exec(ctx, `INSERT INTO billing.change_log (merchant_id, id, occurred_at, actor, source, object_type, object_id, action, changes)
+SELECT p.merchant_id, $2::text::uuid, $5::text::timestamptz, 'system', 'job', 'price', product.key || ':' || $3::text, 'move',
+    jsonb_build_object('version', 1, 'price_id', p.public_id, 'archived', $6::text::boolean)
+FROM billing.prices p JOIN billing.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
+WHERE p.merchant_id = $1::text::uuid AND p.id = $4::text::uuid`, row[0], row[1], row[2], row[3], row[4], row[6])
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return &Error{Code: "integrity", Table: contract.PriceKeyMovements.Name}
+	}
+	return nil
 }
 
 const wakeBatch = 500

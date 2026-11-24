@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/open-rails/openrails/internal/modules/disputes"
+
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/identity"
@@ -138,6 +140,9 @@ type Runtime struct {
 	MoneyService         *money.MoneyService
 	// MetricsService is the #733 merchant analytics query engine.
 	MetricsService *metrics.Service
+	// Disputes records disputes and fraud reports and evaluates the card
+	// networks' monitoring programs.
+	Disputes *disputes.Service
 	// DashboardService is the merchant's saved dashboard layout.
 	DashboardService *dashboard.Service
 	// CopilotService answers catalog questions and drafts price changes for a
@@ -493,9 +498,14 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		dispatchDone = make(chan struct{})
 		go func() { defer close(dispatchDone); r.Messages.Run(loopCtx) }()
 	}
+	var wakeDone chan struct{}
+	if r.Disputes != nil {
+		wakeDone = make(chan struct{})
+		go func() { defer close(wakeDone); r.Disputes.Run(loopCtx) }()
+	}
 	joinLoops := func() {
 		stopLoops()
-		for _, done := range []chan struct{}{pollerDone, dispatchDone} {
+		for _, done := range []chan struct{}{pollerDone, dispatchDone, wakeDone} {
 			if done != nil {
 				<-done
 			}

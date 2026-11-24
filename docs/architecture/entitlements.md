@@ -24,10 +24,7 @@ usage costs is [usage billing](usage-billing.md).
 - **Seats**: a per-seat window's `quantity`; a check answers the most seats held.
 - **`valid_until`**: the next scheduled change that could alter a requested
   answer, null when none.
-- **Limit**: a declared cap in a named unit or a currency, with a reset and an
-  overrun, `require_estimate` or `admit_while_positive` (`catalog_limits`).
-  Products give it capacity (`catalog_product_limits`); a customer override
-  replaces their sum (`customer_limit_overrides`).
+- **Limit**: a declared cap in a named unit or a currency, with a reset and an overrun, `require_estimate` or `admit_while_positive` (`catalog_limits`). A named-unit limit's `counts` add each event's quantity × `weight` ÷ `per`, rounded half up, per meter and optional `filter` (`limits.Units`); a currency limit counts the rated amount. Products give it capacity (`catalog_product_limits`); a customer override replaces their sum (`customer_limit_overrides`).
 - **Reset kinds**: `fixed` (tiles of `window_seconds` from the subscription start
   or the first use), `billing_period`, `session` (opens at the first use),
   `rolling` (60 buckets), `rate` (refills continuously), `lifetime`.
@@ -285,10 +282,10 @@ Checks:
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products).
-- **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to S18 (declarations, capacity, windows, overruns, spend caps, racing replicas), S19 to S31 (the gate in process and over Redis, lost replies, outbox, closing), S33, S34 (a window and an accrual-rate cap in the policy's `policy_currency`); OR-J25-S05 (running charges under `accrual_rate_cap`).
+- **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to S18 (declarations, capacity, windows, overruns, spend caps, racing replicas), S19 to S31 (the gate in process and over Redis, lost replies, outbox, closing), S33, S34 (a window and an accrual-rate cap in the policy's `policy_currency`), S35 (a limit counting two meters by weight, admitted and through a gate), S36 (a limit's `rate_cards` refused with their rename to `counts`); OR-J25-S05 (running charges under `accrual_rate_cap`).
 - **J24**, leases and holds: OR-J24-S03, S12 to S20, S23 to S35 (lease lifetime,
   hold versions, sizing, bounded syncs).
-- Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14.
+- Also OR-J22-S06 and OR-J22-S50 (lapsed credit), OR-J29-S08, OR-J31-S14, OR-J31-S16 (stored limit rate cards migrate to counts).
 
 Other tests: `entitlement_check_cache_test.go` drives the cache against a test
 server (defaults, allowed keys only, live eviction, an in-flight fill refused

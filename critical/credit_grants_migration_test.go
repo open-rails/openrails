@@ -35,8 +35,8 @@ func TestCreditGrantsMigration(t *testing.T) {
 	})
 }
 
-// legacySchema is a schema migrated up to the migration that moves credit
-// lots, and the full chain that then moves them.
+// legacySchema is a schema migrated up to the migration under test, and the
+// full chain that then runs it.
 type legacySchema struct {
 	pool   *pgxpool.Pool
 	schema string
@@ -44,6 +44,13 @@ type legacySchema struct {
 }
 
 func newLegacySchema(t *testing.T) *legacySchema {
+	t.Helper()
+	return newLegacySchemaBefore(t, "_credit_grants.up.sql")
+}
+
+// newLegacySchemaBefore is a schema migrated up to the migration whose name
+// ends in suffix.
+func newLegacySchemaBefore(t *testing.T, suffix string) *legacySchema {
 	t.Helper()
 	dsn := os.Getenv("OPENRAILS_CRITICAL_DSN")
 	require.NotEmpty(t, dsn, "OPENRAILS_CRITICAL_DSN must name a disposable PostgreSQL database; critical scenarios never skip")
@@ -60,7 +67,7 @@ func newLegacySchema(t *testing.T) *legacySchema {
 	names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 	require.NoError(t, err)
 	slices.Sort(names)
-	at := slices.IndexFunc(names, func(name string) bool { return strings.HasSuffix(name, "_credit_grants.up.sql") })
+	at := slices.IndexFunc(names, func(name string) bool { return strings.HasSuffix(name, suffix) })
 	require.GreaterOrEqual(t, at, 0)
 	before := fstest.MapFS{}
 	for _, name := range names[:at] {

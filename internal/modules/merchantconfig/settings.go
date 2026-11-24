@@ -166,6 +166,14 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		}
 		cfg.ProviderRefundAccess = policy
 	}
+	if in.FraudWarningRefund != nil {
+		switch policy := billing.FraudWarningRefund(strings.TrimSpace(string(*in.FraudWarningRefund))); policy {
+		case "", billing.FraudWarningRefundCharge, billing.FraudWarningRecord:
+			cfg.FraudWarningRefund = policy
+		default:
+			return Settings{}, fmt.Errorf("fraud_warning_refund must be %q or %q", billing.FraudWarningRefundCharge, billing.FraudWarningRecord)
+		}
+	}
 	if in.DunningPolicy != nil {
 		if _, err := collection.PolicyOf(in.DunningPolicy); err != nil {
 			return Settings{}, err

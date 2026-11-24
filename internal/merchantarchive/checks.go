@@ -52,7 +52,7 @@ var excludedTables = map[string]string{
 	"provisioning_tokens":           "credentials; the destination mints its own",
 	"merchant_destructive_policy":   "deployment safety policy",
 	"carts":                         "a customer's basket, not billing history: priced live, it holds no money and the customer fills it again at the destination",
-	"provider_mutation_logs":        "operator evidence; raw bodies excluded",
+	"operation_log":                 "the source deployment's record of the provider operations it ran: operator evidence, never moved",
 	"reconciliation_findings":       "operator observations",
 	"destructive_run_before_images": "unsupported byte-exact undo history; any rows refused",
 	"subscription_verifications":    "derived: re-detected from unverified subscriptions",
@@ -64,6 +64,7 @@ var excludedTables = map[string]string{
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 
 	"price_keys":                    "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
+	"network_activity_daily":        "derived: the payments, disputes and fraud_reports triggers rebuild it as they are restored",
 	"balance_watches":               "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
 	"psp_imports":                   "import working state: the destination pulls its PSPs again",
 	"psp_import_records":            "import working state: copies of provider objects, pulled again",
@@ -109,7 +110,7 @@ var excludedColumns = map[string]string{
 	"notification_events":           "merchant_id id customer_id event_type data created_at inserted_at",
 	"notification_issue_revisions":  "merchant_id customer_id issue_key revision withdrawn source_event",
 	"notification_channel_state":    "merchant_id restore_required",
-	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id origin actor executor operation_id subscription_id reason_code",
+	"operation_log":                 "merchant_id id occurred_at actor source object_type object_id action changes reason request_id operation_id rail psp_id custodian_id subscription_id",
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
 	"stored_card_checks":            "merchant_id payment_method_id due_at",
 	"nmi_bulk_checkpoints":          "merchant_id psp_id window_starts_at window_ends_at next_page started_at",
@@ -120,8 +121,9 @@ var excludedColumns = map[string]string{
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
-	"price_keys":      "merchant_id product_id key revision created_at updated_at",
-	"balance_watches": "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
+	"price_keys":             "merchant_id product_id key revision created_at updated_at",
+	"network_activity_daily": "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
+	"balance_watches":        "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment
@@ -141,7 +143,8 @@ var omittedColumns = map[string]string{
 	"order_attempts":   "destructive_run_class",
 	"product_access":   "destructive_run_class",
 	"maintenance_runs": "run_class coverage affected note summary inventory_manifest inventory_total_rows",
-	"provider_intents": "destructive_run_class destructive_action_id",
+	// The breaker's sent attempt: the destination's breaker counts its own.
+	"provider_intents": "destructive_run_class destructive_action_id sent_attempt",
 	"price_migrations": "destructive_action_id",
 	// Derived from the lines: a restored open order is not found by it.
 	"orders": "lines_digest",

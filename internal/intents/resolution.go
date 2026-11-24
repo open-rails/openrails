@@ -78,7 +78,7 @@ func (r Resolution) normalized() (Resolution, error) {
 	return r, nil
 }
 
-// Record is the durable audit form stored with the operation and mutation log.
+// Record is the durable audit form stored with the operation and its result entry.
 func (r Resolution) Record(at time.Time) map[string]any {
 	out := map[string]any{"actor": r.Actor, "reason": r.Reason, "resolved_at": at.UTC().Format(time.RFC3339Nano)}
 	if r.Step != "" {

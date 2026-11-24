@@ -148,7 +148,7 @@ export type ApplyLimit = {
   unit?: string | null
   reset?: LimitReset | null
   overrun?: "admit_while_positive" | "require_estimate" | null
-  rate_cards?: LimitRateCard[] | null
+  counts?: LimitCount[] | null
 }
 
 export type ApplyMeter = {
@@ -1077,6 +1077,54 @@ export type DismissProposalsParams = {
   notes?: string
 }
 
+export type Dispute = {
+  id: string
+  provider_ref: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  psp_id: string
+  customer_id: string | null
+  payment_id: string | null
+  kind: "chargeback" | "inquiry" | "prevented" | "unknown"
+  status: "closed" | "lost" | "open" | "unreported" | "won"
+  network: "amex" | "diners" | "discover" | "jcb" | "mastercard" | "other" | "unionpay" | "unknown" | "visa"
+  reason: "authorization" | "canceled_recurring" | "credit_not_processed" | "duplicate" | "fraud" | "not_as_described" | "not_received" | "other" | "processing_error" | "unknown" | "unrecognized"
+  reason_code: string
+  provider_reason: string
+  amount: string | null
+  currency: string | null
+  disputed_at: string
+  chargeback_at: string | null
+  evidence_due_at: string | null
+  closed_at: string | null
+  reversal_payment_id: string | null
+  recovery_payment_id: string | null
+}
+
+export type DisputeStanding = {
+  psp_id: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  program: "acquirer" | "mastercard_ecp" | "mastercard_efm" | "stripe" | "visa_vamp"
+  month: string
+  count: string
+  denominator: string
+  ratio: number
+  projected_ratio: number
+  projected_count: string
+  level: "excessive" | "high_excessive" | "none" | "warning"
+  thresholds: DisputeThreshold[]
+  fraud_reports_visible: boolean
+  disputes_reported: boolean
+}
+
+export type DisputeThreshold = {
+  level: "excessive" | "high_excessive" | "none" | "warning"
+  ratio: number
+  min_count: string
+  min_amount: string
+  min_prior_sales: string
+  source: string
+}
+
 export type DriftField = {
   field: string
   openrails_value: string
@@ -1239,6 +1287,7 @@ export type Hold = {
   limit_set: string
   currency: string
   limits: HoldLimit[]
+  counts: HoldCount[]
   rate_cards: HoldRateCard[]
   price_bounds: PriceBound[]
   safe: string | null
@@ -1257,6 +1306,18 @@ export type HoldCommitment = {
   limits?: LimitCommitment[]
 }
 
+export type HoldCount = {
+  limit: string
+  meter: string
+  event_type: string
+  value_property: string
+  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  group_by: Record<string, string> | null
+  filter: Record<string, string[]> | null
+  weight: number
+  per: number
+}
+
 export type HoldLimit = {
   limit: string
   unit: string
@@ -1267,7 +1328,6 @@ export type HoldLimit = {
 }
 
 export type HoldRateCard = {
-  limit: string | null
   meter: string
   event_type: string
   value_property: string
@@ -1355,7 +1415,7 @@ export type Limit = {
   unit: string
   reset: LimitReset
   overrun: "admit_while_positive" | "require_estimate"
-  rate_cards: LimitRateCard[]
+  counts: LimitCount[]
   products: LimitProduct[]
   revision: number
   created_at: string
@@ -1368,6 +1428,13 @@ export type LimitCommitment = {
   committed?: string
 }
 
+export type LimitCount = {
+  meter: string
+  weight?: number
+  per?: number
+  filter?: Record<string, string[]>
+}
+
 export type LimitOverride = {
   inherit?: boolean
   limit: string
@@ -1378,12 +1445,6 @@ export type LimitProduct = {
   product_id: string
   product_key: string
   capacity: string
-}
-
-export type LimitRateCard = {
-  meter: string
-  filter?: Record<string, string[]>
-  price: RatePrice
 }
 
 export type LimitReset = {
@@ -1404,7 +1465,7 @@ export type LogEntry = {
   source: "api" | "catalog_apply" | "cli" | "console" | "customer" | "intent" | "job" | "provider_read" | "reload" | "webhook"
   object_type: "custodian" | "limit" | "merchant" | "messages" | "meter" | "price" | "product" | "psp"
   object_id: string
-  action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "unarchive" | "update"
+  action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "move" | "unarchive" | "update"
   changes: unknown | null
   reason: string | null
   request_id: string | null
@@ -1426,7 +1487,7 @@ export type Mandate = {
   subscription_id: string | null
   currency: string | null
   status: "active" | "ended" | "requires_reconsent" | "revoked"
-  end_reason: "brand_changed" | "closed" | "customer_revoked" | "payment_method_removed" | "replaced" | "subscription_ended" | null
+  end_reason: "brand_changed" | "closed" | "customer_revoked" | "disputed" | "payment_method_removed" | "replaced" | "subscription_ended" | null
   ended_at: string | null
   card_brand: string | null
   initial_transaction_id: string | null
@@ -1460,6 +1521,7 @@ export type MerchantConfigurationState = {
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
+  fraud_warning_refund?: "record" | "refund"
   arrears_grace_days?: number
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
@@ -2004,6 +2066,7 @@ export type Payment = {
   failure: PaymentFailure | null
   refunded_payment_id: string | null
   reason: string | null
+  refund_reason: "charged_after_cancel" | "dispute_prevention" | "duplicate" | "fraud_warning" | "fraudulent" | "other" | "requested_by_customer" | "unknown" | null
   refunds: Payment[]
   created_at: string
 }
@@ -2059,7 +2122,7 @@ export type PaymentMethod = {
   customer_id: string
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   psp_id: string | null
-  status: "active" | "closed" | "removed" | "replaced" | "requires_action"
+  status: "active" | "closed" | "disputed" | "removed" | "replaced" | "requires_action"
   next_action: NextAction | null
   replaced_by: string | null
   card: CardDetails | null
@@ -2422,6 +2485,7 @@ export type RefundPaymentParams = {
   amount?: string
   full?: boolean
   reason?: string
+  refund_reason?: "charged_after_cancel" | "dispute_prevention" | "duplicate" | "fraud_warning" | "fraudulent" | "other" | "requested_by_customer" | "unknown"
   revoke_access?: boolean
 }
 
@@ -2535,7 +2599,7 @@ export type SetLimitParams = {
   unit?: string
   reset?: LimitReset
   overrun?: "admit_while_positive" | "require_estimate"
-  rate_cards?: LimitRateCard[]
+  counts?: LimitCount[]
   expected_revision?: number
 }
 
@@ -2861,6 +2925,7 @@ export type UpdateMerchantConfigurationParams = {
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
+  fraud_warning_refund?: "record" | "refund"
   arrears_grace_days?: number
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy

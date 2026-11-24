@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/disputejob"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -126,11 +127,25 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		FailureCode:         p.FailureCode,
 		FailureReason:       p.FailureReason,
 		ReversalKind:        p.ReversalKind,
+		RefundReason:        refundReason(p),
+		PaymentMethodID:     p.PaymentMethodID,
 		TokenType:           p.TokenType,
 		MoneyMovement:       string(movement),
 		OrderID:             p.OrderID,
 		Quantity:            quantity,
 	}, nil
+}
+
+// refundReason is a refund row's reason: unknown when its writer named none.
+func refundReason(p *models.Payment) *string {
+	if p.ReversalKind == nil || *p.ReversalKind != ReversalRefund {
+		return nil
+	}
+	if p.RefundReason != nil && billing.RefundReason(*p.RefundReason).Valid() {
+		return p.RefundReason
+	}
+	unknown := string(billing.RefundUnknown)
+	return &unknown
 }
 
 func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) error {
@@ -161,7 +176,23 @@ func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) er
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
+	if err := s.queueSaleMonitor(ctx, params); err != nil {
+		return err
+	}
 	return convergejob.Queue(ctx, s.db, tid, payment.CustomerID)
+}
+
+// queueSaleMonitor re-evaluates the PSP's flagged dispute programs once a
+// sale settled on it.
+func (s *PaymentService) queueSaleMonitor(ctx context.Context, p gen.CreatePaymentParams) error {
+	if p.PspID == nil || p.Status != PaymentStatusSucceededValue || p.Amount <= 0 || p.RefundedPaymentID != nil || p.MoneyMovement != string(models.MoneyMovementRail) {
+		return nil
+	}
+	settled := p.PurchasedAt
+	if settled.IsZero() {
+		settled = s.now()
+	}
+	return disputejob.QueueMonitorIfFlagged(ctx, s.db, p.MerchantID, *p.PspID, settled)
 }
 
 func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.Payment) (bool, error) {
@@ -187,6 +218,9 @@ func (s *PaymentService) CreateIfNotExists(ctx context.Context, payment *models.
 	}
 	rows, err := s.db.Gen(ctx).CreatePaymentIfNotExists(ctx, gen.CreatePaymentIfNotExistsParams(params))
 	if err != nil || rows == 0 {
+		return false, err
+	}
+	if err := s.queueSaleMonitor(ctx, params); err != nil {
 		return false, err
 	}
 	return true, convergejob.Queue(ctx, s.db, tid, payment.CustomerID)
@@ -491,7 +525,15 @@ func (s *PaymentService) completeProviderAttempt(ctx context.Context, attemptID 
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-	return nil
+	// The attempt settled at the rail: a sale on its PSP.
+	settled, err := s.db.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: queryMerchant.UUID(), ID: attemptID})
+	if err != nil {
+		return err
+	}
+	if settled.PspID == nil || settled.Amount <= 0 || settled.RefundedPaymentID != nil {
+		return nil
+	}
+	return disputejob.QueueMonitorIfFlagged(ctx, s.db, queryMerchant.UUID(), *settled.PspID, settled.PurchasedAt)
 }
 
 func (s *PaymentService) completeProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {

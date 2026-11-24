@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -17,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -187,7 +190,7 @@ func newIntentsLogCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "intents-log",
-		Short: "List provider mutation attempts/results",
+		Short: "List the operations history: provider operation attempts, results and holds",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runIntentsMutationLog(c, provider, intent, psp, phase, format, merchant, limit)
@@ -402,12 +405,10 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase,
 	}
 	var phaseFilter *string
 	if p := strings.ToLower(strings.TrimSpace(phase)); p != "" {
-		switch p {
-		case string(intents.MutationLogPhaseAttempting), string(intents.MutationLogPhaseSucceeded), string(intents.MutationLogPhaseFailed), string(intents.MutationLogPhaseUnknown), string(intents.MutationLogPhaseParked):
-			phaseFilter = &p
-		default:
+		if !slices.Contains(intents.OperationPhases(), intents.OperationPhase(p)) {
 			return fmt.Errorf("invalid --phase %q", phase)
 		}
+		phaseFilter = &p
 	}
 	format = strings.ToLower(strings.TrimSpace(format))
 	if format == "" {
@@ -425,75 +426,75 @@ func runIntentsMutationLog(cmd *cobra.Command, provider, intentID, pspID, phase,
 		if err != nil {
 			return err
 		}
-		total, err := database.Gen(ctx).CountProviderMutationLogs(ctx, gen.CountProviderMutationLogsParams{
-			MerchantID:       merchantID.UUID(),
-			Rail:             providerFilter,
-			ProviderIntentID: intentFilter,
-			PspID:            accountFilter,
-			Phase:            phaseFilter,
+		total, err := database.Gen(ctx).CountOperationLog(ctx, gen.CountOperationLogParams{
+			MerchantID:  merchantID.UUID(),
+			Rail:        providerFilter,
+			OperationID: intentFilter,
+			PspID:       accountFilter,
+			Action:      phaseFilter,
 		})
 		if err != nil {
-			return fmt.Errorf("count rail mutation logs: %w", err)
+			return fmt.Errorf("count operation log: %w", err)
 		}
-		rows, err := database.Gen(ctx).ListProviderMutationLogs(ctx, gen.ListProviderMutationLogsParams{
-			MerchantID:       merchantID.UUID(),
-			Rail:             providerFilter,
-			ProviderIntentID: intentFilter,
-			PspID:            accountFilter,
-			Phase:            phaseFilter,
-			LimitRows:        int64(limit),
+		rows, err := database.Gen(ctx).ListOperationLog(ctx, gen.ListOperationLogParams{
+			MerchantID:  merchantID.UUID(),
+			Rail:        providerFilter,
+			OperationID: intentFilter,
+			PspID:       accountFilter,
+			Action:      phaseFilter,
+			RowLimit:    int32(min(limit, math.MaxInt32)), // #nosec G115 -- bounded above
 		})
 		if err != nil {
-			return fmt.Errorf("list rail mutation logs: %w", err)
+			return fmt.Errorf("list operation log: %w", err)
+		}
+		operations := make([]history.Operation, len(rows))
+		for i, row := range rows {
+			if err := json.Unmarshal(row.Changes, &operations[i]); err != nil {
+				return fmt.Errorf("operation log entry %s: %w", row.ID, err)
+			}
 		}
 
 		if format == "json" {
 			items := make([]map[string]any, 0, len(rows))
-			for _, row := range rows {
-				item := map[string]any{
-					"id":                 row.ID,
-					"merchant_id":        row.MerchantID,
-					"provider":           row.Rail,
-					"psp_id":             row.PspID,
-					"provider_intent_id": row.ProviderIntentID,
-					"intent_type":        row.IntentType,
-					"idempotency_key":    row.IdempotencyKey,
-					"attempt":            row.Attempt,
-					"phase":              row.Phase,
-					"reason":             row.Reason,
-					"created_at":         row.CreatedAt,
-				}
-				if len(row.Evidence) > 0 {
-					item["evidence"] = json.RawMessage(row.Evidence)
-				}
-				items = append(items, item)
+			for i, row := range rows {
+				items = append(items, map[string]any{
+					"id":              row.ID,
+					"occurred_at":     row.OccurredAt,
+					"actor":           row.Actor,
+					"source":          row.Source,
+					"rail":            row.Rail,
+					"psp_id":          row.PspID,
+					"custodian_id":    row.CustodianID,
+					"subscription_id": row.SubscriptionID,
+					"operation_id":    row.OperationID,
+					"phase":           row.Action,
+					"request_id":      row.RequestID,
+					"operation":       operations[i],
+				})
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			return enc.Encode(map[string]any{"total": total, "provider_mutation_events": items})
+			return enc.Encode(map[string]any{"total": total, "operations": items})
 		}
 
-		fmt.Printf("Provider mutation events: %d total, showing %d\n\n", total, len(rows))
+		fmt.Printf("Provider operations: %d entries, showing %d\n\n", total, len(rows))
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "CREATED\tPROVIDER\tACCOUNT\tINTENT\tTYPE\tATTEMPT\tPHASE\tREASON")
-		for _, row := range rows {
-			// or#893/or#795: an intent is addressed to a PSP or to a custodian.
+		fmt.Fprintln(w, "OCCURRED\tPROVIDER\tACCOUNT\tINTENT\tTYPE\tATTEMPT\tPHASE\tACTOR\tREASON")
+		for i, row := range rows {
+			// An intent is addressed to a PSP or to a custodian.
 			account := intentAddress(row.PspID, row.CustodianID)
 			intent := ""
-			if row.ProviderIntentID != nil {
-				intent = row.ProviderIntentID.String()
+			if row.OperationID != nil {
+				intent = row.OperationID.String()
 			}
-			intentType := ""
-			if row.IntentType != nil {
-				intentType = *row.IntentType
+			op := operations[i]
+			reason := op.Reason
+			if reason == "" {
+				reason = op.ReasonCode
 			}
-			reason := ""
-			if row.Reason != nil {
-				reason = *row.Reason
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-				row.CreatedAt.Format("2006-01-02 15:04"),
-				row.Rail, account, intent, intentType, row.Attempt, row.Phase, reason)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+				row.OccurredAt.Format("2006-01-02 15:04"),
+				row.Rail, account, intent, op.Kind, op.Attempt, row.Action, row.Actor, reason)
 		}
 		return w.Flush()
 	})

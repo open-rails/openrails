@@ -267,7 +267,7 @@ and no sticky session.
   `periodic_leases`.
 
 Size PostgreSQL `max_connections` for every pool, plus `DatabaseConfig.LeaseConns`
-per instance, plus one per instance with Vault configuration (it listens for edits).
+per instance, plus one per instance for each listener: customer messages, dispute responses and, with Vault configuration, configuration edits.
 
 ## PgBouncer
 
@@ -278,6 +278,11 @@ and role through PostgreSQL's direct endpoint. OpenRails scopes the merchant to
 each transaction and uses direct sessions for migrations, listeners and session
 locks. Its own River workers poll in this mode; a host fleet on the PgBouncer
 pool sets `river.Config.PollOnly`.
+
+`LISTEN` needs a session: a transaction-pooled connection drops its
+notifications. Without `PostgresSession` the listeners (customer messages,
+dispute responses, configuration edits) run on the `Postgres` pool, so behind
+PgBouncer that pool must be in session mode.
 
 ## Routes
 

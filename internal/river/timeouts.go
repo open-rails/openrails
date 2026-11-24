@@ -4,6 +4,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/open-rails/openrails/internal/disputejob"
+
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/internal/balancelook"
@@ -35,6 +37,8 @@ var kinds = map[string]time.Duration{
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,
 	convergejob.Kind:                     DefaultTimeout,
+	disputejob.MonitorKind:               DefaultTimeout,
+	disputejob.ResponseKind:              DefaultTimeout,
 	alerting.DeliveryKind:                DefaultTimeout,
 	messages.KindSend:                    DefaultTimeout,
 	messages.KindDispatch:                DefaultTimeout,

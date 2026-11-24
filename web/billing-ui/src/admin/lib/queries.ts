@@ -108,6 +108,7 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
     getDashboard,
     getMetricsSchema,
     metricsQuery,
+    listDisputePrograms,
   } = api
 
   const currentMerchantRoot = queryRoot
@@ -543,6 +544,12 @@ export function createQueries(client: AdminClient, api: AdminAPI) {
         queryKey: [...queryKeys.dashboard(), "metrics", query ?? "unselected"],
         queryFn: ({ signal }) => metricsQuery(query!, signal),
         enabled: Boolean(query),
+      }),
+    disputePrograms: (at?: string) =>
+      queryOptions({
+        queryKey: [...queryKeys.dashboard(), "dispute-programs", at ?? "now"],
+        queryFn: ({ signal }) => listDisputePrograms(at, signal),
+        meta: { errorAction: "Load dispute programs" },
       }),
     // The bell lists the open findings that need a person and counts them.
     notifications: (enabled: boolean) =>

@@ -429,8 +429,10 @@ func severityRank(s Severity) int32 {
 
 // RaisedFinding is a finding raised outside a run: it needs a person.
 type RaisedFinding struct {
-	Type              FindingType
-	SubjectKey        string
+	Type       FindingType
+	SubjectKey string
+	// PSPID names the PSP the finding is about, when it is about one.
+	PSPID             *uuid.UUID
 	Severity          Severity
 	RecommendedAction string
 	Evidence          map[string]any
@@ -448,7 +450,7 @@ func (s *PGStore) RaiseFinding(ctx context.Context, f RaisedFinding) (FindingRec
 	}
 	row, err := s.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID: tid.UUID(), FindingType: string(f.Type), SubjectKey: f.SubjectKey, Severity: string(f.Severity),
-		Status: string(FindingStatusRequiresReview), RecommendedAction: action, Evidence: marshalEvidence(f.Evidence),
+		Status: string(FindingStatusRequiresReview), RecommendedAction: action, Evidence: marshalEvidence(f.Evidence), PspID: f.PSPID,
 	})
 	if err != nil {
 		return FindingRecord{}, err

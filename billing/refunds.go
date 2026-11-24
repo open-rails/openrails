@@ -17,9 +17,13 @@ var (
 // If seat or plan changes make the funding ambiguous, the refund completes
 // and a merchant finding requests review while access stays intact.
 // Provider notifications of an OpenRails refund preserve this decision.
+//
+// Reason is the merchant's own words; RefundReason the kind of refund, for
+// reporting refunds by reason (default requested_by_customer).
 type RefundPaymentParams struct {
-	Amount       int64  `json:"amount,omitempty,string"`
-	Full         bool   `json:"full,omitempty"`
-	Reason       string `json:"reason,omitempty"`
-	RevokeAccess bool   `json:"revoke_access,omitempty"`
+	Amount       int64        `json:"amount,omitempty,string"`
+	Full         bool         `json:"full,omitempty"`
+	Reason       string       `json:"reason,omitempty"`
+	RefundReason RefundReason `json:"refund_reason,omitempty"`
+	RevokeAccess bool         `json:"revoke_access,omitempty"`
 }

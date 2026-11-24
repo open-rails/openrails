@@ -201,13 +201,12 @@ type boundKey struct{ meter, cell string }
 
 type moneyCard struct {
 	meter limits.Meter
-	card  catalog.LimitRateCard
+	card  catalog.RateCard
 }
 
 // holdPricing is how a gate prices a request against one hold: named-unit
-// limits by their rate cards, the same code the server runs; money by the
-// hold's pinned cards at their price bounds, which never price below the
-// server.
+// limits by their counts, the same code the server runs; money by the hold's
+// pinned cards at their price bounds, which never price below the server.
 type holdPricing struct {
 	currency string
 	parts    []holdPart
@@ -233,30 +232,33 @@ func newHoldPricing(h billing.Hold, events map[string]bool) *holdPricing {
 	for _, l := range h.Limits {
 		p.parts = append(p.parts, holdPart{id: partID(l.Limit, l.WindowStartsAt), limit: l.Limit, unit: l.Unit, overrun: l.Overrun, start: l.WindowStartsAt, end: l.WindowEndsAt})
 	}
-	for _, rc := range h.RateCards {
-		m := limits.Meter{Key: rc.Meter, EventType: rc.EventType, ValueProperty: limits.PropertyKey(rc.ValueProperty), Aggregation: rc.Aggregation, GroupBy: rc.GroupBy}
+	meter := func(key, eventType, valueProperty string, aggregation catalog.Aggregation, groupBy map[string]string) limits.Meter {
+		m := limits.Meter{Key: key, EventType: eventType, ValueProperty: limits.PropertyKey(valueProperty), Aggregation: aggregation, GroupBy: groupBy}
 		if m.EventType == "" {
-			m.EventType = rc.Meter
+			m.EventType = key
 		}
 		if m.ValueProperty == "" {
-			m.ValueProperty = rc.Meter
+			m.ValueProperty = key
 		}
 		if m.Aggregation == "" {
 			m.Aggregation = catalog.AggregationSum
 		}
-		p.meters[rc.Meter] = m
+		p.meters[key] = m
 		p.events[m.EventType] = true
-		card := catalog.LimitRateCard{Meter: rc.Meter, Filter: rc.Filter, Price: rc.Price}
-		if rc.Limit == nil {
-			if c := strings.ToUpper(strings.TrimSpace(string(rc.Price.Currency))); c == "" || c == p.currency {
-				p.money = append(p.money, moneyCard{meter: m, card: card})
-			}
-			continue
+		return m
+	}
+	for _, c := range h.Counts {
+		meter(c.Meter, c.EventType, c.ValueProperty, c.Aggregation, c.GroupBy)
+		def := p.units[c.Limit]
+		def.Key = c.Limit
+		def.Counts = append(def.Counts, catalog.LimitCount{Meter: c.Meter, Weight: c.Weight, Per: c.Per, Filter: c.Filter})
+		p.units[c.Limit] = def
+	}
+	for _, rc := range h.RateCards {
+		m := meter(rc.Meter, rc.EventType, rc.ValueProperty, rc.Aggregation, rc.GroupBy)
+		if c := strings.ToUpper(strings.TrimSpace(string(rc.Price.Currency))); c == "" || c == p.currency {
+			p.money = append(p.money, moneyCard{meter: m, card: catalog.RateCard{Meter: rc.Meter, Filter: rc.Filter, Price: rc.Price}})
 		}
-		def := p.units[*rc.Limit]
-		def.Key = *rc.Limit
-		def.RateCards = append(def.RateCards, card)
-		p.units[*rc.Limit] = def
 	}
 	for _, b := range h.PriceBounds {
 		cell := ""
@@ -296,11 +298,11 @@ var errUnpriced = errors.New("openrails: gate: the hold cannot price this reques
 
 // cost is what r takes from each limit of the hold it counts toward, in the
 // window current at now, as the server claims it: a currency limit takes
-// every request's money cost, a named-unit limit the units its rate cards
-// count of r's usage (a host-stated request has none). The money cost is
-// priced when a currency limit (or withMoney) needs it. errUnpriced asks for
-// a sync: every window of a limit r counts toward has ended, or the hold has
-// no card or bound for r.
+// every request's money cost, a named-unit limit the units its counts make
+// of r's usage (a host-stated request has none). The money cost is priced
+// when a currency limit (or withMoney) needs it. errUnpriced asks for a sync:
+// every window of a limit r counts toward has ended, or the hold has no card
+// or bound for r.
 func (p *holdPricing) cost(now time.Time, r request, withMoney bool) ([]take, int64, error) {
 	var claimed []holdPart
 	seen := map[string]bool{}
@@ -369,12 +371,7 @@ func (p *holdPricing) counts(part holdPart, r request) bool {
 	if r.usage == nil {
 		return false
 	}
-	for _, card := range p.units[part.limit].RateCards {
-		if m, ok := p.meters[card.Meter]; ok && m.EventType == r.usage.EventType {
-			return true
-		}
-	}
-	return false
+	return limits.Counts(p.units[part.limit], p.meters, r.usage.EventType)
 }
 
 // costOf is what r counts toward each taken part's limit, by the same rules:

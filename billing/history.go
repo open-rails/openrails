@@ -93,6 +93,9 @@ const (
 	LogActionKeyAdd    LogAction = "key_add"
 	LogActionKeyRemove LogAction = "key_remove"
 	LogActionKeyRename LogAction = "key_rename"
+	// LogActionMove moves a price key: from then it names another of its
+	// prices, or, archived, none.
+	LogActionMove LogAction = "move"
 )
 
 // LogEntry is one entry of a merchant's history. Changes is versioned per
@@ -100,7 +103,9 @@ const (
 // {"version":1,"fields":{field:{"before":…,"after":…}}} (a field absent
 // before or after omits that side), a configuration document adds its
 // "revision", and a credential field reads "changed"; key_add and key_remove
-// carry {"version":1,"keys":[…]}, key_rename {"version":1,"from":…,"to":…}.
+// carry {"version":1,"keys":[…]}, key_rename {"version":1,"from":…,"to":…},
+// and a price's move {"version":1,"price_id":…,"archived":…} with its
+// revision.
 type LogEntry struct {
 	ID          LogEntryID      `json:"id"`
 	OccurredAt  time.Time       `json:"occurred_at"`
