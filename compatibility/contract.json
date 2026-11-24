@@ -4278,6 +4278,7 @@
       "json": "encoding/json",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "providerposture": "github.com/open-rails/openrails/internal/providerposture",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "strconv": "strconv",
       "strings": "strings",
