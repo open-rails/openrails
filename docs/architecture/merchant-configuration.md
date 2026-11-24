@@ -251,8 +251,7 @@ Checks:
   target.
 - `Service.Purge` checks `PurgeConfirmPhrase`, `ExpectRows`, `AllowDestructive` and
   `CountMatchingPurgeInventories` before deleting.
-- `HasDestructiveArchiveBarrier` refuses a restore beside a pending, uncertain or
-  24-hour action or an uncleared hold.
+- `DestructiveArchiveBarrier` refuses an export or a restore beside a destructive action still `reserved`, `started` or `uncertain` (an ordinary catalog or configuration edit aside) or an uncleared hold, and a restore within 24 hours, by the deployment's clock, of a prune or approval run that can still be undone (OR-J34-S41, S42, S43).
 
 ## Tests
 

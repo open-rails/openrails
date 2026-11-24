@@ -58,7 +58,7 @@ func ImportBillingArchive(r *httprequest.Request) {
 		writeMerchantArchiveError(r, nil)
 		return
 	}
-	result, err := merchantarchive.Restore(r.Request.Context(), r.State.DB, mid, r.Request.Body)
+	result, err := merchantarchive.Restore(r.Request.Context(), r.State.DB, r.State.Clock, mid, r.Request.Body)
 	if err != nil {
 		writeMerchantArchiveError(r, err)
 		return

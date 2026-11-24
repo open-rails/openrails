@@ -440,9 +440,7 @@ products:
 	})
 
 	t.Run("OR-J24-S54/an-archive-carries-the-merchants-usage-and-restores-it-into-an-empty-store", func(t *testing.T) {
-		// Two days ago: a catalog change in the last day bars a merchant's
-		// archive (destructive budget would not move with it).
-		source := newWorld(t, func(w *world) { w.clock.Advance(-48 * time.Hour) })
+		source := newWorld(t)
 		usageMeter(t, source.alpha, 100)
 		customer, _ := fundedCustomer(t, source)
 		lease := newLease()

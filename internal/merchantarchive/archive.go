@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
@@ -172,10 +173,13 @@ func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.
 // Restore validates and inserts in one transaction. Footer failure, disconnect,
 // mismatched identity, unsupported state or integrity errors roll back all rows.
 // A matching committed receipt is a no-op even if the target has since advanced.
-func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.Reader) (Result, error) {
+func Restore(ctx context.Context, database *db.DB, clock clockwork.Clock, id billing.MerchantID, in io.Reader) (Result, error) {
 	var result Result
 	if database == nil || id.IsZero() {
 		return result, &Error{Code: "merchant_mismatch"}
+	}
+	if clock == nil {
+		return result, errors.New("merchantarchive: a restore needs the deployment's clock")
 	}
 	header, verified, err := archivewire.ReadHeader(in)
 	if err != nil {
@@ -226,7 +230,8 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if err := q.SetCatalogBatchMerchant(ctx, id.String()); err != nil {
 				return err
 			}
-			if err := destructiveArchiveBarrier(ctx, tx, id); err != nil {
+			undoSince := clock.Now().UTC().Add(-archiveUndoWindow)
+			if err := destructiveArchiveBarrier(ctx, tx, id, &undoSince); err != nil {
 				return err
 			}
 			receipt, err := q.BeginBillingRestore(ctx, id.UUID())
