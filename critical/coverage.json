@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 654,
+  "scenario_count": 666,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3272,6 +3272,66 @@
       "id": "OR-J41-S17",
       "journey": "J41",
       "name": "An imported purchase is applied over the access its import grants"
+    },
+    {
+      "id": "OR-J40-S10",
+      "journey": "J40",
+      "name": "A $50 pack of 55 credits defers its price from its payment; 11 credits release exactly $10 and the last credit releases the remainder"
+    },
+    {
+      "id": "OR-J40-S11",
+      "journey": "J40",
+      "name": "A lapsed pack's unreleased money is breakage, a revoked pack's is forfeited, and reinstating it reverses the forfeit and lets it be revoked again"
+    },
+    {
+      "id": "OR-J40-S12",
+      "journey": "J40",
+      "name": "A gift's spend grosses usage up against promotional credit; owed is receivable and is repaid at face from a gift and from a bonus pack"
+    },
+    {
+      "id": "OR-J40-S13",
+      "journey": "J40",
+      "name": "A refund of unspent credit returns its deferred money, a chargeback of spent credit is contra-revenue, and a won dispute reverses it"
+    },
+    {
+      "id": "OR-J40-S14",
+      "journey": "J40",
+      "name": "An archive with a reinstated pack and a pack from before the credit books restores, each lot keeping its money"
+    },
+    {
+      "id": "OR-J40-S15",
+      "journey": "J40",
+      "name": "A won dispute repays again only owed still outstanding: the rest returns to the balance with its money, and the payment refunds after"
+    },
+    {
+      "id": "OR-J40-S16",
+      "journey": "J40",
+      "name": "Two partial recoveries of a chargeback, with and without reopened owed, follow the units they restore and end exact"
+    },
+    {
+      "id": "OR-J40-S17",
+      "journey": "J40",
+      "name": "Owed that accrued partly before the credit books is repaid through the receivable first and the rest as revenue, from a gift and a pack"
+    },
+    {
+      "id": "OR-J40-S18",
+      "journey": "J40",
+      "name": "Refunds in pieces strand no deferred money, and a merchant-unit lot refunds its units in the unit and its money in its paid currency"
+    },
+    {
+      "id": "OR-J40-S19",
+      "journey": "J40",
+      "name": "A revocation retried under its idempotency key after a reinstatement replays, and a lapsed lot is not reinstated"
+    },
+    {
+      "id": "OR-J40-S25",
+      "journey": "J40",
+      "name": "A credit lot applied beyond its payment's cash fails ledger-audit, as a bill's lines would"
+    },
+    {
+      "id": "OR-J40-S26",
+      "journey": "J40",
+      "name": "A credit lot whose payment brought no cash defers nothing, raises books.credit.unapplied and commits"
     }
   ]
 }

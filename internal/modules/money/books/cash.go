@@ -69,3 +69,15 @@ func ReceivePayment(ctx context.Context, q *gen.Queries, p gen.BillingPayment) e
 	}
 	return New(q, p.MerchantID).Receive(ctx, r)
 }
+
+// CashAccount is where a payment's cash sits, by ReceiptOf's rule: its PSP's
+// clearing account, or external_receipts for money that came outside
+// OpenRails. A reversal returns cash from, and a recovery restores it to,
+// the account its payment's receipt debited.
+func CashAccount(p gen.BillingPayment) Ref {
+	if p.PspID != nil && p.Channel != "manual" && p.MoneyMovement == "rail" {
+		psp := *p.PspID
+		return Ref{Type: CashClearing, PSP: &psp}
+	}
+	return Ref{Type: ExternalReceipts}
+}

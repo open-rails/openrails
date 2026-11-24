@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/retention"
@@ -490,14 +491,15 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 		owedAt: later(earlier(earlier(end, cut).Add(-time.Microsecond), now), billed)}
 	key := MustIdempotencyKey(OpUsagePosting, usagePostingSourcePrefix+row.ID.String(), "1")
 	payer := identity.CustomerID(customer)
-	_, _, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
+	_, accrued, applied, err := posting.spendBalanceThenOwedTx(ctx, q, payer, customer.String(), currency, key, amount, true)
 	if err != nil {
 		return err
 	}
 	if !applied {
 		return fmt.Errorf("usage posting %s: the ledger already held it", row.ID)
 	}
-	return nil
+	// What it left owed is usage revenue receivable, dated as its owed is.
+	return books.New(q, merchantID).AccrueUsage(ctx, customer, currency, accrued, key.Coord(), posting.posting.owedAt, nil)
 }
 
 // reversePeriod credits what a period posted beyond its price, as a lot that
@@ -527,6 +529,13 @@ func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, mercha
 	}
 	coord := ledger.Coord{Operation: OpUsagePosting, Source: usagePostingSourcePrefix + row.ID.String(), SourceID: "1"}
 	if _, err := l.ReverseUsage(ctx, customer, currency, -amount, coord, lot.ID); err != nil {
+		return err
+	}
+	// The revenue it took back is the lot's, deferred at face.
+	if lot, err = q.GetCreditLot(ctx, gen.GetCreditLotParams{MerchantID: merchantID, ID: lot.ID}); err != nil {
+		return err
+	}
+	if err := books.New(q, merchantID).ReverseUsage(ctx, books.CreditLotOf(lot), coord, now); err != nil {
 		return err
 	}
 	return ledger.WatchChange(ctx, q, merchantID, customer, currency, true, now)

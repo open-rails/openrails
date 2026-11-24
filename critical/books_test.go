@@ -601,7 +601,7 @@ func TestBooks(t *testing.T) {
 		require.NoError(t, err)
 		accounts, err := pgx.CollectRows(rows, pgx.RowTo[string])
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"customer_units units held", "units_sold units issued"}, accounts)
+		require.ElementsMatch(t, []string{"customer_units units held", "units_granted units issued"}, accounts, "a gift's units are granted")
 		var moved int
 		require.NoError(t, target.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(target, "ledger_transfers")+" WHERE merchant_id=$1 AND book='units' AND effective_at=created_at", mid).Scan(&moved))
 		require.Equal(t, 1, moved, "a transfer is the units book's, effective when it posted")

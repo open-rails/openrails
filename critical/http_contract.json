@@ -39,6 +39,12 @@
     },
     {
       "method": "POST",
+      "path": "/v1/admin/credit-grants/{id}/reinstate",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "POST",
       "path": "/v1/admin/credit-grants/{id}/revoke",
       "auth": "merchant",
       "feature": ""

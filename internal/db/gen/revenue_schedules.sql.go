@@ -356,7 +356,9 @@ type ListOverappliedPaymentsRow struct {
 	Applied   int64
 }
 
-// A payment whose cash the general ledger applied beyond what it received.
+// A payment whose cash the general ledger applied beyond what it received:
+// to its bill's lines at (application, payment, id) and to the credit lot it
+// bought at (credit_issue, payment, id).
 func (q *Queries) ListOverappliedPayments(ctx context.Context, merchantID uuid.UUID) ([]ListOverappliedPaymentsRow, error) {
 	rows, err := q.db.Query(ctx, listOverappliedPayments, merchantID)
 	if err != nil {
