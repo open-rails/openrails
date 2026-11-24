@@ -23,7 +23,7 @@ migration 0024_payment_method_versions_restrict.up.sql sha256:6f8bf0877070c35443
 migration 0025_usage_on_event_store.up.sql sha256:5332fadccb74fa286a91e9a8d4fce6ee5680c979809e6cfadd2e84b9a7ac3f4f
 migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c321d951aac93b728ca4
 migration 0027_mrr_at_risk.up.sql sha256:e2fdd4b8664adc64b11d71405c1b8be66ac173c5d761f2afb15c3c6437c654d6
-migration 0028_merchant_unit_spending.up.sql sha256:0bdada50d87e275711d8092683c39e3c8e531a263582936345ffef2785331a62
+migration 0028_merchant_unit_spending.up.sql sha256:71787372990ea91e2cb6bfa8cd02b207f88b98732dd0ef402994f37ad135f478
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3512,10 +3512,12 @@ table billing.usage_postings
   column lines jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column forgiven bigint NOT NULL
+  column forgiven_lines jsonb
   constraint usage_postings_amount_check CHECK (((amount <> 0) AND ((reason = 'reversal'::text) = (amount < 0))))
   constraint usage_postings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_postings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint usage_postings_forgiven_check CHECK (((forgiven = 0) OR ((currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text])) AND (((reason <> 'reversal'::text) AND (forgiven > 0) AND (forgiven <= amount)) OR ((reason = 'reversal'::text) AND (forgiven < 0) AND (forgiven >= amount))))))
+  constraint usage_postings_forgiven_lines_check CHECK ((((forgiven = 0) = (forgiven_lines IS NULL)) AND ((forgiven_lines IS NULL) OR ((jsonb_typeof(forgiven_lines) = 'array'::text) AND (octet_length((forgiven_lines)::text) <= 262144)))))
   constraint usage_postings_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (octet_length((lines)::text) <= 262144)))
   constraint usage_postings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint usage_postings_period_ends_at_check CHECK ((period_ends_at > period_starts_at))

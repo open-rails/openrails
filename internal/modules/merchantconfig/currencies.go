@@ -83,8 +83,11 @@ func ChangedUnits(held []billing.MerchantCurrency, next currency.Registry) []str
 // KeepCountedUnits keeps, in a loaded document, each unit in use as it is
 // counted, and answers why; "" when the document keeps every one. A unit the
 // units book recorded (counted, by code) keeps its recorded scale, so a
-// restart is no way around it; another unit in use keeps the declaration
-// served before (previous), and one no declaration served is named alone.
+// restart is no way around it, and one the document drops keeps serving at
+// it, named by its code: configuration is authored in a file or Vault, but a
+// unit's scale is what its stored amounts mean, ledger evidence the ledger
+// may supply. Another unit in use keeps the declaration served before
+// (previous), and one no declaration served is named alone.
 func KeepCountedUnits(inUse []string, counted map[string]int, previous []billing.MerchantCurrency, doc *billing.MerchantSettings) string {
 	served := map[string]billing.MerchantCurrency{}
 	for _, u := range previous {

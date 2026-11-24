@@ -178,11 +178,11 @@ func (q *Queries) InsertUsageCardPrint(ctx context.Context, arg InsertUsageCardP
 }
 
 const insertUsagePosting = `-- name: InsertUsagePosting :one
-INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, forgiven, lines, created_at)
+INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, forgiven, forgiven_lines, lines, created_at)
 VALUES ($1::uuid, $2::uuid, $3::text, $4::timestamptz,
     $5::timestamptz, $6::timestamptz, $7::text, $8::bigint,
-    $9::bigint, $10::jsonb, $11::timestamptz)
-RETURNING merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven
+    $9::bigint, $10::jsonb, $11::jsonb, $12::timestamptz)
+RETURNING merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines
 `
 
 type InsertUsagePostingParams struct {
@@ -195,6 +195,7 @@ type InsertUsagePostingParams struct {
 	Reason         string
 	Amount         int64
 	Forgiven       int64
+	ForgivenLines  []byte
 	Lines          []byte
 	Now            time.Time
 }
@@ -210,6 +211,7 @@ func (q *Queries) InsertUsagePosting(ctx context.Context, arg InsertUsagePosting
 		arg.Reason,
 		arg.Amount,
 		arg.Forgiven,
+		arg.ForgivenLines,
 		arg.Lines,
 		arg.Now,
 	)
@@ -227,6 +229,7 @@ func (q *Queries) InsertUsagePosting(ctx context.Context, arg InsertUsagePosting
 		&i.Lines,
 		&i.CreatedAt,
 		&i.Forgiven,
+		&i.ForgivenLines,
 	)
 	return i, err
 }
@@ -292,7 +295,7 @@ func (q *Queries) ListDueUsageUnposted(ctx context.Context, arg ListDueUsageUnpo
 }
 
 const listForgivenUsagePostings = `-- name: ListForgivenUsagePostings :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven FROM billing.usage_postings
+SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_postings
 WHERE merchant_id = $1::uuid AND forgiven <> 0
   AND cut_at > $2::timestamptz AND cut_at <= $3::timestamptz
 ORDER BY cut_at, id
@@ -328,6 +331,7 @@ func (q *Queries) ListForgivenUsagePostings(ctx context.Context, arg ListForgive
 			&i.Lines,
 			&i.CreatedAt,
 			&i.Forgiven,
+			&i.ForgivenLines,
 		); err != nil {
 			return nil, err
 		}
@@ -408,7 +412,7 @@ func (q *Queries) ListUsageCardPrints(ctx context.Context, arg ListUsageCardPrin
 }
 
 const listUsagePostings = `-- name: ListUsagePostings :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven FROM billing.usage_postings
+SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_postings
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text AND period_starts_at >= $4::timestamptz
 ORDER BY period_starts_at, created_at, id
@@ -449,6 +453,7 @@ func (q *Queries) ListUsagePostings(ctx context.Context, arg ListUsagePostingsPa
 			&i.Lines,
 			&i.CreatedAt,
 			&i.Forgiven,
+			&i.ForgivenLines,
 		); err != nil {
 			return nil, err
 		}
@@ -461,7 +466,7 @@ func (q *Queries) ListUsagePostings(ctx context.Context, arg ListUsagePostingsPa
 }
 
 const listUsagePostingsByIDs = `-- name: ListUsagePostingsByIDs :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven FROM billing.usage_postings
+SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, forgiven, forgiven_lines FROM billing.usage_postings
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND id = ANY($3::uuid[])
 `
@@ -494,6 +499,7 @@ func (q *Queries) ListUsagePostingsByIDs(ctx context.Context, arg ListUsagePosti
 			&i.Lines,
 			&i.CreatedAt,
 			&i.Forgiven,
+			&i.ForgivenLines,
 		); err != nil {
 			return nil, err
 		}

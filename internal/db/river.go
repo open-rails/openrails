@@ -63,6 +63,9 @@ type MerchantConfig interface {
 	MerchantSettings(ctx context.Context, id billing.MerchantID) (displayName string, settings billing.MerchantSettings, err error)
 	// MerchantMessages is the messages document the merchant serves.
 	MerchantMessages(ctx context.Context, id billing.MerchantID) (billing.MessageSettings, error)
+	// StoredCurrencies are the units the merchant's document declares in its
+	// file or Vault now, read past any cache: what another replica wrote.
+	StoredCurrencies(ctx context.Context, id billing.MerchantID) ([]billing.MerchantCurrency, error)
 }
 
 // SetMerchantConfig binds the merchant configuration every handle derived

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // catalogMutation serializes catalog changes per merchant. Nested writes share
@@ -90,6 +91,16 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 		var callErr error
 		if out, callErr = fn(ctx, &scoped); callErr != nil {
 			return callErr
+		}
+		// A unit the catalog names is counted as it is first named, under
+		// the units lock held above: a later rescale is caught even before
+		// any balance holds it.
+		named, err := q.ListUncountedCatalogUnits(ctx, gen.ListUncountedCatalogUnitsParams{MerchantID: mid.UUID(), Registry: moneyutil.CurrencyCodes()})
+		if err != nil {
+			return err
+		}
+		if err := ledger.New(q, mid.UUID()).CountUnits(ctx, named...); err != nil {
+			return err
 		}
 		after, err := readCatalogState(ctx, q, mid.UUID())
 		if err != nil {

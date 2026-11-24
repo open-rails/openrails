@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/merchantdocs"
@@ -278,4 +279,52 @@ func TestMerchantCurrencies(t *testing.T) {
 		require.Equal(t, &billing.MerchantCurrency{Code: "GOLD", Name: "Gold bars", Symbol: "🪙", Scale: 0}, gold.Unit, "400 whole coins, never 4.00")
 		require.Contains(t, customerUnits(t, a, a.aliceToken), billing.MerchantCurrency{Code: "GOLD", Name: "Gold bars", Symbol: "🪙", Scale: 0})
 	})
+
+	t.Run("OR-J05-S11/a-catalog-that-names-a-unit-counts-it", func(t *testing.T) {
+		a := unitWorld(t)
+		potion, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "potion", DisplayName: "Potion", Ownership: catalog.OwnershipConsumable})
+		require.NoError(t, err)
+		_, err = a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: potion.ID, Key: "gold", UnitAmount: 50, Currency: "GOLD"})
+		require.NoError(t, err)
+		require.Equal(t, 0, countedScale(t, a.world, a.alpha.MerchantID(), "GOLD"), "a price in GOLD counts it, though no balance holds any")
+
+		// A restart on a file that rescales it keeps the price's scale.
+		alpha := cfgMerchant(a.cfg, "alpha")
+		alpha.Currencies = []billing.MerchantCurrency{{Code: "GOLD", Name: "Gold bars", Scale: 2}, creditsUnit}
+		setCfgMerchant(&a.cfg, "alpha", alpha)
+		a.restart(t)
+		require.Contains(t, customerUnits(t, a, a.aliceToken), billing.MerchantCurrency{Code: "GOLD", Name: "Gold bars", Symbol: "GOLD", Scale: 0}, "50 whole coins, never 0.50")
+	})
+
+	t.Run("OR-J05-S12/a-units-first-count-reads-its-declaration-where-it-is-stored", func(t *testing.T) {
+		a, _ := newPSPWorld(t)
+		_, err := a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{DisplayName: ptr("Alpha"),
+			MerchantSettings: &billing.MerchantSettings{Currencies: []billing.MerchantCurrency{goldUnit}}})
+		require.NoError(t, err)
+		// Another replica declares GOLD in hundredths and its announcement
+		// is lost: this one still serves whole coins.
+		path := a.cfg.Vault.KVMount + "/data/openrails/merchants/" + a.alpha.MerchantID().UUID().String() + "/merchant"
+		stored, err := a.deps.Vault.Logical().ReadWithContext(t.Context(), path)
+		require.NoError(t, err)
+		data := stored.Data["data"].(map[string]any)
+		data["currencies"] = []any{map[string]any{"code": "GOLD", "name": "Gold coins", "symbol": "🪙", "scale": 2}}
+		_, err = a.deps.Vault.Logical().WriteWithContext(t.Context(), path, map[string]any{"data": data})
+		require.NoError(t, err)
+		served, err := a.alphaRemote.GetMerchantConfiguration(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []billing.MerchantCurrency{goldUnit}, served.Currencies, "this replica's copy is stale")
+
+		_, err = a.alphaRemote.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Currency: "GOLD", Amount: 400, Source: "critical", SourceID: "gold"}})
+		require.NoError(t, err)
+		require.Equal(t, 2, countedScale(t, a.world, a.alpha.MerchantID(), "GOLD"), "the units book counts GOLD as Vault declares it, not as a stale copy does")
+	})
+}
+
+// countedScale is the scale the units book recorded unit at for merchant.
+func countedScale(t *testing.T, w *world, merchant billing.MerchantID, unit string) int {
+	t.Helper()
+	var scale int
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT scale FROM "+pgx.Identifier{w.schema, "ledger_units"}.Sanitize()+" WHERE merchant_id = $1 AND unit = $2",
+		merchant.UUID(), unit).Scan(&scale))
+	return scale
 }

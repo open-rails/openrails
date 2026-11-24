@@ -94,6 +94,12 @@
     "OR-J05-S10": [
       "TestMerchantCurrencies/OR-J05-S10/a-restart-on-a-file-that-rescales-a-counted-unit-keeps-its-recorded-scale"
     ],
+    "OR-J05-S11": [
+      "TestMerchantCurrencies/OR-J05-S11/a-catalog-that-names-a-unit-counts-it"
+    ],
+    "OR-J05-S12": [
+      "TestMerchantCurrencies/OR-J05-S12/a-units-first-count-reads-its-declaration-where-it-is-stored"
+    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],

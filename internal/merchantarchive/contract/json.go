@@ -397,6 +397,7 @@ var jsonRules = map[string]jsonRule{
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":           nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
 	"usage_postings.lines":           array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "print": textValue, "requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue})),
+	"usage_postings.forgiven_lines":  nullable(array(object(map[string]jsonRule{"invoker": textValue, "event_type": textValue, "meter_key": textValue, "cell": textValue, "amount": integerValue}))),
 	"usage_card_prints.card":         metadataJSON,
 	"event_store.usage_events.event": metadataJSON,
 	"order_attempts.metadata":        metadataJSON,

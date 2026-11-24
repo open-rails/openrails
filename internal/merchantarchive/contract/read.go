@@ -152,8 +152,8 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			r.Values = append(r.Values, nil, nil, nil, nil)
 		}
 		// Usage postings before merchant units forgave nothing.
-		if p.Name == "usage_postings" && len(r.Values) == len(p.Columns)-1 {
-			r.Values = append(r.Values, new("0"))
+		if p.Name == "usage_postings" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, new("0"), nil)
 		}
 		if preUsage {
 			if err := normalizePreUsage(p, &r.Values); err != nil {

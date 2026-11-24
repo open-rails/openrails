@@ -44,3 +44,16 @@ FROM (
 ) u
 WHERE u.code IS NOT NULL AND u.code <> ALL(sqlc.arg(registry)::text[])
 ORDER BY 1;
+
+-- name: ListUncountedCatalogUnits :many
+-- The merchant's own units its catalog names (a price, a product's credit or
+-- a rate card) that the units book has not recorded.
+SELECT DISTINCT u.code::text AS code
+FROM (
+    SELECT p.currency AS code FROM billing.prices p WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+    UNION ALL SELECT pr.credit_grant ->> 'currency' FROM billing.products pr WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.credit_grant IS NOT NULL
+    UNION ALL SELECT c.price ->> 'currency' FROM billing.catalog_rate_cards c WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
+) u
+WHERE u.code IS NOT NULL AND u.code <> ALL(sqlc.arg(registry)::text[])
+  AND NOT EXISTS (SELECT 1 FROM billing.ledger_units l WHERE l.merchant_id = sqlc.arg(merchant_id)::uuid AND l.unit = u.code)
+ORDER BY 1;

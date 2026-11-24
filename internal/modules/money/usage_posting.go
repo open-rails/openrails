@@ -218,9 +218,19 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 		}
 	}
 	slices.SortFunc(periods, func(a, b time.Time) int { return a.Compare(b) })
-	forgiven := map[time.Time]int64{}
+	forgiven := map[time.Time]map[forgivenKey]int64{}
 	for _, p := range postings {
-		forgiven[p.PeriodStartsAt.UTC()] += p.Forgiven
+		lines, err := decodeForgivenLines(p.ForgivenLines)
+		if err != nil {
+			return false, fmt.Errorf("usage posting %s: %w", p.ID, err)
+		}
+		period := p.PeriodStartsAt.UTC()
+		for _, l := range lines {
+			if forgiven[period] == nil {
+				forgiven[period] = map[forgivenKey]int64{}
+			}
+			forgiven[period][l.key()] += l.Amount
+		}
 	}
 	var since, due time.Time
 	keep := func(s, d time.Time) {
@@ -327,15 +337,24 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 	posting.clock = clockwork.NewFakeClockAt(now)
 	posting.posting = &runningChargePosting{through: cut}
 	var forgiven int64
+	var split []byte
 	if IsMerchantUnit(currency) {
 		covered, err := posting.spendableUnits(ctx, q, merchantID, customer, currency)
 		if err != nil {
 			return err
 		}
-		forgiven = max(amount-covered, 0)
+		if forgiven = max(amount-covered, 0); forgiven > 0 {
+			lines, err := s.forgivenLines(ctx, q, merchantID, customer, currency, period, cut, forgiven)
+			if err != nil {
+				return err
+			}
+			if split, err = json.Marshal(lines); err != nil {
+				return err
+			}
+		}
 	}
 	row, err := q.InsertUsagePosting(ctx, gen.InsertUsagePostingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency,
-		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: reason, Amount: amount, Forgiven: forgiven, Lines: encoded, Now: now})
+		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: reason, Amount: amount, Forgiven: forgiven, ForgivenLines: split, Lines: encoded, Now: now})
 	if err != nil {
 		return err
 	}
@@ -373,18 +392,28 @@ func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantI
 }
 
 // reversePeriod credits what a period posted beyond its price, as a lot that
-// never lapses. What the period forgave is taken back first: only what the
-// ledger took is credited.
+// never lapses. What the period forgave is taken back first, from its stored
+// shares: only what the ledger took is credited.
 func (s *MoneyService) reversePeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut time.Time,
-	amount, forgave int64, lines []PostingLine) error {
+	amount int64, forgave map[forgivenKey]int64, lines []PostingLine) error {
 	encoded, err := json.Marshal(lines)
 	if err != nil {
 		return err
 	}
 	now := instant(s.now())
-	unforgiven := -min(-amount, max(forgave, 0))
+	var total int64
+	for _, v := range forgave {
+		total += max(v, 0)
+	}
+	unforgiven := -min(-amount, total)
+	var split []byte
+	if unforgiven != 0 {
+		if split, err = json.Marshal(takeBackForgiven(forgave, unforgiven)); err != nil {
+			return err
+		}
+	}
 	row, err := q.InsertUsagePosting(ctx, gen.InsertUsagePostingParams{MerchantID: merchantID, CustomerID: customer, Currency: currency,
-		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: usagePostingReversal, Amount: amount, Forgiven: unforgiven, Lines: encoded, Now: now})
+		PeriodStartsAt: period, PeriodEndsAt: end, CutAt: cut, Reason: usagePostingReversal, Amount: amount, Forgiven: unforgiven, ForgivenLines: split, Lines: encoded, Now: now})
 	if err != nil {
 		return err
 	}

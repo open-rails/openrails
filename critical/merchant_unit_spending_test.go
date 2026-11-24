@@ -570,6 +570,8 @@ func unitOverrun(t *testing.T) {
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT sum(amount), sum(forgiven) FROM "+pgx.Identifier{a.schema, "usage_postings"}.Sanitize()+
 		" WHERE merchant_id = $1 AND customer_id = $2", a.alpha.MerchantID().UUID(), s.alice.UUID()).Scan(&posted, &forgiven))
 	require.Equal(t, [2]int64{28, 8}, [2]int64{posted, forgiven}, "the posting records what it forgave")
+	require.ElementsMatch(t, []forgivenShare{{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: 6}, {Invoker: "alice-phone", EventType: "image", MeterKey: "images", Amount: 2}},
+		forgivenShares(t, a, s.alice)[0], "and how it shared it, as it posted")
 	var owed int
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
 		" WHERE merchant_id = $1 AND customer_id = $2 AND transfer_type = 'owed_accrual'", a.alpha.MerchantID().UUID(), s.alice.UUID()).Scan(&owed))
@@ -893,6 +895,8 @@ func unitPriceFalls(t *testing.T) {
 	a.clock.Advance(70 * 24 * time.Hour)
 	closeMonths(t, fleet)
 	require.Equal(t, []posting{{20, 10}, {-14, -10}}, postings())
+	require.Equal(t, [][]forgivenShare{{{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: 10}}, {{Invoker: s.alice.String(), EventType: "image", MeterKey: "images", Amount: -10}}},
+		forgivenShares(t, a, s.alice), "the reversal takes back from the shares the posting stored")
 	unitBalance(t, a.alpha, s.alice, "GOLD", 5, 0, 5)
 }
 
@@ -929,8 +933,12 @@ func unitFirstBalance(t *testing.T) {
 		}()
 		return done
 	}
+	// Alice is a customer already.
+	_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "dollar"}})
+	require.NoError(t, err)
 	// A settings change removing GOLD holds the units lock: the gift that
-	// opens the first GOLD balance waits for it.
+	// opens the first GOLD balance waits for it, before it locks alice, so
+	// her other money waits for nothing.
 	tx := hold()
 	first := give("first")
 	select {
@@ -938,6 +946,12 @@ func unitFirstBalance(t *testing.T) {
 		t.Fatalf("the first GOLD balance did not wait for the units lock: %v", err)
 	case <-time.After(500 * time.Millisecond):
 	}
+	probe, err := a.pool.Begin(t.Context())
+	require.NoError(t, err)
+	_, err = probe.Exec(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2 FOR NO KEY UPDATE NOWAIT",
+		a.alpha.MerchantID().UUID(), s.alice.UUID())
+	require.NoError(t, err, "the waiting gift holds no customer lock")
+	require.NoError(t, probe.Rollback(t.Context()))
 	require.NoError(t, tx.Rollback(t.Context()))
 	select {
 	case err := <-first:
@@ -959,4 +973,32 @@ func unitFirstBalance(t *testing.T) {
 		t.Fatal("a gift in a counted unit waited for the units lock")
 	}
 	unitBalance(t, a.alpha, s.alice, "GOLD", 20, 0, 20)
+}
+
+type forgivenShare struct {
+	Invoker   string `json:"invoker"`
+	EventType string `json:"event_type"`
+	MeterKey  string `json:"meter_key"`
+	Cell      string `json:"cell"`
+	Amount    int64  `json:"amount"`
+}
+
+// forgivenShares are how each of customer's postings that forgave shared it,
+// in posting order.
+func forgivenShares(t *testing.T, a *authorityWorld, customer billing.CustomerID) [][]forgivenShare {
+	t.Helper()
+	rows, err := a.pool.Query(t.Context(), "SELECT forgiven_lines FROM "+pgx.Identifier{a.schema, "usage_postings"}.Sanitize()+
+		" WHERE merchant_id = $1 AND customer_id = $2 AND forgiven <> 0 ORDER BY created_at, id", a.alpha.MerchantID().UUID(), customer.UUID())
+	require.NoError(t, err)
+	defer rows.Close()
+	var out [][]forgivenShare
+	for rows.Next() {
+		var raw []byte
+		require.NoError(t, rows.Scan(&raw))
+		var shares []forgivenShare
+		require.NoError(t, json.Unmarshal(raw, &shares))
+		out = append(out, shares)
+	}
+	require.NoError(t, rows.Err())
+	return out
 }

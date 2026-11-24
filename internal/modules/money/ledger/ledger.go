@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -267,40 +268,55 @@ func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency stri
 	if acct, ok := books.Lookup(t); !ok || acct.Book != books.Units {
 		return uuid.Nil, false, fmt.Errorf("ledger: %q is not a units-book account", t)
 	}
-	if unit.IsUnitCode(currency) {
-		if err := l.countUnit(ctx, currency); err != nil {
-			return uuid.Nil, false, err
-		}
+	if err := l.CountUnits(ctx, currency); err != nil {
+		return uuid.Nil, false, err
 	}
 	return books.EnsureAccount(ctx, l.q, l.merchant, t, currency, customer, nil)
 }
 
-// countUnit records a merchant's unit the first time the book counts it, at
-// the scale the merchant declares then (ledger_units), under UnitsLock: a
-// settings change that would remove or rescale it either commits first, and
-// this reads its result, or sees the record.
-func (l *Ledger) countUnit(ctx context.Context, code string) error {
-	key := gen.GetLedgerUnitScaleParams{MerchantID: l.merchant, Unit: code}
-	if _, err := l.q.GetLedgerUnitScale(ctx, key); !errors.Is(err, pgx.ErrNoRows) {
-		return err
+// CountUnits records each of codes that is one of the merchant's units and
+// the book has not counted yet (ledger_units), at the scale the merchant's
+// document in its file or Vault declares now, read past any replica's cache,
+// under UnitsLock: a settings change that would remove or rescale it either
+// commits first, and this reads its result, or sees the record. A path that
+// may count a unit first calls it before it locks any customer, so the units
+// lock always comes first.
+func (l *Ledger) CountUnits(ctx context.Context, codes ...string) error {
+	var missing []string
+	for _, code := range codes {
+		if !unit.IsUnitCode(code) || slices.Contains(missing, code) {
+			continue
+		}
+		if _, err := l.q.GetLedgerUnitScale(ctx, gen.GetLedgerUnitScaleParams{MerchantID: l.merchant, Unit: code}); errors.Is(err, pgx.ErrNoRows) {
+			missing = append(missing, code)
+		} else if err != nil {
+			return err
+		}
+	}
+	if len(missing) == 0 {
+		return nil
 	}
 	if err := l.q.LockCatalogKey(ctx, UnitsLock(l.merchant)); err != nil {
 		return err
 	}
 	config := db.MerchantConfigOf(l.q)
 	if config == nil {
-		return fmt.Errorf("%w: %s (no merchant configuration is bound)", ErrUndeclaredUnit, code)
+		return fmt.Errorf("%w: %s (no merchant configuration is bound)", ErrUndeclaredUnit, strings.Join(missing, ", "))
 	}
-	_, settings, err := config.MerchantSettings(ctx, billing.MerchantID(l.merchant))
+	declared, err := config.StoredCurrencies(ctx, billing.MerchantID(l.merchant))
 	if err != nil {
 		return fmt.Errorf("ledger: read the merchant's units: %w", err)
 	}
-	for _, u := range settings.Currencies {
-		if strings.EqualFold(string(u.Code), code) {
-			return l.q.InsertLedgerUnit(ctx, gen.InsertLedgerUnitParams{MerchantID: l.merchant, Unit: code, Scale: int32(u.Scale)})
+	for _, code := range missing {
+		i := slices.IndexFunc(declared, func(u billing.MerchantCurrency) bool { return strings.EqualFold(string(u.Code), code) })
+		if i < 0 || declared[i].Scale < 0 || declared[i].Scale > unit.MaxUnitScale {
+			return fmt.Errorf("%w: %s", ErrUndeclaredUnit, code)
+		}
+		if err := l.q.InsertLedgerUnit(ctx, gen.InsertLedgerUnitParams{MerchantID: l.merchant, Unit: code, Scale: int32(declared[i].Scale)}); err != nil {
+			return err
 		}
 	}
-	return fmt.Errorf("%w: %s", ErrUndeclaredUnit, code)
+	return nil
 }
 
 // Transfer is one double-entry movement to append.

@@ -2484,6 +2484,8 @@ type BillingUsagePosting struct {
 	CreatedAt time.Time
 	// Of amount, what the ledger did not take: usage in a merchant's unit its lots could not cover, never owed (positive); a reversal's share that took back forgiveness rather than credit (negative). Zero in a registry currency.
 	Forgiven int64
+	// How forgiven is shared, as the posting computed it: [{invoker, event_type, meter_key, cell, amount}], by what the period charged each before the cut, to the largest remainder; a reversal takes back from the period's shares the same way. NULL when nothing was forgiven.
+	ForgivenLines []byte
 }
 
 // A customer whose usage in a currency the ledger has not taken in full: the event store holds it, its balance reads it there, and the month-end close or the next movement of the balance posts it. Intake writes the row in the transaction that commits the usage, and a posting locks it; a posting that leaves nothing to post deletes it.

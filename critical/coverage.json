@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 639,
+  "scenario_count": 641,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -157,6 +157,16 @@
       "id": "OR-J05-S10",
       "journey": "J05",
       "name": "A unit the units book counts keeps the scale it recorded (ledger_units) when a restart loads a file that rescales it: the balance reads at the recorded scale and the operator gets the refused-document finding"
+    },
+    {
+      "id": "OR-J05-S11",
+      "journey": "J05",
+      "name": "A catalog write that first names a unit (a price, a pack's credit, a rate card) records its scale under the units lock, so a restart on a file that rescales it keeps that scale before any balance holds it"
+    },
+    {
+      "id": "OR-J05-S12",
+      "journey": "J05",
+      "name": "A unit's first count reads its declaration in Vault under the units lock, not a replica's stale copy"
     },
     {
       "id": "OR-J06-S01",
@@ -2941,7 +2951,7 @@
     {
       "id": "OR-J48-S10",
       "journey": "J48",
-      "name": "A period in a unit whose volume price falls below what posted is credited once its late window closes, taking back what the period forgave before crediting what the lots paid beyond its price"
+      "name": "A period in a unit whose volume price falls below what posted is credited once its late window closes, taking back what the period forgave, from the shares its posting stored, before crediting what the lots paid beyond its price"
     },
     {
       "id": "OR-J48-S11",
@@ -2951,7 +2961,7 @@
     {
       "id": "OR-J48-S12",
       "journey": "J48",
-      "name": "The first balance in a unit waits for the units lock a settings change takes and records the unit's scale; a gift in a counted unit takes no lock"
+      "name": "The first balance in a unit waits for the units lock a settings change takes before it locks any customer, and records the unit's scale; a gift in a counted unit takes no lock"
     },
     {
       "id": "OR-J53-S01",

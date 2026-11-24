@@ -69,6 +69,10 @@ ALTER TABLE billing.usage_postings ADD CONSTRAINT usage_postings_forgiven_check 
     OR currency NOT IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR')
     AND (reason <> 'reversal' AND forgiven > 0 AND forgiven <= amount OR reason = 'reversal' AND forgiven < 0 AND forgiven >= amount));
 COMMENT ON COLUMN billing.usage_postings.forgiven IS 'Of amount, what the ledger did not take: usage in a merchant''s unit its lots could not cover, never owed (positive); a reversal''s share that took back forgiveness rather than credit (negative). Zero in a registry currency.';
+ALTER TABLE billing.usage_postings ADD COLUMN forgiven_lines jsonb,
+    ADD CONSTRAINT usage_postings_forgiven_lines_check CHECK ((forgiven = 0) = (forgiven_lines IS NULL)
+        AND (forgiven_lines IS NULL OR jsonb_typeof(forgiven_lines) = 'array' AND octet_length(forgiven_lines::text) <= 262144));
+COMMENT ON COLUMN billing.usage_postings.forgiven_lines IS 'How forgiven is shared, as the posting computed it: [{invoker, event_type, meter_key, cell, amount}], by what the period charged each before the cut, to the largest remainder; a reversal takes back from the period''s shares the same way. NULL when nothing was forgiven.';
 CREATE INDEX usage_postings_forgiven_idx ON billing.usage_postings (merchant_id, cut_at) WHERE forgiven <> 0;
 
 -- Which of a merchant's own units the units book counts, at the scale every

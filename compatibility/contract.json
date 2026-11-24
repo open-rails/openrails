@@ -1833,6 +1833,7 @@
     ],
     "internal/modules/money": [
       "type CustomerInvoiceProfile struct {\n\tNetTermsDays     int                     `json:\"net_terms_days\"`\n\tCollectionMethod string                  `json:\"collection_method\"`\n\tPONumber         string                  `json:\"po_number,omitempty\"`\n\tTax              map[string]any          `json:\"tax,omitempty\"`\n\tBillingContacts  []models.InvoiceContact `json:\"billing_contacts,omitempty\"`\n\tMemo             string                  `json:\"memo,omitempty\"`\n}",
+      "type ForgivenLine struct {\n\tInvoker   string `json:\"invoker\"`\n\tEventType string `json:\"event_type\"`\n\tMeterKey  string `json:\"meter_key\"`\n\tCell      string `json:\"cell\"`\n\tAmount    int64  `json:\"amount\"`\n}",
       "type PostingLine struct {\n\tMeterKey string `json:\"meter_key\"`\n\tCell     string `json:\"cell\"`\n\tPrint    string `json:\"print\"`\n\tRequests int64  `json:\"requests\"`\n\tQuantity int64  `json:\"quantity\"`\n\tStated   int64  `json:\"stated\"`\n\tAmount   int64  `json:\"amount\"`\n}",
       "type UsageAccountKey struct {\n\tDueAt      time.Time `json:\"due_at\"`\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCustomerID uuid.UUID `json:\"customer_id\"`\n\tCurrency   string    `json:\"currency\"`\n}",
       "type UsageOrderArgs struct {\n\tBill    *UsageAccountKey `json:\"bill,omitempty\"`\n\tCollect *UsageOrderKey   `json:\"collect,omitempty\"`\n}",
@@ -4017,6 +4018,22 @@
       "utf8": "unicode/utf8",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/money/usage_history.go": {
+      "big": "math/big",
+      "billing": "github.com/open-rails/openrails/billing",
+      "calendarutil": "github.com/open-rails/openrails/internal/shared/calendarutil",
+      "cmp": "cmp",
+      "context": "context",
+      "eventstore": "github.com/open-rails/openrails/internal/eventstore",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "slices": "slices",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/money/usage_price.go": {
       "catalog": "github.com/open-rails/openrails/catalog",
