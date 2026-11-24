@@ -168,9 +168,12 @@ in the change's transaction; a look schedules the next; a failed look is taken b
 published to the inbox.
 
 **Email.** One sender per deployment: `Deps.Email` (`config.EmailSender`: `Send`,
-`CheckHealth`); nil sends none. The standalone server builds it from `email_smtp`
-(`hostdeps.NewEmailSender`, over `helpers/smtp`; it does not connect until it
-sends) and lends it to AuthKit for account email (`controlplane.AuthKitSender`).
+`CheckHealth`); nil sends none. `smtpmail.EmailSender` (`adapters/smtpmail`) wraps a
+`helpers/smtp` sender a host opened; the standalone server builds one from
+`email_smtp` (`hostdeps.NewEmailSender`; it does not connect until it sends) and
+lends it to AuthKit for account email (`controlplane.AuthKitSender`). Neither
+sets a `Message-ID`: helpers/smtp mints a random one, so a send repeated after a
+crash is not deduplicated by mail clients.
 It sends customer messages and merchant alerts (`alerting.MailSender`), each from
 the merchant profile's `from_email`.
 
