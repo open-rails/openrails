@@ -129,7 +129,8 @@ that rehearsal in the report.
    isolated database, a dedicated River schema and a separate configuration.
    Use a database backup for the source. `openrails billing export` sets a hold
    on the source merchant. [Archive and restore](standalone.md#backup-and-restore)
-2. **Check the fences.** Configure `provider_write_mode: readonly`. Exclude live
+2. **Check the fences.** Hold the target merchant readonly
+   (`openrails merchant hold --mode readonly`) before importing. Exclude live
    provider credentials from the first phase. Block provider, email and host
    callback egress. Confirm the target database and `openrails book status`
    before importing. [Safety levers](standalone.md#write-safety-and-the-kill-switch)

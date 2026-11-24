@@ -165,7 +165,7 @@ func (h *StripePaymentMethodDomainHandler) classify(intent gen.BillingProviderIn
 	msg := subscriptions.ParseStripeAPIError(raw)
 	switch {
 	case errors.Is(err, stripeapi.ErrProviderReadOnly):
-		return Parked("stripe provider writes blocked (mode=readonly)"), true
+		return Parked("stripe provider writes blocked (readonly write posture)"), true
 	case errors.Is(err, providerposture.ErrDisarmed):
 		return Parked("stripe domain registration held by sandbox posture gate: " + err.Error()), true
 	case err != nil:
@@ -233,7 +233,7 @@ func (h *StripePaymentMethodDomainHandler) post(ctx context.Context, key, path s
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, idempotencyKey)
-	resp, err := h.Clients.Client(h.Config, 0).Do(req)
+	resp, err := h.Clients.Client(0).Do(req)
 	if err != nil {
 		return 0, nil, err
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -45,7 +46,7 @@ func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.C
 	d := s.CustodianSaleService.DB
 	// One collection has one identity, including when another customer submits
 	// the same handle. Returning an existing card still checks its owner.
-	id := uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:platform-card-setup:"+mid.String()+":"+custody.String()+":"+token))
+	id := uuidutil.DerivedV7(uuidutil.TimeOf(collectedID), uuid.NameSpaceURL, "openrails:platform-card-setup:"+mid.String()+":"+custody.String()+":"+token)
 	existing, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: id})
 	if err == nil {
 		return platformSetupResult(existing, customer)
@@ -53,7 +54,7 @@ func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.C
 	if !db.IsNotFound(err) {
 		return SavedCard{}, err
 	}
-	if (writeposture.View{Config: s.Config, DB: d}).Posture(ctx, mid.UUID()).ReadOnly() {
+	if (writeposture.View{DB: d}).Posture(ctx, mid.UUID()).ReadOnly() {
 		return SavedCard{}, ProviderWritesDisabled("card setup is unavailable while provider writes are disabled")
 	}
 	cfg, proxy, bt, err := s.CustodianSaleService.basisTheory(ctx, req.PSPID.UUID())

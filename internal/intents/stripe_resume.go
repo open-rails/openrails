@@ -97,7 +97,7 @@ func (h *StripeResumeHandler) Execute(ctx context.Context, intent gen.BillingPro
 	status, _, msg, err := h.write(ctx, key, http.MethodPost, psid, url.Values{"cancel_at_period_end": {"false"}}, intent.IdempotencyKey+":resume")
 	switch {
 	case errors.Is(err, stripeapi.ErrProviderReadOnly):
-		return parkedBeforeEffect("stripe provider writes blocked (mode=readonly)")
+		return parkedBeforeEffect("stripe provider writes blocked (readonly write posture)")
 	case errors.Is(err, providerposture.ErrDisarmed):
 		return parkedBeforeEffect("stripe resume held by sandbox posture gate: " + err.Error())
 	case err != nil:

@@ -84,7 +84,7 @@ func lapsedNMIBook(t *testing.T, members int) (*authorityWorld, *nmimock.Mock, b
 	setCfgMerchant(&a.cfg, "alpha", m)
 	// A refresh pass verifies unverified rows only for a merchant whose
 	// provider writes are not held, so the next whole read can happen.
-	a.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+	setWritePosture(t, a.world, "full", a.alpha.MerchantID())
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
 	a.alpha, err = declaredMerchant(a.engine, "alpha")

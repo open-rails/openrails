@@ -3,11 +3,12 @@ package hosttools
 import (
 	"context"
 	"fmt"
-	vaultapi "github.com/hashicorp/vault/api"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // providerRuntime is a one-off provider read's world. Rail clients arm per
@@ -69,7 +71,7 @@ func newProviderRuntime(ctx context.Context, logger *slog.Logger, opts providerR
 	}
 	cleanup = func() { opened.Close(); _ = database.Close() }
 	// The factory the configuration's load registered Stripe posture with.
-	stripeClients := stripeapi.ConfiguredFactory(cfg)
+	stripeClients := stripeapi.ConfiguredFactory(cfg, writeposture.View{DB: database})
 	if opened.Service != nil {
 		stripeClients = opened.Service.StripeClients
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/adapters/smtpmail"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -272,7 +273,7 @@ func TestCustomerMessages(t *testing.T) {
 			require.NoError(t, err)
 			intents, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
 			require.NoError(t, err)
-			require.True(t, slices.ContainsFunc(intents, func(id uuid.UUID) bool { return uuid.NewSHA1(id, []byte("collection_outcome")) == stopped }),
+			require.True(t, slices.ContainsFunc(intents, func(id uuid.UUID) bool { return uuidutil.ChildV7(id, "collection_outcome") == stopped }),
 				"the fact's id derives from its collection attempt")
 		})
 	})

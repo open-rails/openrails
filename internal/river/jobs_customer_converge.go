@@ -38,7 +38,7 @@ func (w CustomerConvergeWorker) Work(ctx context.Context, job *river.Job[converg
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts
 	}
-	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	postures := writeposture.View{DB: w.DB}
 	return w.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
 		// A readonly merchant is observed, never written.
 		if postures.Posture(ctx, mid.UUID()).ReadOnly() {

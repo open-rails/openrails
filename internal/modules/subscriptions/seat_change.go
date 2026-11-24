@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // SeatsChangeable reports whether a subscription's seats can change: an
@@ -282,7 +283,7 @@ func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscript
 		charged := n.Charged
 		data.Amount = &charged
 	}
-	notice := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte("staff_change:"+n.Key)), CustomerID: sub.CustomerID, EventType: models.NotificationSubscriptionChanged, Data: data}
+	notice := &models.NotificationEvent{ID: uuidutil.ChildV7(sub.ID, "staff_change:"+n.Key), CustomerID: sub.CustomerID, EventType: models.NotificationSubscriptionChanged, Data: data}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, notice); err != nil {
 		return nil, fmt.Errorf("queue staff change notice for %s: %w", sub.ID, err)
 	}

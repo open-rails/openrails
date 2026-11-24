@@ -161,7 +161,7 @@ var (
 	cliUse    = regexp.MustCompile(`(?:^\s*(?:\$\s+)?(?:[A-Z_][A-Z0-9_]*=\S+\s+)*|--\s+|&&\s+|;\s+|\|\s+)openrails((?:[ \t]+[^\s|)&;]+)+)`)
 	cliWord   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	keyPath   = regexp.MustCompile(`^\.?[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`)
-	globalArg = map[string]bool{"--config": true, "-c": true, "--provider-write-mode": true}
+	globalArg = map[string]bool{"--config": true, "-c": true}
 )
 
 // checkStale reports what standalone.md documents that does not exist: an

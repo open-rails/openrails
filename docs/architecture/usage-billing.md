@@ -121,8 +121,8 @@ Does not apply: usage comes from the merchant's backend, not a provider; a usage
 Amounts are `int64` native units of their currency end to end. A period is
 priced on its total, so its postings sum to R of its quantity however the usage
 arrived, and history's 15-minute buckets, so any zone's days, sum to what posts.
-Each item is one event (UUIDv5 of
-merchant, lease and number, or of the request id), sorted by customer and event
+Each item is one event (a UUIDv7 derived from
+merchant, lease and number at the lease's time, or from the request id), sorted by customer and event
 id; a resend inserts nothing, and postings read `FINAL`, so a duplicate copy never
 counts. Each posting has its own
 ledger key (`OpUsagePosting`, `usage_posting:<id>`, `1`). Postings are per

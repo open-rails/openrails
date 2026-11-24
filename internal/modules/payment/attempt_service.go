@@ -165,14 +165,14 @@ func (s *OrderAttemptService) Clock() clockwork.Clock {
 }
 
 func (s *OrderAttemptService) requireProviderWrites(ctx context.Context) error {
-	if s == nil || s.config == nil {
-		return ProviderWritesDisabled("operating mode is unknown (no config wired)")
+	if s == nil {
+		return ProviderWritesDisabled("write posture is unknown (nothing wired)")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	if posture := (writeposture.View{Config: s.config, DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
+	if posture := (writeposture.View{DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
 		return ProviderWritesDisabled(posture.Reason)
 	}
 	return nil

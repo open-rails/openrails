@@ -3,10 +3,15 @@
 # Keep config.yaml for process infrastructure: listeners, databases, Vault,
 # rate limits, captcha, and similar deployment concerns. Merchant configuration
 # (PSPs, custodians, settings) lives in the merchant manifest or in Vault.
+# Every key has the default docs/standalone.md's configuration reference
+# states; with none set, `openrails run-server` runs against the Compose
+# dependencies (`docker compose up -d postgres garnet`). The values below
+# are the defaults unless a comment says otherwise.
 
-provider_write_mode: full # full | limited | readonly; REQUIRED: boot refuses it unset
 # Whether money is real is each PSP's declared environment (live | test |
-# sandbox) in the merchant configuration, never this file's.
+# sandbox) in the merchant configuration, never this file's. How much OpenRails
+# writes to a merchant's providers is the merchant's write posture
+# (`openrails merchant hold` / `openrails merchant arm`).
 
 # Independent of reader progress; 2160h = 90 days. Env: EVENT_RETENTION.
 event_retention: 2160h
@@ -14,43 +19,45 @@ event_retention: 2160h
 host: 0.0.0.0
 port: 3053
 # private_port: 9090 # the operator's /metrics, apart from the public port; unset serves none
-# On SIGTERM: readiness fails at once, serving continues for drain_delay, then
-# in-flight requests and workers finish within shutdown_timeout.
-# drain_delay: 5s
-# shutdown_timeout: 20s
-public_billing_base_url: http://localhost:3053
+# On SIGTERM readiness fails at once, serving continues for 5s, then in-flight
+# requests and workers finish within 20s.
+public_billing_base_url: http://localhost:3053 # default http://localhost:<port>
 
 logger:
   level: info       # debug | info | warn | error
   format: json      # json | text
 
+# One role: the server migrates as it at boot and owns what it creates.
+# Merchant isolation is per-query merchant predicates, not login flags.
 db:
-  url: ""           # optional; overrides the fields below when set
-  host: localhost
-  port: "5434"
-  database: openrails_db
-  # One role: the server migrates as it at boot and owns what it creates.
-  # Merchant isolation is per-query merchant predicates, not login flags.
-  username: app
-  password: app_password
-  sslmode: disable # local compose only; unset is verify-full, or require on loopback
+  # With no db key set: Compose's Postgres. Or the parts below, all four of
+  # host, port, database and username.
+  url: postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable
+  # host: db.example.com
+  # port: "5432"
+  # database: openrails
+  # username: openrails
+  # password: ""
+  # sslmode: verify-full # default; require for a loopback host or Unix socket
   # sslrootcert: /etc/openrails/db-ca.pem # the CAs that verify the database; unset, the system roots
+  lease_conns: 4
 
 database:
-  schema: billing # every OpenRails table lives here; defaults to 'billing' (env DATABASE_SCHEMA)
-  # river_schema: billing_river # OpenRails' River jobs; defaults to the schema plus '_river'
+  schema: billing # every OpenRails table lives here (env DATABASE_SCHEMA)
+  # river_schema: billing_river # OpenRails' River jobs; default the schema plus '_river'
 
 # The event store usage needs (ClickHouse's native protocol). Without it
 # usage, limits and admissions answer event_store_required.
 # clickhouse:
-#   addr: localhost:9000
-#   database: openrails # created or upgraded at boot
-#   username: default   # password from CLICKHOUSE_PASSWORD
+#   addr: localhost:9000 # default none: usage is off
+#   database: openrails  # created or upgraded at boot
+#   username: default    # password from CLICKHOUSE_PASSWORD
 
 # Rate limits, lockouts, captcha challenges and card-testing declines, shared
 # by every instance.
 # Without redis they live in this process's memory: run one instance only.
-# While a declared Redis does not answer, each process keeps its own.
+# While a declared Redis does not answer, each process keeps its own. Default
+# none.
 redis:
   addr: localhost:6380 # or url: rediss://user:password@cache.example:6380/0
   password: ""
@@ -68,20 +75,17 @@ redis:
 auth:
   # Generate once for this deployment; keep it across restarts and migration.
   # This platform/operator directory is independent of merchant ownership.
+  # Default: this one for a loopback issuer; a deployed issuer names its own.
   default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
   token:
-    issuer: http://localhost:3053 # issuer URL; JWKS is served under this authority
+    issuer: http://localhost:3053 # default public_billing_base_url; JWKS is served under this authority
+    refresh_token_duration: 720h
   keys:
-    allow_ephemeral_dev_keys: true # disposable local signing key; else keys.path or AUTHKIT_ACTIVE_PRIVATE_KEY_PEM
-  registration:
-    allow_missing_senders: true # no email delivery in this local example
-  http:
-    # Optional: AuthKit's client IP follows the top-level trusted_proxies and
-    # cloudflare_proxies (the socket peer when both are empty); beside either,
-    # true refuses boot.
-    direct_peer_ip: true
-  # database:
-  #   schema: profiles # the server's AuthKit tables
+    allow_ephemeral_dev_keys: true # not a default: a local signing key; else keys.path or AUTHKIT_ACTIVE_PRIVATE_KEY_PEM
+  # AuthKit's client IP follows the top-level trusted_proxies and
+  # cloudflare_proxies: the socket peer when both are empty.
+  database:
+    schema: profiles # the server's AuthKit tables
   # Accept the RFC 9068 access tokens trusted issuers mint for this
   # deployment: their users call the API directly. Each merchant's trusted
   # issuers are AuthKit remote applications in its group.

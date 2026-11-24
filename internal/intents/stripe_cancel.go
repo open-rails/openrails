@@ -127,7 +127,7 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	status, code, msg, err := h.write(ctx, key, method, psid, form, intent.IdempotencyKey+":"+op)
 	switch {
 	case errors.Is(err, stripeapi.ErrProviderReadOnly):
-		return parkedBeforeEffect("stripe provider writes blocked (mode=readonly)")
+		return parkedBeforeEffect("stripe provider writes blocked (readonly write posture)")
 	case errors.Is(err, providerposture.ErrDisarmed):
 		return parkedBeforeEffect("stripe cancel held by sandbox posture gate: " + err.Error())
 	case err != nil:
@@ -227,7 +227,7 @@ func (h *StripeCancelHandler) write(ctx context.Context, key, method, psid strin
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	stripeapi.SetIdempotencyKey(req, idempotencyKey)
-	resp, err := h.Clients.Client(h.Config, 0).Do(req)
+	resp, err := h.Clients.Client(0).Do(req)
 	if err != nil {
 		return 0, "", "", err
 	}
