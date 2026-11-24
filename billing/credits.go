@@ -345,6 +345,9 @@ type MerchantSettings struct {
 	// gate may spend unreserved. Off by default. Unit limits are never spent
 	// past their holds.
 	UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
+	// Accounting is how the merchant's books are dated; a patch replaces it
+	// whole.
+	Accounting *AccountingSettings `json:"accounting,omitempty"`
 	// CardVault is where new cards are saved: a card PSP's key, whose own
 	// vault (or the custodian it names) holds them, or CardVaultPlatform.
 	// Absent: each card is saved where the PSP that takes it keeps cards. It
@@ -362,6 +365,13 @@ type MerchantSettings struct {
 	// They join the currency registry for this merchant alone; operations
 	// that move money refuse them (merchant_unit_unsupported).
 	Currencies []MerchantCurrency `json:"currencies,omitempty"`
+}
+
+// AccountingSettings date a merchant's books.
+type AccountingSettings struct {
+	// Timezone is the IANA zone (Europe/Berlin) whose days and months MRR
+	// rollups count in; empty is UTC. A change dates only later days.
+	Timezone string `json:"timezone,omitempty"`
 }
 
 // BillingPolicy declares one named billing policy (or#897). The policy says

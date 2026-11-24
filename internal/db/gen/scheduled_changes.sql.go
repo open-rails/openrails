@@ -188,12 +188,12 @@ const createScheduledChange = `-- name: CreateScheduledChange :one
 
 INSERT INTO billing.scheduled_changes (
     merchant_id, subscription_id, from_price_id, price_id, quantity, effective_at,
-    source, price_migration_id, status, acknowledged_short_notice, invoker, reason
+    source, price_migration_id, status, acknowledged_short_notice, invoker, reason, created_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     $4::uuid, $5::int, $6::timestamptz,
     $7::text, $8::uuid, 'scheduled', $9::bool,
-    $10::text, $11::text
+    $10::text, $11::text, $12::timestamptz
 )
 RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason
 `
@@ -210,6 +210,7 @@ type CreateScheduledChangeParams struct {
 	AcknowledgedShortNotice bool
 	Invoker                 *string
 	Reason                  *string
+	CreatedAt               time.Time
 }
 
 // billing.scheduled_changes: a subscription's change waiting for its renewal.
@@ -227,6 +228,7 @@ func (q *Queries) CreateScheduledChange(ctx context.Context, arg CreateScheduled
 		arg.AcknowledgedShortNotice,
 		arg.Invoker,
 		arg.Reason,
+		arg.CreatedAt,
 	)
 	var i BillingScheduledChange
 	err := row.Scan(

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 476,
+  "scenario_count": 482,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2127,6 +2127,36 @@
       "id": "OR-J22-S09",
       "journey": "J22",
       "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
+    },
+    {
+      "id": "OR-J42-S01",
+      "journey": "J42",
+      "name": "New, expansion, contraction, churn and reactivation are each recorded once at the customer level, normalised to a month (a day's 730 hours, a year's twelfth, calendar months) and per currency"
+    },
+    {
+      "id": "OR-J42-S02",
+      "journey": "J42",
+      "name": "A cancellation at period end is scheduled churn with MRR unchanged; a resume reverses it; its end churns, dated at the end"
+    },
+    {
+      "id": "OR-J42-S03",
+      "journey": "J42",
+      "name": "A scheduled downgrade is scheduled contraction applied at its renewal; canceling the change reverses it"
+    },
+    {
+      "id": "OR-J42-S04",
+      "journey": "J42",
+      "name": "A Stripe cancel at period end mirrored from the portal is scheduled churn; a portal resume reverses it"
+    },
+    {
+      "id": "OR-J42-S05",
+      "journey": "J42",
+      "name": "A CCBill upgrade replacing its subscription nets to one expansion; an imported subscription opens MRR rather than counting as new"
+    },
+    {
+      "id": "OR-J42-S06",
+      "journey": "J42",
+      "name": "MRR at a past local day's start, across a daylight-saving change, read from 15-minute buckets equals its movements; the rollup and due reads take indexes, never a sequential scan"
     },
     {
       "id": "OR-J28-S09",

@@ -122,6 +122,10 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		txdb := database.NewWithPgxTx(tx)
 		qx := txdb.Qx(ctx)
 		q := txdb.Gen(ctx)
+		// What the book adopts opens MRR; it is not new business.
+		if err := db.SetMRRCause(ctx, q, db.MRRCauseImport); err != nil {
+			return err
+		}
 
 		// Lifecycle clock pinned at AsOf so re-runs are deterministic. The
 		// service and deferred-delete scheduler share this transaction so no

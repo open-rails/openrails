@@ -63,6 +63,10 @@ type MerchantConfiguration struct {
 	// UsageGateSafeSpend: a lease's holds name their money size as safe,
 	// which their gate may spend while OpenRails is unreachable.
 	UsageGateSafeSpend bool `json:"usage_gate_safe_spend,omitempty"`
+
+	// AccountingTimezone is the IANA zone the merchant's books are dated in;
+	// never empty (UTC by default).
+	AccountingTimezone string `json:"accounting_timezone,omitempty"`
 }
 
 // BalanceNoticeConfiguration is a merchant's validated default low-balance

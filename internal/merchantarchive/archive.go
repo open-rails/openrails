@@ -296,6 +296,11 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := q.RebuildUsageDue(ctx, gen.RebuildUsageDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
+		// An archive from before MRR carries subscriptions without it: they
+		// open MRR now. The restore check proves the rest agree.
+		if err := q.SeedMRR(ctx, gen.SeedMRRParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {
+			return err
+		}
 		// The source's wakes stay in its River schema.
 		if err := queueWakes(ctx, database, tx, q, id); err != nil {
 			return err

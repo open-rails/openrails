@@ -351,17 +351,7 @@ Solana prices are refused. `rpc_url`, a secret, is tried before the network's
 public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
 at purchase; devnet and testnet price at $1.00 parity.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile`
-(`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`,
-`terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault`
-and `charge_psps` (where new cards are saved and which PSPs take new charges),
-`psp_routing`, `dunning_policy`, `usage_billing`, `billing_policies` and their
-bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`,
-`monthly_floor`, `collection_threshold`, `billing_period_boundary`),
-`reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`,
-`provider_refund_access`, `usage_gate_safe_spend` and `currencies`. `from_email` and
-`alert_email` are each one mailbox, bare or named. Beside the settings, the
-merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing`, `billing_policies` and their bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`, `monthly_floor`, `collection_threshold`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `usage_gate_safe_spend`, `currencies` and `accounting.timezone` (the IANA zone whose days and months MRR reports count in; default UTC). `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.

@@ -11,6 +11,10 @@ export type AccessTenure = {
   seconds: Record<string, number> | null
 }
 
+export type AccountingSettings = {
+  timezone?: string
+}
+
 export type AdjustCustomerLimitParams = {
   limit?: string
   amount?: string
@@ -1461,6 +1465,7 @@ export type MerchantConfigurationState = {
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
   usage_gate_safe_spend?: boolean
+  accounting?: AccountingSettings
   card_vault?: string
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
@@ -2497,6 +2502,12 @@ export type ScheduledChange = {
   product?: ProductSummary
 }
 
+export type ScheduledMRR = {
+  kind: "churn" | "contraction" | "expansion"
+  amount: string
+  effective_at: string
+}
+
 export type SetCartLineParams = {
   quantity?: number
   amount?: string
@@ -2610,6 +2621,7 @@ export type Subscription = {
   product_id: string
   price_id: string
   quantity: number | null
+  mrr: SubscriptionMRR | null
   psp_id: string
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   rail_subscription_id: string | null
@@ -2777,6 +2789,12 @@ export type SubscriptionHistoryTransition = {
   to_period_end: string | null
 }
 
+export type SubscriptionMRR = {
+  amount: string
+  currency: string
+  scheduled: ScheduledMRR | null
+}
+
 export type SubscriptionRetryNowResult = {
   subscription: Subscription
   status: string
@@ -2851,6 +2869,7 @@ export type UpdateMerchantConfigurationParams = {
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
   usage_gate_safe_spend?: boolean
+  accounting?: AccountingSettings
   card_vault?: string
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]

@@ -32,6 +32,9 @@ type SubscriptionFilters struct {
 	CanceledAfter  *time.Time
 	CanceledBefore *time.Time
 	ExpiresBefore  *time.Time
+	// ScheduledChangeBefore keeps the subscriptions whose MRR is scheduled to
+	// change by then.
+	ScheduledChangeBefore *time.Time
 	// Dunning keeps the subscriptions past_due or awaiting_method.
 	Dunning bool
 	// Sort picks ListPage's order; Count ignores it.
@@ -693,21 +696,21 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 		rows, err = q.ListSubscriptionsPageByPeriodEnd(ctx, gen.ListSubscriptionsPageByPeriodEndParams{
 			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, ScheduledChangeBefore: f.ScheduledChangeBefore, Dunning: f.Dunning,
 			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 		})
 	case billing.SubscriptionSortCanceledAt:
 		rows, err = q.ListSubscriptionsPageByCanceledAt(ctx, gen.ListSubscriptionsPageByCanceledAtParams{
 			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, ScheduledChangeBefore: f.ScheduledChangeBefore, Dunning: f.Dunning,
 			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 		})
 	default:
 		rows, err = q.ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
 			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, ScheduledChangeBefore: f.ScheduledChangeBefore, Dunning: f.Dunning,
 			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 		})
 	}
@@ -743,7 +746,7 @@ func (r *SubscriptionRepo) Count(ctx context.Context, f SubscriptionFilters) (in
 	return r.db.Gen(ctx).CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
 		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, ScheduledChangeBefore: f.ScheduledChangeBefore, Dunning: f.Dunning,
 	})
 }
 

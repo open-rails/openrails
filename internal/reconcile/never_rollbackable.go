@@ -20,6 +20,10 @@ var NeverRollbackableTables = map[string]string{
 		"duplicate charges, duplicate cancels",
 	"reconciliation_findings": "forensics: a rollback that erases the evidence of what went wrong defeats itself",
 	"price_key_movements":     "forensics: price-identity history",
+	"mrr_movements":           "MRR history: an undo's restored subscriptions record their own corrections",
+	"mrr_movement_lines":      "MRR history, with its movements",
+	"subscription_mrr":        "trigger-maintained MRR projection of subscriptions; restoring a row desynchronises it from its movements",
+	"customer_mrr":            "trigger-maintained MRR projection; restoring a row desynchronises it from its movements",
 }
 
 // maintenance_runs and destructive_run_before_images are absent on purpose: an

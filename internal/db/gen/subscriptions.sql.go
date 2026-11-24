@@ -112,22 +112,25 @@ WHERE sub.merchant_id = $1::uuid AND ($2::uuid IS NULL OR sub.customer_id = $2::
   AND ($8::timestamptz IS NULL OR sub.canceled_at >= $8::timestamptz)
   AND ($9::timestamptz IS NULL OR sub.canceled_at <= $9::timestamptz)
   AND ($10::timestamptz IS NULL OR sub.current_period_ends_at <= $10::timestamptz)
-  AND (NOT $11::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND ($11::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
+      WHERE e.merchant_id = sub.merchant_id AND e.subscription_id = sub.id AND e.status = 'scheduled' AND e.effective_at <= $11::timestamptz))
+  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.deleted_at IS NULL
 `
 
 type CountSubscriptionsFilteredParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     *uuid.UUID
-	Status         *string
-	PriceID        *uuid.UUID
-	Rail           *string
-	CreatedAfter   *time.Time
-	CreatedBefore  *time.Time
-	CanceledAfter  *time.Time
-	CanceledBefore *time.Time
-	ExpiresBefore  *time.Time
-	Dunning        bool
+	MerchantID            uuid.UUID
+	CustomerID            *uuid.UUID
+	Status                *string
+	PriceID               *uuid.UUID
+	Rail                  *string
+	CreatedAfter          *time.Time
+	CreatedBefore         *time.Time
+	CanceledAfter         *time.Time
+	CanceledBefore        *time.Time
+	ExpiresBefore         *time.Time
+	ScheduledChangeBefore *time.Time
+	Dunning               bool
 }
 
 func (q *Queries) CountSubscriptionsFiltered(ctx context.Context, arg CountSubscriptionsFilteredParams) (int64, error) {
@@ -142,6 +145,7 @@ func (q *Queries) CountSubscriptionsFiltered(ctx context.Context, arg CountSubsc
 		arg.CanceledAfter,
 		arg.CanceledBefore,
 		arg.ExpiresBefore,
+		arg.ScheduledChangeBefore,
 		arg.Dunning,
 	)
 	var count int64
@@ -1749,28 +1753,31 @@ WHERE sub.merchant_id = $1::uuid AND ($2::uuid IS NULL OR sub.customer_id = $2::
   AND ($8::timestamptz IS NULL OR sub.canceled_at >= $8::timestamptz)
   AND ($9::timestamptz IS NULL OR sub.canceled_at <= $9::timestamptz)
   AND ($10::timestamptz IS NULL OR sub.current_period_ends_at <= $10::timestamptz)
-  AND (NOT $11::boolean OR sub.status IN ('past_due', 'awaiting_method'))
-  AND ($12::timestamptz IS NULL OR (sub.created_at, sub.id) < ($12::timestamptz, $13::uuid))
+  AND ($11::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
+      WHERE e.merchant_id = sub.merchant_id AND e.subscription_id = sub.id AND e.status = 'scheduled' AND e.effective_at <= $11::timestamptz))
+  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND ($13::timestamptz IS NULL OR (sub.created_at, sub.id) < ($13::timestamptz, $14::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC, sub.id DESC
-LIMIT $14::int
+LIMIT $15::int
 `
 
 type ListSubscriptionsPageParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     *uuid.UUID
-	Status         *string
-	PriceID        *uuid.UUID
-	Rail           *string
-	CreatedAfter   *time.Time
-	CreatedBefore  *time.Time
-	CanceledAfter  *time.Time
-	CanceledBefore *time.Time
-	ExpiresBefore  *time.Time
-	Dunning        bool
-	AfterAt        *time.Time
-	AfterID        *uuid.UUID
-	RowLimit       int32
+	MerchantID            uuid.UUID
+	CustomerID            *uuid.UUID
+	Status                *string
+	PriceID               *uuid.UUID
+	Rail                  *string
+	CreatedAfter          *time.Time
+	CreatedBefore         *time.Time
+	CanceledAfter         *time.Time
+	CanceledBefore        *time.Time
+	ExpiresBefore         *time.Time
+	ScheduledChangeBefore *time.Time
+	Dunning               bool
+	AfterAt               *time.Time
+	AfterID               *uuid.UUID
+	RowLimit              int32
 }
 
 // One page of a subscription list, newest first; after_at/after_id is the
@@ -1787,6 +1794,7 @@ func (q *Queries) ListSubscriptionsPage(ctx context.Context, arg ListSubscriptio
 		arg.CanceledAfter,
 		arg.CanceledBefore,
 		arg.ExpiresBefore,
+		arg.ScheduledChangeBefore,
 		arg.Dunning,
 		arg.AfterAt,
 		arg.AfterID,
@@ -1862,29 +1870,32 @@ WHERE sub.merchant_id = $1::uuid AND ($2::uuid IS NULL OR sub.customer_id = $2::
   AND ($8::timestamptz IS NULL OR sub.canceled_at >= $8::timestamptz)
   AND ($9::timestamptz IS NULL OR sub.canceled_at <= $9::timestamptz)
   AND ($10::timestamptz IS NULL OR sub.current_period_ends_at <= $10::timestamptz)
-  AND (NOT $11::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND ($11::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
+      WHERE e.merchant_id = sub.merchant_id AND e.subscription_id = sub.id AND e.status = 'scheduled' AND e.effective_at <= $11::timestamptz))
+  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.canceled_at IS NOT NULL
-  AND ($12::timestamptz IS NULL OR (sub.canceled_at, sub.id) < ($12::timestamptz, $13::uuid))
+  AND ($13::timestamptz IS NULL OR (sub.canceled_at, sub.id) < ($13::timestamptz, $14::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.canceled_at DESC, sub.id DESC
-LIMIT $14::int
+LIMIT $15::int
 `
 
 type ListSubscriptionsPageByCanceledAtParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     *uuid.UUID
-	Status         *string
-	PriceID        *uuid.UUID
-	Rail           *string
-	CreatedAfter   *time.Time
-	CreatedBefore  *time.Time
-	CanceledAfter  *time.Time
-	CanceledBefore *time.Time
-	ExpiresBefore  *time.Time
-	Dunning        bool
-	AfterAt        *time.Time
-	AfterID        *uuid.UUID
-	RowLimit       int32
+	MerchantID            uuid.UUID
+	CustomerID            *uuid.UUID
+	Status                *string
+	PriceID               *uuid.UUID
+	Rail                  *string
+	CreatedAfter          *time.Time
+	CreatedBefore         *time.Time
+	CanceledAfter         *time.Time
+	CanceledBefore        *time.Time
+	ExpiresBefore         *time.Time
+	ScheduledChangeBefore *time.Time
+	Dunning               bool
+	AfterAt               *time.Time
+	AfterID               *uuid.UUID
+	RowLimit              int32
 }
 
 // The canceled subscriptions, the latest cancellation first.
@@ -1900,6 +1911,7 @@ func (q *Queries) ListSubscriptionsPageByCanceledAt(ctx context.Context, arg Lis
 		arg.CanceledAfter,
 		arg.CanceledBefore,
 		arg.ExpiresBefore,
+		arg.ScheduledChangeBefore,
 		arg.Dunning,
 		arg.AfterAt,
 		arg.AfterID,
@@ -1975,29 +1987,32 @@ WHERE sub.merchant_id = $1::uuid AND ($2::uuid IS NULL OR sub.customer_id = $2::
   AND ($8::timestamptz IS NULL OR sub.canceled_at >= $8::timestamptz)
   AND ($9::timestamptz IS NULL OR sub.canceled_at <= $9::timestamptz)
   AND ($10::timestamptz IS NULL OR sub.current_period_ends_at <= $10::timestamptz)
-  AND (NOT $11::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND ($11::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
+      WHERE e.merchant_id = sub.merchant_id AND e.subscription_id = sub.id AND e.status = 'scheduled' AND e.effective_at <= $11::timestamptz))
+  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.current_period_ends_at IS NOT NULL
-  AND ($12::timestamptz IS NULL OR (sub.current_period_ends_at, sub.id) > ($12::timestamptz, $13::uuid))
+  AND ($13::timestamptz IS NULL OR (sub.current_period_ends_at, sub.id) > ($13::timestamptz, $14::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at, sub.id
-LIMIT $14::int
+LIMIT $15::int
 `
 
 type ListSubscriptionsPageByPeriodEndParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     *uuid.UUID
-	Status         *string
-	PriceID        *uuid.UUID
-	Rail           *string
-	CreatedAfter   *time.Time
-	CreatedBefore  *time.Time
-	CanceledAfter  *time.Time
-	CanceledBefore *time.Time
-	ExpiresBefore  *time.Time
-	Dunning        bool
-	AfterAt        *time.Time
-	AfterID        *uuid.UUID
-	RowLimit       int32
+	MerchantID            uuid.UUID
+	CustomerID            *uuid.UUID
+	Status                *string
+	PriceID               *uuid.UUID
+	Rail                  *string
+	CreatedAfter          *time.Time
+	CreatedBefore         *time.Time
+	CanceledAfter         *time.Time
+	CanceledBefore        *time.Time
+	ExpiresBefore         *time.Time
+	ScheduledChangeBefore *time.Time
+	Dunning               bool
+	AfterAt               *time.Time
+	AfterID               *uuid.UUID
+	RowLimit              int32
 }
 
 // The subscriptions with a current period, the soonest end first.
@@ -2013,6 +2028,7 @@ func (q *Queries) ListSubscriptionsPageByPeriodEnd(ctx context.Context, arg List
 		arg.CanceledAfter,
 		arg.CanceledBefore,
 		arg.ExpiresBefore,
+		arg.ScheduledChangeBefore,
 		arg.Dunning,
 		arg.AfterAt,
 		arg.AfterID,
