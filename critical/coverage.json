@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 663,
+  "scenario_count": 665,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3317,6 +3317,16 @@
       "id": "OR-J04-S79",
       "journey": "J04",
       "name": "OrderPayment reads a Solana order awaiting its wallet and confirms it at most twice a minute, well under the purchase limit"
+    },
+    {
+      "id": "OR-J07-S11",
+      "journey": "J07",
+      "name": "A kept customer search lists the contact whose username is the query first, then the newest customers, and the list keeps that order"
+    },
+    {
+      "id": "OR-J38-S82",
+      "journey": "J38",
+      "name": "A CCBill postback names its customer by a username more than one search's worth of the host's users contain, not leaving it unattributable"
     }
   ]
 }

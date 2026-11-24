@@ -184,6 +184,27 @@ func TestCustomerDirectory(t *testing.T) {
 			require.Equal(t, prefix+"buyer", *found.Items[0].Contact.Username)
 		}
 	})
+	t.Run("OR-J07-S11/a-kept-search-lists-the-exact-match-first-then-the-newest", func(t *testing.T) {
+		a := newAuthorityWorld(t, func(w *world) { w.deps.UserInfo = nil })
+		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
+		require.NoError(t, err)
+		named := map[billing.CustomerID]string{}
+		for _, name := range []string{"joanne", "ann", "annabel", "hannah"} {
+			id := uuid.NewString()
+			status, raw := a.request(t, "POST", scimUsers, token.Token, scimUser(id, name))
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			named[billing.CustomerID(uuid.MustParse(id))] = name
+		}
+		for limit, want := range map[int][]string{10: {"ann", "hannah", "annabel", "joanne"}, 2: {"ann", "hannah"}} {
+			found, err := a.alpha.ListCustomers(t.Context(), billing.CustomerListParams{Search: "ann", PageRequest: billing.PageRequest{Limit: limit}})
+			require.NoError(t, err)
+			var got []string
+			for _, c := range found.Items {
+				got = append(got, named[c.ID])
+			}
+			require.Equal(t, want, got, "the username it is first, then the newest")
+		}
+	})
 	t.Run("OR-J07-S04/live-host-directory-exposes-no-copied-write-authority", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		id := billing.CustomerID(uuid.MustParse(a.alice.ID))

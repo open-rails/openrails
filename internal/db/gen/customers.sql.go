@@ -125,40 +125,6 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 	return i, err
 }
 
-const listCustomerIDsAfter = `-- name: ListCustomerIDsAfter :many
-SELECT id FROM billing.customers
-WHERE merchant_id = $1::uuid AND ($2::uuid IS NULL OR id > $2::uuid)
-ORDER BY id
-LIMIT $3::int
-`
-
-type ListCustomerIDsAfterParams struct {
-	MerchantID uuid.UUID
-	AfterID    *uuid.UUID
-	RowLimit   int32
-}
-
-// One page of the merchant's customers in id order, after after_id.
-func (q *Queries) ListCustomerIDsAfter(ctx context.Context, arg ListCustomerIDsAfterParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listCustomerIDsAfter, arg.MerchantID, arg.AfterID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listCustomers = `-- name: ListCustomers :many
 SELECT id, merchant_id, issuer, created_at, last_seen_at, billing_policy FROM billing.customers c
 WHERE c.merchant_id = $1

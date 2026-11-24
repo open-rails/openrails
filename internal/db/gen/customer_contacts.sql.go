@@ -323,7 +323,8 @@ SELECT merchant_id, customer_id, email, display_name, user_name, active, provisi
 WHERE c.merchant_id = $1::uuid
   AND EXISTS (SELECT 1 FROM billing.customers cu WHERE cu.merchant_id = c.merchant_id AND cu.id = c.customer_id)
   AND (c.email ILIKE $2::text OR c.user_name ILIKE $2::text OR c.display_name ILIKE $2::text)
-ORDER BY (lower(c.user_name) = lower($3::text)) DESC NULLS LAST, (lower(c.email) = lower($3::text)) DESC NULLS LAST, c.customer_id
+ORDER BY (lower(c.user_name) = lower($3::text) OR lower(c.email) = lower($3::text)) DESC NULLS LAST,
+  (SELECT cu.created_at FROM billing.customers cu WHERE cu.merchant_id = c.merchant_id AND cu.id = c.customer_id) DESC, c.customer_id DESC
 LIMIT $4::int
 `
 
@@ -334,7 +335,8 @@ type SearchCustomerContactsOfCustomersParams struct {
 	RowLimit   int32
 }
 
-// SearchCustomerContacts kept to the merchant's customers.
+// SearchCustomerContacts kept to the merchant's customers: an exact username
+// or email first, then the newest customers.
 func (q *Queries) SearchCustomerContactsOfCustomers(ctx context.Context, arg SearchCustomerContactsOfCustomersParams) ([]BillingCustomerContact, error) {
 	rows, err := q.db.Query(ctx, searchCustomerContactsOfCustomers,
 		arg.MerchantID,

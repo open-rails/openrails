@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -124,6 +125,14 @@ func (s *Service) ListCustomers(ctx context.Context, params billing.CustomerList
 		if err != nil {
 			return page, err
 		}
+		// In the search's own order: the id, then exact matches, then the newest.
+		rank := make(map[uuid.UUID]int, len(ids))
+		for i, id := range ids {
+			if _, ok := rank[id]; !ok {
+				rank[id] = i
+			}
+		}
+		slices.SortStableFunc(rows, func(a, b gen.BillingCustomer) int { return rank[a.ID] - rank[b.ID] })
 		page.Items, err = s.customers(ctx, mid, rows[:min(len(rows), limit)])
 		return page, err
 	}
@@ -143,8 +152,8 @@ func (s *Service) ListCustomers(ctx context.Context, params billing.CustomerList
 	return page, err
 }
 
-// searchCustomers is the ids a search names: the customer whose id it is,
-// and those whose contact the directory finds.
+// searchCustomers is the ids a search names, in its order: the customer
+// whose id it is, then those whose contact the directory finds.
 func (s *Service) searchCustomers(ctx context.Context, mid billing.MerchantID, search string, limit int) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
 	if id, err := uuid.Parse(search); err == nil {

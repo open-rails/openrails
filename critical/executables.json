@@ -2152,6 +2152,12 @@
     ],
     "OR-J04-S79": [
       "TestOrderPaymentBrowser/OR-J04-S79/an-order-awaiting-its-wallet-is-read-and-confirmed-well-under-the-purchase-limit"
+    ],
+    "OR-J07-S11": [
+      "TestCustomerDirectory/OR-J07-S11/a-kept-search-lists-the-exact-match-first-then-the-newest"
+    ],
+    "OR-J38-S82": [
+      "TestCCBillIdentity/OR-J38-S82/a-postback-names-its-customer-by-a-username-many-others-contain"
     ]
   }
 }
