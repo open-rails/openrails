@@ -64,6 +64,7 @@ var excludedTables = map[string]string{
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 
 	"price_keys":                    "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
+	"network_activity_daily":        "derived: the payments, disputes and fraud_reports triggers rebuild it as they are restored",
 	"balance_watches":               "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
 	"psp_imports":                   "import working state: the destination pulls its PSPs again",
 	"psp_import_records":            "import working state: copies of provider objects, pulled again",
@@ -120,8 +121,9 @@ var excludedColumns = map[string]string{
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
-	"price_keys":      "merchant_id product_id key revision created_at updated_at",
-	"balance_watches": "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
+	"price_keys":             "merchant_id product_id key revision created_at updated_at",
+	"network_activity_daily": "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
+	"balance_watches":        "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment
@@ -328,26 +330,25 @@ var referenceChecks = []rowCheck{
 	// A native lot retains its payment's accepted promise. The product's current
 	// benefit is deliberately irrelevant to previously purchased credit.
 	{"payments", `credit_grant_snapshot IS NOT NULL AND status='succeeded' AND NOT EXISTS (
-  SELECT 1 FROM billing.grants g JOIN billing.order_lines l ON l.merchant_id=$1 AND l.order_id=payments.order_id AND l.product_id=g.product_id
-  WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.kind='credit' AND g.event='grant'
-    AND g.source_type='purchase' AND g.source_id=payments.id::text
+  SELECT 1 FROM billing.credit_grants g JOIN billing.order_lines l ON l.merchant_id=$1 AND l.order_id=payments.order_id AND l.product_id=g.product_id
+  WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.source_id=payments.id::text
     AND g.customer_id=payments.customer_id AND g.product_id=l.product_id
-    AND g.currency=payments.currency AND g.amount=(payments.credit_grant_snapshot->>'amount')::bigint
-    AND (g.spec_snapshot->'deposit'->>'paid_amount')::bigint=payments.amount AND payments.amount>0
+    AND g.unit=payments.currency AND g.units=(payments.credit_grant_snapshot->>'amount')::bigint
+    AND g.paid_amount=payments.amount AND g.paid_currency=payments.currency AND payments.amount>0
     AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
-    AND g.ends_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
+    AND g.expires_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
 	// An order's lot keeps its line's promise instead: the frozen benefit per
 	// unit, and the line's amount as what was paid for it.
-	{"grants", `kind='credit' AND event='grant' AND spec_snapshot->'deposit'->'paid_amount' IS NOT NULL AND NOT EXISTS (
-  SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=grants.payment_id
-    AND p.status='succeeded' AND p.customer_id=grants.customer_id AND p.currency=grants.currency
+	{"credit_grants", `payment_id IS NOT NULL AND NOT EXISTS (
+  SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=credit_grants.payment_id
+    AND p.status='succeeded' AND p.customer_id=credit_grants.customer_id AND p.currency=credit_grants.paid_currency
     AND ((p.credit_grant_snapshot IS NOT NULL
-        AND (p.credit_grant_snapshot->>'amount')::bigint=grants.amount
-        AND p.amount=(grants.spec_snapshot->'deposit'->>'paid_amount')::bigint)
+        AND (p.credit_grant_snapshot->>'amount')::bigint=credit_grants.units
+        AND p.amount=credit_grants.paid_amount)
       OR EXISTS (SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.order_id=p.order_id
-        AND l.product_id=grants.product_id AND l.credit_grant IS NOT NULL
-        AND (l.credit_grant->>'amount')::bigint*COALESCE(l.quantity,1)=grants.amount
-        AND l.amount=(grants.spec_snapshot->'deposit'->>'paid_amount')::bigint)))`},
+        AND l.product_id=credit_grants.product_id AND l.credit_grant IS NOT NULL
+        AND (l.credit_grant->>'amount')::bigint*COALESCE(l.quantity,1)=credit_grants.units
+        AND l.amount=credit_grants.paid_amount)))`},
 
 	{"provider_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
           (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR
@@ -382,11 +383,10 @@ var referenceChecks = []rowCheck{
                AND m.status IN ('removed','closed','replaced')
                AND m.park_reason IS NOT DISTINCT FROM ('removed:' || provider_intents.id::text))))`},
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
-	 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g
-   WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND (
+	 OR (credit_grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.credit_grants g
+   WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND (
      g.customer_id=ledger_transfers.customer_id OR (
-       ledger_transfers.customer_id IS NULL AND g.kind='credit'
-       AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
+       ledger_transfers.customer_id IS NULL AND g.paid_amount IS NOT NULL
        AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))

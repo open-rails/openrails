@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -93,6 +94,11 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			}
 			r.Values = values
 		}
+		if p.Name == "grants" && len(r.Values) == len(p.Columns)+2 {
+			if kind := r.Values[4]; kind != nil && *kind == "credit" {
+				return errArchivedCreditGrants
+			}
+		}
 		if err := dropUnreadColumns(p, &r.Values); err != nil {
 			return err
 		}
@@ -100,6 +106,12 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		// zero. Preserve that meaning; no schedule existed before #1289.
 		if p.Name == "money_settings" && len(r.Values) == len(p.Columns)-5 {
 			r.Values = append(r.Values, new("true"), nil, nil, nil, new("false"))
+		}
+		// Payments before refund reasons and charged cards: a refund's reason
+		// is unknown, as the migration that added them reads it, and no card
+		// is named.
+		if p.Name == "payments" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, legacyRefundReason(p, r.Values), nil)
 		}
 		if p.Name == "subscription_status_transitions" && len(r.Values) == len(p.Columns)-4 {
 			r.Values = append(r.Values, nil, nil, nil, nil)
@@ -252,7 +264,7 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
 var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
-	"usage_daily": true, "usage_accruals": true}
+	"usage_daily": true, "usage_accruals": true, "credit_grants": true, "credit_grant_events": true, "disputes": true, "fraud_reports": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}
@@ -269,6 +281,8 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 		empty = map[int]*string{len(p.Columns) - 1: nil} // routing_reason
 	case p.Name == "payment_methods" && len(*values) == len(p.Columns)+1:
 		empty = map[int]*string{len(p.Columns): nil} // wallet_card_id
+	case p.Name == "grants" && len(*values) == len(p.Columns)+2:
+		empty = map[int]*string{13: nil, 14: nil} // amount, currency
 	default:
 		return nil
 	}
@@ -286,6 +300,8 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 }
 
 var errArchivedInvoices = fmt.Errorf("an archive with invoices: restore it on a release before usage orders, then export it again")
+
+var errArchivedCreditGrants = fmt.Errorf("an archive with credit lots among its grants: restore it on a release before credit_grants, then export it again")
 
 // normalizePreUsage moves a row exported before usage orders to their
 // shapes, as migration 61 moved the database. Rows naming an invoice are
@@ -364,4 +380,33 @@ func ClearMeteredPaymentTerm(p Profile, values []*string) {
 			values[i] = nil
 		}
 	}
+}
+
+// legacyRefundReason is the reason a refund exported before reasons reads as:
+// the same reading the migration that added them gave the rows it found.
+func legacyRefundReason(p Profile, values []*string) *string {
+	at := func(name string) *string {
+		for i, c := range p.Columns[:len(values)] {
+			if c.Name == name {
+				return values[i]
+			}
+		}
+		return nil
+	}
+	if kind := at("reversal_kind"); kind == nil || *kind != "refund" {
+		return nil
+	}
+	reason := "unknown"
+	if meta := at("metadata"); meta != nil {
+		var m map[string]any
+		if json.Unmarshal([]byte(*meta), &m) == nil {
+			switch {
+			case m["charge_after_cancel"] == true:
+				reason = "charged_after_cancel"
+			case m["order_late_payment"] == true:
+				reason = "duplicate"
+			}
+		}
+	}
+	return &reason
 }

@@ -777,8 +777,7 @@ count, primary or sticky session.
   read per request. Merchant configuration is cached per instance (see
   [Vault](#vault)). An FX rate published more than 48 hours ago is never quoted.
 - **Connections:** size PostgreSQL `max_connections` for every instance's pool,
-  its `db.lease_conns` lease pool, and one connection per instance with Vault
-  configuration (it listens for edits).
+  its `db.lease_conns` lease pool, and one connection per instance for each listener: customer messages, dispute responses and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode.
 
 A webhook takes effect once per provider event: a concurrent copy waits up to
 10 seconds, then answers 500 so the provider retries. An idempotent request runs
@@ -1272,7 +1271,7 @@ the merchant the token is bound to.
 | `openrails destructive-holds list`, `openrails destructive-holds clear` | destructive-action incidents |
 | `openrails admin-lockouts unlock <user-id>` | end an administrator's lockout |
 | `openrails workers [--json]` | job health from River's tables |
-| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation and counters; non-zero on a finding. Nothing schedules it |
+| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters and credit lot counters; non-zero on a finding. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
 | `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |

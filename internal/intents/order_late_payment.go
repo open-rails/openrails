@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
@@ -41,7 +43,7 @@ func RefundLateOrderPayment(ctx context.Context, d *db.DB, payment *models.Payme
 	}
 	clock = timeutil.FirstClock(clock)
 	key := RefundIdempotencyKey(payment.ID, orderLatePaymentRefundKey)
-	refund, err := queueFullRefund(ctx, d, mid.UUID(), payment, key, orderLatePaymentRefundKey, "paid after the order closed",
+	refund, _, err := queueFullRefund(ctx, d, mid.UUID(), payment, key, orderLatePaymentRefundKey, "paid after the order closed", billing.RefundDuplicate,
 		map[string]any{"order_late_payment": true, "refund_reason": "paid after the order closed"}, clock)
 	if err != nil {
 		return err

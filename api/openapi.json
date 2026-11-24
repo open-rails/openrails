@@ -8502,6 +8502,276 @@
         ]
       }
     },
+    "/v1/admin/disputes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "ListDisputes",
+        "description": "ListDisputes is one page of the merchant's disputes (inquiries, chargebacks and prevented disputes), newest first.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "chargeback",
+                  "inquiry",
+                  "prevented",
+                  "unknown"
+                ]
+              },
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "network",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "amex",
+                  "diners",
+                  "discover",
+                  "jcb",
+                  "mastercard",
+                  "other",
+                  "unionpay",
+                  "unknown",
+                  "visa"
+                ]
+              },
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "payment_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "psp_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "authorization",
+                  "canceled_recurring",
+                  "credit_not_processed",
+                  "duplicate",
+                  "fraud",
+                  "not_as_described",
+                  "not_received",
+                  "other",
+                  "processing_error",
+                  "unknown",
+                  "unrecognized"
+                ]
+              },
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "closed",
+                  "lost",
+                  "open",
+                  "unreported",
+                  "won"
+                ]
+              },
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Dispute"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:read",
+          "root": "root:customer:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/admin/disputes/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "GetDispute",
+        "description": "GetDispute reads one dispute.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dispute"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:read",
+          "root": "root:customer:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "resource_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
+    },
     "/v1/admin/renewals": {
       "get": {
         "tags": [
@@ -12419,6 +12689,92 @@
         ]
       }
     },
+    "/v1/metrics/dispute-programs": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "operationId": "ListDisputePrograms",
+        "description": "ListDisputePrograms is each card PSP's standing in the dispute monitoring programs for the month containing params.At (now when unset): the counts, the ratio so far and projected over the month, the level reached and the thresholds in force.",
+        "parameters": [
+          {
+            "name": "at",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "psp_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DisputeStanding"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:metrics:read",
+          "root": "root:metrics:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/metrics/dashboard": {
       "get": {
         "tags": [
@@ -15967,6 +16323,14 @@
           "source": {
             "type": "string"
           },
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "import",
+              "promotion"
+            ]
+          },
           "invoker": {
             "type": "string"
           },
@@ -16530,19 +16894,52 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "refunded_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "state": {
             "type": "string",
             "enum": [
               "active",
               "expired",
+              "pending",
+              "refunded",
               "revoked",
               "scheduled",
-              "spent",
-              "terminated"
+              "spent"
             ]
           },
-          "source_type": {
-            "type": "string"
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "import",
+              "promotion",
+              "purchase",
+              "recurring"
+            ]
+          },
+          "paid_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paid_currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_id": {
             "oneOf": [
@@ -16583,7 +16980,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "terminated_at": {
+          "revoked_at": {
             "oneOf": [
               {
                 "type": "string",
@@ -16594,7 +16991,7 @@
               }
             ]
           },
-          "termination_reason": {
+          "revoke_reason": {
             "oneOf": [
               {
                 "type": "string"
@@ -16617,15 +17014,18 @@
           "remaining_amount",
           "revoked_amount",
           "expired_amount",
+          "refunded_amount",
           "state",
-          "source_type",
+          "funding_source",
+          "paid_amount",
+          "paid_currency",
           "source_id",
           "description",
           "starts_at",
           "expires_at",
           "created_at",
-          "terminated_at",
-          "termination_reason",
+          "revoked_at",
+          "revoke_reason",
           "replayed"
         ]
       },
@@ -18024,6 +18424,329 @@
             "type": "string"
           }
         }
+      },
+      "Dispute": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "provider_ref": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
+          },
+          "psp_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "chargeback",
+              "inquiry",
+              "prevented",
+              "unknown"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "closed",
+              "lost",
+              "open",
+              "unreported",
+              "won"
+            ]
+          },
+          "network": {
+            "type": "string",
+            "enum": [
+              "amex",
+              "diners",
+              "discover",
+              "jcb",
+              "mastercard",
+              "other",
+              "unionpay",
+              "unknown",
+              "visa"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "authorization",
+              "canceled_recurring",
+              "credit_not_processed",
+              "duplicate",
+              "fraud",
+              "not_as_described",
+              "not_received",
+              "other",
+              "processing_error",
+              "unknown",
+              "unrecognized"
+            ]
+          },
+          "reason_code": {
+            "type": "string"
+          },
+          "provider_reason": {
+            "type": "string"
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disputed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "chargeback_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_due_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closed_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reversal_payment_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recovery_payment_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "provider_ref",
+          "rail",
+          "psp_id",
+          "customer_id",
+          "payment_id",
+          "kind",
+          "status",
+          "network",
+          "reason",
+          "reason_code",
+          "provider_reason",
+          "amount",
+          "currency",
+          "disputed_at",
+          "chargeback_at",
+          "evidence_due_at",
+          "closed_at",
+          "reversal_payment_id",
+          "recovery_payment_id"
+        ]
+      },
+      "DisputeStanding": {
+        "type": "object",
+        "properties": {
+          "psp_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "ccbill",
+              "nmi",
+              "solana",
+              "stripe"
+            ]
+          },
+          "program": {
+            "type": "string",
+            "enum": [
+              "acquirer",
+              "mastercard_ecp",
+              "mastercard_efm",
+              "stripe",
+              "visa_vamp"
+            ]
+          },
+          "month": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "count": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "denominator": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "projected_ratio": {
+            "type": "number"
+          },
+          "projected_count": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "excessive",
+              "high_excessive",
+              "none",
+              "warning"
+            ]
+          },
+          "thresholds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DisputeThreshold"
+            }
+          },
+          "fraud_reports_visible": {
+            "type": "boolean"
+          },
+          "disputes_reported": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "psp_id",
+          "rail",
+          "program",
+          "month",
+          "count",
+          "denominator",
+          "ratio",
+          "projected_ratio",
+          "projected_count",
+          "level",
+          "thresholds",
+          "fraud_reports_visible",
+          "disputes_reported"
+        ]
+      },
+      "DisputeThreshold": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "excessive",
+              "high_excessive",
+              "none",
+              "warning"
+            ]
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "min_count": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "min_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "min_prior_sales": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "ratio",
+          "min_count",
+          "min_amount",
+          "min_prior_sales",
+          "source"
+        ]
       },
       "DriftField": {
         "type": "object",
@@ -19960,6 +20683,7 @@
                   "brand_changed",
                   "closed",
                   "customer_revoked",
+                  "disputed",
                   "payment_method_removed",
                   "replaced",
                   "subscription_ended"
@@ -20142,6 +20866,13 @@
               "keep",
               "revoke_on_any",
               "revoke_on_full"
+            ]
+          },
+          "fraud_warning_refund": {
+            "type": "string",
+            "enum": [
+              "record",
+              "refund"
             ]
           },
           "arrears_grace_days": {
@@ -22870,6 +23601,26 @@
               }
             ]
           },
+          "refund_reason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "charged_after_cancel",
+                  "dispute_prevention",
+                  "duplicate",
+                  "fraud_warning",
+                  "fraudulent",
+                  "other",
+                  "requested_by_customer",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "refunds": {
             "type": "array",
             "items": {
@@ -22900,6 +23651,7 @@
           "failure",
           "refunded_payment_id",
           "reason",
+          "refund_reason",
           "refunds",
           "created_at"
         ]
@@ -23260,6 +24012,7 @@
             "enum": [
               "active",
               "closed",
+              "disputed",
               "removed",
               "replaced",
               "requires_action"
@@ -25407,6 +26160,19 @@
           "reason": {
             "type": "string"
           },
+          "refund_reason": {
+            "type": "string",
+            "enum": [
+              "charged_after_cancel",
+              "dispute_prevention",
+              "duplicate",
+              "fraud_warning",
+              "fraudulent",
+              "other",
+              "requested_by_customer",
+              "unknown"
+            ]
+          },
           "revoke_access": {
             "type": "boolean"
           }
@@ -27287,6 +28053,13 @@
               "keep",
               "revoke_on_any",
               "revoke_on_full"
+            ]
+          },
+          "fraud_warning_refund": {
+            "type": "string",
+            "enum": [
+              "record",
+              "refund"
             ]
           },
           "arrears_grace_days": {

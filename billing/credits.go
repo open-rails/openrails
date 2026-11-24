@@ -54,56 +54,92 @@ func (id *BalanceTransactionID) UnmarshalText(text []byte) error {
 
 // CreateCreditGrantParams grants a customer prepaid credit. SourceID identifies the
 // grant per customer and must be reproducible across retries: an identical
-// retry returns the existing grant (Replayed), one whose amount, currency or
-// expiry differs is ErrIdempotencyKeyReused. Source labels where the money
-// came from; Invoker records who granted it (default: the customer).
+// retry returns the existing grant (Replayed), one whose amount, currency,
+// expiry or named funding source differs is ErrIdempotencyKeyReused; a retry
+// that names no funding source matches the grant's. Source labels
+// where the credit came from; Invoker records who granted it (default: the
+// customer), at most 512 bytes.
 type CreateCreditGrantParams struct {
-	CustomerID  CustomerID       `json:"customer_id"`
-	Currency    catalog.Currency `json:"currency"`
-	Amount      int64            `json:"amount,string"`
-	SourceID    string           `json:"source_id"`
-	Source      string           `json:"source"`
-	Invoker     string           `json:"invoker,omitempty"`
-	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
-	Description *string          `json:"description,omitempty"`
+	CustomerID    CustomerID         `json:"customer_id"`
+	Currency      catalog.Currency   `json:"currency"`
+	Amount        int64              `json:"amount,string"`
+	SourceID      string             `json:"source_id"`
+	Source        string             `json:"source"`
+	FundingSource CreditGrantFunding `json:"funding_source,omitempty"`
+	Invoker       string             `json:"invoker,omitempty"`
+	ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
+	Description   *string            `json:"description,omitempty"`
 }
 
-// CreditGrantState is where a credit grant stands.
+// CreditGrantFunding is where a granted lot's units came from: given by the
+// merchant (grant, the default; promotion) or brought from another system
+// (import). Bought lots come from orders.
+type CreditGrantFunding string
+
+const (
+	CreditGrantFundingGrant     CreditGrantFunding = "grant"
+	CreditGrantFundingPromotion CreditGrantFunding = "promotion"
+	CreditGrantFundingImport    CreditGrantFunding = "import"
+)
+
+// CreditFundingSource is where a credit grant's units came from: bought
+// (purchase, or recurring for a recurring price's cycle), given (grant,
+// promotion) or brought from another system (import).
+type CreditFundingSource string
+
+const (
+	CreditFundingPurchase  CreditFundingSource = "purchase"
+	CreditFundingRecurring CreditFundingSource = "recurring"
+	CreditFundingGrant     CreditFundingSource = "grant"
+	CreditFundingPromotion CreditFundingSource = "promotion"
+	CreditFundingImport    CreditFundingSource = "import"
+)
+
+// CreditGrantState is where a credit grant stands. The first that holds
+// wins: revoked; pending, when none of its units has posted; refunded, when
+// refunds or chargebacks of its payment took all of it, whatever its expiry;
+// expired, past its expiry; spent, when nothing is left (what refunds took is
+// in RefundedAmount); scheduled, before it starts; else active.
 type CreditGrantState string
 
 const (
 	CreditGrantActive    CreditGrantState = "active"
 	CreditGrantScheduled CreditGrantState = "scheduled"
+	CreditGrantPending   CreditGrantState = "pending"
 	CreditGrantSpent     CreditGrantState = "spent"
 	CreditGrantExpired   CreditGrantState = "expired"
 	CreditGrantRevoked   CreditGrantState = "revoked"
-	// CreditGrantTerminated was superseded by a later grant.
-	CreditGrantTerminated CreditGrantState = "terminated"
+	CreditGrantRefunded  CreditGrantState = "refunded"
 )
 
 // CreditGrant is one lot of prepaid credit on a customer's balance, spent
-// first-in first-out. SourceType says what created it (admin for a merchant
-// grant, purchase, subscription); SourceID is that source's id. Replayed: a
-// create that found the grant already made.
+// soonest expiry first. Amount is what it delivered; RemainingAmount what is
+// left, and the spent, expired, revoked and refunded amounts what left it.
+// PaidAmount and PaidCurrency are what was paid for it, null for a gift.
+// SourceID is the funding's id: the payment that bought it, or the caller's
+// key. Replayed: a create that found the grant already made.
 type CreditGrant struct {
-	ID                CreditGrantID    `json:"id"`
-	CustomerID        CustomerID       `json:"customer_id"`
-	Currency          catalog.Currency `json:"currency"`
-	Amount            int64            `json:"amount,string"`
-	SpentAmount       int64            `json:"spent_amount,string"`
-	RemainingAmount   int64            `json:"remaining_amount,string"`
-	RevokedAmount     int64            `json:"revoked_amount,string"`
-	ExpiredAmount     int64            `json:"expired_amount,string"`
-	State             CreditGrantState `json:"state"`
-	SourceType        string           `json:"source_type"`
-	SourceID          *string          `json:"source_id"`
-	Description       *string          `json:"description"`
-	StartsAt          time.Time        `json:"starts_at"`
-	ExpiresAt         *time.Time       `json:"expires_at"`
-	CreatedAt         time.Time        `json:"created_at"`
-	TerminatedAt      *time.Time       `json:"terminated_at"`
-	TerminationReason *string          `json:"termination_reason"`
-	Replayed          bool             `json:"replayed"`
+	ID              CreditGrantID       `json:"id"`
+	CustomerID      CustomerID          `json:"customer_id"`
+	Currency        catalog.Currency    `json:"currency"`
+	Amount          int64               `json:"amount,string"`
+	SpentAmount     int64               `json:"spent_amount,string"`
+	RemainingAmount int64               `json:"remaining_amount,string"`
+	RevokedAmount   int64               `json:"revoked_amount,string"`
+	ExpiredAmount   int64               `json:"expired_amount,string"`
+	RefundedAmount  int64               `json:"refunded_amount,string"`
+	State           CreditGrantState    `json:"state"`
+	FundingSource   CreditFundingSource `json:"funding_source"`
+	PaidAmount      *int64              `json:"paid_amount,string"`
+	PaidCurrency    *catalog.Currency   `json:"paid_currency"`
+	SourceID        *string             `json:"source_id"`
+	Description     *string             `json:"description"`
+	StartsAt        time.Time           `json:"starts_at"`
+	ExpiresAt       *time.Time          `json:"expires_at"`
+	CreatedAt       time.Time           `json:"created_at"`
+	RevokedAt       *time.Time          `json:"revoked_at"`
+	RevokeReason    *string             `json:"revoke_reason"`
+	Replayed        bool                `json:"replayed"`
 }
 
 // CreditGrantListParams filters a customer's credit grants, newest first.
@@ -327,8 +363,11 @@ type MerchantSettings struct {
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
 	ProviderRefundAccess *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays     *int                  `json:"arrears_grace_days,omitempty"`
-	PSPRouting           *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
+	// FraudWarningRefund decides what an actionable early fraud warning does:
+	// FraudWarningRefundCharge (default) or FraudWarningRecord.
+	FraudWarningRefund *FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
+	ArrearsGraceDays   *int                `json:"arrears_grace_days,omitempty"`
+	PSPRouting         *[]PSPRoutingRule   `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`

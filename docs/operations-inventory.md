@@ -160,7 +160,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 480 named SQL statements in 89 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 483 named SQL statements in 90 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -177,6 +177,7 @@ The source scan found 480 named SQL statements in 89 files with an explicit qual
 | [customer_invoice_profiles.sql](../internal/db/queries/customer_invoice_profiles.sql) | 2 | `customer_invoice_profiles` |
 | [customer_low_balance_lines.sql](../internal/db/queries/customer_low_balance_lines.sql) | 2 | `customer_low_balance_lines` |
 | [customers.sql](../internal/db/queries/customers.sql) | 3 | `customers` |
+| [credit_grants.sql](../internal/db/queries/credit_grants.sql) | 3 | `credit_grant_events`, `credit_grants` |
 | [dashboard_configs.sql](../internal/db/queries/dashboard_configs.sql) | 1 | `dashboard_configs` |
 | [delinquency.sql](../internal/db/queries/delinquency.sql) | 5 | `customer_delinquency`, `notification_events` |
 | [destructive_actions.sql](../internal/db/queries/destructive_actions.sql) | 7 | `destructive_actions`, `destructive_holds`, `host_outbox`, `reconciliation_findings` |
@@ -253,10 +254,10 @@ The source scan found 480 named SQL statements in 89 files with an explicit qual
 | [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
 | [write_posture.sql](../internal/db/queries/write_posture.sql) | 2 | `merchant_write_posture` |
 
-The migrations declare these 106 billing tables. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
+The migrations declare these 108 billing tables. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
 
 - `balance_watches`, `book_identity`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`
-- `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `catalog_restore_receipts`, `custodians`, `customer_contacts`, `customer_delinquency`
+- `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `catalog_restore_receipts`, `credit_grant_events`, `credit_grants`, `custodians`, `customer_contacts`, `customer_delinquency`
 - `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`, `customers`, `dashboard_configs`
 - `destructive_action_switch`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`
 - `eventlog_streams`, `failed_usage_windows`, `grants`, `host_outbox`, `idempotency_keys`, `leases`, `ledger_accounts`

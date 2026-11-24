@@ -2,7 +2,6 @@ package money
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -23,8 +22,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/limits"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -32,35 +31,18 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// grantLedger binds a grant ledger to the query handle + merchant on the
-// service clock, so derived timestamps match the rest of the money service.
-func (s *MoneyService) grantLedger(q *gen.Queries, tenantID uuid.UUID) *grants.Ledger {
-	gl := grants.New(q, tenantID)
-	gl.SetClock(s.now)
-	gl.DrawLotsLiveAt(s.lotsLiveAt())
-	return gl
+// creditLots binds the merchant's credit lots to the query handle on the
+// service clock.
+func (s *MoneyService) creditLots(q *gen.Queries, tenantID uuid.UUID) *credits.Lots {
+	lots := credits.New(q, tenantID, s.now)
+	lots.DrawLiveAt(s.lotsLiveAt())
+	return lots
 }
 
 // moneyLedger binds the double-entry money ledger to the query handle +
 // merchant (for direct transfers like owed accrual/settlement).
 func (s *MoneyService) moneyLedger(q *gen.Queries, tenantID uuid.UUID) *ledger.Ledger {
 	return ledger.New(q, tenantID).SetClock(s.now)
-}
-
-// depositSourceType maps a free-form deposit source label onto the grant
-// ledger's source_type vocabulary (purchase | subscription | admin | grace).
-func depositSourceType(source string) string {
-	s := strings.ToLower(source)
-	switch {
-	case strings.Contains(s, "subscription"):
-		return string(grants.Subscription)
-	case strings.Contains(s, "purchase"):
-		return string(grants.Purchase)
-	case strings.Contains(s, "grace"):
-		return string(grants.Grace)
-	default:
-		return string(grants.Admin)
-	}
 }
 
 func derefStr(s *string) string {
@@ -240,7 +222,7 @@ func (s *MoneyService) AdmissionCapacityTx(ctx context.Context, q *gen.Queries, 
 		return AdmissionCapacity{}, err
 	}
 	now := s.now()
-	if _, err := s.grantLedger(q, tenantID).ExpireLapsedBy(ctx, payerID, cur, now); err != nil {
+	if _, err := s.creditLots(q, tenantID).ExpireLapsedBy(ctx, payerID, cur, now); err != nil {
 		return AdmissionCapacity{}, err
 	}
 	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
@@ -399,10 +381,21 @@ type DepositParams struct {
 	SourceID    *string    // natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
 	ExpiresAt   *time.Time // nil is permanent; expiry is an immutable operation term
 	Description *string
+	// Funding is where the units came from; zero is a grant, and a replay
+	// that leaves it zero matches whatever the lot recorded. A purchase here
+	// is change from a charge, paid at face.
+	Funding credits.FundingSource
 	// RepayOwed applies the new credit to outstanding owed first.
 	RepayOwed bool
 	// Internal fulfillment terms: duration is anchored to the first grant, including on replay.
 	expiryHours int
+}
+
+func (p DepositParams) funding() credits.FundingSource {
+	if p.Funding == "" {
+		return credits.Grant
+	}
+	return p.Funding
 }
 
 func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*models.MoneyTransaction, error) {
@@ -492,10 +485,10 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 	return db.EnsureCustomerRowQ(ctx, q, tenantID, tsid)
 }
 
-// depositTx records a money-in as a credit grant, then materializes it into a
-// ledger deposit (DR processor_clearing / CR customer_balance); the grant IS
-// the FIFO lot. Idempotent on (merchant, payer, source_id) via the credit-grant
-// lookup. Runs under the customers-row lock so deposits serialize per customer.
+// depositTx records a money-in as a credit lot and posts its deposit (DR
+// processor_clearing / CR customer_balance). Idempotent on (merchant, payer,
+// source_id) via the lot lookup. Runs under the customers-row lock so deposits
+// serialize per customer.
 func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositParams) (*models.MoneyTransaction, error) {
 	q := d.Gen(ctx)
 	now := s.now()
@@ -528,28 +521,29 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 			MerchantID: tenantID, CustomerID: payerID, SourceID: *params.SourceID,
 		})
 		if gerr == nil {
-			if committed := derefInt(existing.Amount); committed != params.Amount {
+			if existing.Units != params.Amount {
 				return nil, &IdempotencyConflict{
 					Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
-					Field: "amount", Committed: committed, Retried: params.Amount,
+					Field: "amount", Committed: existing.Units, Retried: params.Amount,
 				}
 			}
-			if committed := derefStr(existing.Currency); committed != cur {
+			if existing.Unit != cur {
 				return nil, &IdempotencyConflict{Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
-					Field: "currency", Committed: committed, Retried: cur}
+					Field: "currency", Committed: existing.Unit, Retried: cur}
 			}
 			retryExpiry, err := params.expiryAt(existing.StartsAt)
 			if err != nil {
 				return nil, err
 			}
-			if !sameDepositExpiry(existing.EndsAt, retryExpiry) {
+			if !sameDepositExpiry(existing.ExpiresAt, retryExpiry) {
 				return nil, &IdempotencyConflict{Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
-					Field: "expires_at", Committed: existing.EndsAt, Retried: retryExpiry}
+					Field: "expires_at", Committed: existing.ExpiresAt, Retried: retryExpiry}
 			}
-			replayed, err := creditGrantTxn(existing)
-			if err != nil {
-				return nil, err
+			if params.Funding != "" && existing.FundingSource != string(params.Funding) {
+				return nil, &IdempotencyConflict{Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
+					Field: "funding_source", Committed: existing.FundingSource, Retried: string(params.Funding)}
 			}
+			replayed := creditGrantTxn(existing)
 			replayed.Replayed = true
 			return replayed, nil
 		}
@@ -562,23 +556,32 @@ func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositPa
 		return nil, fmt.Errorf("deposit would overflow balance")
 	}
 
-	gl := s.grantLedger(q, tenantID)
-	g, err := gl.Grant(ctx, grants.GrantInput{
-		Customer: payerID, Kind: grants.Credit,
-		Source: grants.SourceType(depositSourceType(params.Source)), SourceID: derefStr(params.SourceID),
-		Amount: &params.Amount, Currency: &cur, StartsAt: now, EndsAt: expiresAt,
-		Reason: params.Description,
-		Spec:   &grants.Spec{Deposit: &grants.DepositProvenance{Source: params.Source, Invoker: params.Invoker}},
-	})
+	funding := params.funding()
+	if !funding.Valid() || funding == credits.Recurring {
+		return nil, fmt.Errorf("a deposit is a grant, a promotion, an import or change from a charge")
+	}
+	invoker := params.Invoker
+	if invoker == "" {
+		invoker = payerID.String() // the customer funded its own balance
+	}
+	issue := credits.Issue{
+		Customer: payerID, Unit: cur, Units: params.Amount, Funding: funding,
+		Source: params.Source, SourceID: derefStr(params.SourceID), Invoker: invoker,
+		Description: params.Description, StartsAt: now, ExpiresAt: expiresAt,
+	}
+	if funding.Paid() {
+		issue.PaidAmount, issue.PaidCurrency = &params.Amount, &cur
+	}
+	lot, err := s.creditLots(q, tenantID).Issue(ctx, issue)
 	if err != nil {
 		return nil, err
 	}
 	if params.RepayOwed {
-		if _, err := owed.Repay(ctx, d, tenantID, g, params.Amount, now); err != nil {
+		if _, err := owed.Repay(ctx, d, tenantID, lot, params.Amount, now); err != nil {
 			return nil, err
 		}
 	}
-	return creditGrantTxn(g)
+	return creditGrantTxn(lot), nil
 }
 
 func (p DepositParams) expiryAt(start time.Time) (*time.Time, error) {
@@ -604,32 +607,24 @@ func sameDepositExpiry(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-// creditGrantTxn derives the public MoneyTransaction DTO for a deposit from
-// its credit grant (the lot).
-func creditGrantTxn(g gen.BillingGrant) (*models.MoneyTransaction, error) {
-	var spec grants.Spec
-	if err := json.Unmarshal(g.SpecSnapshot, &spec); err != nil {
-		return nil, fmt.Errorf("decode deposit provenance: %w", err)
-	}
-	if spec.Deposit == nil {
-		return nil, fmt.Errorf("deposit grant %s has no recorded provenance", g.ID)
-	}
+// creditGrantTxn is the public MoneyTransaction of a deposit: its lot.
+func creditGrantTxn(lot gen.BillingCreditGrant) *models.MoneyTransaction {
 	return &models.MoneyTransaction{
-		ID:              g.ID,
-		MerchantID:      g.MerchantID,
-		CustomerID:      g.CustomerID,
-		Currency:        derefStr(g.Currency),
-		Invoker:         spec.Deposit.Invoker,
-		Amount:          derefInt(g.Amount),
+		ID:              lot.ID,
+		MerchantID:      lot.MerchantID,
+		CustomerID:      lot.CustomerID,
+		Currency:        lot.Unit,
+		Invoker:         lot.Invoker,
+		Amount:          lot.Units,
 		TransactionType: "deposit",
 		Status:          "posted",
-		Source:          spec.Deposit.Source,
-		SourceID:        g.SourceID,
-		ExpiresAt:       g.EndsAt,
-		Description:     g.Reason,
-		CreatedAt:       g.CreatedAt,
-		UpdatedAt:       g.CreatedAt,
-	}, nil
+		Source:          lot.Source,
+		SourceID:        lot.SourceID,
+		ExpiresAt:       lot.ExpiresAt,
+		Description:     lot.Description,
+		CreatedAt:       lot.CreatedAt,
+		UpdatedAt:       lot.CreatedAt,
+	}
 }
 
 // withdrawBalanceAndBlocks debits amount from the customer's prepaid balance by
@@ -653,10 +648,9 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 	if bal.Balance < amount {
 		return 0, false, ErrInsufficientCredits
 	}
-	gl := s.grantLedger(q, tenantID)
-	applied, err = gl.CreditSpend(ctx, payerID, cur, amount, invokerID, resource, key.Coord())
+	applied, err = s.creditLots(q, tenantID).Spend(ctx, payerID, cur, amount, invokerID, resource, key.Coord())
 	if err != nil {
-		if errors.Is(err, grants.ErrInsufficientCredits) {
+		if errors.Is(err, credits.ErrInsufficientCredits) {
 			return 0, false, ErrInsufficientCredits
 		}
 		return 0, false, err

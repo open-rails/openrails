@@ -759,6 +759,16 @@
     "OR-J31-S40": [
       "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers"
     ],
+    "OR-J31-S15": [
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/moves-every-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-lot-drawn-before-its-deposit",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-termination-that-is-not-a-revocation",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-paid-amount-without-a-payment",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-an-amount-on-a-grant-that-is-not-a-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/refuses-a-transfer-naming-another-customers-lot",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/a-migrated-purchase-deposit-replays",
+      "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders"
+    ],
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
     ],
@@ -1132,6 +1142,9 @@
     "OR-J26-S61": [
       "TestUsageBillingContracts/OR-J26-S61/a-policys-cap-in-another-currency-binds-no-dollar-money"
     ],
+    "OR-J26-S62": [
+      "TestCreditLotCounters/OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],
@@ -1349,6 +1362,18 @@
     ],
     "OR-J22-S12": [
       "TestCredits/OR-J22-S12/a-staff-member-grants-a-full-batch-once-a-minute"
+    ],
+    "OR-J22-S10": [
+      "TestCreditLotCounters/OR-J22-S10/lot-view-equals-ledger-counters"
+    ],
+    "OR-J22-S11": [
+      "TestCreditLotCounters/OR-J22-S11/refunded-credit-pack-raises-no-refunded-grant-finding"
+    ],
+    "OR-J22-S13": [
+      "TestCreditLotCounters/OR-J22-S13/lapsed-lots-expire-only-what-they-hold"
+    ],
+    "OR-J40-S04": [
+      "TestCreditLotCounters/OR-J40-S04/unposted-deposit-is-not-spendable"
     ],
     "OR-J37-S10": [
       "TestFXRates/OR-J37-S10/a-published-rate-far-from-the-held-one-prices-nothing"
@@ -1588,6 +1613,70 @@
     ],
     "OR-J43-S07": [
       "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
+    ],
+    "OR-J46-S02": [
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/webhooks",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/reconcile-pull",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/a-notice-releases-a-pulled-case",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing"
+    ],
+    "OR-J46-S01": [
+      "TestDisputes/OR-J46-S01/a-chargeback-is-recorded-reversed-and-ends-its-charge"
+    ],
+    "OR-J46-S03": [
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/rdr-resolution-is-a-refund",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/refund-first-is-the-resolution",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/resolution-first-absorbs-the-refund",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/ce3-block-books-nothing",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback"
+    ],
+    "OR-J46-S04": [
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won/won",
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won/lost",
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won"
+    ],
+    "OR-J46-S06": [
+      "TestDisputes/OR-J46-S06/a-ccbill-chargeback-is-recorded"
+    ],
+    "OR-J46-S07": [
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/refunds-by-default",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-disputed-charge-is-not-refunded",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/unactionable-stays-so",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-held-response-waits-and-wakes",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/the-merchant-stop-holds-it",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/nothing-to-refund-still-ends",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
+    ],
+    "OR-J46-S08": [
+      "TestDisputes/OR-J46-S08/the-monitor-raises-and-escalates-alerting-findings"
+    ],
+    "OR-J46-S09": [
+      "TestDisputes/OR-J46-S09/mastercard-divides-by-the-previous-months-sales"
+    ],
+    "OR-J46-S10": [
+      "TestDisputes/OR-J46-S10/the-program-in-force-is-the-months"
+    ],
+    "OR-J46-S14": [
+      "TestDisputes/OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio"
+    ],
+    "OR-J46-S11": [
+      "TestDisputes/OR-J46-S11/a-charged-back-card-is-never-charged-again"
+    ],
+    "OR-J46-S15": [
+      "TestDisputes/OR-J46-S15/a-chargeback-blocks-the-charged-card-only"
+    ],
+    "OR-J46-S16": [
+      "TestDisputes/OR-J46-S16/a-report-on-an-unknown-charge-is-answered"
+    ],
+    "OR-J46-S12": [
+      "TestDisputes/OR-J46-S12/the-dispute-metrics-equal-the-records"
+    ],
+    "OR-J46-S05": [
+      "TestDisputes/OR-J46-S05/an-nmi-batch-records-every-entry"
+    ],
+    "OR-J46-S13": [
+      "TestDisputes/OR-J46-S13/the-rollup-equals-its-records-after-a-restore"
     ],
     "OR-J43-S08": [
       "TestOperationsHistory/OR-J43-S08/an-operation-is-recorded-before-its-provider-call-and-survives-a-crash"

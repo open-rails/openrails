@@ -32,7 +32,7 @@ LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
   AND ps.source_reference='order:' || o.id::text
 WHERE p.deleted_at IS NULL AND p.merchant_id=$1::uuid AND p.id=$2::uuid
 )
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity, g.import_as_of, g.import_root_id FROM billing.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity, g.import_as_of, g.import_root_id FROM billing.grants g
 JOIN billing.payments p ON p.merchant_id=g.merchant_id AND p.customer_id=g.customer_id
 WHERE p.deleted_at IS NULL AND p.merchant_id=$1::uuid AND p.id=$2::uuid
   AND g.kind='access' AND g.event='grant'
@@ -73,8 +73,6 @@ func (q *Queries) ListPaymentAccessGrants(ctx context.Context, arg ListPaymentAc
 			&i.SpecSnapshot,
 			&i.StartsAt,
 			&i.EndsAt,
-			&i.Amount,
-			&i.Currency,
 			&i.Reason,
 			&i.CreatedAt,
 			&i.Actor,

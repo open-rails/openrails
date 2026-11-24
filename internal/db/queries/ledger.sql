@@ -28,15 +28,15 @@ RETURNING *;
 INSERT INTO billing.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to, operation,
-    source, source_id, grant_id, customer_id, invoker_id, resource, order_id
+    source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text,
-    sqlc.arg(allow_debit_negative_up_to)::bigint, sqlc.arg(operation)::text,
-    sqlc.arg(source)::text, sqlc.arg(source_id)::text, sqlc.narg(grant_id)::uuid, sqlc.narg(customer_id)::uuid,
+    0, sqlc.arg(operation)::text,
+    sqlc.arg(source)::text, sqlc.arg(source_id)::text, sqlc.narg(credit_grant_id)::uuid, sqlc.narg(customer_id)::uuid,
     sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(order_id)::uuid
 )
-ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id)
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id)
 DO NOTHING
 RETURNING *;
 
@@ -52,7 +52,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text
-  AND grant_id IS NOT DISTINCT FROM sqlc.narg(grant_id)::uuid;
+  AND credit_grant_id IS NOT DISTINCT FROM sqlc.narg(credit_grant_id)::uuid;
 
 -- LedgerAccountBalance: net credit (credits - debits) from the maintained
 -- account counters.
@@ -102,7 +102,7 @@ SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
-  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND transfer_type IN ('credit_spend', 'owed_accrual')
   AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text
@@ -162,7 +162,7 @@ FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
-  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND transfer_type IN ('credit_spend', 'owed_accrual')
   AND operation = sqlc.arg(operation)::text
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text;

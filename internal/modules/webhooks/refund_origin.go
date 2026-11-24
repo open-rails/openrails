@@ -13,3 +13,17 @@ func refundDecidedByOpenRails(refund *models.Payment) bool {
 	_, ok := refund.Metadata["admin_refund_idempotency_key"]
 	return ok
 }
+
+// refundInitiatedByOpenRails reports whether OpenRails asked for the refund:
+// a staff refund or one of its automatic refunds, each marked when reserved.
+func refundInitiatedByOpenRails(refund *models.Payment) bool {
+	if refund == nil {
+		return false
+	}
+	for _, key := range []string{"admin_refund_idempotency_key", "charge_after_cancel", "fraud_warning", "order_late_payment"} {
+		if _, ok := refund.Metadata[key]; ok {
+			return true
+		}
+	}
+	return false
+}
