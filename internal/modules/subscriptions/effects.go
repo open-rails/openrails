@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
@@ -16,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -162,21 +162,23 @@ func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB
 	if kind == lifecycle.NoticeUpdateMethod {
 		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryPaymentMethodRequired, billing.NotificationRecoveryUpdatePaymentMethod
 	}
-	key := string(kind)
+	// The id's instant is the last the key names (the subscription's own
+	// when it names none); a renewal's is its period start (renewalNoticeKey).
+	key, at := string(kind), uuidutil.TimeOf(sub.ID)
 	if sub.CurrentPeriodEndsAt != nil {
-		key += ":" + sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339Nano)
+		key, at = key+":"+sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339Nano), *sub.CurrentPeriodEndsAt
 	}
 	if sub.EndedAt != nil {
-		key += ":" + sub.EndedAt.UTC().Format(time.RFC3339Nano)
+		key, at = key+":"+sub.EndedAt.UTC().Format(time.RFC3339Nano), *sub.EndedAt
 	}
 	if granted != nil {
 		start, end := granted.Start, granted.End
 		data.PeriodStartsAt, data.PeriodEndsAt = &start, &end
 		if kind == lifecycle.NoticeRenewed {
-			key = "renewed:" + start.UTC().Format(time.RFC3339Nano) + ":" + end.UTC().Format(time.RFC3339Nano)
+			key, at = renewalNoticeKey(start, end), start
 		}
 	}
-	n := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationEventType(kind), Data: data, CreatedAt: now}
+	n := &models.NotificationEvent{ID: uuidutil.DerivedV7(at, sub.ID, key), CustomerID: sub.CustomerID, EventType: models.NotificationEventType(kind), Data: data, CreatedAt: now}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 		return nil, fmt.Errorf("queue %s notice for %s: %w", kind, sub.ID, err)
 	}

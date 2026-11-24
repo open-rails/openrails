@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
@@ -90,7 +91,7 @@ func (s *PurchaseService) stripeCardAccount(ctx context.Context, psp uuid.UUID, 
 // StripeCardID is the method a customer's token becomes: a retry of the same
 // save finds it.
 func StripeCardID(merchantID, customer uuid.UUID, token string) uuid.UUID {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:stripe-card:"+merchantID.String()+":"+customer.String()+":"+token))
+	return uuidutil.DerivedV7(uuidutil.TimeOf(customer), uuid.NameSpaceURL, "openrails:stripe-card:"+merchantID.String()+":"+customer.String()+":"+token)
 }
 
 // SaveStripeCard saves the card behind token, a pm_ the page's Stripe fields

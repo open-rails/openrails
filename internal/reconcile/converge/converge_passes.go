@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // deriveBackfillWindow bounds derive-1: only subscriptions/payments whose
@@ -677,7 +678,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
 				return repo.CreateIfAbsent(ctx, &models.NotificationEvent{
-					ID:         uuid.NewSHA1(cust, []byte("access-ended:"+closedAt.Format(time.RFC3339Nano))),
+					ID:         uuidutil.DerivedV7(closedAt, cust, "access-ended:"+closedAt.Format(time.RFC3339Nano)),
 					CustomerID: cust,
 					EventType:  models.NotificationPremiumEnded,
 					CreatedAt:  now,

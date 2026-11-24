@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 type Status string
@@ -92,7 +93,7 @@ func (s *Store) Begin(ctx context.Context, operation, key string) (*Claim, *Reco
 	}
 	q := s.queries(ctx)
 	for range 3 {
-		token := uuid.New()
+		token := uuidutil.NewV7()
 		start := time.Now()
 		row, err := q.ClaimIdempotencyKey(ctx, gen.ClaimIdempotencyKeyParams{
 			MerchantID: mid.UUID(), Operation: operation, IdempotencyKey: key, Token: token,
