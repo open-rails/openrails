@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -97,5 +98,31 @@ func TestLiveDataLinkTakesOneRequestAnHour(t *testing.T) {
 	}
 	if got := dataLink.Unexpected(); len(got) != 1 {
 		t.Fatalf("CCBill saw %v; want the one request it refused", got)
+	}
+}
+
+// The abuse state keeps slots to the millisecond: a clock with a fraction of
+// one still waits exactly the hour, and is answered when it has passed.
+func TestLiveDataLinkWaitsTheHourOnAFractionalClock(t *testing.T) {
+	now := time.Date(2026, 11, 20, 10, 0, 0, 123_456_789, time.UTC)
+	clock := func() time.Time { return now }
+	dataLink := ccbillmock.New()
+	t.Cleanup(dataLink.Close)
+	dataLink.SetClock(clock)
+	live := ccbill.NewDataLinkClient(slog.New(slog.DiscardHandler), &config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", DataLinkUsername: "u", DataLinkPassword: "p"})
+	live.BaseURL, live.Pacing = dataLink.URL(), ccbill.Pacing{Slots: abusestate.New(slog.New(slog.DiscardHandler), nil), Now: clock}
+	if _, err := live.FetchActiveMembers(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := live.FetchActiveMembers(t.Context())
+	if wait, paced := ccbill.PacedFor(err); !paced || wait != ccbill.DataLinkInterval {
+		t.Fatalf("a second request in the hour = %v (%v)", err, wait)
+	}
+	now = now.Add(ccbill.DataLinkInterval)
+	if _, err := live.FetchActiveMembers(t.Context()); err != nil {
+		t.Fatalf("the request an hour later: %v", err)
+	}
+	if got := dataLink.Unexpected(); len(got) != 0 {
+		t.Fatalf("CCBill saw %v", got)
 	}
 }
