@@ -6,7 +6,8 @@ migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd
 migration 0003_usage_limits.up.sql sha256:08672a0999aac672d48761f90ac14fe42955e2c4dd514d0cf3699f9e8c780f92
 migration 0004_drop_access_cutover_contract.up.sql sha256:dd092699ba66add50f33ab520713dc69aaece641cd3a83d9a1314233dbf582e6
 migration 0005_customer_messages.up.sql sha256:c5c6dc66c3145613b541a161b3004804803e28e2bf224fe1044dbbb441403094
-migration 0017_dashboard_retired_measures.up.sql sha256:f6dd2a2187e91c2d0ae891928207bbde8d2c503d2a33242e37b68ba461af767d
+migration 0006_change_log.up.sql sha256:87f833b05aba1e281feb20cf40ebe2df5a8149040eaaf6e5a9242625eed594a0
+migration 0007_dashboard_retired_measures.up.sql sha256:f6dd2a2187e91c2d0ae891928207bbde8d2c503d2a33242e37b68ba461af767d
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -200,6 +201,35 @@ table billing.catalog_restore_receipts
   index CREATE UNIQUE INDEX catalog_restore_receipts_pkey ON billing.catalog_restore_receipts USING btree (merchant_id)
   trigger CREATE TRIGGER immutable_catalog_restore_receipt BEFORE DELETE OR UPDATE ON billing.catalog_restore_receipts FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER no_catalog_restore_receipt_truncate BEFORE TRUNCATE ON billing.catalog_restore_receipts FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.change_log
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column occurred_at timestamp with time zone NOT NULL DEFAULT now()
+  column actor text NOT NULL
+  column source text NOT NULL
+  column object_type text NOT NULL
+  column object_id text NOT NULL
+  column action text NOT NULL
+  column changes jsonb NOT NULL
+  column reason text
+  column request_id text
+  column operation_id uuid
+  constraint change_log_action_check CHECK ((action = ANY (ARRAY['create'::text, 'update'::text, 'archive'::text, 'unarchive'::text, 'delete'::text, 'key_add'::text, 'key_remove'::text, 'key_rename'::text])))
+  constraint change_log_actor_check CHECK (((octet_length(actor) <= 4200) AND ((actor ~ '^(staff|customer):.'::text) OR (actor ~ '^provider:[a-z][a-z0-9_]{0,31}$'::text) OR (actor = ANY (ARRAY['system'::text, 'file'::text, 'vault'::text])))))
+  constraint change_log_changes_check CHECK (((jsonb_typeof(changes) = 'object'::text) AND (jsonb_typeof((changes -> 'version'::text)) = 'number'::text) AND (octet_length((changes)::text) <= 262144)))
+  constraint change_log_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint change_log_object_id_check CHECK (((octet_length(object_id) >= 1) AND (octet_length(object_id) <= 512)))
+  constraint change_log_object_type_check CHECK ((object_type = ANY (ARRAY['product'::text, 'price'::text, 'meter'::text, 'limit'::text, 'merchant'::text, 'messages'::text, 'psp'::text, 'custodian'::text])))
+  constraint change_log_pkey PRIMARY KEY (merchant_id, id)
+  constraint change_log_reason_check CHECK (((octet_length(reason) >= 1) AND (octet_length(reason) <= 1024)))
+  constraint change_log_request_id_check CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 128)))
+  constraint change_log_source_check CHECK ((source = ANY (ARRAY['api'::text, 'customer'::text, 'console'::text, 'catalog_apply'::text, 'cli'::text, 'reload'::text, 'job'::text, 'intent'::text, 'webhook'::text, 'provider_read'::text])))
+  index CREATE INDEX change_log_object_idx ON billing.change_log USING btree (merchant_id, object_type, object_id, occurred_at)
+  index CREATE INDEX change_log_occurred_at_idx ON billing.change_log USING btree (merchant_id, occurred_at)
+  index CREATE UNIQUE INDEX change_log_pkey ON billing.change_log USING btree (merchant_id, id)
+  trigger CREATE TRIGGER immutable_change_log BEFORE DELETE OR UPDATE ON billing.change_log FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_change_log_truncate BEFORE TRUNCATE ON billing.change_log FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.custodians
   column id uuid NOT NULL DEFAULT uuidv7()
