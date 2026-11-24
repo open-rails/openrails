@@ -233,6 +233,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "already_owned",
+          "billing_details_required",
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
@@ -543,6 +544,7 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
+          "billing_details_required",
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
@@ -9658,6 +9660,7 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
+          "billing_details_required",
           "card_attempts_blocked",
           "card_declined",
           "card_not_saved",
@@ -15532,6 +15535,29 @@
           "address"
         ]
       },
+      "BillingFieldSettings": {
+        "type": "object",
+        "properties": {
+          "country": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "hidden",
+              "optional",
+              "required"
+            ]
+          },
+          "postal_code": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "hidden",
+              "optional",
+              "required"
+            ]
+          }
+        }
+      },
       "BillingImportResult": {
         "type": "object",
         "properties": {
@@ -19296,6 +19322,7 @@
               "billing_archive_platform_cards",
               "billing_archive_unavailable",
               "billing_archive_unsupported_state",
+              "billing_details_required",
               "billing_policy_not_found",
               "cancel_unsupported_on_rail",
               "captcha_invalid",
@@ -20901,6 +20928,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "billing_fields": {
+            "$ref": "#/components/schemas/BillingFieldSettings"
           }
         }
       },
@@ -24022,6 +24052,9 @@
               "$ref": "#/components/schemas/PSPPaymentConfig"
             }
           },
+          "billing_fields": {
+            "$ref": "#/components/schemas/BillingFieldSettings"
+          },
           "solana": {
             "oneOf": [
               {
@@ -24035,6 +24068,7 @@
         },
         "required": [
           "psps",
+          "billing_fields",
           "solana"
         ]
       },
@@ -25430,6 +25464,7 @@
               "billing_archive_platform_cards",
               "billing_archive_unavailable",
               "billing_archive_unsupported_state",
+              "billing_details_required",
               "billing_policy_not_found",
               "cancel_unsupported_on_rail",
               "captcha_invalid",
@@ -29657,6 +29692,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The merchant has state that cannot safely be moved."
+    },
+    "billing_details_required": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "A billing detail the merchant's checkout.billing_fields require of a new card is missing; param names it."
     },
     "billing_policy_not_found": {
       "status": 404,

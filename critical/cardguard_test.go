@@ -191,7 +191,7 @@ func TestCardGuard(t *testing.T) {
 		require.Equal(t, billing.CodeUnknownField, read(raw).Error.Code)
 		require.NotContains(t, string(raw), "4111")
 		status, raw = a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psp,
-			Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4343", Exp: "1235"})}, map[string]string{"X-E2E-Run-ID": "run-4111111111111111"})
+			Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4343", Exp: "1235"}), BillingDetails: legit}, map[string]string{"X-E2E-Run-ID": "run-4111111111111111"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var tagged billing.PaymentMethod
 		require.NoError(t, json.Unmarshal(raw, &tagged))

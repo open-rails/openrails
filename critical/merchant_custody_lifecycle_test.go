@@ -339,7 +339,7 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, psps.Items, 1)
 			collected := vendor.collect(merchantBTTenant)
-			input := billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: collected}
+			input := billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: collected, BillingDetails: billedTo("US", "10001")}
 			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, input)
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var method billing.PaymentMethod

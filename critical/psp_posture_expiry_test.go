@@ -57,7 +57,7 @@ func TestPSPPostureExpiry(t *testing.T) {
 			}
 			buy := func(ctx context.Context, price billing.PriceID, key string) (int, []byte, error) {
 				input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
-					Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"})}}
+					Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
 				return a.do(ctx, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 			}
 			paid := func(key string) {

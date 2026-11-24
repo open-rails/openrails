@@ -459,6 +459,10 @@ pkg openrails/billing, const BalanceTransactionOwedWriteoff BalanceTransactionTy
 pkg openrails/billing, const BalanceTransactionReinstate BalanceTransactionType = "reinstate"
 pkg openrails/billing, const BalanceTransactionRevoke BalanceTransactionType = "revoke"
 pkg openrails/billing, const BalanceTransactionSpend BalanceTransactionType = "spend"
+pkg openrails/billing, const BillingFieldAuto BillingFieldMode = "auto"
+pkg openrails/billing, const BillingFieldHidden BillingFieldMode = "hidden"
+pkg openrails/billing, const BillingFieldOptional BillingFieldMode = "optional"
+pkg openrails/billing, const BillingFieldRequired BillingFieldMode = "required"
 pkg openrails/billing, const BillingModeArrears BillingMode = "arrears"
 pkg openrails/billing, const BillingModePrepaid BillingMode = "prepaid"
 pkg openrails/billing, const CardExpiryExpired CardExpiryStatus = "expired"
@@ -509,6 +513,7 @@ pkg openrails/billing, const CodeBillingArchiveNotEmpty ErrorCode = "billing_arc
 pkg openrails/billing, const CodeBillingArchivePlatformCards ErrorCode = "billing_archive_platform_cards"
 pkg openrails/billing, const CodeBillingArchiveUnavailable ErrorCode = "billing_archive_unavailable"
 pkg openrails/billing, const CodeBillingArchiveUnsupportedState ErrorCode = "billing_archive_unsupported_state"
+pkg openrails/billing, const CodeBillingDetailsRequired ErrorCode = "billing_details_required"
 pkg openrails/billing, const CodeBillingPolicyNotFound ErrorCode = "billing_policy_not_found"
 pkg openrails/billing, const CodeCSRFOriginDenied ErrorCode = "csrf_origin_denied"
 pkg openrails/billing, const CodeCancelUnsupportedOnRail ErrorCode = "cancel_unsupported_on_rail"
@@ -1568,6 +1573,10 @@ pkg openrails/billing, type BillingDetails struct, Address *BillingAddress `json
 pkg openrails/billing, type BillingDetails struct, Email *string `json:"email"`
 pkg openrails/billing, type BillingDetails struct, Name *string `json:"name"`
 pkg openrails/billing, type BillingDetails struct, Phone *string `json:"phone"`
+pkg openrails/billing, type BillingFieldMode string
+pkg openrails/billing, type BillingFieldSettings struct
+pkg openrails/billing, type BillingFieldSettings struct, Country BillingFieldMode `json:"country,omitempty"`
+pkg openrails/billing, type BillingFieldSettings struct, PostalCode BillingFieldMode `json:"postal_code,omitempty"`
 pkg openrails/billing, type BillingImportResult struct
 pkg openrails/billing, type BillingImportResult struct, Blocked []string `json:"blocked"`
 pkg openrails/billing, type BillingImportResult struct, Imported []string `json:"imported"`
@@ -2640,6 +2649,7 @@ pkg openrails/billing, type MerchantBinding struct
 pkg openrails/billing, type MerchantBinding struct, ID MerchantID
 pkg openrails/billing, type MerchantBinding struct, TenantID string
 pkg openrails/billing, type MerchantCheckoutSettings struct
+pkg openrails/billing, type MerchantCheckoutSettings struct, BillingFields *BillingFieldSettings `json:"billing_fields,omitempty"`
 pkg openrails/billing, type MerchantCheckoutSettings struct, EmbedOrigins []string `json:"embed_origins,omitempty"`
 pkg openrails/billing, type MerchantConfigurationState struct
 pkg openrails/billing, type MerchantConfigurationState struct, DisplayName string `json:"display_name"`
@@ -3450,6 +3460,7 @@ pkg openrails/billing, type PaymentAttemptListParams struct, Until time.Time `fo
 pkg openrails/billing, type PaymentAttemptListParams struct, embedded PageRequest
 pkg openrails/billing, type PaymentChannel string
 pkg openrails/billing, type PaymentConfig struct
+pkg openrails/billing, type PaymentConfig struct, BillingFields BillingFieldSettings `json:"billing_fields"`
 pkg openrails/billing, type PaymentConfig struct, PSPs []PSPPaymentConfig `json:"psps"`
 pkg openrails/billing, type PaymentConfig struct, Solana *SolanaPaymentConfig `json:"solana"`
 pkg openrails/billing, type PaymentFailure struct

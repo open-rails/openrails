@@ -70,10 +70,11 @@ func GetCustomerConfig(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	who, units, ok := loadPublicMerchant(r, mid)
+	who, units, fields, ok := loadPublicMerchant(r, mid)
 	if !ok {
 		return
 	}
+	payment.BillingFields = fields
 	// A document listing a temporarily unavailable PSP is never stored: the
 	// next request may find it available.
 	cache := "private"
@@ -117,8 +118,9 @@ func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.
 }
 
 // loadPublicMerchant is the merchant's display name, its logo and support
-// page when they are https URLs, and its own units.
-func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing.PublicMerchant, []billing.MerchantCurrency, bool) {
+// page when they are https URLs, its own units and its card forms' billing
+// fields.
+func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing.PublicMerchant, []billing.MerchantCurrency, billing.BillingFieldSettings, bool) {
 	name, settings, err := r.State.Merchants.MerchantSettings(r.Request.Context(), mid)
 	var units currency.Registry
 	if err == nil {
@@ -127,7 +129,7 @@ func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing
 	if err != nil {
 		r.Log.ErrorContext(r.Request.Context(), "customer config: merchant settings could not be loaded", logx.Err(err), "merchant_id", mid.String())
 		r.ErrorCode(billing.CodeInternalError, "failed to load the merchant")
-		return billing.PublicMerchant{}, nil, false
+		return billing.PublicMerchant{}, nil, billing.BillingFieldSettings{}, false
 	}
 	who := billing.PublicMerchant{DisplayName: name, EmbedOrigins: merchantconfig.EmbedOrigins(settings)}
 	if p := settings.Profile; p != nil {
@@ -137,7 +139,7 @@ func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing
 			who.StatementDescriptor = &d
 		}
 	}
-	return who, merchantconfig.Currencies(units), true
+	return who, merchantconfig.Currencies(units), merchantconfig.BillingFields(settings), true
 }
 
 func httpsURL(raw string) *string {

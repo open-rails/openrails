@@ -386,6 +386,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeProviderOutcomeUnknown, 409, fault, "The provider did not confirm the outcome; read the resource before retrying."},
 	{CodeCardNotSaved, 409, fault, "The card was not saved; enter it again."},
 	{CodeCardAttemptsBlocked, 429, limit, "Too many declined card attempts; try again later."},
+	{CodeBillingDetailsRequired, 400, invalid, "A billing detail the merchant's checkout.billing_fields require of a new card is missing; param names it."},
 	{CodeCustodianCaptureUnavailable, 503, fault, "The card custodian cannot capture cards right now."},
 	{CodeCustomerPaymentUnsupported, 400, invalid, "Customer-present payment is unsupported for this rail or method."},
 	{CodeInvalidPaymentMethod, 400, invalid, "The payment method is not eligible for this operation."},
