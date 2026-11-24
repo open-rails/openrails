@@ -31,6 +31,9 @@ type GetSubscriptionsFilters struct {
 	CanceledAfter  *time.Time
 	CanceledBefore *time.Time
 	ExpiresBefore  *time.Time
+	// ScheduledChangeBefore keeps the subscriptions whose MRR is scheduled to
+	// change by then.
+	ScheduledChangeBefore *time.Time
 	// Dunning keeps the subscriptions past_due or awaiting_method.
 	Dunning bool
 	// Sort is the list's order; empty is created_at.
@@ -210,7 +213,7 @@ func (s *SubscriptionService) filters(ctx context.Context, f GetSubscriptionsFil
 		UserID: customer, Status: f.Status, PriceID: priceID, Rail: f.Rail,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
 		CanceledAfter: f.CanceledAfter, CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
-		Dunning: f.Dunning, Sort: f.Sort,
+		ScheduledChangeBefore: f.ScheduledChangeBefore, Dunning: f.Dunning, Sort: f.Sort,
 	}, nil
 }
 

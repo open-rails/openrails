@@ -15,6 +15,9 @@ migration 0011_disputes.up.sql sha256:2c2f3eea9343cece49fd8c8aa0b6a93a6e0292ee3d
 migration 0012_operation_log.up.sql sha256:230a94a136e3e0229505fbc58dbc87a052b9b6d3112ac24ae08795870e55b9e7
 migration 0013_limit_counts.up.sql sha256:d674b513c1dc9874c7580fa1625bc80d3474023d1bb165d6942b0c2a8bcd81d8
 migration 0014_bounded_gate.up.sql sha256:cbfefdff4b6968b735896de2c3f71b946954b25f151a10bbb2ab6e15729373c5
+migration 0015_event_store.up.sql sha256:67e10055bc149bb0f9049cd000d2b392a2f154dc10aa222fa0d48b0d00b195fe
+migration 0016_mrr.up.sql sha256:df42cce7fb504628cf0b3b44851be7e90dde4f39d7a9afab03ece7d1650200ec
+migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650cf192aa51a1211cb788ced9b4d0d
 
 table billing.balance_watches
@@ -467,6 +470,22 @@ table billing.customer_messages
   index CREATE INDEX customer_messages_pending_idx ON billing.customer_messages USING btree (created_at, merchant_id, id) WHERE (status = 'pending'::text)
   index CREATE UNIQUE INDEX customer_messages_pkey ON billing.customer_messages USING btree (merchant_id, id)
 
+table billing.customer_mrr
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column mrr bigint NOT NULL
+  column subscriptions integer NOT NULL
+  column first_active_at timestamp with time zone
+  constraint customer_mrr_active_check CHECK (((mrr = 0) OR (first_active_at IS NOT NULL)))
+  constraint customer_mrr_count_check CHECK (((mrr > 0) = (subscriptions > 0)))
+  constraint customer_mrr_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint customer_mrr_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
+  constraint customer_mrr_mrr_check CHECK ((mrr >= 0))
+  constraint customer_mrr_pkey PRIMARY KEY (merchant_id, customer_id, currency)
+  constraint customer_mrr_subscriptions_check CHECK ((subscriptions >= 0))
+  index CREATE UNIQUE INDEX customer_mrr_pkey ON billing.customer_mrr USING btree (merchant_id, customer_id, currency)
+
 table billing.customers
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -528,7 +547,7 @@ table billing.destructive_actions
   constraint destructive_actions_actor_key_check CHECK ((actor_key ~ '^[0-9a-f]{64}$'::text))
   constraint destructive_actions_admission_sequence_key UNIQUE (admission_sequence)
   constraint destructive_actions_credential_check CHECK ((credential <> ''::text))
-  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'block_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text])))
+  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'block_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text, 'erase_contact'::text])))
   constraint destructive_actions_lifecycle_check CHECK ((((state = 'reserved'::text) AND (started_at IS NULL) AND (finished_at IS NULL)) OR ((state = ANY (ARRAY['started'::text, 'uncertain'::text])) AND (started_at IS NOT NULL) AND (finished_at IS NULL)) OR ((state = 'succeeded'::text) AND (started_at IS NOT NULL) AND (finished_at IS NOT NULL) AND (completion_sequence IS NOT NULL)) OR ((state = 'no_effect'::text) AND (finished_at IS NOT NULL))))
   constraint destructive_actions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint destructive_actions_origin_check CHECK ((origin = ANY (ARRAY['staff'::text, 'host'::text, 'automation'::text])))
@@ -541,6 +560,8 @@ table billing.destructive_actions
   index CREATE INDEX destructive_actions_actor_recent_idx ON billing.destructive_actions USING btree (actor_key, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE ((state = 'succeeded'::text) AND (origin = 'staff'::text))
   index CREATE UNIQUE INDEX destructive_actions_admission_sequence_key ON billing.destructive_actions USING btree (admission_sequence)
   index CREATE INDEX destructive_actions_completion_sequence_idx ON billing.destructive_actions USING btree (completion_sequence) WHERE (completion_sequence IS NOT NULL)
+  index CREATE INDEX destructive_actions_erasure_queue_idx ON billing.destructive_actions USING btree (merchant_id, admission_sequence) WHERE ((kind = 'erase_contact'::text) AND (state = ANY (ARRAY['reserved'::text, 'started'::text])))
+  index CREATE INDEX destructive_actions_erasure_recent_idx ON billing.destructive_actions USING btree (merchant_id, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE ((kind = 'erase_contact'::text) AND (state = 'succeeded'::text))
   index CREATE INDEX destructive_actions_key_history_idx ON billing.destructive_actions USING btree (merchant_id, action_key, admitted_at DESC, id DESC)
   index CREATE UNIQUE INDEX destructive_actions_live_key ON billing.destructive_actions USING btree (merchant_id, action_key) WHERE (state <> 'no_effect'::text)
   index CREATE INDEX destructive_actions_merchant_recent_idx ON billing.destructive_actions USING btree (merchant_id, origin, GREATEST(admitted_at, finished_at)) INCLUDE (units) WHERE (state = 'succeeded'::text)
@@ -581,7 +602,7 @@ table billing.destructive_holds
   constraint destructive_holds_observed_check CHECK ((observed >= 0))
   constraint destructive_holds_pkey PRIMARY KEY (merchant_id, id)
   constraint destructive_holds_requested_check CHECK ((requested > 0))
-  constraint destructive_holds_scope_check CHECK ((scope = ANY (ARRAY['actor'::text, 'merchant'::text, 'deployment'::text])))
+  constraint destructive_holds_scope_check CHECK ((scope = ANY (ARRAY['actor'::text, 'merchant'::text, 'deployment'::text, 'erasure'::text])))
   constraint destructive_holds_scope_key_check CHECK ((btrim(scope_key) <> ''::text))
   constraint destructive_holds_target_check CHECK ((btrim(target) <> ''::text))
   constraint destructive_holds_window_name_check CHECK ((window_name = ANY (ARRAY['hour'::text, 'day'::text])))
@@ -673,6 +694,14 @@ table billing.disputes
   index CREATE UNIQUE INDEX disputes_psp_id_provider_ref_key ON billing.disputes USING btree (merchant_id, psp_id, provider_ref)
   index CREATE INDEX disputes_waiting_idx ON billing.disputes USING btree (merchant_id, id) WHERE ((kind = 'chargeback'::text) AND (responded_at IS NULL))
   trigger CREATE TRIGGER disputes_network_activity AFTER INSERT OR DELETE OR UPDATE OF kind, chargeback_at, network, reason, amount, currency ON billing.disputes FOR EACH ROW EXECUTE FUNCTION billing.dispute_network_activity()
+
+table billing.event_store
+  column singleton boolean NOT NULL
+  column store_id uuid NOT NULL
+  column attached_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint event_store_pkey PRIMARY KEY (singleton)
+  constraint event_store_singleton_check CHECK (singleton)
+  index CREATE UNIQUE INDEX event_store_pkey ON billing.event_store USING btree (singleton)
 
 table billing.eventlog_events
   column source text NOT NULL
@@ -1320,6 +1349,154 @@ table billing.money_settings
   index CREATE INDEX money_settings_usage_due_at_idx ON billing.money_settings USING btree (usage_due_at, merchant_id, customer_id, currency) WHERE (usage_due_at IS NOT NULL)
   trigger CREATE TRIGGER money_settings_mark_stored_card_check AFTER INSERT OR UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.default_card_marks_stored_card_check()
   trigger CREATE TRIGGER trg_subscription_history_default AFTER UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_default_card()
+
+table billing.mrr_cohort_flows
+  column merchant_id uuid NOT NULL
+  column currency text NOT NULL
+  column cohort_at timestamp with time zone NOT NULL
+  column bucket_at timestamp with time zone NOT NULL
+  column amount bigint NOT NULL
+  column logos bigint NOT NULL
+  constraint mrr_cohort_flows_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint mrr_cohort_flows_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint mrr_cohort_flows_pkey PRIMARY KEY (merchant_id, currency, cohort_at, bucket_at)
+  index CREATE UNIQUE INDEX mrr_cohort_flows_pkey ON billing.mrr_cohort_flows USING btree (merchant_id, currency, cohort_at, bucket_at)
+
+table billing.mrr_flows
+  column merchant_id uuid NOT NULL
+  column currency text NOT NULL
+  column bucket_at timestamp with time zone NOT NULL
+  column measure text NOT NULL
+  column amount bigint NOT NULL
+  column entries bigint NOT NULL
+  column logos bigint NOT NULL
+  constraint mrr_flows_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint mrr_flows_entries_check CHECK ((entries >= 0))
+  constraint mrr_flows_measure_check CHECK ((measure = ANY (ARRAY['new'::text, 'expansion'::text, 'contraction'::text, 'churn'::text, 'reactivation'::text, 'opening'::text, 'correction'::text, 'churn_voluntary'::text])))
+  constraint mrr_flows_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint mrr_flows_pkey PRIMARY KEY (merchant_id, currency, bucket_at, measure)
+  index CREATE UNIQUE INDEX mrr_flows_pkey ON billing.mrr_flows USING btree (merchant_id, currency, bucket_at, measure)
+
+table billing.mrr_movement_lines
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column movement_id uuid NOT NULL
+  column subscription_id uuid NOT NULL
+  column product_id uuid NOT NULL
+  column price_id uuid NOT NULL
+  column delta bigint NOT NULL
+  column mrr_before bigint NOT NULL
+  column mrr_after bigint NOT NULL
+  column subscriber_delta integer NOT NULL
+  column cause text NOT NULL
+  constraint mrr_movement_lines_amount_check CHECK ((mrr_after = (mrr_before + delta)))
+  constraint mrr_movement_lines_cause_check CHECK ((cause = ANY (ARRAY['subscribed'::text, 'resumed'::text, 'renewed'::text, 'price_change'::text, 'seat_change'::text, 'canceled'::text, 'merchant_canceled'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'import'::text, 'prune'::text, 'undo'::text, 'backfill'::text])))
+  constraint mrr_movement_lines_delta_check CHECK ((delta <> 0))
+  constraint mrr_movement_lines_movement_id_fkey FOREIGN KEY (merchant_id, movement_id) REFERENCES billing.mrr_movements(merchant_id, id) ON DELETE RESTRICT
+  constraint mrr_movement_lines_mrr_after_check CHECK ((mrr_after >= 0))
+  constraint mrr_movement_lines_mrr_before_check CHECK ((mrr_before >= 0))
+  constraint mrr_movement_lines_pkey PRIMARY KEY (merchant_id, id)
+  constraint mrr_movement_lines_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
+  constraint mrr_movement_lines_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
+  constraint mrr_movement_lines_subscriber_delta_check CHECK ((abs(subscriber_delta) <= 1))
+  constraint mrr_movement_lines_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE RESTRICT
+  index CREATE INDEX mrr_movement_lines_movement_id_idx ON billing.mrr_movement_lines USING btree (merchant_id, movement_id)
+  index CREATE UNIQUE INDEX mrr_movement_lines_pkey ON billing.mrr_movement_lines USING btree (merchant_id, id)
+  index CREATE INDEX mrr_movement_lines_subscription_id_idx ON billing.mrr_movement_lines USING btree (merchant_id, subscription_id)
+  trigger CREATE TRIGGER immutable_mrr_movement_lines BEFORE DELETE OR UPDATE ON billing.mrr_movement_lines FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_mrr_movement_lines_truncate BEFORE TRUNCATE ON billing.mrr_movement_lines FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.mrr_movements
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column kind text NOT NULL
+  column delta bigint NOT NULL
+  column mrr_before bigint NOT NULL
+  column mrr_after bigint NOT NULL
+  column logo_delta integer NOT NULL
+  column cohort_at timestamp with time zone NOT NULL
+  column cause text NOT NULL
+  column voluntary boolean
+  column backfilled boolean NOT NULL
+  column occurred_at timestamp with time zone NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint mrr_movements_amount_check CHECK ((mrr_after = (mrr_before + delta)))
+  constraint mrr_movements_cause_check CHECK ((cause = ANY (ARRAY['subscribed'::text, 'resumed'::text, 'renewed'::text, 'price_change'::text, 'seat_change'::text, 'canceled'::text, 'merchant_canceled'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'import'::text, 'prune'::text, 'undo'::text, 'backfill'::text])))
+  constraint mrr_movements_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint mrr_movements_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
+  constraint mrr_movements_delta_check CHECK ((delta <> 0))
+  constraint mrr_movements_kind_check CHECK ((kind = ANY (ARRAY['new'::text, 'expansion'::text, 'contraction'::text, 'churn'::text, 'reactivation'::text, 'opening'::text, 'correction'::text])))
+  constraint mrr_movements_logo_delta_check CHECK ((abs(logo_delta) <= 1))
+  constraint mrr_movements_mrr_after_check CHECK ((mrr_after >= 0))
+  constraint mrr_movements_mrr_before_check CHECK ((mrr_before >= 0))
+  constraint mrr_movements_pkey PRIMARY KEY (merchant_id, id)
+  constraint mrr_movements_voluntary_check CHECK (((voluntary IS NOT NULL) = (kind = 'churn'::text)))
+  index CREATE INDEX mrr_movements_customer_id_idx ON billing.mrr_movements USING btree (merchant_id, customer_id, currency, occurred_at)
+  index CREATE INDEX mrr_movements_occurred_at_idx ON billing.mrr_movements USING btree (merchant_id, currency, occurred_at)
+  index CREATE UNIQUE INDEX mrr_movements_pkey ON billing.mrr_movements USING btree (merchant_id, id)
+  trigger CREATE TRIGGER immutable_mrr_movements BEFORE DELETE OR UPDATE ON billing.mrr_movements FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER immutable_mrr_movements_truncate BEFORE TRUNCATE ON billing.mrr_movements FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.mrr_product_flows
+  column merchant_id uuid NOT NULL
+  column currency text NOT NULL
+  column bucket_at timestamp with time zone NOT NULL
+  column product_id uuid NOT NULL
+  column amount bigint NOT NULL
+  column subscribers bigint NOT NULL
+  constraint mrr_product_flows_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint mrr_product_flows_pkey PRIMARY KEY (merchant_id, currency, bucket_at, product_id)
+  constraint mrr_product_flows_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
+  index CREATE UNIQUE INDEX mrr_product_flows_pkey ON billing.mrr_product_flows USING btree (merchant_id, currency, bucket_at, product_id)
+
+table billing.mrr_scheduled
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column subscription_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column kind text NOT NULL
+  column mrr_delta bigint NOT NULL
+  column effective_at timestamp with time zone NOT NULL
+  column cause text NOT NULL
+  column scheduled_change_id uuid
+  column status text NOT NULL
+  column scheduled_at timestamp with time zone NOT NULL
+  column resolved_at timestamp with time zone
+  constraint mrr_scheduled_cause_check CHECK ((cause = ANY (ARRAY['subscribed'::text, 'resumed'::text, 'renewed'::text, 'price_change'::text, 'seat_change'::text, 'canceled'::text, 'merchant_canceled'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'import'::text, 'prune'::text, 'undo'::text, 'backfill'::text])))
+  constraint mrr_scheduled_change_check CHECK (((kind = 'churn'::text) = (scheduled_change_id IS NULL)))
+  constraint mrr_scheduled_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint mrr_scheduled_kind_check CHECK ((kind = ANY (ARRAY['churn'::text, 'contraction'::text, 'expansion'::text])))
+  constraint mrr_scheduled_mrr_delta_check CHECK ((mrr_delta <> 0))
+  constraint mrr_scheduled_pkey PRIMARY KEY (merchant_id, id)
+  constraint mrr_scheduled_resolved_check CHECK (((status = 'scheduled'::text) = (resolved_at IS NULL)))
+  constraint mrr_scheduled_scheduled_change_id_fkey FOREIGN KEY (merchant_id, scheduled_change_id) REFERENCES billing.scheduled_changes(merchant_id, id) ON DELETE RESTRICT
+  constraint mrr_scheduled_sign_check CHECK (((kind = 'expansion'::text) = (mrr_delta > 0)))
+  constraint mrr_scheduled_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'reversed'::text, 'effected'::text, 'superseded'::text])))
+  constraint mrr_scheduled_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id) ON DELETE RESTRICT
+  index CREATE INDEX mrr_scheduled_effective_at_idx ON billing.mrr_scheduled USING btree (merchant_id, effective_at) WHERE (status = 'scheduled'::text)
+  index CREATE UNIQUE INDEX mrr_scheduled_pkey ON billing.mrr_scheduled USING btree (merchant_id, id)
+  index CREATE INDEX mrr_scheduled_resolved_at_idx ON billing.mrr_scheduled USING btree (merchant_id, currency, resolved_at) WHERE (resolved_at IS NOT NULL)
+  index CREATE INDEX mrr_scheduled_scheduled_at_idx ON billing.mrr_scheduled USING btree (merchant_id, currency, scheduled_at)
+  index CREATE INDEX mrr_scheduled_scheduled_change_id_idx ON billing.mrr_scheduled USING btree (merchant_id, scheduled_change_id) WHERE (scheduled_change_id IS NOT NULL)
+  index CREATE UNIQUE INDEX mrr_scheduled_subscription_id_key ON billing.mrr_scheduled USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text)
+  trigger CREATE TRIGGER immutable_mrr_scheduled_delete BEFORE DELETE ON billing.mrr_scheduled FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.mrr_totals
+  column merchant_id uuid NOT NULL
+  column currency text NOT NULL
+  column mrr bigint NOT NULL
+  column customers bigint NOT NULL
+  column subscribers bigint NOT NULL
+  constraint mrr_totals_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint mrr_totals_customers_check CHECK ((customers >= 0))
+  constraint mrr_totals_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint mrr_totals_mrr_check CHECK ((mrr >= 0))
+  constraint mrr_totals_pkey PRIMARY KEY (merchant_id, currency)
+  constraint mrr_totals_subscribers_check CHECK ((subscribers >= 0))
+  index CREATE UNIQUE INDEX mrr_totals_pkey ON billing.mrr_totals USING btree (merchant_id, currency)
 
 table billing.network_activity_daily
   column merchant_id uuid NOT NULL
@@ -2799,6 +2976,7 @@ table billing.scheduled_changes
   constraint scheduled_changes_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
   constraint scheduled_changes_price_migration_id_fkey FOREIGN KEY (merchant_id, price_migration_id) REFERENCES billing.price_migrations(merchant_id, id) ON DELETE RESTRICT
   constraint scheduled_changes_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
+  constraint scheduled_changes_quantity_max_check CHECK ((quantity <= 10000))
   constraint scheduled_changes_reason_check CHECK ((reason <> ''::text))
   constraint scheduled_changes_source_check CHECK (((source = ANY (ARRAY['change'::text, 'migration'::text])) AND ((source = 'migration'::text) = (price_migration_id IS NOT NULL))))
   constraint scheduled_changes_staff_check CHECK ((((invoker IS NULL) = (reason IS NULL)) AND ((invoker IS NULL) OR (source = 'change'::text))))
@@ -2810,6 +2988,7 @@ table billing.scheduled_changes
   index CREATE INDEX scheduled_changes_price_migration_id_idx ON billing.scheduled_changes USING btree (merchant_id, price_migration_id) WHERE (price_migration_id IS NOT NULL)
   index CREATE INDEX scheduled_changes_subscription_id_idx ON billing.scheduled_changes USING btree (merchant_id, subscription_id)
   index CREATE UNIQUE INDEX scheduled_changes_subscription_id_key ON billing.scheduled_changes USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text)
+  trigger CREATE TRIGGER scheduled_changes_track_mrr AFTER INSERT OR UPDATE OF status ON billing.scheduled_changes FOR EACH ROW EXECUTE FUNCTION billing.scheduled_changes_track_mrr()
 
 table billing.solana_crankers
   column name text NOT NULL
@@ -2952,6 +3131,39 @@ table billing.subscription_billing_changes
   trigger CREATE TRIGGER immutable_subscription_billing_changes BEFORE UPDATE ON billing.subscription_billing_changes FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER retained_subscription_billing_changes BEFORE DELETE ON billing.subscription_billing_changes FOR EACH ROW EXECUTE FUNCTION billing.guard_retention_delete('occurred_at', '761 days')
 
+table billing.subscription_mrr
+  column merchant_id uuid NOT NULL
+  column subscription_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column product_id uuid NOT NULL
+  column price_id uuid NOT NULL
+  column mrr bigint NOT NULL
+  column contributes boolean NOT NULL
+  column ends_at timestamp with time zone
+  column next_change_at timestamp with time zone
+  column changed_at timestamp with time zone NOT NULL
+  column cause text NOT NULL
+  column recorded_currency text NOT NULL
+  column recorded_product_id uuid NOT NULL
+  column recorded_price_id uuid NOT NULL
+  column recorded_mrr bigint NOT NULL
+  column dirty boolean NOT NULL GENERATED ALWAYS AS (((mrr <> recorded_mrr) OR (currency <> recorded_currency) OR (product_id <> recorded_product_id) OR (price_id <> recorded_price_id))) STORED
+  constraint subscription_mrr_cause_check CHECK ((cause = ANY (ARRAY['subscribed'::text, 'resumed'::text, 'renewed'::text, 'price_change'::text, 'seat_change'::text, 'canceled'::text, 'merchant_canceled'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'import'::text, 'prune'::text, 'undo'::text, 'backfill'::text])))
+  constraint subscription_mrr_contributes_check CHECK ((contributes OR ((mrr = 0) AND (ends_at IS NULL))))
+  constraint subscription_mrr_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint subscription_mrr_mrr_check CHECK ((mrr >= 0))
+  constraint subscription_mrr_pkey PRIMARY KEY (merchant_id, subscription_id)
+  constraint subscription_mrr_recorded_currency_check CHECK ((recorded_currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint subscription_mrr_recorded_mrr_check CHECK ((recorded_mrr >= 0))
+  constraint subscription_mrr_settle TRIGGER DEFERRABLE INITIALLY DEFERRED
+  constraint subscription_mrr_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id) ON DELETE RESTRICT
+  index CREATE INDEX subscription_mrr_customer_id_idx ON billing.subscription_mrr USING btree (merchant_id, customer_id)
+  index CREATE INDEX subscription_mrr_dirty_idx ON billing.subscription_mrr USING btree (merchant_id, customer_id) WHERE dirty
+  index CREATE INDEX subscription_mrr_next_change_at_idx ON billing.subscription_mrr USING btree (next_change_at, merchant_id, subscription_id) WHERE (next_change_at IS NOT NULL)
+  index CREATE UNIQUE INDEX subscription_mrr_pkey ON billing.subscription_mrr USING btree (merchant_id, subscription_id)
+  trigger CREATE CONSTRAINT TRIGGER subscription_mrr_settle AFTER INSERT OR UPDATE ON billing.subscription_mrr DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.settle_subscription_mrr()
+
 table billing.subscription_status_transitions
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -3057,6 +3269,7 @@ table billing.subscriptions
   constraint subscriptions_provider_access_choice_check CHECK (((NOT provider_access_default_snapshot) OR (access_duration_hours_snapshot IS NULL)))
   constraint subscriptions_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint subscriptions_quantity_check CHECK (((quantity IS NULL) OR ((quantity >= 1) AND (collection_policy = 'engine'::text) AND (rail = ANY (ARRAY['nmi'::text, 'stripe'::text])))))
+  constraint subscriptions_quantity_max_check CHECK ((quantity <= 10000))
   constraint subscriptions_rail_subscription_id_check CHECK ((rail_subscription_id <> ''::text))
   constraint subscriptions_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'awaiting_method'::text, 'canceled'::text, 'unverified'::text])))
   constraint subscriptions_stop_pending_canceled_check CHECK (((status = 'canceled'::text) OR (deletion_scheduled_at IS NULL)))
@@ -3101,6 +3314,7 @@ table billing.subscriptions
   trigger CREATE TRIGGER trg_subscriptions_billing_changes AFTER UPDATE OF payment_method_id, next_retry_at, last_retry_at, retry_attempts, transient_retries, grace_ends_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_record_billing_change()
   trigger CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id, tier_group, status, deleted_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_set_tier_group()
   trigger CREATE TRIGGER trg_subscriptions_status_transition AFTER INSERT OR UPDATE OF status, current_period_ends_at ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_record_status_transition()
+  trigger CREATE TRIGGER trg_subscriptions_track_mrr AFTER INSERT OR UPDATE OF status, price_id, product_id, quantity, ended_at, current_period_starts_at, current_period_ends_at, deleted_at, cancel_type ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_track_mrr()
   trigger CREATE CONSTRAINT TRIGGER trg_subscriptions_track_unverified AFTER INSERT OR UPDATE OF status ON billing.subscriptions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_track_unverified()
 
 table billing.usage_accruals
@@ -3469,7 +3683,7 @@ function billing.catalog_authored_entitlements()
       FOR mid IN SELECT DISTINCT merchant_id FROM changed LOOP
           IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text THEN
               BEGIN
-                  PERFORM id FROM billing.merchants WHERE id=mid FOR UPDATE NOWAIT;
+                  PERFORM id FROM billing.merchants WHERE id=mid FOR NO KEY UPDATE NOWAIT;
               EXCEPTION WHEN lock_not_available THEN
                   RAISE EXCEPTION 'concurrent catalog authoring; retry the transaction' USING ERRCODE='40001';
               END;
@@ -3493,7 +3707,7 @@ function billing.catalog_authored_write()
           -- behind a merchant-first transaction while holding that child: refuse
           -- with a retryable serialization conflict instead of deadlocking.
           BEGIN
-              PERFORM id FROM billing.merchants WHERE id=mid FOR UPDATE NOWAIT;
+              PERFORM id FROM billing.merchants WHERE id=mid FOR NO KEY UPDATE NOWAIT;
           EXCEPTION WHEN lock_not_available THEN
               RAISE EXCEPTION 'concurrent catalog authoring; retry the transaction' USING ERRCODE='40001';
           END;
@@ -3549,6 +3763,39 @@ function billing.check_billing_restore_ledger(uuid)
                   OR (d.customer_id IS NOT NULL AND d.customer_id IS DISTINCT FROM t.customer_id)
                   OR (c.customer_id IS NOT NULL AND c.customer_id IS DISTINCT FROM t.customer_id))) THEN
           RAISE EXCEPTION 'billing restore ledger integrity mismatch' USING ERRCODE='23514';
+      END IF;
+  END;
+  $function$
+
+function billing.check_billing_restore_mrr(uuid)
+  CREATE OR REPLACE FUNCTION billing.check_billing_restore_mrr(p_merchant uuid)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF p_merchant IS DISTINCT FROM billing.current_merchant_id() THEN
+          RAISE EXCEPTION 'billing restore merchant mismatch' USING ERRCODE='42501';
+      END IF;
+      IF EXISTS (SELECT 1 FROM billing.subscription_mrr WHERE merchant_id = p_merchant AND dirty)
+         OR EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id = p_merchant AND s.price_id IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM billing.subscription_mrr m WHERE m.merchant_id = s.merchant_id AND m.subscription_id = s.id))
+         OR EXISTS (SELECT 1 FROM (SELECT customer_id, currency, mrr, subscriptions FROM billing.customer_mrr WHERE merchant_id = p_merchant) c
+             FULL JOIN (SELECT customer_id, recorded_currency AS currency, sum(recorded_mrr) AS mrr, count(*) FILTER (WHERE recorded_mrr > 0) AS subscriptions
+                          FROM billing.subscription_mrr WHERE merchant_id = p_merchant GROUP BY customer_id, recorded_currency) s
+               ON s.customer_id = c.customer_id AND s.currency = c.currency
+             WHERE COALESCE(c.mrr, 0) <> COALESCE(s.mrr, 0) OR COALESCE(c.subscriptions, 0) <> COALESCE(s.subscriptions, 0))
+         OR EXISTS (SELECT 1 FROM (SELECT customer_id, currency, mrr FROM billing.customer_mrr WHERE merchant_id = p_merchant) c
+             FULL JOIN (SELECT customer_id, currency, sum(delta) AS mrr FROM billing.mrr_movements WHERE merchant_id = p_merchant GROUP BY customer_id, currency) v
+               ON v.customer_id = c.customer_id AND v.currency = c.currency
+             WHERE COALESCE(c.mrr, 0) <> COALESCE(v.mrr, 0))
+         OR EXISTS (SELECT 1 FROM (SELECT currency, mrr, customers, subscribers FROM billing.mrr_totals WHERE merchant_id = p_merchant) t
+             FULL JOIN (SELECT currency, sum(mrr) AS mrr, count(*) FILTER (WHERE mrr > 0) AS customers, sum(subscriptions) AS subscribers
+                          FROM billing.customer_mrr WHERE merchant_id = p_merchant GROUP BY currency) c
+               ON c.currency = t.currency
+             WHERE COALESCE(t.mrr, 0) <> COALESCE(c.mrr, 0) OR COALESCE(t.customers, 0) <> COALESCE(c.customers, 0)
+                OR COALESCE(t.subscribers, 0) <> COALESCE(c.subscribers, 0)) THEN
+          RAISE EXCEPTION 'billing restore MRR integrity mismatch' USING ERRCODE='23514';
       END IF;
   END;
   $function$
@@ -3713,6 +3960,27 @@ function billing.drop_month_partitions(name,timestamp with time zone)
           dropped := dropped + 1;
       END LOOP;
       RETURN dropped;
+  END;
+  $function$
+
+function billing.effect_due_mrr(uuid,uuid,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.effect_due_mrr(p_merchant uuid, p_subscription uuid, p_at timestamp with time zone)
+   RETURNS boolean
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      v_sub billing.subscriptions;
+      v_due timestamptz;
+  BEGIN
+      SELECT * INTO v_sub FROM billing.subscriptions WHERE merchant_id = p_merchant AND id = p_subscription FOR UPDATE;
+      SELECT next_change_at INTO v_due FROM billing.subscription_mrr
+       WHERE merchant_id = p_merchant AND subscription_id = p_subscription AND next_change_at <= p_at;
+      IF NOT FOUND THEN
+          RETURN false;
+      END IF;
+      PERFORM billing.refresh_subscription_mrr(v_sub, v_due, billing.mrr_cancel_cause(v_sub.cancel_type));
+      RETURN true;
   END;
   $function$
 
@@ -4008,6 +4276,7 @@ function billing.guard_billing_restore_receipt()
                     'customer_limit_overrides',
                     'customer_low_balance_lines',
                     'customer_messages',
+                    'customer_mrr',
                     'customers',
                     'dashboard_configs',
                     'destructive_actions',
@@ -4033,6 +4302,13 @@ function billing.guard_billing_restore_receipt()
                     'merchant_destructive_policy',
                     'meter_period_quantities',
                     'money_settings',
+                    'mrr_cohort_flows',
+                    'mrr_flows',
+                    'mrr_movement_lines',
+                    'mrr_movements',
+                    'mrr_product_flows',
+                    'mrr_scheduled',
+                    'mrr_totals',
                     'nmi_bulk_checkpoints',
                     'nmi_history_months',
                     'nmi_history_reads',
@@ -4071,8 +4347,9 @@ function billing.guard_billing_restore_receipt()
                     'solana_pay_references',
                     'solana_subscriptions',
                     'stored_card_checks',
-                    'subscription_status_transitions',
                     'subscription_billing_changes',
+                    'subscription_mrr',
+                    'subscription_status_transitions',
                     'subscription_verifications',
                     'subscriptions',
                     'usage_accruals',
@@ -4574,6 +4851,30 @@ function billing.monthly_normalized_amount(bigint,integer)
   END
   $function$
 
+function billing.mrr_bucket(timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.mrr_bucket(p_at timestamp with time zone)
+   RETURNS timestamp with time zone
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$
+  SELECT date_bin('15 minutes', p_at, '2000-01-01 00:00:00+00'::timestamptz)
+  $function$
+
+function billing.mrr_cancel_cause(text)
+  CREATE OR REPLACE FUNCTION billing.mrr_cancel_cause(p_cancel_type text)
+   RETURNS text
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$
+  SELECT CASE p_cancel_type
+      WHEN 'user' THEN 'canceled'
+      WHEN 'merchant' THEN 'merchant_canceled'
+      WHEN 'chargeback' THEN 'chargeback'
+      WHEN 'upgrade' THEN 'upgrade'
+      ELSE 'expired'
+  END
+  $function$
+
 function billing.notification_event_record(billing.notification_events)
   CREATE OR REPLACE FUNCTION billing.notification_event_record(n billing.notification_events)
    RETURNS jsonb
@@ -4618,6 +4919,23 @@ function billing.payment_network_activity()
   END;
   $function$
 
+function billing.pending_mrr_lines(uuid,uuid,text)
+  CREATE OR REPLACE FUNCTION billing.pending_mrr_lines(p_merchant uuid, p_customer uuid, p_currency text)
+   RETURNS TABLE(subscription_id uuid, product_id uuid, price_id uuid, mrr_before bigint, mrr_after bigint, cause text, changed_at timestamp with time zone)
+   LANGUAGE sql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  SELECT m.subscription_id,
+         CASE WHEN m.currency = p_currency THEN m.product_id ELSE m.recorded_product_id END,
+         CASE WHEN m.currency = p_currency THEN m.price_id ELSE m.recorded_price_id END,
+         CASE WHEN m.recorded_currency = p_currency THEN m.recorded_mrr ELSE 0 END,
+         CASE WHEN m.currency = p_currency THEN m.mrr ELSE 0 END,
+         m.cause, m.changed_at
+    FROM billing.subscription_mrr m
+   WHERE m.merchant_id = p_merchant AND m.customer_id = p_customer AND m.dirty
+     AND p_currency IN (m.currency, m.recorded_currency)
+  $function$
+
 function billing.preserve_subscription_collection_policy()
   CREATE OR REPLACE FUNCTION billing.preserve_subscription_collection_policy()
    RETURNS trigger
@@ -4629,6 +4947,37 @@ function billing.preserve_subscription_collection_policy()
     RAISE EXCEPTION 'subscription collection policy is immutable' USING ERRCODE='23514';
    END IF;
    RETURN NEW;
+  END;
+  $function$
+
+function billing.price_mrr(billing.prices,integer)
+  CREATE OR REPLACE FUNCTION billing.price_mrr(p billing.prices, p_seats integer)
+   RETURNS bigint
+   LANGUAGE plpgsql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$
+  DECLARE
+      v_months integer := CASE WHEN p.provider_snapshot ? 'provider_billing_interval_months'
+          THEN substring(p.provider_snapshot->>'provider_billing_interval_months' FROM '^[0-9]{1,4}$')::integer
+          ELSE p.billing_interval_months END;
+      v_hours integer := CASE WHEN p.provider_snapshot ? 'provider_billing_interval_hours'
+          THEN substring(p.provider_snapshot->>'provider_billing_interval_hours' FROM '^[0-9]{1,9}$')::integer
+          ELSE p.billing_interval_hours END;
+      v_level numeric;
+  BEGIN
+      IF COALESCE(v_months, 0) <= 0 THEN
+          v_months := CASE v_hours WHEN 720 THEN 1 WHEN 2160 THEN 3 WHEN 4320 THEN 6 WHEN 8760 THEN 12 END;
+      END IF;
+      v_level := COALESCE(CASE
+          WHEN v_months > 0 THEN round(p.amount::numeric / v_months)
+          WHEN v_hours = 168 THEN round(p.amount::numeric * 52 / 12)
+          WHEN v_hours > 0 THEN round(p.amount::numeric * 730.485 / v_hours)
+      END, 0) * greatest(p_seats, 1);
+      IF v_level > 1000000000000000 THEN
+          RAISE WARNING 'MRR % of price % for % seats is held at 10^15', v_level, p.id, greatest(p_seats, 1);
+          RETURN 1000000000000000;
+      END IF;
+      RETURN v_level;
   END;
   $function$
 
@@ -4716,6 +5065,109 @@ function billing.rail_subscription_key(text,text)
    IMMUTABLE PARALLEL SAFE
   AS $function$ SELECT CASE WHEN rail = 'ccbill' THEN ltrim(ref, '0') ELSE ref END $function$
 
+function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with time zone,text)
+  CREATE OR REPLACE FUNCTION billing.refresh_subscription_mrr(s billing.subscriptions, p_at timestamp with time zone, p_cause text)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      v_price billing.prices;
+      v_prev billing.subscription_mrr;
+      v_open billing.mrr_scheduled;
+      v_change billing.scheduled_changes;
+      v_has_open boolean;
+      v_level bigint := 0;
+      v_live boolean := false;
+      v_ends timestamptz;
+      v_at timestamptz := p_at;
+  BEGIN
+      SELECT * INTO v_price FROM billing.prices WHERE merchant_id = s.merchant_id AND id = s.price_id;
+      IF NOT FOUND THEN
+          RETURN;
+      END IF;
+      SELECT * INTO v_prev FROM billing.subscription_mrr WHERE merchant_id = s.merchant_id AND subscription_id = s.id;
+      IF s.deleted_at IS NULL THEN
+          IF s.status = 'canceled' THEN
+              -- A cancellation at period end contributes until it ends (an older
+              -- one recorded no end); a subscription replaced by its upgrade
+              -- leaves at once.
+              v_ends := COALESCE(s.ended_at, s.current_period_ends_at);
+              v_live := s.cancel_type IS DISTINCT FROM 'upgrade' AND COALESCE(v_ends > p_at, false);
+          ELSE
+              v_live := s.status IN ('active', 'past_due', 'awaiting_method', 'unverified');
+          END IF;
+          -- A trial contributes from its conversion: the first renewal of a
+          -- price with a trial phase.
+          IF v_live AND v_price.trial_duration_hours IS NOT NULL
+             AND (s.current_period_starts_at IS NULL OR s.current_period_starts_at <= s.started_at) THEN
+              v_live := false;
+          END IF;
+      END IF;
+      IF v_live THEN
+          v_level := billing.price_mrr(v_price, s.quantity);
+      ELSE
+          v_ends := NULL;
+          -- A scheduled end that passed took effect at that end.
+          IF v_prev.ends_at IS NOT NULL AND v_prev.ends_at <= p_at THEN
+              v_at := v_prev.ends_at;
+          END IF;
+      END IF;
+      IF v_prev.subscription_id IS NULL THEN
+          INSERT INTO billing.subscription_mrr (merchant_id, subscription_id, customer_id, currency, product_id, price_id, mrr, contributes,
+              ends_at, next_change_at, changed_at, cause, recorded_currency, recorded_product_id, recorded_price_id, recorded_mrr)
+          VALUES (s.merchant_id, s.id, s.customer_id, v_price.currency, s.product_id, s.price_id, v_level, v_live,
+              v_ends, v_ends, v_at, p_cause, v_price.currency, s.product_id, s.price_id, 0);
+      ELSIF ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr, v_prev.contributes, v_prev.ends_at)
+            IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level, v_live, v_ends) THEN
+          UPDATE billing.subscription_mrr
+             SET currency = v_price.currency, product_id = s.product_id, price_id = s.price_id, mrr = v_level, contributes = v_live,
+                 ends_at = v_ends, next_change_at = v_ends,
+                 -- A change of what MRR counts is dated and explained by this one.
+                 changed_at = CASE WHEN ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr) IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level)
+                     THEN v_at ELSE v_prev.changed_at END,
+                 cause = CASE WHEN ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr) IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level)
+                     THEN p_cause ELSE v_prev.cause END
+           WHERE merchant_id = s.merchant_id AND subscription_id = s.id;
+      END IF;
+      SELECT * INTO v_open FROM billing.mrr_scheduled
+       WHERE merchant_id = s.merchant_id AND subscription_id = s.id AND status = 'scheduled' FOR UPDATE;
+      v_has_open := FOUND;
+      IF v_ends IS NOT NULL AND v_level > 0 THEN
+          -- Canceled with its end ahead: scheduled churn of what it adds now.
+          -- An entry is never edited: any other one is superseded by a new one.
+          IF NOT (v_has_open AND v_open.kind = 'churn'
+                  AND (v_open.currency, v_open.mrr_delta, v_open.effective_at) = (v_price.currency, -v_level, v_ends)) THEN
+              IF v_has_open THEN
+                  PERFORM billing.resolve_mrr_scheduled(v_open, 'superseded', p_at);
+              END IF;
+              INSERT INTO billing.mrr_scheduled (merchant_id, subscription_id, customer_id, currency, kind, mrr_delta, effective_at, cause, status, scheduled_at)
+              VALUES (s.merchant_id, s.id, s.customer_id, v_price.currency, 'churn', -v_level, v_ends, billing.mrr_cancel_cause(s.cancel_type), 'scheduled', p_at);
+          END IF;
+      ELSIF v_has_open AND v_open.kind = 'churn' THEN
+          -- It resumed, or it ended: at its end or earlier as churn, or by a
+          -- correction or an upgrade, which no churn records.
+          PERFORM billing.resolve_mrr_scheduled(v_open, CASE
+              WHEN v_level > 0 THEN 'reversed'
+              WHEN p_cause IN ('canceled', 'merchant_canceled', 'expired', 'chargeback') THEN 'effected'
+              ELSE 'superseded' END, v_at);
+          IF v_level > 0 THEN
+              PERFORM billing.schedule_mrr_change(s.merchant_id, s.id, p_at);
+          END IF;
+      ELSIF v_has_open AND v_level IS DISTINCT FROM v_prev.mrr THEN
+          -- A scheduled contraction or expansion is met when the subscription
+          -- bills its change, and overtaken by any other change.
+          SELECT * INTO v_change FROM billing.scheduled_changes WHERE merchant_id = s.merchant_id AND id = v_open.scheduled_change_id;
+          IF v_level > 0 AND s.price_id = v_change.price_id AND (v_change.quantity IS NULL OR v_change.quantity = s.quantity) THEN
+              PERFORM billing.resolve_mrr_scheduled(v_open, 'effected', p_at);
+          ELSE
+              PERFORM billing.resolve_mrr_scheduled(v_open, 'superseded', p_at);
+              PERFORM billing.schedule_mrr_change(s.merchant_id, s.id, p_at);
+          END IF;
+      END IF;
+  END;
+  $function$
+
 function billing.reject_immutable_billing_fact()
   CREATE OR REPLACE FUNCTION billing.reject_immutable_billing_fact()
    RETURNS trigger
@@ -4775,9 +5227,20 @@ function billing.require_finished_billing_restore()
           END IF;
           PERFORM billing.check_billing_restore_ledger(NEW.merchant_id);
           PERFORM billing.check_billing_restore_credit_grants(NEW.merchant_id);
+          PERFORM billing.check_billing_restore_mrr(NEW.merchant_id);
       END IF;
       RETURN NULL;
   END;
+  $function$
+
+function billing.resolve_mrr_scheduled(billing.mrr_scheduled,text,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.resolve_mrr_scheduled(p_entry billing.mrr_scheduled, p_status text, p_at timestamp with time zone)
+   RETURNS void
+   LANGUAGE sql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  UPDATE billing.mrr_scheduled SET status = p_status, resolved_at = p_at
+   WHERE merchant_id = p_entry.merchant_id AND id = p_entry.id AND status = 'scheduled'
   $function$
 
 function billing.running_charge_total(bigint,timestamp with time zone,timestamp with time zone)
@@ -4787,6 +5250,256 @@ function billing.running_charge_total(bigint,timestamp with time zone,timestamp 
    IMMUTABLE PARALLEL SAFE
   AS $function$
   SELECT div(p_rate_per_hour::numeric * greatest(floor(extract(epoch FROM p_at - p_started_at)), 0) * 2 + 3600, 7200)::bigint
+  $function$
+
+function billing.schedule_mrr_change(uuid,uuid,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.schedule_mrr_change(p_merchant uuid, p_subscription uuid, p_at timestamp with time zone)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      v_change billing.scheduled_changes;
+      v_state billing.subscription_mrr;
+      v_sub billing.subscriptions;
+      v_target billing.prices;
+      v_delta bigint;
+      v_kind text;
+  BEGIN
+      SELECT * INTO v_change FROM billing.scheduled_changes
+       WHERE merchant_id = p_merchant AND subscription_id = p_subscription AND status = 'scheduled';
+      IF NOT FOUND THEN
+          RETURN;
+      END IF;
+      SELECT * INTO v_state FROM billing.subscription_mrr WHERE merchant_id = p_merchant AND subscription_id = p_subscription;
+      IF NOT FOUND OR v_state.mrr = 0 OR v_state.ends_at IS NOT NULL
+         OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e WHERE e.merchant_id = p_merchant AND e.subscription_id = p_subscription AND e.status = 'scheduled') THEN
+          RETURN;
+      END IF;
+      SELECT * INTO v_sub FROM billing.subscriptions WHERE merchant_id = p_merchant AND id = p_subscription;
+      SELECT * INTO v_target FROM billing.prices WHERE merchant_id = p_merchant AND id = v_change.price_id;
+      IF v_target.currency IS DISTINCT FROM v_state.currency THEN
+          RETURN;
+      END IF;
+      v_delta := billing.price_mrr(v_target, COALESCE(v_change.quantity, v_sub.quantity)) - v_state.mrr;
+      IF v_delta = 0 THEN
+          RETURN;
+      END IF;
+      v_kind := CASE WHEN v_delta < 0 THEN 'contraction' ELSE 'expansion' END;
+      INSERT INTO billing.mrr_scheduled (merchant_id, subscription_id, customer_id, currency, kind, mrr_delta, effective_at, cause,
+          scheduled_change_id, status, scheduled_at)
+      VALUES (p_merchant, p_subscription, v_sub.customer_id, v_state.currency, v_kind, v_delta,
+          -- The renewal on or after the change's date.
+          CASE WHEN v_sub.current_period_ends_at >= v_change.effective_at THEN v_sub.current_period_ends_at ELSE v_change.effective_at END,
+          CASE WHEN v_change.price_id = v_change.from_price_id THEN 'seat_change' ELSE 'price_change' END,
+          v_change.id, 'scheduled', p_at);
+  END;
+  $function$
+
+function billing.scheduled_changes_track_mrr()
+  CREATE OR REPLACE FUNCTION billing.scheduled_changes_track_mrr()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      v_open billing.mrr_scheduled;
+  BEGIN
+      IF NEW.status <> 'scheduled' AND (TG_OP = 'INSERT' OR OLD.status <> 'scheduled') OR billing.billing_restore_active(NEW.merchant_id) THEN
+          RETURN NULL;
+      END IF;
+      IF NEW.status = 'scheduled' THEN
+          PERFORM billing.schedule_mrr_change(NEW.merchant_id, NEW.subscription_id, NEW.created_at);
+      ELSE
+          SELECT * INTO v_open FROM billing.mrr_scheduled
+           WHERE merchant_id = NEW.merchant_id AND scheduled_change_id = NEW.id AND status = 'scheduled' FOR UPDATE;
+          IF FOUND THEN
+              PERFORM billing.resolve_mrr_scheduled(v_open, CASE WHEN NEW.status = 'applied' THEN 'effected' ELSE 'reversed' END,
+                  COALESCE(NEW.applied_at, NEW.canceled_at, statement_timestamp()));
+          END IF;
+      END IF;
+      RETURN NULL;
+  END;
+  $function$
+
+function billing.seed_mrr(uuid,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.seed_mrr(p_merchant uuid, p_at timestamp with time zone)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      v_sub billing.subscriptions;
+  BEGIN
+      FOR v_sub IN
+          SELECT s.* FROM billing.subscriptions s
+           WHERE s.merchant_id = p_merchant AND s.price_id IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM billing.subscription_mrr m WHERE m.merchant_id = s.merchant_id AND m.subscription_id = s.id)
+           ORDER BY s.id
+      LOOP
+          PERFORM billing.refresh_subscription_mrr(v_sub, p_at, 'backfill');
+          PERFORM billing.schedule_mrr_change(p_merchant, v_sub.id, p_at);
+      END LOOP;
+      PERFORM billing.settle_mrr(p_merchant);
+  END;
+  $function$
+
+function billing.settle_mrr(uuid)
+  CREATE OR REPLACE FUNCTION billing.settle_mrr(p_merchant uuid)
+   RETURNS void
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      v_pair record;
+      v_sum record;
+      v_customer billing.customer_mrr;
+      v_total bigint;
+      v_subs integer;
+      v_after bigint;
+      v_logo integer;
+      v_at timestamptz;
+      v_cause text;
+      v_kind text;
+      v_first timestamptz;
+      v_movement uuid;
+      v_movements uuid[] := '{}';
+  BEGIN
+      FOR v_pair IN
+          SELECT DISTINCT m.customer_id, c.currency
+            FROM billing.subscription_mrr m
+            CROSS JOIN LATERAL (VALUES (m.currency), (m.recorded_currency)) c(currency)
+           WHERE m.merchant_id = p_merchant AND m.dirty
+           ORDER BY m.customer_id, c.currency
+      LOOP
+          -- The latest change dates the customer's movement.
+          SELECT COALESCE(sum(l.mrr_after - l.mrr_before), 0), COALESCE(sum((l.mrr_after > 0)::integer - (l.mrr_before > 0)::integer), 0), max(l.changed_at)
+            INTO v_total, v_subs, v_at
+            FROM billing.pending_mrr_lines(p_merchant, v_pair.customer_id, v_pair.currency) l;
+          IF v_total = 0 AND v_subs = 0 THEN
+              CONTINUE;
+          END IF;
+          INSERT INTO billing.customer_mrr (merchant_id, customer_id, currency, mrr, subscriptions)
+          VALUES (p_merchant, v_pair.customer_id, v_pair.currency, 0, 0)
+          ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
+          SELECT * INTO v_customer FROM billing.customer_mrr
+           WHERE merchant_id = p_merchant AND customer_id = v_pair.customer_id AND currency = v_pair.currency FOR UPDATE;
+          v_after := v_customer.mrr + v_total;
+          v_logo := (v_after > 0)::integer - (v_customer.mrr > 0)::integer;
+          v_first := v_customer.first_active_at;
+          IF v_total <> 0 THEN
+              -- An upgrade explains the whole movement; otherwise its largest
+              -- change does.
+              SELECT l.cause INTO v_cause FROM billing.pending_mrr_lines(p_merchant, v_pair.customer_id, v_pair.currency) l
+               WHERE l.mrr_after <> l.mrr_before ORDER BY (l.cause = 'upgrade') DESC, abs(l.mrr_after - l.mrr_before) DESC, l.subscription_id LIMIT 1;
+              v_kind := CASE
+                  WHEN v_cause IN ('prune', 'undo') THEN 'correction'
+                  WHEN v_cause IN ('import', 'backfill') THEN CASE WHEN v_total > 0 THEN 'opening' ELSE 'correction' END
+                  WHEN v_customer.mrr = 0 THEN CASE WHEN v_customer.first_active_at IS NULL THEN 'new' ELSE 'reactivation' END
+                  WHEN v_after = 0 THEN 'churn'
+                  WHEN v_total > 0 THEN 'expansion'
+                  ELSE 'contraction'
+              END;
+              IF v_first IS NULL THEN
+                  v_first := v_at;
+                  -- An adopted subscription's cohort is when it started.
+                  IF v_kind = 'opening' THEN
+                      SELECT least(v_at, min(s.started_at)) INTO v_first
+                        FROM billing.pending_mrr_lines(p_merchant, v_pair.customer_id, v_pair.currency) l
+                        JOIN billing.subscriptions s ON s.merchant_id = p_merchant AND s.id = l.subscription_id
+                       WHERE l.mrr_after > 0;
+                  END IF;
+              END IF;
+              INSERT INTO billing.mrr_movements (merchant_id, customer_id, currency, kind, delta, mrr_before, mrr_after, logo_delta,
+                  cohort_at, cause, voluntary, backfilled, occurred_at)
+              VALUES (p_merchant, v_pair.customer_id, v_pair.currency, v_kind, v_total, v_customer.mrr, v_after, v_logo,
+                  v_first, v_cause, CASE WHEN v_kind = 'churn' THEN v_cause IN ('canceled', 'merchant_canceled') END,
+                  v_cause = 'backfill', v_at)
+              RETURNING id INTO v_movement;
+              v_movements := array_append(v_movements, v_movement);
+              INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
+                  subscriber_delta, cause)
+              SELECT p_merchant, v_movement, l.subscription_id, l.product_id, l.price_id, l.mrr_after - l.mrr_before, l.mrr_before, l.mrr_after,
+                     (l.mrr_after > 0)::integer - (l.mrr_before > 0)::integer, l.cause
+                FROM billing.pending_mrr_lines(p_merchant, v_pair.customer_id, v_pair.currency) l
+               WHERE l.mrr_after <> l.mrr_before;
+          END IF;
+          UPDATE billing.customer_mrr
+             SET mrr = v_after, subscriptions = subscriptions + v_subs, first_active_at = v_first
+           WHERE merchant_id = p_merchant AND customer_id = v_pair.customer_id AND currency = v_pair.currency;
+      END LOOP;
+      -- The movements by kind; a voluntary churn also counts apart.
+      INSERT INTO billing.mrr_flows AS f (merchant_id, currency, bucket_at, measure, amount, entries, logos)
+      SELECT p_merchant, v.currency, billing.mrr_bucket(v.occurred_at), x.measure, sum(v.delta), count(*), sum(v.logo_delta)
+        FROM billing.mrr_movements v
+        CROSS JOIN LATERAL (SELECT v.kind UNION ALL SELECT 'churn_voluntary' WHERE v.voluntary) x(measure)
+       WHERE v.merchant_id = p_merchant AND v.id = ANY(v_movements)
+       GROUP BY v.currency, billing.mrr_bucket(v.occurred_at), x.measure
+       ORDER BY v.currency, billing.mrr_bucket(v.occurred_at), x.measure
+      ON CONFLICT (merchant_id, currency, bucket_at, measure) DO UPDATE
+      SET amount = f.amount + EXCLUDED.amount, entries = f.entries + EXCLUDED.entries, logos = f.logos + EXCLUDED.logos;
+      INSERT INTO billing.mrr_cohort_flows AS c (merchant_id, currency, cohort_at, bucket_at, amount, logos)
+      SELECT p_merchant, v.currency, billing.mrr_bucket(v.cohort_at), billing.mrr_bucket(v.occurred_at), sum(v.delta), sum(v.logo_delta)
+        FROM billing.mrr_movements v
+       WHERE v.merchant_id = p_merchant AND v.id = ANY(v_movements)
+       GROUP BY v.currency, billing.mrr_bucket(v.cohort_at), billing.mrr_bucket(v.occurred_at)
+       ORDER BY v.currency, billing.mrr_bucket(v.cohort_at), billing.mrr_bucket(v.occurred_at)
+      ON CONFLICT (merchant_id, currency, cohort_at, bucket_at) DO UPDATE
+      SET amount = c.amount + EXCLUDED.amount, logos = c.logos + EXCLUDED.logos;
+      -- Each changed subscription moves its products' MRR and subscribers, in
+      -- the bucket of its customer's movement in each currency: the latest
+      -- change of the customer's rows in that currency.
+      INSERT INTO billing.mrr_product_flows AS p (merchant_id, currency, bucket_at, product_id, amount, subscribers)
+      SELECT p_merchant, x.currency, billing.mrr_bucket(x.at), x.product_id, sum(x.amount), sum(x.subscribers)
+        FROM (SELECT x.currency, x.product_id, x.amount, x.subscribers, max(m.changed_at) OVER (PARTITION BY m.customer_id, x.currency) AS at
+                FROM billing.subscription_mrr m
+                CROSS JOIN LATERAL (VALUES (m.recorded_currency, m.recorded_product_id, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
+                                           (m.currency, m.product_id, m.mrr, (m.mrr > 0)::integer)) x(currency, product_id, amount, subscribers)
+               WHERE m.merchant_id = p_merchant AND m.dirty) x
+       GROUP BY x.currency, billing.mrr_bucket(x.at), x.product_id
+      HAVING sum(x.amount) <> 0 OR sum(x.subscribers) <> 0
+       ORDER BY x.currency, billing.mrr_bucket(x.at), x.product_id
+      ON CONFLICT (merchant_id, currency, bucket_at, product_id) DO UPDATE
+      SET amount = p.amount + EXCLUDED.amount, subscribers = p.subscribers + EXCLUDED.subscribers;
+      -- The merchant's totals, one currency at a time.
+      FOR v_sum IN
+          SELECT x.currency, sum(x.amount)::bigint AS mrr, sum(x.subscribers)::bigint AS subscribers,
+                 COALESCE((SELECT sum(v.logo_delta) FROM billing.mrr_movements v
+                            WHERE v.merchant_id = p_merchant AND v.id = ANY(v_movements) AND v.currency = x.currency), 0)::bigint AS customers
+            FROM billing.subscription_mrr m
+            CROSS JOIN LATERAL (VALUES (m.recorded_currency, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
+                                       (m.currency, m.mrr, (m.mrr > 0)::integer)) x(currency, amount, subscribers)
+           WHERE m.merchant_id = p_merchant AND m.dirty
+           GROUP BY x.currency
+           ORDER BY x.currency
+      LOOP
+          CONTINUE WHEN v_sum.mrr = 0 AND v_sum.subscribers = 0 AND v_sum.customers = 0;
+          INSERT INTO billing.mrr_totals (merchant_id, currency, mrr, customers, subscribers)
+          VALUES (p_merchant, v_sum.currency, 0, 0, 0)
+          ON CONFLICT (merchant_id, currency) DO NOTHING;
+          UPDATE billing.mrr_totals
+             SET mrr = mrr + v_sum.mrr, customers = customers + v_sum.customers, subscribers = subscribers + v_sum.subscribers
+           WHERE merchant_id = p_merchant AND currency = v_sum.currency;
+      END LOOP;
+      UPDATE billing.subscription_mrr
+         SET recorded_currency = currency, recorded_product_id = product_id, recorded_price_id = price_id, recorded_mrr = mrr
+       WHERE merchant_id = p_merchant AND dirty;
+  END;
+  $function$
+
+function billing.settle_subscription_mrr()
+  CREATE OR REPLACE FUNCTION billing.settle_subscription_mrr()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF EXISTS (SELECT 1 FROM billing.subscription_mrr
+                  WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.subscription_id AND dirty) THEN
+          PERFORM billing.settle_mrr(NEW.merchant_id);
+      END IF;
+      RETURN NULL;
+  END;
   $function$
 
 function billing.solana_pay_references_wake()
@@ -5053,6 +5766,37 @@ function billing.subscriptions_set_tier_group()
       WHERE prod.id = NEW.product_id AND prod.merchant_id = NEW.merchant_id
       FOR SHARE;
       RETURN NEW;
+  END;
+  $function$
+
+function billing.subscriptions_track_mrr()
+  CREATE OR REPLACE FUNCTION billing.subscriptions_track_mrr()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF NEW.price_id IS NULL OR TG_OP = 'UPDATE' AND ROW(OLD.status, OLD.price_id, OLD.product_id, OLD.quantity, OLD.ended_at,
+              OLD.current_period_starts_at, OLD.current_period_ends_at, OLD.deleted_at, OLD.cancel_type)
+          IS NOT DISTINCT FROM ROW(NEW.status, NEW.price_id, NEW.product_id, NEW.quantity, NEW.ended_at,
+              NEW.current_period_starts_at, NEW.current_period_ends_at, NEW.deleted_at, NEW.cancel_type) THEN
+          RETURN NULL;
+      END IF;
+      IF billing.billing_restore_active(NEW.merchant_id) THEN
+          RETURN NULL;
+      END IF;
+      PERFORM billing.refresh_subscription_mrr(NEW, NEW.updated_at, CASE
+          WHEN current_setting('openrails.mrr_cause', true) IN ('import', 'undo') THEN current_setting('openrails.mrr_cause', true)
+          WHEN TG_OP = 'UPDATE' AND OLD.deleted_at IS DISTINCT FROM NEW.deleted_at THEN CASE WHEN NEW.deleted_at IS NULL THEN 'undo' ELSE 'prune' END
+          WHEN NEW.status = 'canceled' THEN billing.mrr_cancel_cause(NEW.cancel_type)
+          WHEN TG_OP = 'INSERT' THEN 'subscribed'
+          WHEN OLD.price_id IS DISTINCT FROM NEW.price_id THEN 'price_change'
+          WHEN OLD.quantity IS DISTINCT FROM NEW.quantity THEN 'seat_change'
+          WHEN OLD.status = 'canceled' THEN 'resumed'
+          WHEN OLD.status = 'pending' THEN 'subscribed'
+          ELSE 'renewed'
+      END);
+      RETURN NULL;
   END;
   $function$
 

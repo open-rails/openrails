@@ -1432,6 +1432,36 @@
     "OR-J31-S11": [
       "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
     ],
+    "OR-J42-S01": [
+      "TestMRR/OR-J42-S01/new-expansion-contraction-churn-reactivation-once-normalised-per-currency"
+    ],
+    "OR-J42-S02": [
+      "TestMRR/OR-J42-S02/cancel-at-period-end-is-scheduled-churn-a-resume-reverses-it-the-end-churns"
+    ],
+    "OR-J42-S03": [
+      "TestMRR/OR-J42-S03/scheduled-downgrade-is-scheduled-contraction-applied-at-renewal-a-canceled-change-reverses-it"
+    ],
+    "OR-J42-S04": [
+      "TestMRR/OR-J42-S04/stripe-cancel-at-period-end-is-scheduled-churn-a-portal-resume-reverses-it"
+    ],
+    "OR-J42-S05": [
+      "TestMRR/OR-J42-S05/ccbill-upgrade-replacing-a-subscription-is-one-expansion-an-import-opens"
+    ],
+    "OR-J42-S06": [
+      "TestMRR/OR-J42-S06/mrr-at-a-past-date-equals-the-movements-and-every-report-read-has-an-index"
+    ],
+    "OR-J42-S07": [
+      "TestMRR/OR-J42-S07/an-engine-upgrade-replacing-a-subscription-is-one-expansion"
+    ],
+    "OR-J42-S08": [
+      "TestMRR/OR-J42-S08/a-prune-and-its-undo-are-corrections-the-pruned-scheduled-churn-is-superseded"
+    ],
+    "OR-J42-S09": [
+      "TestMRR/OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book"
+    ],
+    "OR-J42-S10": [
+      "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],
@@ -1700,6 +1730,55 @@
     ],
     "OR-J24-S38": [
       "TestLeaseSyncs/OR-J24-S38/usage-counts-in-the-spend-windows-of-the-attributes-it-reports"
+    ],
+    "OR-J24-S39": [
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-catalog-routes-client-and-gate",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-settings",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/subscriptions-credit-packs-and-running-charges",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-orders",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works"
+    ],
+    "OR-J24-S40": [
+      "TestEventStore/OR-J24-S40/new-migrates-clickhouse-idempotently-and-refuses-another-store"
+    ],
+    "OR-J24-S41": [
+      "TestEventStore/OR-J24-S41/public-config-reports-whether-usage-is-served"
+    ],
+    "OR-J01-S20": [
+      "TestRoutePermissions/OR-J01-S20/every-route-refuses-a-credential-without-its-permission"
+    ],
+    "OR-J07-S07": [
+      "TestDirectoryAuthority/OR-J07-S07/an-application-without-the-provisioning-permission-is-refused"
+    ],
+    "OR-J07-S08": [
+      "TestDirectoryAuthority/OR-J07-S08/erasures-keep-their-own-budget-and-are-never-lost"
+    ],
+    "OR-J01-S21": [
+      "TestRoutePermissions/OR-J01-S21/a-config-only-credential-cannot-approve-a-refund"
+    ],
+    "OR-J34-S32": [
+      "TestDestructiveReservations/OR-J34-S32/a-reservation-that-never-starts-stops-holding-budget"
+    ],
+    "OR-J01-S22": [
+      "TestRoutePermissions/OR-J01-S22/a-config-only-person-cannot-approve-a-cancel-proposal"
+    ],
+    "OR-J01-S23": [
+      "TestRoutePermissions/OR-J01-S23/a-finding-approval-spends-its-actions-operation-limit"
+    ],
+    "OR-J01-S24": [
+      "TestRoutePermissions/OR-J01-S24/a-psp-import-applies-only-the-corrections-its-approver-may-approve"
+    ],
+    "OR-J07-S09": [
+      "TestDirectoryAuthority/OR-J07-S09/a-waiting-erasure-takes-the-contact-at-once-and-a-stale-report-cannot-restore-it"
+    ],
+    "OR-J34-S33": [
+      "TestDestructiveReservations/OR-J34-S33/a-reservation-started-past-its-life-is-admitted-again"
+    ],
+    "OR-J01-S25": [
+      "TestRoutePermissions/OR-J01-S25/an-approval-is-one-operation-however-many-changes-it-carries"
+    ],
+    "OR-J01-S26": [
+      "TestRoutePermissions/OR-J01-S26/a-proposal-rewritten-before-its-lock-is-held-to-the-kinds-allowed"
     ],
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",

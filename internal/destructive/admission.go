@@ -65,6 +65,9 @@ func holdKeys(row gen.BillingDestructiveAction, mid uuid.UUID) []string {
 	case "automation":
 		return []string{automationKey(row.ActorID, mid)}
 	}
+	if Kind(row.Kind) == EraseContact {
+		return []string{erasureKey(mid)}
+	}
 	return scopeKeys(Actor{Issuer: row.ActorIssuer, ID: row.ActorID}, mid)
 }
 
@@ -121,6 +124,9 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 	for _, c := range commands {
 		if err := c.validate(); err != nil {
 			return nil, err
+		}
+		if c.Kind == EraseContact {
+			return nil, errors.New("an erasure is admitted by AdmitErasure")
 		}
 		if c.MerchantID != first.MerchantID || c.Actor.Issuer != first.Actor.Issuer || c.Actor.ID != first.Actor.ID || c.origin != first.origin {
 			return nil, errors.New("destructive batch must share merchant and actor")
@@ -207,10 +213,10 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 			return nil, err
 		}
 		var hourly, daily int64
-		hourSince, daySince := now.Add(-time.Hour), now.Add(-24*time.Hour)
+		hourSince, daySince, reservedSince := now.Add(-time.Hour), now.Add(-24*time.Hour), now.Add(-ReservationLife)
 		switch scope {
 		case ScopeActor:
-			n, err := q.CountDestructiveUnitsForActor(ctx, gen.CountDestructiveUnitsForActorParams{ActorKey: c.Actor.key(), HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+			n, err := q.CountDestructiveUnitsForActor(ctx, gen.CountDestructiveUnitsForActorParams{ActorKey: c.Actor.key(), HourSince: hourSince, DaySince: daySince, ClearAfter: after, ReservedSince: reservedSince})
 			if err != nil {
 				return nil, err
 			}
@@ -218,20 +224,20 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 		case ScopeMerchant:
 			if c.origin == "automation" {
 				n, err := q.CountDestructiveUnitsForAutomation(ctx, gen.CountDestructiveUnitsForAutomationParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after,
-					Disputes: c.Actor.ID == DisputeSource})
+					ReservedSince: reservedSince, Disputes: c.Actor.ID == DisputeSource})
 				if err != nil {
 					return nil, err
 				}
 				hourly, daily = n.Hourly, n.Daily
 			} else {
-				n, err := q.CountDestructiveUnitsForMerchant(ctx, gen.CountDestructiveUnitsForMerchantParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+				n, err := q.CountDestructiveUnitsForMerchant(ctx, gen.CountDestructiveUnitsForMerchantParams{MerchantID: c.MerchantID, HourSince: hourSince, DaySince: daySince, ClearAfter: after, ReservedSince: reservedSince})
 				if err != nil {
 					return nil, err
 				}
 				hourly, daily = n.Hourly, n.Daily
 			}
 		case ScopeDeployment:
-			n, err := q.CountDestructiveUnitsForDeployment(ctx, gen.CountDestructiveUnitsForDeploymentParams{HourSince: hourSince, DaySince: daySince, ClearAfter: after})
+			n, err := q.CountDestructiveUnitsForDeployment(ctx, gen.CountDestructiveUnitsForDeploymentParams{HourSince: hourSince, DaySince: daySince, ClearAfter: after, ReservedSince: reservedSince})
 			if err != nil {
 				return nil, err
 			}
@@ -304,7 +310,7 @@ func (a *Admissions) StartPending(ctx context.Context, mid, id uuid.UUID) (Actio
 func (a *Admissions) start(ctx context.Context, mid, id uuid.UUID, provenUnsent bool) (Action, error) {
 	var out Action
 	var held *HeldError
-	err := a.transaction(ctx, mid, func(ctx context.Context, q *gen.Queries, _ pgx.Tx) error {
+	err := a.transaction(ctx, mid, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
 		row, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid, ID: id})
 		if err != nil {
 			return err
@@ -330,6 +336,13 @@ func (a *Admissions) start(ctx context.Context, mid, id uuid.UUID, provenUnsent 
 			out.Replayed = true
 			return nil
 		}
+		// A reservation past ReservationLife no longer holds budget: it is
+		// admitted against the budget again before it starts.
+		if row.AdmittedAt.Before(a.clock.Now().UTC().Add(-ReservationLife)) && Kind(row.Kind) != EraseContact {
+			if held, err = a.admitUnits(ctx, q, tx, commandOf(row), row.Units); err != nil || held != nil {
+				return err
+			}
+		}
 		row, err = q.StartDestructiveAction(ctx, gen.StartDestructiveActionParams{MerchantID: mid, ID: id, Now: a.clock.Now().UTC()})
 		if err == nil {
 			out = actionOf(row)
@@ -343,6 +356,16 @@ func (a *Admissions) start(ctx context.Context, mid, id uuid.UUID, provenUnsent 
 		return Action{}, held
 	}
 	return out, nil
+}
+
+// commandOf is the command an admitted row records.
+func commandOf(row gen.BillingDestructiveAction) Command {
+	c := Command{MerchantID: row.MerchantID, Kind: Kind(row.Kind), Target: row.Target, Key: row.ActionKey, Digest: row.RequestDigest, Units: row.Units,
+		Actor: Actor{Issuer: row.ActorIssuer, ID: row.ActorID, Credential: text(row.Credential)}}
+	if row.Origin == "automation" {
+		c.origin = "automation"
+	}
+	return c
 }
 
 // Finish records only a proven outcome; a generic network error is Uncertain.
@@ -464,6 +487,12 @@ func (a *Admissions) Clear(ctx context.Context, mid, id uuid.UUID, by Actor, rea
 		row, err := q.GetDestructiveHold(ctx, gen.GetDestructiveHoldParams{MerchantID: mid, ID: id})
 		if err != nil {
 			return err
+		}
+		if row.Scope == string(ScopeErasure) {
+			// The erasure scope admits under its merchant's lock.
+			if err := q.LockErasureAdmissions(ctx, mid); err != nil {
+				return err
+			}
 		}
 		if row.ActorIssuer == by.Issuer && row.ActorID == by.ID {
 			return ErrSelfClear

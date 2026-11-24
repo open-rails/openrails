@@ -83,6 +83,60 @@ func (q *Queries) ClearSubscriptionDeletionMarker(ctx context.Context, arg Clear
 	return result.RowsAffected(), nil
 }
 
+const countScheduledSubscriptions = `-- name: CountScheduledSubscriptions :one
+SELECT count(*) FROM billing.mrr_scheduled e
+JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
+WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
+  AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
+  AND ($4::text IS NULL OR sub.status::text = $4::text)
+  AND ($5::uuid IS NULL OR sub.price_id = $5::uuid)
+  AND ($6::text IS NULL OR sub.rail = $6::text)
+  AND ($7::timestamptz IS NULL OR sub.created_at >= $7::timestamptz)
+  AND ($8::timestamptz IS NULL OR sub.created_at <= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR sub.canceled_at >= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.canceled_at <= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.current_period_ends_at <= $11::timestamptz)
+  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND sub.deleted_at IS NULL
+`
+
+type CountScheduledSubscriptionsParams struct {
+	MerchantID            uuid.UUID
+	ScheduledChangeBefore time.Time
+	CustomerID            *uuid.UUID
+	Status                *string
+	PriceID               *uuid.UUID
+	Rail                  *string
+	CreatedAfter          *time.Time
+	CreatedBefore         *time.Time
+	CanceledAfter         *time.Time
+	CanceledBefore        *time.Time
+	ExpiresBefore         *time.Time
+	Dunning               bool
+}
+
+// The subscriptions whose MRR is scheduled to change by scheduled_change_before,
+// read from mrr_scheduled's index: the same filters and orders as above.
+func (q *Queries) CountScheduledSubscriptions(ctx context.Context, arg CountScheduledSubscriptionsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countScheduledSubscriptions,
+		arg.MerchantID,
+		arg.ScheduledChangeBefore,
+		arg.CustomerID,
+		arg.Status,
+		arg.PriceID,
+		arg.Rail,
+		arg.CreatedAfter,
+		arg.CreatedBefore,
+		arg.CanceledAfter,
+		arg.CanceledBefore,
+		arg.ExpiresBefore,
+		arg.Dunning,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSubscriptionsByCustomer = `-- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM billing.subscriptions sub
 WHERE sub.merchant_id = $2::uuid AND sub.customer_id = $1
@@ -1505,6 +1559,355 @@ func (q *Queries) ListRespelledSubscriptions(ctx context.Context, arg ListRespel
 	for rows.Next() {
 		var i ListRespelledSubscriptionsRow
 		if err := rows.Scan(&i.Ref, &i.Spelled); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScheduledSubscriptionsPage = `-- name: ListScheduledSubscriptionsPage :many
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key FROM billing.mrr_scheduled e
+JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
+WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
+  AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
+  AND ($4::text IS NULL OR sub.status::text = $4::text)
+  AND ($5::uuid IS NULL OR sub.price_id = $5::uuid)
+  AND ($6::text IS NULL OR sub.rail = $6::text)
+  AND ($7::timestamptz IS NULL OR sub.created_at >= $7::timestamptz)
+  AND ($8::timestamptz IS NULL OR sub.created_at <= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR sub.canceled_at >= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.canceled_at <= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.current_period_ends_at <= $11::timestamptz)
+  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND ($13::timestamptz IS NULL OR (sub.created_at, sub.id) < ($13::timestamptz, $14::uuid))
+  AND sub.deleted_at IS NULL
+ORDER BY sub.created_at DESC, sub.id DESC
+LIMIT $15::int
+`
+
+type ListScheduledSubscriptionsPageParams struct {
+	MerchantID            uuid.UUID
+	ScheduledChangeBefore time.Time
+	CustomerID            *uuid.UUID
+	Status                *string
+	PriceID               *uuid.UUID
+	Rail                  *string
+	CreatedAfter          *time.Time
+	CreatedBefore         *time.Time
+	CanceledAfter         *time.Time
+	CanceledBefore        *time.Time
+	ExpiresBefore         *time.Time
+	Dunning               bool
+	AfterAt               *time.Time
+	AfterID               *uuid.UUID
+	RowLimit              int32
+}
+
+func (q *Queries) ListScheduledSubscriptionsPage(ctx context.Context, arg ListScheduledSubscriptionsPageParams) ([]BillingSubscription, error) {
+	rows, err := q.db.Query(ctx, listScheduledSubscriptionsPage,
+		arg.MerchantID,
+		arg.ScheduledChangeBefore,
+		arg.CustomerID,
+		arg.Status,
+		arg.PriceID,
+		arg.Rail,
+		arg.CreatedAfter,
+		arg.CreatedBefore,
+		arg.CanceledAfter,
+		arg.CanceledBefore,
+		arg.ExpiresBefore,
+		arg.Dunning,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingSubscription
+	for rows.Next() {
+		var i BillingSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.ProductID,
+			&i.Status,
+			&i.Rail,
+			&i.CollectionPolicy,
+			&i.RailSubscriptionID,
+			&i.PaymentMethodID,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.GraceEndsAt,
+			&i.LastRetryAt,
+			&i.RetryAttempts,
+			&i.NextRetryAt,
+			&i.CanceledAt,
+			&i.CancelType,
+			&i.CancelFeedback,
+			&i.GatewayResponse,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TierGroup,
+			&i.DeletionScheduledAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.TransientRetries,
+			&i.LifecycleRev,
+			&i.RowVersion,
+			&i.DunningPolicy,
+			&i.AccessDurationHoursSnapshot,
+			&i.Quantity,
+			&i.ProviderAccessDefaultSnapshot,
+			&i.FactsAuthority,
+			&i.DueRecheckAt,
+			&i.RailSubscriptionKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScheduledSubscriptionsPageByCanceledAt = `-- name: ListScheduledSubscriptionsPageByCanceledAt :many
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key FROM billing.mrr_scheduled e
+JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
+WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
+  AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
+  AND ($4::text IS NULL OR sub.status::text = $4::text)
+  AND ($5::uuid IS NULL OR sub.price_id = $5::uuid)
+  AND ($6::text IS NULL OR sub.rail = $6::text)
+  AND ($7::timestamptz IS NULL OR sub.created_at >= $7::timestamptz)
+  AND ($8::timestamptz IS NULL OR sub.created_at <= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR sub.canceled_at >= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.canceled_at <= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.current_period_ends_at <= $11::timestamptz)
+  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND sub.canceled_at IS NOT NULL
+  AND ($13::timestamptz IS NULL OR (sub.canceled_at, sub.id) < ($13::timestamptz, $14::uuid))
+  AND sub.deleted_at IS NULL
+ORDER BY sub.canceled_at DESC, sub.id DESC
+LIMIT $15::int
+`
+
+type ListScheduledSubscriptionsPageByCanceledAtParams struct {
+	MerchantID            uuid.UUID
+	ScheduledChangeBefore time.Time
+	CustomerID            *uuid.UUID
+	Status                *string
+	PriceID               *uuid.UUID
+	Rail                  *string
+	CreatedAfter          *time.Time
+	CreatedBefore         *time.Time
+	CanceledAfter         *time.Time
+	CanceledBefore        *time.Time
+	ExpiresBefore         *time.Time
+	Dunning               bool
+	AfterAt               *time.Time
+	AfterID               *uuid.UUID
+	RowLimit              int32
+}
+
+// The canceled subscriptions, the latest cancellation first.
+func (q *Queries) ListScheduledSubscriptionsPageByCanceledAt(ctx context.Context, arg ListScheduledSubscriptionsPageByCanceledAtParams) ([]BillingSubscription, error) {
+	rows, err := q.db.Query(ctx, listScheduledSubscriptionsPageByCanceledAt,
+		arg.MerchantID,
+		arg.ScheduledChangeBefore,
+		arg.CustomerID,
+		arg.Status,
+		arg.PriceID,
+		arg.Rail,
+		arg.CreatedAfter,
+		arg.CreatedBefore,
+		arg.CanceledAfter,
+		arg.CanceledBefore,
+		arg.ExpiresBefore,
+		arg.Dunning,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingSubscription
+	for rows.Next() {
+		var i BillingSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.ProductID,
+			&i.Status,
+			&i.Rail,
+			&i.CollectionPolicy,
+			&i.RailSubscriptionID,
+			&i.PaymentMethodID,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.GraceEndsAt,
+			&i.LastRetryAt,
+			&i.RetryAttempts,
+			&i.NextRetryAt,
+			&i.CanceledAt,
+			&i.CancelType,
+			&i.CancelFeedback,
+			&i.GatewayResponse,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TierGroup,
+			&i.DeletionScheduledAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.TransientRetries,
+			&i.LifecycleRev,
+			&i.RowVersion,
+			&i.DunningPolicy,
+			&i.AccessDurationHoursSnapshot,
+			&i.Quantity,
+			&i.ProviderAccessDefaultSnapshot,
+			&i.FactsAuthority,
+			&i.DueRecheckAt,
+			&i.RailSubscriptionKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScheduledSubscriptionsPageByPeriodEnd = `-- name: ListScheduledSubscriptionsPageByPeriodEnd :many
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key FROM billing.mrr_scheduled e
+JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
+WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
+  AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
+  AND ($4::text IS NULL OR sub.status::text = $4::text)
+  AND ($5::uuid IS NULL OR sub.price_id = $5::uuid)
+  AND ($6::text IS NULL OR sub.rail = $6::text)
+  AND ($7::timestamptz IS NULL OR sub.created_at >= $7::timestamptz)
+  AND ($8::timestamptz IS NULL OR sub.created_at <= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR sub.canceled_at >= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR sub.canceled_at <= $10::timestamptz)
+  AND ($11::timestamptz IS NULL OR sub.current_period_ends_at <= $11::timestamptz)
+  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND sub.current_period_ends_at IS NOT NULL
+  AND ($13::timestamptz IS NULL OR (sub.current_period_ends_at, sub.id) > ($13::timestamptz, $14::uuid))
+  AND sub.deleted_at IS NULL
+ORDER BY sub.current_period_ends_at, sub.id
+LIMIT $15::int
+`
+
+type ListScheduledSubscriptionsPageByPeriodEndParams struct {
+	MerchantID            uuid.UUID
+	ScheduledChangeBefore time.Time
+	CustomerID            *uuid.UUID
+	Status                *string
+	PriceID               *uuid.UUID
+	Rail                  *string
+	CreatedAfter          *time.Time
+	CreatedBefore         *time.Time
+	CanceledAfter         *time.Time
+	CanceledBefore        *time.Time
+	ExpiresBefore         *time.Time
+	Dunning               bool
+	AfterAt               *time.Time
+	AfterID               *uuid.UUID
+	RowLimit              int32
+}
+
+// The subscriptions with a current period, the soonest end first.
+func (q *Queries) ListScheduledSubscriptionsPageByPeriodEnd(ctx context.Context, arg ListScheduledSubscriptionsPageByPeriodEndParams) ([]BillingSubscription, error) {
+	rows, err := q.db.Query(ctx, listScheduledSubscriptionsPageByPeriodEnd,
+		arg.MerchantID,
+		arg.ScheduledChangeBefore,
+		arg.CustomerID,
+		arg.Status,
+		arg.PriceID,
+		arg.Rail,
+		arg.CreatedAfter,
+		arg.CreatedBefore,
+		arg.CanceledAfter,
+		arg.CanceledBefore,
+		arg.ExpiresBefore,
+		arg.Dunning,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingSubscription
+	for rows.Next() {
+		var i BillingSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.ProductID,
+			&i.Status,
+			&i.Rail,
+			&i.CollectionPolicy,
+			&i.RailSubscriptionID,
+			&i.PaymentMethodID,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.GraceEndsAt,
+			&i.LastRetryAt,
+			&i.RetryAttempts,
+			&i.NextRetryAt,
+			&i.CanceledAt,
+			&i.CancelType,
+			&i.CancelFeedback,
+			&i.GatewayResponse,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TierGroup,
+			&i.DeletionScheduledAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.TransientRetries,
+			&i.LifecycleRev,
+			&i.RowVersion,
+			&i.DunningPolicy,
+			&i.AccessDurationHoursSnapshot,
+			&i.Quantity,
+			&i.ProviderAccessDefaultSnapshot,
+			&i.FactsAuthority,
+			&i.DueRecheckAt,
+			&i.RailSubscriptionKey,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

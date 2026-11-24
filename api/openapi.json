@@ -1611,6 +1611,7 @@
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "catalog_revision_conflict",
+          "event_store_required",
           "merchant_unit_unsupported",
           "price_not_sellable",
           "product_not_found",
@@ -1831,6 +1832,7 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "default_rate_card_not_found",
@@ -1844,7 +1846,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -3020,6 +3023,14 @@
                 "solana",
                 "stripe"
               ]
+            }
+          },
+          {
+            "name": "scheduled_change_before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -6679,12 +6690,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6740,12 +6753,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6801,12 +6816,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6862,12 +6879,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6948,13 +6967,15 @@
           }
         ],
         "x-openrails-auth": "customer",
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "currency_unsupported",
           "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7471,6 +7492,7 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_revision_conflict",
@@ -7481,7 +7503,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7553,13 +7576,15 @@
           "merchant": "merchant:usage:read",
           "root": "root:usage:read"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_customer_id",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7607,9 +7632,11 @@
           }
         ],
         "x-openrails-auth": "customer",
+        "x-openrails-event-store": true,
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
-          "tier:customer"
+          "tier:customer",
+          "event_store"
         ]
       }
     },
@@ -7665,6 +7692,7 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "admission_not_found",
           "currency_unsupported",
@@ -7678,7 +7706,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7742,6 +7771,7 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "idempotency_key_reused",
@@ -7752,7 +7782,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -10555,6 +10586,7 @@
           "card_vault_unknown",
           "charge_psp_incompatible",
           "charge_psp_unknown",
+          "event_store_required",
           "invalid_param",
           "merchant_unit_unsupported",
           "platform_vault_mixed_class",
@@ -11721,7 +11753,7 @@
           "merchant_config"
         ],
         "operationId": "ApplyPSPImport",
-        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
+        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies; one holding merchant:customer:manage too approves the corrections that move a subscription's price or terms, and without it an import with one open is refused. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
         "parameters": [
           {
             "name": "id",
@@ -11768,6 +11800,7 @@
         },
         "x-openrails-person": true,
         "x-openrails-errors": [
+          "finding_not_actionable",
           "invalid_param",
           "person_required",
           "psp_import_in_progress",
@@ -12494,7 +12527,7 @@
           "merchant_config"
         ],
         "operationId": "ClearDestructiveHold",
-        "description": "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other than the one whose action opened it, holding root:admin-rate-limits:unlock and merchant configuration authority: over HTTP a self-acting human's own credential; in process the handle ActingFor names them, once the host has authenticated them.",
+        "description": "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other than the one whose action opened it, holding merchant configuration authority and root:admin-rate-limits:unlock, or for the merchant's contact-erasure hold merchant:provisioning:manage: over HTTP a self-acting human's own credential; in process the handle ActingFor names them, once the host has authenticated them.",
         "parameters": [
           {
             "name": "id",
@@ -12548,6 +12581,80 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
+        "x-openrails-errors": [
+          "invalid_param",
+          "permission_required",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/erasure-holds/{id}/clear": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "ClearErasureHold",
+        "description": "ClearErasureHold clears the merchant's contact-erasure hold after review, recording who and why; its waiting erasures then run. It needs a person holding merchant:provisioning:manage: over HTTP a self-acting human's own credential; in process the handle ActingFor names them.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearDestructiveHoldParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestructiveHold"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
+        },
+        "x-openrails-person": true,
         "x-openrails-errors": [
           "invalid_param",
           "permission_required",
@@ -12659,6 +12766,7 @@
           "root": "root:metrics:read"
         },
         "x-openrails-errors": [
+          "event_store_required",
           "metrics_query_invalid",
           "service_unavailable"
         ],
@@ -13256,7 +13364,7 @@
           "merchant_config"
         ],
         "operationId": "ApproveProposals",
-        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves. idempotencyKey is required: a retry with it answers the first call's results.",
+        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves; a change that refunds, revokes or cancels also needs merchant:customer:manage. idempotencyKey is required: a retry with it answers the first call's results.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -13311,6 +13419,7 @@
         },
         "x-openrails-person": true,
         "x-openrails-errors": [
+          "finding_not_actionable",
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
@@ -13394,7 +13503,7 @@
           "merchant_config"
         ],
         "operationId": "ResolveFinding",
-        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding.",
+        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding. Approving a refund, cancellation or product-access recommendation also needs what that action's own route needs: merchant:customer:manage.",
         "parameters": [
           {
             "name": "id",
@@ -13543,8 +13652,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:read",
-          "root": "root:config:read"
+          "merchant": "merchant:provisioning:read",
+          "root": "root:provisioning:read"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": null,
@@ -13601,8 +13710,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
@@ -13655,8 +13764,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
@@ -13696,6 +13805,14 @@
           "as_of",
           "seconds"
         ]
+      },
+      "AccountingSettings": {
+        "type": "object",
+        "properties": {
+          "timezone": {
+            "type": "string"
+          }
+        }
       },
       "AdjustCustomerLimitParams": {
         "type": "object",
@@ -13759,11 +13876,12 @@
                 "merchant:config:read",
                 "merchant:customer:manage",
                 "merchant:customer:read",
-                "merchant:customers:read",
                 "merchant:entitlements:read",
                 "merchant:events:read",
                 "merchant:metrics:read",
                 "merchant:orders:manage",
+                "merchant:provisioning:manage",
+                "merchant:provisioning:read",
                 "merchant:usage:manage",
                 "merchant:usage:read",
                 "root:admin-rate-limits:unlock",
@@ -13773,7 +13891,6 @@
                 "root:config:read",
                 "root:customer:manage",
                 "root:customer:read",
-                "root:customers:read",
                 "root:entitlements:read",
                 "root:events:read",
                 "root:merchants:delete",
@@ -13781,6 +13898,8 @@
                 "root:merchants:restore",
                 "root:metrics:read",
                 "root:orders:manage",
+                "root:provisioning:manage",
+                "root:provisioning:read",
                 "root:usage:manage",
                 "root:usage:read",
                 "root:worker-health:read"
@@ -19090,6 +19209,7 @@
               "embed_origins_required",
               "entitlement_required",
               "event_cursor_expired",
+              "event_store_required",
               "finding_action_failed",
               "finding_not_actionable",
               "finding_requires_merchant_config",
@@ -20678,6 +20798,9 @@
           },
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
+          },
+          "accounting": {
+            "$ref": "#/components/schemas/AccountingSettings"
           },
           "card_vault": {
             "type": "string"
@@ -25139,6 +25262,7 @@
               "embed_origins_required",
               "entitlement_required",
               "event_cursor_expired",
+              "event_store_required",
               "finding_action_failed",
               "finding_not_actionable",
               "finding_requires_merchant_config",
@@ -25622,13 +25746,17 @@
                 "type": "null"
               }
             ]
+          },
+          "usage": {
+            "type": "boolean"
           }
         },
         "required": [
           "capabilities",
           "currencies",
           "rails",
-          "captcha"
+          "captcha",
+          "usage"
         ]
       },
       "PublicMerchant": {
@@ -26354,6 +26482,32 @@
           "created_at"
         ]
       },
+      "ScheduledMRR": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "churn",
+              "contraction",
+              "expansion"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "kind",
+          "amount",
+          "effective_at"
+        ]
+      },
       "SetCartLineParams": {
         "type": "object",
         "properties": {
@@ -26745,6 +26899,16 @@
               }
             ]
           },
+          "mrr": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionMRR"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "psp_id": {
             "type": "string"
           },
@@ -26927,6 +27091,7 @@
           "product_id",
           "price_id",
           "quantity",
+          "mrr",
           "psp_id",
           "rail",
           "rail_subscription_id",
@@ -27600,6 +27765,33 @@
           "to_period_end"
         ]
       },
+      "SubscriptionMRR": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "scheduled": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScheduledMRR"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "amount",
+          "currency",
+          "scheduled"
+        ]
+      },
       "SubscriptionRetryNowResult": {
         "type": "object",
         "properties": {
@@ -27910,6 +28102,9 @@
           },
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
+          },
+          "accounting": {
+            "$ref": "#/components/schemas/AccountingSettings"
           },
           "card_vault": {
             "type": "string"
@@ -29016,6 +29211,9 @@
     }
   },
   "x-openrails-error-sets": {
+    "event_store": [
+      "event_store_required"
+    ],
     "request": [
       "invalid_param",
       "invalid_query",
@@ -29375,6 +29573,11 @@
       "status": 410,
       "type": "invalid_request_error",
       "meaning": "The event cursor is no longer retained; resynchronize current state."
+    },
+    "event_store_required": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."
     },
     "finding_action_failed": {
       "status": 502,

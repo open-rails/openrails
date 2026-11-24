@@ -41,7 +41,7 @@ func (w *PSPImportWorker) Work(ctx context.Context, job *river.Job[pspimport.Job
 		return errors.New("psp import: importer not wired")
 	}
 	mid, id := billing.MerchantID(job.Args.MerchantID), billing.PSPImportID(job.Args.ImportID)
-	err := im.Run(ctx, mid, id, job.Args.Step, job.Args.ApprovalActor)
+	err := im.Run(ctx, mid, id, job.Args.Step, job.Args.ApprovalActor, job.Args.ApprovedKinds)
 	if wait, paced := pspimport.Paced(err); paced {
 		return river.JobSnooze(wait)
 	}

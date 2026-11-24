@@ -14,6 +14,7 @@ process instead, see [the embedded guide](embedded.md).
 | Service | Needed | Holds | Losing it |
 |---|---|---|---|
 | PostgreSQL 18+ | yes | everything: the ledger, grants, subscriptions, access, catalog, provider intents and River's queue. OpenRails owns one schema (`billing`), its River schema (`billing_river`) and the server's AuthKit schema (`profiles`); the instance may be shared. | data loss. Provider-owned facts can be re-read with a PSP import; the ledger, credits, access and catalog exist nowhere else. |
+| ClickHouse 26.8 LTS | for usage | the event store usage needs: usage reporting, the gate, meters, limits and usage history ([event store](#event-store)) | a ClickHouse without the store's identity is refused at boot: restore its backup |
 | Redis 6.2+ or Garnet | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines, AuthKit's rate limits and spent DPoP proofs | each instance keeps them in memory: right for one instance only. No money path needs Redis, and nothing in it needs a backup. |
 | Vault | optional | with `vault.kv_mount`, every merchant's configuration, credentials included; a Transit mount signs for Solana crankers | without a KV mount the merchant manifest is the configuration, read-only |
 | SMTP | optional | billing and operator mail, the server's own sign-in codes | no email; operator alerts still reach webhooks |
@@ -188,7 +189,7 @@ keys: `host`, `port`, `private_port`, `drain_delay`, `shutdown_timeout`,
 `usage_billing_enabled`, `event_retention`, `webhook_secret_overlap`,
 `merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
 `checkout_origin`, `return_origins`, `trusted_proxies`,
-`cloudflare_proxies`, `db`, `database`, `redis`,
+`cloudflare_proxies`, `db`, `database`, `clickhouse`, `redis`,
 `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`,
 `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`,
 `rate_limits_disabled`, `captcha`, `user_action_rate_limit`,
@@ -251,6 +252,14 @@ the deployment does not serve answers `404 route_not_found`.
 SQL is authored in `billing`; another schema is reached by one token-aware
 rewrite of schema qualifiers, never other strings. The server's AuthKit keeps its
 own schema (`auth.database.schema`, default `profiles`).
+
+**Event store**
+
+| Key | Meaning |
+|---|---|
+| `clickhouse.addr` | `host:port` of ClickHouse's native protocol. Set, the server waits for it at boot like the database; unset, usage is off |
+| `clickhouse.database` | the event store's database, created or upgraded at boot; default `openrails` |
+| `clickhouse.username`, `clickhouse.password` | the user (default `default`) and its password |
 
 **Redis**
 
@@ -348,6 +357,7 @@ root owner needs a second factor, so boot refuses without a 16, 24 or 32-byte
 | `destructive_action_limits.actor_per_hour`, `.actor_per_day` | 5, 15 | staff destructive actions per actor ([destructive holds](#destructive-holds)) |
 | `destructive_action_limits.merchant_per_hour`, `.merchant_per_day` | 15, 25 | per merchant, floors that rise with active customers |
 | `destructive_action_limits.deployment_per_hour`, `.deployment_per_day` | 50, 100 | per deployment, likewise |
+| `destructive_action_limits.erasure_per_hour`, `.erasure_per_day` | 100, 1000 | contact erasures over OpenRails' own SCIM routes per merchant, floors that rise with its directory; past them an erasure waits ([client](client.md#customers)) |
 
 The example file sets the shipped buckets explicitly:
 
@@ -443,6 +453,7 @@ mounted file or the environment, named like its key's variable.
 |---|---|
 | database URL | `DB_URL` (with `sslmode=verify-full` across a network) |
 | Redis | `REDIS_URL` or `REDIS_PASSWORD`, `REDIS_CA_CERT` |
+| ClickHouse | `CLICKHOUSE_PASSWORD` |
 | SMTP | `EMAIL_SMTP_PASSWORD` |
 | Vault | `VAULT_TOKEN`, or `VAULT_SECRET_ID` re-read from `vault.secrets_path` |
 | LLM | `LLM_API_KEY` |
@@ -747,6 +758,12 @@ JWKS, `llm.base_url`):
 | `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | captcha, when set |
 | `api.anthropic.com`, `api.openai.com` | the catalog copilot, with `llm.api_key` and no `llm.base_url` |
 
+## Event store
+
+Usage needs an event store on ClickHouse; money stays in PostgreSQL. Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant and are named in one log line at boot.
+
+The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead.
+
 ## Scaling and Redis
 
 Any number of instances can serve one book: `openrails run-server` replicas,
@@ -814,6 +831,7 @@ its own, as a deploy step; `openrails migrate status [--json]` compares the
 applied ledger with the binary's chain and exits non-zero on any mismatch. With
 `database.skip_migrations`, startup only checks and is refused with
 `ErrMigrationsRequired` until the step has run for the build.
+With `clickhouse`, the same step creates or upgrades the event store's database, and startup checks it too.
 
 The schema is one baseline migration and numbered migrations after it, each an
 addition, so the previous build runs on a schema the next one migrated and
@@ -1150,12 +1168,7 @@ touches the ledger, grants or logs.
 
 ## Retention
 
-Periods are constants, the same for every merchant, except the event log's
-`event_retention`. Each table's comment states its class: **permanent** (the
-ledger, grants, payments, owed usage, usage accruals, receipts, operation
-authorizations, refusals, running charges, maintenance runs, the before-images of
-destructive runs), **partitioned** (monthly partitions dropped whole), **rows**
-(deleted by the hourly cleanup) or **state** (one row per thing that exists).
+Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage accruals, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **partitioned** (monthly partitions dropped whole), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|

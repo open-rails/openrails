@@ -116,6 +116,7 @@ its role's permissions. Grant only what the backend needs:
 | read the event log | `merchant:events:read` |
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 | read metrics | `merchant:metrics:read` |
+| push the customer directory over SCIM, or mint its provisioning tokens | `merchant:provisioning:read`, `merchant:provisioning:manage` |
 
 Each permission also has a `root:` name, held in your auth's root scope for
 every merchant; `billing.Permissions()` lists them and roles should be built
@@ -196,15 +197,7 @@ _, err = shop.UpdateCustomer(ctx, c.ID, billing.UpdateCustomerParams{
 return err
 ```
 
-**Contacts.** Who a customer is (email, username, name) is your directory's.
-Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your
-own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to
-`{Prefix}/v1/app/scim/v2` with an application credential or a provisioning token;
-`externalId` is the user's UUID, and the newest write wins. On a standalone
-server or the hosted platform, your issuer pushes to the server's directory
-(`/directory/scim/v2`), and verified contact claims in customer tokens fill in
-as they are used. OpenRails emails a customer only at an address that was
-verified.
+**Contacts.** Who a customer is (email, username, name) is your directory's. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with a provisioning token, or an application credential holding `merchant:provisioning:read` for reads and `merchant:provisioning:manage` for writes; `externalId` is the user's UUID, and the newest write wins. A `DELETE` erases the contact within the merchant's own erasure budget (`DestructiveActionLimitsConfig.ErasurePerHour` and `ErasurePerDay` in `Config.DestructiveActionLimits`, floors that rise with the directory), which no refund or cancellation shares. The User leaves the directory and its contact's values go at once either way; the customer's message log and notifications, which cannot be restored, are erased within the budget. Past it the erasure is never refused: the answer is still `204`, the rest waits, and the merchant's erasure [hold](#destructive-holds) opens until a person holding `merchant:provisioning:manage` clears it (`ClearErasureHold`), or a root operator holding `root:admin-rate-limits:unlock`. A create dated before the erasure (`meta.lastModified`) is refused `409`. On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used. OpenRails emails a customer only at an address that was verified.
 
 ## Merchant configuration and PSPs
 
@@ -223,7 +216,7 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `UpdatePSP` | rotate credentials, change settings or archive; archiving the last active PSP of a rail is `409 psp_last_active` |
 | `PreviewPSPRouting` | which PSP a purchase would use, without charging |
 | `ListCustodians`, `SetCustodian` | card custodians (Basis Theory) a PSP charges through (`SetCustodianParams`) |
-| `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha |
+| `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha, and `usage`, whether the deployment serves usage |
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
 | `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
 
@@ -351,7 +344,7 @@ Solana prices are refused. `rpc_url`, a secret, is tried before the network's
 public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
 at purchase; devnet and testnet price at $1.00 parity.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `fraud_warning_refund` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `fraud_warning_refund`, `currencies` and `accounting.timezone` (the IANA zone whose days and months MRR reports count in; default UTC). `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
@@ -911,6 +904,8 @@ own row.
 
 ## Usage and running charges
 
+Usage needs the deployment's event store (ClickHouse). Without one `GET /v1/config` reports `usage: false`, and lease syncs, admissions, `GET /v1/me/usage`, customer limits and their adjustments, meter and limit edits and usage metrics answer `409 event_store_required` (`billing.ErrEventStoreRequired`); running charges and usage orders still work.
+
 `SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends
 it for you. A batch job picks one `lse_` lease id for its stream and sends up to
 1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes
@@ -1118,10 +1113,7 @@ return f.Close()
 
 ## Proposals and findings
 
-A finding is a divergence OpenRails detected: `pull.*` (a local mirror against the
-provider), `derive.*`, `life.*` (a record against its clock), `consistency.*`. A
-`pull.*` finding with a change is a proposal: approving it applies that change.
-Findings need merchant configuration authority, not customer support's.
+A finding is a divergence OpenRails detected: `pull.*` (a local mirror against the provider), `derive.*`, `life.*` (a record against its clock), `consistency.*`. A `pull.*` finding with a change is a proposal: approving it applies that change. Findings need merchant configuration authority. Approving a finding whose recommendation refunds, cancels, or grants or revokes a product, or a proposal whose change refunds, revokes, cancels, collects a renewal or corrects a subscription's price or terms, also needs `merchant:customer:manage`, as that action's own route does, and spends that route's operation limit once per request, however many changes it carries; a proposal that only records what the provider already did and billed needs the configuration alone. Applying a PSP import approves only the corrections its approver may approve, and is refused while one they may not is open.
 
 | Method | Use it to |
 |---|---|
@@ -1192,18 +1184,13 @@ return err
 
 ## Destructive holds
 
-Refunds, cancellations, card removals, access and credit revocations, write-offs
-and substantive catalog or configuration changes share one admission policy per
-staff member or application: by default 5 an hour and 15 a day per actor, with
-merchant and deployment ceilings that grow with active customers. A breach is a
-**hold**: denied `429`, and held until a person reviews and clears it; waiting,
-restarting or rotating a key does not release it. The in-process host's own
-calls spend nothing; a call made for a person through `ActingFor` is theirs.
+Refunds, cancellations, card removals, access and credit revocations, write-offs and substantive catalog or configuration changes share one admission policy per staff member or application: by default 5 an hour and 15 a day per actor, with merchant and deployment ceilings that grow with active customers. A breach is a **hold**: denied `429` with `Retry-After`, and held until a person reviews and clears it; waiting, restarting or rotating a key does not release it. An admitted action that never starts stops counting after 15 minutes. SCIM contact erasures keep their own per-merchant budget and hold, apart from all of these ([contacts](#customers)). The in-process host's own calls spend nothing; a call made for a person through `ActingFor` is theirs.
 
 | Method | Use it to |
 |---|---|
 | `ListDestructiveHolds` | the merchant's incidents |
 | `ClearDestructiveHold` | clear one after review, with a reason |
+| `ClearErasureHold` | clear the merchant's contact-erasure hold, with `merchant:provisioning:manage` alone |
 
 ```go guide:destructive-holds
 page, err := reviewer.ListDestructiveHolds(ctx, billing.DestructiveHoldListParams{})
@@ -1274,6 +1261,7 @@ default: // no answer, or a 5xx: it may have committed; retry with the same key 
   `403 captcha_required`: solve and send `X-Captcha-Token`.
 - `409 idempotency_key_in_use`, `payment_in_progress`: the original is still
   running. `provider_outcome_unknown`: read before retrying.
+- `409 event_store_required` (`billing.ErrEventStoreRequired`): the deployment has no event store, so usage is off ([usage](#usage-and-running-charges)); `param` and `metadata.paths` name what a refused document or setting declared. Retrying does not help.
 - `429` with `Retry-After`: the customer routes allow 10 purchases, 20
   subscription writes and 40 payment-method writes a minute; never retry
   purchases in a loop. `429 card_attempts_blocked`: too many recent declines.

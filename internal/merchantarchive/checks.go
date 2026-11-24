@@ -37,6 +37,7 @@ var excludedTables = map[string]string{
 	"solana_crankers":               "the deployment's Solana cranker pins",
 	"destructive_action_switch":     "deployment-wide safety switch",
 	"book_identity":                 "the deployment's database identity",
+	"event_store":                   "the deployment's event store identity",
 	"merchant_write_posture":        "deployment write posture: export sets the source readonly, restore the destination",
 	"webhook_health":                "telemetry", "webhook_health_daily": "telemetry",
 	"failed_usage_windows":          "live grace and cutoff windows; the destination counts afresh",
@@ -88,6 +89,7 @@ var excludedColumns = map[string]string{
 	"catalog_restore_receipts":      "merchant_id digest rows restored_at",
 	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
 	"book_identity":                 "singleton system_identifier database_oid schema_oid armed_by armed_at book_id tagging_started_at",
+	"event_store":                   "singleton store_id attached_at",
 	"merchant_write_posture":        "merchant_id mode reason set_by set_at",
 	"periodic_leases":               "kind holder expires_at claimed_at",
 	"solana_crankers":               "name public_key pinned_at",
@@ -137,8 +139,10 @@ var omittedColumns = map[string]string{
 	// Credential evidence belongs to the source deployment's configuration;
 	// the destination validates and fingerprints its own.
 	// live is generated from environment.
-	"psps":             "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
-	"subscriptions":    "destructive_run_class lifecycle_rev row_version due_recheck_at rail_subscription_key",
+	"psps":          "credentials_validated_at webhook_endpoint_id webhook_digest credential_fingerprint credential_duplicate_at live",
+	"subscriptions": "destructive_run_class lifecycle_rev row_version due_recheck_at rail_subscription_key",
+	// Generated from the recorded columns.
+	"subscription_mrr": "dirty",
 	"payments":         "destructive_run_class",
 	"order_attempts":   "destructive_run_class",
 	"product_access":   "destructive_run_class",

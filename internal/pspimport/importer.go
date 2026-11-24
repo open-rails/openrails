@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/proposals"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/transient"
@@ -125,6 +127,9 @@ type JobArgs struct {
 	Step       Step      `json:"step"`
 	// ApprovalActor is the verified caller of Apply, retained for its worker.
 	ApprovalActor *destructive.Actor `json:"approval_actor,omitempty"`
+	// ApprovedKinds are the change kinds that caller may approve: Apply
+	// approves no correction of another kind.
+	ApprovedKinds []billing.ChangeKind `json:"approved_kinds"`
 }
 
 func (JobArgs) Kind() string { return JobKind }
@@ -451,11 +456,15 @@ func (im *Importer) SetMappings(ctx context.Context, p billing.SetPSPImportMappi
 // RequestApply checks an import can land, marks it applying in the name of
 // the person who asked (who approves its corrections) and queues its landing
 // in the same transaction.
-func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, requestedBy string) (*billing.PSPImport, error) {
+func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, requestedBy string, authorize func(billing.ChangeKind) error) (*billing.PSPImport, error) {
 	if strings.TrimSpace(requestedBy) == "" {
 		return nil, errors.New("pspimport: an apply names the person who asked")
 	}
 	actor, err := destructive.ActorFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	approved, err := im.approvedKinds(ctx, id, authorize)
 	if err != nil {
 		return nil, err
 	}
@@ -483,13 +492,59 @@ func (im *Importer) RequestApply(ctx context.Context, id billing.PSPImportID, re
 		if out, err = q.RequestPSPImportApply(ctx, gen.RequestPSPImportApplyParams{MerchantID: row.MerchantID, ID: row.ID, RequestedBy: requestedBy}); err != nil {
 			return inFlight(err)
 		}
-		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepApply, ApprovalActor: &actor}, nil)
+		_, err = d.InsertRiverJob(ctx, JobArgs{MerchantID: row.MerchantID, ImportID: row.ID, Step: StepApply, ApprovalActor: &actor, ApprovedKinds: approved}, nil)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return im.view(ctx, out)
+}
+
+// applyKinds are the change kinds an Apply approves: those
+// ListPullCorrections selects.
+var applyKinds = []billing.ChangeKind{billing.ChangeRecordCharge, billing.ChangeUpdateCard, billing.ChangeAdoptSubscription, billing.ChangeCorrectSubscription}
+
+// approvedKinds are the kinds among applyKinds the person asking to apply
+// may approve, as authorize says; nil authorizes all of them. A kind they may
+// not approve refuses the request when one of the import's open corrections
+// has it; one raised later is left open for a person who may.
+func (im *Importer) approvedKinds(ctx context.Context, id billing.PSPImportID, authorize func(billing.ChangeKind) error) ([]billing.ChangeKind, error) {
+	if authorize == nil {
+		return slices.Clone(applyKinds), nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := im.DB.Gen(ctx)
+	ids, err := q.ListPullCorrections(ctx, gen.ListPullCorrectionsParams{MerchantID: mid.UUID(), PullID: id.UUID()})
+	if err != nil {
+		return nil, err
+	}
+	open := map[billing.ChangeKind]int{}
+	if len(ids) > 0 {
+		rows, err := q.ListReconciliationFindingsByIDs(ctx, gen.ListReconciliationFindingsByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if change, err := reconcile.DecodeChange(row.Change); err == nil && change != nil {
+				open[change.Kind]++
+			}
+		}
+	}
+	approved := []billing.ChangeKind{}
+	for _, kind := range applyKinds {
+		if err := authorize(kind); err != nil {
+			if open[kind] > 0 {
+				return nil, err
+			}
+			continue
+		}
+		approved = append(approved, kind)
+	}
+	return approved, nil
 }
 
 // Fail records why an import's job gave up, with the PermanentError's code

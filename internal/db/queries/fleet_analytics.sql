@@ -54,10 +54,10 @@ FROM charges c
 FULL JOIN disputes d ON d.r = c.r
 ORDER BY 1;
 
--- Fleet MRR per currency, using the dashboard mrr normalization.
+-- Fleet MRR per currency: billing.price_mrr, as subscriptions count it.
 -- name: FleetMRRByCurrency :many
 SELECT pr.currency::text AS currency, count(*)::bigint AS subscriptions,
-       COALESCE(sum(CASE WHEN pr.billing_interval_months IS NOT NULL THEN round(pr.amount::numeric / pr.billing_interval_months)::bigint ELSE billing.monthly_normalized_amount(pr.amount, pr.billing_interval_hours) END), 0)::bigint AS monthly_amount
+       COALESCE(sum(billing.price_mrr(pr, s.quantity)), 0)::bigint AS monthly_amount
 FROM billing.subscriptions s
 JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id
 WHERE s.status = 'active' AND s.deleted_at IS NULL AND (pr.billing_interval_hours > 0 OR pr.billing_interval_months > 0)

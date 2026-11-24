@@ -125,6 +125,7 @@ func insertChange(ctx context.Context, d *db.DB, sub *models.Subscription, c New
 		AcknowledgedShortNotice: c.AcknowledgedShortNotice,
 		Invoker:                 staffField(c.Staff, func(s *StaffChange) string { return s.Invoker }),
 		Reason:                  staffField(c.Staff, func(s *StaffChange) string { return s.Reason }),
+		CreatedAt:               now.UTC(),
 	})
 	if db.IsUniqueViolation(err) {
 		return nil, ErrChangeAlreadyScheduled

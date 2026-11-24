@@ -10,10 +10,12 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/disputes"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/authkit/userinfo"
 
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/migrate"
@@ -100,6 +102,7 @@ type runtimeOverrides struct {
 	Notifications        *config.NotificationChannel
 	Migrations           fs.FS
 	Vault                *vaultapi.Client
+	ClickHouse           driver.Conn
 }
 
 // devnetParityPriceProvider wraps the Pyth client (#360) for a merchant whose
@@ -193,6 +196,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	if err != nil {
 		return nil, err
+	}
+	var events *eventstore.Store
+	if overrides != nil && overrides.ClickHouse != nil {
+		if events, err = attachEventStore(ctx, cfg, database, overrides.ClickHouse, logger); err != nil {
+			return nil, err
+		}
 	}
 	if overrides != nil && overrides.Notifications != nil {
 		if overrides.Notifications.Sink == nil || overrides.Notifications.Recipient == nil {
@@ -317,6 +326,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	runtime := &Runtime{
 		Log:           logger,
+		EventStore:    events,
 		StripeClients: stripeClients,
 		DB:            database,
 		leaseDB:       leaseDB,

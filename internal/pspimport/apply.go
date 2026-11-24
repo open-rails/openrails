@@ -29,10 +29,11 @@ const applyCustomers = 50
 // Apply lands the import's linked records through billingimport as the
 // provider's book, a book of whole customers at a time at the pull's
 // horizon, then approves the import's corrections in the name of the person
-// who asked and hands the held rows it read to the provider's evidence. A
+// who asked, of the kinds they may approve (approved), and hands the held
+// rows it read to the provider's evidence. A
 // book the import refuses is retried one customer at a time, so one
 // customer's refusal blocks only its own records.
-func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID, approvalActor *destructive.Actor) error {
+func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID, approvalActor *destructive.Actor, approved []billing.ChangeKind) error {
 	row, err := im.row(ctx, id)
 	if err != nil || row.Status != string(billing.PSPImportApplying) {
 		return err
@@ -104,7 +105,7 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID, approvalA
 		}
 		after = customers[len(customers)-1]
 	}
-	if err := im.approveCorrections(ctx, row, approvalActor); err != nil {
+	if err := im.approveCorrections(ctx, row, approvalActor, approved); err != nil {
 		return err
 	}
 	return im.DB.Gen(ctx).SetPSPImportApplied(ctx, gen.SetPSPImportAppliedParams{MerchantID: row.MerchantID, ID: row.ID, AppliedAt: im.now()})

@@ -387,11 +387,12 @@ func (im *Importer) noteMoved(ctx context.Context, row gen.BillingPspImport, ref
 	return im.writeLinks(ctx, row, updates)
 }
 
-// approveCorrections approves the import's corrections under one approval
-// run in the name of the person who asked to apply it, then hands the held
+// approveCorrections approves the import's corrections of the kinds the
+// person who asked to apply it may approve, under one approval run in their
+// name, then hands the held
 // rows a host book landed, unchanged since the pull read them, to the
 // provider's evidence.
-func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspImport, approvalActor *destructive.Actor) error {
+func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspImport, approvalActor *destructive.Actor, approved []billing.ChangeKind) error {
 	q := im.DB.Gen(ctx)
 	if im.Proposals != nil && row.ApplyRequestedBy != nil {
 		ids, err := q.ListPullCorrections(ctx, gen.ListPullCorrectionsParams{MerchantID: row.MerchantID, PullID: row.ID})
@@ -399,7 +400,7 @@ func (im *Importer) approveCorrections(ctx context.Context, row gen.BillingPspIm
 			return err
 		}
 		if len(ids) > 0 {
-			if _, err := im.Proposals.ApproveSet(ctx, ids, *row.ApplyRequestedBy, "applied with "+billing.PSPImportID(row.ID).String(), approvalActor); err != nil {
+			if _, err := im.Proposals.ApproveSet(ctx, ids, *row.ApplyRequestedBy, "applied with "+billing.PSPImportID(row.ID).String(), approvalActor, approved); err != nil {
 				return err
 			}
 		}

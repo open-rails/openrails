@@ -37,6 +37,9 @@ config:
   # Optional, no default; more than one replica needs it.
   # redis:
   #   addr: redis:6379 # or url: rediss://…; username, tls, ca_cert
+  # The event store usage needs; without it usage is off.
+  # clickhouse:
+  #   addr: clickhouse:9000 # password from a CLICKHOUSE_PASSWORD secret
   # The ingress controller's pod or node CIDR: without it the client IP is the
   # proxy's.
   # trusted_proxies: [10.244.0.0/16]

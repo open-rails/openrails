@@ -17,6 +17,9 @@ type PublicConfig struct {
 	// Captcha is the challenge to solve when a request answers 403
 	// captcha_required; null when the deployment challenges nobody.
 	Captcha *CaptchaConfig `json:"captcha"`
+	// Usage is whether the deployment has the event store usage needs:
+	// false answers usage, limits and admissions with event_store_required.
+	Usage bool `json:"usage"`
 }
 
 // CustomerConfig is what a customer's browser needs to know about the

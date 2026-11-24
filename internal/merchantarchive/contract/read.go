@@ -189,6 +189,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		}
 		return nil
 	})
+	// An archive from before the last tables were added ends without them.
+	for err == nil && table+1 < len(Profiles) && addedTables[Profiles[table+1].Name] {
+		table++
+	}
 	if err == nil && table != len(Profiles)-1 {
 		err = fmt.Errorf("archive tables incomplete")
 	}
@@ -259,7 +263,9 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
 var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
-	"usage_daily": true, "usage_accruals": true, "credit_grants": true, "credit_grant_events": true, "disputes": true, "fraud_reports": true}
+	"usage_daily": true, "usage_accruals": true, "credit_grants": true, "credit_grant_events": true, "disputes": true, "fraud_reports": true,
+	"subscription_mrr": true, "customer_mrr": true, "mrr_movements": true, "mrr_movement_lines": true, "mrr_scheduled": true,
+	"mrr_flows": true, "mrr_totals": true, "mrr_product_flows": true, "mrr_cohort_flows": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}
