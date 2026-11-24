@@ -178,24 +178,26 @@ func (q *Queries) InsertUsageCardPrint(ctx context.Context, arg InsertUsageCardP
 }
 
 const insertUsagePosting = `-- name: InsertUsagePosting :one
-INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at)
+INSERT INTO billing.usage_postings (merchant_id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines,
+    ingested_through, created_at)
 VALUES ($1::uuid, $2::uuid, $3::text, $4::timestamptz,
     $5::timestamptz, $6::timestamptz, $7::text, $8::bigint,
-    $9::jsonb, $10::timestamptz)
-RETURNING merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at
+    $9::jsonb, $10::timestamptz, $11::timestamptz)
+RETURNING merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, ingested_through
 `
 
 type InsertUsagePostingParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	Currency       string
-	PeriodStartsAt time.Time
-	PeriodEndsAt   time.Time
-	CutAt          time.Time
-	Reason         string
-	Amount         int64
-	Lines          []byte
-	Now            time.Time
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	Currency        string
+	PeriodStartsAt  time.Time
+	PeriodEndsAt    time.Time
+	CutAt           time.Time
+	Reason          string
+	Amount          int64
+	Lines           []byte
+	IngestedThrough time.Time
+	Now             time.Time
 }
 
 func (q *Queries) InsertUsagePosting(ctx context.Context, arg InsertUsagePostingParams) (BillingUsagePosting, error) {
@@ -209,6 +211,7 @@ func (q *Queries) InsertUsagePosting(ctx context.Context, arg InsertUsagePosting
 		arg.Reason,
 		arg.Amount,
 		arg.Lines,
+		arg.IngestedThrough,
 		arg.Now,
 	)
 	var i BillingUsagePosting
@@ -224,6 +227,7 @@ func (q *Queries) InsertUsagePosting(ctx context.Context, arg InsertUsagePosting
 		&i.Amount,
 		&i.Lines,
 		&i.CreatedAt,
+		&i.IngestedThrough,
 	)
 	return i, err
 }
@@ -357,7 +361,7 @@ func (q *Queries) ListUsageCardPrints(ctx context.Context, arg ListUsageCardPrin
 }
 
 const listUsagePostings = `-- name: ListUsagePostings :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at FROM billing.usage_postings
+SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, ingested_through FROM billing.usage_postings
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND currency = $3::text AND period_starts_at >= $4::timestamptz
 ORDER BY period_starts_at, created_at, id
@@ -397,6 +401,7 @@ func (q *Queries) ListUsagePostings(ctx context.Context, arg ListUsagePostingsPa
 			&i.Amount,
 			&i.Lines,
 			&i.CreatedAt,
+			&i.IngestedThrough,
 		); err != nil {
 			return nil, err
 		}
@@ -409,7 +414,7 @@ func (q *Queries) ListUsagePostings(ctx context.Context, arg ListUsagePostingsPa
 }
 
 const listUsagePostingsByIDs = `-- name: ListUsagePostingsByIDs :many
-SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at FROM billing.usage_postings
+SELECT merchant_id, id, customer_id, currency, period_starts_at, period_ends_at, cut_at, reason, amount, lines, created_at, ingested_through FROM billing.usage_postings
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND id = ANY($3::uuid[])
 `
@@ -441,6 +446,7 @@ func (q *Queries) ListUsagePostingsByIDs(ctx context.Context, arg ListUsagePosti
 			&i.Amount,
 			&i.Lines,
 			&i.CreatedAt,
+			&i.IngestedThrough,
 		); err != nil {
 			return nil, err
 		}

@@ -2461,6 +2461,8 @@ type BillingUsagePosting struct {
 	// Per meter, cell and card print, what the posting added: [{meter_key, cell, print, requests, quantity, stated, amount}].
 	Lines     []byte
 	CreatedAt time.Time
+	// The latest ingestion among the usage the posting read before its cut, or an earlier posting's when later: a later posting counts usage that occurred before cut_at and was ingested by then at no less than what posted.
+	IngestedThrough time.Time
 }
 
 // A customer whose usage in a currency the ledger has not taken in full: the event store holds it, its balance reads it there, and the month-end close or the next movement of the balance posts it. Intake writes the row in the transaction that commits the usage, and a posting locks it; a posting that leaves nothing to post deletes it.

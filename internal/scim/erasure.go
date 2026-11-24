@@ -195,7 +195,7 @@ func eraseUsage(ctx context.Context, q *gen.Queries, mid, customer uuid.UUID) er
 	}
 	_, err := db.InsertRiverJobWith(ctx, q, usageerasure.Args{MerchantID: mid, CustomerID: customer}, nil)
 	if errors.Is(err, db.ErrNoRiverProducer) {
-		return store.EraseCustomer(ctx, billing.CustomerID(customer))
+		return usageerasure.Erase(ctx, q, store, mid, customer)
 	}
 	return err
 }
