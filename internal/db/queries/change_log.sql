@@ -21,7 +21,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- Every configuration document entry of a merchant, oldest first: what the
 -- history last recorded of each document.
 SELECT object_type, object_id, action, changes FROM billing.change_log
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND object_type IN ('merchant', 'psp', 'custodian')
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND object_type IN ('merchant', 'messages', 'psp', 'custodian')
 ORDER BY occurred_at, id;
 
 -- name: LockConfigurationHistory :exec

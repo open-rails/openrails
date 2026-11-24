@@ -19,10 +19,10 @@ func List(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, p billing.L
 	switch p.ObjectType {
 	case "":
 	case billing.LogObjectProduct, billing.LogObjectPrice, billing.LogObjectMeter, billing.LogObjectLimit,
-		billing.LogObjectMerchant, billing.LogObjectPSP, billing.LogObjectCustodian:
+		billing.LogObjectMerchant, billing.LogObjectMessages, billing.LogObjectPSP, billing.LogObjectCustodian:
 		params.ObjectType = new(string(p.ObjectType))
 	default:
-		return out, apperr.Invalidf("object_type is product, price, meter, limit, merchant, psp or custodian").WithParam("object_type")
+		return out, apperr.Invalidf("object_type is product, price, meter, limit, merchant, messages, psp or custodian").WithParam("object_type")
 	}
 	if id := strings.TrimSpace(p.ObjectID); id != "" {
 		if params.ObjectType == nil {

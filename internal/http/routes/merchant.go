@@ -25,7 +25,7 @@ var merchantRoutes = []Route{
 	// What changed in the catalog and the configuration, and who changed it.
 	{Method: GET, Path: "/v1/merchant/changes", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListChanges",
 		Doc: "ListChanges lists the merchant's configuration history, newest first: each change to a product, price, " +
-			"meter or limit and to the merchant, PSP and custodian documents, with who made it and how. A credential " +
+			"meter or limit and to the merchant, messages, PSP and custodian documents, with who made it and how. A credential " +
 			"reads \"changed\", never its value. ObjectType and ObjectID narrow it to one object, Since and Until to a " +
 			"time range.",
 		Query: billing.LogListParams{}, Responses: []Reply{{200, billing.ListPage[billing.LogEntry]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListChanges)},

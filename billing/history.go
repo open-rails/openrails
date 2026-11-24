@@ -71,7 +71,10 @@ const (
 	LogObjectLimit LogObjectType = "limit"
 	// LogObjectMerchant is the merchant document: its object id is the
 	// merchant's id.
-	LogObjectMerchant  LogObjectType = "merchant"
+	LogObjectMerchant LogObjectType = "merchant"
+	// LogObjectMessages is the merchant's messages document: its object id
+	// is the merchant's id.
+	LogObjectMessages  LogObjectType = "messages"
 	LogObjectPSP       LogObjectType = "psp"
 	LogObjectCustodian LogObjectType = "custodian"
 )

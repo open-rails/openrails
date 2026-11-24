@@ -287,8 +287,11 @@ func mergedKeys[V any](a, b map[string]V) map[string]bool {
 
 // configObject is a configuration document's object in history.
 func configObject(id billing.MerchantID, name string) (billing.LogObjectType, string) {
-	if name == merchantdocs.MerchantDoc {
+	switch name {
+	case merchantdocs.MerchantDoc:
 		return billing.LogObjectMerchant, id.String()
+	case merchantdocs.MessagesDoc:
+		return billing.LogObjectMessages, id.String()
 	}
 	psp, custodian := merchantdocs.ParseDoc(name)
 	if psp != "" {
@@ -302,6 +305,8 @@ func configDocumentName(objectType billing.LogObjectType, objectID string) (stri
 	switch objectType {
 	case billing.LogObjectMerchant:
 		return merchantdocs.MerchantDoc, nil
+	case billing.LogObjectMessages:
+		return merchantdocs.MessagesDoc, nil
 	case billing.LogObjectPSP:
 		return merchantdocs.PSPDoc(objectID), nil
 	case billing.LogObjectCustodian:

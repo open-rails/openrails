@@ -30,6 +30,9 @@ func (s Set) Documents() map[string]Document {
 	if s.HasMerchant {
 		out[MerchantDoc] = DocumentOf(MerchantDoc, s.Merchant.Value, s.Merchant.Revision)
 	}
+	if s.HasMessages {
+		out[MessagesDoc] = DocumentOf(MessagesDoc, s.Messages.Value, s.Messages.Revision)
+	}
 	for key, d := range s.PSPs {
 		out[PSPDoc(key)] = DocumentOf(PSPDoc(key), d.Value, d.Revision)
 	}
@@ -55,6 +58,16 @@ func DocumentOf(name string, value any, revision int64) Document {
 			secrets = map[string]string{"scim_token": v.Secrets.SCIMToken}
 		}
 		v.AlertWebhooks, v.Secrets = nil, MerchantSecrets{}
+		fields = objectFields(v)
+	case billing.MessageSettings:
+		// One field per event type and per layout language.
+		for event, settings := range v.Events {
+			d.Fields["events."+event] = jsonValue(settings)
+		}
+		for language, layout := range v.Layouts {
+			d.Fields["layouts."+language] = jsonValue(layout)
+		}
+		v.Events, v.Layouts = nil, nil
 		fields = objectFields(v)
 	case PSP:
 		fields, secrets = config.PSPDocument(v).Fields(), v.Secrets

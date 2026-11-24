@@ -7,7 +7,7 @@ CREATE TABLE billing.change_log (
     occurred_at timestamptz NOT NULL DEFAULT now(),
     actor text NOT NULL CHECK (octet_length(actor) <= 4200 AND (actor ~ '^(staff|customer):.' OR actor ~ '^provider:[a-z][a-z0-9_]{0,31}$' OR actor IN ('system', 'file', 'vault'))),
     source text NOT NULL CHECK (source IN ('api', 'customer', 'console', 'catalog_apply', 'cli', 'reload', 'job', 'intent', 'webhook', 'provider_read')),
-    object_type text NOT NULL CHECK (object_type IN ('product', 'price', 'meter', 'limit', 'merchant', 'psp', 'custodian')),
+    object_type text NOT NULL CHECK (object_type IN ('product', 'price', 'meter', 'limit', 'merchant', 'messages', 'psp', 'custodian')),
     object_id text NOT NULL CHECK (octet_length(object_id) BETWEEN 1 AND 512),
     action text NOT NULL CHECK (action IN ('create', 'update', 'archive', 'unarchive', 'delete', 'key_add', 'key_remove', 'key_rename')),
     changes jsonb NOT NULL CHECK (jsonb_typeof(changes) = 'object' AND jsonb_typeof(changes->'version') = 'number' AND octet_length(changes::text) <= 262144),
@@ -16,9 +16,9 @@ CREATE TABLE billing.change_log (
     operation_id uuid,
     PRIMARY KEY (merchant_id, id)
 );
-COMMENT ON TABLE billing.change_log IS 'Configuration history: each change to a catalog object (product, price, meter, limit) or a configuration document (merchant, psp, custodian), who made it and how. A catalog entry commits with its change; a configuration entry is written when OpenRails writes the document, or when a load finds a change made outside it. Credentials are never recorded. Nothing on a billing path reads it. Retention: permanent, never pruned.';
+COMMENT ON TABLE billing.change_log IS 'Configuration history: each change to a catalog object (product, price, meter, limit) or a configuration document (merchant, messages, psp, custodian), who made it and how. A catalog entry commits with its change; a configuration entry is written when OpenRails writes the document, or when a load finds a change made outside it. Credentials are never recorded. Nothing on a billing path reads it. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.change_log.actor IS 'staff:<invoker>, customer:<invoker>, provider:<rail>, or system, file or vault where no person acted.';
-COMMENT ON COLUMN billing.change_log.object_id IS 'The object''s key: product:price for a price, the merchant id for the merchant document.';
+COMMENT ON COLUMN billing.change_log.object_id IS 'The object''s key: product:price for a price, the merchant id for the merchant and messages documents.';
 COMMENT ON COLUMN billing.change_log.changes IS 'The changed fields'' values before and after, versioned per action; a credential reads "changed".';
 COMMENT ON COLUMN billing.change_log.operation_id IS 'The operation the change belongs to, when one names it.';
 

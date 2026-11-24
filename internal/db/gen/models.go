@@ -163,7 +163,7 @@ type BillingCatalogRestoreReceipt struct {
 	RestoredAt time.Time
 }
 
-// Configuration history: each change to a catalog object (product, price, meter, limit) or a configuration document (merchant, psp, custodian), who made it and how. A catalog entry commits with its change; a configuration entry is written when OpenRails writes the document, or when a load finds a change made outside it. Credentials are never recorded. Nothing on a billing path reads it. Retention: permanent, never pruned.
+// Configuration history: each change to a catalog object (product, price, meter, limit) or a configuration document (merchant, messages, psp, custodian), who made it and how. A catalog entry commits with its change; a configuration entry is written when OpenRails writes the document, or when a load finds a change made outside it. Credentials are never recorded. Nothing on a billing path reads it. Retention: permanent, never pruned.
 type BillingChangeLog struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -172,7 +172,7 @@ type BillingChangeLog struct {
 	Actor      string
 	Source     string
 	ObjectType string
-	// The object's key: product:price for a price, the merchant id for the merchant document.
+	// The object's key: product:price for a price, the merchant id for the merchant and messages documents.
 	ObjectID string
 	Action   string
 	// The changed fields' values before and after, versioned per action; a credential reads "changed".

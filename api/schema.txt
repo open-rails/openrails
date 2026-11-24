@@ -6,7 +6,7 @@ migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd
 migration 0003_usage_limits.up.sql sha256:08672a0999aac672d48761f90ac14fe42955e2c4dd514d0cf3699f9e8c780f92
 migration 0004_drop_access_cutover_contract.up.sql sha256:dd092699ba66add50f33ab520713dc69aaece641cd3a83d9a1314233dbf582e6
 migration 0005_customer_messages.up.sql sha256:c5c6dc66c3145613b541a161b3004804803e28e2bf224fe1044dbbb441403094
-migration 0006_change_log.up.sql sha256:e72716bf480b95741da12620a09328b77159af6e3995ec0254a85e524c388d52
+migration 0006_change_log.up.sql sha256:87f833b05aba1e281feb20cf40ebe2df5a8149040eaaf6e5a9242625eed594a0
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -219,7 +219,7 @@ table billing.change_log
   constraint change_log_changes_check CHECK (((jsonb_typeof(changes) = 'object'::text) AND (jsonb_typeof((changes -> 'version'::text)) = 'number'::text) AND (octet_length((changes)::text) <= 262144)))
   constraint change_log_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint change_log_object_id_check CHECK (((octet_length(object_id) >= 1) AND (octet_length(object_id) <= 512)))
-  constraint change_log_object_type_check CHECK ((object_type = ANY (ARRAY['product'::text, 'price'::text, 'meter'::text, 'limit'::text, 'merchant'::text, 'psp'::text, 'custodian'::text])))
+  constraint change_log_object_type_check CHECK ((object_type = ANY (ARRAY['product'::text, 'price'::text, 'meter'::text, 'limit'::text, 'merchant'::text, 'messages'::text, 'psp'::text, 'custodian'::text])))
   constraint change_log_pkey PRIMARY KEY (merchant_id, id)
   constraint change_log_reason_check CHECK (((octet_length(reason) >= 1) AND (octet_length(reason) <= 1024)))
   constraint change_log_request_id_check CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 128)))

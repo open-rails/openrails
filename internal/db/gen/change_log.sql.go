@@ -132,7 +132,7 @@ func (q *Queries) ListChangeLog(ctx context.Context, arg ListChangeLogParams) ([
 
 const listConfigurationChangeLog = `-- name: ListConfigurationChangeLog :many
 SELECT object_type, object_id, action, changes FROM billing.change_log
-WHERE merchant_id = $1::uuid AND object_type IN ('merchant', 'psp', 'custodian')
+WHERE merchant_id = $1::uuid AND object_type IN ('merchant', 'messages', 'psp', 'custodian')
 ORDER BY occurred_at, id
 `
 
