@@ -82,8 +82,6 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
-	// idempotencyLeaseConns is the default cap for the lease renewal pool.
-	idempotencyLeaseConns int32 = 4
 )
 
 type runtimeOverrides struct {
@@ -169,7 +167,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		redisClient redis.UniversalClient
 		err         error
 	)
-	leaseConns := idempotencyLeaseConns
+	leaseConns := int32(config.DefaultLeaseConns)
 	if cfg.Database.LeaseConns > 0 {
 		leaseConns, err = safecast.Convert[int32](cfg.Database.LeaseConns)
 		if err != nil {

@@ -27,18 +27,15 @@ type VaultSource struct {
 	Log    *slog.Logger
 }
 
-// DefaultPrefix is the path under the KV mount OpenRails owns.
-const DefaultPrefix = "openrails"
-
 // NewVaultSource keeps configuration in kv under prefix ("" is
-// DefaultPrefix).
+// config.DefaultVaultScopePrefix).
 func NewVaultSource(logger *slog.Logger, kv *vault.KVv2Adapter, prefix string) (*VaultSource, error) {
 	if kv == nil {
 		return nil, fmt.Errorf("merchantdocs: Vault source needs a KV client")
 	}
 	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
 	if prefix == "" {
-		prefix = DefaultPrefix
+		prefix = config.DefaultVaultScopePrefix
 	}
 	if path.Clean(prefix) != prefix || strings.Contains(prefix, "..") {
 		return nil, fmt.Errorf("merchantdocs: invalid Vault path prefix %q", prefix)

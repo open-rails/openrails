@@ -339,9 +339,6 @@ type ClickHouseConfig struct {
 	Database string
 }
 
-// DefaultClickHouseDatabase is the event store's database when none is named.
-const DefaultClickHouseDatabase = "openrails"
-
 // ClickHouseDatabase is the event store's database: ClickHouse.Database, or
 // DefaultClickHouseDatabase.
 func ClickHouseDatabase(c *Config) string {
@@ -352,10 +349,6 @@ func ClickHouseDatabase(c *Config) string {
 	}
 	return DefaultClickHouseDatabase
 }
-
-// DefaultSchema is the Postgres schema used when none is configured. All SQL
-// is authored in it; any other schema is reached by internal/sqlschema.
-const DefaultSchema = "billing"
 
 // MigratekitApp is the migratekit app/tracking key written to
 // public.migrations.app for OpenRails' own (non-River, non-AuthKit) migrations.
@@ -373,7 +366,7 @@ func RiverSchemaName(c *Config) string {
 			return s
 		}
 	}
-	return SchemaName(c) + "_river"
+	return RiverSchemaFor(SchemaName(c))
 }
 
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must

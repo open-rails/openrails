@@ -1,6 +1,9 @@
 package openrails
 
 import (
+	"cmp"
+	"strings"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 )
@@ -278,6 +281,47 @@ type ProviderSandboxConfig struct {
 // MerchantDeclaration's Issuer and Binding are set in code.
 func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 	return config.ParseMerchantDocument(raw)
+}
+
+// The values New gives a setting left zero, the engine's own defaults (the
+// standalone server's loader applies the same ones). RateLimits and Captcha
+// keep nil as their own default: the built-in limits and challenge.
+const (
+	defaultSchema             = config.DefaultSchema             // "billing"; RiverSchema is the schema plus "_river"
+	defaultLeaseConns         = config.DefaultLeaseConns         // 4
+	defaultClickHouseDatabase = config.DefaultClickHouseDatabase // "openrails"
+	defaultVaultScopePrefix   = config.DefaultVaultScopePrefix   // "openrails"
+	defaultVaultTransitMount  = config.DefaultVaultTransitMount  // "transit"
+	// defaultEventRetention is 2160h (90 days), defaultWebhookSecretOverlap 24h.
+	defaultEventRetention       = config.DefaultEventRetention
+	defaultWebhookSecretOverlap = config.DefaultWebhookSecretOverlap
+)
+
+// withDefaults is cfg with every zero setting that has a default set to it.
+func (cfg Config) withDefaults() Config {
+	cfg.Database = cfg.Database.withDefaults()
+	cfg.ClickHouse = cfg.ClickHouse.withDefaults()
+	cfg.EventRetention = cmp.Or(strings.TrimSpace(cfg.EventRetention), defaultEventRetention.String())
+	cfg.WebhookSecretOverlap = cmp.Or(strings.TrimSpace(cfg.WebhookSecretOverlap), defaultWebhookSecretOverlap.String())
+	if cfg.Vault != nil {
+		vault := *cfg.Vault
+		vault.ScopePrefix = cmp.Or(vault.ScopePrefix, defaultVaultScopePrefix)
+		vault.TransitMount = cmp.Or(vault.TransitMount, defaultVaultTransitMount)
+		cfg.Vault = &vault
+	}
+	return cfg
+}
+
+func (d DatabaseConfig) withDefaults() DatabaseConfig {
+	d.Schema = cmp.Or(strings.ToLower(strings.TrimSpace(d.Schema)), defaultSchema)
+	d.RiverSchema = cmp.Or(strings.TrimSpace(d.RiverSchema), config.RiverSchemaFor(d.Schema))
+	d.LeaseConns = cmp.Or(d.LeaseConns, defaultLeaseConns)
+	return d
+}
+
+func (c ClickHouseConfig) withDefaults() ClickHouseConfig {
+	c.Database = cmp.Or(strings.TrimSpace(c.Database), defaultClickHouseDatabase)
+	return c
 }
 
 // engineConfig is cfg as the engine reads it. Each settings type converts as
