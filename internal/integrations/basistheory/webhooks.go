@@ -37,14 +37,19 @@ var (
 )
 
 // WebhookVerifier verifies deliveries against one published public key,
-// fetched once and cached (refetched only on verification failure, so a BT
-// key rotation self-heals without a restart).
+// fetched once and cached. A signature the key rejects refetches it, so a BT
+// key rotation self-heals without a restart: one fetch at a time, at most
+// every RefetchEvery, and the cached key stays until a new one parses.
 type WebhookVerifier struct {
 	KeyURL     string
 	HTTPClient *http.Client // nil = 10s-timeout default
+	// RefetchEvery bounds key fetches after the first; zero is 5 minutes.
+	RefetchEvery time.Duration
 
-	mu  sync.Mutex
-	key *rsa.PublicKey
+	mu        sync.Mutex
+	key       *rsa.PublicKey
+	fetchedAt time.Time
+	fetching  chan struct{}
 }
 
 func NewWebhookVerifier(keyURL string) *WebhookVerifier {
@@ -123,20 +128,69 @@ func (v *WebhookVerifier) Verify(ctx context.Context, body []byte, sigB64, sigVe
 	if key != nil && verifyPSS(key, digest[:], sig) == nil {
 		return nil
 	}
-	fresh, err := v.fetchKey(ctx)
-	if err != nil {
-		if key == nil {
-			return err
-		}
-		return ErrWebhookSignatureInvalid
-	}
-	v.mu.Lock()
-	v.key = fresh
-	v.mu.Unlock()
-	if verifyPSS(fresh, digest[:], sig) != nil {
+	fresh, err := v.refresh(ctx, key)
+	switch {
+	case err != nil && key == nil:
+		return err
+	case err != nil, fresh == key, verifyPSS(fresh, digest[:], sig) != nil:
 		return ErrWebhookSignatureInvalid
 	}
 	return nil
+}
+
+// firstFetchRetry spaces fetches while no key is cached.
+const firstFetchRetry = 10 * time.Second
+
+// refresh is the key after stale was rejected: one another caller already
+// fetched, or a new fetch when none ran within RefetchEvery. Concurrent
+// callers wait for the one fetch; a fetch that fails or does not parse keeps
+// the cached key.
+func (v *WebhookVerifier) refresh(ctx context.Context, stale *rsa.PublicKey) (*rsa.PublicKey, error) {
+	every := v.RefetchEvery
+	if every <= 0 {
+		every = 5 * time.Minute
+	}
+	for {
+		v.mu.Lock()
+		key, fetching := v.key, v.fetching
+		switch {
+		case key != stale:
+			v.mu.Unlock()
+			return key, nil
+		case fetching != nil:
+			v.mu.Unlock()
+			select {
+			case <-fetching:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		case key != nil && time.Since(v.fetchedAt) < every:
+			v.mu.Unlock()
+			return key, nil
+		case key == nil && time.Since(v.fetchedAt) < firstFetchRetry:
+			v.mu.Unlock()
+			return nil, errors.New("basistheory: webhook key unavailable; it is fetched again shortly")
+		}
+		done := make(chan struct{})
+		v.fetching, v.fetchedAt = done, time.Now()
+		v.mu.Unlock()
+		// The fetch serves every waiting caller, so no one caller cancels it.
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		fresh, err := v.fetchKey(fctx)
+		cancel()
+		v.mu.Lock()
+		if err == nil {
+			v.key = fresh
+		}
+		key, v.fetching = v.key, nil
+		v.mu.Unlock()
+		close(done)
+		if err != nil && key == nil {
+			return nil, err
+		}
+		return key, nil
+	}
 }
 
 func verifyPSS(key *rsa.PublicKey, digest, sig []byte) error {
