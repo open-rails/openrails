@@ -32,9 +32,10 @@ func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, payer identit
 
 // Load turns an already-resolved policy into the payer-scope windows the SQL
 // gate enforces, in requestCurrency. Only window_spend_cap declares NEW-spend
-// windows; an outstanding_cap policy caps debt, not velocity.
+// windows; an outstanding_cap policy caps debt, not velocity. A window that
+// names no currency is in the policy's policy_currency, else the request's.
 func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string, resolved ResolvedPolicy) (spendgate.Policy, error) {
-	pw, err := l.convert(ctx, spendgate.ScopePayer, resolved.SpendWindows, requestCurrency)
+	pw, err := l.convert(ctx, spendgate.ScopePayer, resolved.SpendWindows, resolved.PolicyCurrency, requestCurrency)
 	if err != nil {
 		return spendgate.Policy{}, err
 	}
@@ -45,8 +46,8 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string
 }
 
 // convert maps budgets.BudgetWindow → spendgate.Window, FX-converting the limit to
-// requestCurrency when the window carries a different currency.
-func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Scope, ws []budgets.BudgetWindow, requestCurrency string) ([]spendgate.Window, error) {
+// requestCurrency when the window's currency (else policyCurrency) differs.
+func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Scope, ws []budgets.BudgetWindow, policyCurrency, requestCurrency string) ([]spendgate.Window, error) {
 	reqCur := money.NormalizeCurrency(requestCurrency)
 	out := make([]spendgate.Window, 0, len(ws))
 	for _, w := range ws {
@@ -54,7 +55,11 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 			continue
 		}
 		limit := w.Limit
-		if c := strings.TrimSpace(w.Currency); c != "" && money.NormalizeCurrency(c) != reqCur {
+		c := strings.TrimSpace(w.Currency)
+		if c == "" {
+			c = strings.TrimSpace(policyCurrency)
+		}
+		if c != "" && money.NormalizeCurrency(c) != reqCur {
 			conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(c), reqCur, w.Limit)
 			if err != nil {
 				return nil, err

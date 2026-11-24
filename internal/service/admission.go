@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -251,7 +252,8 @@ func (s *Service) invokerWastedSpendPolicy(ctx context.Context) ([]abuse.WastedW
 }
 
 // payerWastedWindows resolves the PAYER's wasted-spend budget windows from the
-// bound billing policy's bad_spend windows (#488) at the payer's current tier.
+// bound billing policy's bad_spend windows (#488) at the payer's current tier;
+// a window that names no currency is in the policy's policy_currency.
 func (s *Service) payerWastedWindows(ctx context.Context, payer identity.CustomerID, currency, trustLevel string) ([]abuse.WastedWindow, error) {
 	if trustLevel == "" {
 		if t, err := s.GetTrustLevel(ctx, payer, currency); err == nil && t != "" {
@@ -269,7 +271,7 @@ func (s *Service) payerWastedWindows(ctx context.Context, payer identity.Custome
 		if w.WindowSeconds <= 0 {
 			continue
 		}
-		out = append(out, abuse.WastedWindow{Key: w.Key, Window: time.Duration(w.WindowSeconds) * time.Second, Limit: w.Limit, Currency: w.Currency})
+		out = append(out, abuse.WastedWindow{Key: w.Key, Window: time.Duration(w.WindowSeconds) * time.Second, Limit: w.Limit, Currency: cmp.Or(w.Currency, pol.PolicyCurrency)})
 	}
 	return out, nil
 }

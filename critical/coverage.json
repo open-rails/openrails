@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 445,
+  "scenario_count": 446,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1272,6 +1272,11 @@
       "id": "OR-J23-S32",
       "journey": "J23",
       "name": "A Redis gate names a window to the microsecond: a ticket open across a subscription-anchored window's rollover keeps its take held in its own window and its capture settles there"
+    },
+    {
+      "id": "OR-J23-S33",
+      "journey": "J23",
+      "name": "A spend window that names no currency is in its policy's policy_currency, converted to the request's"
     },
     {
       "id": "OR-J29-S07",

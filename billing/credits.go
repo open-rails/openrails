@@ -397,8 +397,10 @@ type BillingPolicy struct {
 	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
 	// windows: at most Limit of host-reported wasted spend is forgiven per window;
 	// direct-payer overage is charged. Allowed on either kind.
-	BadSpendWindows []BudgetWindow   `json:"bad_spend_windows,omitempty"`
-	PolicyCurrency  catalog.Currency `json:"policy_currency,omitempty"`
+	BadSpendWindows []BudgetWindow `json:"bad_spend_windows,omitempty"`
+	// PolicyCurrency is the currency of a spend or bad-spend window that
+	// names none; absent, the request's.
+	PolicyCurrency catalog.Currency `json:"policy_currency,omitempty"`
 }
 
 // BillingPolicyBinding declares a merchant-default or per-tier policy.
