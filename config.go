@@ -25,9 +25,10 @@ type Config struct {
 	// start; none leaves that to run time (a standalone server's are
 	// provisioned through its API). A slug declared twice provisions neither
 	// entry. Without a Vault KV mount a declaration is the merchant's
-	// configuration, read-only; with one it seeds Vault once, when Vault
-	// holds nothing for the merchant. A request acts on the merchant its
-	// credential is bound to: see billing.MerchantDeclaration.Issuer.
+	// configuration, read-only; with one Vault serves it, and a declaration
+	// naming configuration beside its slug is ignored and reported. A request
+	// acts on the merchant its credential is bound to: see
+	// billing.MerchantDeclaration.Issuer.
 	Merchants []billing.MerchantDeclaration
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
