@@ -7,8 +7,6 @@ const (
 	// Permanent rows are never pruned: money, grants, owed usage, receipts and
 	// the records they depend on.
 	Permanent Class = "permanent"
-	// PartitionedMonthly tables drop whole monthly partitions by the calendar.
-	PartitionedMonthly Class = "partitioned"
 	// Rows tables delete rows past a period, in bounded batches.
 	Rows Class = "rows"
 	// State tables hold what currently exists (configuration, entities,
@@ -77,9 +75,6 @@ var Tables = map[string]Table{
 	"mrr_risk_cases":                {Permanent, permanent},
 	"mrr_risk_episodes":             {Permanent, permanent},
 	"subscription_cancellations":    {Permanent, permanent},
-
-	"limit_holds":      {PartitionedMonthly, "monthly partitions on created_at, dropped once older than the 61-day replay horizon."},
-	"limit_hold_parts": {PartitionedMonthly, "monthly partitions on hold_created_at, dropped with their hold's, each month before its month of holds."},
 
 	"subscription_billing_changes":    {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"subscription_status_transitions": {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},

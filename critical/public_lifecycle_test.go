@@ -99,7 +99,7 @@ func TestPublicLifecycle(t *testing.T) {
 		_, uncachedErr := w.alpha.ListOrders(t.Context(), billing.OrderListParams{})
 		tx, err := w.pool.Begin(t.Context())
 		require.NoError(t, err)
-		_, localErr := w.local.ReleaseAdmissionsTx(t.Context(), tx, []string{"closed-owner"})
+		_, localErr := w.local.StopRunningChargeTx(t.Context(), tx, "closed-owner", billing.StopRunningChargeParams{})
 		require.NoError(t, tx.Rollback(t.Context()))
 		status, raw := a.request(t, "POST", "/v1/catalog/products", a.alphaKey.Secret, billing.CreateProductParams{Key: "after-network-close", DisplayName: "Must not commit over mounted HTTP"})
 		t.Logf("after Close: warm read=%v; write=%v; batched cache=%v; uncached read=%v; local transaction=%v", readErr, writeErr, batchErr, uncachedErr, localErr)

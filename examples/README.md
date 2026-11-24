@@ -9,7 +9,7 @@ its own and its README says how to run it.
 | [`standalone`](standalone) | the same store calling the `openrails` server it runs (Compose) | [Standalone](../docs/standalone.md) |
 | [`hosted`](hosted) | the same store calling the hosted platform | [Client: credentials](../docs/client.md#credentials) |
 | [`own-auth`](own-auth) | two merchants on one engine behind the host's own users, sessions and roles | [Embedded: auth](../docs/embedded.md#auth) |
-| [`gate`](gate) | an API whose requests count toward usage limits, admitted in process by `openrails.Gate` | [Client: the Gate](../docs/client.md#limits-admissions-and-the-gate) |
+| [`gate`](gate) | an API whose requests count toward usage limits, admitted in process by `openrails.Gate` | [Client: the Gate](../docs/client.md#limits-and-the-gate) |
 | [`guide`](guide) | the fragments the guides show that no app runs; they compile | [Integration guide](../docs/guide.md) |
 
 The three stores share `content.go`, `web/src/pages.tsx` and the catalog; only

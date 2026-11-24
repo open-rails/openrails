@@ -15,34 +15,23 @@ import (
 const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    -- Same hold total as GetFinancialHeldAmount.
-    (COALESCE((SELECT SUM(hp.held)
-              FROM billing.limit_hold_parts hp
-              JOIN billing.limit_holds lh ON lh.merchant_id = hp.merchant_id AND lh.id = hp.hold_id AND lh.created_at = hp.hold_created_at
-             WHERE hp.merchant_id = a.merchant_id AND hp.customer_id = a.customer_id AND hp.limit_key = 'balance'
-               AND lh.currency = a.currency AND lh.state = 'open'
-               AND hp.hold_created_at >= $1::timestamptz AND lh.created_at >= $1::timestamptz
-               AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > $2::timestamptz
-                   ELSE lh.created_at > $3::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
-                       AND l.closed_at IS NULL AND l.last_sync_at > $3::timestamptz) END), 0)
-     -- What live gates other than except_lease report in flight of the balance.
-     + COALESCE((SELECT SUM(f.amount)
+    (COALESCE((SELECT SUM(f.amount)
               FROM billing.lease_in_flight f
               JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
              WHERE f.merchant_id = a.merchant_id AND f.customer_id = a.customer_id
                AND f.limit_key = 'balance' AND f.unit = a.currency
-               AND l.closed_at IS NULL AND l.last_sync_at > $3::timestamptz
-               AND ($4::uuid IS NULL OR f.lease_id <> $4::uuid)), 0)
+               AND l.closed_at IS NULL AND l.last_sync_at > $1::timestamptz
+               AND ($2::uuid IS NULL OR f.lease_id <> $2::uuid)), 0)
      -- What pending refunds reserve of a purchased lot, up to its units left.
      -- Retired credit funds its refund from the retired account; an unswept
      -- lapsed lot is entirely unavailable.
-     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= $2::timestamptz
+     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= $3::timestamptz
          THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
        FROM billing.credit_grants g
        WHERE g.merchant_id = a.merchant_id AND g.customer_id = a.customer_id AND g.unit = a.currency
          AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
      -- What the customer's running charges have accrued and not posted.
-     + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $2::timestamptz) - rc.posted_amount, 0))
+     + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $3::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
              WHERE rc.merchant_id = a.merchant_id AND rc.customer_id = a.customer_id AND rc.currency = a.currency AND rc.stopped_at IS NULL), 0))::bigint AS held,
     -- A revoked collection agreement leaves only the balance to spend.
@@ -62,18 +51,17 @@ LEFT JOIN billing.ledger_accounts ar
  AND ar.customer_id = a.customer_id
  AND ar.currency = a.currency
  AND ar.account_type = 'customer_owed'
-WHERE a.merchant_id = $5::uuid
-  AND a.customer_id = $6::uuid
-  AND a.currency = $7::text
+WHERE a.merchant_id = $4::uuid
+  AND a.customer_id = $5::uuid
+  AND a.currency = $6::text
   AND a.account_type = 'customer_units'
 LIMIT 1
 `
 
 type GetAdmissionCapacityParams struct {
-	HeldSince      time.Time
-	AsOf           time.Time
 	LeaseLiveSince time.Time
 	ExceptLease    *uuid.UUID
+	AsOf           time.Time
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
 	Currency       string
@@ -88,15 +76,14 @@ type GetAdmissionCapacityRow struct {
 	OutstandingOwed     int64
 }
 
-// Hot-path affordability snapshot for service admit: customer_units counters,
-// the held total, money_settings (missing = prepaid, no credit line) and
-// outstanding owed.
+// Affordability snapshot: customer_units counters, the held total (as
+// GetFinancialHeldAmount sums it), money_settings (missing = prepaid, no
+// credit line) and outstanding owed.
 func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapacityParams) (GetAdmissionCapacityRow, error) {
 	row := q.db.QueryRow(ctx, getAdmissionCapacity,
-		arg.HeldSince,
-		arg.AsOf,
 		arg.LeaseLiveSince,
 		arg.ExceptLease,
+		arg.AsOf,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
@@ -110,6 +97,61 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 		&i.CreditLimitOverride,
 		&i.OutstandingOwed,
 	)
+	return i, err
+}
+
+const getFinancialHeldAmount = `-- name: GetFinancialHeldAmount :one
+SELECT (h.claims + h.accrued)::bigint AS held, h.accrued::bigint AS accrued
+FROM (SELECT (COALESCE((SELECT SUM(f.amount)
+              FROM billing.lease_in_flight f
+              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+             WHERE f.merchant_id = $1::uuid AND f.customer_id = $2::uuid
+               AND f.limit_key = 'balance' AND f.unit = $3::text
+               AND l.closed_at IS NULL AND l.last_sync_at > $4::timestamptz), 0)
+     -- What pending refunds reserve of a purchased lot, up to its units left.
+     -- Retired credit funds its refund from the retired account; an unswept
+     -- lapsed lot is entirely unavailable.
+     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= $5::timestamptz
+         THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
+       FROM billing.credit_grants g
+       WHERE g.merchant_id = $1::uuid AND g.customer_id = $2::uuid AND g.unit = $3::text
+         AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)) AS claims,
+     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE($6::timestamptz, $5::timestamptz)) - rc.posted_amount, 0))
+              FROM billing.running_charges rc
+             WHERE rc.merchant_id = $1::uuid AND rc.customer_id = $2::uuid AND rc.currency = $3::text AND rc.stopped_at IS NULL), 0) AS accrued) h
+`
+
+type GetFinancialHeldAmountParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	LeaseLiveSince time.Time
+	AsOf           time.Time
+	AccruedAsOf    *time.Time
+}
+
+type GetFinancialHeldAmountRow struct {
+	Held    int64
+	Accrued int64
+}
+
+// The one financial hold total in PostgreSQL: what gates have in flight,
+// pending refunds, and what the customer's running charges have accrued and
+// not posted (accrued, also answered apart); unposted usage is the event
+// store's, added by the caller. GetAdmissionCapacity computes the same sum. A
+// posting through an instant holds the accrual as of it (accrued_as_of);
+// every other read, as of as_of.
+func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHeldAmountParams) (GetFinancialHeldAmountRow, error) {
+	row := q.db.QueryRow(ctx, getFinancialHeldAmount,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.LeaseLiveSince,
+		arg.AsOf,
+		arg.AccruedAsOf,
+	)
+	var i GetFinancialHeldAmountRow
+	err := row.Scan(&i.Held, &i.Accrued)
 	return i, err
 }
 
@@ -480,35 +522,26 @@ const listViewCapacities = `-- name: ListViewCapacities :many
 SELECT
     c.id::uuid AS customer_id,
     COALESCE(a.credits_posted - a.debits_posted, 0)::bigint AS balance,
-    (COALESCE((SELECT SUM(hp.held)
-              FROM billing.limit_hold_parts hp
-              JOIN billing.limit_holds lh ON lh.merchant_id = hp.merchant_id AND lh.id = hp.hold_id AND lh.created_at = hp.hold_created_at
-             WHERE hp.merchant_id = $1::uuid AND hp.customer_id = c.id AND hp.limit_key = 'balance'
-               AND lh.currency = $2::text AND lh.state = 'open'
-               AND hp.hold_created_at >= $3::timestamptz AND lh.created_at >= $3::timestamptz
-               AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > $4::timestamptz
-                   ELSE lh.created_at > $5::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
-                       AND l.closed_at IS NULL AND l.last_sync_at > $5::timestamptz) END), 0)
-     + COALESCE((SELECT SUM(f.amount)
+    (COALESCE((SELECT SUM(f.amount)
               FROM billing.lease_in_flight f
               JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
              WHERE f.merchant_id = $1::uuid AND f.customer_id = c.id
                AND f.limit_key = 'balance' AND f.unit = $2::text
-               AND l.closed_at IS NULL AND l.last_sync_at > $5::timestamptz
-               AND ($6::uuid IS NULL OR f.lease_id <> $6::uuid)), 0)
-     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= $4::timestamptz
+               AND l.closed_at IS NULL AND l.last_sync_at > $3::timestamptz
+               AND ($4::uuid IS NULL OR f.lease_id <> $4::uuid)), 0)
+     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= $5::timestamptz
          THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
        FROM billing.credit_grants g
        WHERE g.merchant_id = $1::uuid AND g.customer_id = c.id AND g.unit = $2::text
          AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
-     + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $4::timestamptz) - rc.posted_amount, 0))
+     + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $5::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
              WHERE rc.merchant_id = $1::uuid AND rc.customer_id = c.id AND rc.currency = $2::text AND rc.stopped_at IS NULL), 0))::bigint AS held,
     CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     COALESCE(s.credit_limit_override, false)::boolean AS credit_limit_override,
     COALESCE(GREATEST(ar.debits_posted - ar.credits_posted, 0), 0)::bigint AS outstanding_owed
-FROM unnest($7::uuid[]) AS c(id)
+FROM unnest($6::uuid[]) AS c(id)
 LEFT JOIN billing.ledger_accounts a
   ON a.merchant_id = $1::uuid AND a.customer_id = c.id
  AND a.currency = $2::text AND a.account_type = 'customer_units'
@@ -522,10 +555,9 @@ LEFT JOIN billing.ledger_accounts ar
 type ListViewCapacitiesParams struct {
 	MerchantID     uuid.UUID
 	Currency       string
-	HeldSince      time.Time
-	AsOf           time.Time
 	LeaseLiveSince time.Time
 	ExceptLease    *uuid.UUID
+	AsOf           time.Time
 	CustomerIds    []uuid.UUID
 }
 
@@ -546,10 +578,9 @@ func (q *Queries) ListViewCapacities(ctx context.Context, arg ListViewCapacities
 	rows, err := q.db.Query(ctx, listViewCapacities,
 		arg.MerchantID,
 		arg.Currency,
-		arg.HeldSince,
-		arg.AsOf,
 		arg.LeaseLiveSince,
 		arg.ExceptLease,
+		arg.AsOf,
 		arg.CustomerIds,
 	)
 	if err != nil {

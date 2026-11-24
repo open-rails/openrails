@@ -173,7 +173,7 @@ func (s *Service) lockBalance(ctx context.Context, q *gen.Queries, mid, customer
 		return 0, 0, err
 	}
 	now := s.now()
-	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now)})
+	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: now, LeaseLiveSince: limits.LeaseLiveSince(now)})
 	if err != nil {
 		return 0, 0, err
 	}

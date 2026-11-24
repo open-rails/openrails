@@ -107,7 +107,7 @@ func availableNow(ctx context.Context, q *gen.Queries, merchant, customer uuid.U
 		return 0, err
 	}
 	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
-		MerchantID: merchant, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now),
+		MerchantID: merchant, CustomerID: customer, Currency: currency, AsOf: now, LeaseLiveSince: limits.LeaseLiveSince(now),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("ledger: held amount: %w", err)

@@ -126,13 +126,6 @@ FROM (
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
 
--- Calendar-driven partition maintenance: neither statement reads a row.
--- name: EnsureMonthPartitions :one
-SELECT billing.ensure_month_partitions(sqlc.arg(table_name)::name, sqlc.arg(from_at)::timestamptz, sqlc.arg(through_at)::timestamptz)::int AS created;
-
--- name: DropMonthPartitions :one
-SELECT billing.drop_month_partitions(sqlc.arg(table_name)::name, sqlc.arg(before)::timestamptz)::int AS dropped;
-
 -- Row retention. Each statement deletes one bounded batch, oldest first, of
 -- one merchant's rows past their period; the cleanup worker loops.
 
