@@ -164,6 +164,7 @@ func (s *PriceMigrationService) raiseMigrationBlocked(ctx context.Context, d *db
 		"price_migration_id":   billing.PriceMigrationID(*change.PriceMigrationID).String(),
 		"subscription_id":      billing.SubscriptionID(sub.ID).String(),
 		"rail":                 string(sub.Rail),
+		"psp_id":               billing.PSPID(sub.PspID).String(),
 		"rail_subscription_id": sub.RailSubscriptionID,
 		"reason":               refused.Reason,
 		"detail":               refused.Detail,
@@ -174,7 +175,7 @@ func (s *PriceMigrationService) raiseMigrationBlocked(ctx context.Context, d *db
 	action := "The provider cannot move these subscriptions to the migration's price, and nothing retries it: they keep billing their old price. " + blockedRemedy(refused.Reason)
 	row, err := d.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID: change.MerchantID, FindingType: MigrationBlockedFindingType, SubjectKey: billing.PriceMigrationID(*change.PriceMigrationID).String() + "/" + refused.Reason,
-		Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence, PspID: &sub.PspID,
+		Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
 	})
 	if err != nil {
 		return fmt.Errorf("raise %s: %w", MigrationBlockedFindingType, err)
