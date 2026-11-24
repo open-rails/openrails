@@ -60,6 +60,16 @@ func providerCredentialError(err error) error {
 	return err
 }
 
+// ProbeLimitedError refuses a credential probe the provider's lockout of
+// failed logins forbids for now (ccbill.ProbeInterval).
+type ProbeLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *ProbeLimitedError) Error() string {
+	return fmt.Sprintf("merchants: a credential check of this account failed within the hour; check again in %s", e.RetryAfter.Round(time.Second))
+}
+
 // LastActivePSPError refuses to archive the only active PSP on a rail without
 // AllowLast.
 type LastActivePSPError struct {

@@ -28,6 +28,12 @@ func (s *slots) Claim(_ context.Context, key string, now, next time.Time) (time.
 	return next, true
 }
 
+func (s *slots) Reopen(_ context.Context, key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.next, key)
+}
+
 func TestLiveDataLinkTakesOneRequestAnHour(t *testing.T) {
 	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
@@ -75,6 +81,18 @@ func TestLiveDataLinkTakesOneRequestAnHour(t *testing.T) {
 	}
 	if calls := dataLink.Calls(); len(calls) != 2 || calls[0].Form.Get("action") != "viewSubscriptionStatus" {
 		t.Fatalf("the probes were %v", calls)
+	}
+	// A failed probe holds the account's probes an hour, sent to CCBill or
+	// not; a proven one held nothing.
+	var limited *ccbill.ProbeLimitedError
+	if err := stranger.ProbeCredentials(t.Context()); !errors.As(err, &limited) || limited.Wait != ccbill.ProbeInterval {
+		t.Fatalf("a probe after a failed one = %v", err)
+	}
+	if err := live.ProbeCredentials(t.Context()); err != nil {
+		t.Fatalf("a proven login's slot was kept: %v", err)
+	}
+	if calls := dataLink.Calls(); len(calls) != 3 {
+		t.Fatalf("the held probe reached CCBill: %v", calls)
 	}
 	now = now.Add(time.Hour)
 	if _, err := live.FetchTransactionExport(t.Context(), now.Add(-time.Hour), now, ccbill.AllDataLinkTxnTypes); err != nil {

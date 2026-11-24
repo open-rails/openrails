@@ -11,7 +11,9 @@
 // subscription-management actions are not DataLink exports: a credential
 // probe is a status read of a subscription no account holds, which CCBill
 // answers -3 or -4 only to a login it authenticated and -1 to one it refused,
-// so it never takes the slot.
+// so it never takes the slot. CCBill locks a login out for an hour after
+// three failed ones (-12), so a failed probe holds the account's probes an
+// hour, across merchants and money classes (psp_probe_limited).
 //
 // CCBill documents the shape of its times but not their zone. DataLink rows,
 // webhook timestamps and subscription-management dates are read as UTC

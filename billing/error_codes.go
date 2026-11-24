@@ -115,6 +115,11 @@ const (
 	CodeUsageOutOfOrder ErrorCode = "usage_out_of_order"
 )
 
+// CodePSPProbeLimited: a credential check of the provider account failed
+// within the hour, and the provider locks out repeated failed logins; it is
+// not asked again before Retry-After.
+const CodePSPProbeLimited ErrorCode = "psp_probe_limited"
+
 // CodeProductInUse: a record refers to the product or one of its prices (a
 // purchase, subscription, grant, access, pay URL, migration, provider write,
 // PSP link or rate card), so it is never deleted; archive it instead.
@@ -511,6 +516,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodePSPEnvironmentRefused, 409, invalid, "A live PSP is refused where the deployment wires fake providers."},
 	{CodePSPLastActive, 409, invalid, "The PSP is the last active one on its rail; pass allow_last to archive it."},
 	{CodePSPClaimRequiresProof, 403, authz, "Claiming a provider account needs credentials that prove control of it."},
+	{CodePSPProbeLimited, 429, limit, "A credential check of the account failed within the hour, and the provider locks out repeated failed logins; Retry-After says when it may be checked again."},
 	{CodeInvalidPSPReference, 400, invalid, "The PSP reference is invalid."},
 	{CodeMerchantConfigReadOnly, 409, invalid, "The merchant's configuration is read from a file; change the file."},
 	{CodePlatformVaultUnavailable, 409, invalid, "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; save cards at a PSP's vault."},

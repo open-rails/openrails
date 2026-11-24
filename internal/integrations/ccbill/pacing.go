@@ -18,6 +18,8 @@ type Slots interface {
 	// Claim takes key's slot when it is open at now and keeps it until
 	// next; otherwise it answers when the slot opens.
 	Claim(ctx context.Context, key string, now, next time.Time) (time.Time, bool)
+	// Reopen opens key's slot at once.
+	Reopen(ctx context.Context, key string)
 }
 
 // Pacing is where a live DataLink client takes its slots and its clock. A
@@ -102,4 +104,10 @@ func (m *memorySlots) Claim(_ context.Context, key string, now, next time.Time) 
 	}
 	m.next[key] = next
 	return next, true
+}
+
+func (m *memorySlots) Reopen(_ context.Context, key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.next, key)
 }

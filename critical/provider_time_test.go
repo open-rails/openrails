@@ -681,6 +681,40 @@ func TestProviderTime(t *testing.T) {
 		require.Len(t, dataLink.Calls(), probed, "beta's claim reached no CCBill")
 	})
 
+	t.Run("OR-J28-S15/a-second-failed-ccbill-probe-of-an-account-within-the-hour-reaches-no-ccbill", func(t *testing.T) {
+		dataLink := ccbillmock.New()
+		t.Cleanup(dataLink.Close)
+		dataLink.RequireCredentials("critical-datalink", "critical-datalink-password", false)
+		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
+		a, _ := newPSPWorld(t, func(w *world) {
+			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+		})
+		create := func(client *openrails.Client, subacc, password string) error {
+			_, err := client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "ccbill", Rail: billing.RailCCBill, Environment: billing.EnvironmentSandbox,
+				PSPAccount:  billing.PSPAccount{ClientAccnum: account, ClientSubacc: subacc},
+				Credentials: map[string]string{"salt": "critical-ccbill-salt", "datalink_username": "critical-datalink", "datalink_password": password}})
+			return err
+		}
+		// CCBill locks a login out after three failed ones in an hour: a
+		// failed probe holds the account's probes for the hour.
+		status, code := refusalCode(t, create(a.alphaRemote, "0001", "wrong"))
+		require.Equal(t, http.StatusBadRequest, status)
+		require.Equal(t, billing.CodePSPCredentialsRejected, code)
+		require.Len(t, dataLink.Calls(), 1)
+		// Another merchant's wrong password on another subaccount of the
+		// account is refused before CCBill.
+		var refusal *billing.StatusError
+		require.ErrorAs(t, create(a.betaRemote, "0002", "also-wrong"), &refusal)
+		require.Equal(t, http.StatusTooManyRequests, refusal.Status)
+		require.Equal(t, billing.CodePSPProbeLimited, refusal.Code)
+		require.Equal(t, "3600", refusal.RetryAfter)
+		require.Len(t, dataLink.Calls(), 1, "the second probe reached no CCBill")
+		// After the hour the account is probed again.
+		a.clock.Advance(time.Hour)
+		require.NoError(t, create(a.betaRemote, "0002", "critical-datalink-password"))
+		require.Len(t, dataLink.Calls(), 2)
+	})
+
 	t.Run("OR-J28-S14/a-ccbill-datalink-login-ccbill-refuses-is-not-declared", func(t *testing.T) {
 		dataLink := ccbillmock.New()
 		t.Cleanup(dataLink.Close)

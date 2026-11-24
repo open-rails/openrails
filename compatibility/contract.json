@@ -364,6 +364,7 @@
       "const CodeEventCursorExpired ErrorCode = \"event_cursor_expired\"",
       "const CodeLimitNotFound ErrorCode = \"limit_not_found\"",
       "const CodePSPImportInProgress ErrorCode = \"psp_import_in_progress\"",
+      "const CodePSPProbeLimited ErrorCode = \"psp_probe_limited\"",
       "const CodePaymentMethodPSPMismatch ErrorCode = \"payment_method_psp_mismatch\"",
       "const CodeProductInUse ErrorCode = \"product_in_use\"",
       "const CodeRevisionMismatch ErrorCode = \"revision_mismatch\"",

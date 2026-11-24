@@ -153,6 +153,11 @@ func (s *Store) Claim(ctx context.Context, key string, now, next time.Time) (tim
 	return next, true
 }
 
+// Reopen opens key's slot at once. Memory opens it whatever Redis answers.
+func (s *Store) Reopen(ctx context.Context, key string) {
+	_ = s.release(ctx, s.slots, []string{key})
+}
+
 // Put keeps value under key for ttl, until Take spends it.
 func (s *Store) Put(ctx context.Context, key string, value []byte, ttl time.Duration) {
 	now := s.now()

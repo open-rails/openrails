@@ -74,9 +74,14 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 		if s.dataLinkURL != "" {
 			client.BaseURL, client.LoopbackFixture = s.dataLinkURL, true
 		}
+		client.Pacing = s.dataLinkPacing
 		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
 		defer cancel()
 		if err := client.ProbeCredentials(probeCtx); err != nil {
+			var limited *ccbill.ProbeLimitedError
+			if errors.As(err, &limited) {
+				return false, &ProbeLimitedError{RetryAfter: max(limited.Wait, time.Second)}
+			}
 			return false, providerCredentialError(fmt.Errorf("merchants: validate ccbill credentials: %w", err))
 		}
 		return true, nil

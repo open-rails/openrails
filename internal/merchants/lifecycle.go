@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/integrations/vault"
@@ -80,6 +81,9 @@ type Service struct {
 	// dataLinkURL is the loopback fake DataLink a sandbox stack declares,
 	// which CCBill credential probes read as every DataLink client does.
 	dataLinkURL string
+	// dataLinkPacing keeps CCBill accounts' probe slots, shared by every
+	// instance (ccbill.ProbeInterval).
+	dataLinkPacing ccbill.Pacing
 	// destructive gates the merchant purge; nil denies (the gate fails closed).
 	destructive *destructive.Gate
 	// jobs queues a purge's secret cleanup with the purge.
@@ -264,6 +268,15 @@ func toMerchant(id uuid.UUID, slug, status string, groupID *string, err error) (
 func (s *Service) merchantByID(ctx context.Context, id billing.MerchantID) (*Merchant, error) {
 	row, err := s.database.Gen(ctx).GetMerchantDirectoryByID(ctx, id.UUID())
 	return toMerchant(row.ID, row.Slug, row.Status, row.PermissionGroupID, err)
+}
+
+// WithDataLinkPacing keeps CCBill credential probes' slots where every
+// DataLink client keeps its own.
+func (s *Service) WithDataLinkPacing(p ccbill.Pacing) *Service {
+	if s != nil {
+		s.dataLinkPacing = p
+	}
+	return s
 }
 
 // WithNMIWire points credential probes at the runtime's NMI gateway.

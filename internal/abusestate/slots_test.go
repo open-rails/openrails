@@ -22,3 +22,15 @@ func TestClaimTakesOneSlotUntilItOpens(t *testing.T) {
 		t.Fatalf("claim once open = %v, %v", next, ok)
 	}
 }
+
+func TestReopenOpensAHeldSlot(t *testing.T) {
+	s := New(slog.New(slog.DiscardHandler), nil)
+	now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	if _, ok := s.Claim(t.Context(), "slot", now, now.Add(time.Hour)); !ok {
+		t.Fatal("first claim refused")
+	}
+	s.Reopen(t.Context(), "slot")
+	if _, ok := s.Claim(t.Context(), "slot", now.Add(time.Minute), now.Add(time.Hour)); !ok {
+		t.Fatal("a reopened slot stayed held")
+	}
+}
