@@ -157,6 +157,7 @@ func New(ctx context.Context, cfg config.Config, deps Deps) (*Engine, error) {
 	}
 	e.serveCheckout(cfg, declarations, deps.CheckoutAssets)
 	rt.CheckBookIdentity(ctx)
+	rt.ReportDormantUsage(ctx)
 	ids := e.declaredIDs()
 	rt.PreloadMerchantConfig(ids...)
 	rt.StartProviderPosture(ids...)

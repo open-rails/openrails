@@ -17,6 +17,7 @@ sql:
       - "internal/migrate/postgres/0012_operation_log.up.sql"
       - "internal/migrate/postgres/0013_limit_counts.up.sql"
       - "internal/migrate/postgres/0014_bounded_gate.up.sql"
+      - "internal/migrate/postgres/0015_event_store.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

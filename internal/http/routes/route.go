@@ -226,6 +226,10 @@ type Route struct {
 	Limit middleware.AdminOperation
 	// When is the configuration the route needs to be mounted.
 	When Feature
+	// EventStore: the route needs the event store. It is mounted on every
+	// deployment; without a store it answers event_store_required once its
+	// caller is authenticated.
+	EventStore bool
 	// NoConn: the route pins no merchant database connection.
 	NoConn bool
 	// Merchant is where a public route finds its merchant; a public route
@@ -469,12 +473,15 @@ func sortedCodes(codes []billing.ErrorCode) []billing.ErrorCode {
 }
 
 // ErrorSets names the shared code sets a route answers besides its own
-// Errors: its tier's and request-shape codes
+// Errors: its tier's, request-shape and event-store codes
 // where they apply. ErrorSet lists each set's codes.
 func (r Route) ErrorSets() []string {
 	sets := []string{"tier:" + string(r.Auth)}
 	if r.Request != nil || r.Query != nil {
 		sets = append(sets, "request")
+	}
+	if r.EventStore {
+		sets = append(sets, "event_store")
 	}
 	return sets
 }
@@ -484,6 +491,8 @@ func ErrorSet(name string) []billing.ErrorCode {
 	switch name {
 	case "request":
 		return requestShapeErrors
+	case "event_store":
+		return []billing.ErrorCode{billing.CodeEventStoreRequired}
 	}
 	if tier, ok := strings.CutPrefix(name, "tier:"); ok {
 		return TierErrors(Tier(tier))
