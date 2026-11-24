@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 473,
+  "scenario_count": 475,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2367,6 +2367,16 @@
       "id": "OR-J46-S12",
       "journey": "J46",
       "name": "The dispute metrics equal the records: disputes by kind, reason, outcome and the disputed charge's kind, the win rate, the chargeback rate by network against the networks' levels, fraud reports by outcome and refunds by reason; a card merchant's overview carries the dispute programs widget, whose read answers"
+    },
+    {
+      "id": "OR-J46-S05",
+      "journey": "J46",
+      "name": "An NMI chargeback batch records every entry with its code: a matched entry is its charge's, reversed, linked and its subscription canceled; an unmatched one takes the masked number's network, books nothing and still counts in the monitor"
+    },
+    {
+      "id": "OR-J46-S13",
+      "journey": "J46",
+      "name": "The network rollup is derived and leaves no row in an archive: a restored book rebuilds it from its payments, disputes and fraud reports, equal to the source's, and its program standings with it"
     }
   ]
 }

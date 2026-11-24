@@ -3,8 +3,13 @@
 package critical_test
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"testing"
@@ -28,6 +33,7 @@ func TestDisputes(t *testing.T) {
 	t.Run("OR-J46-S02/an-inquiry-books-and-cancels-nothing", disputeInquiry)
 	t.Run("OR-J46-S03/a-prevented-dispute-is-no-chargeback", disputePrevented)
 	t.Run("OR-J46-S04/a-won-dispute-stays-won", disputeWon)
+	t.Run("OR-J46-S05/an-nmi-batch-records-every-entry", disputeNMIBatch)
 	t.Run("OR-J46-S06/a-ccbill-chargeback-is-recorded", disputeCCBill)
 	t.Run("OR-J46-S07/an-early-fraud-warning-refunds-its-charge", disputeFraudWarning)
 	t.Run("OR-J46-S08/the-monitor-raises-and-escalates-alerting-findings", disputeMonitor)
@@ -35,6 +41,7 @@ func TestDisputes(t *testing.T) {
 	t.Run("OR-J46-S10/the-program-in-force-is-the-months", disputeProgramDates)
 	t.Run("OR-J46-S11/a-charged-back-card-is-never-charged-again", disputeBlockedCard)
 	t.Run("OR-J46-S12/the-dispute-metrics-equal-the-records", disputeMetrics)
+	t.Run("OR-J46-S13/the-rollup-equals-its-records-after-a-restore", disputeRollupRestore)
 	t.Run("OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio", disputeRefundReasons)
 	t.Run("OR-J46-S15/a-chargeback-blocks-the-charged-card-only", disputeChargedCardOnly)
 	t.Run("OR-J46-S16/a-report-on-an-unknown-charge-is-answered", disputeUnknownCharge)
@@ -800,4 +807,97 @@ func disputeUnknownCharge(t *testing.T) {
 	page, err := m.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.disputes.unknown_charge"})
 	require.NoError(t, err)
 	require.Len(t, page.Items, 2, "each unbooked report is a finding")
+}
+
+// An NMI batch records every entry with its code. A matched entry is its
+// charge's, reversed and linked; an unmatched one takes the masked number's
+// network, books nothing and still counts in the monitor.
+func disputeNMIBatch(t *testing.T) {
+	a, _, sub := nmiMembership(t)
+	payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+	require.NoError(t, err)
+	require.Len(t, payments.Items, 1)
+	day := payments.Items[0].CreatedAt.UTC().Format("2006-01-02")
+	body, err := json.Marshal(map[string]any{"event_id": "nmi-chargeback-batch", "event_type": "chargeback.batch.complete", "event_body": map[string]any{
+		"merchant": map[string]string{"id": "critical-gateway"}, "count": 2,
+		"chargebacks": []map[string]any{
+			{"id": "cb-matched", "date": day, "cc_number": "xxxxxxxxxxxx4242", "amount": "10.00", "reason_code": "10.4", "reason": "Other Fraud - Card Absent Environment"},
+			{"id": "cb-unmatched", "date": day, "cc_number": "5555xxxxxxxx9999", "amount": "25.00", "reason_code": "4837", "reason": "No Cardholder Authorization"},
+		}}})
+	require.NoError(t, err)
+	at := fmt.Sprint(time.Now().Unix())
+	h := hmac.New(sha256.New, []byte("critical-nmi-webhook"))
+	_, _ = h.Write([]byte(at + "."))
+	_, _ = h.Write(body)
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, a.server.URL+"/v1/webhooks/nmi/critical-gateway", bytes.NewReader(body))
+	require.NoError(t, err)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Webhook-Signature", "t="+at+",s="+hex.EncodeToString(h.Sum(nil)))
+	response, err := a.server.Client().Do(r)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+
+	recorded, err := a.alpha.ListDisputes(t.Context(), billing.DisputeListParams{})
+	require.NoError(t, err)
+	cases := map[string]billing.Dispute{}
+	for _, d := range recorded.Items {
+		cases[d.ProviderRef] = d
+	}
+	require.Len(t, cases, 2, "every entry is a case")
+	matched, unmatched := cases["cb-matched"], cases["cb-unmatched"]
+	require.Equal(t, billing.DisputeChargeback, matched.Kind)
+	require.Equal(t, billing.DisputeUnreported, matched.Status, "NMI reports no outcome")
+	require.Equal(t, billing.DisputeFraud, matched.Reason)
+	require.Equal(t, "10.4", matched.ReasonCode)
+	require.NotNil(t, matched.PaymentID)
+	require.Equal(t, payments.Items[0].ID, *matched.PaymentID)
+	require.NotNil(t, matched.ReversalPaymentID, "the matched reversal is linked")
+	require.Nil(t, unmatched.PaymentID)
+	require.Nil(t, unmatched.ReversalPaymentID, "nothing to book")
+	require.Equal(t, billing.NetworkMastercard, unmatched.Network)
+	require.Equal(t, billing.DisputeFraud, unmatched.Reason)
+	subscriptionState(t, a, sub.ID, "canceled")
+	require.EqualValues(t, 1, standing(t, a, billing.ProgramMastercardECP, a.clock.Now()).Count, "the unmatched chargeback counts")
+}
+
+// The network rollup is derived, so an archive carries none: a restored book
+// rebuilds it from its payments, disputes and fraud reports, equal to the
+// source's, and its program standings with it.
+func disputeRollupRestore(t *testing.T) {
+	s := newSales(t)
+	first, second := s.buy(t, "rollup-first"), s.buy(t, "rollup-second")
+	s.chargeback(t, first.ID, "dp_rollup")
+	ch := s.charges[second.ID]
+	body := stripeNotice(t, "evt_rollup_efw", "radar.early_fraud_warning.created", stripemock.Object{"id": "issfr_rollup", "object": "radar.early_fraud_warning",
+		"charge": ch[0], "payment_intent": ch[1], "fraud_type": "misc", "actionable": false, "created": s.a.clock.Now().Unix()})
+	status, raw := callback(t, s.a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
+	require.Equal(t, http.StatusOK, status, raw)
+
+	rollup := func(w *world) string {
+		t.Helper()
+		var out string
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY psp_id, network, currency, day_at), '[]')::text FROM "+
+			pgx.Identifier{w.schema, "network_activity_daily"}.Sanitize()+" r WHERE merchant_id = $1", s.a.alpha.MerchantID().UUID()).Scan(&out))
+		return out
+	}
+	source := rollup(s.a.world)
+	require.Contains(t, source, `"chargebacks": 1`)
+	require.Contains(t, source, `"fraud_reports": 1`)
+	archive := archiveBytes(t, s.a.alpha)
+	targetWorld, target := archiveTarget(t, s.a.world)
+	_, err := target.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+	require.NoError(t, err)
+	require.JSONEq(t, source, rollup(targetWorld), "the restored rollup is the source's")
+	at := s.a.clock.Now()
+	restored, err := target.ListDisputePrograms(t.Context(), billing.DisputeProgramListParams{At: &at})
+	require.NoError(t, err)
+	for _, st := range restored.Items {
+		if st.Program == billing.ProgramVisaVAMP {
+			require.EqualValues(t, 2, st.Count, "the chargeback and the fraud report")
+			require.EqualValues(t, 2, st.Denominator)
+		}
+	}
 }

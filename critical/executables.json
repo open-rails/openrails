@@ -1521,6 +1521,12 @@
     ],
     "OR-J46-S12": [
       "TestDisputes/OR-J46-S12/the-dispute-metrics-equal-the-records"
+    ],
+    "OR-J46-S05": [
+      "TestDisputes/OR-J46-S05/an-nmi-batch-records-every-entry"
+    ],
+    "OR-J46-S13": [
+      "TestDisputes/OR-J46-S13/the-rollup-equals-its-records-after-a-restore"
     ]
   }
 }

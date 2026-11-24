@@ -269,7 +269,7 @@ Checks:
   (`TestCCBillRefunds`).
 - J21: OR-J21-S01 to S03 external payments (`TestExternalPayments`); OR-J21-S04
   imported refund allowance (`TestImportedReceipt`).
-- J46 (`TestDisputes`): OR-J46-S01 a chargeback; S02 an inquiry, its escalation and the reconcile pull; S03 RDR and CE 3.0; S04 won and lost disputes stay decided; S06 CCBill; S07 early fraud warnings; S08 the monitor's findings, alerts and resolution; S09 Mastercard's previous-month basis; S10 the levels in force; S11 the blocked card; S14 refund reasons; S15 only the charged card is blocked; S16 reports on unknown charges.
+- J46 (`TestDisputes`): OR-J46-S01 a chargeback; S02 an inquiry, its escalation and the reconcile pull; S03 RDR and CE 3.0; S04 won and lost disputes stay decided; S06 CCBill; S07 early fraud warnings; S08 the monitor's findings, alerts and resolution; S09 Mastercard's previous-month basis; S10 the levels in force; S11 the blocked card; S05 an NMI batch; S12 the dispute metrics; S13 the rollup across a restore; S14 refund reasons; S15 only the charged card is blocked; S16 reports on unknown charges.
 - Credit-line reversals (`TestMixedOrderCreditRefunds`): OR-J22-S07 (a pending
   refund holds the lot), S08 (refunds, chargeback, won dispute), S09 (dispute credit).
 - OR-J27-S04: a staff refund's `revoke_access`, and a full revoking refund ends
