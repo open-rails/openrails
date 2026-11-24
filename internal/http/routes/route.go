@@ -93,7 +93,8 @@ const (
 	// AuthProvider: the payment provider's own signature on the payload.
 	AuthProvider Tier = "provider_signature"
 	// AuthProvisioning: the merchant's provisioning token, which opens only
-	// these routes, or what AuthApplication admits.
+	// these routes and is their grant, or an application holding the
+	// route's permission, as AuthApplication.
 	AuthProvisioning Tier = "provisioning"
 )
 
@@ -212,11 +213,12 @@ type Route struct {
 	ConsoleOnly bool
 	// Level is an admin route's: read or write.
 	Level Level
-	// Permission is a programmatic route's: the pair its caller holds one
-	// of. A staff route's follows from its Group and Level (Needs).
+	// Permission is an application or provisioning route's: the pair its
+	// caller holds one of. A staff route's follows from its Group and Level
+	// (Needs). A tier that checks one never goes without (authority).
 	Permission Pair
-	// Sensitive: a customer operation needs a recent sign-in.
-	// Never set on an AuthMerchant route.
+	// Sensitive: a customer operation needs a recent sign-in. Only a
+	// customer route declares it.
 	Sensitive bool
 	// Person: a merchant operation only a user acting in person, or the
 	// in-process host, may take; an API key or service token holding the
@@ -358,73 +360,109 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		if _, dup := byKey[r.Key()]; dup {
 			panic("routes: declared twice: " + r.Key())
 		}
-		if err := r.consoleOwnership(); err != nil {
+		if err := r.validate(); err != nil {
 			panic("routes: " + r.Key() + ": " + err.Error())
-		}
-		if _, err := r.QueryParams(); err != nil {
-			panic("routes: " + r.Key() + ": " + err.Error())
-		}
-		if err := r.clientShape(); err != nil {
-			panic("routes: " + r.Key() + ": " + err.Error())
-		}
-		if (r.Handler == nil) == (r.Bind == nil) {
-			panic("routes: " + r.Key() + " needs exactly one of Handler and Bind")
-		}
-		leveled := r.Group == Admin || r.Group == CatalogAdmin || r.Group == MerchantConfig
-		appRead := r.Group == App && r.Level == LevelRead && r.Method == POST
-		if leveled != (r.Level == LevelRead || r.Level == LevelUpdate) && !appRead || !leveled && r.Level != "" && !appRead {
-			panic("routes: " + r.Key() + ": an admin, catalog or merchant-config route reads or updates; a programmatic POST may say it reads")
-		}
-		if (r.Group == Access) != (r.Auth == AuthSignedIn) {
-			panic("routes: " + r.Key() + ": the access route, and only it, takes any signed-in caller")
-		}
-		if (r.Group == App) != (r.Auth == AuthApplication || r.Auth == AuthProvisioning) {
-			panic("routes: " + r.Key() + ": a programmatic route, and only one, takes an application or a provisioning token")
-		}
-		if r.Auth == AuthMerchant && r.Sensitive {
-			panic("routes: " + r.Key() + ": admin operations never require a recent sign-in")
-		}
-		if r.Person && r.Auth != AuthMerchant {
-			panic("routes: " + r.Key() + ": only a merchant route asks for a person")
-		}
-		if r.Group == App && (r.Sensitive || !strings.HasPrefix(r.Path, "/v1/app/")) {
-			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and replay belongs to each operation")
-		}
-		if (r.Auth == AuthApplication) != (r.Permission != Pair{}) {
-			panic("routes: " + r.Key() + ": a programmatic route, and only one, names its permission")
-		}
-		if err := r.Needs().check(); err != nil {
-			panic("routes: " + r.Key() + ": " + err.Error())
-		}
-		switch r.Merchant {
-		case "":
-			if r.Auth == AuthPublic && !r.NoConn {
-				panic("routes: " + r.Key() + ": a public route names its merchant in the request, or reads no merchant's rows (NoConn)")
-			}
-		case MerchantOrder:
-			if r.Auth != AuthPublic || r.NoConn || !strings.Contains(r.Path, "{id}") {
-				panic("routes: " + r.Key() + ": only a public route names its merchant, by the order its {id} names")
-			}
-		default:
-			panic("routes: " + r.Key() + ": unknown merchant source " + string(r.Merchant))
-		}
-		switch r.PayURL {
-		case "":
-		case PayURLPublic:
-			if r.Auth != AuthPublic {
-				panic("routes: " + r.Key() + ": a public pay URL route takes no credential")
-			}
-		case PayURLOrder, PayURLSavedCards, PayURLMerchant:
-			if r.Auth != AuthCustomer || (r.PayURL == PayURLOrder) != strings.Contains(r.Path, "{id}") {
-				panic("routes: " + r.Key() + ": a pay URL customer route is a customer route; an order route names the order as {id}")
-			}
-		default:
-			panic("routes: " + r.Key() + ": unknown pay URL access " + string(r.PayURL))
 		}
 		byKey[r.Key()] = r
 	}
 	return all, byKey
 }()
+
+// permissionFree are the tiers that check no permission, each by its own
+// rule: a public route nothing, a provider callback its signature, a
+// customer route the customer itself, the access read any signed-in caller.
+// Every other tier admits only a caller holding the route's pair.
+var permissionFree = []Tier{AuthPublic, AuthProvider, AuthCustomer, AuthSignedIn}
+
+// authority refuses a route whose gate would admit a caller without a
+// declared permission: a route of a tier that checks one names its pair, by
+// its staff group and level or as its own Permission, and no route names one
+// its tier never checks.
+func (r Route) authority() error {
+	switch r.Auth {
+	case AuthPublic, AuthProvider, AuthCustomer, AuthSignedIn, AuthMerchant, AuthApplication, AuthProvisioning:
+	default:
+		return fmt.Errorf("unknown auth tier %q", r.Auth)
+	}
+	free := slices.Contains(permissionFree, r.Auth)
+	switch needs := r.Needs(); {
+	case !free && needs == (Pair{}):
+		return fmt.Errorf("a %s route checks a permission: a merchant route's is its staff group's, an application or provisioning route names its own", r.Auth)
+	case free && (needs != (Pair{}) || r.Permission != (Pair{})):
+		return fmt.Errorf("a %s route checks no permission, so it cannot name one", r.Auth)
+	}
+	programmatic := r.Auth == AuthApplication || r.Auth == AuthProvisioning
+	if programmatic != (r.Permission != Pair{}) {
+		return fmt.Errorf("a programmatic route, and only one, names its permission")
+	}
+	if r.Sensitive && r.Auth != AuthCustomer {
+		return fmt.Errorf("only a customer operation asks for a recent sign-in")
+	}
+	return r.Needs().check()
+}
+
+// validate is every rule a catalog declaration keeps; the catalog refuses to
+// load with a route that breaks one.
+func (r Route) validate() error {
+	if err := r.consoleOwnership(); err != nil {
+		return err
+	}
+	if _, err := r.QueryParams(); err != nil {
+		return err
+	}
+	if err := r.clientShape(); err != nil {
+		return err
+	}
+	if (r.Handler == nil) == (r.Bind == nil) {
+		return fmt.Errorf("needs exactly one of Handler and Bind")
+	}
+	leveled := r.Group == Admin || r.Group == CatalogAdmin || r.Group == MerchantConfig
+	appRead := r.Group == App && r.Level == LevelRead && r.Method == POST
+	if leveled != (r.Level == LevelRead || r.Level == LevelUpdate) && !appRead || !leveled && r.Level != "" && !appRead {
+		return fmt.Errorf("an admin, catalog or merchant-config route reads or updates; a programmatic POST may say it reads")
+	}
+	if (r.Group == Access) != (r.Auth == AuthSignedIn) {
+		return fmt.Errorf("the access route, and only it, takes any signed-in caller")
+	}
+	if (r.Group == App) != (r.Auth == AuthApplication || r.Auth == AuthProvisioning) {
+		return fmt.Errorf("a programmatic route, and only one, takes an application or a provisioning token")
+	}
+	if r.Person && r.Auth != AuthMerchant {
+		return fmt.Errorf("only a merchant route asks for a person")
+	}
+	if r.Group == App && !strings.HasPrefix(r.Path, "/v1/app/") {
+		return fmt.Errorf("a programmatic route is under /v1/app")
+	}
+	if err := r.authority(); err != nil {
+		return err
+	}
+	switch r.Merchant {
+	case "":
+		if r.Auth == AuthPublic && !r.NoConn {
+			return fmt.Errorf("a public route names its merchant in the request, or reads no merchant's rows (NoConn)")
+		}
+	case MerchantOrder:
+		if r.Auth != AuthPublic || r.NoConn || !strings.Contains(r.Path, "{id}") {
+			return fmt.Errorf("only a public route names its merchant, by the order its {id} names")
+		}
+	default:
+		return fmt.Errorf("unknown merchant source %s", r.Merchant)
+	}
+	switch r.PayURL {
+	case "":
+	case PayURLPublic:
+		if r.Auth != AuthPublic {
+			return fmt.Errorf("a public pay URL route takes no credential")
+		}
+	case PayURLOrder, PayURLSavedCards, PayURLMerchant:
+		if r.Auth != AuthCustomer || (r.PayURL == PayURLOrder) != strings.Contains(r.Path, "{id}") {
+			return fmt.Errorf("a pay URL customer route is a customer route; an order route names the order as {id}")
+		}
+	default:
+		return fmt.Errorf("unknown pay URL access %s", r.PayURL)
+	}
+	return nil
+}
 
 // requestShapeErrors are the codes any route with a JSON body or a query can
 // answer before its handler runs.
@@ -452,7 +490,7 @@ func TierErrors(tier Tier) []billing.ErrorCode {
 		own = append(staff, authenticated...)
 	case AuthSignedIn:
 		own = append(slices.Clone(staff), authenticated...)
-	case AuthApplication:
+	case AuthApplication, AuthProvisioning:
 		own = append(append([]billing.ErrorCode{billing.CodeApplicationRequired}, staff...), authenticated...)
 	default:
 		// No credential: a public route names its own merchant, a provider's

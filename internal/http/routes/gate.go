@@ -479,6 +479,13 @@ func (e *Env) customerCheck(route Route, a billingauth.Authenticator) router.Mid
 				refuseCode(r, route, a, billing.CodeAuthenticationRequired, "the Verified's Identity names a customer that is not a canonical UUID")
 				return
 			}
+			// A declared sensitivity holds on every customer mount.
+			if route.Sensitive {
+				if err := recentSignIn(r.Request.Context(), v); err != nil {
+					refuse(r, route, a, stepRecentSignIn, err)
+					return
+				}
+			}
 			if e.payURL {
 				// A pay URL acts as its order's customer, whose row the
 				// order holds, whatever its issuer: nothing to admit.
@@ -665,14 +672,14 @@ func (e *Env) Guarded(route Route) router.Handler {
 
 // appGates gates a programmatic route: an application holding the route's
 // permission at the merchant its credential is bound to. A person is refused
-// whatever it holds. SCIM's routes name no permission.
+// whatever it holds. A route without a permission is never mounted.
 func (e *Env) appGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a programmatic route needs Routes.Auth"})
 	}
 	pair := needs(route, a)
-	if route.Auth == AuthApplication && pair == (Pair{}) {
+	if pair == (Pair{}) {
 		panic(MountError{Route: route.Key(), Reason: "a programmatic route declares no permission"})
 	}
 	return []router.Middleware{verify(route, a), e.appCheck(route, a, pair)}
@@ -689,7 +696,7 @@ func (e *Env) appCheck(route Route, a billingauth.Authenticator, pair Pair) rout
 				refuseCode(r, route, a, billing.CodeApplicationRequired, "")
 				return
 			}
-			if pair != (Pair{}) && !e.permitted(r, route, a, v, target.MerchantID, pair) {
+			if !e.permitted(r, route, a, v, target.MerchantID, pair) {
 				return
 			}
 			bindStaff(r, c, route, target)
@@ -698,12 +705,15 @@ func (e *Env) appCheck(route Route, a billingauth.Authenticator, pair Pair) rout
 	}
 }
 
-type provisionerKey struct{}
+// ProvisioningIssuer is the issuer that names a merchant's provisioning token
+// as the actor of what it provisions, the token's id its subject.
+const ProvisioningIssuer = "openrails:provisioning-token"
 
 // provisioningGate admits a SCIM request by the merchant's provisioning
-// token, which opens only these routes and is bound to its row's merchant,
-// or else as a programmatic route. A refusal before the SCIM server runs is
-// answered as a SCIM error.
+// token, or else as a programmatic route: an application holding the route's
+// permission. The token is the deliberate exception to a permission: it opens
+// only these routes, is bound to its row's merchant, and acts as itself. A
+// refusal before the SCIM server runs is answered as a SCIM error.
 func (e *Env) provisioningGate(route Route) router.Middleware {
 	gates := e.appGates(route)
 	return func(next router.Handler) router.Handler {
@@ -724,7 +734,7 @@ func (e *Env) provisioningGate(route Route) router.Middleware {
 					refusals.flush()
 				})
 			}, func(r *httprequest.Request) {
-				v, ok := e.provisioner(r, route)
+				v, id, ok := e.provisioner(r, route)
 				if !ok {
 					asApp(r)
 					return
@@ -735,7 +745,7 @@ func (e *Env) provisioningGate(route Route) router.Middleware {
 					return
 				}
 				pin(r, target)
-				r.Request = r.Request.WithContext(context.WithValue(r.Request.Context(), provisionerKey{}, target.MerchantID))
+				bindStaff(r, provisioningActor(id), route, target)
 				admitted(r)
 			})
 		}
@@ -746,23 +756,35 @@ func (e *Env) provisioningGate(route Route) router.Middleware {
 // to the merchant of its row.
 type provisioningToken struct{ billingauth.MerchantBinding }
 
-// Identity names no subject: the token opens the SCIM routes alone.
+// Identity names no subject, so no issuer binds the token to another
+// merchant: it is bound by its row alone.
 func (provisioningToken) Identity() billingauth.Identity { return billingauth.Identity{} }
 
-// provisioner is the provisioning token r presents, when it is one.
-func (e *Env) provisioner(r *httprequest.Request, route Route) (provisioningToken, bool) {
+// provisioningActor is the admitted token, as the actor its writes and
+// erasures name: an application of its own issuer, invoking itself.
+func provisioningActor(id billing.ProvisioningTokenID) billingauth.Identity {
+	who := billingauth.Invoker{Issuer: ProvisioningIssuer, ID: id.String()}
+	return billingauth.Identity{
+		Issuer: who.Issuer, Subject: who.ID, SubjectKind: billingauth.SubjectApplication, Invoker: who,
+		Credential: billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: id.String()},
+	}
+}
+
+// provisioner is the provisioning token r presents, when it is one, and its
+// id.
+func (e *Env) provisioner(r *httprequest.Request, route Route) (provisioningToken, billing.ProvisioningTokenID, bool) {
 	token := scim.BearerToken(r.Request)
 	if token == "" || e.Runtime == nil || e.Runtime.DB == nil {
-		return provisioningToken{}, false
+		return provisioningToken{}, billing.ProvisioningTokenID{}, false
 	}
-	mid, err := scim.Tokens{DB: e.Runtime.DB}.Resolve(r.Request.Context(), token)
+	mid, id, err := scim.Tokens{DB: e.Runtime.DB}.Resolve(r.Request.Context(), token)
 	if err != nil {
 		if !errors.Is(err, scim.ErrUnauthorized) {
 			e.Log.ErrorContext(r.Request.Context(), "openrails: provisioning token lookup failed", logx.Err(err), "route", route.Key())
 		}
-		return provisioningToken{}, false
+		return provisioningToken{}, billing.ProvisioningTokenID{}, false
 	}
-	return provisioningToken{billingauth.BindsMerchant(billingauth.Target{MerchantID: mid})}, true
+	return provisioningToken{billingauth.BindsMerchant(billingauth.Target{MerchantID: mid})}, id, true
 }
 
 // scimRefusals answers a refusal written before the SCIM server ran as a
@@ -813,13 +835,11 @@ func (w *scimRefusals) flush() {
 // scimMerchant is the merchant the SCIM gate admitted: a provisioning
 // token's or an application's.
 func (e *Env) scimMerchant(r *http.Request) (billing.MerchantID, error) {
-	if mid, ok := r.Context().Value(provisionerKey{}).(billing.MerchantID); ok && !mid.IsZero() {
-		return mid, nil
+	staff, ok := billingauth.StaffFromContext(r.Context())
+	if !ok || staff.Identity.SubjectKind != billingauth.SubjectApplication || staff.Merchant.IsZero() {
+		return billing.MerchantID{}, scim.ErrUnauthorized
 	}
-	if staff, ok := billingauth.StaffFromContext(r.Context()); ok && staff.Identity.SubjectKind == billingauth.SubjectApplication && !staff.Merchant.IsZero() {
-		return staff.Merchant, nil
-	}
-	return billing.MerchantID{}, scim.ErrUnauthorized
+	return staff.Merchant, nil
 }
 
 // signedInGates gates the access read: any person or application, at the

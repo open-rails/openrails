@@ -61,10 +61,13 @@ var (
 	needEvents       = Pair{billing.MerchantEventsRead, billing.RootEventsRead}
 	needOrders       = Pair{billing.MerchantOrdersManage, billing.RootOrdersManage}
 	needCustomers    = Pair{billing.MerchantCustomersRead, billing.RootCustomersRead}
+
+	needProvisioningRead = Pair{billing.MerchantProvisioningRead, billing.RootProvisioningRead}
+	needProvisioning     = Pair{billing.MerchantProvisioningManage, billing.RootProvisioningManage}
 )
 
 // Needs is the pair a route checks: a staff route's group's (and level's), a
-// programmatic route's own, none for any other route.
+// programmatic or provisioning route's own, none for any other route.
 func (r Route) Needs() Pair {
 	switch r.Group {
 	case CatalogAdmin:
