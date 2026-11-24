@@ -23,7 +23,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT currency::text AS currency FROM billing.prices WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 UNION
 SELECT (price->>'currency')::text FROM billing.catalog_rate_cards
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL AND price->>'currency' IS NOT NULL;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price->>'currency' IS NOT NULL;
 
 -- ListGeneralLedgerPSPs: the merchant's PSPs, each with cash clearing.
 -- name: ListGeneralLedgerPSPs :many

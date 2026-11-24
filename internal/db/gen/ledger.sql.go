@@ -1135,7 +1135,7 @@ const listSellableCurrencies = `-- name: ListSellableCurrencies :many
 SELECT currency::text AS currency FROM billing.prices WHERE merchant_id = $1::uuid
 UNION
 SELECT (price->>'currency')::text FROM billing.catalog_rate_cards
-WHERE merchant_id = $1::uuid AND deleted_at IS NULL AND price->>'currency' IS NOT NULL
+WHERE merchant_id = $1::uuid AND price->>'currency' IS NOT NULL
 `
 
 // ListSellableCurrencies: every currency the merchant's catalog prices in.
