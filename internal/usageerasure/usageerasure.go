@@ -32,7 +32,7 @@ func (Args) Kind() string { return Kind }
 // retries it until the store answers.
 func (Args) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "billing", MaxAttempts: 25, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
-		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateRunning, rivertype.JobStateScheduled,
+		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
 	}}}
 }
 

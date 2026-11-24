@@ -113,7 +113,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, idempotencyKey)
 
-	client := s.StripeClients.Client(s.Config, 30*time.Second)
+	client := s.StripeClients.Client(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("stripe refund request failed: %w", err)
@@ -210,7 +210,7 @@ func (s *StripeRefundService) FindRefundByIdempotencyKey(ctx context.Context, ch
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, false, fmt.Errorf("stripe refund list failed: %w", err)

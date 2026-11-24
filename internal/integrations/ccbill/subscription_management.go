@@ -31,7 +31,7 @@ const (
 
 // ErrProviderReadOnly is returned by every CCBill mutation in readonly mode,
 // before any bytes hit the wire.
-var ErrProviderReadOnly = errors.New("ccbill: provider writes are blocked (mode=readonly)")
+var ErrProviderReadOnly = errors.New("ccbill: provider writes are blocked (readonly write posture)")
 
 // ErrDataLinkAuth identifies explicit HTTP/authentication rejections, of an
 // SMS action or a DataLink export. A numeric -7 response is deliberately

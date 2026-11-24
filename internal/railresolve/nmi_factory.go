@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // NMIFactory is the only way OpenRails builds an NMI client for a PSP. The
@@ -20,6 +21,9 @@ import (
 // startup verified. There is no bare-key path.
 type NMIFactory struct {
 	Config *config.Config
+	// Postures is each merchant's write posture: a readonly merchant's
+	// client writes nothing, and so does every client without Postures.
+	Postures writeposture.Reader
 	// Transport replaces the wire at the real endpoints (test seam). Unlike
 	// the sandbox gateway it exempts nothing: posture is verified through it.
 	Transport http.RoundTripper
@@ -78,17 +82,18 @@ func (f *NMIFactory) Client(ctx context.Context, secrets merchants.MerchantSecre
 	if err != nil {
 		return nil, err
 	}
-	return f.ClientFor(mid, scope, settings)
+	return f.ClientFor(ctx, mid, scope, settings)
 }
 
 // ClientFor binds already-read settings to scope (callers that hold the
-// credential set, such as a custodian proxy, still get the same client).
-func (f *NMIFactory) ClientFor(mid billing.MerchantID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
+// credential set, such as a custodian proxy, still get the same client). The
+// client is readonly when the merchant's write posture is.
+func (f *NMIFactory) ClientFor(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, settings *config.NMIProviderSettings) (*nmi.NMIClient, error) {
 	client, err := nmi.NewAccountClient(f.Log, mid.UUID(), scope.ID, scope.AccountID, settings)
 	if err != nil {
 		return nil, fmt.Errorf("build NMI client for PSP %s: %w", scope.ID, err)
 	}
-	client.ReadOnly = f != nil && f.Config != nil && config.IsProviderReadOnly(f.Config)
+	client.ReadOnly = f == nil || f.Postures == nil || f.Postures.Posture(ctx, mid.UUID()).ReadOnly()
 	f.Wire(client)
 	return client, nil
 }

@@ -16,9 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/retry"
 )
 
-// DefaultTransitMount is used when config.VaultConfig.TransitMount is empty.
-const DefaultTransitMount = "transit"
-
 // ErrNoClient refuses a Vault mount named without a client to reach it.
 var ErrNoClient = errors.New("Config names a Vault mount but Deps.Vault is nil")
 
@@ -69,7 +66,7 @@ func Open(ctx context.Context, logger *slog.Logger, cfg *config.Config, client *
 	}
 	transitMount := vc.TransitMount
 	if transitMount == "" {
-		transitMount = DefaultTransitMount
+		transitMount = config.DefaultVaultTransitMount
 	}
 	conn.SolanaTransit = vault.NewTransitAdapter(client, transitMount).Refuse(conn.Err)
 	if mount != "" {

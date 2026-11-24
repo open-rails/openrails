@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -104,7 +103,7 @@ func (s *CCBillWebhookService) recordNotices(ctx context.Context, d *db.DB, note
 		if n == nil {
 			continue
 		}
-		n.ID = uuid.NewSHA1(db.PSPIDFromContext(ctx), []byte(s.Data.EventType+":"+s.stableDedupeEventKey()+":"+n.CustomerID.String()+":"+string(n.EventType)+":"+n.Data.SubscriptionID.String()))
+		n.ID = uuidutil.DerivedV7(uuidutil.TimeOf(n.Data.SubscriptionID.UUID()), db.PSPIDFromContext(ctx), s.Data.EventType+":"+s.stableDedupeEventKey()+":"+n.CustomerID.String()+":"+string(n.EventType)+":"+n.Data.SubscriptionID.String())
 		n.CreatedAt = s.now().UTC()
 		if err := subscriptions.NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 			return fmt.Errorf("record CCBill notification: %w", err)

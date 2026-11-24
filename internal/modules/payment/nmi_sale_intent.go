@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -30,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func NMISaleIdempotencyKey(key string) string {
@@ -116,8 +116,11 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 	}
 	var held *nmiproxy.Charger
 	if p.Instrument.Custodian == models.CustodianBasisTheory || p.Instrument.Custodian == models.CustodianPlatform {
-		if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
+		if h.Sale.Config == nil {
 			return intents.Parked("Basis Theory sale writes unavailable")
+		}
+		if posture := (writeposture.View{DB: h.database()}).Posture(ctx, in.MerchantID); posture.ReadOnly() {
+			return intents.Parked("Basis Theory sale writes unavailable: " + posture.Reason)
 		}
 		if p.Instrument.CustodianID == nil {
 			return intents.Parked("accepted custody is missing")
@@ -308,8 +311,11 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProv
 }
 
 func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload) intents.Outcome {
-	if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
+	if h.Sale.Config == nil {
 		return intents.Parked("Stripe sale writes unavailable")
+	}
+	if posture := (writeposture.View{DB: h.database()}).Posture(ctx, in.MerchantID); posture.ReadOnly() {
+		return intents.Parked("Stripe sale writes unavailable: " + posture.Reason)
 	}
 	if _, err := h.stripeService(ctx, in); err != nil {
 		return intents.Parked(err.Error())

@@ -47,7 +47,7 @@ VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.narg(product_id)::uuid, sqlc.arg(ordinal)::bigint,
     NULLIF(sqlc.arg(meter_key)::text, ''), NULLIF(sqlc.arg(payment_term)::text, ''), sqlc.arg(filter)::jsonb,
     sqlc.narg(allowance)::jsonb, sqlc.arg(price)::jsonb,
-    COALESCE(sqlc.narg(id)::uuid, gen_random_uuid()), COALESCE(sqlc.narg(created_at)::timestamptz, now())
+    COALESCE(sqlc.narg(id)::uuid, uuidv7()), COALESCE(sqlc.narg(created_at)::timestamptz, now())
 )
 ON CONFLICT (merchant_id, product_id, ordinal) DO UPDATE SET meter_key = EXCLUDED.meter_key,
     payment_term = EXCLUDED.payment_term, filter = EXCLUDED.filter, allowance = EXCLUDED.allowance,

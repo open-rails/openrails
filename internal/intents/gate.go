@@ -9,12 +9,9 @@ import (
 	"github.com/open-rails/openrails/internal/writeposture"
 )
 
-// ModeView is a merchant's effective write posture: the lower of the
-// process's provider_write_mode and the merchant's stored posture, readonly in
-// a copy of the billing book. writeposture.View satisfies it.
-type ModeView interface {
-	Posture(ctx context.Context, merchantID uuid.UUID) writeposture.Posture
-}
+// ModeView is a merchant's effective write posture: its stored posture,
+// readonly in a copy of the billing book. writeposture.View satisfies it.
+type ModeView = writeposture.Reader
 
 // GateExecution decides whether an intent of the given origin may attempt a
 // provider write for merchantID under its posture. blocked=true parks the
@@ -34,7 +31,7 @@ func GateExecution(ctx context.Context, mode ModeView, merchantID uuid.UUID, ori
 	// a wiring bug, and a fail-closed gate must never answer "go ahead" when it
 	// does not know. Parking is free (the intent is durable); executing is not.
 	if mode == nil {
-		return true, "operating mode is unknown (no mode view wired); refusing to attempt a provider write"
+		return true, "write posture is unknown (none wired); refusing to attempt a provider write"
 	}
 	switch origin {
 	case OriginUser, OriginAdmin, OriginSystem, OriginProvider:
@@ -43,11 +40,8 @@ func GateExecution(ctx context.Context, mode ModeView, merchantID uuid.UUID, ori
 		return true, fmt.Sprintf("unknown intent origin %q", origin)
 	}
 	p := mode.Posture(ctx, merchantID)
-	if p.ReadOnly() {
-		return true, p.Reason
-	}
-	if p.Limited() && origin == OriginSystem {
-		return true, p.Reason
+	if p.ReadOnly() || p.Limited() && origin == OriginSystem {
+		return true, "write posture " + p.Mode.String() + ": " + p.Reason
 	}
 	return false, ""
 }

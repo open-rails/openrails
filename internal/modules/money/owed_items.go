@@ -12,6 +12,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
+// owedPeriodStartKey is the metadata key of when an owed item's charges
+// began (EarliestPendingOwedCharge reads it).
+const owedPeriodStartKey = "period_starts_at"
+
 // insertPendingOwedItemTx queues an owed accrual for its usage order. Rows
 // leave the pending workspace only when an order bills them.
 func insertPendingOwedItemTx(

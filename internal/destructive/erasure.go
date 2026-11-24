@@ -259,10 +259,8 @@ type DrainErasuresArgs struct {
 // Kind names the job.
 func (DrainErasuresArgs) Kind() string { return DrainErasuresKind }
 
-// InsertOpts keeps one drain per merchant, waiting or running (River
-// requires running among the unique states); a running drain takes what is
-// queued while it runs.
+// InsertOpts keeps one waiting drain per merchant.
 func (DrainErasuresArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "billing", MaxAttempts: 10, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
-		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateRunning, rivertype.JobStateScheduled}}}
+		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}}}
 }

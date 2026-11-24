@@ -215,8 +215,9 @@ type MarkBalanceWatchDueParams struct {
 // A change queued a look at the balance: the watch is due until a look resets
 // it, so the billing pass looks at it if the look fails. A row already due is
 // not written again. Skipping a due row is sound only because every marker
-// holds the customer's LockCustomerForSpend, which the look takes before it
-// reads the balance and resets the row.
+// holds the customer's LockCustomerForSpend or a key share of the row
+// (ShareBalanceWatches), which the look waits for before it reads the
+// balance and resets the row.
 func (q *Queries) MarkBalanceWatchDue(ctx context.Context, arg MarkBalanceWatchDueParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markBalanceWatchDue,
 		arg.Now,
@@ -318,6 +319,59 @@ func (q *Queries) SetBalanceWatch(ctx context.Context, arg SetBalanceWatchParams
 		arg.Currency,
 	)
 	return err
+}
+
+const shareBalanceWatches = `-- name: ShareBalanceWatches :many
+SELECT merchant_id, customer_id, currency, next_check_at, depletes_at, low_notified_at, depleted_at, updated_at, funded_at, usage_rate_per_hour, rate_sampled_at, low_line_amount, floor_amount, look_each_change FROM billing.balance_watches
+WHERE merchant_id = $1::uuid AND currency = $2::text
+  AND customer_id = ANY($3::uuid[])
+ORDER BY customer_id
+FOR KEY SHARE
+`
+
+type ShareBalanceWatchesParams struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	CustomerIds []uuid.UUID
+}
+
+// The watches of customers whose usage a sync just took, held against a
+// look (LockBalanceWatch) until the marks commit: a look running now
+// finishes first, and one that starts reads the balance after them. Syncs
+// never wait on each other here.
+func (q *Queries) ShareBalanceWatches(ctx context.Context, arg ShareBalanceWatchesParams) ([]BillingBalanceWatch, error) {
+	rows, err := q.db.Query(ctx, shareBalanceWatches, arg.MerchantID, arg.Currency, arg.CustomerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingBalanceWatch
+	for rows.Next() {
+		var i BillingBalanceWatch
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Currency,
+			&i.NextCheckAt,
+			&i.DepletesAt,
+			&i.LowNotifiedAt,
+			&i.DepletedAt,
+			&i.UpdatedAt,
+			&i.FundedAt,
+			&i.UsageRatePerHour,
+			&i.RateSampledAt,
+			&i.LowLineAmount,
+			&i.FloorAmount,
+			&i.LookEachChange,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const stampBalanceWatchFunded = `-- name: StampBalanceWatchFunded :exec

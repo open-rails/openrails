@@ -1025,7 +1025,7 @@ type BillingMerchantSlugAlias struct {
 	CreatedAt  time.Time
 }
 
-// One merchant's provider write posture; no row is full. The effective mode is the lower of this and provider_write_mode. Export sets the source readonly and restore the destination; an operator arms it back to full.
+// One merchant's provider write posture; no row is full. A copy of the billing book is readonly whatever it says. Export sets the source readonly and restore the destination; an operator arms it back to full.
 type BillingMerchantWritePosture struct {
 	MerchantID uuid.UUID
 	Mode       string
@@ -2020,7 +2020,7 @@ type BillingProviderIntent struct {
 	NextAttemptAt  time.Time
 	// The running attempt's claim. An in_flight row whose lease elapsed lost its attempt and becomes unknown_needs_verify: a provider read settles it before any retry.
 	LeaseExpiresAt *time.Time
-	// Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.
+	// Who wanted this mutation: user/admin-origin intents execute under a limited write posture (reactive completion), system-origin intents require full. Nothing executes under readonly.
 	Origin       string
 	OriginReason *string
 	// The invoker that produced a user/admin-origin intent: the party that acted, the subject itself when it acted itself. NULL for system-origin. Keys the anti-credential-compromise rate ceiling (per-invoker + per-merchant rolling-hour count of destructive ops).
@@ -2273,7 +2273,7 @@ type BillingReconciliationState struct {
 	UpdatedAt       time.Time
 }
 
-// One row per paid order line whose revenue the general ledger defers: what was funded (credited to deferred_revenue), what has been recognised, and over what service. A ratable schedule recognises by elapsed service at every midnight on the 1st in the merchant's accounting timezone and at its end; a point-in-time one at once. Retention: permanent, never pruned.
+// One row per paid order line, and per currency its money was paid in, whose revenue the general ledger defers: what was funded (credited to deferred_revenue), what has been recognised, and over what service. A line priced in a merchant's own unit is funded by its lots' money, in each lot's paid currency. A ratable schedule recognises by elapsed service at every midnight on the 1st in the merchant's accounting timezone and at its end; a point-in-time one at once. Retention: permanent, never pruned.
 type BillingRevenueSchedule struct {
 	MerchantID      uuid.UUID
 	ID              uuid.UUID

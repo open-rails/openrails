@@ -83,7 +83,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.BillingProvide
 	if h.Config == nil {
 		return Parked("rebill execution mode is not configured")
 	}
-	if blocked, reason := GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
+	if blocked, reason := GateExecution(ctx, writeposture.View{DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
 		return Parked(reason)
 	}
 	client, err := h.railClient(ctx, in)

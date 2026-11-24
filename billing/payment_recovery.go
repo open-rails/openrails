@@ -8,8 +8,8 @@ type PaymentRecovery struct {
 	// failure, never raw provider text. It is absent for successful recovery, old
 	// subscription periods, or a newer pending attempt.
 	LastFailureReason DeclineReason `json:"last_failure_reason,omitempty"`
-	// Retryable is false while provider writes are disabled. Limited mode
-	// still permits otherwise eligible customer payments; automatic retries
+	// Retryable is false while provider writes are disabled. A limited write
+	// posture still permits otherwise eligible customer payments; automatic retries
 	// can remain paused. Commands recheck all eligibility before charging.
 	Retryable     bool   `json:"retryable"`
 	BlockedReason string `json:"blocked_reason,omitempty"`

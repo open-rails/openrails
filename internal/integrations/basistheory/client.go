@@ -33,7 +33,7 @@ const (
 
 // ErrProviderReadOnly is returned for every mutating BT request in readonly
 // mode. It survives *url.Error wrapping, so errors.Is works.
-var ErrProviderReadOnly = errors.New("basistheory: provider writes are blocked (mode=readonly)")
+var ErrProviderReadOnly = errors.New("basistheory: provider writes are blocked (readonly write posture)")
 
 // Config builds a Client. APIKey is the PRIVATE application key (permissions:
 // proxy:invoke, token*, token-intent*, network-token*, account-updater:real-time:invoke).

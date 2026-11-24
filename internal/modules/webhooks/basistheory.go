@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // BasisTheoryWebhookHandler folds Basis Theory custody events into instrument
@@ -112,11 +113,15 @@ func (s *basisTheoryWebhookService) btClient(ctx context.Context) (*basistheory.
 	if cc == nil || cc.Custodian != models.CustodianBasisTheory {
 		return nil, fmt.Errorf("custodian tenant %s is not declared as basis_theory", s.accountID)
 	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return basistheory.New(basistheory.Config{
 		APIKey:        cc.APIKey,
 		BaseURL:       cc.APIBaseURL,
 		WebhookKeyURL: cc.WebhookKeyURL,
-		ReadOnly:      s.d.Config != nil && config.IsProviderReadOnly(s.d.Config),
+		ReadOnly:      writeposture.View{DB: s.d.DB}.Posture(ctx, mid.UUID()).ReadOnly(),
 	})
 }
 

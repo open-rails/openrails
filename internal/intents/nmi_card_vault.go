@@ -146,7 +146,7 @@ func (h *NMICardVaultHandler) advance(ctx context.Context, intent gen.BillingPro
 			return Parked(reason)
 		}
 		if client.ReadOnly {
-			return Parked("nmi client is read-only (mode=readonly)")
+			return Parked("nmi client is read-only (readonly write posture)")
 		}
 		if h.Store == nil {
 			card.Zero()
@@ -169,7 +169,7 @@ func (h *NMICardVaultHandler) advance(ctx context.Context, intent gen.BillingPro
 			_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: created.CustomerVaultID})
 			return Terminal("the gateway did not keep the requested customer vault id; server card entry cannot be used with it")
 		case errors.Is(err, nmi.ErrProviderReadOnly):
-			return Parked("nmi provider writes blocked (mode=readonly)")
+			return Parked("nmi provider writes blocked (readonly write posture)")
 		case nmi.IsTransportAmbiguous(err):
 			uncertain = true
 		case errors.As(err, &refused):

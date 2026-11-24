@@ -501,3 +501,18 @@ test("console-proposals-group-approve-held-dismiss", async ({
   await expect(late.getByTestId("outcome")).toContainText("Already resolved")
   await stale.close()
 })
+
+test("console-dashboard-shows-merchant-units", async ({ page }) => {
+  // Credits sold in the merchant's own units read at each unit's scale with
+  // its name, never as an unregistered currency.
+  for (const [currency, amount] of [
+    ["CREDITS", "20.00 Credits"],
+    ["GOLD", "400 Gold coins"],
+  ]) {
+    await open(page, `/?currency=${currency}`)
+    await expect(
+      page.locator('[data-widget="kpi-credits-sold"]')
+    ).toContainText(amount)
+    await expect(page.getByText("unregistered currency")).toHaveCount(0)
+  }
+})

@@ -11,6 +11,23 @@ VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(curre
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     since_at = LEAST(u.since_at, EXCLUDED.since_at), due_at = LEAST(u.due_at, EXCLUDED.due_at), updated_at = EXCLUDED.updated_at;
 
+-- name: ShareUsageUnposted :many
+-- A sync's hold on the unposted marks of its customers in a currency, taken
+-- after its events are inserted: a posting, which locks its mark FOR
+-- UPDATE, either waits for the sync to commit or has already read its
+-- events. Syncs never wait on each other here.
+SELECT customer_id, since_at, due_at FROM billing.usage_unposted
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+ORDER BY customer_id
+FOR KEY SHARE;
+
+-- name: ListUsageUnpostedOf :many
+-- Many customers' unposted marks in a currency.
+SELECT customer_id, since_at FROM billing.usage_unposted
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]);
+
 -- name: LockUsageUnposted :one
 SELECT * FROM billing.usage_unposted
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
@@ -76,6 +93,12 @@ SELECT * FROM billing.usage_postings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text AND period_starts_at >= sqlc.arg(period_starts_at)::timestamptz
 ORDER BY period_starts_at, created_at, id;
+
+-- name: ListUsagePostingsOf :many
+-- Many customers' postings in a currency of the periods from one start on.
+SELECT customer_id, period_starts_at, amount FROM billing.usage_postings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+  AND currency = sqlc.arg(currency)::text AND period_starts_at >= sqlc.arg(period_starts_at)::timestamptz;
 
 -- name: ListUsagePostingsByIDs :many
 SELECT * FROM billing.usage_postings

@@ -23,8 +23,7 @@ if err != nil {
 }
 
 cfg := openrails.Config{
-	Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
-	ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
+	Database: openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 	Merchants: []billing.MerchantDeclaration{{
 		MerchantDocument: merchant,
 		Issuer:           issuer, // your users, signed in at your AuthKit, are this merchant's customers and staff
@@ -78,8 +77,7 @@ if err := bill.Start(ctx); err != nil {
 | `Engine.Close(ctx)` | stops what `Start` started. Close the engine before your pool; OpenRails never closes `Deps.Postgres`. |
 
 `New` fails only on what it cannot serve without: PostgreSQL and its migrations,
-an unset `ProviderWriteMode`, an invalid River schema, a test seam beside a live
-PSP. Anything else is refused alone and the rest serves: an optional setting is
+an invalid River schema, a test seam beside a live PSP. Anything else is refused alone and the rest serves: an optional setting is
 turned off, a merchant whose document is invalid is not provisioned, a PSP that
 does not check is not armed. `openrails_configuration` names what is not served
 and why; Vault, PSP posture and Redis reconnect in the background.
@@ -113,7 +111,6 @@ Go. Libraries never read the environment.
 
 | Field | Meaning |
 |---|---|
-| `ProviderWriteMode` | Required. `ProviderWritesFull`, `ProviderWritesLimited` (OpenRails initiates no provider writes; customers still buy) or `ProviderWritesReadOnly` (nothing is written to any provider). |
 | `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
 | `UsageBillingEnabled` | Bills owed usage automatically ([usage](client.md#usage-and-running-charges)). Deploy every worker first. |
 | `Database` | `DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
@@ -137,7 +134,12 @@ Go. Libraries never read the environment.
 | `EventRetention` | How long the event log keeps facts (default 90 days). |
 | `WebhookSecretOverlap` | How long a rotated webhook secret still verifies (default 24 h, at most 168 h). |
 
-Several instances must agree on the schemas, `ProviderWriteMode`, `Merchants`,
+How much OpenRails writes to a merchant's providers is the merchant's write
+posture, kept in the database: `openrails merchant hold` and
+`openrails merchant arm`, run with the engine's database and schema, change it
+([write safety](standalone.md#write-safety-and-the-kill-switch)).
+
+Several instances must agree on the schemas, `Merchants`,
 `RateLimits`, `Captcha`, `TrustedProxies`, `ReturnOrigins` and the mounted
 `Routes` (a route some instances lack answers 404 there).
 

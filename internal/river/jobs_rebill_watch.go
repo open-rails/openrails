@@ -249,7 +249,7 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 	if err != nil {
 		return err
 	}
-	collect := reason == MissProviderSkipped && !(writeposture.View{Config: w.Config, DB: w.DB}).Posture(ctx, sub.MerchantID).ReadOnly()
+	collect := reason == MissProviderSkipped && !(writeposture.View{DB: w.DB}).Posture(ctx, sub.MerchantID).ReadOnly()
 	return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := w.DB.NewWithPgxTx(tx)
 		q := txdb.Gen(ctx)

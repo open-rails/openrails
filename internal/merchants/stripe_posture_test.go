@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/stripemock"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // stripeLoad is one process loading a merchant's Stripe PSPs over the Stripe
@@ -31,7 +31,7 @@ type stripeLoad struct {
 func newStripeLoad() *stripeLoad {
 	stripe := stripemock.NewUnstarted(stripemock.Options{})
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
-	return &stripeLoad{stripe: stripe, factory: stripeapi.NewWiredFactory(stripe), merchant: billing.MerchantID(uuid.New()), name: name, key: "sk_test_acct_" + name}
+	return &stripeLoad{stripe: stripe, factory: stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full)), merchant: billing.MerchantID(uuid.New()), name: name, key: "sk_test_acct_" + name}
 }
 
 func (l *stripeLoad) set(psps map[string]merchantdocs.PSP) merchantdocs.Set {
@@ -52,7 +52,7 @@ func (l *stripeLoad) refund(t *testing.T) error {
 	req, err := http.NewRequestWithContext(merchant.WithID(context.Background(), l.merchant), http.MethodPost, stripeapi.APIBase+"/v1/refunds", strings.NewReader("payment_intent=pi_posture&amount=100"))
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+l.key)
-	response, err := l.factory.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0).Do(req)
+	response, err := l.factory.Client(0).Do(req)
 	if response != nil {
 		_ = response.Body.Close()
 	}

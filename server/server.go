@@ -181,14 +181,18 @@ type Config struct {
 	// PrivateAddr is where Run and Serve also serve PrivateHandler, the
 	// operator's /metrics, apart from the public surface. Empty serves none.
 	PrivateAddr string
-	// DrainDelay is how long Run and Serve keep serving once ctx ends, with
-	// /health/ready failing, so load balancers stop routing here before the
-	// listener closes. 0 closes it at once.
-	DrainDelay time.Duration
-	// ShutdownTimeout bounds finishing in-flight requests and closing the
-	// server, background work included, after the drain; 0 is 30s.
-	ShutdownTimeout time.Duration
 }
+
+const (
+	// drainDelay is how long Run and Serve keep serving once ctx ends, with
+	// /health/ready failing, so load balancers stop routing here before the
+	// listener closes.
+	drainDelay = 5 * time.Second
+	// shutdownTimeout bounds finishing in-flight requests and closing the
+	// server, background work included, after the drain. With drainDelay it
+	// fits Kubernetes' default 30s grace period.
+	shutdownTimeout = 20 * time.Second
+)
 
 // Deps is everything a standalone server reaches outside its process.
 type Deps struct {
@@ -395,27 +399,19 @@ func (s *Server) Start(ctx context.Context, opts ...openrails.StartOption) error
 }
 
 // Run serves Handler at Config.Addr and runs the background work until ctx
-// ends or serving fails, then drains (Config.DrainDelay), finishes in-flight
-// requests and closes the server.
+// ends or serving fails, then drains for 5s, finishes in-flight requests and
+// closes the server within 20s.
 func (s *Server) Run(ctx context.Context) error { return s.run(ctx, true) }
 
 // Serve is Run without the background work, which another process runs.
 func (s *Server) Serve(ctx context.Context) error { return s.run(ctx, false) }
 
-// shutdownTimeout is Config.ShutdownTimeout, defaulted.
-func (s *Server) shutdownTimeout() time.Duration {
-	if s.cfg.ShutdownTimeout > 0 {
-		return s.cfg.ShutdownTimeout
-	}
-	return 30 * time.Second
-}
-
 func (s *Server) run(ctx context.Context, workers bool) (err error) {
-	// One ShutdownTimeout bounds the HTTP shutdown and Close together.
+	// One shutdownTimeout bounds the HTTP shutdown and Close together.
 	var deadline time.Time
 	defer func() {
 		if deadline.IsZero() {
-			deadline = time.Now().Add(s.shutdownTimeout())
+			deadline = time.Now().Add(shutdownTimeout)
 		}
 		closeCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 		defer cancel()
@@ -463,11 +459,11 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	if err == nil {
 		select {
 		case <-ctx.Done():
-			err = drain(s.log, s.surface.Drain, s.cfg.DrainDelay, served, hs)
+			err = drain(s.log, s.surface.Drain, drainDelay, served, hs)
 		case err = <-served:
 		}
 	}
-	deadline = time.Now().Add(s.shutdownTimeout())
+	deadline = time.Now().Add(shutdownTimeout)
 	shutdown(s.log, deadline, hs, private)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
