@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 602,
+  "scenario_count": 608,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2514,9 +2514,39 @@
       "name": "Two credit lots that lapsed before their expiry ran expire only what each still holds after the usage settled at the first lapse"
     },
     {
+      "id": "OR-J40-S01",
+      "journey": "J40",
+      "name": "Every account type has one book and class; the general ledger refuses a merchant unit"
+    },
+    {
+      "id": "OR-J40-S02",
+      "journey": "J40",
+      "name": "A transfer across books, across currencies or naming another customer's account is refused"
+    },
+    {
+      "id": "OR-J40-S03",
+      "journey": "J40",
+      "name": "ledger-audit catches injected counter and rollup corruption"
+    },
+    {
       "id": "OR-J40-S04",
       "journey": "J40",
       "name": "A credit lot whose deposit did not post is not spendable until convergence posts it once"
+    },
+    {
+      "id": "OR-J40-S05",
+      "journey": "J40",
+      "name": "A ledger from before the books migrates with rollups that ledger-audit and an export accept"
+    },
+    {
+      "id": "OR-J40-S06",
+      "journey": "J40",
+      "name": "Concurrent top-ups, one posting unposted usage first, all commit"
+    },
+    {
+      "id": "OR-J40-S07",
+      "journey": "J40",
+      "name": "An archive written before the books restores as the units book"
     },
     {
       "id": "OR-J42-S01",

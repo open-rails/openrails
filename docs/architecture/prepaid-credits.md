@@ -4,7 +4,7 @@ A customer's prepaid balance in a currency is a set of credit lots: staff grants
 
 ## Concepts
 
-- **Lot**: a `credit_grants` row: `units` of `unit` (a currency, or later a merchant unit), `starts_at`, `expires_at` (NULL never lapses), its `funding_source` (`purchase`, `recurring`, `grant`, `promotion`, `import`) and `account_id`, the customer's `customer_balance` account its units sit in. A revocation is a `credit_grant_events` row (`revoke`; `reinstate` clears it), whose trigger sets the lot's `revoked_at`.
+- **Lot**: a `credit_grants` row: `units` of `unit` (a currency, or later a merchant unit), `starts_at`, `expires_at` (NULL never lapses), its `funding_source` (`purchase`, `recurring`, `grant`, `promotion`, `import`) and `account_id`, the customer's `customer_units` account its units sit in. A revocation is a `credit_grant_events` row (`revoke`; `reinstate` clears it), whose trigger sets the lot's `revoked_at`.
 - **Remaining**: `units_credited - units_debited`. The trigger `ledger_transfers_apply_lot_counters` keeps both from the legs that name the lot and touch its balance account: deposits, bonuses, restores and reinstatements credit it; spends, repayments, expiries, revocations and refunds debit it. A leg naming the lot on another account (cash, revenue, retired value) moves neither, and a deposit that never posted leaves nothing to spend. `credit_grants_units_posted_check` keeps `units_debited <= units_credited`: a lot never gives more than it holds.
 - **Purchased lot**: `paid_amount` and `paid_currency` are set, and `payment_id` and `order_line_id` name what bought it. Face is the credit delivered; paid is the cash of the order line that bought it. A gift has neither.
 - **Reserved**: `units_reserved`, what the pending refunds of a purchased lot's payment will withdraw (`credit_grant_reservation`): their share of its paid amount, up to what no reversal returned, rounded up. **Available** in a lot is remaining less reserved.
@@ -18,7 +18,7 @@ A customer's prepaid balance in a currency is a set of credit lots: staff grants
 ### Funding
 
 - **Staff**: `Service.CreateCreditGrants` validates 1 to `billing.MaxBatchItems` items and calls `MoneyService.DepositBatch`: one transaction, balances locked in (customer, currency) order. An item's `funding_source` (`billing.CreditGrantFunding`) is `grant` (the default), `promotion` or `import`; its invoker is at most 512 bytes. `depositTx` takes the customer lock and answers a known `source_id` (`credit_grants_customer_id_source_id_key`) with the same amount, currency, expiry and, when the retry names one, funding source as `Replayed`; other terms are `idempotency_key_reused`. Otherwise `credits.Lots.Issue` records the lot and its `Materialize` posts the customer's unposted usage first, then the `deposit` at (`deposit`, `grant`, lot id); `owed.Repay` pays existing owed from the new lot. Change a usage order's card charge leaves beyond the order, collected or observed at NMI, is a `purchase` lot paid at face, its invoker the customer.
-- **Purchase**: a paid order line with a `credit_grant` reaches `purchasedcredits.Service.Fund` in the settlement transaction (`fundCreditLine`, or `FulfillmentService.grantPurchasedCredits` for a one-line payment). It checks the payment succeeded in the lot's currency and matches its line, keeps one lot per payment (`credit_grants_payment_id_key`), records it `purchase` or, for a recurring price's line, `recurring`, and posts through `Ledger.PurchasedDeposit`: `min(face, paid)` from `processor_clearing`, excess face from `promotional_funding` (`deposit_bonus`), excess cash to `platform_revenue`. Only the paid part repays owed. An order buys at most one credit product.
+- **Purchase**: a paid order line with a `credit_grant` reaches `purchasedcredits.Service.Fund` in the settlement transaction (`fundCreditLine`, or `FulfillmentService.grantPurchasedCredits` for a one-line payment). It checks the payment succeeded in the lot's currency and matches its line, keeps one lot per payment (`credit_grants_payment_id_key`), records it `purchase` or, for a recurring price's line, `recurring`, and posts through `Ledger.PurchasedDeposit`: `min(face, paid)` from `units_sold`, excess face from `units_granted` (`deposit_bonus`), excess cash to `units_redeemed`. Only the paid part repays owed. An order buys at most one credit product.
 - **Recurring**: each paid renewal of an engine-owned recurring credit price funds
   the order line's frozen promise (`internal/modules/orders/renewal.go`), with its
   own expiry from delivery ([recurring credits](../client.md#credits)).
@@ -40,7 +40,7 @@ reversal, a released refund (`MarkFailed`) and a running charge's stop.
 
 ### Revocation
 
-`MoneyService.RevokeCreditGrant` runs inside `destructive.RunLocal` (`destructive.RevokeCredit`) under the customer lock. It posts accrued running charges and usage, refuses `credit_grant_held` when holds or a pending refund (`units_reserved`) need the remainder and `credit_grant_unavailable` when nothing remains, and `credits.Lots.Revoke` appends a `revoke` event and moves the remainder to `revoked_credits` (`credit_revoke`). Revoking a revoked lot replays.
+`MoneyService.RevokeCreditGrant` runs inside `destructive.RunLocal` (`destructive.RevokeCredit`) under the customer lock. It posts accrued running charges and usage, refuses `credit_grant_held` when holds or a pending refund (`units_reserved`) need the remainder and `credit_grant_unavailable` when nothing remains, and `credits.Lots.Revoke` appends a `revoke` event and moves the remainder to `units_revoked` (`credit_revoke`). Revoking a revoked lot replays.
 
 ### Refunds and chargebacks
 
@@ -49,8 +49,8 @@ reversal, a released refund (`MarkFailed`) and a running charge's stop.
   (`purchased_credit_refund`, leg, reversal id). The cash share is the reversal up
   to the credit line's unreturned cash; the face share is proportional. It takes
   face from the lot first, then expired or revoked value, then debt the lot repaid
-  (owed again), and books the rest to `credit_refund_loss`. Every leg routes
-  through `credit_refund_clearing`, which nets to zero. A recovery restores only
+  (owed again), and books the rest to `units_refund_loss`. Every leg routes
+  through `units_refund_clearing`, which nets to zero. A recovery restores only
   what its own reversal took.
 
 ### Balance watch

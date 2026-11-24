@@ -16,10 +16,10 @@ const getCustomerPeriodAnchor = `-- name: GetCustomerPeriodAnchor :one
 SELECT LEAST(
     (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
      WHERE lt.merchant_id = $1::uuid AND lt.customer_id = $2::uuid
-       AND lt.currency = $3::text),
+       AND lt.currency = $3::text AND lt.book = 'units'),
     (SELECT a.created_at FROM billing.ledger_accounts a
      WHERE a.merchant_id = $1::uuid AND a.customer_id = $2::uuid
-       AND a.currency = $3::text AND a.account_type = 'customer_balance'))::timestamptz AS period_anchor
+       AND a.currency = $3::text AND a.account_type = 'customer_units'))::timestamptz AS period_anchor
 `
 
 type GetCustomerPeriodAnchorParams struct {
@@ -28,7 +28,7 @@ type GetCustomerPeriodAnchorParams struct {
 	Currency   string
 }
 
-// A customer's first recorded activity in a currency: its first transfer or
+// A customer's first recorded activity in a currency: its first units-book transfer or
 // the opening of its balance account. Anniversary periods are anchored on it.
 func (q *Queries) GetCustomerPeriodAnchor(ctx context.Context, arg GetCustomerPeriodAnchorParams) (time.Time, error) {
 	row := q.db.QueryRow(ctx, getCustomerPeriodAnchor, arg.MerchantID, arg.CustomerID, arg.Currency)

@@ -240,6 +240,9 @@ func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpe
 	}
 
 	where := []string{merchantCols[fam] + " = " + arg(merchantID)}
+	if spec.BaseWhere != "" {
+		where = append(where, spec.BaseWhere)
+	}
 	if plan.HasTime {
 		where = append(where, fmt.Sprintf("%s < %s", spec.TimeExpr, arg(lastEdge)))
 	} else {
@@ -283,7 +286,7 @@ LEFT JOIN LATERAL (
       ON (lt.credit_account_id = la.id OR lt.debit_account_id = la.id)
      AND lt.merchant_id = la.merchant_id
      AND lt.created_at < edge.bucket
-    WHERE la.merchant_id = $1 AND la.account_type = 'customer_balance' AND la.customer_id IS NOT NULL
+    WHERE la.merchant_id = $1 AND la.account_type = 'customer_units' AND la.customer_id IS NOT NULL
     GROUP BY la.customer_id, la.currency
   ) bal
   JOIN unnest($3::timestamptz[], $4::uuid[], $5::text[], $6::bigint[]) AS burn(edge, customer_id, currency, burn)

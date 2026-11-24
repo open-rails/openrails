@@ -478,7 +478,8 @@ var families = map[Family]familySpec{
 		From: `billing.ledger_transfers lt
 		JOIN billing.ledger_accounts da ON da.merchant_id = lt.merchant_id AND da.id = lt.debit_account_id
 		JOIN billing.ledger_accounts ca ON ca.merchant_id = lt.merchant_id AND ca.id = lt.credit_account_id`,
-		TimeExpr: `lt.created_at`,
+		BaseWhere: `lt.book = 'units'`,
+		TimeExpr:  `lt.created_at`,
 		DimExprs: map[string]string{
 			"currency": `lt.currency`,
 		},
@@ -973,18 +974,18 @@ var declared = []Measure{
 		Expr:        `COUNT(*)`,
 		Dims:        []string{"limit", "customer"}},
 	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: UnitMoney, Direction: Neutral,
-		Description: "unconsumed prepaid credit (deferred revenue) at t: net customer_balance across the ledger",
+		Description: "unconsumed prepaid credit at t, at face: net customer_units across the units book",
 		Formula:     "SUM(customer balances) at t",
 		Expr: `COALESCE(SUM(
-			CASE WHEN ca.account_type = 'customer_balance' THEN lt.amount ELSE 0 END
-			- CASE WHEN da.account_type = 'customer_balance' THEN lt.amount ELSE 0 END), 0)::bigint`,
+			CASE WHEN ca.account_type = 'customer_units' THEN lt.amount ELSE 0 END
+			- CASE WHEN da.account_type = 'customer_units' THEN lt.amount ELSE 0 END), 0)::bigint`,
 		Dims: []string{"currency"}},
 	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: UnitMoney, Direction: DownIsGood,
 		Description: "arrears accounts receivable at t: accrued-but-unpaid usage debt",
 		Formula:     "SUM(arrears owed) at t",
 		Expr: `COALESCE(SUM(
-			CASE WHEN da.account_type = 'arrears_liability' THEN lt.amount ELSE 0 END
-			- CASE WHEN ca.account_type = 'arrears_liability' THEN lt.amount ELSE 0 END), 0)::bigint`,
+			CASE WHEN da.account_type = 'customer_owed' THEN lt.amount ELSE 0 END
+			- CASE WHEN ca.account_type = 'customer_owed' THEN lt.amount ELSE 0 END), 0)::bigint`,
 		Dims: []string{"currency"}},
 	{Name: "customers_at_depletion_risk", Class: ClassSnapshot, Family: FamDepletion, Unit: "count", Direction: DownIsGood,
 		Description: "customers whose prepaid balance at t covers <= 7 days of their trailing-7d burn (in any currency)",

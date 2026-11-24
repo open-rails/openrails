@@ -40,6 +40,9 @@ var Tables = map[string]Table{
 	// Money, grants, owed usage and receipts.
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},
+	"ledger_daily":                  {Permanent, permanent},
+	"ledger_type_totals":            {Class: State},
+	"ledger_rollup_pending":         {Class: State},
 	"grants":                        {Permanent, permanent},
 	"credit_grants":                 {Permanent, permanent},
 	"credit_grant_events":           {Permanent, permanent},

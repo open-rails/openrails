@@ -17,13 +17,13 @@ WHERE cm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND COALESCE(NULLIF(cm.event_type, ''), cm.key) = sqlc.arg(event_type)::text
 ORDER BY cm.key;
 
--- A customer's first recorded activity in a currency: its first transfer or
+-- A customer's first recorded activity in a currency: its first units-book transfer or
 -- the opening of its balance account. Anniversary periods are anchored on it.
 -- name: GetCustomerPeriodAnchor :one
 SELECT LEAST(
     (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
      WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id = sqlc.arg(customer_id)::uuid
-       AND lt.currency = sqlc.arg(currency)::text),
+       AND lt.currency = sqlc.arg(currency)::text AND lt.book = 'units'),
     (SELECT a.created_at FROM billing.ledger_accounts a
      WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = sqlc.arg(customer_id)::uuid
-       AND a.currency = sqlc.arg(currency)::text AND a.account_type = 'customer_balance'))::timestamptz AS period_anchor;
+       AND a.currency = sqlc.arg(currency)::text AND a.account_type = 'customer_units'))::timestamptz AS period_anchor;

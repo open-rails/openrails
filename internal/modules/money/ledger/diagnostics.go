@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Ledger integrity diagnostics, per (merchant, currency):
+// Integrity diagnostics of both books, per (merchant, book, currency):
 //
 //  1. Conservation: sum(credits_posted - debits_posted) over every account is
 //     0. Cheap (O(accounts)); catches one-sided counter corruption.
@@ -20,21 +21,24 @@ import (
 //  3. Lot drift: a credit lot's units_credited and units_debited are the legs
 //     on its balance account, kept by their own trigger; recomputed likewise.
 //     Its units_reserved is what its payment's pending refunds reserve.
+//  4. Rollup drift: ledger_type_totals and ledger_daily, recomputed from
+//     ledger_transfers.
 //
 // Each takes an explicitly selected merchant; ledger-audit calls once per merchant.
 
-// ConservationBreach is one (merchant, currency) ledger whose account balances
-// do not sum to zero.
+// ConservationBreach is one (merchant, book, currency) ledger whose account
+// balances do not sum to zero.
 type ConservationBreach struct {
 	MerchantID uuid.UUID `json:"merchant_id"`
+	Book       string    `json:"book"`
 	Currency   string    `json:"currency"`
 	Net        int64     `json:"net"` // sum(credits_posted - debits_posted); must be 0
 	Accounts   int64     `json:"accounts"`
 }
 
 func (b ConservationBreach) String() string {
-	return fmt.Sprintf("conservation: merchant=%s net=%s across %d accounts (must be 0)",
-		b.MerchantID, moneyutil.FormatAmount(b.Net, b.Currency), b.Accounts)
+	return fmt.Sprintf("conservation: merchant=%s book=%s net=%s across %d accounts (must be 0)",
+		b.MerchantID, b.Book, moneyutil.FormatAmount(b.Net, b.Currency), b.Accounts)
 }
 
 // CounterDrift is one account whose maintained counters disagree with the sum
@@ -42,6 +46,7 @@ func (b ConservationBreach) String() string {
 type CounterDrift struct {
 	AccountID     uuid.UUID  `json:"account_id"`
 	MerchantID    uuid.UUID  `json:"merchant_id"`
+	Book          string     `json:"book"`
 	Currency      string     `json:"currency"`
 	AccountType   string     `json:"account_type"`
 	CustomerID    *uuid.UUID `json:"customer_id,omitempty"`
@@ -79,16 +84,44 @@ func (d LotDrift) String() string {
 		moneyutil.FormatAmount(d.StoredReserved, d.Unit), moneyutil.FormatAmount(d.ExpectedReserved, d.Unit))
 }
 
+// RollupDrift is one ledger_type_totals row (Bucket nil) or ledger_daily
+// bucket whose kept amounts disagree with the transfers logged into it. A
+// missing row keeps 0.
+type RollupDrift struct {
+	Book          string     `json:"book"`
+	Currency      string     `json:"currency"`
+	AccountType   string     `json:"account_type"`
+	PSPID         *uuid.UUID `json:"psp_id,omitempty"`
+	Bucket        *time.Time `json:"bucket,omitempty"`
+	TransferType  string     `json:"transfer_type,omitempty"`
+	ProductID     *uuid.UUID `json:"product_id,omitempty"`
+	StoredCredits int64      `json:"stored_credits"`
+	LoggedCredits int64      `json:"logged_credits"`
+	StoredDebits  int64      `json:"stored_debits"`
+	LoggedDebits  int64      `json:"logged_debits"`
+}
+
+func (d RollupDrift) String() string {
+	where := "ledger_type_totals"
+	if d.Bucket != nil {
+		where = fmt.Sprintf("ledger_daily %s %s", d.Bucket.UTC().Format(time.RFC3339), d.TransferType)
+	}
+	return fmt.Sprintf("rollup drift: %s %s/%s credits stored=%s logged=%s, debits stored=%s logged=%s",
+		where, d.Book, d.AccountType, moneyutil.FormatAmount(d.StoredCredits, d.Currency), moneyutil.FormatAmount(d.LoggedCredits, d.Currency),
+		moneyutil.FormatAmount(d.StoredDebits, d.Currency), moneyutil.FormatAmount(d.LoggedDebits, d.Currency))
+}
+
 // IntegrityReport is the combined result. Empty means every invariant holds.
 type IntegrityReport struct {
 	Conservation []ConservationBreach `json:"conservation_breaches"`
 	Counters     []CounterDrift       `json:"counter_drifts"`
 	Lots         []LotDrift           `json:"lot_drifts"`
+	Rollups      []RollupDrift        `json:"rollup_drifts"`
 }
 
-// OK reports whether the ledger is intact.
+// OK reports whether the books are intact.
 func (r IntegrityReport) OK() bool {
-	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0
+	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0
 }
 
 // CheckIntegrity runs every diagnostic for one explicitly selected merchant.
@@ -102,6 +135,9 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 		return r, err
 	}
 	if r.Lots, err = CheckLotDrift(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Rollups, err = CheckRollupDrift(ctx, q, merchant); err != nil {
 		return r, err
 	}
 	return r, nil
@@ -131,8 +167,8 @@ func CheckLotDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]LotDr
 	return out, nil
 }
 
-// CheckConservation returns every (merchant, currency) ledger whose balances do
-// not sum to zero. An empty slice is the healthy answer.
+// CheckConservation returns every (merchant, book, currency) ledger whose
+// balances do not sum to zero. An empty slice is the healthy answer.
 func CheckConservation(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]ConservationBreach, error) {
 	if merchant == uuid.Nil {
 		return nil, fmt.Errorf("ledger: merchant is required")
@@ -146,6 +182,7 @@ func CheckConservation(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]C
 	for _, row := range rows {
 		out = append(out, ConservationBreach{
 			MerchantID: row.MerchantID,
+			Book:       row.Book,
 			Currency:   row.Currency,
 			Net:        row.Net,
 			Accounts:   row.Accounts,
@@ -171,6 +208,7 @@ func CheckCounterDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]C
 		out = append(out, CounterDrift{
 			AccountID:     row.AccountID,
 			MerchantID:    row.MerchantID,
+			Book:          row.Book,
 			Currency:      row.Currency,
 			AccountType:   row.AccountType,
 			CustomerID:    row.CustomerID,
@@ -178,6 +216,41 @@ func CheckCounterDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]C
 			LoggedCredits: row.LoggedCredits,
 			StoredDebits:  row.StoredDebits,
 			LoggedDebits:  row.LoggedDebits,
+		})
+	}
+	return out, nil
+}
+
+// CheckRollupDrift recomputes ledger_type_totals and ledger_daily from
+// ledger_transfers and returns every row whose kept amounts disagree. An
+// empty slice is the healthy answer.
+func CheckRollupDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]RollupDrift, error) {
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("ledger: merchant is required")
+	}
+	totals, err := gen.New(q).ListLedgerTypeTotalDrifts(ctx, merchant)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: total drift check: %w", err)
+	}
+	days, err := gen.New(q).ListLedgerDailyDrifts(ctx, merchant)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: daily drift check: %w", err)
+	}
+	var out []RollupDrift
+	for _, row := range totals {
+		out = append(out, RollupDrift{
+			Book: row.Book, Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID,
+			StoredCredits: row.StoredCredits, LoggedCredits: row.LoggedCredits,
+			StoredDebits: row.StoredDebits, LoggedDebits: row.LoggedDebits,
+		})
+	}
+	for _, row := range days {
+		bucket := row.BucketAt
+		out = append(out, RollupDrift{
+			Book: row.Book, Currency: row.Currency, AccountType: row.AccountType, PSPID: row.PspID,
+			Bucket: &bucket, TransferType: row.TransferType, ProductID: row.ProductID,
+			StoredCredits: row.StoredCredits, LoggedCredits: row.LoggedCredits,
+			StoredDebits: row.StoredDebits, LoggedDebits: row.LoggedDebits,
 		})
 	}
 	return out, nil

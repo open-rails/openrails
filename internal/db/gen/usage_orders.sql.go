@@ -393,7 +393,7 @@ func (q *Queries) GetUsageOrderByPeriod(ctx context.Context, arg GetUsageOrderBy
 }
 
 const getUsageRecoveryLedgerTransfer = `-- name: GetUsageRecoveryLedgerTransfer :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -423,6 +423,10 @@ func (q *Queries) GetUsageRecoveryLedgerTransfer(ctx context.Context, arg GetUsa
 		&i.OrderID,
 		&i.CreatedAt,
 		&i.Operation,
+		&i.Book,
+		&i.EffectiveAt,
+		&i.OrderLineID,
+		&i.ProductID,
 	)
 	return i, err
 }
