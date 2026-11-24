@@ -1241,6 +1241,9 @@
     "OR-J12-S14": [
       "TestCardGuard/OR-J12-S14/a-card-number-in-any-field-of-a-card-save-or-order-payment-is-refused"
     ],
+    "OR-J12-S15": [
+      "TestPaymentMethodContracts/OR-J12-S15/a-hyperswitch-card-save-consults-the-card-testing-ledger"
+    ],
     "OR-J38-S36": [
       "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
     ],

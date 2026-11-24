@@ -184,17 +184,13 @@ Checks:
 
 ### 8. Abuse protection
 
-`/v1/me/payment-methods*` is in the `payment` rate-limit bucket (40 a minute)
-with captcha escalation. NMI, Stripe and Basis Theory saves and order payments
-check the card-testing ledger (`refuseBlockedCardAttempt`, `card_attempts_blocked`)
-before any provider call; a HyperSwitch save does not ([limits](../standalone.md#abuse-limits)).
-The firewall above refuses card numbers.
+`/v1/me/payment-methods*` is in the `payment` rate-limit bucket (40 a minute) with captcha escalation. Every card save, whatever its PSP or custodian, and every order payment checks the card-testing ledger (`refuseBlockedCardAttempt`, `card_attempts_blocked`) before any provider call ([limits](../standalone.md#abuse-limits)). The firewall above refuses card numbers.
 
 Checks:
 - OR-J12-S12 and OR-J38-S36: the detector's ranges, and numeric references that are not cards.
 - OR-J12-S05: no card number, security code or secret in outputs or logs.
 - OR-J12-S14: a card number in any billing detail of a token save or an order payment, in a token, a return URL or a token symbol is refused, and NMI sees nothing.
-- `CreatePaymentMethod` calls `refuseBlockedCardAttempt` before every provider call except in its HyperSwitch branch (the gap below).
+- OR-J12-S15: a customer the ledger blocks is refused before HyperSwitch is asked; `CreatePaymentMethod` checks the ledger once, before choosing a branch.
 
 ### 9. Destructive-action safeguards
 
@@ -211,7 +207,7 @@ Checks:
 
 ## Tests
 
-- J12: OR-J12-S01 to S04 (`TestPaymentMethodContracts`), S05 (`TestFinancialFailures`), S06 (`TestMerchantOwnedBasisTheoryCardLifecycle`), S07, S71 (`TestMerchantCardRemoval`), S08 to S11, S30 (`TestStoredCardRefresh`), S12, S14 (`TestCardGuard`), S13 (`TestStripeCustomerPerAccount`), S70 (`TestOrderExpiryClock`).
+- J12: OR-J12-S01 to S04, S15 (`TestPaymentMethodContracts`), S05 (`TestFinancialFailures`), S06 (`TestMerchantOwnedBasisTheoryCardLifecycle`), S07, S71 (`TestMerchantCardRemoval`), S08 to S11, S30 (`TestStoredCardRefresh`), S12, S14 (`TestCardGuard`), S13 (`TestStripeCustomerPerAccount`), S70 (`TestOrderExpiryClock`).
 - Custody and imports: OR-J06-S06 (`TestMerchantCustodyConfiguration`), OR-J38-S36 (`TestCardGuard`).
 - Agreements: OR-J14-S06 (`TestRenewalAgreements`), OR-J17-S04 (`TestCancellationRecoveryContracts`), OR-J26-S58 (`TestUsageBillingContracts`), OR-J16-S02 (`TestDunning`: a healthy card does not revive a terminal decline).
 
@@ -219,6 +215,6 @@ The only package test is `internal/integrations/basistheory/accountupdater_test.
 
 Gaps:
 
-- No scenario covers HyperSwitch, `card_entry: server` (`nmi_card_vault`), NMI Account Updater notices, Stripe card-updater events, re-consent after a brand change, or card edits.
+- No scenario covers a HyperSwitch capture or charge, `card_entry: server` (`nmi_card_vault`), NMI Account Updater notices, Stripe card-updater events, re-consent after a brand change, or card edits.
 - No test asserts the stored-credential fields NMI receives (`initiated_by`, `stored_credential_indicator`, `initial_transaction_id`), though `nmimock` records them.
-- A HyperSwitch save skips the card-testing ledger; the ledger, the `payment` bucket and the customer-action budget have no scenario here.
+- The `payment` bucket and the customer-action budget have no scenario here.

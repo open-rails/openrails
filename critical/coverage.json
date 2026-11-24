@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 506,
+  "scenario_count": 507,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1782,6 +1782,11 @@
       "id": "OR-J12-S14",
       "journey": "J12",
       "name": "A card number in any field of a card save or order payment but the typed card is refused before a provider sees it"
+    },
+    {
+      "id": "OR-J12-S15",
+      "journey": "J12",
+      "name": "A HyperSwitch card save consults the card-testing ledger: a blocked customer never reaches HyperSwitch"
     },
     {
       "id": "OR-J06-S30",

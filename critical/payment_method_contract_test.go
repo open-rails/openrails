@@ -5,10 +5,13 @@ package critical_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -33,6 +36,51 @@ func saveMethod(t *testing.T, a *authorityWorld, p *providerLedger, bearer, last
 }
 
 func TestPaymentMethodContracts(t *testing.T) {
+	t.Run("OR-J12-S15/a-hyperswitch-card-save-consults-the-card-testing-ledger", func(t *testing.T) {
+		// HyperSwitch answers nothing: a save that reaches it is counted and
+		// refused as unavailable.
+		var asked atomic.Int32
+		a, journal := newNMIWorld(t, func(w *world) {
+			hyperswitch := httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, _ *http.Request) {
+				asked.Add(1)
+				http.Error(out, "fixture answers nothing", http.StatusServiceUnavailable)
+			}))
+			t.Cleanup(hyperswitch.Close)
+			w.cfg.HyperSwitch = &openrails.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: hyperswitch.URL, SDKURL: hyperswitch.URL + "/sdk"}
+			merchant := cfgMerchant(w.cfg, "alpha")
+			merchant.Custodians = billing.Custodians{"hs": {Kind: billing.CardVaultHyperSwitch, Environment: billing.EnvironmentTest, AccountID: "merchant_critical",
+				Settings: map[string]any{"public_api_key": "pk_snd_critical", "profile_id": "pro_critical"}, Secrets: map[string]string{"api_key": "snd_critical_private"}}}
+			merchant.PSPs["hs"] = openrails.NMIPSP{GatewayID: "critical-hyperswitch", Environment: billing.EnvironmentTest, Custodian: "hs", SecurityKey: "critical-hs-key", WebhookSigningSecret: "critical-hs-webhook"}.PSPConfig()
+			setCfgMerchant(&w.cfg, "alpha", merchant)
+		})
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 2)
+		ids := map[string]billing.PSPID{}
+		for _, psp := range psps.Items {
+			ids[psp.Key] = psp.ID
+		}
+		save := func(key string) (int, []byte) {
+			return a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: ids["hs"],
+				BillingDetails: &billing.BillingDetails{Name: ptr("Alice Buyer"), Email: ptr("alice@critical.invalid")}}, map[string]string{"Idempotency-Key": key})
+		}
+		before := asked.Load()
+		status, raw := save("hyperswitch-unblocked")
+		require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
+		require.Equal(t, before+1, asked.Load(), "an unblocked customer's save asks HyperSwitch")
+		// Six cards the issuer refuses, saved at the PSP's own vault, block the
+		// customer for the window.
+		for i := range 6 {
+			token := journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "0002", Exp: "1235", Decline: "200"})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: ids["nmi"], Token: token})
+			require.Equal(t, http.StatusPaymentRequired, status, "decline %d: %s", i, raw)
+			require.Contains(t, string(raw), `"code":"card_declined"`)
+		}
+		status, raw = save("hyperswitch-blocked")
+		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
+		require.Contains(t, string(raw), `"code":"card_attempts_blocked"`)
+		require.Equal(t, before+1, asked.Load(), "a blocked customer's save never reaches HyperSwitch")
+	})
 	t.Run("OR-J12-S04/provider-detach-after-acceptance-preserves-payment-and-replay", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		saved := saveMethod(t, a, p, a.aliceToken, "4242")

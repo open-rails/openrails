@@ -120,7 +120,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 	defer req.Card.Zero()
-	if refuseCardNumber(r, req) {
+	if refuseCardNumber(r, req) || refuseBlockedCardAttempt(r, user.ID) {
 		return
 	}
 	key := strings.TrimSpace(r.Header("Idempotency-Key"))
@@ -244,9 +244,6 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 				r.APIError(api.Coded(billing.CodeInvalidParam, "platform card setup requires an available NMI PSP").WithParam("psp_id"))
 				return
 			}
-			if refuseBlockedCardAttempt(r, user.ID) {
-				return
-			}
 			if r.State.PurchaseService == nil {
 				r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 				return
@@ -284,9 +281,6 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 		}
 	} else if strings.TrimSpace(req.Token) == "" {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "token or card is required").WithParam("token"))
-		return
-	}
-	if refuseBlockedCardAttempt(r, user.ID) {
 		return
 	}
 	if mid, err := merchant.Require(r.Request.Context()); err == nil && pspRail(r, mid.UUID(), pspID) == string(models.RailStripe) {
