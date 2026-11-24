@@ -1530,6 +1530,7 @@
     "OR-J45-S03": [
       "TestDeclineCauses/OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud",
       "TestDeclineCauses/OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud/radar-block-waits-for-a-new-card",
+      "TestDeclineCauses/OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud/any-other-block-is-the-merchants",
       "TestDeclineCauses/OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud/issuer-fraud-is-the-issuers"
     ],
     "OR-J45-S04": [

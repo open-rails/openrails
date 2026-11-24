@@ -12,8 +12,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -464,8 +466,10 @@ func (s *StripeService) engineResult(ctx context.Context, p StripeEnginePaymentP
 	return r, nil
 }
 
-// radarBlock is the block reason of a charge Radar blocked (highest_risk_level,
-// rule, ...), read from an expanded latest_charge; "" otherwise.
+// radarBlock is the code of a charge Stripe blocked before the network, read
+// from an expanded latest_charge: its block reason (highest_risk_level,
+// rule, ...), or "blocked" for a reason without a mapping; "" for a charge
+// that was not blocked. Either way the decline is blocked_by_psp.
 func radarBlock(charge json.RawMessage) string {
 	var ch struct {
 		Outcome struct {
@@ -476,7 +480,10 @@ func radarBlock(charge json.RawMessage) string {
 	if json.Unmarshal(charge, &ch) != nil || ch.Outcome.Type != "blocked" {
 		return ""
 	}
-	return strings.TrimSpace(ch.Outcome.Reason)
+	if reason := strings.TrimSpace(ch.Outcome.Reason); decline.Classify("stripe", reason).Reason == billing.DeclineBlockedByPSP {
+		return reason
+	}
+	return "blocked"
 }
 func (s *StripeService) engineReceipt(ctx context.Context, p StripeEnginePaymentParams, pi stripeEngineIntent) (StripeEngineReceipt, error) {
 	ref := rawID(pi.LatestCharge)

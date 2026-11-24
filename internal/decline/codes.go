@@ -160,6 +160,7 @@ var stripeCodes = map[string]billing.DeclineReason{
 	"elevated_risk_level":              billing.DeclineBlockedByPSP,
 	"rule":                             billing.DeclineBlockedByPSP,
 	"low_probability_of_authorization": billing.DeclineBlockedByPSP,
+	"blocked":                          billing.DeclineBlockedByPSP, // any other block reason
 	"processing_error":                 billing.DeclineProcessingError,
 	"issuer_not_available":             billing.DeclineIssuerUnavailable,
 	"duplicate_transaction":            billing.DeclineDuplicateTransaction,

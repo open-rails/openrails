@@ -179,6 +179,8 @@ func TestDeclineCauses(t *testing.T) {
 			// Radar stops the charge before the network; its error still reads
 			// as a fraudulent decline.
 			{"radar-block-waits-for-a-new-card", func(p *providerLedger) { p.core.SetRadarBlock("4242", "highest_risk_level") }, "highest_risk_level", billing.DeclineBlockedByPSP, "fix_payment_method"},
+			// A block reason no table knows is a block all the same.
+			{"any-other-block-is-the-merchants", func(p *providerLedger) { p.core.SetRadarBlock("4242", "a_new_radar_reason") }, "blocked", billing.DeclineBlockedByPSP, "fix_payment_method"},
 			{"issuer-fraud-is-the-issuers", func(p *providerLedger) { p.core.SetDecline("4242", "fraudulent") }, "fraudulent", billing.DeclineFraudulent, "non_recoverable"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {

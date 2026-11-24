@@ -2394,11 +2394,6 @@
       "name": "An NMI catch-all decline is classified by the issuer's code the Query API reports: a never-retry code waits for a new card and never cancels, a retryable one keeps the schedule"
     },
     {
-      "id": "OR-J45-S03",
-      "journey": "J45",
-      "name": "A Stripe renewal Radar blocked is the merchant's refusal and waits for a new card; an issuer's fraudulent decline stays the issuer's"
-    },
-    {
       "id": "OR-J45-S04",
       "journey": "J45",
       "name": "Newly mapped codes decline with their cause: NMI 461 is the merchant account's brand, and Stripe's do_not_try_again, new_account_information_available, service_not_allowed, mobile_device_authentication_required, invalid_amount and testmode_decline have their reasons"
@@ -2422,6 +2417,11 @@
       "id": "OR-J45-S11",
       "journey": "J45",
       "name": "An engine NMI renewal declined with 200 reads the issuer's code after the decline, or from the order read when the answer was lost; a failed read keeps NMI's own code"
+    },
+    {
+      "id": "OR-J45-S03",
+      "journey": "J45",
+      "name": "A Stripe renewal Radar blocked is the merchant's refusal and waits for a new card; an issuer's fraudulent decline stays the issuer's"
     }
   ]
 }
