@@ -5,7 +5,7 @@ credit packs and deposits a customer buys, and the credit a recurring plan
 delivers each paid cycle. Usage, admissions and running charges spend the lots
 soonest expiry first; a lot can lapse, be revoked, or be reversed by a
 refund or chargeback of the payment that bought it. Each lot is a `grants` row;
-every movement of its value is a [ledger](ledger.md) transfer carrying its
+every movement of its value is a [ledger](books.md) transfer carrying its
 `grant_id`.
 
 ## Concepts

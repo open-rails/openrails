@@ -51,7 +51,7 @@ Every movement funnels through `Ledger.ApplyIdempotent`
    surfaces as `ledger.ErrInsufficientFunds`.
 4. A transfer that names a customer calls `WatchChange` in the same transaction,
    which queues a balance look when the change crosses a line or the watch looks
-   at every change (see [prepaid credits](prepaid-credits.md)).
+   at every change (see [prepaid credits](credits.md)).
 
 Facts never change. `immutable_ledger_transfers` refuses UPDATE, DELETE and
 TRUNCATE; `guard_ledger_account_facts` lets only the nested counter trigger touch

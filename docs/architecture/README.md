@@ -9,7 +9,7 @@ people changing or reviewing OpenRails.
 
 | System | Page |
 |---|---|
-| Ledger | [ledger.md](ledger.md) |
+| Ledger | [ledger.md](books.md) |
 | Catalog | [catalog.md](catalog.md) |
 | Orders and checkout | [orders.md](orders.md) |
 | Subscriptions | [subscriptions.md](subscriptions.md) |
@@ -17,7 +17,7 @@ people changing or reviewing OpenRails.
 | Refunds and disputes | [refunds.md](refunds.md) |
 | Usage billing | [usage-billing.md](usage-billing.md) |
 | Entitlements and limits | [entitlements.md](entitlements.md) |
-| Prepaid credits | [prepaid-credits.md](prepaid-credits.md) |
+| Prepaid credits | [prepaid-credits.md](credits.md) |
 | Payment providers | [payment-providers.md](payment-providers.md) |
 | Cards and payment methods | [payment-methods.md](payment-methods.md) |
 | Imports | [imports.md](imports.md) |
