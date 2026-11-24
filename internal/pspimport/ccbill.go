@@ -59,7 +59,7 @@ func (s *ccbillSource) roster(ctx context.Context) ([]staged, error) {
 	return out, nil
 }
 
-func (s *ccbillSource) history(ctx context.Context, since, until time.Time) ([]staged, error) {
+func (s *ccbillSource) history(ctx context.Context, since, until time.Time, _ bool) ([]staged, error) {
 	var out []staged
 	for from := since; from.Before(until); from = from.Add(dataLinkPeriod) {
 		to := from.Add(dataLinkPeriod)

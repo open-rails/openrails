@@ -85,6 +85,7 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 		return nil, fmt.Errorf("nmi transaction query: %w", err)
 	}
 	snap.Transactions = txns
+	// Exhaustive for the window: its read has no end (fetchTransactions).
 	snap.Coverage.TransactionsExhaustive = true
 	snap.Coverage.TransactionsPaginatedComplete = true
 	snap.Coverage.TransactionWindowSince = timePtrIfSet(params.Since)
@@ -225,18 +226,34 @@ func parseNMIV5Date(raw string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unrecognized v5 date %q", raw)
 }
 
-// fetchTransactions runs a date-ranged transaction search. No condition or
-// action_type filter is sent, so NMI returns transactions in EVERY condition
-// — including failed/declined ones, which the dunning-forensics report needs.
+// fetchTransactions reads the charges, declines and refunds NMI dated in
+// [Since, Until]. NMI's start_date and end_date select a transaction by its
+// last change, which a later action (settlement, refund, void) moves past any
+// window: the read has no end and keeps the actions dated inside the window.
+// No condition or action_type is sent, so declines are included.
 func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams, filter nmi.QueryFilter) ([]RemoteTransaction, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	if !params.Since.IsZero() {
 		filter.StartDate = params.Since.UTC().Format(nmi.QueryTimeFormat)
 	}
-	if !params.Until.IsZero() {
-		filter.EndDate = params.Until.UTC().Format(nmi.QueryTimeFormat)
+	since, until := params.Since.Truncate(time.Second), params.Until
+	txns, err := f.readTransactions(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := txns[:0]
+	for _, t := range txns {
+		if (params.Since.IsZero() || !t.OccurredAt.Before(since)) && (until.IsZero() || !t.OccurredAt.After(until)) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+// readTransactions pages the transaction report filter selects, each
+// transaction's actions normalized.
+func (f *NMIFetcher) readTransactions(ctx context.Context, filter nmi.QueryFilter) ([]RemoteTransaction, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	filter.ResultLimit = nmiQueryPageLimit
 	var out []RemoteTransaction
@@ -273,14 +290,23 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams, 
 	return out, nil
 }
 
-// NMITransactions reads the transaction report for [since, until), each
-// charge, decline and refund normalized as the pull reads it.
-func NMITransactions(ctx context.Context, client *nmi.NMIClient, since, until time.Time) ([]RemoteTransaction, error) {
-	return NewNMIFetcher(client).fetchTransactions(ctx, FetchParams{Since: since, Until: until}, nmi.QueryFilter{})
+// NMIChangedTransactions reads every action of the transactions NMI last
+// changed in [since, until); a zero until reads through now. Consecutive
+// windows read through now list each transaction once, in the window of its
+// last change, wherever its actions are dated.
+func NMIChangedTransactions(ctx context.Context, client *nmi.NMIClient, since, until time.Time) ([]RemoteTransaction, error) {
+	var filter nmi.QueryFilter
+	if !since.IsZero() {
+		filter.StartDate = since.UTC().Format(nmi.QueryTimeFormat)
+	}
+	if !until.IsZero() {
+		filter.EndDate = until.UTC().Add(-time.Second).Format(nmi.QueryTimeFormat) // end_date is inclusive
+	}
+	return NewNMIFetcher(client).readTransactions(ctx, filter)
 }
 
-// NMISubscriptionTransactions reads one subscription's transactions since
-// since, normalized as the pull reads them.
+// NMISubscriptionTransactions reads one subscription's transactions dated
+// since since, normalized as the pull reads them.
 func NMISubscriptionTransactions(ctx context.Context, client *nmi.NMIClient, subscriptionID string, since time.Time) ([]RemoteTransaction, error) {
 	return NewNMIFetcher(client).fetchTransactions(ctx, FetchParams{Since: since}, nmi.QueryFilter{SubscriptionID: subscriptionID})
 }

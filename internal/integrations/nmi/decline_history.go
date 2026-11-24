@@ -48,8 +48,9 @@ type DeclineHistory struct {
 
 // DeclineHistory counts the card verifications, one-off sales and scheduled
 // rebills NMI answered in [since, until), once each in the month made. Read
-// only. The Query API selects by last change, so until should be now; it reads
-// one calendar month per query, oldest first, in pages of QueryPageLimit.
+// only. The Query API selects by last change, which a later action moves
+// past until, so it reads the changes of one calendar month per query, oldest
+// first, the last through now, in pages of QueryPageLimit.
 func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) (DeclineHistory, error) {
 	h := DeclineHistory{Since: since.UTC(), Until: until.UTC()}
 	counts := map[HistoryCount]int{}
@@ -59,7 +60,7 @@ func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) 
 		if to.After(h.Until) {
 			to = h.Until
 		}
-		if err := c.readHistoryWindow(ctx, from, to, &h, counts, seen); err != nil {
+		if err := c.readHistoryWindow(ctx, from, to, !to.Before(h.Until), &h, counts, seen); err != nil {
 			return DeclineHistory{}, err
 		}
 		from = to
@@ -74,10 +75,13 @@ func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) 
 	return h, nil
 }
 
-// readHistoryWindow pages the transactions last changed in [from, to).
-func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, h *DeclineHistory, counts map[HistoryCount]int, seen map[string]bool) error {
-	// end_date is inclusive, to the second.
-	filter := QueryFilter{StartDate: from.Format(QueryTimeFormat), EndDate: to.Add(-time.Second).Format(QueryTimeFormat), ResultLimit: QueryPageLimit}
+// readHistoryWindow pages the transactions last changed in [from, to), or
+// since from when last.
+func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, last bool, h *DeclineHistory, counts map[HistoryCount]int, seen map[string]bool) error {
+	filter := QueryFilter{StartDate: from.Format(QueryTimeFormat), ResultLimit: QueryPageLimit}
+	if !last {
+		filter.EndDate = to.Add(-time.Second).Format(QueryTimeFormat) // end_date is inclusive
+	}
 	firsts := map[string]bool{}
 	for filter.PageNumber = 0; ; filter.PageNumber++ {
 		batch, err := c.TransactionReport(ctx, filter)

@@ -1354,6 +1354,9 @@
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],
+    "OR-J15-S73": [
+      "TestProviderTime/OR-J15-S73/prune-keeps-an-nmi-sale-settled-after-its-window"
+    ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],

@@ -206,7 +206,7 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		if until.After(*row.PulledAt) {
 			until = *row.PulledAt
 		}
-		recs, err := src.history(ctx, through, until)
+		recs, err := src.history(ctx, through, until, !until.Before(*row.PulledAt))
 		if err != nil {
 			return err
 		}

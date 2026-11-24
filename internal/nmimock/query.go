@@ -117,7 +117,8 @@ func binFor(c Card) string {
 
 // search is the transaction report: every sale, validation and refund in
 // arrival order, filtered as NMI filters and paged by result_limit and
-// zero-based page_number. Like NMI's, it names no schedule.
+// zero-based page_number. Like NMI's, it names no schedule, and start_date
+// and end_date select a transaction by its last change.
 func (m *Mock) search(form url.Values) string {
 	match := func(field string, value string) bool {
 		want := form.Get(field)
@@ -175,7 +176,7 @@ func (m *Mock) search(form url.Values) string {
 		if v := m.vaults[s.Vault]; v != nil {
 			txn.Email = v.Email
 		}
-		add(txn, s.At, s.ScheduleID)
+		add(txn, s.changed(), s.ScheduleID)
 	}
 	for _, r := range m.refunds {
 		s := r.Sale

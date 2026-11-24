@@ -48,5 +48,12 @@
 // or in bulk above 200. nmi_history_months holds a daily read of 25 months of
 // transaction reports, the source of `openrails nmi decline-report`.
 //
+// The Query API's start_date and end_date select a transaction by its last
+// change, which a settlement, refund or void moves, not by when it was made.
+// A read of one window (a pull, `openrails prune`, a bulk verification) has
+// no end and keeps the actions dated in the window; reads of consecutive
+// windows (an import's history, the decline history) read each by last
+// change, the last through now.
+//
 // Tests use openrailstest/nmimock. Its package comment has the wiring.
 package nmi

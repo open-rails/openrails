@@ -113,12 +113,22 @@ type Sale struct {
 	// Voided sales never settle: no money moved.
 	Voided bool
 	At     time.Time
+	// Changed is the transaction's last change (a settlement, refund or
+	// void); zero is At. The Query API's start_date and end_date select by it.
+	Changed time.Time
 	// Hidden keeps the sale out of the Query API until Reveal.
 	Hidden bool
 }
 
 // Approved reports whether the sale moved money.
 func (s Sale) Approved() bool { return s.Declined == "" }
+
+func (s Sale) changed() time.Time {
+	if s.Changed.After(s.At) {
+		return s.Changed
+	}
+	return s.At
+}
 
 // Validation is a Direct Post type=validate card verification.
 type Validation struct {
