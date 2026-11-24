@@ -231,9 +231,11 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	}
 	// @period_start is the start of the row's bucket, or of the range.
 	if strings.Contains(sql, "@period_start") {
-		start := arg(plan.From) + "::timestamptz"
+		var start string
 		if plan.HasTime {
 			start = bucketExpr(spec, arg(plan.Grain), arg(plan.zone().String()))
+		} else {
+			start = arg(plan.From) + "::timestamptz"
 		}
 		sql = strings.ReplaceAll(sql, "@period_start", start)
 	}

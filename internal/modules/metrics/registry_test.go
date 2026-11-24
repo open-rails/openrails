@@ -3,6 +3,7 @@ package metrics
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -110,27 +111,40 @@ func TestEveryFamilyNamesItsMerchant(t *testing.T) {
 	}
 }
 
-// Every public measure compiles, each statement scoped to the merchant.
+// Every public measure compiles, over the range and by time, each statement
+// scoped to the merchant and naming every argument it binds: PostgreSQL
+// cannot type one it never reads.
 func TestEveryMeasureCompiles(t *testing.T) {
 	now := time.Date(2026, time.November, 15, 12, 0, 0, 0, time.UTC)
 	for _, m := range Measures {
 		if m.Internal {
 			continue
 		}
-		q := Query{Measures: []string{m.Name}, Range: &QueryRange{Last: "7d"}}
-		plan, verr := ValidateAt(&q, now)
-		if verr != nil {
-			t.Errorf("%s: %v", m.Name, verr)
-			continue
-		}
-		stmts, err := compile(plan, uuid.New(), nil)
-		if err != nil {
-			t.Errorf("%s: %v", m.Name, err)
-			continue
-		}
-		for _, st := range stmts {
-			if !regexp.MustCompile(`[a-z]+\.merchant_id = \$\d`).MatchString(st.sql) {
-				t.Errorf("%s: statement over %s is not scoped to its merchant:\n%s", m.Name, st.family, st.sql)
+		for i, q := range []Query{
+			{Measures: []string{m.Name}, Range: &QueryRange{Last: "7d"}},
+			{Measures: []string{m.Name}, By: []string{"time"}, Grain: "auto", Range: &QueryRange{Last: "30d"}},
+		} {
+			plan, verr := ValidateAt(&q, now)
+			if verr != nil {
+				if i == 0 { // a measure may have no time series
+					t.Errorf("%s: %v", m.Name, verr)
+				}
+				continue
+			}
+			stmts, err := compile(plan, uuid.New(), nil)
+			if err != nil {
+				t.Errorf("%s by %v: %v", m.Name, q.By, err)
+				continue
+			}
+			for _, st := range stmts {
+				if !regexp.MustCompile(`[a-z]+\.merchant_id = \$\d`).MatchString(st.sql) {
+					t.Errorf("%s: statement over %s is not scoped to its merchant:\n%s", m.Name, st.family, st.sql)
+				}
+				for n := range st.args {
+					if !regexp.MustCompile(`\$` + strconv.Itoa(n+1) + `\b`).MatchString(st.sql) {
+						t.Errorf("%s by %v: statement over %s binds $%d and never reads it:\n%s", m.Name, q.By, st.family, n+1, st.sql)
+					}
+				}
 			}
 		}
 	}
