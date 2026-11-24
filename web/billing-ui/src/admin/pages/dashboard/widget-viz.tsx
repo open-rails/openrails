@@ -19,7 +19,7 @@ import {
   LineChart,
   Pie,
   PieChart,
-  ReferenceArea,
+  LabelList,
   ReferenceLine,
   XAxis,
   YAxis,
@@ -74,6 +74,7 @@ import {
   measureLabel,
   type Registry,
 } from "./registry"
+import { band, inForce, monthOf, nearest, reached, severest } from "./levels"
 
 export function WidgetVizView({
   viz,
@@ -209,6 +210,11 @@ function KpiViz({
   const { text: adminText } = useAdminUI()
   const idx = indexColumns(result.columns)
   const primary = idx.measures[0]
+  // A program's ratio reads its level from the dispute monitor, whose
+  // minimum counts the ratio alone does not know.
+  const program = primary ? registry.measure(primary.name)?.program : undefined
+  const end = new Date(Date.parse(result.range.to) - 1).toISOString()
+  const monitor = useMonitorLevel(program, end)
   if (!primary) return <Empty label={adminText("no measure")} />
   const row = result.rows[0]
   const currency = row ? rowCurrency(row, idx, fallback) : fallback
@@ -217,18 +223,23 @@ function KpiViz({
       ? "—"
       : formatMeasure(row ? row[primary.index] : 0, primary.unit, currency)
   const delta = row ? statDelta(result, row, primary.index) : null
-  const thresholds = registry.thresholds(primary.name)
+  const direction = registry.direction(primary.name)
+  const levels = inForce(
+    registry.thresholds(primary.name),
+    monthOf(end, result.timezone)
+  )
   const reading = row ? Number(row[primary.index] ?? NaN) : NaN
-  // A network's dispute program levels: the highest the value reached reads
-  // as held, the top one as failed.
-  const levels = [...thresholds].sort((a, b) => a.value - b.value)
-  const crossed = levels.filter((t) => reading >= t.value).at(-1)
-  const lowest = levels[0]
+  const passed = reached(levels, reading, direction)
+  const crossed = program
+    ? levels.find((l) => l.label === monitor?.replaceAll("_", " "))
+    : passed
+  // The severest level reads as failed, any other as held.
   const tone = crossed
-    ? crossed === levels.at(-1)
+    ? crossed === severest(levels, direction)
       ? "text-failed"
       : "text-held"
     : undefined
+  const ahead = nearest(levels, direction)
   const line = spark ? pivotTimeSeries(spark, fallback) : undefined
   const series = line?.series.find(
     (s) =>
@@ -261,9 +272,9 @@ function KpiViz({
           against={comparedWith(result)}
         />
       ) : null}
-      {thresholds.length > 0 ? (
-        // One line: the level reached, or the first one ahead; every level
-        // on hover and as dashed lines in the sparkline.
+      {levels.length > 0 ? (
+        // One line: the level reached, or the first one ahead; the levels in
+        // force on hover and as dashed lines in the sparkline.
         <span
           className={cn(
             "truncate text-[0.6875rem] tabular-nums",
@@ -278,27 +289,49 @@ function KpiViz({
               <AdminMessage id={"Reached "} />
               {crossed.label} {formatMeasure(crossed.value, primary.unit)}
             </>
+          ) : passed ? (
+            <>
+              <AdminMessage id={"Past "} />
+              {passed.label} {formatMeasure(passed.value, primary.unit)}
+              <AdminMessage id={"; minimums not met"} />
+            </>
           ) : (
             <>
-              <AdminMessage id={"Below "} />
-              {lowest!.label} {formatMeasure(lowest!.value, primary.unit)}
+              <AdminMessage
+                id={direction === "up_is_good" ? "Above " : "Below "}
+              />
+              {ahead!.label} {formatMeasure(ahead!.value, primary.unit)}
             </>
           )}
         </span>
       ) : null}
       {line && series && line.data.length > 1 ? (
-        <Sparkline
-          data={line.data}
-          dataKey={series.key}
-          thresholds={registry.thresholds(primary.name)}
-        />
+        <Sparkline data={line.data} dataKey={series.key} thresholds={levels} />
       ) : null}
     </div>
   )
 }
 
-// A sparkline draws its measure's thresholds (the networks' dispute levels),
-// unlabelled.
+// useMonitorLevel is the severest level the dispute monitor computed for
+// program in the month at falls in, across the merchant's PSPs; undefined
+// without a program or a level.
+function useMonitorLevel(program: string | undefined, at: string) {
+  const { adminQueries } = useAdminServices()
+  const { data } = useQuery({
+    ...adminQueries.disputePrograms(at),
+    enabled: Boolean(program),
+    meta: undefined,
+  })
+  const order = ["warning", "excessive", "high_excessive"]
+  return (data?.data ?? [])
+    .filter((s) => s.program === program && s.level !== "none")
+    .map((s) => s.level)
+    .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+    .at(-1)
+}
+
+// A sparkline draws its measure's levels in force (the networks' dispute
+// levels), unlabelled.
 function Sparkline({
   data,
   dataKey,
@@ -429,8 +462,8 @@ function StatViz({
 }
 
 // seriesLabel names a series for people: a bare measure key
-// (new_subscriptions) reads "New subscriptions"; a dimension value (a rail, a
-// currency) stays as it is.
+// (mrr_movements) reads "MRR movements"; a series by dimension reads its
+// values as pivotTimeSeries words them.
 function seriesLabel(series?: PivotSeries): string | undefined {
   if (!series) return undefined
   return series.label === series.measure
@@ -511,6 +544,7 @@ function TimeSeriesViz({
         data={data}
         series={series}
         registry={registry}
+        timezone={result.timezone}
       />
     )
   return (
@@ -526,6 +560,7 @@ function TimeSeriesViz({
               data={data}
               series={group.series}
               registry={registry}
+              timezone={result.timezone}
             />
           </div>
         </section>
@@ -543,7 +578,12 @@ function TimeSeriesChart({
   data,
   series,
   registry,
-}: Pivoted & { viz: "line" | "area" | "bar"; registry: Registry }) {
+  timezone,
+}: Pivoted & {
+  viz: "line" | "area" | "bar"
+  registry: Registry
+  timezone?: string
+}) {
   const config: ChartConfig = {}
   series.forEach((s, i) => {
     config[s.key] = { label: seriesLabel(s), color: chartColor(i) }
@@ -551,6 +591,102 @@ function TimeSeriesChart({
   const unit = series[0]?.unit
   const tickFormatter = (v: number) =>
     formatMeasure(v, unit, series[0]?.currency)
+  // A measure's levels (a network's dispute program levels) cross its line,
+  // each bucket against the levels in force in its month; alone on its
+  // chart, each level shades the band towards worse.
+  const months = data.map((row) => monthOf(String(row.bucketISO), timezone))
+  const measures = [...new Set(series.map((s) => s.measure))]
+  const levelled = measures
+    .map((measure) => ({
+      measure,
+      direction: registry.direction(measure),
+      prefix: measures.length > 1 ? `${measureLabel(measure)} ` : "",
+      byRow: months.map((m) => inForce(registry.thresholds(measure), m)),
+    }))
+    .filter((l) => l.byRow.some((levels) => levels.length > 0))
+  const peak = Math.max(
+    0,
+    ...series.flatMap((s) => data.map((row) => Number(row[s.key] ?? 0))),
+    ...levelled.flatMap((l) => l.byRow.flat().map((t) => t.value))
+  )
+  const top = peak > 0 ? rateAxisTop(peak) : 1
+  const bands = levelled.length === 1
+  const plotted = levelled.length
+    ? data.map((row, r) => {
+        const out: Record<string, unknown> = { ...row }
+        for (const l of levelled)
+          l.byRow[r].forEach((t, i) => {
+            out[`level:${l.measure}:${t.label}`] = t.value
+            if (bands)
+              out[`band:${l.measure}:${t.label}`] = band(
+                l.byRow[r],
+                i,
+                l.direction,
+                top
+              )
+          })
+        return out
+      })
+    : data
+  const thresholds = levelled.flatMap((l) => {
+    const labels = [
+      ...new Map(l.byRow.flat().map((t) => [t.label, t])).values(),
+    ].sort((a, b) => a.value - b.value)
+    const worst = severest(labels, l.direction)?.label
+    return labels.flatMap((t) => {
+      const tone = t.label === worst ? "var(--failed)" : "var(--held)"
+      const key = `${l.measure}:${t.label}`
+      const last = l.byRow.findLastIndex((levels) =>
+        levels.some((x) => x.label === t.label)
+      )
+      return [
+        bands ? (
+          <Area
+            key={`band:${key}`}
+            dataKey={`band:${key}`}
+            type="step"
+            stroke="none"
+            fill={tone}
+            fillOpacity={t.label === worst ? 0.1 : 0.07}
+            isAnimationActive={false}
+            activeDot={false}
+            tooltipType="none"
+            legendType="none"
+          />
+        ) : null,
+        <Line
+          key={`level:${key}`}
+          dataKey={`level:${key}`}
+          type="step"
+          stroke={tone}
+          strokeWidth={1}
+          strokeDasharray="4 4"
+          dot={false}
+          activeDot={false}
+          isAnimationActive={false}
+          tooltipType="none"
+          legendType="none"
+        >
+          <LabelList
+            dataKey={`level:${key}`}
+            content={(props: { index?: number; x?: unknown; y?: unknown }) =>
+              props.index === last ? (
+                <text
+                  x={Number(props.x)}
+                  y={Number(props.y) - 4}
+                  textAnchor="end"
+                  fontSize={10}
+                  fill="var(--muted-foreground)"
+                >
+                  {l.prefix + t.label}
+                </text>
+              ) : null
+            }
+          />
+        </Line>,
+      ]
+    })
+  })
   const chartProps = { data, margin: { left: 4, right: 4, top: 4, bottom: 0 } }
   const axes = (
     <>
@@ -572,52 +708,15 @@ function TimeSeriesChart({
         allowDecimals={unit === "money" || unit === "ratio" || unit === "days"}
         domain={
           unit === "ratio"
-            ? [0, (max: number) => (max > 0 ? rateAxisTop(max) : 1)]
+            ? levelled.length
+              ? [0, top]
+              : [0, (max: number) => (max > 0 ? rateAxisTop(max) : 1)]
             : undefined
         }
       />
     </>
   )
   const tooltip = <ChartTooltip content={<MetricTooltip series={series} />} />
-  // A measure's thresholds (a network's dispute program levels) cross its
-  // line; alone on its chart, each level shades the band up to the next.
-  const measures = [...new Set(series.map((s) => s.measure))]
-  const thresholds = measures.flatMap((measure) => {
-    const levels = [...registry.thresholds(measure)].sort(
-      (a, b) => a.value - b.value
-    )
-    const prefix = measures.length > 1 ? `${measureLabel(measure)} ` : ""
-    return levels.flatMap((t, i) => {
-      const top = i === levels.length - 1
-      const tone = top ? "var(--failed)" : "var(--held)"
-      return [
-        measures.length === 1 ? (
-          <ReferenceArea
-            key={`${measure}:${t.value}:band`}
-            y1={t.value}
-            // The top band runs to the chart's top edge, clipped there.
-            y2={levels[i + 1]?.value ?? Math.max(1, t.value * 10)}
-            fill={tone}
-            fillOpacity={top ? 0.1 : 0.07}
-            ifOverflow="hidden"
-          />
-        ) : null,
-        <ReferenceLine
-          key={`${measure}:${t.value}`}
-          y={t.value}
-          stroke={tone}
-          strokeDasharray="4 4"
-          ifOverflow="extendDomain"
-          label={{
-            value: prefix + t.label,
-            position: "insideTopRight",
-            fontSize: 10,
-            fill: "var(--muted-foreground)",
-          }}
-        />,
-      ]
-    })
-  })
   // Signed stacked bars (MRR movements, cash by kind) draw their net: one
   // line per measure whose series go both ways.
   const nets =
@@ -674,7 +773,7 @@ function TimeSeriesChart({
   return (
     <ChartContainer config={config} className="h-full min-h-24 w-full">
       {viz === "line" ? (
-        <LineChart {...chartProps}>
+        <ComposedChart {...chartProps} data={plotted}>
           {axes}
           {tooltip}
           {legend}
@@ -692,7 +791,7 @@ function TimeSeriesChart({
               dot={s.unit === "ratio" ? { r: 2.5 } : false}
             />
           ))}
-        </LineChart>
+        </ComposedChart>
       ) : viz === "area" ? (
         // Signed values stack apart: refunds below the axis, sales above.
         <AreaChart {...chartProps} stackOffset="sign">

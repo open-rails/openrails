@@ -65,6 +65,8 @@ export const billingAdminMessages = {
   ", an edit set": ", an edit set",
   ", before another action.": ", before another action.",
   ", deleted: ": ", deleted: ",
+  "; minimums not met": "; minimums not met",
+  "Past ": "Past ",
   ".": ".",
   ". Active holds may prevent revocation. Payment refunds are managed separately.":
     ". Active holds may prevent revocation. Payment refunds are managed separately.",
@@ -91,6 +93,7 @@ export const billingAdminMessages = {
     "A product is the thing a customer gets. You set what it costs afterwards, by adding a price to it.",
   "A reprice_scheduled notice is queued for every affected subscriber as soon as you confirm.":
     "A reprice_scheduled notice is queued for every affected subscriber as soon as you confirm.",
+  "Above ": "Above ",
   "Access duration": "Access duration",
   "Access, not paying": "Access, not paying",
   "Account ID": "Account ID",
