@@ -210,7 +210,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
   state), stated in its table comment; the `retention` package doc lists the periods.
   `limit_holds` and `limit_hold_parts` are partitioned by month, so every read of
-  them names a time range. Usage keeps no events: settlement writes aggregates only.
+  them names a time range.
 - External writes are `provider_intents` and their write-ahead `operation_log`; per-PSP state is
   `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
   with its `order_lines`, provider-run renewals included (`billing.Order`'s doc);
@@ -218,9 +218,11 @@ through `host-four`; these are placeholders, not customer or repository names.
   charges its own metered price with a `running_charges` row.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 - Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded
-  migrations); money stays in PostgreSQL. Whether `Deps.ClickHouse` is set decides usage: without
-  it the event-backed routes (`Route.EventStore`), catalog declarations and settings answer
-  409 `event_store_required`.
+  migrations); money stays in PostgreSQL. Usage posts to the ledger at each month's end in
+  `accounting.timezone` and before any other movement of the balance, as the period's total
+  price less earlier postings (`usage_postings`); money reads use `FINAL`. Whether
+  `Deps.ClickHouse` is set decides usage: without it the event-backed routes
+  (`Route.EventStore`), catalog declarations and settings answer 409 `event_store_required`.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
   Hard deletes only for privacy erasure and derived or short-lived rows.
 - Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and
