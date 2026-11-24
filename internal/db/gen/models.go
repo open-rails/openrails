@@ -780,6 +780,8 @@ type BillingLedgerTransfer struct {
 	OrderLineID *uuid.UUID
 	// The product a general-ledger transfer belongs to. No foreign key (ledger purity).
 	ProductID *uuid.UUID
+	// The revenue schedule whose deferred revenue a general-ledger transfer funds, recognises or reduces. No foreign key (ledger purity).
+	RevenueScheduleID *uuid.UUID
 }
 
 // What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters, and settling it refuses the commit when it crosses that account's sign rule. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
@@ -2094,6 +2096,41 @@ type BillingReconciliationState struct {
 	SourceDomain    string
 	FullyReconciled bool
 	UpdatedAt       time.Time
+}
+
+// One row per paid order line whose revenue the general ledger defers: what was funded (credited to deferred_revenue), what has been recognised, and over what service. A ratable schedule recognises by elapsed service at every midnight on the 1st in the merchant's accounting timezone and at its end; a point-in-time one at once. Retention: permanent, never pruned.
+type BillingRevenueSchedule struct {
+	MerchantID      uuid.UUID
+	ID              uuid.UUID
+	CustomerID      uuid.UUID
+	Currency        string
+	OrderID         uuid.UUID
+	OrderLineID     uuid.UUID
+	SubscriptionID  *uuid.UUID
+	ProductAccessID *uuid.UUID
+	ProductID       *uuid.UUID
+	PriceID         *uuid.UUID
+	Method          string
+	// The general-ledger revenue account recognition credits.
+	RevenueAccount string
+	// The net transaction price allocated to the line: cash applied and non-cash settlement, less later reductions.
+	Funded int64
+	// What recognition has moved from deferred_revenue to revenue_account, less refund catch-ups.
+	RecognizedNet   int64
+	ServiceStartsAt time.Time
+	ServiceEndsAt   time.Time
+	// For service sold in calendar months: their number. Each month recognises an equal share, linear within it; NULL recognises by elapsed time over the whole service.
+	ServiceMonths *int32
+	// When the service ended before service_ends_at (an immediate cancellation, a revocation): what remains unrecognised then is forfeited to revenue.
+	EndedAt *time.Time
+	// The instant recognition has reached: the application, or the last boundary posted.
+	RecognizedThroughAt time.Time
+	// When the schedule is next due to the revenue_recognition job; NULL once fully recognised. An early end makes it due then.
+	NextRecognitionAt *time.Time
+	// How many forfeits an undone end took back: the generation of the schedule's termination and reinstatement coordinates, so an end repeated at one instant posts again.
+	Reinstatements int32
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // One row per running charge: a customer charged rate_per_hour (native units of currency) from started_at until stopped_at. No row changes while it runs; a posting moves what accrued through posted_through_at to the ledger, and a stopped charge is posted through stopped_at. Retention: permanent, never pruned.

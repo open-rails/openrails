@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -333,9 +334,14 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		if in.PaidAt != nil {
 			paidAt = in.PaidAt.UTC().Truncate(time.Microsecond)
 		}
-		// The owed payment settles the arrears liability (DR
-		// units_sold / CR customer_owed) at the remittance's
-		// unique coordinate.
+		// The money arrives (DR external_receipts / CR unapplied_cash),
+		// then the owed payment settles the arrears liability (DR
+		// units_sold / CR customer_owed) at the remittance's unique
+		// coordinate.
+		id := uuidutil.NewV7()
+		if e := books.New(q, mid.UUID()).Receive(ctx, books.Receipt{Payment: id, Customer: order.CustomerID, Order: &in.OrderID, Amount: in.Amount, Currency: order.Currency, At: paidAt}); e != nil {
+			return e
+		}
 		coord := ledger.Coord{Operation: ledger.OpManualOrderPayment, Source: "manual_invoice_payment", SourceID: in.TransactionID}
 		tr, e := s.moneyLedger(q, mid.UUID()).PayOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), in.Amount, coord, &in.OrderID)
 		if e != nil {
@@ -344,7 +350,6 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		if tr.Amount != in.Amount || tr.OrderID == nil || *tr.OrderID != in.OrderID {
 			return billing.ErrIdempotencyKeyReused
 		}
-		id := uuidutil.NewV7()
 		if e := q.InsertOrderPayment(ctx, gen.InsertOrderPaymentParams{ID: id, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: in.OrderID,
 			LedgerTransferID: tr.ID, Channel: string(models.ChannelManual), TransactionID: in.TransactionID, Amount: in.Amount, Currency: order.Currency, PaidAt: paidAt, Now: now}); e != nil {
 			if db.IsUniqueViolation(e) {

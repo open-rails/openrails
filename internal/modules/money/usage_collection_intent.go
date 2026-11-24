@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
@@ -502,6 +503,11 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		}
 		currency := normalizeCurrency(p.Currency)
 		ml := ledger.New(q, intent.MerchantID)
+		// The money arrives before it settles what is owed.
+		if err := books.New(q, intent.MerchantID).Receive(ctx, books.Receipt{Payment: p.PaymentID, Customer: p.CustomerID, Order: &p.OrderID,
+			PSP: &p.Instrument.PSPID, Amount: chargedAmount, Currency: currency, At: now}); err != nil {
+			return err
+		}
 		coord := ledger.Coord{Operation: ledger.OpOrderPayment, Source: "invoice_charge", SourceID: intent.IdempotencyKey}
 		transfer, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, Currency: currency,

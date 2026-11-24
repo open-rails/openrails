@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -29,6 +30,9 @@ import (
 //     general ledger never refuses one: it raises books.sign_breach.
 //  6. Side warnings: one with no sign rule whose type total sits opposite its
 //     class's normal side. Reported, never a failure.
+//  7. Applications: no payment's cash is applied beyond its receipt
+//     (books.CheckApplications), and every completed revenue line has its
+//     revenue schedule (books.CheckSchedules).
 //
 // Each takes an explicitly selected merchant; ledger-audit calls once per merchant.
 
@@ -163,12 +167,14 @@ type IntegrityReport struct {
 	Rollups      []RollupDrift        `json:"rollup_drifts"`
 	Signs        []SignBreach         `json:"sign_breaches"`
 	// Sides are warnings: they never make the report fail.
-	Sides []SideWarning `json:"side_warnings"`
+	Sides        []SideWarning           `json:"side_warnings"`
+	Applications []books.Overapplication `json:"overapplied_payments"`
+	Unscheduled  []books.UnscheduledLine `json:"unscheduled_lines"`
 }
 
 // OK reports whether the books are intact; side warnings do not count.
 func (r IntegrityReport) OK() bool {
-	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0
+	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0 && len(r.Applications) == 0 && len(r.Unscheduled) == 0
 }
 
 // CheckIntegrity runs every diagnostic for one explicitly selected merchant.
@@ -185,6 +191,12 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 		return r, err
 	}
 	if r.Rollups, err = CheckRollupDrift(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Applications, err = books.CheckApplications(ctx, q, merchant); err != nil {
+		return r, err
+	}
+	if r.Unscheduled, err = books.CheckSchedules(ctx, q, merchant); err != nil {
 		return r, err
 	}
 	if r.Signs, err = CheckSignBreaches(ctx, q, merchant); err != nil {
