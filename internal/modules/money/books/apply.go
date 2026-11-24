@@ -169,6 +169,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 			SubscriptionID: plan.subscription, ProductAccessID: plan.access, ProductID: line.ProductID, PriceID: line.PriceID,
 			Method: string(plan.method), RevenueAccount: string(plan.account), Funded: s.funded, RecognizedNet: s.recognized,
 			ServiceStartsAt: plan.service.Starts, ServiceEndsAt: plan.service.Ends, EndedAt: s.ended, RecognizedThroughAt: s.through, NextRecognitionAt: next,
+			Forfeited: s.forfeited,
 		}
 		if plan.service.Months > 1 {
 			months := int32(plan.service.Months) // #nosec G115 -- a calendar interval is at most 1200 months

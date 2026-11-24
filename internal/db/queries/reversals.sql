@@ -13,6 +13,7 @@ SET funded = sqlc.arg(funded)::bigint,
     recognized_through_at = sqlc.arg(recognized_through_at)::timestamptz,
     next_recognition_at = sqlc.narg(next_recognition_at)::timestamptz,
     reinstatements = sqlc.arg(reinstatements)::int,
+    forfeited = sqlc.arg(forfeited)::bigint,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
@@ -37,17 +38,9 @@ SELECT EXISTS (
 
 -- name: ListUnpostedPayments :many
 -- A receipt, or a settled reversal of one, that the general ledger holds no
--- posting of, stored no earlier than the payment it first booked (by the
--- clock that stamps both).
+-- posting of, stored since the merchant's books started.
 WITH started AS (
-    SELECT (
-        SELECT p.created_at FROM billing.payments p
-        WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = (
-            SELECT t.source_id::uuid FROM billing.ledger_transfers t
-            WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.operation = 'cash' AND t.source = 'payment'
-            ORDER BY t.created_at, t.id
-            LIMIT 1)
-    ) AS at
+    SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = sqlc.arg(merchant_id)::uuid) AS at
 )
 SELECT p.id, p.currency, p.amount, p.reversal_kind, p.created_at
 FROM billing.payments p
@@ -63,3 +56,10 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.deleted_at IS NULL AND p
       SELECT 1 FROM billing.ledger_transfers t
       WHERE t.merchant_id = p.merchant_id AND t.book = 'general' AND t.source = 'payment' AND t.source_id = p.id::text)
 ORDER BY p.created_at, p.id;
+
+-- name: RecordBooksStart :exec
+-- The books start when the first receipt is booked; a later one changes
+-- nothing.
+INSERT INTO billing.books_starts (merchant_id, started_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(started_at)::timestamptz)
+ON CONFLICT (merchant_id) DO NOTHING;

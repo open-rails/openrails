@@ -69,3 +69,13 @@ func ReceivePayment(ctx context.Context, q *gen.Queries, p gen.BillingPayment) e
 	}
 	return New(q, p.MerchantID).Receive(ctx, r)
 }
+
+// Started records, once, that the merchant's books started: when the payment
+// writer first booked a receipt, by its clock. A later receipt, or a booking
+// of an older payment, never moves it.
+func Started(ctx context.Context, q *gen.Queries, p gen.BillingPayment, now time.Time) error {
+	if _, ok := ReceiptOf(p); !ok || CheckCurrency(p.Currency) != nil {
+		return nil
+	}
+	return q.RecordBooksStart(ctx, gen.RecordBooksStartParams{MerchantID: p.MerchantID, StartedAt: now.UTC().Truncate(time.Microsecond)})
+}

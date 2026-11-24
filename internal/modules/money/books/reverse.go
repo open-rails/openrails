@@ -421,6 +421,7 @@ func (w *reverser) adjust(ctx context.Context, id uuid.UUID, delta, contra int64
 	n, err := w.q.AdjustRevenueSchedule(ctx, gen.AdjustRevenueScheduleParams{
 		MerchantID: w.merchant, ID: id, Funded: s.funded, RecognizedNet: s.recognized, RecognizedThroughAt: s.through,
 		NextRecognitionAt: s.nextDue(w.loc), Reinstatements: int32(s.reinstatements), // #nosec G115 -- one per undone end
+		Forfeited: s.forfeited,
 	})
 	if err == nil && n != 1 {
 		err = fmt.Errorf("books: revenue schedule %s did not record its reversal", id)
@@ -479,12 +480,14 @@ func (s *schedule) restore(y, contra int64, serving bool, end time.Time) (c, def
 		c = s.recognized - was
 		return c, y - c, 0
 	}
-	forfeit := s.ended != nil && s.recognized < s.funded
+	pending := s.ended != nil && s.recognized < s.funded
 	c = min(contra, y)
 	s.funded += y
 	s.recognized += c
 	earned = max(s.service.target(s.funded, end)-s.recognized, 0)
-	if !forfeit {
+	if !pending {
+		// Forfeited now: what the service did not earn by its end.
+		s.forfeited += s.funded - s.recognized - earned
 		earned = s.funded - s.recognized
 	}
 	s.recognized += earned

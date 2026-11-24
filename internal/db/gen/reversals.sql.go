@@ -19,8 +19,9 @@ SET funded = $1::bigint,
     recognized_through_at = $3::timestamptz,
     next_recognition_at = $4::timestamptz,
     reinstatements = $5::int,
+    forfeited = $6::bigint,
     updated_at = now()
-WHERE merchant_id = $6::uuid AND id = $7::uuid
+WHERE merchant_id = $7::uuid AND id = $8::uuid
 `
 
 type AdjustRevenueScheduleParams struct {
@@ -29,6 +30,7 @@ type AdjustRevenueScheduleParams struct {
 	RecognizedThroughAt time.Time
 	NextRecognitionAt   *time.Time
 	Reinstatements      int32
+	Forfeited           int64
 	MerchantID          uuid.UUID
 	ID                  uuid.UUID
 }
@@ -42,6 +44,7 @@ func (q *Queries) AdjustRevenueSchedule(ctx context.Context, arg AdjustRevenueSc
 		arg.RecognizedThroughAt,
 		arg.NextRecognitionAt,
 		arg.Reinstatements,
+		arg.Forfeited,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -105,14 +108,7 @@ func (q *Queries) ListPaymentBooksLegs(ctx context.Context, arg ListPaymentBooks
 
 const listUnpostedPayments = `-- name: ListUnpostedPayments :many
 WITH started AS (
-    SELECT (
-        SELECT p.created_at FROM billing.payments p
-        WHERE p.merchant_id = $1::uuid AND p.id = (
-            SELECT t.source_id::uuid FROM billing.ledger_transfers t
-            WHERE t.merchant_id = $1::uuid AND t.book = 'general' AND t.operation = 'cash' AND t.source = 'payment'
-            ORDER BY t.created_at, t.id
-            LIMIT 1)
-    ) AS at
+    SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = $1::uuid) AS at
 )
 SELECT p.id, p.currency, p.amount, p.reversal_kind, p.created_at
 FROM billing.payments p
@@ -139,8 +135,7 @@ type ListUnpostedPaymentsRow struct {
 }
 
 // A receipt, or a settled reversal of one, that the general ledger holds no
-// posting of, stored no earlier than the payment it first booked (by the
-// clock that stamps both).
+// posting of, stored since the merchant's books started.
 func (q *Queries) ListUnpostedPayments(ctx context.Context, merchantID uuid.UUID) ([]ListUnpostedPaymentsRow, error) {
 	rows, err := q.db.Query(ctx, listUnpostedPayments, merchantID)
 	if err != nil {
@@ -168,7 +163,7 @@ func (q *Queries) ListUnpostedPayments(ctx context.Context, merchantID uuid.UUID
 }
 
 const lockRevenueSchedule = `-- name: LockRevenueSchedule :one
-SELECT merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at FROM billing.revenue_schedules
+SELECT merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at, forfeited FROM billing.revenue_schedules
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
@@ -206,6 +201,7 @@ func (q *Queries) LockRevenueSchedule(ctx context.Context, arg LockRevenueSchedu
 		&i.Reinstatements,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Forfeited,
 	)
 	return i, err
 }
@@ -228,4 +224,22 @@ func (q *Queries) PaymentPosted(ctx context.Context, arg PaymentPostedParams) (b
 	var posted bool
 	err := row.Scan(&posted)
 	return posted, err
+}
+
+const recordBooksStart = `-- name: RecordBooksStart :exec
+INSERT INTO billing.books_starts (merchant_id, started_at)
+VALUES ($1::uuid, $2::timestamptz)
+ON CONFLICT (merchant_id) DO NOTHING
+`
+
+type RecordBooksStartParams struct {
+	MerchantID uuid.UUID
+	StartedAt  time.Time
+}
+
+// The books start when the first receipt is booked; a later one changes
+// nothing.
+func (q *Queries) RecordBooksStart(ctx context.Context, arg RecordBooksStartParams) error {
+	_, err := q.db.Exec(ctx, recordBooksStart, arg.MerchantID, arg.StartedAt)
+	return err
 }

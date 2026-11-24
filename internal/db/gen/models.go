@@ -2199,6 +2199,8 @@ type BillingRevenueSchedule struct {
 	Reinstatements int32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// What of recognized_net an early end forfeited and no undone end took back: the most an undone end reinstates.
+	Forfeited int64
 }
 
 // One row per running charge: a customer charged rate_per_hour (native units of currency) from started_at until stopped_at. No row changes while it runs; a posting moves what accrued through posted_through_at to the ledger, and a stopped charge is posted through stopped_at. Retention: permanent, never pruned.
