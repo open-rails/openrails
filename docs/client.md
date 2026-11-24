@@ -64,8 +64,7 @@ if err != nil {
 return remote.Merchant(merchant) // every call checks the server answered for this merchant
 ```
 
-A customer is your user's UUID (`billing.CustomerID`). A customer who never
-touched billing holds nothing; that is never an error.
+A customer is your user's UUID (`billing.CustomerID`). A customer who never touched billing holds nothing; that is never an error, but `GetCustomer` answers `404 customer_not_found`.
 
 ## Credentials
 
@@ -164,9 +163,7 @@ In the browser, billing-ui's `tokenSource` keeps the token in memory, fetches th
 next one shortly before expiry however many calls wait, and resends a call
 answered `401 credential_expired` once.
 
-An issuer of your own can mint RFC 9068 tokens (`typ: at+jwt`) for the billing
-resource with `openrails:self` and the buyer's UUID as `sub`; include verified
-contact claims if receipts should use them. Clear tokens on sign-out.
+An issuer of your own can mint RFC 9068 tokens (`typ: at+jwt`) for the billing resource with `openrails:self` and the buyer's UUID as `sub`; include verified contact claims to fill in the customer's contact. Clear tokens on sign-out.
 
 ## Customers
 
@@ -181,8 +178,7 @@ contact claims if receipts should use them. Clear tokens on sign-out.
 | `GetAccessTenure` | how long it has held access (`GetAccessTenureParams`), for loyalty rules |
 | `CreateProvisioningToken`, `ListProvisioningTokens`, `DeleteProvisioningToken` | SCIM tokens for a directory that cannot use your issuer |
 
-`UpdateCustomer` never creates a customer (`404 customer_not_found`); an amount of
-`"0"` clears a limit and `Inherit: true` restores the merchant's default.
+`UpdateCustomer` creates a customer not billed yet; a credit limit of `"0"` allows no arrears and `Inherit: true` restores the merchant's default.
 
 ```go guide:customers
 c, err := shop.GetCustomer(ctx, customer) // settings, balances, contact; 404 if it never billed
@@ -196,15 +192,7 @@ _, err = shop.UpdateCustomer(ctx, c.ID, billing.UpdateCustomerParams{
 return err
 ```
 
-**Contacts.** Who a customer is (email, username, name) is your directory's.
-Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your
-own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to
-`{Prefix}/v1/app/scim/v2` with an application credential or a provisioning token;
-`externalId` is the user's UUID, and the newest write wins. On a standalone
-server or the hosted platform, your issuer pushes to the server's directory
-(`/directory/scim/v2`), and verified contact claims in customer tokens fill in
-as they are used. OpenRails emails a customer only at an address that was
-verified.
+**Contacts.** Who a customer is (email, username, name) is your directory's. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with an application credential or a provisioning token; `externalId` is the user's UUID, and the newest write wins. On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used. [Customer messages](#customer-messages) go to this address.
 
 ## Merchant configuration and PSPs
 
@@ -218,11 +206,11 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 |---|---|
 | `GetMerchantConfiguration` | read name, settings and `revision`; never credentials |
 | `UpdateMerchantConfiguration` | merge settings (Vault only); `ExpectedRevision` refuses a concurrent edit (`409 revision_mismatch`) |
-| `ListPSPs`, `GetPSP` | the merchant's PSPs, with posture |
+| `ListPSPs`, `GetPSP` | the merchant's PSPs, with each credential's state, never its value |
 | `CreatePSP` | add a PSP (Vault only); credentials are checked with the provider before anything is stored |
-| `UpdatePSP` | rotate credentials, change settings or archive; archiving the last active PSP of a rail is `409 psp_last_active` |
+| `UpdatePSP` | rotate credentials, change public keys or custodian, or archive (Vault only); the last active PSP of a rail archives only with `AllowLast` (else `409 psp_last_active`) |
 | `PreviewPSPRouting` | which PSP a purchase would use, without charging |
-| `ListCustodians`, `SetCustodian` | card custodians (Basis Theory) a PSP charges through (`SetCustodianParams`) |
+| `ListCustodians`, `SetCustodian` | card custodians (Basis Theory, HyperSwitch) a PSP charges through; `SetCustodian` (`SetCustodianParams`) needs Vault |
 | `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha |
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
 | `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
@@ -265,11 +253,7 @@ psps:
     treasury: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu # where every payment lands
 ```
 
-`openrails.ParseMerchantDocument` reads one. Unknown or duplicate fields,
-several documents, anchors and tags are refused, and so are the retired keys
-`rail_merchant_accounts` and `provider_accounts`. Keep secrets out of the
-committed file: an overlay or Vault supplies them
-([standalone.md](standalone.md#configuration-reference)).
+`openrails.ParseMerchantDocument` reads one, with its required `slug`. Unknown or duplicate fields, several documents, anchors and tags are refused, and so are the retired keys `rail_merchant_accounts`, `provider_accounts` and `api_host`. Keep secrets out of the committed file: an overlay or Vault supplies them ([standalone.md](standalone.md#configuration-reference)).
 
 **Environments.** Each PSP declares whether it moves real money; omitted, it is
 the rail's real-money one, so production declares none. NMI: `live`, `test` (an
@@ -282,13 +266,7 @@ every RPC endpoint. A PSP whose answer disagrees stays disarmed: reads work,
 writes fail before any byte is sent, and the `openrails_psp_posture` probe
 reports it. CCBill's sandbox has no signal, so its writes are always refused.
 
-**Webhooks.** Each provider posts to `/v1/webhooks/{rail}/{account_id}`
-(beneath the mount when embedded). `{rail}` is `nmi`, `stripe`, `ccbill` or
-`basistheory`, never a PSP key, and `{account_id}` is the PSP's account fields
-joined with `-`. The account resolves the merchant, its own secret verifies the
-delivery, and the payload's account must agree. Rotating a signing secret keeps
-the old one for `webhook_secret_overlap` (24 h); `retire_webhook_overlap` on
-`UpdatePSP` refuses it at once.
+**Webhooks.** Each provider posts to `/v1/webhooks/{rail}/{account_id}` (beneath the mount when embedded). `{rail}` is `nmi`, `stripe`, `ccbill` or `basistheory`, never a PSP key, and `{account_id}` is the PSP's account fields joined with `-`. The account resolves the merchant, its own secret verifies the delivery, and the payload's account must agree. Rotating a signing secret keeps the old one for `webhook_secret_overlap` (default 24 h); `retire_webhook_overlap` on `UpdatePSP` refuses it at once.
 
 ### NMI
 
@@ -342,31 +320,11 @@ A card checkout can keep CCBill back as a fallback ([orders](#orders-and-checkou
 
 ### Solana
 
-Solana is self-custody: `treasury` is the wallet every payment lands in, and
-OpenRails never holds its key. One-time payments use Solana Pay; subscriptions
-use the on-chain Subscriptions Delegation Program, pulled each period by the
-deployment's crankers (`solana.crankers`, or `Config.Solana`), which pay the fees
-and never receive money. Without a cranker, one-time payments work and recurring
-Solana prices are refused. `rpc_url`, a secret, is tried before the network's
-public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
-at purchase; devnet and testnet price at $1.00 parity.
+Solana is self-custody: `treasury` is the wallet every payment lands in, and OpenRails never holds its key. One-time payments use Solana Pay; subscriptions use the on-chain Subscriptions Delegation Program, pulled each period by the deployment's crankers (`solana.crankers`, or `Config.Solana`), which pay the fees and never receive money. Without a cranker, one-time payments work and recurring Solana prices are refused. `rpc_url`, a secret, is tried before the network's public endpoint. Prices are in USD and quoted in the merchant's accepted tokens at purchase; devnet and testnet fall back to $1.00 parity when the price feed is unavailable.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile`
-(`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`,
-`terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault`
-and `charge_psps` (where new cards are saved and which PSPs take new charges),
-`psp_routing`, `dunning_policy`, `usage_billing`, `billing_policies` and their
-bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`,
-`monthly_floor`, `collection_threshold`, `billing_period_boundary`),
-`reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`,
-`provider_refund_access`, `usage_gate_safe_spend` and `currencies`. `from_email` and
-`alert_email` are each one mailbox, bare or named. Beside the settings, the
-merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing`, `billing_policies` and their bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`, `monthly_floor`, `collection_threshold`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `usage_gate_safe_spend`, `delegated_invoker_wasted_spend_limits` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
-`psp_routing` picks one PSP before a purchase is attempted: ordered rules
-(`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
-Without rules: stripe, nmi, ccbill, solana, the first that can serve the price.
-Fallback is pre-charge only: a decline never moves to a second processor.
+`psp_routing` picks one PSP before a purchase is attempted: ordered rules (`currency`, `product`, `price`, `mode`), first match wins, and its `prefer` list ranks the only PSPs it allows. Without a matching rule: the merchant's `charge_psps` (else stripe, nmi), then ccbill, solana, the first that can serve the price; a provider price always uses its own PSP. Fallback is pre-charge only: a decline never moves to a second processor.
 
 `currencies` declares the merchant's own units (`billing.MerchantCurrency`: credits, API tokens, an in-game currency), at most 32: a `code` of 4 to 12 upper-case letters or digits starting with a letter that is not in OpenRails' registry (three-letter codes are ISO 4217's), a `name`, a `symbol` without a currency sign (the code when omitted) and a `scale` from 0 (whole units, the default) to 6, so `{code: GOLD, name: Gold coins, symbol: 🪙}` counts whole coins. A unit joins the registry for that merchant alone; `GET /v1/me/config` lists it beside `GET /v1/config`'s registry. It is never money: `CreatePrice`, a catalog's credit grants and rate cards, credit grants, balances, admissions and the money settings above refuse it with `merchant_unit_unsupported`, a catalog document cannot price in it, so nothing is charged or paid in it, and a declaration that names a registry currency or breaks these rules is refused like any other invalid settings.
 
@@ -404,16 +362,7 @@ products:
         billing_interval: 365 days
 ```
 
-Products, prices, meters and limits are maps keyed by stable keys you choose.
-`entitlements` are plain strings your app gives meaning to;
-`required_entitlements` must already be held to buy (`403 entitlement_required`);
-`tier_group` and `tier_rank` make a plan family that upgrades and downgrades
-within itself; `credit_grant` makes a product top up a balance. A price's
-`amount` is `9.99 USD`; `billing_interval` (`30 days`, or `1 month` for a
-calendar month that keeps the billing day) makes it recurring; `access_duration`
-defaults to the interval, or `forever` for a one-off; `quantity: {min, max}` sells
-seats; `customer_amount` lets the buyer name the amount; `sell_via` restricts it to
-`card` or `solana`. Trials are refused by every rail today.
+Products, prices, meters and limits are maps keyed by stable keys you choose. `entitlements` are plain strings your app gives meaning to; `required_entitlements` must already be held to buy (`403 entitlement_required`); `tier_group` and `tier_rank` make a plan family that upgrades and downgrades within itself; `credit_grant` makes a product top up a balance. A price's `amount` is `9.99 USD`; `billing_interval` (`30 days`, or `1 month` for a calendar month that keeps the billing day) makes it recurring; `access_duration` defaults to the interval, or `forever` for a one-off; `quantity: {min, max}` sells seats; `customer_amount` lets the buyer name the amount; `sell_via` restricts it to `card` or `solana`. A price with a trial is not sold in an order today.
 
 ```go guide:catalog-apply
 products, err := catalog.ReadFile(path)
@@ -481,11 +430,7 @@ snapshot with ids and history ([standalone.md](standalone.md#commands)).
 
 ## Orders and checkout
 
-Every bill is an order: a purchase, a renewal OpenRails or a provider runs, a
-usage bill. An order's lines are priced and frozen; its payments are the money
-that moved. `status` is `open`, `processing`, `complete`, `canceled`, `expired`
-or (renewal) `void`; `collection_owner` says who collects (`engine`,
-`nmi_schedule`, `provider`).
+Every bill is an order: a purchase, a renewal OpenRails or a provider runs, a usage bill. An order's lines are priced and frozen; its payments are the money that moved. `status` is `open`, `processing`, `complete`, `canceled`, `expired`, `void` (a renewal left unowed, or a voided usage order) or `uncollectible` (a usage order written off); `collection_owner` says who collects (`engine`, `nmi_schedule`, `provider`).
 
 **In the browser** the signed-in customer buys with billing-ui. Your server reads
 the products it sells (`ListProducts`, `billing.BuyerPrices`) into its page:
@@ -506,7 +451,9 @@ for _, product := range listed.Items {
 ```tsx
 <BuyButton price={course.prices[0]} signedIn={signedIn}
   onSignInRequired={openSignIn} onPaid={() => refetchAccess()} />
-<ProductList products={products} fallbacks={{ ccbill: { for: ["mobius"], afterFailures: 2 } }} />
+<ProductList products={products} signedIn={signedIn}
+  onSignInRequired={openSignIn} onPaid={() => refetchAccess()}
+  fallbacks={{ ccbill: { for: ["stripe"], afterFailures: 2 } }} />
 ```
 
 A button creates the customer's order (`POST /v1/me/orders`) and pays it in a
@@ -558,24 +505,15 @@ or the redirect to `success_url`.
   offers Apple Pay and Google Pay with a Stripe `publishable_key`, and stops after
   ten declined cards (`409 pay_url_attempts_exhausted`).
 
-Paying in the customer's own API (`POST /v1/me/orders` with `payment`, or
-`/{id}/pay`) takes a saved card `{payment_method_id}` or a new one `{token,
-psp_id}`; naming neither is `400 payment_method_required`. One provider request
-charges and saves a new card; a declined card is not saved. In the EEA and UK a
-new card is kept for later only with `reusable: true`, the customer's unticked
-opt-in. `requires_action` carries `next_action`: `authenticate` (run the PSP's
-script, then `confirm`), `redirect_to_url` (CCBill, Stripe-hosted Checkout), or
-`solana_pay` (a QR code or wallet link; the wallet signs a transaction OpenRails
-builds, and the order completes when it lands). A decline is `402` with the order
-open again for another card.
+Paying in the customer's own API (`POST /v1/me/orders` with `payment`, or `/{id}/pay`) takes exactly one of a saved card `{payment_method_id}`, a new one `{token, psp_id}`, a Solana wallet's token `{token_symbol}` or a hosted page's `{return_url}`; a card charge naming no card is `400 payment_method_required`. One provider request charges and saves a new card; a declined card is not saved. In the EEA and UK a new card is kept for later only with `reusable: true`, the customer's unticked opt-in. `requires_action` carries `next_action`: `authenticate` (run the PSP's script, then `confirm`), `redirect_to_url` (CCBill, Stripe-hosted Checkout), or `solana_pay` (a QR code or wallet link; the wallet signs a transaction OpenRails builds, and the order completes when it lands). A decline is `402` with the order open again for another card.
 
 | Method | Use it to |
 |---|---|
 | `PreviewOrder` | price lines, with refusals and the `payment_options` that can take them |
 | `CreateOrder` | an unpaid order for a customer, open 30 days unless `ExpiresAt`; only that customer pays it, signed in or through `pay_url`; takes `idempotencyKey` |
-| `GetOrder`, `ListOrders` | read orders: filter by customer, `origin` (`purchase`, `subscription`, `usage`), status, overdue |
+| `GetOrder`, `ListOrders` | read orders: filter by customer, price, subscription, `origin` (`customer`, `merchant`, `subscription`, `usage`), status, overdue |
 | `GetOrderPaymentAttempt` | the outcome of one pay attempt by its idempotency key, after a lost response |
-| `CancelOrder` | cancel an unpaid order (settle an unresolved payment first) |
+| `CancelOrder` | withdraw an open order `CreateOrder` made (settle an unresolved payment first) |
 | `WaiveOrderBalance` | void a usage order and write off what it owes |
 | `MarkOrderUncollectible` | stop collecting and keep the debt |
 | `ListRenewals`, `GetRenewal` | renewal bills OpenRails runs |
@@ -659,7 +597,7 @@ return nil
 | `ListPayments`, `GetPayment` | payments and refunds, with their order |
 | `ListPaymentAttempts`, `GetPaymentAttempt` | each provider attempt, with its decline |
 | `RefundPayment` | refund through the PSP, in full or in part; `RevokeAccess` ends what the payment bought; takes `idempotencyKey` |
-| `RecordExternalPayment` | money received outside OpenRails against a usage order, idempotent on its transaction id, at most what it owes (`409 payment_exceeds_due`) |
+| `RecordExternalPayment` | money received outside OpenRails for one order, idempotent on its transaction id: part or all of what a usage order owes, or another order's total (else `409 payment_exceeds_due`); an order with a recurring line is refused |
 
 ```go guide:refund
 // key: one per refund decision; a retry with it refunds once
@@ -670,23 +608,9 @@ return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 })
 ```
 
-A refund through CCBill or Solana is `refund_unsupported`. Refunds and
-chargebacks revoke the access their payment bought. Staff never start a card
-charge.
+A refund through CCBill or Solana is `refund_unsupported`. A chargeback revokes the access its payment bought; a refund does with `RevokeAccess`, and one made in the provider's own dashboard follows `provider_refund_access`. Staff never start a card charge.
 
-**Saved cards.** A method is `{id, rail, psp_id, card, billing_details, health,
-default_currencies}`; only `active` ones are charged. Renewals and usage
-collection charge the subscription's own card, else the customer's default card
-for that currency; with neither, or with no active recurring agreement, the
-renewal waits for the customer (`awaiting_method`) and never charges another
-card. A charge agreement is the customer's permission to charge a card without
-them present (`recurring` for one subscription, `unscheduled` for usage); the
-customer revokes one at `POST /v1/me/agreements/{id}/revoke`, which cancels the
-subscription at period end or stops usage collection, and the merchant gets
-`mandate.revoked`. A card reissued under another brand waits for the customer's
-consent before it is charged again. A HyperSwitch-custodied card is saved in two
-steps: `POST /v1/me/payment-methods` answers a `capture` next action, then
-`/{id}/confirm` with the custodian's token.
+**Saved cards.** A method is `{id, rail, psp_id, status, card, billing_details, health, mandates, default_currencies, …}`; only `active` ones are charged. Renewals and usage collection charge the subscription's own card, else the customer's default card for that currency; with neither, or with no active recurring agreement, the renewal waits for the customer (`awaiting_method`) and never charges another card. A charge agreement is the customer's permission to charge a card without them present (`recurring` for one subscription, `unscheduled` for usage); the customer revokes one at `POST /v1/me/agreements/{id}/revoke`, which cancels the subscription at period end or stops usage collection, and the merchant gets `mandate.revoked`. A card reissued under another brand waits for the customer's consent before it is charged again. A HyperSwitch-custodied card is saved in two steps: `POST /v1/me/payment-methods` answers a `capture` next action, then `/{id}/confirm` with the custodian's token.
 
 ## Credits
 
@@ -727,7 +651,7 @@ each paid renewal. A voluntary refund needs the lot unused and unheld.
 
 | Method | Use it to |
 |---|---|
-| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID` |
+| `CreateCreditGrants` | fund balances directly, idempotent per customer on `SourceID` (`Source` is a label) |
 | `ListCreditGrants`, `GetCreditGrant` | the lots, with what remains |
 | `RevokeCreditGrant` | take back what remains of a lot |
 
@@ -786,10 +710,7 @@ _, err := shop.CreateProductAccess(ctx, key, []billing.CreateProductAccessParams
 return err
 ```
 
-Never infer access from subscription status. `subscription_canceled` means
-renewal stopped while paid access remains; `premium_ended` means access closed. A
-remote handle caches allowed keys ([caching](#caching)); a check for the present
-can ask for `IncludeValidity` (`ValidUntil`, the next scheduled change).
+Never infer access from subscription status. `subscription_canceled` means renewal stopped while paid access remains; `premium_ended` means access closed. A remote handle with an API key caches allowed keys ([caching](#caching)); a check for the present can ask for `IncludeValidity` (`ValidUntil`, the next scheduled change).
 
 ## Limits, admissions and the Gate
 
@@ -812,6 +733,7 @@ Refusals are verdicts, not errors:
 | `budget_exceeded`, `accrual_rate_cap_reached` | a billing policy's spend window or accrual rate |
 | `delinquent_unpaid_order` | an unpaid usage bill past grace |
 | `failure_rate_limited` | a delegated invoker's failed usage passed its limit |
+| `delegated_spend_not_allowed` | only the customer's own credential spends its balance |
 
 **The Gate** admits in your process over any `*Client` whose credential holds
 `merchant:usage:manage` and `merchant:usage:read`. It keeps one lease and holds
@@ -1083,9 +1005,9 @@ return nil
 |---|---|
 | `CreatePSPImport` | pull a PSP's customers, cards, subscriptions and charges, read-only, into staging |
 | `ListPSPImports`, `GetPSPImport`, `ListPSPImportRecords` | follow it and review the staged records |
-| `SetPSPImportMappings` | map provider prices to yours, and customers to your ids |
+| `SetPSPImportMappings` | map your own identifiers (a legacy user or order id) to customers, for the import's rules |
 | `LinkPSPImport` | link records to customers (and set a CCBill subscription's price) |
-| `UpdatePSPImport`, `ApplyPSPImport`, `DeletePSPImport` | change its rules, land the linked records, or discard it |
+| `UpdatePSPImport`, `ApplyPSPImport`, `DeletePSPImport` | change its rules, land the linked records (a person or the in-process host), or discard it |
 | `ListProviderCatalog` | the provider prices OpenRails observed |
 | `ListParkedSubscriptions` | provider subscriptions that could not land: map the price or link the customer |
 | `ImportBilling` | post a legacy book as facts at one `AsOf`; a re-post reports `skipped` |
@@ -1128,7 +1050,7 @@ Findings need merchant configuration authority, not customer support's.
 |---|---|
 | `ListFindings`, `GetFinding`, `ResolveFinding` | the queue; resolve one by hand |
 | `ListProposals` | proposals by PSP, change kind or import |
-| `ApproveProposals`, `DismissProposals` | apply or dismiss up to 100; approving takes `idempotencyKey` and needs a person or the in-process host |
+| `ApproveProposals`, `DismissProposals` | apply or dismiss up to 100, each by a person or the in-process host; approving takes `idempotencyKey`, dismissing needs notes |
 
 ```go guide:proposals
 page, err := shop.ListProposals(ctx, billing.ProposalListParams{Pull: pull})
@@ -1172,14 +1094,11 @@ An unknown measure or a bad combination is a `400` naming what is wrong and what
 
 ## Alerts
 
-Findings of medium severity and higher go to the merchant's alert webhooks, high
-and critical also to `alert_email`, once per episode unless the severity rises.
-Each destination retries on its own; a webhook retry carries the same
-`Idempotency-Key`.
+A finding that needs review goes, at medium severity and higher, to the merchant's alert webhooks, at high and critical also to `alert_email`, once per episode unless the severity rises; a low one stays in the console. A destructive hold goes to both. Each destination retries on its own; a webhook retry carries the same `Idempotency-Key`.
 
 | Method | Use it to |
 |---|---|
-| `ListAlertWebhooks`, `CreateAlertWebhook`, `UpdateAlertWebhook`, `DeleteAlertWebhook` | manage destinations: `generic` JSON, `discord` or `slack`; a URL is write-only and a new URL keeps the webhook's identity |
+| `ListAlertWebhooks`, `CreateAlertWebhook`, `UpdateAlertWebhook`, `DeleteAlertWebhook` | manage destinations (writes need Vault): `generic` JSON, `discord` or `slack`; a URL is write-only and a new URL keeps the webhook's identity |
 
 ```go guide:alert-webhook
 _, err := shop.CreateAlertWebhook(ctx, billing.CreateAlertWebhookParams{
@@ -1229,17 +1148,7 @@ person acting in person who is not the one held; in process, a handle made with
 
 ## Errors
 
-An unsuccessful request is a `*billing.StatusError`: the HTTP `Status`, the
-`RetryAfter` header and the envelope's `ErrorDetails` (`Type`, `Code`, `Message`,
-`Param`, `Metadata`, `RequestID`). Every code is registered once with its status
-and type (`billing.ErrorCodes()`, [error-codes.md](api/error-codes.md)). Each
-code is a `billing.ErrorCode` constant (`billing.CodeCardDeclined`, …), and
-`billing.ErrorCodeFrom(err)` reads it from a `StatusError` or an in-process
-refusal; `billing.LookupErrorCode` returns its `ErrorCodeInfo`. Classify by
-`errors.Is` and the code, never the message: comparing strings, or an interface
-declaring `ErrorCode() string`, does not match. The wire carries the same string.
-The client validates nothing the server checks: a bad request is the server's
-`400 invalid_param`.
+An unsuccessful request is a `*billing.StatusError`: the HTTP `Status`, the `RetryAfter` header and the envelope's `ErrorDetails` (`Type`, `Code`, `Message`, `Param`, `Metadata`, `RequestID`, and on a decline the `Order` left open). Every code is registered once with its status and type (`billing.ErrorCodes()`, [error-codes.md](api/error-codes.md)). Each code is a `billing.ErrorCode` constant (`billing.CodeCardDeclined`, …), and `billing.ErrorCodeFrom(err)` reads it from a `StatusError` or an in-process refusal; `billing.LookupErrorCode` returns its `ErrorCodeInfo`. Classify by `errors.Is` and the code, never the message: comparing strings, or an interface declaring `ErrorCode() string`, does not match. The wire carries the same string. The client validates nothing the server checks: a bad request is the server's `400 invalid_param`.
 
 ```go guide:errors
 var status *billing.StatusError
@@ -1274,31 +1183,15 @@ default: // no answer, or a 5xx: it may have committed; retry with the same key 
   `403 captcha_required`: solve and send `X-Captcha-Token`.
 - `409 idempotency_key_in_use`, `payment_in_progress`: the original is still
   running. `provider_outcome_unknown`: read before retrying.
-- `429` with `Retry-After`: the customer routes allow 10 purchases, 20
-  subscription writes and 40 payment-method writes a minute; never retry
-  purchases in a loop. `429 card_attempts_blocked`: too many recent declines.
+- `429` with `Retry-After`: by default the customer routes allow 10 purchases, 20 subscription writes and 40 payment-method writes a minute; never retry purchases in a loop. `429 card_attempts_blocked`: too many recent declines.
 
 ## Idempotency
 
-A route that can move money or grant something takes a key, and its method takes
-it as `idempotencyKey` after `ctx`: `CreateOrder`, `ChangeSubscription`,
-`RefundPayment`, `CreateProductAccess`, `ApproveProposals`; `GetOrderPaymentAttempt`
-reads an attempt by it. The same key and terms recover the operation; other
-terms are `422 idempotency_key_reused`. Make the key when the person decides,
-store it with what it is for, and reuse it until the operation resolves. Other
-operations own their replay by a durable id instead: admissions by `RequestID`,
-running charges by `Reference`, credit grants by `Source` and `SourceID`, lease
-usage by lease and item number, limit adjustments by `SourceID`. There is no
-response cache.
+A route that can move money or grant something takes a key, and its method takes it as `idempotencyKey` after `ctx`: `CreateOrder`, `ChangeSubscription`, `RefundPayment`, `CreateProductAccess`, `ApproveProposals`; `GetOrderPaymentAttempt` reads an attempt by it. The same key and terms recover the operation; other terms are `422 idempotency_key_reused`. Make the key when the person decides, store it with what it is for, and reuse it until the operation resolves. Other operations own their replay by a durable id instead: admissions by `RequestID`, running charges by `Reference`, credit grants by customer and `SourceID`, external payments by `TransactionID`, lease usage by lease and item number, limit adjustments by `SourceID`. There is no response cache.
 
 ## Pagination
 
-Every `List*` method returns a `*billing.ListPage[T]`: `Items` and `Next`, empty on
-the last page. Pass `Next` back as `PageRequest.Cursor`; `Limit` is 1–500
-(default 50). There is no offset or total. Merchant lists of records take `IDs`
-(1–100) in place of a page. A list's PSP filter is a PSP reference, its id
-(`psp_…`) or key (`billing.ParsePSPRef`). `ListEvents` is the exception: its own
-cursor and `HasMore`.
+Every `List*` method returns a `*billing.ListPage[T]`: `Items` and `Next`, empty on the last page. Pass `Next` back as `PageRequest.Cursor`; `Limit` is 1–500 (default 50). There is no offset or total. Merchant lists of records take `IDs` (1–100) in place of a page. A `PSP` filter (`ListPSPImports`, `ListProviderCatalog`, `ListParkedSubscriptions`) takes a PSP's id (`psp_…`) or key; a `PSPID` filter takes the id. `ListEvents` is the exception: its own cursor and `HasMore`.
 
 ## Caching
 
@@ -1317,15 +1210,7 @@ at once; another replica's shows within its refresh interval. Override with
 `Config.ReadCache` or `RemoteOptions.ReadCache` (a zero `ReadPolicy` reads live),
 or read through `Uncached()`.
 
-**Entitlement checks.** A remote handle caches `CheckEntitlements` answers for
-allowed keys only, never a denial: a check is answered from the cache only when
-every key is allowed there, so a newly bought key shows at once. A revocation or
-seat change can take up to `MaxAge` (2 minutes, `DefaultEntitlementCheckMaxAge`),
-and an allowed answer also expires at its next scheduled change, such as a
-rental's end. `Uncached().CheckEntitlements` always asks and drops the keys it
-finds denied. `EntitlementCheckCacheOptions.Redis`, your own client, shares entries
-between replicas with the same endpoint, merchant, credential and `MaxAge`;
-`Disabled` turns the cache off. Prefix and historical checks always ask.
+**Entitlement checks.** A remote handle with an API key caches `CheckEntitlements` answers for allowed keys only, never a denial: a check is answered from the cache only when every key is allowed there, so a newly bought key shows at once. A revocation or seat change can take up to `MaxAge` (2 minutes, `DefaultEntitlementCheckMaxAge`), and an allowed answer also expires at its next scheduled change, such as a rental's end. `Uncached().CheckEntitlements` always asks and drops the keys it finds denied. `EntitlementCheckCacheOptions.Redis`, your own client, shares entries between replicas with the same endpoint, merchant, credential and `MaxAge`; `Disabled` turns the cache off. Prefix and historical checks always ask.
 
 ## Without the Go client
 
@@ -1376,5 +1261,4 @@ curl --fail-with-body -X POST "$OPENRAILS_API_URL/v1/app/entitlements/check" \
   your app's sign-in; otherwise an `openrails:self` token. Browser routes answer
   any origin without credentials (`Access-Control-Allow-Origin: *`); staff routes
   send no CORS headers.
-- **Errors** are `{"error": {"type", "code", "message", "param", "metadata"}}`
-  ([errors](#errors)).
+- **Errors** are `{"error": {"type", "code", "message", "param", "metadata", "request_id"}}` ([errors](#errors)).
