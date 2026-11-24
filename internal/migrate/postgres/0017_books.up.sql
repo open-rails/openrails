@@ -278,11 +278,12 @@ CREATE TRIGGER trg_ledger_transfers_rollups AFTER INSERT ON billing.ledger_trans
 
 -- Folds a merchant's queued transfers into the rollups: each total, then each
 -- bucket, in key order, then empties the queue. A merchant-wide general-ledger
--- account's total, locked here, is held to the account's sign rule.
+-- account's total, locked here, that crosses the account's sign rule raises
+-- the finding books.sign_breach, once per type and currency, reopened by a
+-- later breach once resolved. It never refuses the commit: bookkeeping never
+-- blocks a money movement.
 CREATE FUNCTION billing.settle_ledger_rollups(p_merchant uuid) RETURNS void
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-DECLARE
-    v_breach record;
 BEGIN
     WITH kept AS (
     INSERT INTO billing.ledger_type_totals AS r (merchant_id, book, currency, account_type, psp_id, credits_posted, debits_posted)
@@ -298,17 +299,25 @@ BEGIN
     ON CONFLICT (merchant_id, book, currency, account_type, psp_id) DO UPDATE
     SET credits_posted = r.credits_posted + EXCLUDED.credits_posted, debits_posted = r.debits_posted + EXCLUDED.debits_posted
     RETURNING r.book, r.currency, r.account_type, r.psp_id, r.credits_posted, r.debits_posted)
-    SELECT k.account_type, k.currency, k.credits_posted - k.debits_posted AS balance INTO v_breach
+    INSERT INTO billing.reconciliation_findings AS f (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
+    SELECT p_merchant, 'books.sign_breach', k.account_type || '/' || k.currency, 'high', 'requires_review',
+           'The general ledger''s ' || k.account_type || ' total in ' || k.currency || ' crossed its sign rule. Find the posting that drew it (a reversal of money received before the books, or a writer bound by a balance it cannot read) and correct it.',
+           jsonb_build_object('account_type', k.account_type, 'currency', k.currency,
+                              'credits_posted', k.credits_posted::text, 'debits_posted', k.debits_posted::text)
       FROM kept k
       JOIN billing.ledger_accounts a ON a.merchant_id = p_merchant AND a.book = k.book AND a.customer_id IS NULL
        AND a.account_type = k.account_type AND a.currency = k.currency AND a.psp_id IS NOT DISTINCT FROM k.psp_id
      WHERE k.book = 'general'
        AND (a.debits_must_not_exceed_credits AND k.debits_posted > k.credits_posted
             OR a.credits_must_not_exceed_debits AND k.credits_posted > k.debits_posted)
-     LIMIT 1;
-    IF FOUND THEN
-        RAISE EXCEPTION 'ledger_type_total_sign: % % balance %', v_breach.account_type, v_breach.currency, v_breach.balance USING ERRCODE = '23514';
-    END IF;
+     ORDER BY 3
+    ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
+        status = CASE WHEN f.status = 'ignored' THEN f.status ELSE EXCLUDED.status END,
+        resolved_at = CASE WHEN f.status = 'ignored' THEN f.resolved_at END,
+        resolution = CASE WHEN f.status = 'ignored' THEN f.resolution END,
+        resolved_by = CASE WHEN f.status = 'ignored' THEN f.resolved_by END,
+        severity = EXCLUDED.severity, recommended_action = EXCLUDED.recommended_action,
+        evidence = EXCLUDED.evidence, last_seen_at = now(), updated_at = now();
     INSERT INTO billing.ledger_daily AS r (merchant_id, book, currency, account_type, bucket_at, transfer_type, psp_id, product_id, credits, debits)
     SELECT p_merchant, t.book, t.currency, a.account_type, date_bin('15 minutes', t.effective_at, TIMESTAMPTZ '2000-01-01 00:00:00+00'),
            t.transfer_type, a.psp_id, t.product_id,
@@ -364,20 +373,34 @@ END $$;
 
 -- Everything a transaction keeps at commit, after every statement-time lock,
 -- in one order: each merchant's ledger rollups, then each merchant's MRR,
--- merchants in id order, then the event streams. A new commit-time step takes
--- its place in this sequence.
+-- merchants in id order, again until neither queue holds work, then the event
+-- streams. A new commit-time step takes its place in this sequence. Ledger or
+-- MRR work queued once the streams are flushing would lock out of order: it
+-- is refused.
 CREATE FUNCTION billing.settle_commit(p_schema text) RETURNS void
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 DECLARE
     v_merchant uuid;
 BEGIN
-    FOR v_merchant IN SELECT DISTINCT merchant_id FROM billing.ledger_rollup_pending ORDER BY merchant_id LOOP
-        PERFORM billing.settle_ledger_rollups(v_merchant);
+    IF current_setting('openrails.event_log_flushed', true) = 'true'
+       AND (EXISTS (SELECT 1 FROM billing.ledger_rollup_pending) OR EXISTS (SELECT 1 FROM billing.subscription_mrr WHERE dirty)) THEN
+        RAISE EXCEPTION 'settle_commit: ledger or MRR work queued after the event log flushed' USING ERRCODE = '55000';
+    END IF;
+    LOOP
+        FOR v_merchant IN SELECT DISTINCT merchant_id FROM billing.ledger_rollup_pending ORDER BY merchant_id LOOP
+            PERFORM billing.settle_ledger_rollups(v_merchant);
+        END LOOP;
+        FOR v_merchant IN SELECT DISTINCT merchant_id FROM billing.subscription_mrr WHERE dirty ORDER BY merchant_id LOOP
+            PERFORM billing.settle_mrr(v_merchant);
+        END LOOP;
+        EXIT WHEN NOT EXISTS (SELECT 1 FROM billing.ledger_rollup_pending)
+              AND NOT EXISTS (SELECT 1 FROM billing.subscription_mrr WHERE dirty);
     END LOOP;
-    FOR v_merchant IN SELECT DISTINCT merchant_id FROM billing.subscription_mrr WHERE dirty ORDER BY merchant_id LOOP
-        PERFORM billing.settle_mrr(v_merchant);
-    END LOOP;
+    PERFORM set_config('openrails.event_log_flushed', 'true', true);
     PERFORM billing.flush_event_log(p_schema);
+    IF EXISTS (SELECT 1 FROM billing.ledger_rollup_pending) OR EXISTS (SELECT 1 FROM billing.subscription_mrr WHERE dirty) THEN
+        RAISE EXCEPTION 'settle_commit: ledger or MRR work queued after the event log flushed' USING ERRCODE = '55000';
+    END IF;
 END;
 $$;
 

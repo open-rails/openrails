@@ -25,8 +25,8 @@ var (
 	// registry, a merchant's own unit included.
 	ErrNotMoney = errors.New("books: the general ledger holds registry currencies only")
 	// ErrSignRule is a general-ledger posting that would breach a customer
-	// account's sign rule. A merchant-wide account's rule holds at commit,
-	// whose refusal names ledger_type_total_sign.
+	// account's sign rule. A merchant-wide account's rule is checked at
+	// commit, where a breach raises books.sign_breach and never refuses.
 	ErrSignRule = errors.New("books: transfer breaches an account's sign rule")
 	// ErrCoordinateReused is a posting at a coordinate that already posted
 	// another transfer.
@@ -208,13 +208,14 @@ func Open(ctx context.Context, pool *db.Pool, merchant uuid.UUID, currencies ...
 }
 
 // Prepare is Open where a currency or PSP becomes sellable: it never fails
-// the operation that sells. A gap it leaves is filled by the first posting,
-// which raises OpenedLateFindingType.
+// the operation that sells, and inside a caller's transaction it does nothing.
+// A gap it leaves is filled by the first posting, which raises
+// OpenedLateFindingType.
 func Prepare(ctx context.Context, pool *db.Pool, logger *slog.Logger, merchant uuid.UUID, currencies ...string) {
 	if pool == nil {
 		return
 	}
-	if err := Open(ctx, pool, merchant, currencies...); err != nil && logger != nil {
+	if err := Open(ctx, pool, merchant, currencies...); err != nil && !errors.Is(err, db.ErrCallerTransaction) && logger != nil {
 		logger.WarnContext(ctx, "books: the general ledger was not opened; its first posting will open it", "merchant_id", merchant, "error", err)
 	}
 }

@@ -395,20 +395,42 @@ func TestBooks(t *testing.T) {
 			return books.Open(ctx, database.DataPool(), mid, "EUR")
 		}), db.ErrCallerTransaction)
 
-		// A merchant-wide account's sign rule holds at commit: unapplied cash
-		// drawn beyond what was received refuses the commit.
-		require.ErrorContains(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
-			_, _, err := books.New(q, mid).Post(ctx, books.Posting{
-				Debit: books.Ref{Type: books.UnappliedCash}, Credit: books.Ref{Type: books.DeferredRevenue},
-				Amount: 100, Currency: "USD", Type: books.CashApplied, EffectiveAt: w.clock.Now(),
-				Coord: books.Coord{Operation: "cash_application", Source: "critical", SourceID: "unfunded"},
-			})
-			return err
-		}), "ledger_type_total_sign: unapplied_cash USD")
-
 		// Nothing moved.
 		require.Equal(t, before, booksSnapshot(t, w))
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
+
+		// A merchant-wide account's sign rule never refuses a commit: unapplied
+		// cash drawn beyond what was received commits, raises books.sign_breach
+		// once and fails the audit. Resolved, a later breach reopens it.
+		draw := func(key string) error {
+			return booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+				_, _, err := books.New(q, mid).Post(ctx, books.Posting{
+					Debit: books.Ref{Type: books.UnappliedCash}, Credit: books.Ref{Type: books.DeferredRevenue},
+					Amount: 100, Currency: "USD", Type: books.CashApplied, EffectiveAt: w.clock.Now(),
+					Coord: books.Coord{Operation: "cash_application", Source: "critical", SourceID: key},
+				})
+				return err
+			})
+		}
+		breach := func() (status string, findings int) {
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT max(status), count(*) FROM "+booksTable(w, "reconciliation_findings")+
+				" WHERE merchant_id=$1 AND finding_type='books.sign_breach' AND subject_key='unapplied_cash/USD'", mid).Scan(&status, &findings))
+			return status, findings
+		}
+		require.NoError(t, draw("unfunded"))
+		status, findings := breach()
+		require.Equal(t, "requires_review", status)
+		require.Equal(t, 1, findings)
+		output, err := hostCLIResult(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String())
+		require.Error(t, err)
+		require.Contains(t, output, "sign: general/unapplied_cash")
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+booksTable(w, "reconciliation_findings")+" SET status='fixed', resolution='admin_fixed', resolved_at=now()"+
+			" WHERE merchant_id=$1 AND finding_type='books.sign_breach'", mid)
+		require.NoError(t, err)
+		require.NoError(t, draw("unfunded-again"))
+		status, findings = breach()
+		require.Equal(t, "requires_review", status, "a later breach reopens it")
+		require.Equal(t, 1, findings)
 	})
 
 	t.Run("OR-J40-S03/ledger-audit-catches-injected-counter-and-rollup-corruption", func(t *testing.T) {
@@ -851,6 +873,20 @@ products:
 		require.Equal(t, events+2, after, "both events are numbered")
 		require.Equal(t, [2]int64{4 * 100, 0}, booksTotal(t, w, "general", "usage_revenue"))
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
+
+		// Ledger work queued once the event streams have flushed would lock out
+		// of order: it is refused. (Settling early stands in for a later
+		// deferred trigger that posts.)
+		err := booksRawTx(t, w, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) error {
+			if err := booksAccrue(ctx, q, w, mid, a, "settled-early"); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, "SET CONSTRAINTS "+booksTable(w, "ledger_rollups_settle")+" IMMEDIATE"); err != nil {
+				return err
+			}
+			return booksAccrue(ctx, q, w, mid, a, "after-the-flush")
+		})
+		require.ErrorContains(t, err, "ledger or MRR work queued after the event log flushed")
 	})
 
 	t.Run("OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit", func(t *testing.T) {

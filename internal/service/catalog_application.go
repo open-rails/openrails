@@ -421,7 +421,7 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 			}
 			continue
 		}
-		if _, err := s.CreatePrice(ctx, req); err != nil {
+		if _, err := s.commandCreatePrice(ctx, req); err != nil {
 			return err
 		}
 		receipt.PricesChanged++
