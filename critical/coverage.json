@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 719,
+  "scenario_count": 720,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -927,6 +927,11 @@
       "id": "OR-J24-S64",
       "journey": "J24",
       "name": "Usage priced under a card print whose intake never committed holds up no posting: a print a card in force names is recorded again, and one nothing names is left out"
+    },
+    {
+      "id": "OR-J24-S65",
+      "journey": "J24",
+      "name": "A merchant's configuration first read inside a balance look's transaction loads on its own: the look expires the lapsed lot and the pass succeeds"
     },
     {
       "id": "OR-J25-S01",
