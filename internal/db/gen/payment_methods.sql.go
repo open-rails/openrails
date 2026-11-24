@@ -274,17 +274,25 @@ func (q *Queries) CustomerHasVaultedPaymentMethod(ctx context.Context, arg Custo
 	return exists, err
 }
 
-const deletePaymentMethod = `-- name: DeletePaymentMethod :execrows
-DELETE FROM billing.payment_methods WHERE payment_methods.merchant_id = $2::uuid AND id = $1
+const discardPaymentMethod = `-- name: DiscardPaymentMethod :execrows
+UPDATE billing.payment_methods
+SET status = CASE WHEN status IN ('active', 'requires_action') THEN 'removed' ELSE status END,
+    setup_ref = NULL,
+    park_reason = 'removed:' || id::text,
+    updated_at = now()
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+  AND NOT COALESCE(park_reason LIKE 'removed:%', false)
 `
 
-type DeletePaymentMethodParams struct {
-	ID         uuid.UUID
+type DiscardPaymentMethodParams struct {
 	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
-func (q *Queries) DeletePaymentMethod(ctx context.Context, arg DeletePaymentMethodParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deletePaymentMethod, arg.ID, arg.MerchantID)
+// A card deleted at its holder outside an operation (a declined purchase's
+// new card) stays as a removed tombstone: its versions are permanent.
+func (q *Queries) DiscardPaymentMethod(ctx context.Context, arg DiscardPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, discardPaymentMethod, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -891,7 +899,7 @@ func (q *Queries) ListCustomerPaymentMethodsByIDs(ctx context.Context, arg ListC
 
 const listLatestChargeByPaymentMethodIDs = `-- name: ListLatestChargeByPaymentMethodIDs :many
 SELECT DISTINCT ON (a.payment_method_id)
-    a.payment_method_id, a.attempted_at, a.category
+    a.payment_method_id, a.attempted_at, a.outcome
 FROM billing.payment_attempts a
 WHERE a.merchant_id = $1::uuid AND a.payment_method_id = ANY($2::uuid[]) AND a.kind <> 'verify'
 ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC
@@ -905,7 +913,7 @@ type ListLatestChargeByPaymentMethodIDsParams struct {
 type ListLatestChargeByPaymentMethodIDsRow struct {
 	PaymentMethodID *uuid.UUID
 	AttemptedAt     time.Time
-	Category        string
+	Outcome         string
 }
 
 // #589 derived health: each payment method's most recent charge attempt
@@ -919,7 +927,7 @@ func (q *Queries) ListLatestChargeByPaymentMethodIDs(ctx context.Context, arg Li
 	var items []ListLatestChargeByPaymentMethodIDsRow
 	for rows.Next() {
 		var i ListLatestChargeByPaymentMethodIDsRow
-		if err := rows.Scan(&i.PaymentMethodID, &i.AttemptedAt, &i.Category); err != nil {
+		if err := rows.Scan(&i.PaymentMethodID, &i.AttemptedAt, &i.Outcome); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

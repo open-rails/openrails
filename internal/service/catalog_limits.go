@@ -16,6 +16,7 @@ import (
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/catalogrules/syntax"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/limits"
@@ -23,21 +24,21 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// normalizeLimitRateCards validates a limit's rate cards and writes them as
-// storage holds them.
-func normalizeLimitRateCards(key string, cards []catalogwire.LimitRateCard) ([]catalogwire.LimitRateCard, error) {
-	out := make([]catalogwire.LimitRateCard, 0, len(cards))
-	for i, card := range cards {
-		raw, err := json.Marshal(card)
+// normalizeLimitCounts validates a limit's counts and writes them as storage
+// holds them.
+func normalizeLimitCounts(key string, counts []catalogwire.LimitCount) ([]catalogwire.LimitCount, error) {
+	out := make([]catalogwire.LimitCount, 0, len(counts))
+	for i, c := range counts {
+		raw, err := json.Marshal(c)
 		if err != nil {
 			return nil, err
 		}
-		var copied catalogwire.LimitRateCard
+		var copied catalogwire.LimitCount
 		if err := json.Unmarshal(raw, &copied); err != nil {
 			return nil, err
 		}
-		if err := catalogrules.ValidateLimitRateCard(fmt.Sprintf("limit %q rate card #%d", key, i+1), &copied); err != nil {
-			return nil, apperr.Invalidf("%s", err)
+		if err := catalogrules.ValidateLimitCount(fmt.Sprintf("limit %q count #%d", key, i+1), &copied); err != nil {
+			return nil, apperr.Invalidf("%s", err).WithParam("counts")
 		}
 		out = append(out, copied)
 	}
@@ -47,7 +48,7 @@ func normalizeLimitRateCards(key string, cards []catalogwire.LimitRateCard) ([]c
 // declaredLimit is def with decl's named fields set; a new limit needs unit
 // and reset, and its overrun defaults to require_estimate.
 func declaredLimit(key string, current *limits.Definition, decl catalogwire.ApplyLimit) (limits.Definition, error) {
-	next := limits.Definition{Key: key, Overrun: catalogwire.OverrunRequireEstimate, RateCards: []catalogwire.LimitRateCard{}}
+	next := limits.Definition{Key: key, Overrun: catalogwire.OverrunRequireEstimate, Counts: []catalogwire.LimitCount{}}
 	if current != nil {
 		next = *current
 	} else if !decl.Unit.Set || !decl.Reset.Set {
@@ -62,12 +63,12 @@ func declaredLimit(key string, current *limits.Definition, decl catalogwire.Appl
 	if decl.Overrun.Set {
 		next.Overrun = decl.Overrun.Value
 	}
-	if decl.RateCards.Set {
-		cards, err := normalizeLimitRateCards(key, decl.RateCards.Value)
+	if decl.Counts.Set {
+		counts, err := normalizeLimitCounts(key, decl.Counts.Value)
 		if err != nil {
 			return next, err
 		}
-		next.RateCards = cards
+		next.Counts = counts
 	}
 	return next, validateLimit(next)
 }
@@ -86,19 +87,19 @@ func validateLimit(d limits.Definition) error {
 	if err := d.Overrun.Validate(); err != nil {
 		return apperr.Invalidf("limit %q: %s", d.Key, err).WithParam("overrun")
 	}
-	if syntax.LimitUnitCurrency(d.Unit) && len(d.RateCards) > 0 {
-		return apperr.Invalidf("limit %q: a currency limit counts the rated amount and has no rate_cards", d.Key).WithParam("rate_cards")
+	if syntax.LimitUnitCurrency(d.Unit) && len(d.Counts) > 0 {
+		return apperr.Invalidf("limit %q: a currency limit counts the rated amount and has no counts", d.Key).WithParam("counts")
 	}
 	return nil
 }
 
-// writeLimit stores a declaration that changes the limit. Its rate cards'
+// writeLimit stores a declaration that changes the limit. Its counts'
 // meters exist, and a limit with windows keeps its unit.
 func writeLimit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, current *limits.Definition, next limits.Definition) error {
 	if current != nil && bytes.Equal(catalogJSON(catalogLimitValues(*current)), catalogJSON(catalogLimitValues(next))) {
 		return nil
 	}
-	if len(next.RateCards) > 0 {
+	if len(next.Counts) > 0 {
 		meters, err := q.ListCatalogMeters(ctx, merchantID)
 		if err != nil {
 			return err
@@ -107,21 +108,21 @@ func writeLimit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, curre
 		for _, m := range meters {
 			declared[m.Key] = m
 		}
-		for i, card := range next.RateCards {
-			meter, ok := declared[card.Meter]
+		for i, c := range next.Counts {
+			meter, ok := declared[c.Meter]
 			if !ok {
-				return apperr.Invalidf("limit %q: rate card names meter %q, which is not declared", next.Key, card.Meter).WithParam("rate_cards")
+				return apperr.Invalidf("limit %q: count names meter %q, which is not declared", next.Key, c.Meter).WithParam("counts")
 			}
 			var groupBy map[string]string
 			if err := json.Unmarshal(meter.GroupBy, &groupBy); err != nil {
 				return err
 			}
-			where := fmt.Sprintf("limit %q rate card #%d", next.Key, i+1)
-			if err := catalogrules.ValidateMeterPrice(where, catalogwire.Aggregation(meter.Aggregation), card.Price); err != nil {
-				return apperr.Invalidf("%s", err).WithParam("rate_cards")
+			where := fmt.Sprintf("limit %q count #%d", next.Key, i+1)
+			if !catalogrules.BillingSupported(catalogwire.Aggregation(meter.Aggregation)) {
+				return apperr.Invalidf("%s: meter %q aggregates by %s; a limit counts a sum or count meter", where, c.Meter, meter.Aggregation).WithParam("counts")
 			}
-			if err := catalogrules.ValidateDimensions(where, groupBy, card.Filter, &card.Price); err != nil {
-				return apperr.Invalidf("%s", err).WithParam("rate_cards")
+			if err := catalogrules.ValidateDimensions(where, groupBy, c.Filter, nil); err != nil {
+				return apperr.Invalidf("%s", err).WithParam("counts")
 			}
 		}
 	}
@@ -130,15 +131,20 @@ func writeLimit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, curre
 		if err != nil {
 			return err
 		}
+		if store := db.EventStoreOf(q); !used && store != nil {
+			if used, err = store.LimitUsed(ctx, next.Key); err != nil {
+				return err
+			}
+		}
 		if used {
 			return apperr.Conflictf("limit %q has windows counted in %s; it keeps its unit", next.Key, current.Unit).WithParam("unit")
 		}
 	}
-	cards, err := json.Marshal(next.RateCards)
+	counts, err := json.Marshal(next.Counts)
 	if err != nil {
 		return err
 	}
-	params := gen.UpsertCatalogLimitParams{MerchantID: merchantID, LimitKey: next.Key, Unit: next.Unit, ResetKind: string(next.Reset.Kind), Overrun: string(next.Overrun), RateCards: cards}
+	params := gen.UpsertCatalogLimitParams{MerchantID: merchantID, LimitKey: next.Key, Unit: next.Unit, ResetKind: string(next.Reset.Kind), Overrun: string(next.Overrun), Counts: counts}
 	if next.Reset.WindowSeconds != 0 {
 		seconds := int32(next.Reset.WindowSeconds) // #nosec G115 -- bounded by catalog.MaxLimitWindowSeconds
 		params.WindowSeconds = &seconds
@@ -239,12 +245,12 @@ func setProductLimits(ctx context.Context, q *gen.Queries, merchantID, productID
 
 // limitDeclaration is SetLimitParams as a whole declaration.
 func limitDeclaration(key string, params billing.SetLimitParams) (limits.Definition, error) {
-	decl := catalogwire.ApplyLimit{Unit: catalogwire.Value(params.Unit), Reset: catalogwire.Value(params.Reset), RateCards: catalogwire.Value(params.RateCards)}
+	decl := catalogwire.ApplyLimit{Unit: catalogwire.Value(params.Unit), Reset: catalogwire.Value(params.Reset), Counts: catalogwire.Value(params.Counts)}
 	if params.Overrun != "" {
 		decl.Overrun = catalogwire.Value(params.Overrun)
 	}
-	if params.RateCards == nil {
-		decl.RateCards = catalogwire.Value([]catalogwire.LimitRateCard{})
+	if params.Counts == nil {
+		decl.Counts = catalogwire.Value([]catalogwire.LimitCount{})
 	}
 	return declaredLimit(key, nil, decl)
 }
@@ -406,12 +412,12 @@ func limitViews(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, defs 
 	}
 	out := make([]billing.Limit, 0, len(defs))
 	for _, d := range defs {
-		view := billing.Limit{Key: d.Key, Unit: d.Unit, Reset: d.Reset, Overrun: d.Overrun, RateCards: d.RateCards, Products: products[d.Key], Revision: d.Revision, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
+		view := billing.Limit{Key: d.Key, Unit: d.Unit, Reset: d.Reset, Overrun: d.Overrun, Counts: d.Counts, Products: products[d.Key], Revision: d.Revision, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
 		if view.Products == nil {
 			view.Products = []billing.LimitProduct{}
 		}
-		if view.RateCards == nil {
-			view.RateCards = []catalogwire.LimitRateCard{}
+		if view.Counts == nil {
+			view.Counts = []catalogwire.LimitCount{}
 		}
 		out = append(out, view)
 	}

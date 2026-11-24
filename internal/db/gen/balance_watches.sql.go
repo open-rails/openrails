@@ -248,7 +248,7 @@ FROM (
     FROM billing.ledger_accounts a
     LEFT JOIN billing.money_settings s
       ON s.merchant_id = a.merchant_id AND s.customer_id = a.customer_id AND s.currency = a.currency
-    WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_balance' AND a.customer_id IS NOT NULL
+    WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_units' AND a.customer_id IS NOT NULL
       AND (s.billing_mode IS DISTINCT FROM 'arrears' OR s.collection_revoked_at IS NOT NULL)
 ) w
 GROUP BY w.merchant_id, w.customer_id, w.currency
@@ -395,7 +395,7 @@ const watchCustomerBalance = `-- name: WatchCustomerBalance :execrows
 INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, updated_at, look_each_change)
 SELECT a.merchant_id, a.customer_id::uuid, a.currency, to_timestamp(0), 0, $1::timestamptz, true
 FROM billing.ledger_accounts a
-WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_balance'
+WHERE a.merchant_id = $2::uuid AND a.account_type = 'customer_units'
   AND a.currency = $3::text AND a.customer_id = $4::uuid
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     next_check_at = to_timestamp(0),

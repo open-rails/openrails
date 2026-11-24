@@ -86,7 +86,7 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req billing.Create
 		if existing != nil && existing.Archived != req.Archived {
 			return ErrCatalogConflict
 		}
-		out, err = scoped.CreatePrice(ctx, req)
+		out, err = scoped.commandCreatePrice(ctx, req)
 		return err
 	})
 	if err != nil {

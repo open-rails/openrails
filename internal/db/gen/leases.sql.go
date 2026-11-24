@@ -12,6 +12,21 @@ import (
 	"github.com/google/uuid"
 )
 
+const clearLeaseInFlight = `-- name: ClearLeaseInFlight :exec
+DELETE FROM billing.lease_in_flight
+WHERE merchant_id = $1::uuid AND lease_id = $2::uuid
+`
+
+type ClearLeaseInFlightParams struct {
+	MerchantID uuid.UUID
+	LeaseID    uuid.UUID
+}
+
+func (q *Queries) ClearLeaseInFlight(ctx context.Context, arg ClearLeaseInFlightParams) error {
+	_, err := q.db.Exec(ctx, clearLeaseInFlight, arg.MerchantID, arg.LeaseID)
+	return err
+}
+
 const closeLease = `-- name: CloseLease :exec
 UPDATE billing.leases
 SET closed_at = COALESCE(closed_at, GREATEST(created_at, $1::timestamptz))
@@ -24,47 +39,87 @@ type CloseLeaseParams struct {
 	ID         uuid.UUID
 }
 
-// A sync with close ends the lease once: it takes no want after, and usage
-// against it still settles.
+// A sync with close ends the lease once; usage against it still settles.
 func (q *Queries) CloseLease(ctx context.Context, arg CloseLeaseParams) error {
 	_, err := q.db.Exec(ctx, closeLease, arg.ClosedAt, arg.MerchantID, arg.ID)
 	return err
 }
 
-const consumeLeaseHoldPart = `-- name: ConsumeLeaseHoldPart :exec
-UPDATE billing.limit_hold_parts
-SET held = GREATEST(held - $1::bigint, 0), used_units = COALESCE(used_units, 0) + $1::bigint,
-    answered_units = GREATEST(COALESCE(answered_units, held) - $1::bigint, 0)
-WHERE merchant_id = $2::uuid AND hold_id = $3::uuid
-  AND hold_created_at = $4::timestamptz AND limit_key = $5::text
+const countLiveLeases = `-- name: CountLiveLeases :one
+SELECT count(*)::int AS live FROM billing.leases
+WHERE merchant_id = $1::uuid AND closed_at IS NULL
+  AND last_sync_at > $2::timestamptz
 `
 
-type ConsumeLeaseHoldPartParams struct {
-	Units         int64
-	MerchantID    uuid.UUID
-	HoldID        uuid.UUID
-	HoldCreatedAt time.Time
-	LimitKey      string
+type CountLiveLeasesParams struct {
+	MerchantID uuid.UUID
+	LiveSince  time.Time
 }
 
-// Usage a live lease decided against its hold leaves the hold.
-func (q *Queries) ConsumeLeaseHoldPart(ctx context.Context, arg ConsumeLeaseHoldPartParams) error {
-	_, err := q.db.Exec(ctx, consumeLeaseHoldPart,
-		arg.Units,
+// The merchant's leases a sync renewed within the lease lifetime.
+func (q *Queries) CountLiveLeases(ctx context.Context, arg CountLiveLeasesParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countLiveLeases, arg.MerchantID, arg.LiveSince)
+	var live int32
+	err := row.Scan(&live)
+	return live, err
+}
+
+const deleteLeaseInFlight = `-- name: DeleteLeaseInFlight :exec
+DELETE FROM billing.lease_in_flight
+WHERE merchant_id = $1::uuid AND lease_id = $2::uuid
+  AND customer_id = $3::uuid AND limit_key = $4::text AND unit = $5::text
+`
+
+type DeleteLeaseInFlightParams struct {
+	MerchantID uuid.UUID
+	LeaseID    uuid.UUID
+	CustomerID uuid.UUID
+	LimitKey   string
+	Unit       string
+}
+
+func (q *Queries) DeleteLeaseInFlight(ctx context.Context, arg DeleteLeaseInFlightParams) error {
+	_, err := q.db.Exec(ctx, deleteLeaseInFlight,
 		arg.MerchantID,
-		arg.HoldID,
-		arg.HoldCreatedAt,
+		arg.LeaseID,
+		arg.CustomerID,
 		arg.LimitKey,
+		arg.Unit,
 	)
 	return err
 }
 
+const getLease = `-- name: GetLease :one
+SELECT merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts FROM billing.leases
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+`
+
+type GetLeaseParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) GetLease(ctx context.Context, arg GetLeaseParams) (BillingLease, error) {
+	row := q.db.QueryRow(ctx, getLease, arg.MerchantID, arg.ID)
+	var i BillingLease
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.CreatedAt,
+		&i.LastSyncAt,
+		&i.SettledThroughN,
+		&i.ClosedAt,
+		&i.Receipts,
+	)
+	return i, err
+}
+
 const insertLease = `-- name: InsertLease :one
-INSERT INTO billing.leases (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts, hold_version)
+INSERT INTO billing.leases (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts)
 VALUES ($1::uuid, $2::uuid, $3::timestamptz, $3::timestamptz,
-    $4::bigint, '[]'::jsonb, 0)
+    $4::bigint, '[]'::jsonb)
 ON CONFLICT (merchant_id, id) DO NOTHING
-RETURNING merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts, hold_version
+RETURNING merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts
 `
 
 type InsertLeaseParams struct {
@@ -92,156 +147,53 @@ func (q *Queries) InsertLease(ctx context.Context, arg InsertLeaseParams) (Billi
 		&i.SettledThroughN,
 		&i.ClosedAt,
 		&i.Receipts,
-		&i.HoldVersion,
 	)
 	return i, err
 }
 
-const insertLeaseHold = `-- name: InsertLeaseHold :one
-INSERT INTO billing.limit_holds (merchant_id, created_at, customer_id, currency, lease_id, limit_set, terms, rate_cards, state, updated_at,
-    version, applied_version)
-VALUES ($1::uuid, $2::timestamptz, $3::uuid, $4::text,
-    $5::uuid, $6::text, $7::jsonb, $8::jsonb, 'open', $2::timestamptz,
-    $9::bigint, $10::bigint)
-RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version
+const listCustomerInFlight = `-- name: ListCustomerInFlight :many
+SELECT f.limit_key, f.unit, SUM(f.amount)::bigint AS amount
+FROM billing.lease_in_flight f
+JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+WHERE f.merchant_id = $1::uuid AND f.customer_id = $2::uuid
+  AND l.closed_at IS NULL AND l.last_sync_at > $3::timestamptz
+  AND ($4::uuid IS NULL OR f.lease_id <> $4::uuid)
+GROUP BY f.limit_key, f.unit
 `
 
-type InsertLeaseHoldParams struct {
+type ListCustomerInFlightParams struct {
 	MerchantID     uuid.UUID
-	CreatedAt      time.Time
 	CustomerID     uuid.UUID
-	Currency       string
-	LeaseID        uuid.UUID
-	LimitSet       string
-	Terms          []byte
-	RateCards      []byte
-	Version        int64
-	AppliedVersion int64
+	LeaseLiveSince time.Time
+	ExceptLease    *uuid.UUID
 }
 
-func (q *Queries) InsertLeaseHold(ctx context.Context, arg InsertLeaseHoldParams) (BillingLimitHold, error) {
-	row := q.db.QueryRow(ctx, insertLeaseHold,
+type ListCustomerInFlightRow struct {
+	LimitKey string
+	Unit     string
+	Amount   int64
+}
+
+// What live leases other than except_lease report in flight for one
+// customer, by limit and unit.
+func (q *Queries) ListCustomerInFlight(ctx context.Context, arg ListCustomerInFlightParams) ([]ListCustomerInFlightRow, error) {
+	rows, err := q.db.Query(ctx, listCustomerInFlight,
 		arg.MerchantID,
-		arg.CreatedAt,
 		arg.CustomerID,
-		arg.Currency,
-		arg.LeaseID,
-		arg.LimitSet,
-		arg.Terms,
-		arg.RateCards,
-		arg.Version,
-		arg.AppliedVersion,
-	)
-	var i BillingLimitHold
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ID,
-		&i.CreatedAt,
-		&i.CustomerID,
-		&i.Currency,
-		&i.LeaseID,
-		&i.LimitSet,
-		&i.RequestID,
-		&i.EstimatedAmount,
-		&i.AvailableAmount,
-		&i.Terms,
-		&i.EstimateUsage,
-		&i.RateCards,
-		&i.RequestedExpiresAt,
-		&i.ExpiresAt,
-		&i.State,
-		&i.CaptureTerms,
-		&i.CapturedAmount,
-		&i.CapturedAt,
-		&i.ReleasedAt,
-		&i.UpdatedAt,
-		&i.CapturedCharges,
-		&i.Version,
-		&i.AppliedVersion,
-	)
-	return i, err
-}
-
-const insertLeaseHoldPart = `-- name: InsertLeaseHoldPart :exec
-INSERT INTO billing.limit_hold_parts (merchant_id, hold_id, hold_created_at, customer_id, limit_key, unit, window_starts_at, window_ends_at,
-    held, request_units, used_units, answered_units)
-VALUES (
-    $1::uuid, $2::uuid, $3::timestamptz, $4::uuid,
-    $5::text, $6::text, $7::timestamptz, $8::timestamptz,
-    $9::bigint, $10::bigint, $11::bigint, $12::bigint
-)
-`
-
-type InsertLeaseHoldPartParams struct {
-	MerchantID     uuid.UUID
-	HoldID         uuid.UUID
-	HoldCreatedAt  time.Time
-	CustomerID     uuid.UUID
-	LimitKey       string
-	Unit           string
-	WindowStartsAt time.Time
-	WindowEndsAt   *time.Time
-	Held           int64
-	RequestUnits   int64
-	UsedUnits      int64
-	AnsweredUnits  int64
-}
-
-func (q *Queries) InsertLeaseHoldPart(ctx context.Context, arg InsertLeaseHoldPartParams) error {
-	_, err := q.db.Exec(ctx, insertLeaseHoldPart,
-		arg.MerchantID,
-		arg.HoldID,
-		arg.HoldCreatedAt,
-		arg.CustomerID,
-		arg.LimitKey,
-		arg.Unit,
-		arg.WindowStartsAt,
-		arg.WindowEndsAt,
-		arg.Held,
-		arg.RequestUnits,
-		arg.UsedUnits,
-		arg.AnsweredUnits,
-	)
-	return err
-}
-
-const listCustomersMovedSince = `-- name: ListCustomersMovedSince :many
-SELECT w.customer_id FROM billing.limit_windows w
-WHERE w.merchant_id = $1::uuid AND w.customer_id = ANY($2::uuid[])
-  AND w.updated_at > $3::timestamptz
-UNION
-SELECT a.customer_id FROM billing.usage_accruals a
-WHERE a.merchant_id = $1::uuid AND a.customer_id = ANY($2::uuid[])
-  AND a.day_at >= $4::timestamptz AND a.updated_at > $3::timestamptz
-`
-
-type ListCustomersMovedSinceParams struct {
-	MerchantID   uuid.UUID
-	CustomerIds  []uuid.UUID
-	Since        time.Time
-	AccruedSince time.Time
-}
-
-// Of the customers a lease holds for, those whose limits settled or whose
-// usage accrued since an instant: their idle holds are sized again.
-func (q *Queries) ListCustomersMovedSince(ctx context.Context, arg ListCustomersMovedSinceParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listCustomersMovedSince,
-		arg.MerchantID,
-		arg.CustomerIds,
-		arg.Since,
-		arg.AccruedSince,
+		arg.LeaseLiveSince,
+		arg.ExceptLease,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []ListCustomerInFlightRow
 	for rows.Next() {
-		var customer_id uuid.UUID
-		if err := rows.Scan(&customer_id); err != nil {
+		var i ListCustomerInFlightRow
+		if err := rows.Scan(&i.LimitKey, &i.Unit, &i.Amount); err != nil {
 			return nil, err
 		}
-		items = append(items, customer_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -249,60 +201,75 @@ func (q *Queries) ListCustomersMovedSince(ctx context.Context, arg ListCustomers
 	return items, nil
 }
 
-const listLeaseHoldParts = `-- name: ListLeaseHoldParts :many
-SELECT p.hold_id, p.hold_created_at, p.customer_id, p.limit_key, p.unit, p.window_starts_at, p.window_ends_at, p.held,
-       p.request_units, p.used_units, p.contended_at, p.answered_units
-FROM billing.limit_hold_parts p
-JOIN billing.limit_holds h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
-WHERE p.merchant_id = $1::uuid AND h.lease_id = $2::uuid AND h.state = 'open'
-  AND p.hold_created_at >= $3::timestamptz AND h.created_at >= $3::timestamptz
-ORDER BY p.hold_created_at, p.hold_id, p.limit_key COLLATE "C"
+const listCustomerRunningRates = `-- name: ListCustomerRunningRates :many
+SELECT currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND stopped_at IS NULL
+GROUP BY currency
 `
 
-type ListLeaseHoldPartsParams struct {
+type ListCustomerRunningRatesParams struct {
 	MerchantID uuid.UUID
-	LeaseID    uuid.UUID
-	HeldSince  time.Time
+	CustomerID uuid.UUID
 }
 
-type ListLeaseHoldPartsRow struct {
-	HoldID         uuid.UUID
-	HoldCreatedAt  time.Time
-	CustomerID     uuid.UUID
-	LimitKey       string
-	Unit           string
-	WindowStartsAt time.Time
-	WindowEndsAt   *time.Time
-	Held           int64
-	RequestUnits   *int64
-	UsedUnits      *int64
-	ContendedAt    *time.Time
-	AnsweredUnits  *int64
+type ListCustomerRunningRatesRow struct {
+	Currency    string
+	RatePerHour int64
 }
 
-// What a lease's open holds set aside, by hold and limit.
-func (q *Queries) ListLeaseHoldParts(ctx context.Context, arg ListLeaseHoldPartsParams) ([]ListLeaseHoldPartsRow, error) {
-	rows, err := q.db.Query(ctx, listLeaseHoldParts, arg.MerchantID, arg.LeaseID, arg.HeldSince)
+// What each currency's running charges of a customer accrue per hour.
+func (q *Queries) ListCustomerRunningRates(ctx context.Context, arg ListCustomerRunningRatesParams) ([]ListCustomerRunningRatesRow, error) {
+	rows, err := q.db.Query(ctx, listCustomerRunningRates, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListLeaseHoldPartsRow
+	var items []ListCustomerRunningRatesRow
 	for rows.Next() {
-		var i ListLeaseHoldPartsRow
+		var i ListCustomerRunningRatesRow
+		if err := rows.Scan(&i.Currency, &i.RatePerHour); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLeaseInFlight = `-- name: ListLeaseInFlight :many
+SELECT customer_id, limit_key, unit, amount FROM billing.lease_in_flight
+WHERE merchant_id = $1::uuid AND lease_id = $2::uuid
+FOR UPDATE
+`
+
+type ListLeaseInFlightParams struct {
+	MerchantID uuid.UUID
+	LeaseID    uuid.UUID
+}
+
+type ListLeaseInFlightRow struct {
+	CustomerID uuid.UUID
+	LimitKey   string
+	Unit       string
+	Amount     int64
+}
+
+func (q *Queries) ListLeaseInFlight(ctx context.Context, arg ListLeaseInFlightParams) ([]ListLeaseInFlightRow, error) {
+	rows, err := q.db.Query(ctx, listLeaseInFlight, arg.MerchantID, arg.LeaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLeaseInFlightRow
+	for rows.Next() {
+		var i ListLeaseInFlightRow
 		if err := rows.Scan(
-			&i.HoldID,
-			&i.HoldCreatedAt,
 			&i.CustomerID,
 			&i.LimitKey,
 			&i.Unit,
-			&i.WindowStartsAt,
-			&i.WindowEndsAt,
-			&i.Held,
-			&i.RequestUnits,
-			&i.UsedUnits,
-			&i.ContendedAt,
-			&i.AnsweredUnits,
+			&i.Amount,
 		); err != nil {
 			return nil, err
 		}
@@ -314,55 +281,47 @@ func (q *Queries) ListLeaseHoldParts(ctx context.Context, arg ListLeaseHoldParts
 	return items, nil
 }
 
-const listLeaseHolds = `-- name: ListLeaseHolds :many
-SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version FROM billing.limit_holds
-WHERE merchant_id = $1::uuid AND lease_id = $2::uuid
-  AND state = 'open' AND created_at >= $3::timestamptz
-ORDER BY created_at, id
-FOR UPDATE
+const listLeaseOpenHolds = `-- name: ListLeaseOpenHolds :many
+SELECT id, created_at, request_id, customer_id FROM billing.limit_holds
+WHERE merchant_id = $1::uuid AND lease_id = $2::uuid AND state = 'open'
+  AND created_at >= $3::timestamptz
+  AND ($4::text[] IS NULL OR request_id = ANY($4::text[]))
 `
 
-type ListLeaseHoldsParams struct {
+type ListLeaseOpenHoldsParams struct {
 	MerchantID uuid.UUID
 	LeaseID    uuid.UUID
 	HeldSince  time.Time
+	RequestIds []string
 }
 
-// A lease's open holds, retained or not past the hold lifetime, oldest first.
-func (q *Queries) ListLeaseHolds(ctx context.Context, arg ListLeaseHoldsParams) ([]BillingLimitHold, error) {
-	rows, err := q.db.Query(ctx, listLeaseHolds, arg.MerchantID, arg.LeaseID, arg.HeldSince)
+type ListLeaseOpenHoldsRow struct {
+	ID         uuid.UUID
+	CreatedAt  time.Time
+	RequestID  string
+	CustomerID uuid.UUID
+}
+
+// The open request holds a lease owns, by request id.
+func (q *Queries) ListLeaseOpenHolds(ctx context.Context, arg ListLeaseOpenHoldsParams) ([]ListLeaseOpenHoldsRow, error) {
+	rows, err := q.db.Query(ctx, listLeaseOpenHolds,
+		arg.MerchantID,
+		arg.LeaseID,
+		arg.HeldSince,
+		arg.RequestIds,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingLimitHold
+	var items []ListLeaseOpenHoldsRow
 	for rows.Next() {
-		var i BillingLimitHold
+		var i ListLeaseOpenHoldsRow
 		if err := rows.Scan(
-			&i.MerchantID,
 			&i.ID,
 			&i.CreatedAt,
-			&i.CustomerID,
-			&i.Currency,
-			&i.LeaseID,
-			&i.LimitSet,
 			&i.RequestID,
-			&i.EstimatedAmount,
-			&i.AvailableAmount,
-			&i.Terms,
-			&i.EstimateUsage,
-			&i.RateCards,
-			&i.RequestedExpiresAt,
-			&i.ExpiresAt,
-			&i.State,
-			&i.CaptureTerms,
-			&i.CapturedAmount,
-			&i.CapturedAt,
-			&i.ReleasedAt,
-			&i.UpdatedAt,
-			&i.CapturedCharges,
-			&i.Version,
-			&i.AppliedVersion,
+			&i.CustomerID,
 		); err != nil {
 			return nil, err
 		}
@@ -376,7 +335,7 @@ func (q *Queries) ListLeaseHolds(ctx context.Context, arg ListLeaseHoldsParams) 
 
 const lockLease = `-- name: LockLease :one
 
-SELECT merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts, hold_version FROM billing.leases
+SELECT merchant_id, id, created_at, last_sync_at, settled_through_n, closed_at, receipts FROM billing.leases
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
@@ -386,7 +345,8 @@ type LockLeaseParams struct {
 	ID         uuid.UUID
 }
 
-// A gate's lease and the holds it owns. Every statement names the merchant.
+// A gate's lease: its usage stream, its in-flight report and the request
+// holds its gate admitted. Every statement names the merchant.
 func (q *Queries) LockLease(ctx context.Context, arg LockLeaseParams) (BillingLease, error) {
 	row := q.db.QueryRow(ctx, lockLease, arg.MerchantID, arg.ID)
 	var i BillingLease
@@ -398,222 +358,26 @@ func (q *Queries) LockLease(ctx context.Context, arg LockLeaseParams) (BillingLe
 		&i.SettledThroughN,
 		&i.ClosedAt,
 		&i.Receipts,
-		&i.HoldVersion,
 	)
 	return i, err
 }
 
-const markLeaseHoldsContended = `-- name: MarkLeaseHoldsContended :exec
-UPDATE billing.limit_hold_parts p
-SET contended_at = $1::timestamptz
-FROM billing.limit_holds h, billing.leases l
-WHERE h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
-  AND l.merchant_id = h.merchant_id AND l.id = h.lease_id
-  AND p.merchant_id = $2::uuid AND p.customer_id = $3::uuid
-  AND p.limit_key = $4::text
-  AND ($5::text IS NULL OR h.currency = $5::text)
-  AND p.window_starts_at >= $6::timestamptz AND p.window_starts_at <= $7::timestamptz
-  AND p.hold_created_at >= $8::timestamptz AND h.created_at >= $8::timestamptz
-  AND p.held > 0 AND h.state = 'open' AND h.lease_id <> $9::uuid
-  AND l.closed_at IS NULL AND l.last_sync_at > $10::timestamptz
-`
-
-type MarkLeaseHoldsContendedParams struct {
-	Now            time.Time
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	LimitKey       string
-	Currency       *string
-	FromWindow     time.Time
-	ToWindow       time.Time
-	HeldSince      time.Time
-	LeaseID        uuid.UUID
-	LeaseLiveSince time.Time
-}
-
-// Other live leases' parts holding capacity of a limit a want or an
-// admission was refused capacity_held for shrink on their next sync. The
-// caller holds the customer's lock.
-func (q *Queries) MarkLeaseHoldsContended(ctx context.Context, arg MarkLeaseHoldsContendedParams) error {
-	_, err := q.db.Exec(ctx, markLeaseHoldsContended,
-		arg.Now,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.LimitKey,
-		arg.Currency,
-		arg.FromWindow,
-		arg.ToWindow,
-		arg.HeldSince,
-		arg.LeaseID,
-		arg.LeaseLiveSince,
-	)
-	return err
-}
-
-const releaseLeaseHold = `-- name: ReleaseLeaseHold :exec
-UPDATE billing.limit_holds
-SET state = 'released', released_at = $1::timestamptz, updated_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND id = $3::uuid
-  AND created_at = $4::timestamptz AND lease_id IS NOT NULL AND state = 'open'
-`
-
-type ReleaseLeaseHoldParams struct {
-	AsOf       time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	CreatedAt  time.Time
-}
-
-func (q *Queries) ReleaseLeaseHold(ctx context.Context, arg ReleaseLeaseHoldParams) error {
-	_, err := q.db.Exec(ctx, releaseLeaseHold,
-		arg.AsOf,
-		arg.MerchantID,
-		arg.ID,
-		arg.CreatedAt,
-	)
-	return err
-}
-
-const renewLease = `-- name: RenewLease :execrows
+const renewLease = `-- name: RenewLease :exec
 UPDATE billing.leases
 SET last_sync_at = GREATEST(last_sync_at, $1::timestamptz)
 WHERE merchant_id = $2::uuid AND id = $3::uuid AND closed_at IS NULL
-  AND last_sync_at > $4::timestamptz + (clock_timestamp() - transaction_timestamp())
 `
 
 type RenewLeaseParams struct {
 	Now        time.Time
 	MerchantID uuid.UUID
 	ID         uuid.UUID
-	LiveSince  time.Time
 }
 
-// A sync renews its lease only while it is live as the statement runs: the
-// business clock moved on by the transaction's own elapsed time. Readers
-// count a lease live for its lifetime and a grace longer than any sync
-// transaction, so a renewal that commits never revives holds a reader has
-// already counted dead.
-func (q *Queries) RenewLease(ctx context.Context, arg RenewLeaseParams) (int64, error) {
-	result, err := q.db.Exec(ctx, renewLease,
-		arg.Now,
-		arg.MerchantID,
-		arg.ID,
-		arg.LiveSince,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const resizeLeaseHoldPart = `-- name: ResizeLeaseHoldPart :exec
-UPDATE billing.limit_hold_parts
-SET held = $1::bigint, request_units = $2::bigint, used_units = $3::bigint,
-    answered_units = $4::bigint
-WHERE merchant_id = $5::uuid AND hold_id = $6::uuid
-  AND hold_created_at = $7::timestamptz AND limit_key = $8::text
-`
-
-type ResizeLeaseHoldPartParams struct {
-	Held          int64
-	RequestUnits  int64
-	UsedUnits     int64
-	AnsweredUnits int64
-	MerchantID    uuid.UUID
-	HoldID        uuid.UUID
-	HoldCreatedAt time.Time
-	LimitKey      string
-}
-
-// A sync writes its own parts only under their customer's lock, and never
-// contended_at: another lease's refusal marks it under the same lock.
-func (q *Queries) ResizeLeaseHoldPart(ctx context.Context, arg ResizeLeaseHoldPartParams) error {
-	_, err := q.db.Exec(ctx, resizeLeaseHoldPart,
-		arg.Held,
-		arg.RequestUnits,
-		arg.UsedUnits,
-		arg.AnsweredUnits,
-		arg.MerchantID,
-		arg.HoldID,
-		arg.HoldCreatedAt,
-		arg.LimitKey,
-	)
+// A sync makes its lease live again, unless it was closed.
+func (q *Queries) RenewLease(ctx context.Context, arg RenewLeaseParams) error {
+	_, err := q.db.Exec(ctx, renewLease, arg.Now, arg.MerchantID, arg.ID)
 	return err
-}
-
-const setLeaseHoldVersions = `-- name: SetLeaseHoldVersions :exec
-UPDATE billing.limit_holds
-SET version = $1::bigint, applied_version = $2::bigint, updated_at = $3::timestamptz
-WHERE merchant_id = $4::uuid AND id = $5::uuid
-  AND created_at = $6::timestamptz AND lease_id IS NOT NULL
-`
-
-type SetLeaseHoldVersionsParams struct {
-	Version        int64
-	AppliedVersion int64
-	AsOf           time.Time
-	MerchantID     uuid.UUID
-	ID             uuid.UUID
-	CreatedAt      time.Time
-}
-
-// A lease's hold answered a new size, or its gate reported an answer applied.
-func (q *Queries) SetLeaseHoldVersions(ctx context.Context, arg SetLeaseHoldVersionsParams) error {
-	_, err := q.db.Exec(ctx, setLeaseHoldVersions,
-		arg.Version,
-		arg.AppliedVersion,
-		arg.AsOf,
-		arg.MerchantID,
-		arg.ID,
-		arg.CreatedAt,
-	)
-	return err
-}
-
-const sumOtherLeaseHeld = `-- name: SumOtherLeaseHeld :one
-SELECT COALESCE(SUM(p.held), 0)::bigint AS held
-FROM billing.limit_hold_parts p
-JOIN billing.limit_holds h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
-JOIN billing.leases l ON l.merchant_id = h.merchant_id AND l.id = h.lease_id
-WHERE p.merchant_id = $1::uuid AND p.customer_id = $2::uuid
-  AND p.limit_key = $3::text
-  AND ($4::text IS NULL OR h.currency = $4::text)
-  AND p.window_starts_at >= $5::timestamptz AND p.window_starts_at <= $6::timestamptz
-  AND p.hold_created_at >= $7::timestamptz AND h.created_at >= $7::timestamptz
-  AND h.state = 'open' AND h.lease_id <> $8::uuid
-  AND l.closed_at IS NULL AND l.last_sync_at > $9::timestamptz
-`
-
-type SumOtherLeaseHeldParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	LimitKey       string
-	Currency       *string
-	FromWindow     time.Time
-	ToWindow       time.Time
-	HeldSince      time.Time
-	LeaseID        uuid.UUID
-	LeaseLiveSince time.Time
-}
-
-// What other live leases' holds set aside of a limit, in the windows from
-// from_window through to_window and, when named, the currency (balance's):
-// capacity a want or an admission would get if they returned it.
-func (q *Queries) SumOtherLeaseHeld(ctx context.Context, arg SumOtherLeaseHeldParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumOtherLeaseHeld,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.LimitKey,
-		arg.Currency,
-		arg.FromWindow,
-		arg.ToWindow,
-		arg.HeldSince,
-		arg.LeaseID,
-		arg.LeaseLiveSince,
-	)
-	var held int64
-	err := row.Scan(&held)
-	return held, err
 }
 
 const syncElapsed = `-- name: SyncElapsed :one
@@ -629,38 +393,15 @@ func (q *Queries) SyncElapsed(ctx context.Context) (int64, error) {
 	return elapsed_micros, err
 }
 
-const tryLockCustomerForSpend = `-- name: TryLockCustomerForSpend :one
-SELECT id FROM billing.customers
-WHERE merchant_id = $1::uuid AND id = $2::uuid
-FOR UPDATE SKIP LOCKED
-`
-
-type TryLockCustomerForSpendParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// The customer's spend lock unless another transaction holds it: a sync
-// does routine work on the holds of a customer no item names only when it
-// need not wait. No row when skipped.
-func (q *Queries) TryLockCustomerForSpend(ctx context.Context, arg TryLockCustomerForSpendParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, tryLockCustomerForSpend, arg.MerchantID, arg.ID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const updateLeaseSettlement = `-- name: UpdateLeaseSettlement :exec
 UPDATE billing.leases
-SET settled_through_n = $1::bigint, receipts = $2::jsonb,
-    hold_version = $3::bigint
-WHERE merchant_id = $4::uuid AND id = $5::uuid
+SET settled_through_n = $1::bigint, receipts = $2::jsonb
+WHERE merchant_id = $3::uuid AND id = $4::uuid
 `
 
 type UpdateLeaseSettlementParams struct {
 	SettledThroughN int64
 	Receipts        []byte
-	HoldVersion     int64
 	MerchantID      uuid.UUID
 	ID              uuid.UUID
 }
@@ -669,9 +410,39 @@ func (q *Queries) UpdateLeaseSettlement(ctx context.Context, arg UpdateLeaseSett
 	_, err := q.db.Exec(ctx, updateLeaseSettlement,
 		arg.SettledThroughN,
 		arg.Receipts,
-		arg.HoldVersion,
 		arg.MerchantID,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertLeaseInFlight = `-- name: UpsertLeaseInFlight :exec
+INSERT INTO billing.lease_in_flight (merchant_id, lease_id, customer_id, limit_key, unit, amount, updated_at)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text,
+    $5::text, $6::bigint, $7::timestamptz)
+ON CONFLICT (merchant_id, customer_id, limit_key, unit, lease_id)
+DO UPDATE SET amount = EXCLUDED.amount, updated_at = EXCLUDED.updated_at
+`
+
+type UpsertLeaseInFlightParams struct {
+	MerchantID uuid.UUID
+	LeaseID    uuid.UUID
+	CustomerID uuid.UUID
+	LimitKey   string
+	Unit       string
+	Amount     int64
+	Now        time.Time
+}
+
+func (q *Queries) UpsertLeaseInFlight(ctx context.Context, arg UpsertLeaseInFlightParams) error {
+	_, err := q.db.Exec(ctx, upsertLeaseInFlight,
+		arg.MerchantID,
+		arg.LeaseID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.Unit,
+		arg.Amount,
+		arg.Now,
 	)
 	return err
 }

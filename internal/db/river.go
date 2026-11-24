@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/pgidentity"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -31,6 +32,8 @@ type runtimeBinding struct {
 	inserter      RiverJobInserter
 	config        MerchantConfig
 	notifications *config.NotificationChannel
+	events        *eventstore.Store
+	usage         UsageLedger
 }
 
 // SetNotifications binds the optional inbox channel before serving. Every

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
@@ -98,9 +99,12 @@ type funnel struct {
 }
 
 var (
-	attemptFunnel = funnel{measure: "attempts", by: "outcome", failed: []string{"declined"}}
-	rebillFunnel  = funnel{measure: "rebills", by: "first_outcome", failed: []string{"declined", "error", "missed"},
-		counted: []string{"approved", "declined", "error", "missed"}}
+	// A processor outage is a system error, not card testing: errors are left
+	// out of the new-card decline rate.
+	attemptFunnel = funnel{measure: "attempts", by: "outcome", failed: []string{"declined", "refused"},
+		counted: []string{"approved", "declined", "refused"}}
+	rebillFunnel = funnel{measure: "rebills", by: "first_outcome", failed: []string{"declined", "refused", "error", "missed"},
+		counted: []string{"approved", "declined", "refused", "error", "missed"}}
 )
 
 // shares runs f by PSP and owner over [from, to).
@@ -196,7 +200,7 @@ func spikeFinding(kind string, k healthKey, cur, base share, action string) Conv
 // 20), or any answer about our own credentials, which is critical.
 func (p *healthPass) systemErrors(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	from := now.Add(-systemErrorWindow)
-	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "category"}}, from, now, now)
+	rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "owner", "rail", "response_code"}}, from, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +209,7 @@ func (p *healthPass) systemErrors(ctx context.Context, now time.Time) ([]Converg
 		k := healthKey{str(r["psp"]), str(r["owner"])}
 		s := errs[k]
 		s.total += count(r["attempts"])
-		if r["category"] == string(decline.SystemError) {
+		if systemError(str(r["rail"]), str(r["response_code"])) {
 			s.failed += count(r["attempts"])
 		}
 		errs[k] = s
@@ -372,4 +376,17 @@ func count(v any) int64 {
 		return n
 	}
 	return 0
+}
+
+// systemError: a refusal of ours or our processor's, not the card's: a
+// processing failure, our configuration, a malformed or duplicate request.
+// It is read from the rail's own code: an issuer's code behind a generic
+// decline (91, 96, ...) is the issuer's, not ours.
+func systemError(rail, code string) bool {
+	reason := decline.Classify(rail, code).Reason
+	switch reason {
+	case billing.DeclineMerchantConfig, billing.DeclineInvalidRequest, billing.DeclineDuplicateTransaction:
+		return true
+	}
+	return decline.CauseOf(reason) == billing.DeclineCauseProcessing
 }

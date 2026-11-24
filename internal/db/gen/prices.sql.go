@@ -1255,6 +1255,7 @@ SELECT (
     OR EXISTS (SELECT 1 FROM billing.scheduled_changes WHERE merchant_id = $1::uuid AND from_price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.provider_intents WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_psp_bindings WHERE merchant_id = $1::uuid AND price_id = ANY($2::uuid[]))
+    OR EXISTS (SELECT 1 FROM billing.psp_import_records WHERE merchant_id = $1::uuid AND manual_price_id = ANY($2::uuid[]))
 )::boolean AS referenced
 `
 
@@ -1265,7 +1266,7 @@ type PricesHoldReferencesParams struct {
 
 // Whether a record refers to any of the prices: a purchase line,
 // a subscription, a purchase, a price migration, a scheduled change, a
-// provider write or a PSP link.
+// provider write, a PSP link or a PSP import's price pick.
 func (q *Queries) PricesHoldReferences(ctx context.Context, arg PricesHoldReferencesParams) (bool, error) {
 	row := q.db.QueryRow(ctx, pricesHoldReferences, arg.MerchantID, arg.PriceIds)
 	var referenced bool

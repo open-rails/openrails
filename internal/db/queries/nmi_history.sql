@@ -19,10 +19,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
   AND month_at >= sqlc.arg(since)::timestamptz;
 
 -- name: InsertNMIHistoryMonths :exec
-INSERT INTO billing.nmi_history_months (merchant_id, psp_id, month_at, kind, category, reason, authorizations)
-SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, c.month_at, c.kind, c.category, c.reason, c.authorizations
-FROM unnest(sqlc.arg(months)::timestamptz[], sqlc.arg(kinds)::text[], sqlc.arg(categories)::text[],
-    sqlc.arg(reasons)::text[], sqlc.arg(counts)::bigint[]) AS c(month_at, kind, category, reason, authorizations);
+INSERT INTO billing.nmi_history_months (merchant_id, psp_id, month_at, kind, reason, authorizations, outcome, decline_cause)
+SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, c.month_at, c.kind, c.reason, c.authorizations, c.outcome, NULLIF(c.decline_cause, '')
+FROM unnest(sqlc.arg(months)::timestamptz[], sqlc.arg(kinds)::text[], sqlc.arg(reasons)::text[],
+    sqlc.arg(counts)::bigint[], sqlc.arg(outcomes)::text[], sqlc.arg(decline_causes)::text[]) AS c(month_at, kind, reason, authorizations, outcome, decline_cause);
 
 -- name: RecordNMIHistoryRead :exec
 INSERT INTO billing.nmi_history_reads (merchant_id, psp_id, read_at)
@@ -32,8 +32,8 @@ ON CONFLICT (merchant_id, psp_id) DO UPDATE SET read_at = EXCLUDED.read_at;
 -- name: DeleteNMIHistoryMonthsBefore :execrows
 -- #1120 retention: history months past the attempt retention.
 DELETE FROM billing.nmi_history_months
-WHERE (merchant_id, psp_id, month_at, kind, category, reason) IN (
-    SELECT h.merchant_id, h.psp_id, h.month_at, h.kind, h.category, h.reason
+WHERE (merchant_id, psp_id, month_at, kind, reason) IN (
+    SELECT h.merchant_id, h.psp_id, h.month_at, h.kind, h.reason
     FROM billing.nmi_history_months h
     WHERE h.merchant_id = sqlc.arg(merchant_id)::uuid
       AND h.month_at < sqlc.arg(cutoff)::timestamptz

@@ -18,15 +18,15 @@ func newCatalogCmd() *cobra.Command {
 func newCatalogExportCmd() *cobra.Command {
 	var merchant, out string
 	var overwrite bool
-	cmd := &cobra.Command{Use: "export --merchant UUID --out catalog.snapshot.yaml", Short: "Export all persisted catalog history as a sealed YAML snapshot", Long: `Writes a backup of the merchant's catalog from a consistent snapshot of the
+	cmd := &cobra.Command{Use: "export --merchant UUID --out catalog.snapshot.yaml", Short: "Export the persisted catalog as a sealed YAML snapshot", Long: `Writes a backup of the merchant's catalog from a consistent snapshot of the
 configured database: a versioned kind: catalog_snapshot YAML with named rows
 and a SHA-256 digest, published atomically to a private file (an existing
 file needs --overwrite).
 
 It keeps every row of the catalog tables (products, product_entitlements,
-prices, price_key_movements, price_psp_bindings, catalog_meters,
-catalog_limits, catalog_product_limits, catalog_rate_cards,
-catalog_field_owners, catalog_applications) and the catalog revision:
+prices, price_psp_bindings, catalog_meters, catalog_limits,
+catalog_product_limits, catalog_rate_cards, catalog_field_owners,
+catalog_applications) and the catalog revision:
 archived products and prices, UUIDs and revisions, so every purchase keeps its
 original price. Overwritten meter and rate-card definitions were never stored
 and cannot be recovered. It exports no purchases, balances, credentials or

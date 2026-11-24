@@ -21,14 +21,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Usage is priced when it settles. Each meter of the usage's event type that
-// has a rate card takes its quantity from each item; the customer's quantity
-// of that meter (and matrix cell) in the billing period is Q, and a group of
-// items with quantities q is charged R(Q+Σq) - R(Q), where R is the card's
-// price for a whole period. R never falls as Q grows, so no charge is
-// negative, and a period's charges sum to R of its total: rounding never
-// drifts. A dynamic card instead charges each item's stated amount for a
-// positive quantity.
+// Usage is priced at intake provisionally and posted from its period's
+// total (usage_price.go). Each meter of the usage's event type that has a
+// rate card takes its quantity from each item; R is the card's price for a
+// whole period's quantity of a meter cell. A dynamic card instead charges
+// each item's stated amount for a positive quantity.
 
 func usageNotPriced(param, format string, args ...any) error {
 	return &apperr.Error{Status: http.StatusUnprocessableEntity, Code: billing.CodeUsageNotPriced, Message: fmt.Sprintf(format, args...), Param: param}
@@ -232,14 +229,10 @@ func eventValue(ev eventFields, property string) (string, string) {
 	return "", "metadata." + property
 }
 
-// errVolumeTiers refuses a volume-tiered card on a meter: its price for
-// earlier units falls when a later event reaches a cheaper band, so an event
-// could owe a negative amount.
-var errVolumeTiers = errors.New("a metered rate card cannot use volume tiers")
-
 // periodPrice is R(quantity): what a card charges one cell for a whole
 // period's quantity. An allowance's included units are in the price's units
-// (divide_by units for per_unit) and are taken before the price applies.
+// (divide_by units for per_unit) and are taken before the price applies. A
+// volume tier's price falls when the total reaches a cheaper band.
 func periodPrice(card ratingCard, cell string, quantity int64) (int64, error) {
 	cm := catalogrules.Of(card.Price)
 	if card.matrix() != nil {
@@ -247,9 +240,6 @@ func periodPrice(card ratingCard, cell string, quantity int64) (int64, error) {
 		if cm, ok = catalogrules.ForCell(card.Price, cell); !ok {
 			return 0, fmt.Errorf("meter %q has no matrix cell %q", card.MeterKey, cell)
 		}
-	}
-	if cm.Kind == catalog.ModelTiered && cm.Mode == catalog.TierModeVolume {
-		return 0, fmt.Errorf("meter %q: %w", card.MeterKey, errVolumeTiers)
 	}
 	if card.Allowance != nil && card.Allowance.Included > 0 {
 		included := big.NewInt(card.Allowance.Included)
@@ -265,7 +255,8 @@ func periodPrice(card ratingCard, cell string, quantity int64) (int64, error) {
 	return cm.Rate(quantity)
 }
 
-// marginalPrice is R(before + quantity) - R(before).
+// marginalPrice is R(before + quantity) - R(before): negative where a
+// volume tier's price fell.
 func marginalPrice(card ratingCard, cell string, before, quantity int64) (int64, error) {
 	if before < 0 || quantity < 0 || before > maxQuantity-quantity {
 		return 0, fmt.Errorf("meter %q: period quantity out of range", card.MeterKey)
@@ -277,9 +268,6 @@ func marginalPrice(card ratingCard, cell string, before, quantity int64) (int64,
 	after, err := periodPrice(card, cell, before+quantity)
 	if err != nil {
 		return 0, err
-	}
-	if after < prior {
-		return 0, fmt.Errorf("meter %q: price fell from %d to %d", card.MeterKey, prior, after)
 	}
 	return after - prior, nil
 }
@@ -301,8 +289,8 @@ func (u usageQuantity) price(before int64) (int64, error) {
 	return marginalPrice(u.card, u.cell, before, u.quantity)
 }
 
-// priceable refuses a quantity its card cannot price alone (volume tiers, a
-// matrix without its cell); every model prices through price.
+// priceable refuses a quantity its card cannot price alone (a matrix
+// without its cell); every model prices through price.
 func (u usageQuantity) priceable() error {
 	_, err := u.price(0)
 	return err

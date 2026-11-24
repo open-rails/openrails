@@ -11,12 +11,34 @@ import (
 	"github.com/google/uuid"
 )
 
-const countMerchantRowsExternalProviderMutationLogs = `-- name: CountMerchantRowsExternalProviderMutationLogs :one
-SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1
+const countMerchantRowsCustomerContacts = `-- name: CountMerchantRowsCustomerContacts :one
+SELECT count(*) FROM billing.customer_contacts WHERE merchant_id = $1
 `
 
-func (q *Queries) CountMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsExternalProviderMutationLogs, merchantID)
+func (q *Queries) CountMerchantRowsCustomerContacts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsCustomerContacts, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsDisputes = `-- name: CountMerchantRowsDisputes :one
+SELECT count(*) FROM billing.disputes WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsDisputes(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsDisputes, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsFraudReports = `-- name: CountMerchantRowsFraudReports :one
+SELECT count(*) FROM billing.fraud_reports WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsFraudReports(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsFraudReports, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -53,6 +75,28 @@ SELECT count(*) FROM billing.nmi_history_months WHERE merchant_id = $1
 
 func (q *Queries) CountMerchantRowsNMIHistoryMonths(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsNMIHistoryMonths, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsNetworkActivity = `-- name: CountMerchantRowsNetworkActivity :one
+SELECT count(*) FROM billing.network_activity_daily WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsNetworkActivity(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsNetworkActivity, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsOperationLog = `-- name: CountMerchantRowsOperationLog :one
+SELECT count(*) FROM billing.operation_log WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsOperationLog(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsOperationLog, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -135,6 +179,17 @@ func (q *Queries) CountMerchantRowsProviderIntents(ctx context.Context, merchant
 	return count, err
 }
 
+const countMerchantRowsProvisioningTokens = `-- name: CountMerchantRowsProvisioningTokens :one
+SELECT count(*) FROM billing.provisioning_tokens WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsProvisioningTokens(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsProvisioningTokens, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsRailCustomers = `-- name: CountMerchantRowsRailCustomers :one
 SELECT count(*) FROM billing.psp_customers WHERE merchant_id = $1
 `
@@ -190,12 +245,30 @@ func (q *Queries) CountMerchantRowsSubscriptions(ctx context.Context, merchantID
 	return count, err
 }
 
-const purgeMerchantRowsExternalProviderMutationLogs = `-- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
-DELETE FROM billing.provider_mutation_logs WHERE merchant_id = $1
+const purgeMerchantRowsCustomerContacts = `-- name: PurgeMerchantRowsCustomerContacts :exec
+DELETE FROM billing.customer_contacts WHERE merchant_id = $1
 `
 
-func (q *Queries) PurgeMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsExternalProviderMutationLogs, merchantID)
+func (q *Queries) PurgeMerchantRowsCustomerContacts(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsCustomerContacts, merchantID)
+	return err
+}
+
+const purgeMerchantRowsDisputes = `-- name: PurgeMerchantRowsDisputes :exec
+DELETE FROM billing.disputes WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsDisputes(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsDisputes, merchantID)
+	return err
+}
+
+const purgeMerchantRowsFraudReports = `-- name: PurgeMerchantRowsFraudReports :exec
+DELETE FROM billing.fraud_reports WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsFraudReports(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsFraudReports, merchantID)
 	return err
 }
 
@@ -223,6 +296,24 @@ DELETE FROM billing.nmi_history_months WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsNMIHistoryMonths(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsNMIHistoryMonths, merchantID)
+	return err
+}
+
+const purgeMerchantRowsNetworkActivity = `-- name: PurgeMerchantRowsNetworkActivity :exec
+DELETE FROM billing.network_activity_daily WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsNetworkActivity(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsNetworkActivity, merchantID)
+	return err
+}
+
+const purgeMerchantRowsOperationLog = `-- name: PurgeMerchantRowsOperationLog :exec
+DELETE FROM billing.operation_log WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsOperationLog(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsOperationLog, merchantID)
 	return err
 }
 
@@ -286,6 +377,15 @@ DELETE FROM billing.provider_intents WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsProviderIntents(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsProviderIntents, merchantID)
+	return err
+}
+
+const purgeMerchantRowsProvisioningTokens = `-- name: PurgeMerchantRowsProvisioningTokens :exec
+DELETE FROM billing.provisioning_tokens WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsProvisioningTokens(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsProvisioningTokens, merchantID)
 	return err
 }
 

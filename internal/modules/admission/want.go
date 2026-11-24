@@ -2,13 +2,13 @@ package admission
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -31,115 +31,92 @@ func (a *Admitter) Bind(d *db.DB, now func() time.Time) *Admitter {
 	return &bound
 }
 
-// Want is what a lease's want for one customer resolves to: a refusal the
-// checks made, or one request's cost (Cost, priced by Cards) and the limits
-// it claims, spend windows first, each claiming that request's cost.
-type Want struct {
+// Set is what a gate's view resolves for one customer and the invoker
+// attributes of its requests: a refusal the checks made whatever a request
+// costs, or the spend windows and declared limits a request claims (costing
+// nothing here), what the customer may spend and its policy's credit line.
+type Set struct {
 	Refusal *AdmitDecision
-	Cost    int64
-	Cards   []byte
-	// Spend are the request's spend windows; Limits its declared limits.
-	Spend  []limits.Claim
-	Limits []limits.Claim
+	Spend   []limits.Claim
+	Limits  []limits.Claim
 	// Available is what the customer may spend after every live hold, and
 	// CreditLine the overdraft the policy allows on it.
 	Available, CreditLine, Outstanding int64
-	capacity                           money.AdmissionCapacity
 	resolved                           ResolvedPolicy
-	gated                              gated
 }
 
-// ResolveWant makes the checks a lease makes when it issues a hold, and
-// prices one request of the want, under the customer's money lock.
-func (a *Admitter) ResolveWant(ctx context.Context, q *gen.Queries, req AdmitRequest, capacity money.AdmissionCapacity, now time.Time) (Want, error) {
-	var cards []byte
-	if req.Usage != nil {
-		if _, err := money.UsageEstimate(*req.Usage); err != nil {
-			return Want{}, err
-		}
-		var err error
-		if req.EstimatedAmount, cards, err = a.money.RateUsageEstimate(ctx, q, req.CustomerID, money.NormalizeCurrency(req.Currency), *req.Usage); err != nil {
-			return Want{}, err
-		}
-	}
-	return a.resolve(ctx, q, req, capacity, now, cards, nil)
-}
-
-// ResolveHold makes a renewed hold's checks again for the invoker
-// attributes it was resolved for and its event type ("" for host-stated),
-// with the rate cards in force and no cost: the renewal sizes from traffic.
-func (a *Admitter) ResolveHold(ctx context.Context, q *gen.Queries, req AdmitRequest, eventType string, capacity money.AdmissionCapacity, now time.Time) (Want, error) {
-	req.Usage, req.EstimatedAmount = nil, 0
-	var cards []byte
-	if eventType != "" {
-		var err error
-		if cards, err = a.money.PinnedCards(ctx, q, eventType, money.NormalizeCurrency(req.Currency)); err != nil {
-			return Want{}, err
-		}
-	}
-	return a.resolve(ctx, q, req, capacity, now, cards, &eventType)
-}
-
-// resolve is a want's or a renewal's checks and claims; eventType names a
-// renewal's, whose claims cost nothing.
-func (a *Admitter) resolve(ctx context.Context, q *gen.Queries, req AdmitRequest, capacity money.AdmissionCapacity, now time.Time, cards []byte, eventType *string) (Want, error) {
+// ResolveSet makes the checks Admit makes before it weighs any cost, for
+// requests of eventType ("" when they state an amount), and names what they
+// claim. It reads; it takes no lock and holds nothing.
+func (a *Admitter) ResolveSet(ctx context.Context, q *gen.Queries, req AdmitRequest, eventType string, capacity money.AdmissionCapacity, now time.Time) (Set, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return Want{}, err
+		return Set{}, err
 	}
-	out := Want{Cards: cards}
 	g, refused, err := a.gates(ctx, q, req)
 	if err != nil {
-		return Want{}, err
+		return Set{}, err
 	}
 	if refused != nil {
-		out.Refusal = refused
-		return out, nil
+		return Set{Refusal: refused}, nil
 	}
-	out.Cost = req.EstimatedAmount
-	if eventType != nil {
-		out.Limits, err = a.limitClaimsFor(ctx, q, tid.UUID(), req, *eventType)
-	} else {
-		out.Limits, err = a.limitClaims(ctx, q, tid.UUID(), req)
+	out := Set{resolved: g.resolved}
+	if out.Limits, err = a.limitClaimsFor(ctx, q, tid.UUID(), req, eventType); err != nil {
+		return Set{}, err
 	}
-	if err != nil {
-		return Want{}, err
-	}
-	if out.Spend, err = spendgate.SpendClaims(tid.UUID(), req.CustomerID.UUID(), strings.TrimSpace(req.Currency), g.policy, g.request, out.Cost, now); err != nil {
-		return Want{}, err
+	if out.Spend, err = spendgate.SpendClaims(tid.UUID(), req.CustomerID.UUID(), strings.TrimSpace(req.Currency), g.policy, g.request, 0, now); err != nil {
+		return Set{}, err
 	}
 	out.Available, out.CreditLine, out.Outstanding = payerCapacity(capacity, g.resolved)
-	out.capacity, out.resolved, out.gated = capacity, g.resolved, g
 	return out, nil
 }
 
-// SpendAt are the want's spend windows at an instant, claiming nothing: the
-// windows a hold rolled ahead takes.
-func (w Want) SpendAt(merchantID, customer uuid.UUID, currency string, at time.Time) ([]limits.Claim, error) {
-	return spendgate.SpendClaims(merchantID, customer, strings.TrimSpace(currency), w.gated.policy, w.gated.request, 0, at)
-}
-
-// MoneyTerms names the resolved policy and what it makes of the balance:
-// invokers whose policies differ (a trust level's outstanding_cap, or its
-// spend window of the same key with another cap) hold apart.
-func (w Want) MoneyTerms() string { return w.gated.moneyTerms }
-
-// moneyTerms names a policy as declared, so an exchange rate's move never
-// sets two holds of one policy apart.
-func moneyTerms(p ResolvedPolicy) string {
-	return fmt.Sprintf("%q:%s:%d:%s", p.Name, p.Kind, p.OutstandingCapAmount, p.PolicyCurrency)
-}
-
-// BalanceRefusal is the deny code a want that does not fit the balance gets,
-// as Admit answers it: insufficient_balance, insufficient_credit with a
+// BalanceRefusal is the deny code a request that does not fit the balance
+// gets, as Admit answers it: insufficient_balance, insufficient_credit with a
 // credit line, or outstanding_cap_reached when the policy gates on debt.
-func (w Want) BalanceRefusal() billing.DenyCode {
+func (s Set) BalanceRefusal() billing.DenyCode {
 	code := billing.DenyInsufficientBalance
-	if w.CreditLine > 0 {
+	if s.CreditLine > 0 {
 		code = billing.DenyInsufficientCredit
 	}
-	if w.resolved.GatesOnOutstandingOwed() && w.CreditLine == 0 && w.Available <= 0 && w.Outstanding > 0 {
+	if s.resolved.GatesOnOutstandingOwed() && s.CreditLine == 0 && s.Available <= 0 && s.Outstanding > 0 {
 		code = billing.DenyOutstandingCapReached
 	}
 	return code
+}
+
+// SpendPolicy is the billing policy usage of one customer's invoker
+// attributes counts toward, resolved once: its spend windows at any instant
+// follow without another read.
+type SpendPolicy struct {
+	merchant, customer uuid.UUID
+	currency           string
+	policy             spendgate.Policy
+	request            spendgate.Request
+}
+
+// SpendPolicy resolves req's billing policy; a delegated invoker spends
+// nothing of the customer's, so none.
+func (a *Admitter) SpendPolicy(ctx context.Context, req AdmitRequest) (*SpendPolicy, error) {
+	if !identity.IsDirectPayerInvoker(req.InvokerType) {
+		return nil, nil
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sgReq, _, _, policy, err := a.policyOf(ctx, req, a.trustLevel(ctx, req))
+	if err != nil {
+		return nil, err
+	}
+	return &SpendPolicy{merchant: tid.UUID(), customer: req.CustomerID.UUID(), currency: strings.TrimSpace(req.Currency), policy: policy, request: sgReq}, nil
+}
+
+// Windows are the policy's spend windows current at an instant; none for a
+// nil policy.
+func (p *SpendPolicy) Windows(at time.Time) ([]limits.Claim, error) {
+	if p == nil {
+		return nil, nil
+	}
+	return spendgate.SpendClaims(p.merchant, p.customer, p.currency, p.policy, p.request, 0, at)
 }

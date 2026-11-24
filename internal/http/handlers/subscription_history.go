@@ -105,9 +105,10 @@ func subscriptionHistoryEntry(row gen.ListSubscriptionHistoryRow) billing.Subscr
 	case 2:
 		out.Kind = "payment_attempt"
 		out.Attempt = &billing.SubscriptionHistoryAttempt{
-			ID: billing.PaymentAttemptID(row.ID), Kind: row.Kind, Category: row.Category, Reason: row.Reason,
+			ID: billing.PaymentAttemptID(row.ID), Kind: row.Kind, Outcome: billing.AttemptOutcome(row.Category), Reason: row.Reason,
 			Action: row.Action, Source: row.Origin, ObservedVia: row.ObservedVia, Amount: row.Amount, Currency: catalog.Currency(row.Currency),
 		}
+		out.Attempt.DeclineCause = billing.DeclineCause(row.DeclineCause)
 		if row.PspID != nil {
 			out.Attempt.PSPID = billing.PSPID(*row.PspID)
 		}

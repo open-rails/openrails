@@ -25,8 +25,8 @@ type Table struct {
 
 const permanent = "permanent, never pruned."
 
-// Tables classifies every table of the schema. Nothing checks it against the
-// schema, so a new table adds its entry here.
+// Tables classifies every table of the schema; TestTablesMatchSchema holds it
+// to api/schema.txt and the tables' comments.
 var Tables = map[string]Table{
 	"eventlog_migrations":          {Class: State},
 	"eventlog_events":              {Rows, "events expire after the configured event retention, independently of reader progress."},
@@ -40,16 +40,22 @@ var Tables = map[string]Table{
 	// Money, grants, owed usage and receipts.
 	"ledger_accounts":               {Permanent, permanent},
 	"ledger_transfers":              {Permanent, permanent},
+	"ledger_daily":                  {Permanent, permanent},
+	"ledger_type_totals":            {Class: State},
+	"ledger_rollup_pending":         {Class: State},
 	"grants":                        {Permanent, permanent},
 	"credit_grants":                 {Permanent, permanent},
 	"credit_grant_events":           {Permanent, permanent},
 	"payments":                      {Permanent, permanent},
+	"disputes":                      {Permanent, permanent},
+	"fraud_reports":                 {Permanent, permanent},
 	"provider_bills":                {Permanent, "permanent with the financial order."},
 	"provider_schedules":            {Permanent, permanent},
 	"provider_cycle_receipts":       {Permanent, permanent},
 	"provider_charge_attributions":  {Permanent, permanent},
 	"owed_items":                    {Permanent, permanent},
-	"usage_accruals":                {Permanent, permanent},
+	"usage_postings":                {Permanent, permanent},
+	"usage_card_prints":             {Permanent, permanent},
 	"running_charges":               {Permanent, permanent},
 	"solana_pay_receipts":           {Permanent, "permanent for credited and review receipts; an ignored receipt goes with its settled reference."},
 	"catalog_applications":          {Permanent, permanent},
@@ -59,9 +65,11 @@ var Tables = map[string]Table{
 	"destructive_run_before_images": {Permanent, permanent},
 	"payment_method_versions":       {Permanent, permanent},
 	"mandates":                      {Permanent, permanent},
-	"price_key_movements":           {Permanent, permanent},
 	"price_migrations":              {Permanent, permanent},
 	"scheduled_changes":             {Permanent, permanent},
+	"mrr_movements":                 {Permanent, permanent},
+	"mrr_movement_lines":            {Permanent, permanent},
+	"mrr_scheduled":                 {Permanent, permanent},
 
 	"limit_holds":      {PartitionedMonthly, "monthly partitions on created_at, dropped once older than the 61-day replay horizon."},
 	"limit_hold_parts": {PartitionedMonthly, "monthly partitions on hold_created_at, dropped with their hold's, each month before its month of holds."},
@@ -69,7 +77,7 @@ var Tables = map[string]Table{
 	"subscription_billing_changes":    {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"subscription_status_transitions": {Rows, "rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only."},
 	"provider_intents":                {Rows, "finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent."},
-	"provider_mutation_logs":          {Rows, "rows are deleted 25 months (761 days) after created_at."},
+	"operation_log":                   {Rows, "rows are deleted 25 months (761 days) after occurred_at."},
 	"reconciliation_findings":         {Rows, "resolved findings are deleted 12 months (366 days) after they were resolved and last seen."},
 	"order_attempts":                  {Rows, "attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent."},
 	"parked_provider_subscriptions":   {Rows, "released parks are deleted 90 days after released_at."},
@@ -83,12 +91,10 @@ var Tables = map[string]Table{
 	"nmi_history_months":              {Rows, "rows are deleted 25 months (761 days) after their month."},
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"user_destructive_reservations":   {Rows, "rows are deleted 24 hours after reserved_at."},
-	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
-	"meter_period_quantities":         {Rows, "rows are deleted 100 days after period_starts_at."},
-	"usage_daily":                     {Rows, "rows are deleted 24 months after the month's usage was billed."},
-	"usage_minutes":                   {Rows, "rows are deleted 25 hours after their minute, past the longest accrual-rate window."},
+	"network_activity_daily":          {Class: State},
 	"limit_windows":                   {Rows, "rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does."},
 	"leases":                          {Rows, "rows are deleted 61 days after last_sync_at."},
+	"lease_in_flight":                 {Rows, "rows; each sync replaces its lease's rows, close clears them, and they go with the lease."},
 	"limit_adjustments":               {Rows, "rows are deleted 61 days after created_at."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
 	"webhook_health_daily":            {Rows, "rows are deleted 13 months (397 days) after day_at."},
@@ -100,6 +106,8 @@ var Tables = map[string]Table{
 	"merchant_destructive_policy": {Class: State},
 	"merchant_write_posture":      {Class: State},
 	"book_identity":               {Class: State},
+	"event_store":                 {Class: State},
+	"usage_unposted":              {Class: State},
 	"periodic_leases":             {Class: State},
 	"solana_crankers":             {Class: State},
 	"dashboard_configs":           {Class: State},
@@ -139,7 +147,23 @@ var Tables = map[string]Table{
 	"psp_refresh_watermarks":      {Class: State},
 	"webhook_health":              {Class: State},
 	"nmi_bulk_checkpoints":        {Class: State},
+	"subscription_mrr":            {Class: State},
+	"customer_mrr":                {Class: State},
+	"mrr_flows":                   {Class: State},
+	"mrr_totals":                  {Class: State},
+	"mrr_product_flows":           {Class: State},
+	"mrr_cohort_flows":            {Class: State},
 	"nmi_history_reads":           {Class: State},
 	"reconciliation_state":        {Class: State},
 	"ownership_claims":            {Class: State},
+}
+
+// EventStoreTTLs are how long the event store keeps each usage table, as its
+// migrations' TTLs state them.
+var EventStoreTTLs = map[string]string{
+	"usage_events":     "100 days after occurred_at",
+	"limit_usage":      "61 days after the window ends; a window without an end is kept",
+	"usage_quantities": "100 days after the pricing period starts",
+	"usage_minutes":    "2 days after the minute",
+	"usage_history":    "25 months after the 15-minute bucket",
 }

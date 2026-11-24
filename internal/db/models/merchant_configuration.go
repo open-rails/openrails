@@ -42,6 +42,10 @@ type MerchantConfiguration struct {
 	// ("" default), revoke_on_any or keep.
 	ProviderRefundAccess billing.ProviderRefundAccess `json:"provider_refund_access,omitempty"`
 
+	// FraudWarningRefund decides what an actionable early fraud warning does:
+	// refund ("" default) or record.
+	FraudWarningRefund billing.FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
+
 	// DunningPolicy replaces the built-in dunning schedule. Nil ⇒
 	// collection.DefaultPolicy.
 	DunningPolicy *billing.DunningPolicy `json:"dunning_policy,omitempty"`
@@ -53,9 +57,9 @@ type MerchantConfiguration struct {
 	// BalanceNotices are the customers' default low-balance lines.
 	BalanceNotices BalanceNoticeConfiguration `json:"balance_notices,omitempty"`
 
-	// UsageGateSafeSpend: a lease's holds name their money size as safe,
-	// which their gate may spend while OpenRails is unreachable.
-	UsageGateSafeSpend bool `json:"usage_gate_safe_spend,omitempty"`
+	// AccountingTimezone is the IANA zone the merchant's books are dated in;
+	// never empty (UTC by default).
+	AccountingTimezone string `json:"accounting_timezone,omitempty"`
 }
 
 // BalanceNoticeConfiguration is a merchant's validated default low-balance

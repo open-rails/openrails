@@ -4,12 +4,12 @@
 -- name: CreateScheduledChange :one
 INSERT INTO billing.scheduled_changes (
     merchant_id, subscription_id, from_price_id, price_id, quantity, effective_at,
-    source, price_migration_id, status, acknowledged_short_notice, invoker, reason
+    source, price_migration_id, status, acknowledged_short_notice, invoker, reason, created_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(from_price_id)::uuid,
     sqlc.arg(price_id)::uuid, sqlc.narg(quantity)::int, sqlc.arg(effective_at)::timestamptz,
     sqlc.arg(source)::text, sqlc.narg(price_migration_id)::uuid, 'scheduled', sqlc.arg(acknowledged_short_notice)::bool,
-    sqlc.narg(invoker)::text, sqlc.narg(reason)::text
+    sqlc.narg(invoker)::text, sqlc.narg(reason)::text, sqlc.arg(created_at)::timestamptz
 )
 RETURNING *;
 

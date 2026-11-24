@@ -1924,14 +1924,17 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// and an open operator kill switch. Refused terminals park as
 		// `unknown`: access intact, out of the dunning queue, for provider
 		// verification.
-		terminalRefusal := func(leg string) string {
-			if params.TerminalBlocked != "" {
-				return params.TerminalBlocked
+		terminalRefusal := func(leg string) TerminalHold {
+			switch {
+			case params.TerminalBlocked != "":
+				return TerminalHold{Reason: params.TerminalBlocked, Remedy: SwitchRemedy}
+			case leg == "":
+				return TerminalHold{Reason: "no certainty leg named (collection.Certainty*): terminal cancellation requires provider truth, a non-retryable decline, or exhausted dunning attempts",
+					Remedy: "Verify it at its provider, or end it by hand."}
+			case params.HoldTerminal != nil:
+				return params.HoldTerminal()
 			}
-			if leg == "" {
-				return "no certainty leg named (collection.Certainty*): terminal cancellation requires provider truth, a non-retryable decline, or exhausted dunning attempts"
-			}
-			return ""
+			return TerminalHold{}
 		}
 		// Schedule exhaustion is certainty only when every failure was a real,
 		// recorded charge attempt; attempts skipped for missing data exhaust
@@ -1951,7 +1954,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if subscription.CurrentPeriodEndsAt != nil {
 			periodStart = subscription.CurrentPeriodEndsAt.UTC()
 		}
-		heldTerminal := ""
+		var held TerminalHold
+		// advice: the earliest retry the network's advice allowed, when it set
+		// the case's scheduled retry. A case it set that ends exhausted ends
+		// issuer_deferred.
+		advice := subscription.RetryAdvisedAt
+		adviceDeferred := subscription.AdviceDeferred()
+		deferred := false
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
 		// moment; the rest of the case runs under it.
@@ -1970,7 +1979,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		case decline.NonRecoverable:
 			// Bucket 3: the mandate is gone. Cancel at the rail, unless the kill
 			// switch or a missing certainty leg holds the outcome.
-			if heldTerminal = terminalRefusal(params.TerminalCertainty); heldTerminal != "" {
+			if held = terminalRefusal(params.TerminalCertainty); held.Reason != "" {
 				event = lifecycle.TerminalHeld{}
 			} else {
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.NonRecoverable, At: now}
@@ -2023,6 +2032,15 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 						return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 					}
 					subscription.NextRetryAt = &next
+					// Never before the network's standing advice; a case it
+					// deferred to the next renewal stays deferred.
+					if advice != nil && advice.After(next) {
+						subscription.NextRetryAt = nil
+						if !adviceDeferred {
+							at := *advice
+							subscription.NextRetryAt = &at
+						}
+					}
 					event = nil
 					break
 				}
@@ -2046,26 +2064,49 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			if !params.Terminal {
 				leg = scheduleExhaustionLeg()
 			}
+			if terminal {
+				held = terminalRefusal(leg)
+			}
 			switch {
-			case terminal && terminalRefusal(leg) != "":
-				heldTerminal = terminalRefusal(leg)
+			case terminal && held.Reason != "":
 				event = lifecycle.TerminalHeld{}
 			case terminal:
 				event = lifecycle.DunningExhausted{At: now}
+				deferred = advice != nil && !params.Terminal
 			default:
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
 				nextRetry, ok, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, declined)
 				if err != nil {
 					return err
 				}
-				subscription.NextRetryAt = nil
+				// The network's earliest retry, from the decline, or an earlier
+				// decline's that still stands: the case's end moves with it
+				// (CaseEnd). Advice that allows none before the next renewal
+				// defers the case: no retry runs, and it ends then, exhausted.
+				earliest := declined.Add(params.RetryAfter)
+				if advice != nil && advice.After(earliest) {
+					earliest = *advice
+				}
+				subscription.NextRetryAt, subscription.RetryAdvisedAt = nil, nil
+				if ok && earliest.After(nextRetry) {
+					renewal, err := NextRenewalAt(ctx, db, subscription, periodStart, cycleHours)
+					if err != nil {
+						return err
+					}
+					nextRetry = earliest
+					subscription.RetryAdvisedAt = &earliest
+					if !nextRetry.Before(renewal) {
+						ok = false
+						subscription.GraceEndsAt = &renewal
+					}
+				}
 				if ok {
 					subscription.NextRetryAt = &nextRetry
 				}
 			}
 		}
-		if heldTerminal != "" {
-			s.Log.WarnContext(ctx, "Terminal cancellation REFUSED; the subscription waits with access intact and no provider delete queued", "subscription_id", subscription.ID, "failure_reason", normalize.FromPtr(params.FailureReason), "terminal_certainty", params.TerminalCertainty, "refusal", heldTerminal)
+		if held.Reason != "" {
+			s.Log.WarnContext(ctx, "Terminal cancellation REFUSED; the subscription waits with access intact and no provider delete queued", "subscription_id", subscription.ID, "failure_reason", normalize.FromPtr(params.FailureReason), "terminal_certainty", params.TerminalCertainty, "refusal", held.Reason)
 		}
 		if event != nil {
 			if _, err := Transition(subscription, event, now); err != nil {
@@ -2087,6 +2128,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			reason := normalize.FromPtr(params.FailureReason)
 			if reason == "" {
 				reason = "transaction_failure"
+			}
+			if deferred {
+				reason = CancelIssuerDeferred
 			}
 			subscription.CancelFeedback = &reason
 		}
@@ -2116,11 +2160,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// A terminal outcome the operator's switch (or a missing certainty
 		// leg) refused is a standing finding: the member is neither charged
 		// nor canceled until someone decides.
-		if heldTerminal != "" {
-			evidence, _ := json.Marshal(map[string]any{"subscription_id": subscription.ID, "collection_policy": subscription.CollectionPolicy, "status": subscription.Status, "refusal": heldTerminal, "failure_code": normalize.FromPtr(params.FailureCode)})
-			action := fmt.Sprintf("subscription %s reached a terminal decline but cancellation was refused (%s); it waits %s with no further charges. Arm the destructive-action switch to let terminal outcomes apply, or resolve it by hand", subscription.ID, heldTerminal, subscription.Status)
-			if _, err := db.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: subscription.MerchantID, FindingType: FindingTerminalHeld, SubjectKey: subscription.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
-				return fmt.Errorf("record held terminal outcome for %s: %w", subscription.ID, err)
+		if held.Reason != "" {
+			action := fmt.Sprintf("subscription %s reached a terminal decline but ending it was refused (%s); it waits %s with no further charges. %s", subscription.ID, held.Reason, subscription.Status, held.Remedy)
+			if err := s.raiseTerminalHeld(ctx, db, subscription, held, action, map[string]any{"failure_code": normalize.FromPtr(params.FailureCode)}, now); err != nil {
+				return err
 			}
 		}
 		// Engine access through dunning follows the merchant's policy: by
@@ -2180,7 +2223,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// A collection failure is a payment fact even when retries stop. The
 		// access ledger independently publishes the actual membership expiry.
 		eventType := models.NotificationPaymentMethodFailed
-		data := subscriptionFailureNotice(subscription, params, heldTerminal != "")
+		data := subscriptionFailureNotice(subscription, params, held.Reason != "")
 		switch {
 		case needsPaymentMethodUpdate:
 			eventType = models.NotificationPaymentMethodUpdateRequired

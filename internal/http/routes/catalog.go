@@ -31,7 +31,7 @@ var catalogRoutes = []Route{
 			"document that applied whole is remembered by its canonical content hash: applying it again returns " +
 			"the original receipt even after later catalog edits. It is an operator action, never a side effect " +
 			"of starting: run it from a command (openrails catalog apply, or the host's own) or the console.",
-		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "currency_unsupported", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
+		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "currency_unsupported", "event_store_required", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 
 	{Method: GET, Path: "/v1/catalog/meters", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListMeters", Level: LevelRead,
 		Cache: config.ReadMeters,
@@ -42,7 +42,7 @@ var catalogRoutes = []Route{
 		Cache:     config.ReadMeters,
 		Doc:       "GetMeter reads one meter with its rate card.",
 		Responses: []Reply{{200, billing.Meter{}}}, Errors: codes(meterErrors...), Handler: h(handlers.GetMeter)},
-	{Method: PUT, Path: "/v1/catalog/meters/{key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetMeter", Level: LevelUpdate,
+	{Method: PUT, Path: "/v1/catalog/meters/{key}", EventStore: true, Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetMeter", Level: LevelUpdate,
 		Args: []any{""},
 		Doc: "SetMeter declares the meter under key, creating it or changing its definition, and with " +
 			"params.RateCard sets or (null) removes the rate card that prices its usage. A meter with recorded " +

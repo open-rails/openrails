@@ -206,14 +206,14 @@ func unitPacks(t *testing.T) {
 	require.EqualValues(t, 50_000_000, *creditLots[1].PaidAmount)
 	require.Equal(t, catalog.Currency("USD"), *creditLots[1].PaidCurrency)
 
-	// Each lot is one deposit of all its units from processor_clearing: no
+	// Each lot is one deposit of all its units from units_sold: no
 	// bonus from promotional funding, no cash in the unit.
 	for unit, want := range map[catalog.Currency][]int64{"GOLD": {400}, "CREDITS": {2000, 5500}} {
 		var deposits []int64
 		for _, leg := range unitLegs(t, a, unit) {
 			require.Equal(t, "deposit", leg.Type, "%+v", leg)
-			require.Equal(t, string(ledger.RailClearing), leg.Debit)
-			require.Equal(t, string(ledger.CustomerBalance), leg.Credit)
+			require.Equal(t, string(ledger.UnitsSold), leg.Debit)
+			require.Equal(t, string(ledger.CustomerUnits), leg.Credit)
 			require.NotNil(t, leg.Lot)
 			deposits = append(deposits, leg.Amount)
 		}
@@ -250,6 +250,11 @@ func unitPackInEUR(t *testing.T) {
 	s, p := unitPaymentWorld(t, 0)
 	a := s.a
 	gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"}, unitPrice{"eur", 18_000_000, "EUR"})
+	var general []string
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT coalesce(array_agg(DISTINCT currency ORDER BY currency), '{}') FROM "+pgx.Identifier{a.schema, "ledger_accounts"}.Sanitize()+
+		" WHERE merchant_id = $1 AND book = 'general'", a.alpha.MerchantID().UUID()).Scan(&general))
+	require.Subset(t, general, []string{"EUR", "USD"}, "the general ledger opens in the money a pack sells for")
+	require.NotContains(t, general, "GOLD", "a merchant's unit is never money")
 	preview, err := a.alpha.PreviewOrder(t.Context(), billing.PreviewOrderParams{CustomerID: s.alice, Lines: []billing.OrderLineParams{{PriceID: gold["eur"]}}})
 	require.NoError(t, err)
 	require.Equal(t, catalog.Currency("EUR"), preview.Currency)
@@ -320,11 +325,11 @@ func unitAllowanceAndGift(t *testing.T) {
 	require.Equal(t, billing.CreditFundingPromotion, goldLots[2].FundingSource)
 	legs := unitLegs(t, a, "GOLD")
 	require.Len(t, legs, 3)
-	require.Equal(t, string(ledger.RailClearing), legs[0].Debit, "a bought allowance is sold")
-	require.Equal(t, string(ledger.RailClearing), legs[1].Debit)
-	require.Equal(t, string(ledger.PromotionalFunding), legs[2].Debit, "a gift of units is granted, not sold")
-	require.Equal(t, int64(-200), systemBalance(t, a, "GOLD", ledger.RailClearing))
-	require.Equal(t, int64(-25), systemBalance(t, a, "GOLD", ledger.PromotionalFunding))
+	require.Equal(t, string(ledger.UnitsSold), legs[0].Debit, "a bought allowance is sold")
+	require.Equal(t, string(ledger.UnitsSold), legs[1].Debit)
+	require.Equal(t, string(ledger.UnitsGranted), legs[2].Debit, "a gift of units is granted, not sold")
+	require.Equal(t, int64(-200), systemBalance(t, a, "GOLD", ledger.UnitsSold))
+	require.Equal(t, int64(-25), systemBalance(t, a, "GOLD", ledger.UnitsGranted))
 }
 
 func unitPricedProduct(t *testing.T) {
@@ -370,8 +375,8 @@ func unitPricedProduct(t *testing.T) {
 		}
 	}
 	require.Len(t, spends, 1)
-	require.Equal(t, string(ledger.CustomerBalance), spends[0].Debit)
-	require.Equal(t, string(ledger.PlatformRevenue), spends[0].Credit)
+	require.Equal(t, string(ledger.CustomerUnits), spends[0].Debit)
+	require.Equal(t, string(ledger.UnitsRedeemed), spends[0].Credit)
 	require.EqualValues(t, 50, spends[0].Amount)
 	require.Equal(t, order.ID.UUID(), *spends[0].Order, "the spend names its order")
 	require.Equal(t, "order_line", spends[0].Source)
@@ -510,7 +515,7 @@ func unitUsage(t *testing.T) {
 	unitBalance(t, a.alpha, thin, "GOLD", 5, 0, 5)
 	var arrears int
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_accounts"}.Sanitize()+
-		" WHERE merchant_id = $1 AND account_type = $2 AND currency IN ('GOLD', 'CREDITS')", a.alpha.MerchantID().UUID(), string(ledger.ArrearsLiability)).Scan(&arrears))
+		" WHERE merchant_id = $1 AND account_type = $2 AND currency IN ('GOLD', 'CREDITS')", a.alpha.MerchantID().UUID(), string(ledger.CustomerOwed)).Scan(&arrears))
 	require.Zero(t, arrears, "no arrears account exists in a unit")
 	requireDenied(t, admitImages(t, a, thin, "beyond", 2), "insufficient_balance")
 }
@@ -540,15 +545,24 @@ func unitOverrun(t *testing.T) {
 	requireDenied(t, admitOne(t, a.alpha, billing.AdmitParams{RequestID: "costless", CustomerID: s.alice, Invoker: s.alice.String(), InvokerType: billing.InvokerTypeCustomer,
 		Currency: "GOLD", ExpiresAt: ptr(a.clock.Now().Add(time.Hour))}), "insufficient_balance")
 
-	// The first request overruns its hold: 5 images cost 20, the lots can
-	// take 12 beside what the second holds, and 8 are forgiven.
+	// The first request overruns its hold: 5 images cost 20 and the second
+	// 8, against 20 in the lots. Its posting, before the next deposit, takes
+	// the 20 and forgives 8: nothing is owed in a unit.
 	receipt := captureUsage(t, a.alpha, "first", "image", map[string]int64{"images": 5}, nil)
-	require.EqualValues(t, 12, receipt.Amount, "the capture charges what the units cover")
+	require.EqualValues(t, 20, receipt.Amount, "a capture prices its usage in full")
 	receipt = captureUsage(t, a.alpha, "second", "image", map[string]int64{"images": 2}, nil)
 	require.EqualValues(t, 8, receipt.Amount)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: 1, Source: "critical", SourceID: "post"}})
 	require.NoError(t, err)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)
+	var posted, forgiven int64
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT sum(amount), sum(forgiven) FROM "+pgx.Identifier{a.schema, "usage_postings"}.Sanitize()+
+		" WHERE merchant_id = $1 AND customer_id = $2", a.alpha.MerchantID().UUID(), s.alice.UUID()).Scan(&posted, &forgiven))
+	require.Equal(t, [2]int64{28, 8}, [2]int64{posted, forgiven}, "the posting records what it forgave")
+	var owed int
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
+		" WHERE merchant_id = $1 AND customer_id = $2 AND transfer_type = 'owed_accrual'", a.alpha.MerchantID().UUID(), s.alice.UUID()).Scan(&owed))
+	require.Zero(t, owed, "nothing is owed in a unit")
 
 	require.Equal(t, map[string]int64{"charged": 20, "forgiven": 8}, usageByCharge(t, a, s.alice, a.clock.Now()), "the overrun shows as forgiven usage")
 
@@ -558,7 +572,7 @@ func unitOverrun(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &usage))
 	require.Len(t, usage.Rows, 1)
 	require.Equal(t, "image", usage.Rows[0].Key)
-	require.EqualValues(t, 20, usage.Rows[0].Amount, "the customer's usage in the unit is what it charged")
+	require.EqualValues(t, 28, usage.Rows[0].Amount, "the customer's usage in the unit is what it cost")
 }
 
 func unitExpiry(t *testing.T) {
@@ -589,11 +603,11 @@ func unitExpiry(t *testing.T) {
 		}
 	}
 	require.Len(t, expired, 1)
-	require.Equal(t, string(ledger.ExpiredCredits), expired[0].Credit)
+	require.Equal(t, string(ledger.UnitsExpired), expired[0].Credit)
 	require.EqualValues(t, 350, expired[0].Amount, "what was left expires in the unit, once")
 
-	// Usage captured while a lot lived and posted after it lapsed takes
-	// nothing of it: what the posting cannot draw is forgiven usage.
+	// Usage captured while a lot lived posts before it lapses: the lot pays
+	// it, and only what is left expires.
 	imageMeter(t, a)
 	lapsing := billing.CustomerID(uuid.New())
 	_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: lapsing, Currency: "GOLD", Amount: 10, Source: "critical", SourceID: "lapsing",
@@ -603,8 +617,12 @@ func unitExpiry(t *testing.T) {
 	captured := a.clock.Now()
 	captureUsage(t, a.alpha, "before-lapse", "image", map[string]int64{"images": 2}, nil)
 	a.clock.Advance(26 * time.Hour)
-	runRegistered(t, fleet, "openrails.usage_accruals", 1)
-	require.Equal(t, map[string]int64{"charged": 0, "forgiven": 8}, usageByCharge(t, a, lapsing, captured), "the posting forgives what the lapsed lot cannot pay")
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	lot = lots(t, a.alpha, lapsing, "GOLD")[0]
+	require.Equal(t, billing.CreditGrantExpired, lot.State)
+	require.EqualValues(t, 8, lot.SpentAmount, "the lot pays the usage of its life")
+	require.EqualValues(t, 2, lot.ExpiredAmount)
+	require.Equal(t, map[string]int64{"charged": 8, "forgiven": 0}, usageByCharge(t, a, lapsing, captured))
 }
 
 // usageByCharge is customer's usage_charged in GOLD on day's UTC day, by
@@ -695,7 +713,7 @@ func unitRefundByLot(t *testing.T) {
 	unitBalance(t, a.alpha, s.alice, "GOLD", 200, 0, 200)
 	lot = lots(t, a.alpha, s.alice, "GOLD")[0]
 	require.EqualValues(t, 200, lot.RemainingAmount, "the won dispute returns what the chargeback took, not the refund's units")
-	require.Zero(t, systemBalance(t, a, "GOLD", ledger.CreditRefundClearing), "the clearing account nets to zero")
-	require.EqualValues(t, 0, systemBalance(t, a, "GOLD", ledger.CreditRefundLoss), "the consumed units are no loss once the money is back")
-	require.EqualValues(t, -300, systemBalance(t, a, "GOLD", ledger.RailClearing), "400 sold, 100 returned with the refund")
+	require.Zero(t, systemBalance(t, a, "GOLD", ledger.UnitsRefundClearing), "the clearing account nets to zero")
+	require.EqualValues(t, 0, systemBalance(t, a, "GOLD", ledger.UnitsRefundLoss), "the consumed units are no loss once the money is back")
+	require.EqualValues(t, -300, systemBalance(t, a, "GOLD", ledger.UnitsSold), "400 sold, 100 returned with the refund")
 }

@@ -67,7 +67,7 @@ func withCustodyMigrationRecord(t *testing.T, archive []byte) []byte {
 		if r.Kind != "table" {
 			return w.Row(r.Values)
 		}
-		if r.Table == "meter_period_quantities" {
+		if r.Table == "customer_delinquency" {
 			if err := w.Table("custody_migrations"); err != nil {
 				return err
 			}

@@ -610,6 +610,9 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 		return err
 	}
 	payment := &models.Payment{ID: p.NewPaymentID, CustomerID: customer, SubscriptionID: &p.OldSubscriptionID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: receipt.TransactionID(), Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, Metadata: map[string]any{"upgrade_intent_id": in.ID.String()}}
+	if p.PaymentMethodID != uuid.Nil {
+		payment.PaymentMethodID = &p.PaymentMethodID
+	}
 	database := h.Purchases.SubscriptionService.Database()
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := database.NewWithPgxTx(tx)

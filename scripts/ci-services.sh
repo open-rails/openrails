@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CI's disposable services for the critical/SQL jobs, pulled and started in the
 # background while the job sets up Go:
-#   scripts/ci-services.sh start postgres [redis] [vault]
+#   scripts/ci-services.sh start postgres [redis] [vault] [clickhouse]
 #   ...
 #   scripts/ci-services.sh ready
 # ready waits until every started service answers, prints their logs, and adds
@@ -41,15 +41,26 @@ start_vault() {
   timeout 60 bash -c 'until curl -fsS http://127.0.0.1:8200/v1/sys/health >/dev/null; do sleep 1; done'
 }
 
+# The event store: the default user without a password, reachable from the
+# host. Each critical world creates its own database.
+start_clickhouse() {
+  local image
+  image="$(scripts/ci-pull-image.sh clickhouse/clickhouse-server@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7)" # 26.8.36.3
+  docker run -d --pull never --name critical-clickhouse -p 127.0.0.1:9000:9000 \
+    --tmpfs /var/lib/clickhouse:rw,size=2g --ulimit nofile=262144:262144 \
+    -e CLICKHOUSE_SKIP_USER_SETUP=1 "$image"
+  timeout 60 bash -c 'until docker exec critical-clickhouse clickhouse-client --query "SELECT 1"; do sleep 1; done'
+}
+
 case "${1:-}" in
 start)
   shift
-  (($#)) || { echo "usage: ci-services.sh start postgres|redis|vault..." >&2; exit 2; }
+  (($#)) || { echo "usage: ci-services.sh start postgres|redis|vault|clickhouse..." >&2; exit 2; }
   rm -rf "$state"
   mkdir -p "$state"
   printf '%s\n' "$@" >"$state/services"
   for service in "$@"; do
-    case "$service" in postgres | redis | vault) ;; *) echo "ci-services: unknown service $service" >&2; exit 2 ;; esac
+    case "$service" in postgres | redis | vault | clickhouse) ;; *) echo "ci-services: unknown service $service" >&2; exit 2 ;; esac
     # Detached from the step's output: its log and exit status land in $state.
     (
       set +e
@@ -86,7 +97,7 @@ ready)
   fi
   ;;
 *)
-  echo "usage: ci-services.sh start postgres|redis|vault... | ready" >&2
+  echo "usage: ci-services.sh start postgres|redis|vault|clickhouse... | ready" >&2
   exit 2
   ;;
 esac

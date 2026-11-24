@@ -12,10 +12,13 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -233,7 +236,8 @@ func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEngineP
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, "engine:"+p.OperationID.String())
 	resp, err := scoped.StripeClients.Client(scoped.Config, 0).Do(req)
-	if errors.Is(err, stripeapi.ErrProviderReadOnly) {
+	if errors.Is(err, stripeapi.ErrProviderReadOnly) || errors.Is(err, providerposture.ErrDisarmed) {
+		// Refused before a byte was sent: nothing for receipt recovery.
 		return StripeEnginePaymentResult{}, fmt.Errorf("%w: %v", charge.ErrNotDispatched, err)
 	}
 	if err != nil {
@@ -383,7 +387,8 @@ func (s *StripeService) readEngineIntent(ctx context.Context, p StripeEnginePaym
 	if !stripeEngineID(reference, "pi_") {
 		return pi, false, errors.New("invalid Stripe engine payment reference")
 	}
-	body, status, err := s.stripeGet(ctx, "/v1/payment_intents/"+url.PathEscape(reference), nil)
+	// The latest charge's outcome tells Radar's block from an issuer's decline.
+	body, status, err := s.stripeGet(ctx, "/v1/payment_intents/"+url.PathEscape(reference), url.Values{"expand[]": {"latest_charge"}})
 	if err != nil {
 		return pi, false, errors.New("Stripe engine read failed")
 	}
@@ -451,7 +456,36 @@ func (s *StripeService) engineResult(ctx context.Context, p StripeEnginePaymentP
 		e := pi.LastPaymentError
 		r.AdviceCode, r.NetworkAdviceCode, r.NetworkDeclineCode = strings.TrimSpace(e.AdviceCode), strings.TrimSpace(e.NetworkAdviceCode), strings.TrimSpace(e.NetworkDeclineCode)
 	}
+	if reason := radarBlock(pi.LatestCharge); reason != "" && r.State == StripeEngineDeclined {
+		// Radar stopped it before the network: the block reason is the answer,
+		// not the fraudulent decline it reads as.
+		if r.FailureCode == "canceled" {
+			r.DeclineCode = reason
+		} else {
+			r.FailureCode = reason
+		}
+	}
 	return r, nil
+}
+
+// radarBlock is the code of a charge Stripe blocked before the network, read
+// from an expanded latest_charge: its block reason (highest_risk_level,
+// rule, ...), or "blocked" for a reason without a mapping; "" for a charge
+// that was not blocked. Either way the decline is blocked_by_psp.
+func radarBlock(charge json.RawMessage) string {
+	var ch struct {
+		Outcome struct {
+			Type   string `json:"type"`
+			Reason string `json:"reason"`
+		} `json:"outcome"`
+	}
+	if json.Unmarshal(charge, &ch) != nil || ch.Outcome.Type != "blocked" {
+		return ""
+	}
+	if reason := strings.TrimSpace(ch.Outcome.Reason); decline.Classify("stripe", reason).Reason == billing.DeclineBlockedByPSP {
+		return reason
+	}
+	return "blocked"
 }
 func (s *StripeService) engineReceipt(ctx context.Context, p StripeEnginePaymentParams, pi stripeEngineIntent) (StripeEngineReceipt, error) {
 	ref := rawID(pi.LatestCharge)

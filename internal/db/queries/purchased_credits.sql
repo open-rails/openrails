@@ -7,7 +7,7 @@ SELECT
  count(*)::bigint AS sequence
 FROM billing.ledger_transfers
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid
- AND operation='purchased_credit_refund';
+ AND operation='purchased_credit_refund' AND book='units';
 
 -- name: GetPurchasedCreditReversalState :one
 SELECT
@@ -21,7 +21,7 @@ SELECT
  count(*)::bigint AS legs
 FROM billing.ledger_transfers lt
 WHERE lt.merchant_id=sqlc.arg(merchant_id)::uuid AND lt.credit_grant_id=sqlc.arg(credit_grant_id)::uuid
- AND lt.operation='purchased_credit_refund' AND lt.source_id=sqlc.arg(reversal_id)::text;
+ AND lt.operation='purchased_credit_refund' AND lt.source_id=sqlc.arg(reversal_id)::text AND lt.book='units';
 
 -- name: GetPurchasedCreditRecoveryTotal :one
 SELECT COALESCE(sum(amount),0)::bigint AS amount
@@ -38,8 +38,8 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND refunded_payment_id=sqlc.arg(p
 
 -- name: GetPurchasedCreditRetiredBalance :one
 SELECT
- COALESCE(sum(CASE WHEN cr.account_type='expired_credits' THEN lt.amount WHEN dr.account_type='expired_credits' THEN -lt.amount ELSE 0 END),0)::bigint AS expired,
- COALESCE(sum(CASE WHEN cr.account_type='revoked_credits' THEN lt.amount WHEN dr.account_type='revoked_credits' THEN -lt.amount ELSE 0 END),0)::bigint AS revoked
+ COALESCE(sum(CASE WHEN cr.account_type='units_expired' THEN lt.amount WHEN dr.account_type='units_expired' THEN -lt.amount ELSE 0 END),0)::bigint AS expired,
+ COALESCE(sum(CASE WHEN cr.account_type='units_revoked' THEN lt.amount WHEN dr.account_type='units_revoked' THEN -lt.amount ELSE 0 END),0)::bigint AS revoked
 FROM billing.ledger_transfers lt
 JOIN billing.ledger_accounts dr ON dr.merchant_id=lt.merchant_id AND dr.id=lt.debit_account_id
 JOIN billing.ledger_accounts cr ON cr.merchant_id=lt.merchant_id AND cr.id=lt.credit_account_id
@@ -54,4 +54,4 @@ SELECT COALESCE(sum(CASE
     WHEN operation='purchased_credit_refund' AND source LIKE 'repaid_owed_restore:%' THEN amount
     ELSE 0 END),0)::bigint AS amount
 FROM billing.ledger_transfers
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid;
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND credit_grant_id=sqlc.arg(credit_grant_id)::uuid AND book='units';

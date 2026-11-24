@@ -252,7 +252,7 @@ func (q *Queries) EndUsageCollection(ctx context.Context, arg EndUsageCollection
 }
 
 const getOrderPayment = `-- name: GetOrderPayment :one
-SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity, refund_reason, payment_method_id FROM billing.payments
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND order_id = $3::uuid AND id = $4::uuid
 `
@@ -307,6 +307,8 @@ func (q *Queries) GetOrderPayment(ctx context.Context, arg GetOrderPaymentParams
 		&i.OrderID,
 		&i.LedgerTransferID,
 		&i.Quantity,
+		&i.RefundReason,
+		&i.PaymentMethodID,
 	)
 	return i, err
 }
@@ -391,7 +393,7 @@ func (q *Queries) GetUsageOrderByPeriod(ctx context.Context, arg GetUsageOrderBy
 }
 
 const getUsageRecoveryLedgerTransfer = `-- name: GetUsageRecoveryLedgerTransfer :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -421,12 +423,16 @@ func (q *Queries) GetUsageRecoveryLedgerTransfer(ctx context.Context, arg GetUsa
 		&i.OrderID,
 		&i.CreatedAt,
 		&i.Operation,
+		&i.Book,
+		&i.EffectiveAt,
+		&i.OrderLineID,
+		&i.ProductID,
 	)
 	return i, err
 }
 
 const getUsageRecoveryPayment = `-- name: GetUsageRecoveryPayment :many
-SELECT p.id, p.channel, p.rail, p.transaction_id, p.amount, p.list_amount, p.currency, p.status, p.subscription_id, p.refunded_payment_id, p.discount_code, p.discount_reason, p.discount_metadata, p.metadata, p.purchased_at, p.created_at, p.card_brand, p.card_last4, p.merchant_id, p.customer_id, p.psp_id, p.attempt_kind, p.failure_code, p.failure_reason, p.reversal_kind, p.token_type, p.deleted_at, p.destructive_run_id, p.destructive_run_class, p.money_movement, p.credit_grant_snapshot, p.order_id, p.ledger_transfer_id, p.quantity FROM billing.payments p
+SELECT p.id, p.channel, p.rail, p.transaction_id, p.amount, p.list_amount, p.currency, p.status, p.subscription_id, p.refunded_payment_id, p.discount_code, p.discount_reason, p.discount_metadata, p.metadata, p.purchased_at, p.created_at, p.card_brand, p.card_last4, p.merchant_id, p.customer_id, p.psp_id, p.attempt_kind, p.failure_code, p.failure_reason, p.reversal_kind, p.token_type, p.deleted_at, p.destructive_run_id, p.destructive_run_class, p.money_movement, p.credit_grant_snapshot, p.order_id, p.ledger_transfer_id, p.quantity, p.refund_reason, p.payment_method_id FROM billing.payments p
 JOIN billing.orders o ON o.merchant_id = p.merchant_id AND o.id = p.order_id AND o.origin = 'usage'
 WHERE p.merchant_id = $1::uuid AND p.psp_id = $2::uuid
   AND p.transaction_id = $3::text
@@ -483,6 +489,8 @@ func (q *Queries) GetUsageRecoveryPayment(ctx context.Context, arg GetUsageRecov
 			&i.OrderID,
 			&i.LedgerTransferID,
 			&i.Quantity,
+			&i.RefundReason,
+			&i.PaymentMethodID,
 		); err != nil {
 			return nil, err
 		}
@@ -741,7 +749,7 @@ func (q *Queries) ListOpenUsageOrdersOfCurrency(ctx context.Context, arg ListOpe
 }
 
 const listOrderCollectionsForArchive = `-- name: ListOrderCollectionsForArchive :many
-SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id, a.id AS payment_id, a.customer_id AS payment_customer_id, a.order_id AS payment_order_id,
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id, i.sent_attempt, a.id AS payment_id, a.customer_id AS payment_customer_id, a.order_id AS payment_order_id,
     a.psp_id AS payment_psp_id, a.rail AS payment_rail, a.transaction_id AS payment_transaction_id, a.amount AS payment_amount,
     a.currency AS payment_currency, a.status AS payment_status, l.amount AS ledger_amount,
     COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
@@ -820,6 +828,7 @@ func (q *Queries) ListOrderCollectionsForArchive(ctx context.Context, arg ListOr
 			&i.BillingProviderIntent.Subject,
 			&i.BillingProviderIntent.Credential,
 			&i.BillingProviderIntent.DestructiveActionID,
+			&i.BillingProviderIntent.SentAttempt,
 			&i.PaymentID,
 			&i.PaymentCustomerID,
 			&i.PaymentOrderID,

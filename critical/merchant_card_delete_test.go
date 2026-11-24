@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -164,5 +165,49 @@ func TestMerchantCardRemoval(t *testing.T) {
 				require.EqualValues(t, 1, deletes.Load(), "verified absence completes without sending another delete")
 			}
 		}
+	})
+	t.Run("OR-J12-S72/a-card-with-history-is-never-hard-deleted", func(t *testing.T) {
+		a, journal := newNMIWorld(t)
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var method billing.PaymentMethod
+		require.NoError(t, json.Unmarshal(raw, &method))
+		versions := func() int {
+			t.Helper()
+			var n int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "payment_method_versions"}.Sanitize()+" WHERE merchant_id = $1 AND payment_method_id = $2",
+				a.alpha.MerchantID().UUID(), method.ID.UUID()).Scan(&n))
+			return n
+		}
+		require.Equal(t, 1, versions(), "a saved card's history starts with it")
+		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{a.schema, "payment_methods"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2", a.alpha.MerchantID().UUID(), method.ID.UUID())
+		var refused *pgconn.PgError
+		require.ErrorAs(t, err, &refused, "a card's permanent versions refuse its deletion")
+		require.Equal(t, "23503", refused.Code)
+		require.Equal(t, 1, versions())
+	})
+
+	t.Run("OR-J12-S73/a-card-an-unverified-membership-bills-is-kept", func(t *testing.T) {
+		a, journal, sub := nmiMembership(t)
+		// The host's book declares the membership canceled while the switch is
+		// off: it waits unverified, still on its card.
+		asOf := sub.CurrentPeriodStartsAt.Add(time.Hour)
+		_, err := a.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: asOf, DefaultPSP: billing.PSPRef{Key: "nmi"}, Customers: []billing.DeclaredCustomer{{Customer: sub.CustomerID}},
+			Subscriptions: []billing.DeclaredSubscription{{SourceID: "known-nmi-membership", Customer: sub.CustomerID, Price: sub.PriceID, Rail: "nmi", RailSubscriptionID: *sub.RailSubscriptionID,
+				StartedAt: *sub.CurrentPeriodStartsAt, PaidThrough: sub.CurrentPeriodEndsAt, Cancel: billing.CancelEvidence{Kind: "user_canceled", At: asOf.Add(-time.Minute)}}}})
+		require.NoError(t, err)
+		current, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionUnverified, current.Status)
+		methods, err := a.alpha.ListPaymentMethods(t.Context(), sub.CustomerID, billing.PaymentMethodListParams{})
+		require.NoError(t, err)
+		require.Len(t, methods.Items, 1)
+		status, raw := a.request(t, http.MethodDelete, "/v1/me/payment-methods/"+methods.Items[0].ID.String(), a.aliceToken, nil)
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), "add a new card first", "the customer is told what to do")
+		require.Len(t, journal.core.Vaults(), 1, "the schedule's vault stays")
 	})
 }

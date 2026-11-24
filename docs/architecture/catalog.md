@@ -31,20 +31,13 @@ What a merchant sells: products, prices, meters, rate cards and usage limits, an
    (`errCatalogSnapshotMoved`), release the admission as no-effect and plan
    again, up to three times, then answer `409 catalog_revision_conflict`.
 
-**History.** The commit compares the catalog before and after (`readCatalogState`) and appends one `change_log` entry per changed object (`catalogHistory`, `internal/service/catalog_history.go`) through `history.Record`, in the same transaction, so an entry commits and rolls back with its change. A product, price key, meter or limit gets `create`, `update`, `archive`, `unarchive` or `delete` with each changed field before and after; a product's keys get `key_add`, `key_remove` and `key_rename` entries of their own (a rename is what `replaceEntitlements` reported). Every entry but a delete carries the object's revision after the change: a product's, which a price change never moves, or a price key's. The actor is the route gate's invoker (`staff:<id>`) or `system`; the source is `console` for a signed-in person, `api`, `catalog_apply` for a document (with its `application_id`) or `cli` for the operator's apply.
+**History.** The commit compares the catalog before and after (`readCatalogState`) and appends one `change_log` entry per changed object (`catalogHistory`, `internal/service/catalog_history.go`) through `history.Record`, in the same transaction, so an entry commits and rolls back with its change. A product, price key, meter or limit gets `create`, `update`, `archive`, `unarchive` or `delete` with each changed field before and after; a product's keys get `key_add`, `key_remove` and `key_rename` entries of their own (a rename is what `replaceEntitlements` reported); a price key gets a `move` entry (`priceMove`) when it comes to name another of its versions, or none because the price, its product or both were archived or the price deleted; the entry carries the public id of the version it names, or of the one it stopped naming, and `ListPriceHistory` reads them. Every entry but a delete carries the object's revision after the change: a product's, which a price change never moves, or a price key's. The actor is the route gate's invoker (`staff:<id>`) or `system`; the source is `console` for a signed-in person, `api`, `catalog_apply` for a document (with its `application_id`) or `cli` for the operator's apply.
 
 The `catalog_authored_*` triggers advance `merchants.catalog_revision` on every
 row written, unless `openrails.catalog_batch_merchant_id` names the merchant (a
 document, which advances it once with `AdvanceCatalogRevision`).
 
-**Prices are versions.** `writeCatalogPrice` archives the key's current row,
-creates or revives the row whose id derives from the terms (`RevivePrice`), and
-logs the move in `price_key_movements`. `immutable_price_terms` lets only
-`archived`, `updated_at`, `deleted_at` and `sell_via` change, so an order keeps
-its terms. Product keys are valid-time rows in `product_entitlements`; a change
-emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what
-nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else
-`409 product_in_use`.
+**Prices are versions.** `writeCatalogPrice` archives the key's current row and creates or revives the row whose id derives from the terms (`RevivePrice`); the key's move is a `move` entry in `change_log`, as is the move a product's archive makes; a price migration that archives its sources records their archive and move as it writes them, under the catalog lock. `immutable_price_terms` lets only `archived`, `updated_at`, `deleted_at` and `sell_via` change, so an order keeps its terms. Product keys are valid-time rows in `product_entitlements`; a change emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else `409 product_in_use`.
 
 **Applying a document** (`internal/service/catalog_application.go`):
 
@@ -88,11 +81,7 @@ person would send. The model sees aggregate catalog data and subscriber counts.
 
 `internal/catalogrules` validates charge models and rates usage in integer micros ([usage billing](usage-billing.md)); `StripeCatalogService` (webhook endpoints) is [payment providers](payment-providers.md).
 
-Tables: `products`, `product_entitlements`, `prices`, `price_keys`,
-`price_key_movements`, `price_psp_bindings`, `catalog_meters`,
-`catalog_rate_cards`, `catalog_limits`, `catalog_product_limits`,
-`catalog_field_owners`, `catalog_applications`, `catalog_restore_receipts`;
-read-only here, `provider_catalog_objects`.
+Tables: `products`, `product_entitlements`, `prices`, `price_keys`, `price_psp_bindings`, `catalog_meters`, `catalog_rate_cards`, `catalog_limits`, `catalog_product_limits`, `catalog_field_owners`, `catalog_applications`, `catalog_restore_receipts`; read-only here, `provider_catalog_objects`.
 
 ### Moving subscribers to other prices and products
 
@@ -117,7 +106,7 @@ A price migration (`PriceMigrationService`, `internal/modules/subscriptions/pric
 
 **Cancel and list.** `CancelPriceMigration` sets `canceled_at` and cancels each still-scheduled move under its subscription's lock, with its waiting push; resolved moves stay, archived sources stay archived, and it spends no unit. A move an accepted renewal owns refuses it (`409 rebill_terms_committed`) until that renewal resolves. A provider-run Stripe subscription whose schedule may be planted is listed in `rail_release_required`: release that schedule in Stripe, or the price still changes. A staff change back to an engine subscription's current price and seats takes that one out (`ReplaceScheduledChange`). `ListPriceMigrations` pages newest first, by `ids` or by `product_key` and `price_key`; `matched` and creation skips are stored, the other counts are read from the moves.
 
-**Retiring prices and products.** Archiving stops sales and keeps subscribers; a migration moves them. A price or product a migration or move refers to is never deleted (`PricesHoldReferences`, `ProductHoldsReferences`): `DeleteProduct` answers `409 product_in_use` and `prune: true` archives it. The catalog assistant drafts only same-product migrations (`cross_product` refusal).
+**Retiring prices and products.** Archiving stops sales and keeps subscribers; a migration moves them. A price or product a migration, a move or a PSP import's price pick refers to is never deleted (`PricesHoldReferences`, `ProductHoldsReferences`; OR-J38-S77): `DeleteProduct` answers `409 product_in_use` and `prune: true` archives it. The catalog assistant drafts only same-product migrations (`cross_product` refusal).
 
 Tables: `price_migrations`; moves are `scheduled_changes` ([subscriptions](subscriptions.md)).
 
@@ -216,13 +205,12 @@ Checks:
 
 ### 6. Data lifecycle
 
-`products`, `product_entitlements`, `prices`, `price_key_movements`, `catalog_applications`, `catalog_restore_receipts` and `price_migrations` are permanent, the rest state; none is partitioned. Products and prices soft-delete.
+`products`, `product_entitlements`, `prices`, `catalog_applications`, `catalog_restore_receipts` and `price_migrations` are permanent, the rest state; none is partitioned. Products and prices soft-delete.
 
 `change_log`, the history of every catalog and configuration change, is permanent and append-only (`immutable_change_log`): no update or delete, a merchant purge keeps it, and the merchant archive moves it. It is not in the billing restore guard: a destination records its own configuration's history as soon as that configuration loads, and a restore adds the archive's entries to it, once per merchant (the restore receipt makes a replay a no-op).
 
 Checks:
-- `internal/retention/tables.go` lists every catalog table (by hand: nothing
-  checks it against the schema).
+- `internal/retention/tables.go` lists every catalog table (`TestTablesMatchSchema`).
 - `no_product_delete`, `immutable_price_terms` and
   `immutable_catalog_application_receipt` triggers exist.
 

@@ -13,7 +13,7 @@ import (
 )
 
 const getConflictingInitialEnrollmentOperation = `-- name: GetConflictingInitialEnrollmentOperation :one
-SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id FROM billing.provider_intents i
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id, i.sent_attempt FROM billing.provider_intents i
 JOIN billing.products accepted ON accepted.merchant_id=i.merchant_id AND accepted.id=$1::uuid
 JOIN billing.products existing ON existing.merchant_id=i.merchant_id AND existing.id::text=i.payload->'terms'->>'product_id'
 WHERE i.merchant_id=$2::uuid AND i.intent_type='initial_membership'
@@ -62,12 +62,13 @@ func (q *Queries) GetConflictingInitialEnrollmentOperation(ctx context.Context, 
 		&i.Subject,
 		&i.Credential,
 		&i.DestructiveActionID,
+		&i.SentAttempt,
 	)
 	return i, err
 }
 
 const getConflictingInitialEnrollmentSubscription = `-- name: GetConflictingInitialEnrollmentSubscription :one
-SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity, s.provider_access_default_snapshot, s.facts_authority, s.due_recheck_at, s.rail_subscription_key FROM billing.subscriptions s
+SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity, s.provider_access_default_snapshot, s.facts_authority, s.due_recheck_at, s.rail_subscription_key, s.retry_advised_at FROM billing.subscriptions s
 JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
 JOIN billing.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
 WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
@@ -129,6 +130,7 @@ func (q *Queries) GetConflictingInitialEnrollmentSubscription(ctx context.Contex
 		&i.FactsAuthority,
 		&i.DueRecheckAt,
 		&i.RailSubscriptionKey,
+		&i.RetryAdvisedAt,
 	)
 	return i, err
 }
@@ -156,7 +158,7 @@ func (q *Queries) GetConflictingOrderClaim(ctx context.Context, arg GetConflicti
 }
 
 const getPaidRunwaySubscription = `-- name: GetPaidRunwaySubscription :one
-SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity, s.provider_access_default_snapshot, s.facts_authority, s.due_recheck_at, s.rail_subscription_key FROM billing.subscriptions s
+SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity, s.provider_access_default_snapshot, s.facts_authority, s.due_recheck_at, s.rail_subscription_key, s.retry_advised_at FROM billing.subscriptions s
 JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
 JOIN billing.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
 WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
@@ -224,6 +226,7 @@ func (q *Queries) GetPaidRunwaySubscription(ctx context.Context, arg GetPaidRunw
 		&i.FactsAuthority,
 		&i.DueRecheckAt,
 		&i.RailSubscriptionKey,
+		&i.RetryAdvisedAt,
 	)
 	return i, err
 }

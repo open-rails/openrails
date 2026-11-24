@@ -34,6 +34,10 @@ func admitInput(p billing.AdmitParams) billingservice.AdmitInput {
 	if p.ExpiresAt != nil {
 		in.ExpiresAt = *p.ExpiresAt
 	}
+	if p.LeaseID != nil {
+		lease := p.LeaseID.UUID()
+		in.LeaseID = &lease
+	}
 	return in
 }
 

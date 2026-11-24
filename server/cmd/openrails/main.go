@@ -17,11 +17,13 @@ import (
 	"github.com/open-rails/openrails/internal/buildinfo"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
+	"github.com/open-rails/openrails/server/internal/hostdeps"
 )
 
 func main() {
@@ -115,7 +117,7 @@ func newRootCmd() *cobra.Command {
 
 	migrateUpCmd := &cobra.Command{
 		Use:   "up",
-		Short: "Apply OpenRails, AuthKit and River migrations",
+		Short: "Apply OpenRails, AuthKit and River migrations, and the event store's with clickhouse",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return applyStandaloneMigrations(cmd.Context(), hostconfig.FromContext(cmd.Context()))
 		},
@@ -143,7 +145,7 @@ func newRootCmd() *cobra.Command {
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, newMigrateStatusCmd())
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newDumpCatalogCmd(), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newNMICmd(), newSolanaPayCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newDumpCatalogCmd(), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newNMICmd(), newSolanaPayCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd(), newUsageCmd())
 	rootCmd.AddCommand(versionCmd)
 	return rootCmd
 }
@@ -264,6 +266,16 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 	defer database.Close()
 	if err := engine.Migrate(ctx, database.Pool(), *host.Config); err != nil {
 		return err
+	}
+	if host.ClickHouse != nil {
+		conn, err := hostdeps.ClickHouse(host.ClickHouse)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		if err := eventstore.Migrate(ctx, conn, config.ClickHouseDatabase(host.Config), slog.Default()); err != nil {
+			return err
+		}
 	}
 	// The control plane owns the AuthKit/River schema selection. Preserve its
 	// configuration without building its roles, HTTP handler or job workers.

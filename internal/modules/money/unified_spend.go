@@ -73,8 +73,8 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	for _, lot := range lots {
 		spendable += lot.Available
 	}
-	// Admitted usage in a merchant's unit is never owed: it takes what the
-	// lots hold, whatever other holds reserve, before any of it goes uncharged.
+	// Admitted usage in a merchant's unit takes what the lots hold, whatever
+	// other holds reserve: it is never owed.
 	if available > spendable || preAuthorized && IsMerchantUnit(cur) {
 		available = spendable
 	}
@@ -84,14 +84,10 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 	fromOwed := amount - fromBalance
 
-	// A merchant's units are prepaid, never owed: an admitted charge the lots
-	// cannot cover takes what they hold, and the rest is not charged.
-	var waived int64
+	// A merchant's units are prepaid, never owed: a caller forgives what the
+	// lots cannot take before it charges (spendableUnits).
 	if fromOwed > 0 && IsMerchantUnit(cur) {
-		if !preAuthorized {
-			return 0, 0, false, ErrInsufficientCredits
-		}
-		waived, fromOwed = fromOwed, 0
+		return 0, 0, false, ErrInsufficientCredits
 	}
 
 	if fromOwed > 0 {
@@ -158,10 +154,6 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		}
 		owedAccrued = fromOwed
 	}
-	if waived > 0 && fromBalance == 0 {
-		// Nothing posted, yet the charge is settled: it is not a replay.
-		applied = true
-	}
 
 	return balanceSpent, owedAccrued, applied, nil
 }
@@ -193,4 +185,21 @@ func (s *MoneyService) insertOwedItemsTx(ctx context.Context, q *gen.Queries, me
 		}
 	}
 	return nil
+}
+
+// spendableUnits is what a customer's lots in a merchant's unit can take now,
+// those live just before a posting's cut: what a charge in the unit forgives
+// beyond it is never owed.
+func (s *MoneyService) spendableUnits(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, unit string) (int64, error) {
+	lots, err := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
+		MerchantID: merchantID, CustomerID: customer, Currency: unit, AsOf: s.now(), LiveAt: s.lotsLiveAt(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	var spendable int64
+	for _, lot := range lots {
+		spendable = addSat(spendable, lot.Available)
+	}
+	return spendable, nil
 }

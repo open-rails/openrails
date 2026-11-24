@@ -422,12 +422,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")
 	}
-	// HARD CUT (#735): ClickHouse is gone — metrics and dunning forensics are
-	// Postgres-backed. Stale config fails loudly, never silently ignored.
-	if k.Exists("clickhouse") || hasEnvPrefix("CLICKHOUSE_") || hasEnvPrefix("BILLING_CLICKHOUSE_") {
-		return nil, fmt.Errorf("clickhouse config was removed: delete the clickhouse yaml key and CLICKHOUSE_* env vars; analytics/forensics read Postgres")
-	}
-
 	_, oldCardVaultEnv := os.LookupEnv("PLATFORM_VAULT")
 	retiredCardVault := k.Exists("platform_vault") || oldCardVaultEnv || hasEnvPrefix("PLATFORM_VAULT_")
 	for name := range secretFiles {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/hostdeps"
 )
@@ -81,6 +82,23 @@ func cliVault(ctx context.Context) (*vaultapi.Client, error) {
 	cli.vault, cli.vaulted = session.Client(), true
 	cli.closes = append(cli.closes, session.Close)
 	return cli.vault, nil
+}
+
+// cliEventStore is the deployment's event store, checked and not migrated;
+// nil without a clickhouse section.
+func cliEventStore(ctx context.Context) (*eventstore.Store, error) {
+	h := hostconfig.FromContext(ctx)
+	if h.ClickHouse == nil {
+		return nil, nil
+	}
+	conn, err := hostdeps.ClickHouse(h.ClickHouse)
+	if err != nil {
+		return nil, err
+	}
+	cli.mu.Lock()
+	cli.closes = append(cli.closes, func() { _ = conn.Close() })
+	cli.mu.Unlock()
+	return eventstore.Open(ctx, conn, config.ClickHouseDatabase(h.Config), eventstore.Options{Validate: true, Logger: slog.Default()})
 }
 
 // cliDeps is the command's pool and Vault client.

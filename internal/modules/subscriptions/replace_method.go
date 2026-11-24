@@ -15,8 +15,9 @@ import (
 
 // ReplaceMethod decides a new card on a locked membership: one awaiting a
 // card resumes dunning, and a delinquent one retries at the next due pass
-// instead of waiting out the old card's schedule.
+// instead of waiting out the old card's schedule or its network advice.
 func ReplaceMethod(sub *models.Subscription, now time.Time) error {
+	forgetAdvice(sub)
 	if _, err := Transition(sub, lifecycle.MethodReplaced{}, now); err != nil {
 		return fmt.Errorf("replace method on %s: %w", sub.ID, err)
 	}
@@ -24,6 +25,36 @@ func ReplaceMethod(sub *models.Subscription, now time.Time) error {
 		sub.NextRetryAt = &now
 		sub.RecordHistoryDecision(lifecycle.Name(lifecycle.MethodReplaced{}))
 	}
+	return nil
+}
+
+// forgetAdvice drops the network advice the card sub no longer charges drew,
+// and the end at the next renewal a deferral by it set: the case ends as its
+// policy has it.
+func forgetAdvice(sub *models.Subscription) {
+	if sub.AdviceDeferred() {
+		sub.GraceEndsAt = nil
+	}
+	sub.RetryAdvisedAt = nil
+}
+
+// ForgetAdvice is forgetAdvice for a card chosen without resuming dunning: a
+// case the advice deferred takes the policy's retry after its last decline.
+func ForgetAdvice(ctx context.Context, d *db.DB, sub *models.Subscription) error {
+	deferred := sub.AdviceDeferred()
+	forgetAdvice(sub)
+	if !deferred || sub.LastRetryAt == nil || sub.RetryAttempts == nil {
+		return nil
+	}
+	policy, err := CasePolicy(ctx, d, sub)
+	if err != nil {
+		return err
+	}
+	next, ok, err := policy.NextAttemptAt(caseCycleHours(sub, sub.Price), *sub.RetryAttempts, *sub.LastRetryAt)
+	if err != nil || !ok {
+		next = *sub.LastRetryAt
+	}
+	sub.NextRetryAt = &next
 	return nil
 }
 
@@ -41,7 +72,7 @@ func WakeForReplacedMethod(ctx context.Context, d *db.DB, merchantID, paymentMet
 		if err != nil {
 			return err
 		}
-		waiting := sub.Status == models.StatusAwaitingMethod || (sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(now)))
+		waiting := sub.Status == models.StatusAwaitingMethod || (sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(now) || sub.RetryAdvisedAt != nil))
 		collects := sub.CollectionPolicy == models.CollectionPolicyEngine || sub.CollectionPolicy == models.CollectionPolicyNMISchedule
 		charged, err := PaymentMethodOf(ctx, d.Gen(ctx), sub)
 		if err != nil {

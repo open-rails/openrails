@@ -55,3 +55,10 @@ UPDATE billing.customer_contacts SET
   directory_updated_at = sqlc.narg(directory_updated_at), updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
 RETURNING *;
+
+-- Only read enough to decide an erasure ceiling.
+-- name: ProvisionedContactsAtLeast :one
+SELECT count(*)::bigint AS contacts FROM (
+ SELECT 1 FROM billing.customer_contacts WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND provisioned_at IS NOT NULL
+ LIMIT sqlc.arg(required)::bigint
+) AS provisioned;

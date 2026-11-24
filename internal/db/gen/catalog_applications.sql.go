@@ -130,7 +130,7 @@ func (q *Queries) LockCatalogKey(ctx context.Context, lockKey string) error {
 }
 
 const lockCatalogRevision = `-- name: LockCatalogRevision :one
-SELECT catalog_revision FROM billing.merchants WHERE id=$1::uuid FOR UPDATE
+SELECT catalog_revision FROM billing.merchants WHERE id=$1::uuid FOR NO KEY UPDATE
 `
 
 func (q *Queries) LockCatalogRevision(ctx context.Context, merchantID uuid.UUID) (int64, error) {

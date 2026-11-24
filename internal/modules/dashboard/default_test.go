@@ -2,6 +2,8 @@ package dashboard
 
 import (
 	"io/fs"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -22,18 +24,27 @@ func TestDefaultWidgetsValidateForEveryProfile(t *testing.T) {
 	}
 }
 
-// The migration that cleans saved layouts names every retired measure.
+// The migrations that clean saved layouts name every retired measure and
+// dimension.
 func TestRetiredMeasuresLeaveSavedLayouts(t *testing.T) {
-	names, err := fs.Glob(postgresmigrations.FS, "*_dashboard_retired_measures.up.sql")
-	if err != nil || len(names) != 1 {
-		t.Fatalf("migration: %v %v", names, err)
-	}
-	body, err := fs.ReadFile(postgresmigrations.FS, names[0])
+	names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name := range metrics.Removed {
-		if !strings.Contains(string(body), "'"+name+"'") {
+	var cleaning strings.Builder
+	for _, name := range names {
+		body, err := fs.ReadFile(postgresmigrations.FS, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), "UPDATE billing.dashboard_configs") {
+			cleaning.Write(body)
+		}
+	}
+	retired := slices.Collect(maps.Keys(metrics.Removed))
+	retired = append(retired, slices.Collect(maps.Keys(metrics.RemovedDimensions))...)
+	for _, name := range retired {
+		if !strings.Contains(cleaning.String(), "'"+name+"'") {
 			t.Errorf("saved layouts keep %s", name)
 		}
 	}

@@ -13,7 +13,8 @@ func RefundInFull(ctx context.Context, shop *openrails.Client, payment billing.P
 	// key: one per refund decision; a retry with it refunds once
 	return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 		Full:         true,
-		Reason:       "requested_by_customer",
+		RefundReason: billing.RefundRequestedByCustomer,
+		Reason:       "cancelled within the first day",
 		RevokeAccess: true,
 	})
 	// guide:end

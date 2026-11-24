@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// LockCustomer takes the per-customer spend lock (the customers row FOR UPDATE
+// LockCustomer takes the per-customer spend lock (the customers row FOR NO KEY UPDATE
 // money's lockBalance takes), so grant repairs serialize with the customer's
 // money movements. Only effective inside a tx.
 func (l *Ledger) LockCustomer(ctx context.Context, customer uuid.UUID) error {

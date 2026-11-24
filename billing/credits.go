@@ -366,8 +366,11 @@ type MerchantSettings struct {
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
 	ProviderRefundAccess *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays     *int                  `json:"arrears_grace_days,omitempty"`
-	PSPRouting           *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
+	// FraudWarningRefund decides what an actionable early fraud warning does:
+	// FraudWarningRefundCharge (default) or FraudWarningRecord.
+	FraudWarningRefund *FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
+	ArrearsGraceDays   *int                `json:"arrears_grace_days,omitempty"`
+	PSPRouting         *[]PSPRoutingRule   `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
@@ -376,11 +379,9 @@ type MerchantSettings struct {
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.
 	BalanceNotices *BalanceNoticeSettings `json:"balance_notices,omitempty"`
-	// UsageGateSafeSpend lets gates keep admitting while OpenRails is
-	// unreachable: each hold names a safe amount, its money size, that its
-	// gate may spend unreserved. Off by default. Unit limits are never spent
-	// past their holds.
-	UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
+	// Accounting is how the merchant's books are dated; a patch replaces it
+	// whole.
+	Accounting *AccountingSettings `json:"accounting,omitempty"`
 	// CardVault is where new cards are saved: a card PSP's key, whose own
 	// vault (or the custodian it names) holds them, or CardVaultPlatform.
 	// Absent: each card is saved where the PSP that takes it keeps cards. It
@@ -399,6 +400,16 @@ type MerchantSettings struct {
 	// credit lots, prices, credit grants and rate cards may count them; the
 	// money settings refuse them (merchant_unit_unsupported).
 	Currencies []MerchantCurrency `json:"currencies,omitempty"`
+}
+
+// AccountingSettings date a merchant's books.
+type AccountingSettings struct {
+	// Timezone is the IANA zone (Europe/Berlin) whose days and months MRR
+	// reports and usage history group in, and at whose month ends usage
+	// posts; empty is UTC. Rollups are kept in UTC quarter hours, so a change
+	// regroups every day and month, past ones too, usage history included.
+	// Posted books keep their effective instants and never change.
+	Timezone string `json:"timezone,omitempty"`
 }
 
 // BillingPolicy declares one named billing policy (or#897). The policy says

@@ -152,12 +152,12 @@ func (s *MoneyService) queueUsageBilling(ctx context.Context, q *gen.Queries, cu
 
 // queueAccruedUsageBilling asks for a usage order once what the customer
 // owes, and what its unposted usage will owe beyond its balance, reaches its
-// threshold: the order posts the accruals first.
+// threshold: the order posts the usage first.
 func (s *MoneyService) queueAccruedUsageBilling(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string) error {
 	if _, cur, err := s.usageBillingConfig(ctx, currency); err != nil || cur == nil {
 		return err
 	}
-	unposted, err := q.SumUnpostedUsageAccruals(ctx, gen.SumUnpostedUsageAccrualsParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
+	unposted, err := s.unpostedUsage(ctx, q, merchantID, customer, currency)
 	if err != nil || unposted <= 0 {
 		return err
 	}
@@ -276,7 +276,7 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 		if _, err := postRunningChargesThrough(ctx, q, mid.UUID(), customer, currency, now, now); err != nil {
 			return err
 		}
-		if _, err := s.WithDatabase(s.db.NewWithPgxTx(tx)).postUsageAccrualsTx(ctx, q, mid.UUID(), customer, currency, nil, nil, now); err != nil {
+		if _, err := s.WithDatabase(s.db.NewWithPgxTx(tx)).at(now).postUsageTx(ctx, q, mid.UUID(), customer, currency, now, usagePostingMovement); err != nil {
 			return err
 		}
 		if cur == nil {

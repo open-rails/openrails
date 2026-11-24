@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -216,7 +217,7 @@ const toolPriceHistory = "price_history"
 func toolDefPriceHistory() ToolDef {
 	return ToolDef{
 		Name:        toolPriceHistory,
-		Description: "The full version-chain history for a price key, most-recent-first, resolved from the durable pointer-movement log (not each row's own creation date — a reactivated amount shows its most recent movement). Each entry carries the active-subscriber count STILL on that specific historical amount (\"who's still on the old price?\"). Idempotent, safe to retry.",
+		Description: "The full version-chain history for a price key, most-recent-first, resolved from the configuration history's key moves, or from its versions when none are recorded (not each row's own creation date — a reactivated amount shows its most recent movement). Each entry carries the active-subscriber count STILL on that specific historical amount (\"who's still on the old price?\"). Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {"product_key": {"type": "string"}, "price_key": {"type": "string"}},
@@ -244,12 +245,21 @@ func (s *Service) runPriceHistory(ctx context.Context, raw json.RawMessage) (str
 		return "", err
 	}
 	page, err := s.prices.ListKeyMovements(ctx, tid.UUID(), product.ID, key, billing.PageRequest{Limit: billing.MaxPageLimit})
-	movements := page.Items
-	if err != nil || len(movements) == 0 {
+	if err != nil {
+		return "", err
+	}
+	var versions []*models.Price
+	if len(page.Items) == 0 {
+		if versions, err = s.prices.ListChainByKey(ctx, tid.UUID(), product.ID, key); err != nil {
+			return "", err
+		}
+	}
+	points := priceHistoryPoints(page.Items, versions)
+	if len(points) == 0 {
 		return "", fmt.Errorf("price_key %q not found — call list_catalog to see valid keys", key)
 	}
-	table := make([][]string, 0, len(movements))
-	for _, m := range movements {
+	table := make([][]string, 0, len(points))
+	for _, m := range points {
 		price, err := s.prices.GetByID(ctx, m.PriceID)
 		if err != nil {
 			return "", fmt.Errorf("resolve historical price %s: %w", m.PriceID, err)
@@ -268,6 +278,22 @@ func (s *Service) runPriceHistory(ctx context.Context, raw json.RawMessage) (str
 		})
 	}
 	return renderTable([]string{"effective_at", "amount", "status", "active_subscribers"}, table, "no history"), nil
+}
+
+// priceHistoryPoints is a key's history, newest first: its moves, or, for a
+// key with none recorded (a catalog restored from a snapshot carries no
+// history), each of its versions from when it was created.
+func priceHistoryPoints(moves []*models.PriceKeyMovement, versions []*models.Price) []*models.PriceKeyMovement {
+	if len(moves) > 0 {
+		return moves
+	}
+	out := make([]*models.PriceKeyMovement, 0, len(versions))
+	for i := len(versions) - 1; i >= 0; i-- {
+		v := versions[i]
+		out = append(out, &models.PriceKeyMovement{ID: v.ID, PriceID: v.ID, EffectiveAt: v.CreatedAt, Archived: v.Archived})
+	}
+	slices.SortStableFunc(out, func(a, b *models.PriceKeyMovement) int { return b.EffectiveAt.Compare(a.EffectiveAt) })
+	return out
 }
 
 const toolListRepriceBatches = "list_reprice_batches"

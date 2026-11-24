@@ -3,7 +3,6 @@
 package critical_test
 
 import (
-	"sync"
 	"testing"
 	"time"
 
@@ -50,30 +49,6 @@ func leaseMintedAt(at time.Time) billing.LeaseID {
 	return billing.LeaseID(id)
 }
 
-// applied is, per lease, what its gate applied of the last answer it got:
-// syncLease reports it on the lease's next sync, as a gate does.
-var applied sync.Map
-
-// appliedOf is every hold version an answer carried.
-func appliedOf(out *billing.SyncLeasesResult) []billing.HoldApplied {
-	latest := map[[2]string]billing.HoldApplied{}
-	var order [][2]string
-	for _, h := range out.Holds {
-		k := [2]string{h.CustomerID.String(), h.LimitSet}
-		if prev, ok := latest[k]; !ok {
-			order = append(order, k)
-		} else if prev.Version >= h.Version {
-			continue
-		}
-		latest[k] = billing.HoldApplied{CustomerID: h.CustomerID, LimitSet: h.LimitSet, Version: h.Version}
-	}
-	result := make([]billing.HoldApplied, 0, len(order))
-	for _, k := range order {
-		result = append(result, latest[k])
-	}
-	return result
-}
-
 // numbered numbers items from first on, in order. An item that names no
 // time occurred when it settles.
 func numbered(first int64, items ...billing.LeaseUsage) []billing.LeaseUsage {
@@ -85,28 +60,12 @@ func numbered(first int64, items ...billing.LeaseUsage) []billing.LeaseUsage {
 	return out
 }
 
-// syncLease is one lease sync that must succeed as a call, made as a gate
-// makes it: with no Applied given, it reports the versions of the lease's
-// previous answer (a non-nil empty Applied is a lost reply). Every hold it
-// answers carries a balance part.
+// syncLease is one lease sync that must succeed as a call.
 func syncLease(t *testing.T, client *openrails.Client, params billing.SyncLeasesParams) *billing.SyncLeasesResult {
 	t.Helper()
-	if params.Applied == nil {
-		if prev, ok := applied.Load(params.LeaseID); ok {
-			params.Applied = prev.([]billing.HoldApplied)
-		}
-	}
 	out, err := client.SyncLeases(t.Context(), params)
 	require.NoError(t, err)
-	applied.Store(params.LeaseID, appliedOf(out))
-	for _, h := range out.Holds {
-		require.NotEmpty(t, h.Limits)
-		found := false
-		for _, l := range h.Limits {
-			found = found || l.Limit == "balance"
-		}
-		require.True(t, found, "every hold answered carries its balance: %+v", h)
-	}
+	require.Len(t, out.LimitSets, len(params.Views))
 	return out
 }
 
@@ -141,14 +100,22 @@ func refusedItem(t *testing.T, out *billing.SyncLeasesResult, n int64) billing.L
 	return billing.LeaseUsageRefusal{}
 }
 
-// nextDay moves the clock past the next 00:00 UTC.
-func nextDay(w *world) {
+// nextMonth moves the clock past the start of the next UTC month: the
+// month's usage is due to post.
+func nextMonth(w *world) {
 	now := w.clock.Now().UTC()
-	w.clock.Advance(now.Truncate(24 * time.Hour).Add(24*time.Hour + time.Minute).Sub(now))
+	w.clock.Advance(time.Date(now.Year(), now.Month()+1, 1, 0, 1, 0, 0, time.UTC).Sub(now))
 }
 
-// postDays runs a billing pass: every accrual of a day that ended posts.
-func postDays(t *testing.T, fleet *river.Client[pgx.Tx]) {
+// earlyInMonth moves the clock to the second day of the next UTC month: a
+// scenario's usage stays in one month.
+func earlyInMonth(w *world) {
+	now := w.clock.Now().UTC()
+	w.clock.Advance(time.Date(now.Year(), now.Month()+1, 2, 12, 0, 0, 0, time.UTC).Sub(now))
+}
+
+// closeMonths runs a billing pass: the usage of every month that ended posts.
+func closeMonths(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
 	runRegistered(t, fleet, "openrails.billing_pass", 1)
 }

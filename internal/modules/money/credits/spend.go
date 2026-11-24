@@ -2,11 +2,14 @@ package credits
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
@@ -46,7 +49,7 @@ func (l *Lots) spend(ctx context.Context, customer uuid.UUID, unit string, amoun
 	if err != nil {
 		return false, err
 	}
-	revenue, err := l.money.EnsureSystemAccount(ctx, ledger.PlatformRevenue, unit)
+	revenue, err := l.money.EnsureSystemAccount(ctx, ledger.UnitsRedeemed, unit)
 	if err != nil {
 		return false, err
 	}
@@ -91,14 +94,8 @@ func (l *Lots) LockCustomer(ctx context.Context, customer uuid.UUID) error {
 // package, which owns running charges, installs it.
 var PostRunningCharges func(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, through, now time.Time) (posted bool, err error)
 
-// PostUsageAccruals posts what a customer's usage accrued in a currency and
-// the ledger has not taken, drawing the lots live just before liveAt (now
-// when nil), and reports whether anything posted. The money package, which
-// owns accruals, installs it.
-var PostUsageAccruals func(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, liveAt *time.Time, now time.Time) (posted bool, err error)
-
 // SettleRunningCharges posts what the customer's running charges accrued
-// through an instant, and its unposted usage, before a lot is expired,
+// through an instant, and its usage before it, before a lot is expired,
 // revoked or refunded at it: the lot funds what accrued while it lived.
 func (l *Lots) SettleRunningCharges(ctx context.Context, customer uuid.UUID, unit string, through time.Time) (bool, error) {
 	posted := false
@@ -112,15 +109,29 @@ func (l *Lots) SettleRunningCharges(ctx context.Context, customer uuid.UUID, uni
 	return posted || accrued, err
 }
 
+// settleUsage posts the customer's usage that occurred before liveAt (now
+// when nil), drawing the lots live just before it: the usage ledger bound to
+// the transaction posts it.
 func (l *Lots) settleUsage(ctx context.Context, customer uuid.UUID, unit string, liveAt *time.Time) (bool, error) {
-	if PostUsageAccruals == nil {
+	cut := l.now()
+	if liveAt != nil && liveAt.Before(cut) {
+		cut = *liveAt
+	}
+	if usage := db.UsageLedgerOf(l.q); usage != nil {
+		return usage.PostUsage(ctx, l.q, l.merchant, customer, unit, cut, l.now())
+	}
+	_, err := l.q.GetUsageUnposted(ctx, gen.GetUsageUnpostedParams{MerchantID: l.merchant, CustomerID: customer, Currency: unit})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
-	return PostUsageAccruals(ctx, l.q, l.merchant, customer, unit, liveAt, l.now())
+	if err != nil {
+		return false, err
+	}
+	return false, fmt.Errorf("credits: customer %s has usage to post first, and no usage ledger is bound", customer)
 }
 
 // ExpireLapsed moves the units left on every lot past its expiry to
-// expired_credits, one transfer per lot, and returns the total. Idempotent:
+// units_expired, one transfer per lot, and returns the total. Idempotent:
 // an expired lot has none left. It takes the customer's lock.
 func (l *Lots) ExpireLapsed(ctx context.Context, customer uuid.UUID, unit string) (int64, error) {
 	return l.ExpireLapsedBy(ctx, customer, unit, l.now())
@@ -143,7 +154,7 @@ func (l *Lots) ExpireLapsedBy(ctx context.Context, customer uuid.UUID, unit stri
 	if err != nil {
 		return 0, err
 	}
-	expiredAccount, err := l.money.EnsureSystemAccount(ctx, ledger.ExpiredCredits, unit)
+	expiredAccount, err := l.money.EnsureSystemAccount(ctx, ledger.UnitsExpired, unit)
 	if err != nil {
 		return 0, err
 	}

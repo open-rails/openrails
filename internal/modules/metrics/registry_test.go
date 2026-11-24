@@ -1,10 +1,13 @@
 package metrics
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestRegistry(t *testing.T) {
@@ -82,6 +85,53 @@ func TestQueryShape(t *testing.T) {
 	for _, e := range Schema().Examples {
 		if _, verr := ValidateAt(&e.Query, now); verr != nil {
 			t.Errorf("example %q: %v", e.Intent, verr)
+		}
+	}
+}
+
+// One name is one dimension: a second definition would shadow the first.
+func TestDimensionNamesAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range Dimensions {
+		if seen[d.Name] {
+			t.Errorf("dimension %q is defined twice", d.Name)
+		}
+		seen[d.Name] = true
+	}
+}
+
+// Every family a statement reads names its merchant: the predicate is the
+// merchant scope. The event store's read the context's merchant.
+func TestEveryFamilyNamesItsMerchant(t *testing.T) {
+	for fam, spec := range families {
+		if spec.Kind != "depletion" && spec.Kind != "store" && merchantCols[fam] == "" {
+			t.Errorf("family %s names no merchant column", fam)
+		}
+	}
+}
+
+// Every public measure compiles, each statement scoped to the merchant.
+func TestEveryMeasureCompiles(t *testing.T) {
+	now := time.Date(2026, time.November, 15, 12, 0, 0, 0, time.UTC)
+	for _, m := range Measures {
+		if m.Internal {
+			continue
+		}
+		q := Query{Measures: []string{m.Name}, Range: &QueryRange{Last: "7d"}}
+		plan, verr := ValidateAt(&q, now)
+		if verr != nil {
+			t.Errorf("%s: %v", m.Name, verr)
+			continue
+		}
+		stmts, err := compile(plan, uuid.New(), nil)
+		if err != nil {
+			t.Errorf("%s: %v", m.Name, err)
+			continue
+		}
+		for _, st := range stmts {
+			if !regexp.MustCompile(`[a-z]+\.merchant_id = \$\d`).MatchString(st.sql) {
+				t.Errorf("%s: statement over %s is not scoped to its merchant:\n%s", m.Name, st.family, st.sql)
+			}
 		}
 	}
 }

@@ -314,7 +314,7 @@ func (a Application) Validate() error {
 		if err := limit.validate(); err != nil {
 			return fmt.Errorf("limit %q: %w", key, err)
 		}
-		count += len(limit.RateCards.Value)
+		count += len(limit.Counts.Value)
 	}
 	if count > MaxApplicationItems {
 		return fmt.Errorf("catalog application exceeds %d items", MaxApplicationItems)

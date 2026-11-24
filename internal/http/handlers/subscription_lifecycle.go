@@ -233,7 +233,7 @@ func resumeStripe(ctx context.Context, r *httprequest.Request, sub *models.Subsc
 	if err != nil {
 		return err
 	}
-	if err := r.State.StripeClients.WriteDisarmed(key); err != nil {
+	if err := r.State.StripeClients.WriteDisarmed(ctx, key); err != nil {
 		return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "the Stripe key cannot write, so Stripe cannot be told of the resume: "+err.Error())
 	}
 	var operation uuid.UUID
@@ -421,5 +421,5 @@ func writeMerchantSubscription(r *httprequest.Request, id uuid.UUID) {
 		writeRefusal(r, err, "failed to load subscription")
 		return
 	}
-	writeSubscription(r, subscriptionView(subscription, r.Clock.Now()))
+	writeMerchantSubscriptionOne(r, subscriptionView(subscription, r.Clock.Now()))
 }

@@ -174,5 +174,9 @@ func (s *Service) lockBalance(ctx context.Context, q *gen.Queries, mid, customer
 	}
 	now := s.now()
 	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now)})
-	return balance, held.Held, err
+	if err != nil {
+		return 0, 0, err
+	}
+	unposted, err := ledger.UnpostedUsage(ctx, q, mid, customer, currency)
+	return balance, held.Held + unposted, err
 }

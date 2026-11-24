@@ -194,7 +194,7 @@ func (l *Lots) Materialize(ctx context.Context, id uuid.UUID) error {
 }
 
 // Revoke records the lot's revocation, effective asOf (zero is now), and
-// moves its units left to revoked_credits: frozen and reversible, not
+// moves its units left to units_revoked: frozen and reversible, not
 // refunded. What the customer's running charges accrued draws the lot first.
 // actor is who revoked it, "" for none.
 func (l *Lots) Revoke(ctx context.Context, id uuid.UUID, reason, actor string, asOf time.Time) (gen.BillingCreditGrant, error) {
@@ -226,13 +226,13 @@ func (l *Lots) Revoke(ctx context.Context, id uuid.UUID, reason, actor string, a
 }
 
 // clawback moves a revoked lot's units left DR its balance / CR
-// revoked_credits, once at (credit_revoke, grant_revoke, lot).
+// units_revoked, once at (credit_revoke, grant_revoke, lot).
 func (l *Lots) clawback(ctx context.Context, lot gen.BillingCreditGrant) error {
 	remaining := Remaining(lot)
 	if remaining <= 0 {
 		return nil
 	}
-	revoked, err := l.money.EnsureSystemAccount(ctx, ledger.RevokedCredits, lot.Unit)
+	revoked, err := l.money.EnsureSystemAccount(ctx, ledger.UnitsRevoked, lot.Unit)
 	if err != nil {
 		return err
 	}

@@ -9,11 +9,11 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// HoldCards are a hold's pinned money rate cards on the wire, and the
-// highest marginal price of each meter cell they set while the hold lives.
-// A dynamic card has no bound: its gate needs the stated amount.
-func HoldCards(pinned []byte) ([]billing.HoldRateCard, []billing.PriceBound, error) {
-	cards := []billing.HoldRateCard{}
+// ViewCards are pinned money rate cards on the wire, and the highest
+// marginal price of each meter cell they set. A dynamic card has no bound:
+// its gate needs the stated amount.
+func ViewCards(pinned []byte) ([]billing.ViewRateCard, []billing.PriceBound, error) {
+	cards := []billing.ViewRateCard{}
 	bounds := []billing.PriceBound{}
 	if len(pinned) == 0 {
 		return cards, bounds, nil
@@ -23,7 +23,7 @@ func HoldCards(pinned []byte) ([]billing.HoldRateCard, []billing.PriceBound, err
 		return nil, nil, fmt.Errorf("decode pinned rate cards: %w", err)
 	}
 	for _, c := range rating {
-		cards = append(cards, billing.HoldRateCard{Meter: c.MeterKey, EventType: c.EventType, ValueProperty: c.ValueKey, Aggregation: c.Aggregation,
+		cards = append(cards, billing.ViewRateCard{Meter: c.MeterKey, EventType: c.EventType, ValueProperty: c.ValueKey, Aggregation: c.Aggregation,
 			GroupBy: c.GroupBy, Filter: c.Filter, Allowance: c.Allowance, Price: c.Price})
 		bounds = append(bounds, priceBounds(c)...)
 	}

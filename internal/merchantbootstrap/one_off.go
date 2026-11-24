@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/vaultconn"
@@ -55,6 +56,7 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, cli
 		return nil, err
 	}
 	svc.WithPlatformVaultStore(conn.PlatformKV)
+	svc.StripeClients = stripeapi.ConfiguredFactory(cfg)
 	if vault, ok := source.(*merchantdocs.VaultSource); ok {
 		key, err := vault.FingerprintKey(ctx)
 		if err == nil {
@@ -68,9 +70,22 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, cli
 			return nil, err
 		}
 	}
-	cache.SetSync(svc.SyncConfig)
+	cache.SetSync(oneOffSync(svc, cfg))
 	database.SetMerchantConfig(svc)
 	return &Merchants{Service: svc, SolanaTransit: conn.SolanaTransit, Close: closeAll}, nil
+}
+
+// oneOffSync reconciles a loaded configuration and, unless provider writes
+// are readonly, registers its Stripe PSPs' posture as a server does, so a
+// one-off tool's write waits only for its PSP's first check.
+func oneOffSync(svc *merchants.Service, cfg *config.Config) merchantdocs.SyncFunc {
+	return func(ctx context.Context, id billing.MerchantID, previous, loaded merchantdocs.Set) (merchantdocs.Set, error) {
+		set, err := svc.SyncConfig(ctx, id, previous, loaded)
+		if err == nil && !config.IsProviderReadOnly(cfg) {
+			merchants.RegisterStripePosture(svc.StripeClients, id, previous, set)
+		}
+		return set, err
+	}
 }
 
 // OneOffMerchants builds the merchant configuration a one-off process reads PSPs
