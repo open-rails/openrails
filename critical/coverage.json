@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 662,
+  "scenario_count": 663,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3312,6 +3312,11 @@
       "id": "OR-J40-S19",
       "journey": "J40",
       "name": "A revocation retried under its idempotency key after a reinstatement replays, and a lapsed lot is not reinstated"
+    },
+    {
+      "id": "OR-J40-S25",
+      "journey": "J40",
+      "name": "A credit lot applied beyond its payment's cash fails ledger-audit, as a bill's lines would"
     }
   ]
 }

@@ -11,8 +11,8 @@ import (
 )
 
 // Overapplication is a payment whose cash the general ledger applied to bills
-// beyond what it received: every payment's applications must stay within its
-// receipt.
+// and the credit lot it bought beyond what it received: every payment's
+// applications must stay within its receipt.
 type Overapplication struct {
 	PaymentID string `json:"payment_id"`
 	Currency  string `json:"currency"`

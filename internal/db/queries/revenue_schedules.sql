@@ -78,16 +78,27 @@ ORDER BY starts_at, id
 LIMIT 1;
 
 -- name: ListOverappliedPayments :many
--- A payment whose cash the general ledger applied beyond what it received.
-SELECT source_id AS payment_id, currency,
+-- A payment whose cash the general ledger applied beyond what it received:
+-- to its bill's lines, and to the credit lot it bought (its credit_issue).
+WITH legs AS (
+    SELECT source_id AS payment_id, currency, transfer_type, amount
+    FROM billing.ledger_transfers
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment'
+      AND transfer_type IN ('cash_received', 'cash_applied')
+    UNION ALL
+    SELECT g.payment_id::text, t.currency, t.transfer_type, t.amount
+    FROM billing.ledger_transfers t
+    JOIN billing.credit_grants g ON g.merchant_id = t.merchant_id AND g.id = t.credit_grant_id
+    WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.operation = 'credit_issue'
+      AND t.transfer_type = 'cash_applied' AND g.payment_id IS NOT NULL
+)
+SELECT payment_id::text AS payment_id, currency::text AS currency,
        COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
        COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
-FROM billing.ledger_transfers
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment'
-  AND transfer_type IN ('cash_received', 'cash_applied')
-GROUP BY source_id, currency
+FROM legs
+GROUP BY payment_id, currency
 HAVING COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0) > COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)
-ORDER BY source_id, currency;
+ORDER BY payment_id, currency;
 
 -- name: ListScheduledOrderLines :many
 -- The lines among an order's that already have their revenue schedule.

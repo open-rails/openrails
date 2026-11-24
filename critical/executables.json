@@ -2153,6 +2153,9 @@
       "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated/idempotency-key",
       "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated/lapsed",
       "TestCreditBooksEdges/OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated"
+    ],
+    "OR-J40-S25": [
+      "TestCreditBooksEdges/OR-J40-S25/a-lot-applied-beyond-its-payments-cash-fails-ledger-audit"
     ]
   }
 }

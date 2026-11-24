@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -33,6 +34,32 @@ func TestCreditBooksEdges(t *testing.T) {
 	t.Run("OR-J40-S17/owed-from-before-the-books-is-repaid-as-revenue-beside-the-receivable", repaymentSplitsAtTheReceivable)
 	t.Run("OR-J40-S18/refunds-in-pieces-strand-nothing-and-a-merchant-unit-lot-refunds-in-its-paid-currency", piecedAndUnitRefunds)
 	t.Run("OR-J40-S19/a-revocation-retried-under-its-idempotency-key-replays-and-a-lapsed-lot-is-not-reinstated", revocationKeysAndLapsedReinstatement)
+	t.Run("OR-J40-S25/a-lot-applied-beyond-its-payments-cash-fails-ledger-audit", overappliedLotFailsAudit)
+}
+
+// A credit lot's issue applies its payment's cash: ledger-audit holds it to
+// the same per-payment bound as a bill's lines.
+func overappliedLotFailsAudit(t *testing.T) {
+	s := newCreditShop(t)
+	w := s.a.world
+	payment, lot := s.buy(t, s.pack(t, "pack-55", 55_000_000, 50_000_000, 365), 50_000_000, "pack-55")
+	booksAudited(t, w)
+
+	// A second application of the lot, as a broken writer would post it.
+	customer := s.customer.UUID()
+	lotID := lot.UUID()
+	require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
+		_, _, err := books.New(q, w.alpha.MerchantID().UUID()).Post(ctx, books.Posting{
+			Debit: books.Ref{Type: books.UnappliedCash}, Credit: books.Ref{Type: books.DeferredRevenueCredit, Customer: &customer},
+			Amount: 1_000_000, Currency: "USD", Type: books.CashApplied,
+			Coord:       books.Coord{Operation: books.OpCreditIssue, Source: "credit_grant", SourceID: lotID.String() + ":again"},
+			EffectiveAt: w.clock.Now(), Customer: &customer, CreditGrant: &lotID,
+		})
+		return err
+	}))
+	output, err := hostCLIResult(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String())
+	require.Error(t, err)
+	require.Contains(t, output, "overapplied payment: "+payment.UUID().String())
 }
 
 // chargeback opens a Stripe dispute of amount cents on payment and returns
