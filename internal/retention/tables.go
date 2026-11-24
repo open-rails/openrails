@@ -25,8 +25,8 @@ type Table struct {
 
 const permanent = "permanent, never pruned."
 
-// Tables classifies every table of the schema. Nothing checks it against the
-// schema, so a new table adds its entry here.
+// Tables classifies every table of the schema; TestTablesMatchSchema holds it
+// to api/schema.txt and the tables' comments.
 var Tables = map[string]Table{
 	"eventlog_migrations":          {Class: State},
 	"eventlog_events":              {Rows, "events expire after the configured event retention, independently of reader progress."},

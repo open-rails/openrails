@@ -213,6 +213,5 @@ Other tests: none; `internal/lifecycle`, `internal/modules/subscriptions` and
 
 Gaps:
 - No table test of `lifecycle.Apply`; rare transitions run only in scenarios.
-- Nothing checks the `Retention:` table comments against `internal/retention/tables.go`.
 - OR-J18-S03 checks a seat increase's payment and card, not its amount.
 - No scenario covers a local failure after Stripe accepted a resume.

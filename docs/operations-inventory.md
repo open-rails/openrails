@@ -196,7 +196,7 @@ The source scan found 486 named SQL statements in 90 files with an explicit qual
 | [merchant_archive.sql](../internal/db/queries/merchant_archive.sql) | 1 | `merchants` |
 | [merchant_binding.sql](../internal/db/queries/merchant_binding.sql) | 1 | `merchants` |
 | [merchant_config.sql](../internal/db/queries/merchant_config.sql) | 2 | `reconciliation_findings` |
-| [merchant_lifecycle.sql](../internal/db/queries/merchant_lifecycle.sql) | 18 | `customer_entitlement_cache`, `customer_entitlement_cache_stamps`, `mandates`, `money_settings`, `nmi_history_months`, `order_attempts`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `product_access`, `provider_intents`, `provider_mutation_logs`, `psp_customers`, `rebill_cycles`, `solana_pay_receipts`, `solana_pay_references`, `subscriptions` |
+| [merchant_lifecycle.sql](../internal/db/queries/merchant_lifecycle.sql) | 20 | `customer_contacts`, `customer_entitlement_cache`, `customer_entitlement_cache_stamps`, `mandates`, `money_settings`, `nmi_history_months`, `order_attempts`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `product_access`, `provider_intents`, `provider_mutation_logs`, `provisioning_tokens`, `psp_customers`, `rebill_cycles`, `solana_pay_receipts`, `solana_pay_references`, `subscriptions` |
 | [merchant_retirement.sql](../internal/db/queries/merchant_retirement.sql) | 2 | `merchants` |
 | [merchant_secret_cleanup.sql](../internal/db/queries/merchant_secret_cleanup.sql) | 2 | `maintenance_runs` |
 | [merchants.sql](../internal/db/queries/merchants.sql) | 5 | `maintenance_runs`, `merchant_slug_aliases`, `merchants` |

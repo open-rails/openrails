@@ -41,6 +41,9 @@ var merchantOwnedTables = []string{
 	"provider_mutation_logs", "provider_intents",
 	"order_attempts", "product_access", "payments", "subscriptions",
 	"money_settings", "payment_methods", "psp_customers",
+	// The directory's copy of the merchant's customers and the tokens it
+	// pushes them with.
+	"customer_contacts", "provisioning_tokens",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
 	// tables are gone. The append-only ledger_transfers/grants are immutable
 	// (REVOKE DELETE) and intentionally NOT row-purged here — which is also why a
@@ -93,6 +96,10 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.CountMerchantRowsMoneyAccounts(ctx, id)
+	case "customer_contacts":
+		return q.CountMerchantRowsCustomerContacts(ctx, id)
+	case "provisioning_tokens":
+		return q.CountMerchantRowsProvisioningTokens(ctx, id)
 	default:
 		return 0, fmt.Errorf("merchants: no count query for table %q", table)
 	}
@@ -141,6 +148,10 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsProviderIntents(ctx, id)
 	case "money_settings":
 		return q.PurgeMerchantRowsMoneyAccounts(ctx, id)
+	case "customer_contacts":
+		return q.PurgeMerchantRowsCustomerContacts(ctx, id)
+	case "provisioning_tokens":
+		return q.PurgeMerchantRowsProvisioningTokens(ctx, id)
 	default:
 		return fmt.Errorf("merchants: no purge query for table %q", table)
 	}

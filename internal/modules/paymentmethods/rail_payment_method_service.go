@@ -658,6 +658,9 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	if pm == nil {
 		return errors.New("payment method is required")
 	}
+	if Discarded(pm) {
+		return nil
+	}
 	if pm.Custodian != models.CustodianPSP && pm.Custodian != models.CustodianHyperSwitch && !models.BasisTheoryCustody(pm.Custodian) {
 		return ErrPaymentMethodCustodianUnsupported
 	}
@@ -691,6 +694,12 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	default:
 		return ErrPaymentMethodDeleteProcessing
 	}
+}
+
+// Discarded reports a card CleanupPaymentMethodBestEffort removed: its
+// tombstone names no operation.
+func Discarded(pm *models.PaymentMethod) bool {
+	return pm != nil && pm.ParkReason == "removed:"+pm.ID.String()
 }
 
 // CleanupPaymentMethodBestEffort is the DIRECT delete for reactive decline-cleanup

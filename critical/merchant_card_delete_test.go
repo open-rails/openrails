@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -165,6 +166,30 @@ func TestMerchantCardRemoval(t *testing.T) {
 			}
 		}
 	})
+	t.Run("OR-J12-S72/a-card-with-history-is-never-hard-deleted", func(t *testing.T) {
+		a, journal := newNMIWorld(t)
+		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var method billing.PaymentMethod
+		require.NoError(t, json.Unmarshal(raw, &method))
+		versions := func() int {
+			t.Helper()
+			var n int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "payment_method_versions"}.Sanitize()+" WHERE merchant_id = $1 AND payment_method_id = $2",
+				a.alpha.MerchantID().UUID(), method.ID.UUID()).Scan(&n))
+			return n
+		}
+		require.Equal(t, 1, versions(), "a saved card's history starts with it")
+		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{a.schema, "payment_methods"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2", a.alpha.MerchantID().UUID(), method.ID.UUID())
+		var refused *pgconn.PgError
+		require.ErrorAs(t, err, &refused, "a card's permanent versions refuse its deletion")
+		require.Equal(t, "23503", refused.Code)
+		require.Equal(t, 1, versions())
+	})
+
 	t.Run("OR-J12-S73/a-card-an-unverified-membership-bills-is-kept", func(t *testing.T) {
 		a, journal, sub := nmiMembership(t)
 		// The host's book declares the membership canceled while the switch is

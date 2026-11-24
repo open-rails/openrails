@@ -356,5 +356,5 @@ Gaps:
   declares a spend window in another currency.
 - The accrual-rate measure reads `usage_minutes` only, so running charges never
   count toward an `accrual_rate_cap`; no test pins either way.
-- Nothing checks that partitioned reads name a time range, or that
-  `retention.Tables` matches the schema; both are review-only.
+- Nothing checks that partitioned reads name a time range; it is review-only.
+  `TestTablesMatchSchema` holds `retention.Tables` to the schema.

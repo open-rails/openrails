@@ -178,7 +178,7 @@ Checks:
 
 Checks:
 - Each table is in `internal/retention/tables.go` and `internal/merchantarchive/owned_tables.go`.
-- `payment_method_versions_payment_method_id_fkey` is `ON DELETE CASCADE`, so the one hard delete (`CleanupPaymentMethodBestEffort`) drops permanent versions.
+- `payment_method_versions_payment_method_id_fkey` is `ON DELETE RESTRICT`; `CleanupPaymentMethodBestEffort` leaves a `removed` row (`DiscardPaymentMethod`), so a card's versions stay (OR-J12-S72).
 
 ### 7. Work scales with activity
 
