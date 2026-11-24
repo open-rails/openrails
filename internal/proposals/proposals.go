@@ -58,11 +58,10 @@ type Request struct {
 	// AdmissionActor is set only by trusted internal entry points that do
 	// not carry a verified HTTP principal, such as the local operator CLI.
 	AdmissionActor *destructive.Actor
-	// Authorize, when set, is asked of each approved change kind before
-	// anything runs, with how many of the call's proposals are of it: an
-	// HTTP caller holds what the change's own route needs and spends its limit
-	// once per proposal. Each proposal is held to the kinds it allowed.
-	Authorize func(kind billing.ChangeKind, proposals int) error
+	// Authorize, when set, is asked of each change kind the call approves
+	// before anything runs: an HTTP caller holds what the change's own route
+	// needs. Each proposal is held to the kinds it allowed.
+	Authorize func(billing.ChangeKind) error
 }
 
 func (e *Executor) now() time.Time { return timeutil.FirstClock(e.Clock).Now().UTC() }
@@ -397,7 +396,6 @@ func (e *Executor) validate(ctx context.Context, req Request, dismiss bool) (uui
 	}
 	found := make(map[uuid.UUID]bool, len(rows))
 	var kinds []billing.ChangeKind
-	counts := map[billing.ChangeKind]int{}
 	for _, row := range rows {
 		if !strings.HasPrefix(row.FindingType, "pull.") {
 			continue
@@ -407,19 +405,15 @@ func (e *Executor) validate(ctx context.Context, req Request, dismiss bool) (uui
 		if err != nil {
 			return uuid.Nil, nil, err
 		}
-		if change == nil {
-			continue
-		}
-		if counts[change.Kind] == 0 {
+		if change != nil && !slices.Contains(kinds, change.Kind) {
 			kinds = append(kinds, change.Kind)
 		}
-		counts[change.Kind]++
 	}
 	var allowed []billing.ChangeKind
 	if !dismiss && req.Authorize != nil {
 		allowed = []billing.ChangeKind{}
 		for _, kind := range kinds {
-			if err := req.Authorize(kind, counts[kind]); err != nil {
+			if err := req.Authorize(kind); err != nil {
 				return uuid.Nil, nil, err
 			}
 			allowed = append(allowed, kind)

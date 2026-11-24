@@ -624,7 +624,7 @@ func inPerson(c billingauth.Identity) bool {
 // staffCan answers whether the request's admitted staff member or
 // application would also pass another staff route's guard, at the merchant
 // this route admitted it for: its permission, its person rule and its
-// operation limit, which it spends once per object of items. A handler asks
+// operation limit, of which it spends items. A handler asks
 // before it runs that
 // route's effect itself (handlers.StaffCan). A name the Authenticator does
 // not know is held by no one.

@@ -343,23 +343,38 @@ func TestRoutePermissions(t *testing.T) {
 		require.NotNil(t, applied.Resolution)
 		require.Equal(t, "approved", *applied.Resolution)
 	})
-	t.Run("OR-J01-S25/a-proposal-approval-spends-its-routes-limit-per-proposal", func(t *testing.T) {
+	t.Run("OR-J01-S25/an-approval-is-one-operation-however-many-changes-it-carries", func(t *testing.T) {
 		a := newAuthorityWorld(t)
-		// The subscription-change route allows ten a minute: eleven
-		// corrections in one approval spend eleven of it.
-		var ids []billing.FindingID
-		for range 11 {
-			ids = append(ids, raiseProposal(t, a, billing.ChangeCorrectSubscription))
+		approve := func(person string, ids ...billing.FindingID) (int, []byte) {
+			return a.request(t, "POST", "/v1/merchant/proposals/approve", person, billing.ApproveProposalsParams{IDs: ids, Notes: "the provider's terms"},
+				map[string]string{"Idempotency-Key": uuid.NewString()})
 		}
-		person := consoleStaff(t, a, "correction-person", billing.MerchantConfigManage, billing.MerchantCustomerManage)
-		status, raw := a.request(t, "POST", "/v1/merchant/proposals/approve", person, billing.ApproveProposalsParams{IDs: ids, Notes: "the provider's terms"},
-			map[string]string{"Idempotency-Key": uuid.NewString()})
-		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
-		require.Contains(t, string(raw), `"code":"rate_limit_exceeded"`)
-		for _, id := range ids {
+		corrections := func(n int) []billing.FindingID {
+			var ids []billing.FindingID
+			for range n {
+				ids = append(ids, raiseProposal(t, a, billing.ChangeCorrectSubscription))
+			}
+			return ids
+		}
+		// The subscription-change route allows ten operations a minute. One
+		// approval of eleven corrections is one operation, and goes through.
+		bulk := consoleStaff(t, a, "bulk-person", billing.MerchantConfigManage, billing.MerchantCustomerManage)
+		status, raw := approve(bulk, corrections(11)...)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		// Eleven separate approvals in a minute are eleven: the eleventh is
+		// refused.
+		single := consoleStaff(t, a, "single-person", billing.MerchantConfigManage, billing.MerchantCustomerManage)
+		for i, id := range corrections(11) {
+			status, raw := approve(single, id)
+			if i < 10 {
+				require.Equal(t, http.StatusOK, status, "approval %d: %s", i+1, raw)
+				continue
+			}
+			require.Equal(t, http.StatusTooManyRequests, status, string(raw))
+			require.Contains(t, string(raw), `"code":"rate_limit_exceeded"`)
 			f, err := a.alpha.GetFinding(t.Context(), id)
 			require.NoError(t, err)
-			require.Nil(t, f.Resolution, "a refused approval approves none")
+			require.Nil(t, f.Resolution, "a refused approval approves nothing")
 		}
 	})
 	t.Run("OR-J01-S26/a-proposal-rewritten-before-its-lock-is-held-to-the-kinds-allowed", func(t *testing.T) {

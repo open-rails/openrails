@@ -91,17 +91,27 @@ var ProposalChangeRoutes = map[billing.ChangeKind][]string{
 	billing.ChangeCorrectSubscription:   {"POST /v1/admin/subscriptions/{id}/change"},
 }
 
-// changeAuthorizer asks can for each change kind's routes, spending their
-// limits once per proposal: a kind this version does not list is refused, a
-// route's refusal is a staffCanRefusal.
-func changeAuthorizer(r *httprequest.Request, can StaffCan) func(billing.ChangeKind, int) error {
-	return func(kind billing.ChangeKind, proposals int) error {
+// changeAuthorizer asks can for each change kind's routes, spending each
+// route's limit once per request: a kind this version does not list is
+// refused, a route's refusal is a staffCanRefusal.
+func changeAuthorizer(r *httprequest.Request, can StaffCan) func(billing.ChangeKind) error {
+	spent := map[string]bool{}
+	return func(kind billing.ChangeKind) error {
 		keys, known := ProposalChangeRoutes[kind]
 		if !known {
 			return api.Coded(billing.CodeFindingNotActionable, "a proposal names a change this version does not authorize")
 		}
-		if err := staffCanAll(r, can, keys, int64(proposals)); err != nil {
-			return staffCanRefusal{err}
+		for _, key := range keys {
+			// One approval is one operation: each route's limit is spent once
+			// per request, whatever number of changes it carries; the
+			// destructive budgets bound what those changes do.
+			var items int64
+			if !spent[key] {
+				items, spent[key] = 1, true
+			}
+			if err := can(r, key, items); err != nil {
+				return staffCanRefusal{err}
+			}
 		}
 		return nil
 	}

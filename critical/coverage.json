@@ -1191,7 +1191,7 @@
     {
       "id": "OR-J01-S25",
       "journey": "J01",
-      "name": "A proposal approval spends its change's route limit once per proposal"
+      "name": "An approval is one operation of its change's route limit, however many changes it carries"
     },
     {
       "id": "OR-J01-S26",
