@@ -23,6 +23,7 @@ import (
 	jwt "github.com/golang-jwt/jwt/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // A customer token is minted in two steps (RFC 7523): the merchant's backend
@@ -162,9 +163,8 @@ func (k *AssertionKey) validate() error {
 	if _, err := assertionMethod(k.Signer); err != nil {
 		return err
 	}
-	u, err := url.Parse(k.TokenURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("Assertion.TokenURL %q must be the token endpoint's absolute http or https URL", k.TokenURL)
+	if err := config.ValidatePublicURL(k.TokenURL, true, false); err != nil {
+		return fmt.Errorf("Assertion.TokenURL %q must be the token endpoint's absolute https URL (http only on a loopback host)", k.TokenURL)
 	}
 	return nil
 }
