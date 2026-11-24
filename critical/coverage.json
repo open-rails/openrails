@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 714,
+  "scenario_count": 723,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -766,7 +766,7 @@
     {
       "id": "OR-J24-S31",
       "journey": "J24",
-      "name": "A sync that cannot take its locks within its lock budget is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
+      "name": "A sync takes no customer lock: one beside another transaction holding the customer's spend lock settles at once; one that cannot take its locks within its lock budget (a posting holding the unposted mark) is answered 503 service_unavailable before the commit guard, commits and renews nothing, and its retry settles once"
     },
     {
       "id": "OR-J24-S32",
@@ -781,7 +781,7 @@
     {
       "id": "OR-J24-S34",
       "journey": "J24",
-      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers within a time budget, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
+      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers in one insert, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
     },
     {
       "id": "OR-J24-S36",
@@ -927,6 +927,11 @@
       "id": "OR-J24-S64",
       "journey": "J24",
       "name": "Usage priced under a card print whose intake never committed holds up no posting: a print a card in force names is recorded again, and one nothing names is left out"
+    },
+    {
+      "id": "OR-J24-S65",
+      "journey": "J24",
+      "name": "A merchant's configuration first read inside a balance look's transaction loads on its own: the look expires the lapsed lot and the pass succeeds"
     },
     {
       "id": "OR-J25-S01",
@@ -2169,6 +2174,11 @@
       "name": "A usage order whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
     },
     {
+      "id": "OR-J26-S63",
+      "journey": "J26",
+      "name": "A usage order's period covers the usage it bills, from its pricing period's start to the bill"
+    },
+    {
       "id": "OR-J37-S60",
       "journey": "J37",
       "name": "A due Solana pull runs as the operation its period scheduled, a margin after the period end"
@@ -3047,6 +3057,41 @@
       "id": "OR-J48-S12",
       "journey": "J48",
       "name": "The first balance in a unit waits for the units lock a settings change takes before it locks any customer, and records the unit's scale; a gift in a counted unit takes no lock"
+    },
+    {
+      "id": "OR-J48-S13",
+      "journey": "J48",
+      "name": "An order priced in a merchant's unit, paid from lots bought in dollars and euros, has one revenue schedule per paid currency, each funded with exactly the lots' money its spends released: an item recognised at once, a 30-day pass ratably over its window; applying the order again makes nothing new, and the schedules move with a billing archive, whose export refuses a leg naming the order in money no lot paid it with"
+    },
+    {
+      "id": "OR-J48-S14",
+      "journey": "J48",
+      "name": "A chargeback of a pack whose units paid for a 30-day pass takes the consumed share of its cash from the pass's schedule as a price reduction with catch-up; winning the dispute restores it, its contra and deferred parts each under its own label, and recognition resumes at the restored price"
+    },
+    {
+      "id": "OR-J48-S15",
+      "journey": "J48",
+      "name": "A unit-priced line paid only with given units has no revenue schedule and moves nothing in the general ledger"
+    },
+    {
+      "id": "OR-J48-S16",
+      "journey": "J48",
+      "name": "Money of a lot released into a unit-priced line's schedule after it was made adds to its funding when the order is applied again, also when a chargeback took some back and the funding returns to a level it reached before; ledger-audit fails money released under a schedule that does not exist"
+    },
+    {
+      "id": "OR-J48-S17",
+      "journey": "J48",
+      "name": "A $15 refund at Stripe of a $20 pack of 400 GOLD whose 200 GOLD paid for a 30-day pass takes the 200 left and $5 of the pass's schedule against refunds, as a price reduction with catch-up"
+    },
+    {
+      "id": "OR-J48-S18",
+      "journey": "J48",
+      "name": "A full chargeback of a pack whose units paid $5 of usage and a $10 pass takes the $15 it spent pro rata: the pass's schedule to zero and $5 against usage revenue"
+    },
+    {
+      "id": "OR-J48-S19",
+      "journey": "J48",
+      "name": "A statue paid from a dollar lot and a euro lot: a chargeback of the euro pack reduces the statue's euro schedule alone, and the dollar schedule stands"
     },
     {
       "id": "OR-J53-S01",

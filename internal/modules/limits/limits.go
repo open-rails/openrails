@@ -423,19 +423,18 @@ func (c Customer) Windows(ctx context.Context, defs []Definition) (map[string]Cl
 		if err != nil {
 			return nil, err
 		}
-		if !granted {
-			if !w.Open {
-				continue
-			}
+		stored := false
+		if w.Open {
 			row, err := c.stored(ctx, def.Key, w, newest)
 			if err != nil {
 				return nil, err
 			}
-			if row == nil {
-				continue
-			}
+			stored = row != nil
 		}
-		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacity, Overrun: def.Overrun, Ungranted: !granted}
+		if !granted && !stored {
+			continue
+		}
+		claim := Claim{Key: def.Key, Unit: def.Unit, Reset: def.Reset, Window: w, Capacity: capacity, Overrun: def.Overrun, Ungranted: !granted, Stored: stored}
 		if !w.Open {
 			claim.Window, claim.Opens = Opening(def.Reset, c.Now), true
 		}

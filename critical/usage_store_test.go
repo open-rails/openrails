@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -327,7 +328,8 @@ func TestUsageStore(t *testing.T) {
 		nextMonth(w)
 		closeMonths(t, fleet)
 		require.EqualValues(t, 200, owed(t, w.alpha, customer))
-		w.clock.Advance(19 * 24 * time.Hour)
+		// Late, and still within the 35-day ingest window of its occurrence.
+		w.clock.Advance(2 * 24 * time.Hour)
 		late := usageInput(customer, "late", 1)
 		late.OccurredAt = occurred
 		settleUsage(t, w.alpha, lease, numbered(2, late)...)
@@ -426,8 +428,11 @@ products:
 		w := a.world
 		require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND invoker != '' AND metadata != ''"))
 
+		// The store's part is a job River retries until the store answers.
+		events := erasureEvents(t, w)
 		status, raw = a.request(t, "DELETE", "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
+		require.Equal(t, river.EventKindJobCompleted, awaitErasure(t, events))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND (invoker != '' OR metadata != '')"))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker != ''"))
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m}"), "quantities stay")
@@ -449,7 +454,7 @@ products:
 		require.Error(t, err, "usage needs an event store")
 
 		occupied, client := archiveTarget(t, source)
-		require.NoError(t, occupied.deps.ClickHouse.Exec(t.Context(), "INSERT INTO `"+occupied.schema+"`.usage_events (merchant_id, event_id, customer_id, currency, event_type, outcome) VALUES (toUUID(?), generateUUIDv4(), toUUID(?), 'USD', 'compute', 'succeeded')",
+		require.NoError(t, occupied.deps.ClickHouse.Exec(t.Context(), "INSERT INTO `"+occupied.schema+"`.usage_events (merchant_id, event_id, customer_id, currency, event_type, outcome, occurred_at, admitted_at, ingested_at) VALUES (toUUID(?), generateUUIDv4(), toUUID(?), 'USD', 'compute', 'succeeded', now64(6), now64(6), now64(6))",
 			source.alpha.MerchantID().String(), customer.String()))
 		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 		require.Error(t, err, "a merchant with usage in the store is not empty")

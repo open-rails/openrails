@@ -1,12 +1,26 @@
 -- Usage orders (orders.origin = 'usage'): owed charges billed in arrears for
 -- a period. Pending charges wait in owed_items until an order bills them.
 
--- name: GetUsageOrderByPeriod :one
--- One usage order per (payer, currency, period).
+-- name: GetUsageOrderOfWindow :one
+-- The usage order a close of the window [window_starts_at, period_ends_at)
+-- made: it ends with the window and starts no later, where its charges began.
 SELECT * FROM billing.orders
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND origin = 'usage'
   AND currency = sqlc.arg(currency)::text
-  AND period_starts_at = sqlc.arg(period_starts_at)::timestamptz AND period_ends_at = sqlc.arg(period_ends_at)::timestamptz;
+  AND period_ends_at = sqlc.arg(period_ends_at)::timestamptz AND period_starts_at <= sqlc.arg(window_starts_at)::timestamptz
+ORDER BY period_starts_at DESC
+LIMIT 1;
+
+-- name: EarliestPendingOwedCharge :one
+-- Where the charges of a window's pending owed items began: each item's
+-- period start, else when it accrued; window_starts_at when none is pending.
+SELECT COALESCE(MIN(LEAST(accrued_at, COALESCE((metadata ->> 'period_starts_at')::timestamptz, accrued_at))),
+    sqlc.arg(window_starts_at)::timestamptz)::timestamptz AS starts_at
+FROM billing.owed_items
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND order_id IS NULL AND status = 'pending'
+  AND accrued_at >= sqlc.arg(window_starts_at)::timestamptz
+  AND accrued_at < sqlc.arg(window_ends_at)::timestamptz;
 
 -- name: CreateUsageOrder :exec
 -- An open usage order, first charged at its due date when it is collected

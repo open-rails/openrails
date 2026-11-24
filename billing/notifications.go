@@ -7,8 +7,9 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// NotificationEvent is an immutable billing fact. Applications own its delivery,
-// presentation and read state. Unknown kinds remain consumable.
+// NotificationEvent is an immutable billing fact about a customer. OpenRails
+// emails the customer those whose type the merchant's messages document turns
+// on; applications may read any of them. Unknown kinds remain consumable.
 type NotificationEvent struct {
 	ID         NotificationID  `json:"id"`
 	MerchantID MerchantID      `json:"merchant_id"`
@@ -34,7 +35,8 @@ const (
 )
 
 // NotificationRecoveryAction identifies the customer action supported by the
-// billing outcome. The consuming application supplies its destination.
+// billing outcome. A customer message links it to the merchant profile's
+// URLs; another reader supplies its own destination.
 type NotificationRecoveryAction string
 
 const (
@@ -159,8 +161,7 @@ type NotificationData struct {
 	// number. A refund receipt (refund_completed) has the same fields:
 	// Amount is what was refunded, PaymentID the refund and
 	// RefundedPaymentID the charge it reverses; Voided is a charge canceled
-	// before it settled, so the customer was not charged. Delivery addresses
-	// belong to the consuming application.
+	// before it settled, so the customer was not charged.
 	Amount            *int64    `json:"amount,omitempty,string"`
 	ProductName       string    `json:"product_name,omitempty"`
 	PaymentMethod     string    `json:"payment_method,omitempty"`

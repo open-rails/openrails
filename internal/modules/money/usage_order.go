@@ -95,7 +95,15 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {
 			return err
 		}
-		existing, err := q.GetUsageOrderByPeriod(ctx, gen.GetUsageOrderByPeriodParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto})
+		// The order bills the window's owed items; its period runs from where
+		// their charges began (a pricing period's start) to the window's end.
+		start, err := q.EarliestPendingOwedCharge(ctx, gen.EarliestPendingOwedChargeParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur,
+			WindowStartsAt: pfrom, WindowEndsAt: pto})
+		if err != nil {
+			return err
+		}
+		existing, err := q.GetUsageOrderOfWindow(ctx, gen.GetUsageOrderOfWindowParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur,
+			PeriodEndsAt: pto, WindowStartsAt: pfrom})
 		if err == nil {
 			out = &existing
 			return nil
@@ -140,7 +148,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		u := usage.Order{CustomerID: payerID, Currency: cur, PeriodStart: pfrom, PeriodEnd: pto, DueAt: now, Paid: receivable - due,
+		u := usage.Order{CustomerID: payerID, Currency: cur, PeriodStart: earlier(start.UTC(), pfrom), PeriodEnd: pto, DueAt: now, Paid: receivable - due,
 			Lines: lines, CollectionMethod: CollectionChargeAutomatically}
 		if profile != nil {
 			if profile.NetTermsDays > 0 {

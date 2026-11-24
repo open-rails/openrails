@@ -267,7 +267,7 @@ type StaffChangeNotice struct {
 }
 
 // QueueStaffChangeNotice queues the notice once per change in the caller's
-// transaction; each application consumes that source fact independently.
+// transaction. OpenRails emails it when the merchant turns its type on.
 func QueueStaffChangeNotice(ctx context.Context, d *db.DB, sub *models.Subscription, n StaffChangeNotice) (*models.NotificationEvent, error) {
 	refs, err := db.PriceReferences(ctx, d.Gen(ctx), []uuid.UUID{sub.PriceID, n.PriceID})
 	if err != nil {

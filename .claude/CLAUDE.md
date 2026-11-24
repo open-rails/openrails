@@ -100,6 +100,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `oat_`, …).
+- Customer messages: OpenRails holds each customer's contact (read live from the host's directory, or the SCIM copy in `customer_contacts`) and emails customers their billing messages (`internal/modules/messages`, through `Deps.Email`); the merchant's `messages` document turns each event type on or off. In-app notices go to AuthKit's inbox (`Deps.Notifications`); OpenRails keeps no inbox. Removing customer email is the owner's call, never a side effect of other work.
 - Vocabulary: customer (not payer or user); subject (the native account acted as), invoker (the party actually acting, may be foreign), credential (how it was proven); `canceled`.
 
 ## Money
