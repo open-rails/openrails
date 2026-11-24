@@ -5,8 +5,10 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -141,11 +143,13 @@ products:
 			require.NoError(t, err)
 			return app
 		}
+		// The merchant document loaded at start is in the history already.
+		booted := historyOf(t, a.alphaRemote, billing.LogListParams{})
 		first, err := a.alphaRemote.ApplyCatalog(t.Context(), document(`{display_name: Plus, entitlements: [hd]}`, "sd"), billing.ApplyCatalogParams{})
 		require.NoError(t, err)
 		entries := historyOf(t, a.alphaRemote, billing.LogListParams{})
 		seen := map[string]int{}
-		for _, e := range entries {
+		for _, e := range entries[:len(entries)-len(booted)] {
 			require.Equal(t, billing.LogSourceCatalogApply, e.Source)
 			require.True(t, strings.HasPrefix(string(e.Actor), "staff:"), e.Actor)
 			c := changeOf(t, e)
@@ -316,20 +320,29 @@ products:
 		_, err = a.betaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "second", DisplayName: "Beta's second"})
 		require.NoError(t, err)
 
-		all := historyOf(t, a.alphaRemote, billing.LogListParams{})
+		// Products only: the merchant document loaded at start is there too.
+		products := billing.LogListParams{ObjectType: billing.LogObjectProduct}
+		all := historyOf(t, a.alphaRemote, products)
 		require.Len(t, all, 3, "a merchant reads its own history only")
 		require.Equal(t, []billing.LogAction{billing.LogActionUpdate, billing.LogActionCreate}, actions(objectHistory(t, a.alphaRemote, billing.LogObjectProduct, "second")))
 		require.Empty(t, objectHistory(t, a.alphaRemote, billing.LogObjectPrice, "second"))
-		since := historyOf(t, a.alphaRemote, billing.LogListParams{Since: start.Add(30 * time.Minute)})
-		require.Len(t, since, 2)
-		until := historyOf(t, a.alphaRemote, billing.LogListParams{Until: start.Add(30 * time.Minute)})
-		require.Len(t, until, 1)
-		require.Equal(t, "first", until[0].ObjectID)
-		window := historyOf(t, a.alphaRemote, billing.LogListParams{Since: start.Add(30 * time.Minute), Until: start.Add(90 * time.Minute)})
-		require.Len(t, window, 1)
-		require.Equal(t, billing.LogActionCreate, window[0].Action)
+		since := products
+		since.Since = start.Add(30 * time.Minute)
+		require.Len(t, historyOf(t, a.alphaRemote, since), 2)
+		until := products
+		until.Until = start.Add(30 * time.Minute)
+		early := historyOf(t, a.alphaRemote, until)
+		require.Len(t, early, 1)
+		require.Equal(t, "first", early[0].ObjectID)
+		window := since
+		window.Until = start.Add(90 * time.Minute)
+		middle := historyOf(t, a.alphaRemote, window)
+		require.Len(t, middle, 1)
+		require.Equal(t, billing.LogActionCreate, middle[0].Action)
 
-		paged := historyOf(t, a.alphaRemote, billing.LogListParams{PageRequest: billing.PageRequest{Limit: 1}})
+		paging := products
+		paging.Limit = 1
+		paged := historyOf(t, a.alphaRemote, paging)
 		require.Equal(t, all, paged, "one entry a page visits each once, newest first")
 		for i := 1; i < len(all); i++ {
 			require.False(t, all[i].OccurredAt.After(all[i-1].OccurredAt))
@@ -416,7 +429,7 @@ products:
 		} {
 			failure := requireCode(t, edit(), billing.CodeRevisionMismatch)
 			require.Equal(t, http.StatusConflict, failure.Status, name)
-			require.EqualValues(t, current, failure.Metadata["revision"], "%s names the current revision", name)
+			require.Equal(t, strconv.FormatInt(current, 10), fmt.Sprint(failure.Metadata["revision"]), "%s names the current revision", name)
 		}
 		read, err := a.alphaRemote.GetProduct(t.Context(), p.ID)
 		require.NoError(t, err)
