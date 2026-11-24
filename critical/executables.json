@@ -1704,6 +1704,12 @@
     ],
     "OR-J34-S32": [
       "TestDestructiveReservations/OR-J34-S32/a-reservation-that-never-starts-stops-holding-budget"
+    ],
+    "OR-J01-S22": [
+      "TestRoutePermissions/OR-J01-S22/a-config-only-person-cannot-approve-a-cancel-proposal"
+    ],
+    "OR-J01-S23": [
+      "TestRoutePermissions/OR-J01-S23/a-finding-approval-spends-its-actions-operation-limit"
     ]
   }
 }

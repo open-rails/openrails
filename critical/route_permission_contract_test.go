@@ -172,22 +172,8 @@ func TestRoutePermissions(t *testing.T) {
 	})
 	t.Run("OR-J01-S21/a-config-only-credential-cannot-approve-a-refund", func(t *testing.T) {
 		a := newAuthorityWorld(t)
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
-		require.NoError(t, err)
-		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
-		raise := func(subject string, rec recommend.Recommendation) billing.FindingID {
-			t.Helper()
-			var finding reconcile.FindingRecord
-			require.NoError(t, database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-				var err error
-				finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: "consistency.duplicate.ownership",
-					SubjectKey: subject, Severity: reconcile.SeverityHigh, Evidence: map[string]any{recommend.EvidenceKey: rec.Map()}})
-				return err
-			}))
-			return billing.FindingID(finding.ID)
-		}
-		refund := raise("ownership:refund", recommend.CancelAndRefundRec(billing.SubscriptionID{}, billing.PaymentID(uuid.New())))
-		ack := raise("ownership:acknowledge", recommend.Recommendation{Action: recommend.ActionAckResume})
+		refund := raiseRecommendation(t, a, "ownership:refund", recommend.CancelAndRefundRec(billing.SubscriptionID{}, billing.PaymentID(uuid.New())))
+		ack := raiseRecommendation(t, a, "ownership:acknowledge", recommend.Recommendation{Action: recommend.ActionAckResume})
 		before, err := a.alpha.GetFinding(t.Context(), refund)
 		require.NoError(t, err)
 
@@ -208,6 +194,64 @@ func TestRoutePermissions(t *testing.T) {
 		var refusal *billing.StatusError
 		require.ErrorAs(t, err, &refusal)
 		require.NotEqual(t, billing.CodePermissionRequired, refusal.Code, refusal.Error())
+	})
+	t.Run("OR-J01-S23/a-finding-approval-spends-its-actions-operation-limit", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "limited", DisplayName: "Limited"})
+		require.NoError(t, err)
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		person := consoleStaff(t, a, "support-person", billing.MerchantConfigManage, billing.MerchantCustomerManage)
+		// A full batch of grants spends the person's grant limit for the minute.
+		hours := 1
+		items := make([]billing.CreateProductAccessParams, billing.MaxBatchItems)
+		for i := range items {
+			items[i] = billing.CreateProductAccessParams{CustomerID: customer, ProductID: product.ID, Hours: &hours}
+		}
+		status, raw := a.request(t, "POST", "/v1/admin/product-access", person, billing.CreateProductAccessBatchParams{Items: items}, map[string]string{"Idempotency-Key": uuid.NewString()})
+		require.NotEqual(t, http.StatusTooManyRequests, status, string(raw))
+		// Approving a grant recommendation grants a product too, so it spends
+		// the same limit and is refused.
+		grant := raiseRecommendation(t, a, "ownership:grant", recommend.GrantProductRec(customer, product.ID, "legitimize"))
+		status, raw = a.request(t, "POST", "/v1/merchant/findings/"+grant.String()+"/resolve", person, billing.ResolveFindingParams{Outcome: billing.FindingApprove, Notes: "legitimize"})
+		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
+		require.Contains(t, string(raw), `"code":"rate_limit_exceeded"`)
+		open, err := a.alpha.GetFinding(t.Context(), grant)
+		require.NoError(t, err)
+		require.Nil(t, open.Resolution, "a refused approval leaves the finding open")
+	})
+	t.Run("OR-J01-S22/a-config-only-person-cannot-approve-a-cancel-proposal", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		var finding reconcile.FindingRecord
+		require.NoError(t, database.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			var err error
+			finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: reconcile.FindingLocalActiveRemoteDead,
+				SubjectKey: "subscription:" + uuid.NewString(), Severity: reconcile.SeverityHigh, Evidence: map[string]any{}})
+			return err
+		}))
+		// The pull's proposal: a cancel, which the approve route checks before
+		// anything runs.
+		change, err := json.Marshal(reconcile.Change{FindingChange: billing.FindingChange{Kind: billing.ChangeCancelSubscription}})
+		require.NoError(t, err)
+		_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "reconciliation_findings"}.Sanitize()+" SET change = $1 WHERE merchant_id = $2 AND id = $3", change, a.alpha.MerchantID().UUID(), finding.ID)
+		require.NoError(t, err)
+		approve := func(token string) (int, []byte) {
+			return a.request(t, "POST", "/v1/merchant/proposals/approve", token, billing.ApproveProposalsParams{IDs: []billing.FindingID{billing.FindingID(finding.ID)}, Notes: "ended at the provider"},
+				map[string]string{"Idempotency-Key": uuid.NewString()})
+		}
+		before, err := a.alpha.GetFinding(t.Context(), billing.FindingID(finding.ID))
+		require.NoError(t, err)
+		status, raw := approve(consoleStaff(t, a, "config-person", billing.MerchantConfigManage))
+		require.Equal(t, http.StatusForbidden, status, string(raw))
+		require.Contains(t, string(raw), `"code":"permission_required"`)
+		after, err := a.alpha.GetFinding(t.Context(), billing.FindingID(finding.ID))
+		require.NoError(t, err)
+		require.Equal(t, before.Status, after.Status, "a refused approval leaves the proposal open")
+		// Holding customer support's manage permission too, the approval runs.
+		status, raw = approve(consoleStaff(t, a, "config-support-person", billing.MerchantConfigManage, billing.MerchantCustomerManage))
+		require.Equal(t, http.StatusOK, status, string(raw))
 	})
 }
 
@@ -408,4 +452,18 @@ func TestDirectoryAuthority(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, stored.Items[0].ClearedAt)
 	})
+}
+
+// raiseRecommendation opens a finding of alpha's that recommends rec.
+func raiseRecommendation(t *testing.T, a *authorityWorld, subject string, rec recommend.Recommendation) billing.FindingID {
+	t.Helper()
+	database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+	require.NoError(t, err)
+	var finding reconcile.FindingRecord
+	require.NoError(t, database.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+		finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: "consistency.duplicate.ownership",
+			SubjectKey: subject, Severity: reconcile.SeverityHigh, Evidence: map[string]any{recommend.EvidenceKey: rec.Map()}})
+		return err
+	}))
+	return billing.FindingID(finding.ID)
 }

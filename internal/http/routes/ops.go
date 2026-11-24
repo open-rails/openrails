@@ -60,9 +60,10 @@ var opsRoutes = []Route{
 		Query: billing.ProposalListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Finding]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListProposals)},
 	{Method: POST, Path: "/v1/merchant/proposals/approve", Group: MerchantConfig, Auth: AuthMerchant, Name: "ApproveProposals", Level: LevelUpdate, Person: true, IdempotencyKey: true,
 		Doc: "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run " +
-			"that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves. " +
-			"idempotencyKey is required: a retry with it answers the first call's results.",
-		Request: billing.ApproveProposalsParams{}, Responses: []Reply{{200, billing.ProposalResults{}}}, Errors: codes("idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "person_required", "service_unavailable"), Handler: h(handlers.ApproveProposals)},
+			"that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves; " +
+			"a change that refunds, revokes or cancels also needs merchant:customer:manage. idempotencyKey is " +
+			"required: a retry with it answers the first call's results.",
+		Request: billing.ApproveProposalsParams{}, Responses: []Reply{{200, billing.ProposalResults{}}}, Errors: codes("finding_not_actionable", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "person_required", "service_unavailable"), Bind: func(e *Env) router.Handler { return h(handlers.ApproveProposals(e.staffCan)) }},
 	{Method: POST, Path: "/v1/merchant/proposals/dismiss", Group: MerchantConfig, Auth: AuthMerchant, Name: "DismissProposals", Level: LevelUpdate, Person: true,
 		Doc: "DismissProposals closes 1 to 100 proposals without applying them; notes are required. Only a person " +
 			"signed in, or the in-process host, dismisses.",

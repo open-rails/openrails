@@ -57,6 +57,9 @@ type Request struct {
 	// AdmissionActor is set only by trusted internal entry points that do
 	// not carry a verified HTTP principal, such as the local operator CLI.
 	AdmissionActor *destructive.Actor
+	// Authorize, when set, is asked of each approved change's kind before
+	// anything runs: an HTTP caller holds what the change's own route needs.
+	Authorize func(billing.ChangeKind) error
 }
 
 func (e *Executor) now() time.Time { return timeutil.FirstClock(e.Clock).Now().UTC() }
@@ -356,8 +359,22 @@ func (e *Executor) validate(ctx context.Context, req Request, dismiss bool) (uui
 	}
 	found := make(map[uuid.UUID]bool, len(rows))
 	for _, row := range rows {
-		if strings.HasPrefix(row.FindingType, "pull.") {
-			found[row.ID] = true
+		if !strings.HasPrefix(row.FindingType, "pull.") {
+			continue
+		}
+		found[row.ID] = true
+		if dismiss || req.Authorize == nil {
+			continue
+		}
+		change, err := reconcile.DecodeChange(row.Change)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if change == nil {
+			continue
+		}
+		if err := req.Authorize(change.Kind); err != nil {
+			return uuid.Nil, err
 		}
 	}
 	for _, id := range req.IDs {

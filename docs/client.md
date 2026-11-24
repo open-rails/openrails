@@ -1105,7 +1105,7 @@ return f.Close()
 
 ## Proposals and findings
 
-A finding is a divergence OpenRails detected: `pull.*` (a local mirror against the provider), `derive.*`, `life.*` (a record against its clock), `consistency.*`. A `pull.*` finding with a change is a proposal: approving it applies that change. Findings need merchant configuration authority; approving one whose recommendation refunds, cancels, or grants or revokes a product also needs `merchant:customer:manage`, as that action's own route does.
+A finding is a divergence OpenRails detected: `pull.*` (a local mirror against the provider), `derive.*`, `life.*` (a record against its clock), `consistency.*`. A `pull.*` finding with a change is a proposal: approving it applies that change. Findings need merchant configuration authority. Approving a finding whose recommendation refunds, cancels, or grants or revokes a product, or a proposal whose change refunds, revokes or cancels, also needs `merchant:customer:manage` and spends the operation limit, as that action's own route does.
 
 | Method | Use it to |
 |---|---|

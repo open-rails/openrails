@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/reconcile/recommend"
 )
 
 func declared(t *testing.T, key string) Route {
@@ -66,14 +68,40 @@ func TestCatalogRoutesNameTheirPermission(t *testing.T) {
 	}
 }
 
-// Approving a finding's recommendation asks for staff routes that exist and
-// need customer support's manage permission.
-func TestFindingActionsNeedCustomerManage(t *testing.T) {
-	for action, keys := range handlers.FindingActionRoutes {
-		for _, key := range keys {
-			if r := declared(t, key); r.Needs() != needAdminUpdate {
-				t.Errorf("%s: %s checks %v, want %v", action, key, r.Needs().Names(), needAdminUpdate.Names())
-			}
+// Approving a finding's recommendation or a proposal's change asks for the
+// staff routes whose effect it runs: every action and change kind is listed,
+// and each route it names needs customer support's manage permission.
+func TestStaffActionsNeedTheirRoutes(t *testing.T) {
+	actions := map[string]bool{}
+	for _, action := range recommend.Actions() {
+		actions[action] = true
+		if _, ok := handlers.FindingActionRoutes[action]; !ok {
+			t.Errorf("recommendation action %s names no routes", action)
+		}
+	}
+	kinds := map[billing.ChangeKind]bool{}
+	for _, kind := range billing.ChangeKinds() {
+		kinds[kind] = true
+		if _, ok := handlers.ProposalChangeRoutes[kind]; !ok {
+			t.Errorf("change kind %s names no routes", kind)
+		}
+	}
+	var keys []string
+	for action, routes := range handlers.FindingActionRoutes {
+		if !actions[action] {
+			t.Errorf("FindingActionRoutes lists %s, which no recommendation names", action)
+		}
+		keys = append(keys, routes...)
+	}
+	for kind, routes := range handlers.ProposalChangeRoutes {
+		if !kinds[kind] {
+			t.Errorf("ProposalChangeRoutes lists %s, which is no change kind", kind)
+		}
+		keys = append(keys, routes...)
+	}
+	for _, key := range keys {
+		if r := declared(t, key); r.Needs() != needAdminUpdate {
+			t.Errorf("%s checks %v, want %v", key, r.Needs().Names(), needAdminUpdate.Names())
 		}
 	}
 }

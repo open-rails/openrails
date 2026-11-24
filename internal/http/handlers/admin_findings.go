@@ -9,9 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
@@ -200,17 +198,14 @@ func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, fin
 		r.ErrorCode(billing.CodeFindingNotActionable, "")
 		return nil, false
 	}
-	for _, route := range FindingActionRoutes[rec.Action] {
-		if err := can(r.Request, route); err != nil {
-			var refused billingauth.GateError
-			if errors.As(err, &refused) && refused.Code != "" {
-				r.APIError(billingauth.RefusalError(refused))
-				return nil, false
-			}
-			r.Log.WarnContext(ctx, "finding approval could not ask for its action's permission", logx.Err(err), "route", route)
-			r.ErrorCode(billing.CodeAuthorizationUnavailable, "")
-			return nil, false
-		}
+	keys, known := FindingActionRoutes[rec.Action]
+	if !known {
+		r.ErrorCode(billing.CodeFindingNotActionable, "the recommendation names an action this version does not authorize")
+		return nil, false
+	}
+	if err := staffCanAll(r, can, keys); err != nil {
+		refuseStaffCan(r, err)
+		return nil, false
 	}
 	overrides, err := recommend.DecodeParams(overrideParams)
 	var params map[string]any

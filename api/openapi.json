@@ -13228,7 +13228,7 @@
           "merchant_config"
         ],
         "operationId": "ApproveProposals",
-        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves. idempotencyKey is required: a retry with it answers the first call's results.",
+        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves; a change that refunds, revokes or cancels also needs merchant:customer:manage. idempotencyKey is required: a retry with it answers the first call's results.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -13283,6 +13283,7 @@
         },
         "x-openrails-person": true,
         "x-openrails-errors": [
+          "finding_not_actionable",
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",

@@ -62,11 +62,39 @@ func ListProposals(r *httprequest.Request) {
 // approveOperation names approve calls in the idempotency store.
 const approveOperation = "proposals.approve"
 
+// ProposalChangeRoutes are the staff routes whose effect each change kind
+// runs: approving a proposal needs what calling them needs, besides the
+// approve route's merchant:config:manage. Every kind is listed, those that
+// only record provider facts with none; a kind missing here is refused.
+var ProposalChangeRoutes = map[billing.ChangeKind][]string{
+	billing.ChangeCreateSubscription:      nil,
+	billing.ChangeRecordCharge:            nil,
+	billing.ChangeRecordRefund:            nil,
+	billing.ChangeAdoptSubscription:       nil,
+	billing.ChangeCancelSubscription:      {"POST /v1/admin/subscriptions/{id}/cancel"},
+	billing.ChangeUpdateCard:              nil,
+	billing.ChangeRevokeAccess:            {"POST /v1/admin/product-access/{id}/revoke"},
+	billing.ChangeRefundChargeAfterCancel: {"POST /v1/admin/payments/{id}/refunds"},
+	billing.ChangeCancelProviderSchedule:  {"POST /v1/admin/subscriptions/{id}/cancel"},
+	billing.ChangeCollectSkippedRenewal:   nil,
+	billing.ChangeCorrectSubscription:     nil,
+}
+
+// staffCanRefusal is a proposal whose change's own route refused the caller.
+type staffCanRefusal struct{ err error }
+
+func (e staffCanRefusal) Error() string { return e.err.Error() }
+
 // ApproveProposals handles POST /v1/merchant/proposals/approve: a person
 // approves 1 to 100 proposals, each in its own transaction, under one
 // approval run. The Idempotency-Key replays the first answer; the same key
-// with another body is refused.
-func ApproveProposals(r *httprequest.Request) {
+// with another body is refused. A change that refunds, revokes or cancels
+// also needs what its own route needs, asked of can before anything runs.
+func ApproveProposals(can StaffCan) func(r *httprequest.Request) {
+	return func(r *httprequest.Request) { approveProposals(r, can) }
+}
+
+func approveProposals(r *httprequest.Request, can StaffCan) {
 	key := strings.TrimSpace(r.Header("Idempotency-Key"))
 	if key == "" {
 		r.ErrorCode(billing.CodeIdempotencyKeyRequired, "Idempotency-Key header is required")
@@ -109,9 +137,24 @@ func ApproveProposals(r *httprequest.Request) {
 		replayApproval(r, rec, digest)
 		return
 	}
-	out, err := x.Approve(ctx, proposals.Request{IDs: params.IDs, Notes: params.Notes, Actor: personActor(r)})
+	authorize := func(kind billing.ChangeKind) error {
+		keys, known := ProposalChangeRoutes[kind]
+		if !known {
+			return api.Coded(billing.CodeFindingNotActionable, "a proposal names a change this version does not authorize")
+		}
+		if err := staffCanAll(r, can, keys); err != nil {
+			return staffCanRefusal{err}
+		}
+		return nil
+	}
+	out, err := x.Approve(ctx, proposals.Request{IDs: params.IDs, Notes: params.Notes, Actor: personActor(r), Authorize: authorize})
 	if err != nil {
 		_ = claim.Fail(ctx, err)
+		var refused staffCanRefusal
+		if errors.As(err, &refused) {
+			refuseStaffCan(r, refused.err)
+			return
+		}
 		writeRefusal(r, err, "approve proposals failed")
 		return
 	}

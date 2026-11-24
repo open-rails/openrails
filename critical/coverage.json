@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 530,
+  "scenario_count": 532,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1182,6 +1182,16 @@
       "id": "OR-J01-S21",
       "journey": "J01",
       "name": "A configuration-only credential cannot approve a finding's refund, cancellation or access action"
+    },
+    {
+      "id": "OR-J01-S22",
+      "journey": "J01",
+      "name": "A configuration-only person cannot approve a proposal that cancels, revokes or refunds"
+    },
+    {
+      "id": "OR-J01-S23",
+      "journey": "J01",
+      "name": "A finding approval spends the operation limit of the action it runs"
     },
     {
       "id": "OR-J22-S05",

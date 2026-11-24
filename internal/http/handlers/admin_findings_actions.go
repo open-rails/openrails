@@ -148,8 +148,10 @@ func paramOptionalTypedID[T interface{ IsZero() bool }](params map[string]any, k
 
 // FindingActionRoutes are the staff routes whose effect each recommendation
 // runs: approving it needs what calling them needs, besides the finding
-// route's merchant:config:manage. ack_resume touches no customer.
+// route's merchant:config:manage. Every action is listed, ack_resume with
+// none as it touches no customer; an action missing here is refused.
 var FindingActionRoutes = map[string][]string{
+	recommend.ActionAckResume:           nil,
 	recommend.ActionRevokeProductAccess: {"POST /v1/admin/product-access/{id}/revoke"},
 	recommend.ActionGrantProduct:        {"POST /v1/admin/product-access"},
 	recommend.ActionCancelAndRefund:     {"POST /v1/admin/subscriptions/{id}/cancel", "POST /v1/admin/payments/{id}/refunds"},

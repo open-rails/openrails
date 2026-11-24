@@ -1290,8 +1290,9 @@ func (c *Client) ListProposals(ctx context.Context, params billing.ProposalListP
 
 // ApproveProposals applies 1 to 100 proposals, each in its own transaction,
 // under one approval run that `openrails undo-run` reverses. Only a person
-// signed in, or the in-process host, approves. idempotencyKey is required: a
-// retry with it answers the first call's results.
+// signed in, or the in-process host, approves; a change that refunds,
+// revokes or cancels also needs merchant:customer:manage. idempotencyKey is
+// required: a retry with it answers the first call's results.
 func (c *Client) ApproveProposals(ctx context.Context, idempotencyKey string, params billing.ApproveProposalsParams) (*billing.ProposalResults, error) {
 	var out billing.ProposalResults
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/proposals/approve", idempotencyKey: idempotencyKey, body: params}, &out); err != nil {
