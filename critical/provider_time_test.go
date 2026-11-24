@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/ccbillmock"
 	"github.com/open-rails/openrails/internal/config"
@@ -193,11 +194,42 @@ func TestProviderTime(t *testing.T) {
 			require.Equal(t, http.StatusOK, status, raw)
 		}
 		// Signed, and its event_id long forgotten: a sale dated before the
-		// replay record would be kept is a replay, acknowledged unapplied.
+		// replay record would be kept is a replay, acknowledged unapplied, and
+		// a person is told.
 		sale("evt_replayed_old", a.clock.Now().Add(-91*24*time.Hour))
 		require.Zero(t, converges())
+		refused, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.webhook.replay_refused"})
+		require.NoError(t, err)
+		require.Len(t, refused.Items, 1)
+		require.Equal(t, "nmi:evt_replayed_old", refused.Items[0].SubjectKey)
 		sale("evt_recent_new", a.clock.Now().Add(-time.Hour))
 		require.Equal(t, 1, converges(), "a delivery of its own time applies")
+	})
+
+	t.Run("OR-J28-S12/an-nmi-chargeback-of-a-sale-120-days-old-is-applied", func(t *testing.T) {
+		a, p := newNMIWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
+		receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
+		require.NoError(t, err)
+		require.Len(t, receipts.Items, 1)
+		receipt := receipts.Items[0]
+		// A chargeback comes months after its sale, and its entry carries the
+		// sale's date, not the batch's.
+		a.clock.Advance(120 * 24 * time.Hour)
+		status, raw := nmiSignedDelivery(t, a, map[string]any{"event_id": "evt_late_chargeback", "event_type": "chargeback.batch.complete", "event_body": map[string]any{
+			"merchant": map[string]string{"id": "critical-gateway"}, "batch": map[string]any{"count": 1, "total_amount": "10.00"},
+			"chargebacks": []map[string]string{{"id": "cb_late_1", "date": receipt.CreatedAt.UTC().Format(time.DateOnly), "cc_number": "************4242", "amount": "10.00", "reason_code": "10.4", "reason": "Fraud"}}}}, uuid.NewString())
+		require.Equal(t, http.StatusOK, status, raw)
+		read, err := a.alpha.GetPayment(t.Context(), receipt.ID)
+		require.NoError(t, err)
+		require.Len(t, read.Refunds, 1, "the chargeback is booked")
+		require.Equal(t, billing.PaymentChargeback, read.Refunds[0].Kind)
+		after, err := a.alpha.GetSubscription(t.Context(), sub.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionCanceled, after.Status)
+		refused, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.webhook.replay_refused"})
+		require.NoError(t, err)
+		require.Empty(t, refused.Items)
 	})
 
 	t.Run("OR-J15-S73/prune-keeps-an-nmi-sale-settled-refunded-or-voided-after-its-window", func(t *testing.T) {

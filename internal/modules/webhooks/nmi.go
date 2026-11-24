@@ -134,10 +134,11 @@ func (s *NMIWebhookService) parseChargebackBatchEventBody() (*NMIChargebackBatch
 	return &body, nil
 }
 
-// nmiEventDate is the newest date an NMI event body names: a transaction
-// event's action, or a chargeback batch's entries. dated=false when it names
-// none (a recurring or account-updater wake-up, whose effect is a read of
-// NMI's own record).
+// nmiEventDate is the date a transaction event's action names. dated=false
+// when it names none: a recurring or account-updater wake-up, whose effect is
+// a read of NMI's own record, or a chargeback batch, whose entries are dated
+// by their sales and arrive months after them; each entry is booked once, by
+// its NMI id, in the permanent ledger, so a replayed batch finds it booked.
 func nmiEventDate(body json.RawMessage) (time.Time, bool) {
 	type action struct {
 		Date string `json:"date"`
@@ -147,12 +148,11 @@ func nmiEventDate(body json.RawMessage) (time.Time, bool) {
 		Transaction *struct {
 			Action *action `json:"action"`
 		} `json:"transaction"`
-		Chargebacks []action `json:"chargebacks"`
 	}
 	if json.Unmarshal(body, &dates) != nil {
 		return time.Time{}, false
 	}
-	named := dates.Chargebacks
+	var named []action
 	if dates.Action != nil {
 		named = append(named, *dates.Action)
 	}

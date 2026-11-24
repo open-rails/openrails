@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 467,
+  "scenario_count": 468,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2161,7 +2161,12 @@
     {
       "id": "OR-J28-S10",
       "journey": "J28",
-      "name": "A signed NMI delivery dated before its event_id record would be kept is acknowledged and applies nothing; one of its own time applies"
+      "name": "A signed NMI transaction event dated before its event_id record would be kept is acknowledged, applies nothing and raises life.webhook.replay_refused; one of its own time applies"
+    },
+    {
+      "id": "OR-J28-S12",
+      "journey": "J28",
+      "name": "An NMI chargeback batch is booked whatever its sales' dates: a chargeback of a sale 120 days old reverses it and cancels its membership, refused as no replay"
     },
     {
       "id": "OR-J39-S01",
