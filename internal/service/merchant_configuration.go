@@ -244,6 +244,9 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.ProviderRefundAccess != nil {
 		current.ProviderRefundAccess = patch.ProviderRefundAccess
 	}
+	if patch.FraudWarningRefund != nil {
+		current.FraudWarningRefund = patch.FraudWarningRefund
+	}
 	if patch.ArrearsGraceDays != nil {
 		current.ArrearsGraceDays = patch.ArrearsGraceDays
 	}

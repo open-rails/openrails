@@ -264,16 +264,7 @@ several documents, anchors and tags are refused, and so are the retired keys
 committed file: an overlay or Vault supplies them
 ([standalone.md](standalone.md#configuration-reference)).
 
-**Environments.** Each PSP declares whether it moves real money; omitted, it is
-the rail's real-money one, so production declares none. NMI: `live`, `test` (an
-account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key
-prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`,
-`testnet`. A merchant may mix them. OpenRails asks the provider before arming a
-PSP and again once that proof is an hour old: NMI's `test_mode_status`, Stripe's
-key prefix and `api.stripe.com/v1/account` against `account_id`, Solana's genesis hash on
-every RPC endpoint. A PSP whose answer disagrees stays disarmed: reads work,
-writes fail before any byte is sent, and the `openrails_psp_posture` probe
-reports it. CCBill's sandbox has no signal, so its writes are always refused.
+**Environments.** Each PSP declares whether it moves real money; omitted, it is the rail's real-money one, so production declares none. NMI: `live`, `test` (an account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`, `testnet`. A merchant may mix them. OpenRails asks the provider before arming a PSP: NMI's `test_mode_status` and Solana's genesis hash on every RPC endpoint, again once that proof is an hour old; Stripe's `api.stripe.com/v1/account` against `account_id`, plus `api.stripe.com/v1/balance` for a test key, once per key and account. A PSP whose answer disagrees stays disarmed: reads work, writes fail before any byte is sent, and the `openrails_psp_posture` probe reports it. CCBill's sandbox has no signal, so its writes are always refused.
 
 **Webhooks.** Each provider posts to `/v1/webhooks/{rail}/{account_id}`
 (beneath the mount when embedded). `{rail}` is `nmi`, `stripe`, `ccbill` or
@@ -282,6 +273,10 @@ joined with `-`. The account resolves the merchant, its own secret verifies the
 delivery, and the payload's account must agree. Rotating a signing secret keeps
 the old one for `webhook_secret_overlap` (24 h); `retire_webhook_overlap` on
 `UpdatePSP` refuses it at once.
+
+A card PSP (NMI, Stripe, CCBill) may declare `dispute_ratio_limit`, its
+acquirer's limit on a month's chargebacks over settled sales as a percentage
+(`"0.9%"`): it is monitored like the card networks' programs.
 
 ### NMI
 
@@ -303,13 +298,18 @@ and enable exactly these 14 events:
 - `acu.summary.automaticallyupdated`, `.closedaccount`, `.contactcustomer` (with
   NMI's Automatic Card Updater)
 
+NMI sends `chargeback.batch.complete` only for processors that report
+chargebacks: confirm yours does, or a PSP's dispute ratio reads 0% with no data
+behind it (`ListDisputePrograms` says whether any dispute was reported).
+
 Each NMI decline costs a fee; OpenRails retries renewals sparsely. A legacy NMI
 schedule keeps billing at NMI; OpenRails mirrors it and retries its declines.
 
 ### Stripe
 
-`account_id` is your `acct_…`; the key is checked against it, and a key of another
-account never arms. `secret_key` may be a restricted key. OpenRails registers the
+`account_id` is your `acct_…`; the key is checked against it, and a key of another account never arms. `secret_key` may be a restricted key with read access to its own account (`api.stripe.com/v1/account`; Stripe's refusal, which the posture probe reports, names the permission) and these permissions: `customer_write`, `payment_intent_write`, `setup_intent_write`, `payment_method_write`, `charge_write` (refunds), `subscription_write`, `invoice_write`, `checkout_session_write`, `customer_portal_write`, `webhook_write`, `payment_method_domain_write`, `product_read`, `plan_read` (prices), `dispute_read`, `event_read`, and `balance_read` on a test key.
+
+OpenRails registers the
 webhook endpoint itself when the configuration is in Vault, pinned to its Stripe
 API version, and keeps its events current. With a file it cannot keep the new
 signing secret, so register the endpoint once in the dashboard at
@@ -344,7 +344,7 @@ Solana prices are refused. `rpc_url`, a secret, is tried before the network's
 public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
 at purchase; devnet and testnet price at $1.00 parity.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `usage_gate_safe_spend` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `fraud_warning_refund`, `usage_gate_safe_spend` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
@@ -641,14 +641,16 @@ return nil
 |---|---|
 | `ListPayments`, `GetPayment` | payments and refunds, with their order |
 | `ListPaymentAttempts`, `GetPaymentAttempt` | each provider attempt, with its decline |
-| `RefundPayment` | refund through the PSP, in full or in part; `RevokeAccess` ends what the payment bought; takes `idempotencyKey` |
+| `ListDisputes`, `GetDispute` | each provider dispute (inquiry, chargeback or prevented), with its network, reason family, code, dates and outcome |
+| `RefundPayment` | refund through the PSP, in full or in part; `RefundReason` says why (default `requested_by_customer`), `Reason` in the merchant's words; `RevokeAccess` ends what the payment bought; takes `idempotencyKey` |
 | `RecordExternalPayment` | money received outside OpenRails against a usage order, idempotent on its transaction id, at most what it owes (`409 payment_exceeds_due`) |
 
 ```go guide:refund
 // key: one per refund decision; a retry with it refunds once
 return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 	Full:         true,
-	Reason:       "requested_by_customer",
+	RefundReason: billing.RefundRequestedByCustomer,
+	Reason:       "cancelled within the first day",
 	RevokeAccess: true,
 })
 ```
@@ -656,6 +658,14 @@ return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 A refund through CCBill or Solana is `refund_unsupported`. Refunds and
 chargebacks revoke the access their payment bought. Staff never start a card
 charge.
+
+**Disputes.** A chargeback ends what its charge paid for and the card is never
+charged again (`disputed`): the customer's other subscriptions on it wait for
+another card, or end at period end where a provider bills them. An inquiry
+moves no money and ends nothing. A Stripe early fraud warning refunds its charge
+in full and ends what it paid for, unless the merchant setting
+`fraud_warning_refund` is `record`. Each chargeback raises a
+`life.disputes.customer_review` finding.
 
 **Saved cards.** A method is `{id, rail, psp_id, card, billing_details, health,
 default_currencies}`; only `active` ones are charged. Renewals and usage
@@ -1128,6 +1138,7 @@ destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-swit
 |---|---|
 | `GetMetricsSchema` | the measures, dimensions and grains a query may name, with each measure's group (`business` or `ops`), direction and thresholds |
 | `QueryMetrics` | cash, payment, subscription, renewal, usage and ops measures, grouped and bucketed |
+| `ListDisputePrograms` | each card PSP's standing in the dispute monitoring programs (Visa VAMP, Mastercard's excessive chargeback and fraud programs, Stripe's guidance, the PSP's `dispute_ratio_limit`) for a month: ratio so far, projected, level and thresholds |
 | `GetDashboard`, `SetDashboard` | the console dashboard's saved layout, or the health overview built for the merchant's profile |
 
 ```go guide:metrics

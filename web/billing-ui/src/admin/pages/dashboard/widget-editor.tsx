@@ -2,7 +2,7 @@ import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 import { useAdminServices } from "#orck/admin/context"
 // Add or edit a widget: its title, chart type, range behaviour and query,
 // built from the metrics registry so any measure can be charted. A heading
-// is a section title with no query.
+// and the dispute programs have no query.
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Loading02Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
@@ -30,6 +30,7 @@ import { ApiError } from "#orck/admin/lib/api/client"
 import { DIALOG_WIDE } from "#orck/admin/lib/dialog-width"
 import {
   CHART_VIZ,
+  queryless,
   type Widget,
   type WidgetViz,
 } from "#orck/admin/lib/api/metrics"
@@ -50,6 +51,7 @@ const VIZ_LABELS: Record<WidgetViz, string> = {
   donut: "Donut chart",
   table: "Table",
   heading: "Section heading",
+  programs: "Dispute programs",
 }
 
 // A tile is one figure: it takes no time grouping (a kpi draws its own
@@ -83,7 +85,8 @@ export function WidgetEditor({
 
   const { adminQueries } = useAdminServices()
 
-  const heading = initial.viz === "heading"
+  // A queryless widget (a heading, the dispute programs) has a title only.
+  const heading = queryless(initial.viz)
   const [title, setTitle] = React.useState(initial.title)
   const [fixedRange, setFixedRange] = React.useState(
     initial.fixed_range ?? false

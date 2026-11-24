@@ -54,6 +54,10 @@ type Engine struct {
 	// logged, never fails the run (the finding is already persisted).
 	Notifier FindingNotifier
 
+	// Disputes records the dispute cases each pull read, whatever their kind,
+	// so a missed webhook's case still counts. Nil records none.
+	Disputes DisputeRecorder
+
 	// Policy reads the merchant's evidence-staleness floor. A nil Policy makes
 	// the decider trust only what this pass observed: stricter, never more
 	// permissive.
@@ -402,6 +406,11 @@ func (e *Engine) evidenceFloor(ctx context.Context) time.Time {
 	return e.Policy.EvidenceFloor(ctx, mid.UUID())
 }
 
+// DisputeRecorder records the dispute cases a pull read on psp.
+type DisputeRecorder interface {
+	RecordPulledDisputes(ctx context.Context, psp uuid.UUID, provider Provider, cases []json.RawMessage) error
+}
+
 // runProvider fetches, diffs, persists, applies (enforce), and auto-resolves
 // for one provider. A returned error means the provider's reconciliation did
 // not complete (e.g. fetch failure or circuit-breaker abort) and NOTHING was
@@ -447,6 +456,11 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	snap.PspID = binding.ID.String()
 	if params.Reversals {
 		narrowToReversals(snap)
+	}
+	if e.Disputes != nil && len(snap.Disputes) > 0 {
+		if err := e.Disputes.RecordPulledDisputes(ctx, binding.ID, provider, snap.Disputes); err != nil {
+			e.Log.WarnContext(ctx, "reconcile: recording pulled disputes failed; the next pull records them", logx.Err(err), "provider", provider)
+		}
 	}
 	// Strip the absence proof when the pass did not read every active PSP on
 	// the rail, or a merchant with two NMI PSPs would have the unread one's

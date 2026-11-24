@@ -1073,6 +1073,54 @@ export type DismissProposalsParams = {
   notes?: string
 }
 
+export type Dispute = {
+  id: string
+  provider_ref: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  psp_id: string
+  customer_id: string | null
+  payment_id: string | null
+  kind: "chargeback" | "inquiry" | "prevented" | "unknown"
+  status: "closed" | "lost" | "open" | "unreported" | "won"
+  network: "amex" | "diners" | "discover" | "jcb" | "mastercard" | "other" | "unionpay" | "unknown" | "visa"
+  reason: "authorization" | "canceled_recurring" | "credit_not_processed" | "duplicate" | "fraud" | "not_as_described" | "not_received" | "other" | "processing_error" | "unknown" | "unrecognized"
+  reason_code: string
+  provider_reason: string
+  amount: string | null
+  currency: string | null
+  disputed_at: string
+  chargeback_at: string | null
+  evidence_due_at: string | null
+  closed_at: string | null
+  reversal_payment_id: string | null
+  recovery_payment_id: string | null
+}
+
+export type DisputeStanding = {
+  psp_id: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  program: "acquirer" | "mastercard_ecp" | "mastercard_efm" | "stripe" | "visa_vamp"
+  month: string
+  count: string
+  denominator: string
+  ratio: number
+  projected_ratio: number
+  projected_count: string
+  level: "excessive" | "high_excessive" | "none" | "warning"
+  thresholds: DisputeThreshold[]
+  fraud_reports_visible: boolean
+  disputes_reported: boolean
+}
+
+export type DisputeThreshold = {
+  level: "excessive" | "high_excessive" | "none" | "warning"
+  ratio: number
+  min_count: string
+  min_amount: string
+  min_prior_sales: string
+  source: string
+}
+
 export type DriftField = {
   field: string
   openrails_value: string
@@ -1422,7 +1470,7 @@ export type Mandate = {
   subscription_id: string | null
   currency: string | null
   status: "active" | "ended" | "requires_reconsent" | "revoked"
-  end_reason: "brand_changed" | "closed" | "customer_revoked" | "payment_method_removed" | "replaced" | "subscription_ended" | null
+  end_reason: "brand_changed" | "closed" | "customer_revoked" | "disputed" | "payment_method_removed" | "replaced" | "subscription_ended" | null
   ended_at: string | null
   card_brand: string | null
   initial_transaction_id: string | null
@@ -1456,6 +1504,7 @@ export type MerchantConfigurationState = {
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
+  fraud_warning_refund?: "record" | "refund"
   arrears_grace_days?: number
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
@@ -1999,6 +2048,7 @@ export type Payment = {
   failure: PaymentFailure | null
   refunded_payment_id: string | null
   reason: string | null
+  refund_reason: "charged_after_cancel" | "dispute_prevention" | "duplicate" | "fraud_warning" | "fraudulent" | "other" | "requested_by_customer" | "unknown" | null
   refunds: Payment[]
   created_at: string
 }
@@ -2054,7 +2104,7 @@ export type PaymentMethod = {
   customer_id: string
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   psp_id: string | null
-  status: "active" | "closed" | "removed" | "replaced" | "requires_action"
+  status: "active" | "closed" | "disputed" | "removed" | "replaced" | "requires_action"
   next_action: NextAction | null
   replaced_by: string | null
   card: CardDetails | null
@@ -2417,6 +2467,7 @@ export type RefundPaymentParams = {
   amount?: string
   full?: boolean
   reason?: string
+  refund_reason?: "charged_after_cancel" | "dispute_prevention" | "duplicate" | "fraud_warning" | "fraudulent" | "other" | "requested_by_customer" | "unknown"
   revoke_access?: boolean
 }
 
@@ -2843,6 +2894,7 @@ export type UpdateMerchantConfigurationParams = {
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
+  fraud_warning_refund?: "record" | "refund"
   arrears_grace_days?: number
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy

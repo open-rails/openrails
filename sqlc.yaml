@@ -13,6 +13,7 @@ sql:
       - "internal/migrate/postgres/0008_drop_entitlement_cache_contract.up.sql"
       - "internal/migrate/postgres/0009_order_keys_and_cancel_kinds.up.sql"
       - "internal/migrate/postgres/0010_credit_grants.up.sql"
+      - "internal/migrate/postgres/0011_disputes.up.sql"
       - "internal/migrate/postgres/0018_contact_erasure_admission.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"

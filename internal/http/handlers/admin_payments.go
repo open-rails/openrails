@@ -50,6 +50,8 @@ func validateRefund(req RefundRequest) error {
 		return api.Coded(billing.CodeInvalidParam, "amount and full are mutually exclusive").WithParam("amount")
 	case !req.Full && req.Amount <= 0:
 		return api.Coded(billing.CodeInvalidParam, "amount must be a positive native amount, or full must be true").WithParam("amount")
+	case req.RefundReason != "" && !req.RefundReason.Valid():
+		return api.Coded(billing.CodeInvalidParam, "refund_reason is not a refund reason").WithParam("refund_reason")
 	}
 	return nil
 }
@@ -283,7 +285,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	}
 
 	reservationMetadata := adminRefundMetadata(idempotencyKey, req, "pending", "")
-	reservation, err := paymentService.ReserveRefund(ctx, paymentID, adminRefundReservationTransactionID(paymentID, idempotencyKey), req.Amount, reservationMetadata)
+	reservation, err := paymentService.ReserveRefund(ctx, paymentID, adminRefundReservationTransactionID(paymentID, idempotencyKey), req.Amount, adminRefundReason(req), reservationMetadata)
 	if err != nil {
 		return nil, fmt.Errorf("reserve refund: %w", err)
 	}
@@ -329,7 +331,20 @@ func adminRefundMatchesRequest(existing *models.Payment, req RefundRequest) bool
 		return false
 	}
 	revoke, _ := existing.Metadata["admin_refund_revoke_access"].(bool)
-	return revoke == req.RevokeAccess && strings.TrimSpace(adminRefundMetadataString(existing.Metadata, "admin_refund_reason")) == strings.TrimSpace(req.Reason)
+	// A refund booked before reasons were recorded is unknown: a replay that
+	// names no reason is the same request.
+	sameReason := existing.RefundReason != nil && (*existing.RefundReason == string(adminRefundReason(req)) ||
+		req.RefundReason == "" && *existing.RefundReason == string(billing.RefundUnknown))
+	return revoke == req.RevokeAccess && sameReason && strings.TrimSpace(adminRefundMetadataString(existing.Metadata, "admin_refund_reason")) == strings.TrimSpace(req.Reason)
+}
+
+// adminRefundReason is a staff refund's reason: requested_by_customer unless
+// the request names another.
+func adminRefundReason(req RefundRequest) billing.RefundReason {
+	if req.RefundReason == "" {
+		return billing.RefundRequestedByCustomer
+	}
+	return req.RefundReason
 }
 
 func adminRefundMetadataString(metadata map[string]any, key string) string {

@@ -22,6 +22,8 @@ var NeverRollbackableTables = map[string]string{
 		"duplicate charges, duplicate cancels",
 	"reconciliation_findings": "forensics: a rollback that erases the evidence of what went wrong defeats itself",
 	"price_key_movements":     "forensics: price-identity history",
+	"disputes":                "provider facts: the network counted the dispute whatever a rollback restores",
+	"fraud_reports":           "provider facts: the network counted the report whatever a rollback restores",
 }
 
 // maintenance_runs and destructive_run_before_images are absent on purpose: an

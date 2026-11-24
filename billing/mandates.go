@@ -43,6 +43,8 @@ const (
 	MandateEndSubscriptionEnded MandateEndReason = "subscription_ended"
 	// MandateEndPaymentMethodRemoved: the card was deleted.
 	MandateEndPaymentMethodRemoved MandateEndReason = "payment_method_removed"
+	// MandateEndDisputed: a charge on the card was charged back.
+	MandateEndDisputed MandateEndReason = "disputed"
 )
 
 // Mandate is a customer's consent to stored-credential use of one saved card

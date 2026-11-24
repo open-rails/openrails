@@ -29,6 +29,8 @@ const (
 	EndClosed               = "closed"
 	EndSubscriptionEnded    = "subscription_ended"
 	EndPaymentMethodRemoved = "payment_method_removed"
+	// EndDisputed: a charge on the card was charged back.
+	EndDisputed = "disputed"
 )
 
 // Statuses a mandate can charge or be re-consented from.

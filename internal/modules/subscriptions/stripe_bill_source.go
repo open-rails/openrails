@@ -41,8 +41,11 @@ type StripeBillLine struct {
 // identity and amount. Non-cash settlement never produces a synthetic Charge.
 type StripeBillPayment struct {
 	ID, ChargeID, PaymentIntentID, Kind, Status, Currency string
-	Amount                                                int64
-	PaidAt                                                time.Time
+	// PaymentMethodRef is the Charge's payment method (pm_…): the card it was
+	// taken from.
+	PaymentMethodRef string
+	Amount           int64
+	PaidAt           time.Time
 }
 
 type stripeBillList struct {
@@ -294,6 +297,7 @@ func (p *HTTPStripeLivenessProber) readBillPayment(ctx context.Context, invoiceI
 		Amount               int64           `json:"amount"`
 		AmountCaptured       int64           `json:"amount_captured"`
 		Intent               json.RawMessage `json:"payment_intent"`
+		PaymentMethod        string          `json:"payment_method"`
 	}
 	if err := json.Unmarshal(body, &charge); err != nil {
 		return r, fmt.Errorf("decode Stripe invoice Charge: %w", err)
@@ -304,6 +308,7 @@ func (p *HTTPStripeLivenessProber) readBillPayment(ctx context.Context, invoiceI
 	if r.PaymentIntentID != "" && stripeObjectID(charge.Intent) != r.PaymentIntentID {
 		return r, fmt.Errorf("Stripe invoice payment %s Charge belongs to another PaymentIntent", r.ID)
 	}
+	r.PaymentMethodRef = strings.TrimSpace(charge.PaymentMethod)
 	return r, nil
 }
 

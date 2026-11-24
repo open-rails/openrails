@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/booktag"
-	"github.com/open-rails/openrails/internal/logx"
-	"github.com/open-rails/openrails/internal/modules/payment"
 	"io"
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/booktag"
+	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/modules/payment"
 
 	"github.com/open-rails/openrails/internal/modules/alerting"
 
@@ -23,9 +24,11 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/disputerules"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/disputes"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -63,7 +66,9 @@ type StripeWebhookService struct {
 	// ObserveEnqueuer queues the coalesced read of a catalog object a
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer
-	Log             *slog.Logger
+	// Disputes records disputes and fraud reports; nil records with no alerts.
+	Disputes *disputes.Service
+	Log      *slog.Logger
 }
 
 func (s *StripeWebhookService) now() time.Time {
@@ -168,6 +173,8 @@ type stripeRefund struct {
 	Amount        int64  `json:"amount"`
 	Currency      string `json:"currency"`
 	Status        string `json:"status"`
+	Reason        string `json:"reason"`
+	Created       int64  `json:"created"`
 	// Metadata carries the billing book that created the refund (or, on a
 	// charge.refunded event, the charge).
 	Metadata map[string]string `json:"metadata"`
@@ -207,16 +214,6 @@ type stripeInvoicePayment struct {
 type stripePaymentMethod struct {
 	ID       string `json:"id"`
 	Customer string `json:"customer"`
-}
-
-type stripeDispute struct {
-	ID            string `json:"id"`
-	Charge        string `json:"charge"`
-	PaymentIntent string `json:"payment_intent"`
-	Amount        int64  `json:"amount"`
-	Currency      string `json:"currency"`
-	Status        string `json:"status"`
-	Reason        string `json:"reason"`
 }
 
 // redactStripeClientSecrets preserves JSON numbers exactly while removing only
@@ -308,7 +305,11 @@ var HandledStripeEventTypes = []string{
 	"customer.updated",
 	"charge.refunded",
 	"charge.dispute.created",
+	"charge.dispute.updated",
+	"charge.dispute.funds_withdrawn",
 	"charge.dispute.closed",
+	"radar.early_fraud_warning.created",
+	"radar.early_fraud_warning.updated",
 	"product.created",
 	"product.updated",
 	"product.deleted",
@@ -359,8 +360,10 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.handleCustomerUpdated(ctx, obj)
 	case "charge.refunded":
 		return s.handleChargeRefunded(ctx, obj)
-	case "charge.dispute.created", "charge.dispute.closed":
+	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.funds_withdrawn", "charge.dispute.closed":
 		return s.handleDispute(ctx, eventType, obj)
+	case "radar.early_fraud_warning.created", "radar.early_fraud_warning.updated":
+		return s.handleEarlyFraudWarning(ctx, obj)
 	// Catalog events are wake-up signals too: the observe job reads the
 	// object by id, so a deleted one reads as gone.
 	case "product.created", "product.updated", "product.deleted":
@@ -896,90 +899,119 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		if err != nil {
 			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, refundID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refund.Amount))), payments.ReversalRefund); err != nil {
-			return fmt.Errorf("record stripe refund: %w", err)
+		currency := strings.ToUpper(strings.TrimSpace(refund.Currency))
+		if currency == "" {
+			currency = original.Currency
+		}
+		amount, err := moneyutil.RailMinorToNative(currency, moneyutil.Cents(refund.Amount))
+		if err != nil {
+			return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe refund %s amount: %w", refundID, err))
+		}
+		var at time.Time
+		if refund.Created > 0 {
+			at = time.Unix(refund.Created, 0).UTC()
+		}
+		// An RDR resolution's refund a prevented case booked already is this
+		// refund, unless OpenRails asked for it: the case takes it once.
+		absorbed, err := s.disputes().RefundAbsorbed(ctx, s.DB, original.ID, refundID)
+		if err == nil && !absorbed && refund.Metadata[subscriptions.StripeRefundMetadataKey] == "" {
+			absorbed, err = s.disputes().AbsorbByPrevention(ctx, s.DB, original.ID, refundID, amount, currency, s.atOrNow(at).Add(rdrRefundLead))
+		}
+		if err != nil {
+			return err
+		}
+		if !absorbed {
+			if _, err := s.PaymentService.RefundObservedWithReason(ctx, original.ID, refundID, amount, stripeRefundReason(refund.Reason), at); err != nil {
+				return fmt.Errorf("record stripe refund: %w", err)
+			}
 		}
 	}
 	return s.PaymentService.ApplyRefundAccessPolicy(ctx, original.ID)
 }
 
+func (s *StripeWebhookService) disputes() *disputes.Service {
+	if s.Disputes != nil {
+		return s.Disputes
+	}
+	return disputes.New(s.DB, s.Clock)
+}
+
+// handleDispute records the case each dispute event reports, then acts on the
+// kind it reports: a chargeback reverses its charge and ends what it paid
+// for; an inquiry, an unknown status or a CE 3.0 block moves no money; an RDR
+// resolution is a refund. A won dispute returns the money, and stays won
+// against any later notice. A dispute on a charge OpenRails has no record of
+// is recorded and raised for staff, never retried.
 func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType string, obj json.RawMessage) error {
-	var dispute stripeDispute
+	var dispute disputes.StripeDispute
 	if err := json.Unmarshal(obj, &dispute); err != nil {
 		return fmt.Errorf("parse stripe dispute: %w", err)
-	}
-	if stripeDisputeWon(eventType, dispute.Status) {
-		if err := s.markStripeDisputeWon(ctx, dispute.ID); err != nil {
-			return err
-		}
-		return s.handleStripeDisputeWon(ctx, dispute)
-	}
-	// Stripe delivers out of order. A dispute already won never reverses,
-	// whatever notice about it arrives later.
-	if won, err := s.stripeDisputeAlreadyWon(ctx, dispute.ID); err != nil {
-		return err
-	} else if won {
-		s.Log.InfoContext(ctx, "Stripe dispute already won; ignoring late dispute notice", "dispute_id", dispute.ID)
-		return nil
-	}
-	if !stripeDisputeShouldReverse(eventType, dispute.Status) {
-		s.Log.InfoContext(ctx, "Stripe dispute does not require reversal; skipping ledger and entitlement changes", "dispute_id", dispute.ID, "event_type", eventType, "status", dispute.Status)
-		return nil
 	}
 	if s.PaymentService == nil {
 		return fmt.Errorf("payment service is required for stripe dispute")
 	}
-	disputeID := strings.TrimSpace(dispute.ID)
-	if disputeID == "" || dispute.Amount <= 0 {
-		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe dispute missing id or amount"))
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return fmt.Errorf("record stripe dispute: %w", err)
 	}
-	var original *models.Payment
-	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, disputeID); err == nil && existing != nil {
-		if existing.RefundedPaymentID == nil {
+	original, err := disputes.StripeCharge(ctx, s.DB, dispute.Charge, dispute.PaymentIntent)
+	if err != nil {
+		return err
+	}
+	report, err := dispute.Report(psp, original, s.now())
+	if err != nil {
+		return MarkWebhookErrorNonRetryable(err)
+	}
+	disputeID := report.ProviderRef
+	rec, err := s.disputes().Record(ctx, s.DB, report)
+	if err != nil {
+		return err
+	}
+	if original == nil {
+		return s.disputes().RaiseUnknownCharge(ctx, s.DB, psp, disputeID, strings.TrimSpace(dispute.Charge+" "+dispute.PaymentIntent))
+	}
+	if rec.Status == string(billing.DisputeWon) {
+		return s.handleStripeDisputeWon(ctx, dispute, rec)
+	}
+	switch report.Kind {
+	case billing.DisputeChargeback:
+	case billing.DisputePrevented:
+		if !disputerules.StripePreventionRefunds(dispute.PaymentMethodDetails.Card.CaseType) || rec.ReversalPaymentID != nil {
 			return nil
 		}
-		original, err = s.PaymentService.GetByID(ctx, *existing.RefundedPaymentID)
-		if err != nil {
-			return fmt.Errorf("lookup original stripe payment for existing dispute: %w", err)
+		if err := s.preventionRefund(ctx, original, rec, report.Amount, report.Currency); err != nil {
+			return fmt.Errorf("record stripe dispute resolution: %w", err)
 		}
-	} else if err != nil && !db.IsNotFound(err) {
-		return fmt.Errorf("lookup stripe dispute payment: %w", err)
+		return nil
+	default:
+		s.Log.InfoContext(ctx, "Stripe dispute recorded; nothing reversed or ended", "dispute_id", disputeID, "event_type", eventType, "status", dispute.Status, "kind", report.Kind)
+		return nil
 	}
 	var ledgerErr error
-	if original == nil {
-		var err error
-		original, err = s.lookupStripeOriginalPayment(ctx, dispute.Charge, dispute.PaymentIntent)
-		if err != nil {
-			return err
-		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, disputeID, int64(moneyutil.CentsToMicros(moneyutil.Cents(dispute.Amount))), payments.ReversalChargeback); err != nil {
-			ledgerErr = fmt.Errorf("record stripe dispute reversal: %w", err)
+	reversal, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, disputeID)
+	if err != nil && !db.IsNotFound(err) {
+		return fmt.Errorf("lookup stripe dispute payment: %w", err)
+	}
+	if reversal == nil {
+		if reversal, err = s.PaymentService.Refund(ctx, original.ID, disputeID, report.Amount, payments.ReversalChargeback); err != nil {
+			reversal, ledgerErr = nil, fmt.Errorf("record stripe dispute reversal: %w", err)
 			s.Log.ErrorContext(ctx, "Failed to record Stripe dispute reversal; continuing entitlement revocation", logx.Err(ledgerErr), "dispute_id", disputeID, "original_payment_id", original.ID)
 		}
 	}
-	if s.SubscriptionLifecycleService != nil && s.DB != nil {
-		subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, original.ID)
-		if err != nil {
+	if reversal != nil && rec.ReversalPaymentID == nil {
+		if err := s.disputes().Link(ctx, s.DB, rec, &reversal.ID, nil); err != nil {
 			return err
 		}
-		feedback := func(sub *models.Subscription) string {
-			// A membership already canceled is not this dispute's cancellation to undo.
-			if sub.Status == models.StatusCanceled {
-				return fmt.Sprintf("STRIPE DISPUTE %s after cancellation: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
-			}
-			return fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
-		}
-		for _, subscriptionID := range subscriptionIDs {
-			if err := revokeStripeMembership(ctx, s.DB, s.SubscriptionLifecycleService, subscriptionID, models.CancelTypeChargeback, feedback, nil); err != nil {
-				return fmt.Errorf("cancel subscription after stripe dispute: %w", err)
-			}
-		}
 	}
-	if original.SubscriptionID == nil && s.DB != nil {
-		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
-		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.AccessRevokeChargeback); err != nil {
-			return fmt.Errorf("revoke product access after stripe dispute: %w", err)
+	cause := fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
+	if err := s.endDisputedCharge(ctx, original, func(sub *models.Subscription) string {
+		// A membership already canceled is not this dispute's cancellation to undo.
+		if sub.Status == models.StatusCanceled {
+			return fmt.Sprintf("STRIPE DISPUTE %s after cancellation: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
 		}
+		return cause
+	}); err != nil {
+		return err
 	}
 	if ledgerErr != nil {
 		originalID := original.ID
@@ -1003,7 +1035,121 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	return nil
 }
 
-func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispute stripeDispute) error {
+// rdrRefundLead is how long before its dispute object Stripe may make an RDR
+// resolution's refund. Stripe's ordering is unconfirmed; one refund is
+// booked whichever arrives first.
+const rdrRefundLead = 5 * time.Minute
+
+// preventionRefund books an RDR resolution's refund once. A Stripe refund of
+// the whole charge made no earlier than a few minutes before the case, which
+// OpenRails did not ask for and no case took yet, is the resolution's: the
+// case absorbs it rather than booking another.
+func (s *StripeWebhookService) preventionRefund(ctx context.Context, original *models.Payment, rec disputes.Case, amount int64, currency string) error {
+	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, rec.ProviderRef); err == nil && existing != nil {
+		return s.disputes().Link(ctx, s.DB, rec, &existing.ID, nil)
+	} else if err != nil && !db.IsNotFound(err) {
+		return err
+	}
+	_, refunds, err := s.PaymentService.GetByIDWithDetails(ctx, original.ID)
+	if err != nil {
+		return err
+	}
+	for _, r := range refunds {
+		if r.ReversalKind == nil || *r.ReversalKind != payments.ReversalRefund || r.Status != payments.PaymentStatusSucceededValue ||
+			-r.Amount != amount || !strings.EqualFold(r.Currency, currency) || r.PurchasedAt.Before(rec.DisputedAt.Add(-rdrRefundLead)) ||
+			!strings.HasPrefix(r.TransactionID, "re_") || refundInitiatedByOpenRails(r) {
+			continue
+		}
+		taken, err := s.disputes().RefundAbsorbed(ctx, s.DB, original.ID, r.TransactionID)
+		if err != nil {
+			return err
+		}
+		if !taken {
+			return s.disputes().AbsorbRefund(ctx, s.DB, rec, r)
+		}
+	}
+	refund, err := s.PaymentService.RefundWithReason(ctx, original.ID, rec.ProviderRef, amount, billing.RefundDisputePrevention)
+	if err != nil {
+		return err
+	}
+	return s.disputes().Link(ctx, s.DB, rec, &refund.ID, nil)
+}
+
+func (s *StripeWebhookService) atOrNow(at time.Time) time.Time {
+	if at.IsZero() {
+		return s.now()
+	}
+	return at
+}
+
+type stripeEarlyFraudWarning struct {
+	ID            string `json:"id"`
+	Charge        string `json:"charge"`
+	PaymentIntent string `json:"payment_intent"`
+	FraudType     string `json:"fraud_type"`
+	Actionable    bool   `json:"actionable"`
+	Created       int64  `json:"created"`
+}
+
+// handleEarlyFraudWarning records an issuer's fraud report (Visa TC40,
+// Mastercard SAFE) once, from whichever event reports it. An actionable one
+// queues its response: the charge refunded in full and what it paid for
+// ended, as a chargeback would, unless the merchant records reports only or
+// a dispute decides the charge. A report on a charge OpenRails has no record
+// of is raised for staff, never retried.
+func (s *StripeWebhookService) handleEarlyFraudWarning(ctx context.Context, obj json.RawMessage) error {
+	var warning stripeEarlyFraudWarning
+	if err := json.Unmarshal(obj, &warning); err != nil {
+		return fmt.Errorf("parse stripe early fraud warning: %w", err)
+	}
+	ref := strings.TrimSpace(warning.ID)
+	if ref == "" || s.PaymentService == nil || s.DB == nil {
+		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe early fraud warning missing id"))
+	}
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return fmt.Errorf("record stripe early fraud warning: %w", err)
+	}
+	original, err := disputes.StripeCharge(ctx, s.DB, warning.Charge, warning.PaymentIntent)
+	if err != nil {
+		return err
+	}
+	if original == nil {
+		return s.disputes().RaiseUnknownCharge(ctx, s.DB, psp, ref, strings.TrimSpace(warning.Charge+" "+warning.PaymentIntent))
+	}
+	report := disputes.FraudReport{PSPID: psp, Rail: models.RailStripe, ProviderRef: ref, Payment: original, FraudType: warning.FraudType, Actionable: warning.Actionable}
+	if warning.Created > 0 {
+		report.ReportedAt = time.Unix(warning.Created, 0).UTC()
+	}
+	_, _, err = s.disputes().RecordFraudReport(ctx, s.DB, report)
+	return err
+}
+
+// endDisputedCharge ends what a charged-back charge paid for: its
+// subscriptions at once with their access and a one-off's access. Its card is
+// blocked by the chargeback's response, under its gates.
+func (s *StripeWebhookService) endDisputedCharge(ctx context.Context, original *models.Payment, feedback func(*models.Subscription) string) error {
+	if s.SubscriptionLifecycleService != nil && s.DB != nil {
+		subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, original.ID)
+		if err != nil {
+			return err
+		}
+		for _, subscriptionID := range subscriptionIDs {
+			if err := revokeStripeMembership(ctx, s.DB, s.SubscriptionLifecycleService, subscriptionID, models.CancelTypeChargeback, feedback, nil); err != nil {
+				return fmt.Errorf("cancel subscription after stripe dispute: %w", err)
+			}
+		}
+	}
+	if original.SubscriptionID == nil && s.DB != nil {
+		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
+		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.AccessRevokeChargeback); err != nil {
+			return fmt.Errorf("revoke product access after stripe dispute: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispute disputes.StripeDispute, rec disputes.Case) error {
 	if s.PaymentService == nil {
 		return nil
 	}
@@ -1034,7 +1180,9 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 	if err != nil {
 		return fmt.Errorf("lookup original stripe payment for won dispute: %w", err)
 	}
+	var recoveryPaymentID uuid.UUID
 	if existingRecovery != nil {
+		recoveryPaymentID = existingRecovery.ID
 		if existingRecovery.RefundedPaymentID == nil {
 			if err := s.PaymentService.LinkRefundedPayment(ctx, existingRecovery.ID, original.ID); err != nil {
 				return fmt.Errorf("link existing stripe won dispute recovery payment: %w", err)
@@ -1064,6 +1212,10 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 		if err := s.PaymentService.Create(ctx, recovery); err != nil {
 			return fmt.Errorf("record stripe won dispute recovery payment: %w", err)
 		}
+		recoveryPaymentID = recovery.ID
+	}
+	if err := s.disputes().Link(ctx, s.DB, rec, nil, &recoveryPaymentID); err != nil {
+		return err
 	}
 
 	subscriptionIDs, err := paymentSubscriptionIDs(ctx, s.DB, original.ID)
@@ -1141,70 +1293,23 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	return nil
 }
 
-const stripeDisputeWonOp = "stripe.dispute_won"
-
-// markStripeDisputeWon durably records a won dispute, under the PSP whose
-// account owns it, so a late created notice cannot reverse it.
-func (s *StripeWebhookService) markStripeDisputeWon(ctx context.Context, disputeID string) error {
-	disputeID = strings.TrimSpace(disputeID)
-	if s.DB == nil || disputeID == "" {
-		return nil
+// stripeRefundReason is the reason Stripe gives a refund in OpenRails' terms.
+func stripeRefundReason(reason string) billing.RefundReason {
+	switch strings.TrimSpace(reason) {
+	case "duplicate":
+		return billing.RefundDuplicate
+	case "fraudulent":
+		return billing.RefundFraudulent
+	case "requested_by_customer":
+		return billing.RefundRequestedByCustomer
+	case "":
+		return billing.RefundUnknown
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	psp, err := db.RequirePSPID(ctx)
-	if err != nil {
-		return fmt.Errorf("record won stripe dispute: %w", err)
-	}
-	if _, err := s.DB.Gen(ctx).MarkWebhookEventCompleted(ctx, gen.MarkWebhookEventCompletedParams{MerchantID: mid.UUID(), PspID: &psp, Op: stripeDisputeWonOp, EventID: disputeID}); err != nil {
-		return fmt.Errorf("record won stripe dispute: %w", err)
-	}
-	return nil
-}
-
-func (s *StripeWebhookService) stripeDisputeAlreadyWon(ctx context.Context, disputeID string) (bool, error) {
-	disputeID = strings.TrimSpace(disputeID)
-	if s.DB == nil || disputeID == "" {
-		return false, nil
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	psp, err := db.RequirePSPID(ctx)
-	if err != nil {
-		return false, fmt.Errorf("lookup won stripe dispute: %w", err)
-	}
-	won, err := s.DB.Gen(ctx).WebhookEventCompleted(ctx, gen.WebhookEventCompletedParams{MerchantID: mid.UUID(), PspID: &psp, Op: stripeDisputeWonOp, EventID: disputeID})
-	if err != nil {
-		return false, fmt.Errorf("lookup won stripe dispute: %w", err)
-	}
-	return won, nil
+	return billing.RefundOther
 }
 
 func stripeRefundSucceeded(status string) bool {
 	return strings.EqualFold(strings.TrimSpace(status), "succeeded")
-}
-
-func stripeDisputeWon(eventType, status string) bool {
-	return eventType == "charge.dispute.closed" && strings.EqualFold(strings.TrimSpace(status), "won")
-}
-
-func stripeDisputeShouldReverse(eventType, status string) bool {
-	status = strings.ToLower(strings.TrimSpace(status))
-	if status == "won" {
-		return false
-	}
-	switch eventType {
-	case "charge.dispute.created":
-		return true
-	case "charge.dispute.closed":
-		return status == "lost"
-	default:
-		return false
-	}
 }
 
 var errStripeOriginalUnknown = errors.New("stripe original payment not found for charge/payment_intent")

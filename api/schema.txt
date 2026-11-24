@@ -11,7 +11,8 @@ migration 0007_dashboard_retired_measures.up.sql sha256:f6dd2a2187e91c2d0ae89192
 migration 0008_drop_entitlement_cache_contract.up.sql sha256:5614790da69dcc343f221554426cf4c88ea8e126923a80a6a725f03ed005b372
 migration 0009_order_keys_and_cancel_kinds.up.sql sha256:d9f399efae661b1fc5f50edb9295edb31f349d302a9e18e0590bd2419f62bc58
 migration 0010_credit_grants.up.sql sha256:fdab284c9d4a8a721620c8b9c9bd34796ccbe679afc1c79e39299857c0e4e340
-migration 0018_contact_erasure_admission.up.sql sha256:788456151df25e1152a0f7878365bfb134411deeaf9a09904e57b6456f83b2a6
+migration 0011_disputes.up.sql sha256:2c2f3eea9343cece49fd8c8aa0b6a93a6e0292ee3d67d9a518e821b8da68451f
+migration 0018_contact_erasure_admission.up.sql sha256:bedf3fa5426493f9b3b8da8ab6f05cde4144ddd64463e62034fb978a4ad4cf53
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -50,6 +51,7 @@ table billing.book_identity
   constraint book_identity_pkey PRIMARY KEY (singleton)
   constraint book_identity_singleton_check CHECK (singleton)
   index CREATE UNIQUE INDEX book_identity_pkey ON billing.book_identity USING btree (singleton)
+  trigger CREATE TRIGGER book_identity_wake_dispute_responses AFTER INSERT OR UPDATE ON billing.book_identity FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.carts
   column merchant_id uuid NOT NULL
@@ -495,6 +497,7 @@ table billing.destructive_action_switch
   constraint destructive_action_switch_pkey PRIMARY KEY (singleton)
   constraint destructive_action_switch_singleton_check CHECK ((singleton = true))
   index CREATE UNIQUE INDEX destructive_action_switch_pkey ON billing.destructive_action_switch USING btree (singleton)
+  trigger CREATE TRIGGER destructive_action_switch_wake_dispute_responses AFTER UPDATE OF enabled ON billing.destructive_action_switch FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.destructive_actions
   column merchant_id uuid NOT NULL
@@ -522,7 +525,7 @@ table billing.destructive_actions
   constraint destructive_actions_actor_key_check CHECK ((actor_key ~ '^[0-9a-f]{64}$'::text))
   constraint destructive_actions_admission_sequence_key UNIQUE (admission_sequence)
   constraint destructive_actions_credential_check CHECK ((credential <> ''::text))
-  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text, 'erase_contact'::text])))
+  constraint destructive_actions_kind_check CHECK ((kind = ANY (ARRAY['refund'::text, 'cancel_subscription'::text, 'delete_payment_method'::text, 'block_payment_method'::text, 'revoke_credit'::text, 'revoke_access'::text, 'waive_order'::text, 'mark_uncollectible'::text, 'catalog_change'::text, 'configuration_change'::text, 'erase_contact'::text])))
   constraint destructive_actions_lifecycle_check CHECK ((((state = 'reserved'::text) AND (started_at IS NULL) AND (finished_at IS NULL)) OR ((state = ANY (ARRAY['started'::text, 'uncertain'::text])) AND (started_at IS NOT NULL) AND (finished_at IS NULL)) OR ((state = 'succeeded'::text) AND (started_at IS NOT NULL) AND (finished_at IS NOT NULL) AND (completion_sequence IS NOT NULL)) OR ((state = 'no_effect'::text) AND (finished_at IS NOT NULL))))
   constraint destructive_actions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint destructive_actions_origin_check CHECK ((origin = ANY (ARRAY['staff'::text, 'host'::text, 'automation'::text])))
@@ -585,6 +588,7 @@ table billing.destructive_holds
   trigger CREATE TRIGGER destructive_holds_clear BEFORE UPDATE ON billing.destructive_holds FOR EACH ROW EXECUTE FUNCTION billing.guard_destructive_hold_clear()
   trigger CREATE TRIGGER destructive_holds_immutable BEFORE UPDATE ON billing.destructive_holds FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('cleared_at', 'clear_through_sequence', 'cleared_by_issuer', 'cleared_by_id', 'clear_reason')
   trigger CREATE TRIGGER destructive_holds_no_delete BEFORE DELETE ON billing.destructive_holds FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER destructive_holds_wake_dispute_responses AFTER UPDATE OF cleared_at ON billing.destructive_holds FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.destructive_run_before_images
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -604,6 +608,68 @@ table billing.destructive_run_before_images
   index CREATE UNIQUE INDEX destructive_run_before_images_identity_key ON billing.destructive_run_before_images USING btree (merchant_id, destructive_run_id, table_name, row_id)
   index CREATE UNIQUE INDEX destructive_run_before_images_pkey ON billing.destructive_run_before_images USING btree (merchant_id, id)
   trigger CREATE TRIGGER immutable_destructive_before_images BEFORE DELETE OR UPDATE ON billing.destructive_run_before_images FOR EACH ROW EXECUTE FUNCTION billing.guard_before_image()
+
+table billing.disputes
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column psp_id uuid NOT NULL
+  column rail text NOT NULL
+  column provider_ref text NOT NULL
+  column customer_id uuid
+  column payment_id uuid
+  column kind text NOT NULL
+  column network text NOT NULL
+  column reason text NOT NULL
+  column reason_code text
+  column provider_reason text
+  column amount bigint
+  column currency text
+  column status text NOT NULL
+  column disputed_at timestamp with time zone NOT NULL
+  column chargeback_at timestamp with time zone
+  column evidence_due_at timestamp with time zone
+  column closed_at timestamp with time zone
+  column reversal_payment_id uuid
+  column recovery_payment_id uuid
+  column absorbed_refund_ref text
+  column observed_via text NOT NULL
+  column responded_at timestamp with time zone
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint disputes_absorbed_refund_ref_check CHECK ((absorbed_refund_ref <> ''::text))
+  constraint disputes_amount_check CHECK ((amount > 0))
+  constraint disputes_amount_currency_check CHECK (((amount IS NULL) = (currency IS NULL)))
+  constraint disputes_chargeback_check CHECK (((kind = 'chargeback'::text) = (chargeback_at IS NOT NULL)))
+  constraint disputes_closed_check CHECK (((closed_at IS NOT NULL) = (status = ANY (ARRAY['won'::text, 'lost'::text, 'closed'::text]))))
+  constraint disputes_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint disputes_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint disputes_customer_id_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
+  constraint disputes_customer_id_recovery_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, recovery_payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
+  constraint disputes_customer_id_reversal_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, reversal_payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
+  constraint disputes_kind_check CHECK ((kind = ANY (ARRAY['inquiry'::text, 'chargeback'::text, 'prevented'::text, 'unknown'::text])))
+  constraint disputes_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint disputes_money_check CHECK (((payment_id IS NOT NULL) OR ((reversal_payment_id IS NULL) AND (recovery_payment_id IS NULL))))
+  constraint disputes_network_check CHECK ((network = ANY (ARRAY['visa'::text, 'mastercard'::text, 'amex'::text, 'discover'::text, 'jcb'::text, 'diners'::text, 'unionpay'::text, 'other'::text, 'unknown'::text])))
+  constraint disputes_observed_via_check CHECK ((observed_via = ANY (ARRAY['notice'::text, 'pull'::text])))
+  constraint disputes_outcome_check CHECK (((status = ANY (ARRAY['open'::text, 'closed'::text])) OR (kind = 'chargeback'::text)))
+  constraint disputes_payment_check CHECK (((payment_id IS NULL) = (customer_id IS NULL)))
+  constraint disputes_pkey PRIMARY KEY (merchant_id, id)
+  constraint disputes_provider_reason_check CHECK ((provider_reason <> ''::text))
+  constraint disputes_provider_ref_check CHECK ((provider_ref <> ''::text))
+  constraint disputes_psp_id_provider_ref_key UNIQUE (merchant_id, psp_id, provider_ref)
+  constraint disputes_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint disputes_reason_check CHECK ((reason = ANY (ARRAY['fraud'::text, 'unrecognized'::text, 'not_received'::text, 'canceled_recurring'::text, 'not_as_described'::text, 'credit_not_processed'::text, 'duplicate'::text, 'processing_error'::text, 'authorization'::text, 'other'::text, 'unknown'::text])))
+  constraint disputes_reason_code_check CHECK ((reason_code <> ''::text))
+  constraint disputes_status_check CHECK ((status = ANY (ARRAY['open'::text, 'won'::text, 'lost'::text, 'closed'::text, 'unreported'::text])))
+  index CREATE INDEX disputes_chargeback_at_idx ON billing.disputes USING btree (merchant_id, chargeback_at) WHERE (chargeback_at IS NOT NULL)
+  index CREATE INDEX disputes_closed_at_idx ON billing.disputes USING btree (merchant_id, closed_at) WHERE (closed_at IS NOT NULL)
+  index CREATE INDEX disputes_customer_id_disputed_at_idx ON billing.disputes USING btree (merchant_id, customer_id, disputed_at DESC) WHERE (customer_id IS NOT NULL)
+  index CREATE INDEX disputes_disputed_at_id_idx ON billing.disputes USING btree (merchant_id, disputed_at DESC, id DESC)
+  index CREATE INDEX disputes_payment_id_idx ON billing.disputes USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL)
+  index CREATE UNIQUE INDEX disputes_pkey ON billing.disputes USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX disputes_psp_id_provider_ref_key ON billing.disputes USING btree (merchant_id, psp_id, provider_ref)
+  index CREATE INDEX disputes_waiting_idx ON billing.disputes USING btree (merchant_id, id) WHERE ((kind = 'chargeback'::text) AND (responded_at IS NULL))
+  trigger CREATE TRIGGER disputes_network_activity AFTER INSERT OR DELETE OR UPDATE OF kind, chargeback_at, network, reason, amount, currency ON billing.disputes FOR EACH ROW EXECUTE FUNCTION billing.dispute_network_activity()
 
 table billing.eventlog_events
   column source text NOT NULL
@@ -697,6 +763,47 @@ table billing.failed_usage_windows
   constraint failed_usage_windows_window_key_check CHECK (((window_key <> ''::text) AND (octet_length(window_key) <= 255)))
   index CREATE UNIQUE INDEX failed_usage_windows_pkey ON billing.failed_usage_windows USING btree (merchant_id, customer_id, currency, invoker, window_key, window_start)
   index CREATE INDEX failed_usage_windows_window_end_idx ON billing.failed_usage_windows USING btree (merchant_id, window_end)
+
+table billing.fraud_reports
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column psp_id uuid NOT NULL
+  column rail text NOT NULL
+  column provider_ref text NOT NULL
+  column customer_id uuid NOT NULL
+  column payment_id uuid NOT NULL
+  column network text NOT NULL
+  column fraud_type text NOT NULL
+  column actionable boolean NOT NULL
+  column amount bigint NOT NULL
+  column currency text NOT NULL
+  column reported_at timestamp with time zone NOT NULL
+  column action text NOT NULL
+  column refund_payment_id uuid
+  column ended_at timestamp with time zone
+  column responded_at timestamp with time zone
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint fraud_reports_action_check CHECK ((action = ANY (ARRAY['pending'::text, 'recorded'::text, 'refunded'::text, 'nothing_to_refund'::text, 'disputed'::text])))
+  constraint fraud_reports_amount_check CHECK ((amount > 0))
+  constraint fraud_reports_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint fraud_reports_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint fraud_reports_customer_id_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
+  constraint fraud_reports_customer_id_refund_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, refund_payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
+  constraint fraud_reports_fraud_type_check CHECK ((fraud_type = ANY (ARRAY['card_never_received'::text, 'fraudulent_card_application'::text, 'made_with_counterfeit_card'::text, 'made_with_lost_card'::text, 'made_with_stolen_card'::text, 'misc'::text, 'unauthorized_use_of_card'::text])))
+  constraint fraud_reports_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint fraud_reports_network_check CHECK ((network = ANY (ARRAY['visa'::text, 'mastercard'::text, 'amex'::text, 'discover'::text, 'jcb'::text, 'diners'::text, 'unionpay'::text, 'other'::text, 'unknown'::text])))
+  constraint fraud_reports_pkey PRIMARY KEY (merchant_id, id)
+  constraint fraud_reports_provider_ref_check CHECK ((provider_ref <> ''::text))
+  constraint fraud_reports_psp_id_provider_ref_key UNIQUE (merchant_id, psp_id, provider_ref)
+  constraint fraud_reports_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint fraud_reports_refund_check CHECK (((action = 'refunded'::text) = (refund_payment_id IS NOT NULL)))
+  index CREATE INDEX fraud_reports_payment_id_idx ON billing.fraud_reports USING btree (merchant_id, payment_id)
+  index CREATE UNIQUE INDEX fraud_reports_pkey ON billing.fraud_reports USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX fraud_reports_psp_id_provider_ref_key ON billing.fraud_reports USING btree (merchant_id, psp_id, provider_ref)
+  index CREATE INDEX fraud_reports_reported_at_idx ON billing.fraud_reports USING btree (merchant_id, reported_at)
+  index CREATE INDEX fraud_reports_waiting_idx ON billing.fraud_reports USING btree (merchant_id, id) WHERE ((responded_at IS NULL) AND (action = ANY (ARRAY['pending'::text, 'refunded'::text, 'nothing_to_refund'::text])))
+  trigger CREATE TRIGGER fraud_reports_network_activity AFTER INSERT OR DELETE OR UPDATE OF network, amount, currency, reported_at ON billing.fraud_reports FOR EACH ROW EXECUTE FUNCTION billing.fraud_report_network_activity()
 
 table billing.grants
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1072,7 +1179,7 @@ table billing.mandates
   constraint mandates_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint mandates_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint mandates_end_check CHECK ((((status = ANY (ARRAY['revoked'::text, 'ended'::text])) = (end_reason IS NOT NULL)) AND ((end_reason IS NULL) = (ended_at IS NULL))))
-  constraint mandates_end_reason_check CHECK (((end_reason = ANY (ARRAY['replaced'::text, 'brand_changed'::text, 'closed'::text, 'customer_revoked'::text, 'subscription_ended'::text, 'payment_method_removed'::text])) AND ((status = 'revoked'::text) = (end_reason = 'customer_revoked'::text))))
+  constraint mandates_end_reason_check CHECK (((end_reason = ANY (ARRAY['replaced'::text, 'brand_changed'::text, 'closed'::text, 'customer_revoked'::text, 'subscription_ended'::text, 'payment_method_removed'::text, 'disputed'::text])) AND ((status = 'revoked'::text) = (end_reason = 'customer_revoked'::text))))
   constraint mandates_initial_transaction_id_check CHECK ((initial_transaction_id <> ''::text))
   constraint mandates_kind_check CHECK ((kind = ANY (ARRAY['recurring'::text, 'unscheduled'::text, 'card_on_file'::text])))
   constraint mandates_live_method_check CHECK (((status = ANY (ARRAY['revoked'::text, 'ended'::text])) OR (payment_method_id IS NOT NULL)))
@@ -1104,6 +1211,7 @@ table billing.merchant_destructive_policy
   constraint merchant_destructive_policy_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint merchant_destructive_policy_pkey PRIMARY KEY (merchant_id)
   index CREATE UNIQUE INDEX merchant_destructive_policy_pkey ON billing.merchant_destructive_policy USING btree (merchant_id)
+  trigger CREATE TRIGGER merchant_destructive_policy_wake_dispute_responses AFTER INSERT OR UPDATE OF destructive_actions_enabled, enforce_armed_at ON billing.merchant_destructive_policy FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.merchant_slug_aliases
   column slug text NOT NULL
@@ -1127,6 +1235,7 @@ table billing.merchant_write_posture
   constraint merchant_write_posture_reason_check CHECK ((reason = ANY (ARRAY['exported'::text, 'restored'::text, 'operator'::text])))
   constraint merchant_write_posture_set_by_check CHECK ((set_by <> ''::text))
   index CREATE UNIQUE INDEX merchant_write_posture_pkey ON billing.merchant_write_posture USING btree (merchant_id)
+  trigger CREATE TRIGGER merchant_write_posture_wake_dispute_responses AFTER INSERT OR UPDATE OF mode ON billing.merchant_write_posture FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.merchants
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1205,6 +1314,30 @@ table billing.money_settings
   index CREATE INDEX money_settings_usage_due_at_idx ON billing.money_settings USING btree (usage_due_at, merchant_id, customer_id, currency) WHERE (usage_due_at IS NOT NULL)
   trigger CREATE TRIGGER money_settings_mark_stored_card_check AFTER INSERT OR UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.default_card_marks_stored_card_check()
   trigger CREATE TRIGGER trg_subscription_history_default AFTER UPDATE OF default_payment_method_id ON billing.money_settings FOR EACH ROW EXECUTE FUNCTION billing.subscription_history_default_card()
+
+table billing.network_activity_daily
+  column merchant_id uuid NOT NULL
+  column psp_id uuid NOT NULL
+  column rail text NOT NULL
+  column network text NOT NULL
+  column currency text NOT NULL
+  column day_at timestamp with time zone NOT NULL
+  column sales bigint NOT NULL DEFAULT 0
+  column sales_amount bigint NOT NULL DEFAULT 0
+  column refunds bigint NOT NULL DEFAULT 0
+  column refund_amount bigint NOT NULL DEFAULT 0
+  column chargebacks bigint NOT NULL DEFAULT 0
+  column chargeback_amount bigint NOT NULL DEFAULT 0
+  column fraud_chargebacks bigint NOT NULL DEFAULT 0
+  column fraud_chargeback_amount bigint NOT NULL DEFAULT 0
+  column fraud_reports bigint NOT NULL DEFAULT 0
+  column fraud_report_amount bigint NOT NULL DEFAULT 0
+  constraint network_activity_daily_currency_check CHECK (((currency = ''::text) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
+  constraint network_activity_daily_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint network_activity_daily_pkey PRIMARY KEY (merchant_id, psp_id, network, currency, day_at)
+  constraint network_activity_daily_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  index CREATE INDEX network_activity_daily_day_at_idx ON billing.network_activity_daily USING btree (merchant_id, day_at)
+  index CREATE UNIQUE INDEX network_activity_daily_pkey ON billing.network_activity_daily USING btree (merchant_id, psp_id, network, currency, day_at)
 
 table billing.nmi_bulk_checkpoints
   column merchant_id uuid NOT NULL
@@ -1742,7 +1875,7 @@ table billing.payment_methods
   constraint payment_methods_replaced_by_check CHECK ((((status = 'replaced'::text) = (replaced_by_id IS NOT NULL)) AND (replaced_by_id <> id)))
   constraint payment_methods_replaced_by_id_fkey FOREIGN KEY (merchant_id, customer_id, replaced_by_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id)
   constraint payment_methods_setup_ref_check CHECK ((((status = 'requires_action'::text) = (setup_ref IS NOT NULL)) AND (setup_ref <> ''::text)))
-  constraint payment_methods_status_check CHECK ((status = ANY (ARRAY['requires_action'::text, 'active'::text, 'closed'::text, 'replaced'::text, 'removed'::text])))
+  constraint payment_methods_status_check CHECK ((status = ANY (ARRAY['requires_action'::text, 'active'::text, 'closed'::text, 'replaced'::text, 'removed'::text, 'disputed'::text])))
   index CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_rail_method_ref_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text)
   index CREATE INDEX payment_methods_customer_id_created_at_id_idx ON billing.payment_methods USING btree (merchant_id, customer_id, created_at DESC, id DESC)
@@ -1792,6 +1925,8 @@ table billing.payments
   column order_id uuid
   column ledger_transfer_id uuid
   column quantity integer
+  column refund_reason text
+  column payment_method_id uuid
   constraint payments_attempt_kind_check CHECK (((attempt_kind IS NULL) OR (attempt_kind = ANY (ARRAY['initial'::text, 'renewal'::text]))))
   constraint payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text])))
   constraint payments_channel_psp_check CHECK ( CASE WHEN (channel = 'rail'::text) THEN ((rail IS NOT NULL) AND (psp_id IS NOT NULL)) ELSE ((rail IS NULL) AND (psp_id IS NULL)) END)
@@ -1800,6 +1935,7 @@ table billing.payments
   constraint payments_customer_id_currency_refunded_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, refunded_payment_id) REFERENCES billing.payments(merchant_id, customer_id, currency, id)
   constraint payments_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint payments_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
+  constraint payments_customer_id_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (payment_method_id)
   constraint payments_customer_id_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id) ON DELETE SET NULL (subscription_id)
   constraint payments_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint payments_ledger_transfer_check CHECK (((ledger_transfer_id IS NULL) OR ((order_id IS NOT NULL) AND (refunded_payment_id IS NULL))))
@@ -1812,6 +1948,8 @@ table billing.payments
   constraint payments_pkey PRIMARY KEY (merchant_id, id)
   constraint payments_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint payments_quantity_check CHECK (((quantity IS NULL) OR ((quantity >= 1) AND (subscription_id IS NOT NULL))))
+  constraint payments_refund_reason_check CHECK (((refund_reason IS NULL) OR (refund_reason = ANY (ARRAY['requested_by_customer'::text, 'duplicate'::text, 'fraudulent'::text, 'fraud_warning'::text, 'dispute_prevention'::text, 'charged_after_cancel'::text, 'other'::text, 'unknown'::text]))))
+  constraint payments_refund_reason_kind_check CHECK (((refund_reason IS NOT NULL) = ((reversal_kind IS NOT NULL) AND (reversal_kind = 'refund'::text))))
   constraint payments_reversal_check CHECK (((reversal_kind IS NULL) = (refunded_payment_id IS NULL)))
   constraint payments_reversal_kind_check CHECK (((reversal_kind IS NULL) OR (reversal_kind = ANY (ARRAY['refund'::text, 'chargeback'::text, 'dispute_reversal'::text]))))
   constraint payments_sign_check CHECK ( CASE WHEN ((reversal_kind IS NULL) OR (reversal_kind = 'dispute_reversal'::text)) THEN (amount >= 0) ELSE (amount <= 0) END)
@@ -1828,6 +1966,7 @@ table billing.payments
   index CREATE INDEX payments_metadata_nmi_order_idx ON billing.payments USING btree (merchant_id, ((metadata ->> 'nmi_subscription_order_id'::text))) WHERE ((metadata ->> 'nmi_subscription_order_id'::text) IS NOT NULL)
   index CREATE INDEX payments_metadata_stripe_invoice_idx ON billing.payments USING btree (merchant_id, ((metadata ->> 'stripe_invoice_id'::text))) WHERE ((metadata ->> 'stripe_invoice_id'::text) IS NOT NULL)
   index CREATE INDEX payments_order_id_idx ON billing.payments USING btree (merchant_id, order_id) WHERE (order_id IS NOT NULL)
+  index CREATE INDEX payments_payment_method_id_idx ON billing.payments USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)
   index CREATE INDEX payments_pending_credit_refunds_idx ON billing.payments USING btree (merchant_id, customer_id, currency, refunded_payment_id) WHERE ((status = 'pending'::text) AND (amount < 0) AND (deleted_at IS NULL))
   index CREATE UNIQUE INDEX payments_pkey ON billing.payments USING btree (merchant_id, id)
   index CREATE INDEX payments_psp_id_idx ON billing.payments USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
@@ -1838,6 +1977,7 @@ table billing.payments
   index CREATE INDEX payments_refunded_payment_id_idx ON billing.payments USING btree (merchant_id, refunded_payment_id) WHERE (refunded_payment_id IS NOT NULL)
   index CREATE INDEX payments_subscription_id_idx ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   trigger CREATE TRIGGER payments_enqueue_settlement_event AFTER INSERT OR UPDATE OF status ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.enqueue_payment_settlement_event()
+  trigger CREATE TRIGGER payments_network_activity AFTER INSERT OR DELETE OR UPDATE OF status, amount, currency, deleted_at, card_brand, purchased_at, psp_id, money_movement ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.payment_network_activity()
 
 table billing.periodic_leases
   column kind text NOT NULL
@@ -3106,6 +3246,29 @@ table billing.webhook_health_daily
   index CREATE INDEX webhook_health_daily_day_at_idx ON billing.webhook_health_daily USING btree (merchant_id, day_at)
   index CREATE UNIQUE INDEX webhook_health_daily_psp_id_custodian_id_day_at_key ON billing.webhook_health_daily USING btree (merchant_id, psp_id, custodian_id, day_at) NULLS NOT DISTINCT
 
+function billing.add_network_activity(uuid,uuid,text,text,text,timestamp with time zone,text,bigint,bigint)
+  CREATE OR REPLACE FUNCTION billing.add_network_activity(p_merchant uuid, p_psp uuid, p_rail text, p_network text, p_currency text, p_at timestamp with time zone, p_measure text, p_count bigint, p_amount bigint)
+   RETURNS void
+   LANGUAGE sql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  INSERT INTO billing.network_activity_daily AS d (merchant_id, psp_id, rail, network, currency, day_at,
+      sales, sales_amount, refunds, refund_amount, chargebacks, chargeback_amount,
+      fraud_chargebacks, fraud_chargeback_amount, fraud_reports, fraud_report_amount)
+  VALUES (p_merchant, p_psp, p_rail, p_network, p_currency, date_trunc('day', p_at, 'UTC'),
+      CASE WHEN p_measure = 'sale' THEN p_count ELSE 0 END, CASE WHEN p_measure = 'sale' THEN p_amount ELSE 0 END,
+      CASE WHEN p_measure = 'refund' THEN p_count ELSE 0 END, CASE WHEN p_measure = 'refund' THEN p_amount ELSE 0 END,
+      CASE WHEN p_measure = 'chargeback' THEN p_count ELSE 0 END, CASE WHEN p_measure = 'chargeback' THEN p_amount ELSE 0 END,
+      CASE WHEN p_measure = 'fraud_chargeback' THEN p_count ELSE 0 END, CASE WHEN p_measure = 'fraud_chargeback' THEN p_amount ELSE 0 END,
+      CASE WHEN p_measure = 'fraud_report' THEN p_count ELSE 0 END, CASE WHEN p_measure = 'fraud_report' THEN p_amount ELSE 0 END)
+  ON CONFLICT (merchant_id, psp_id, network, currency, day_at) DO UPDATE SET
+      sales = d.sales + EXCLUDED.sales, sales_amount = d.sales_amount + EXCLUDED.sales_amount,
+      refunds = d.refunds + EXCLUDED.refunds, refund_amount = d.refund_amount + EXCLUDED.refund_amount,
+      chargebacks = d.chargebacks + EXCLUDED.chargebacks, chargeback_amount = d.chargeback_amount + EXCLUDED.chargeback_amount,
+      fraud_chargebacks = d.fraud_chargebacks + EXCLUDED.fraud_chargebacks, fraud_chargeback_amount = d.fraud_chargeback_amount + EXCLUDED.fraud_chargeback_amount,
+      fraud_reports = d.fraud_reports + EXCLUDED.fraud_reports, fraud_report_amount = d.fraud_report_amount + EXCLUDED.fraud_report_amount
+  $function$
+
 function billing.arm_book(text,timestamp with time zone)
   CREATE OR REPLACE FUNCTION billing.arm_book(p_armed_by text, p_armed_at timestamp with time zone)
    RETURNS void
@@ -3267,6 +3430,31 @@ function billing.capture_notification_event_log()
       PERFORM billing.queue_event_log(billing.notification_event_record(NEW));
       RETURN NEW;
   END;
+  $function$
+
+function billing.card_network(text)
+  CREATE OR REPLACE FUNCTION billing.card_network(p_brand text)
+   RETURNS text
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$
+  SELECT CASE lower(regexp_replace(coalesce(p_brand, ''), '[^A-Za-z]', '', 'g'))
+      WHEN '' THEN 'unknown'
+      WHEN 'unknown' THEN 'unknown'
+      WHEN 'visa' THEN 'visa'
+      WHEN 'mastercard' THEN 'mastercard'
+      WHEN 'mc' THEN 'mastercard'
+      WHEN 'amex' THEN 'amex'
+      WHEN 'americanexpress' THEN 'amex'
+      WHEN 'discover' THEN 'discover'
+      WHEN 'disc' THEN 'discover'
+      WHEN 'jcb' THEN 'jcb'
+      WHEN 'diners' THEN 'diners'
+      WHEN 'dinersclub' THEN 'diners'
+      WHEN 'unionpay' THEN 'unionpay'
+      WHEN 'chinaunionpay' THEN 'unionpay'
+      ELSE 'other'
+  END
   $function$
 
 function billing.catalog_authored_entitlements()
@@ -3503,6 +3691,29 @@ function billing.discard_deleted_merchant_eventlog()
   END;
   $function$
 
+function billing.dispute_network_activity()
+  CREATE OR REPLACE FUNCTION billing.dispute_network_activity()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      sign integer;
+      d record;
+  BEGIN
+      FOREACH sign IN ARRAY CASE TG_OP WHEN 'INSERT' THEN ARRAY[1] WHEN 'DELETE' THEN ARRAY[-1] ELSE ARRAY[-1, 1] END LOOP
+          IF sign < 0 THEN d := OLD; ELSE d := NEW; END IF;
+          IF d.kind = 'chargeback' THEN
+              PERFORM billing.add_network_activity(d.merchant_id, d.psp_id, d.rail, d.network, coalesce(d.currency, ''), d.chargeback_at, 'chargeback', sign, sign * coalesce(d.amount, 0));
+              IF d.reason IN ('fraud', 'unrecognized') THEN
+                  PERFORM billing.add_network_activity(d.merchant_id, d.psp_id, d.rail, d.network, coalesce(d.currency, ''), d.chargeback_at, 'fraud_chargeback', sign, sign * coalesce(d.amount, 0));
+              END IF;
+          END IF;
+      END LOOP;
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.drop_month_partitions(name,timestamp with time zone)
   CREATE OR REPLACE FUNCTION billing.drop_month_partitions(p_table name, p_before timestamp with time zone)
    RETURNS integer
@@ -3723,6 +3934,24 @@ function billing.finish_billing_restore(uuid,text,bigint)
   END;
   $function$
 
+function billing.fraud_report_network_activity()
+  CREATE OR REPLACE FUNCTION billing.fraud_report_network_activity()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      sign integer;
+      f record;
+  BEGIN
+      FOREACH sign IN ARRAY CASE TG_OP WHEN 'INSERT' THEN ARRAY[1] WHEN 'DELETE' THEN ARRAY[-1] ELSE ARRAY[-1, 1] END LOOP
+          IF sign < 0 THEN f := OLD; ELSE f := NEW; END IF;
+          PERFORM billing.add_network_activity(f.merchant_id, f.psp_id, f.rail, f.network, f.currency, f.reported_at, 'fraud_report', sign, sign * f.amount);
+      END LOOP;
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.guard_before_image()
   CREATE OR REPLACE FUNCTION billing.guard_before_image()
    RETURNS trigger
@@ -3809,8 +4038,10 @@ function billing.guard_billing_restore_receipt()
                     'destructive_actions',
                     'destructive_holds',
                     'destructive_run_before_images',
+                    'disputes',
                     'eventlog_events',
                     'failed_usage_windows',
+                    'fraud_reports',
                     'grants',
                     'host_outbox',
                     'idempotency_keys',
@@ -4386,6 +4617,32 @@ function billing.notification_event_record(billing.notification_events)
   END;
   $function$
 
+function billing.payment_network_activity()
+  CREATE OR REPLACE FUNCTION billing.payment_network_activity()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      sign integer;
+      p record;
+      measure text;
+  BEGIN
+      FOREACH sign IN ARRAY CASE TG_OP WHEN 'INSERT' THEN ARRAY[1] WHEN 'DELETE' THEN ARRAY[-1] ELSE ARRAY[-1, 1] END LOOP
+          IF sign < 0 THEN p := OLD; ELSE p := NEW; END IF;
+          measure := CASE
+              WHEN p.channel <> 'rail' OR p.rail NOT IN ('nmi', 'stripe', 'ccbill') OR p.deleted_at IS NOT NULL THEN NULL
+              WHEN p.reversal_kind IS NULL AND p.money_movement = 'rail' AND p.amount > 0 AND p.status IN ('succeeded', 'refunded') THEN 'sale'
+              WHEN p.reversal_kind = 'refund' AND p.status = 'succeeded' THEN 'refund'
+          END;
+          IF measure IS NOT NULL THEN
+              PERFORM billing.add_network_activity(p.merchant_id, p.psp_id, p.rail, billing.card_network(p.card_brand), p.currency, p.purchased_at, measure, sign, sign * abs(p.amount));
+          END IF;
+      END LOOP;
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.preserve_subscription_collection_policy()
   CREATE OR REPLACE FUNCTION billing.preserve_subscription_collection_policy()
    RETURNS trigger
@@ -4889,6 +5146,18 @@ function billing.void_ended_renewal_orders()
           ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
       END IF;
       RETURN NEW;
+  END;
+  $function$
+
+function billing.wake_dispute_responses()
+  CREATE OR REPLACE FUNCTION billing.wake_dispute_responses()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      PERFORM pg_notify('openrails_dispute_responses', TG_TABLE_SCHEMA);
+      RETURN NULL;
   END;
   $function$
 

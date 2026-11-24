@@ -42,6 +42,10 @@ type MerchantConfiguration struct {
 	// ("" default), revoke_on_any or keep.
 	ProviderRefundAccess billing.ProviderRefundAccess `json:"provider_refund_access,omitempty"`
 
+	// FraudWarningRefund decides what an actionable early fraud warning does:
+	// refund ("" default) or record.
+	FraudWarningRefund billing.FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
+
 	// DunningPolicy replaces the built-in dunning schedule. Nil ⇒
 	// collection.DefaultPolicy.
 	DunningPolicy *billing.DunningPolicy `json:"dunning_policy,omitempty"`
