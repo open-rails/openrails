@@ -14,14 +14,16 @@ import (
 
 const deferStripeFeeRead = `-- name: DeferStripeFeeRead :one
 UPDATE billing.stripe_fee_reads
-SET due_at = now() + make_interval(secs => $1::double precision),
-    attempts = attempts + 1, last_error = $2::text
-WHERE merchant_id = $3::uuid AND psp_id = $4::uuid AND ref = $5::text
-  AND due_at = $6::timestamptz
+SET due_at = CASE WHEN attempts + 1 >= $1::int THEN 'infinity'::timestamptz
+                  ELSE now() + make_interval(secs => $2::double precision) END,
+    attempts = attempts + 1, last_error = $3::text
+WHERE merchant_id = $4::uuid AND psp_id = $5::uuid AND ref = $6::text
+  AND due_at = $7::timestamptz
 RETURNING attempts
 `
 
 type DeferStripeFeeReadParams struct {
+	ParkAfter   int32
 	WaitSeconds float64
 	Error       string
 	MerchantID  uuid.UUID
@@ -31,9 +33,11 @@ type DeferStripeFeeReadParams struct {
 }
 
 // DeferStripeFeeRead: a read that failed waits, unless its object was queued
-// again since the read took it. Answers the failures so far.
+// again since the read took it; at park_after failures it waits for its
+// finding (infinity). Answers the failures so far.
 func (q *Queries) DeferStripeFeeRead(ctx context.Context, arg DeferStripeFeeReadParams) (int32, error) {
 	row := q.db.QueryRow(ctx, deferStripeFeeRead,
+		arg.ParkAfter,
 		arg.WaitSeconds,
 		arg.Error,
 		arg.MerchantID,

@@ -160,9 +160,17 @@ func TestMerchantHost(t *testing.T) {
 	})
 	t.Run("OR-J32-S05/cli-purge-queues-its-vault-cleanup", func(t *testing.T) {
 		a, _ := newPSPWorld(t)
-		_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
+		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
 		merchant := a.alpha.MerchantID().UUID()
+		feeReads := func() int {
+			var n int
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "stripe_fee_reads"}.Sanitize()+" WHERE merchant_id=$1", merchant).Scan(&n))
+			return n
+		}
+		_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "stripe_fee_reads"}.Sanitize()+" (merchant_id, psp_id, ref, kind, due_at) VALUES ($1, $2, 'ch_purged', 'payment', 'infinity')",
+			merchant, psp.ID.UUID())
+		require.NoError(t, err)
 		documents := func() []any {
 			listed, err := a.deps.Vault.Logical().ListWithContext(t.Context(), a.cfg.Vault.KVMount+"/metadata/openrails/merchants/"+merchant.String()+"/psps")
 			require.NoError(t, err)
@@ -198,6 +206,8 @@ func TestMerchantHost(t *testing.T) {
 		require.NoError(t, purge(&purged, append(confirm, "--expect-rows", strconv.Itoa(inventory.TotalRows))...))
 		require.True(t, purged.CleanupQueued)
 		require.Equal(t, inventory.TotalRows, purged.Rows)
+		require.Equal(t, 1, inventory.RowCounts["stripe_fee_reads"])
+		require.Zero(t, feeReads(), "a fee read waiting on its PSP goes with the merchant")
 		var deleted bool
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT deleted_at IS NOT NULL FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" WHERE id=$1", merchant).Scan(&deleted))
 		require.True(t, deleted, "the purge tombstones the merchant")

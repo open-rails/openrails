@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -33,7 +34,8 @@ const (
 	// CoordSource names a fee's coordinate: its source id is the balance
 	// transaction's, so each posts once whoever reads it.
 	CoordSource = "stripe_balance_transaction"
-	// UnreadFindingType is the finding a read that keeps failing raises.
+	// UnreadFindingType is the finding a read that keeps failing raises; the
+	// read waits until it is resolved.
 	UnreadFindingType = "books.fee.unread"
 
 	readBatch   = 100
@@ -49,9 +51,10 @@ var errNotYet = errors.New("stripe has no balance transaction for it yet")
 // posts once, at its balance transaction: DR processor_fees (chargeback_fees
 // for a dispute) / CR cash_clearing of the PSP, in the transaction's own
 // currency, the account's settlement currency, which may differ from the
-// charge's; a negative fee posts the other way. A read that fails waits and
-// is read again, and only ever reads (a read-only client): a fee never holds
-// up the money movement it belongs to.
+// charge's; a negative fee posts the other way. A read that fails waits,
+// doubling from a minute to a day; after eight failures it waits for its
+// books.fee.unread finding to be resolved. It only ever reads (a read-only
+// client): a fee never holds up the money movement it belongs to.
 type StripeReader struct {
 	DB     *db.DB
 	Rails  railresolve.Source
@@ -110,8 +113,8 @@ func (r *StripeReader) read(ctx context.Context, row gen.ListDueStripeFeeReadsRo
 			reason = reason[:500]
 		}
 		attempts, derr := q.DeferStripeFeeRead(ctx, gen.DeferStripeFeeReadParams{MerchantID: row.MerchantID, PspID: row.PspID, Ref: row.Ref, DueAt: row.DueAt,
-			WaitSeconds: wait(row.Attempts).Seconds(), Error: reason})
-		if errors.Is(derr, pgx.ErrNoRows) || derr == nil && attempts != unreadAfter {
+			ParkAfter: unreadAfter, WaitSeconds: wait(row.Attempts).Seconds(), Error: reason})
+		if errors.Is(derr, pgx.ErrNoRows) || derr == nil && attempts < unreadAfter {
 			return nil
 		}
 		if derr != nil {
@@ -130,12 +133,15 @@ func wait(attempts int32) time.Duration {
 	return min(time.Minute<<attempts, maxWait)
 }
 
+// unread raises the finding a parked read waits behind: approving it (its
+// recommendation is ack_resume) reads the object again.
 func unread(ctx context.Context, q *gen.Queries, row gen.ListDueStripeFeeReadsRow, reason string) error {
-	evidence, err := json.Marshal(map[string]string{"psp_id": row.PspID.String(), "ref": row.Ref, "kind": row.Kind, "error": reason})
+	evidence, err := json.Marshal(map[string]any{"psp_id": row.PspID.String(), "ref": row.Ref, "kind": row.Kind, "error": reason,
+		recommend.EvidenceKey: recommend.Recommendation{Action: recommend.ActionAckResume}.Map()})
 	if err != nil {
 		return err
 	}
-	action := "OpenRails cannot read this Stripe object's balance transactions, so its processor fees are not in the general ledger. It keeps trying daily; check the PSP's credentials and that the object exists."
+	action := "OpenRails cannot read this Stripe object's balance transactions, so its processor fees are not in the general ledger. It has stopped trying: check the PSP's credentials and that the object exists, then approve this finding to read it again."
 	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID: row.MerchantID, FindingType: UnreadFindingType, SubjectKey: row.PspID.String() + "/" + row.Ref,
 		Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,

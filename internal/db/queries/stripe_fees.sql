@@ -19,10 +19,12 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
   AND due_at = sqlc.arg(due_at)::timestamptz;
 
 -- DeferStripeFeeRead: a read that failed waits, unless its object was queued
--- again since the read took it. Answers the failures so far.
+-- again since the read took it; at park_after failures it waits for its
+-- finding (infinity). Answers the failures so far.
 -- name: DeferStripeFeeRead :one
 UPDATE billing.stripe_fee_reads
-SET due_at = now() + make_interval(secs => sqlc.arg(wait_seconds)::double precision),
+SET due_at = CASE WHEN attempts + 1 >= sqlc.arg(park_after)::int THEN 'infinity'::timestamptz
+                  ELSE now() + make_interval(secs => sqlc.arg(wait_seconds)::double precision) END,
     attempts = attempts + 1, last_error = sqlc.arg(error)::text
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND ref = sqlc.arg(ref)::text
   AND due_at = sqlc.arg(due_at)::timestamptz

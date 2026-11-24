@@ -3949,6 +3949,7 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "recommend": "github.com/open-rails/openrails/internal/reconcile/recommend",
       "slog": "log/slog",
       "strings": "strings",
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",

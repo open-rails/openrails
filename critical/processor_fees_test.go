@@ -78,7 +78,7 @@ func TestProcessorFees(t *testing.T) {
 		// A charge in euros settles in the account's dollars: its fee posts in
 		// dollars, on the settled amount (20.00 EUR at 1.1 is 22.00 USD; 2.9%
 		// + 30¢ is 94¢), and the euro books take none. A read Stripe fails
-		// waits, and the pass and the charge stand; read again, it posts.
+		// waits, and the pass and the charge stand.
 		m.p.core.SetSettlement("usd", 1.1)
 		price := mrrPlan(t, m.a.alpha, "fees-eur", billing.CreatePriceParams{UnitAmount: 20_000_000, Currency: "EUR", BillingIntervalMonths: ptr(1)})
 		buyMRRPlan(t, m.a, m.p, price, 20_000_000, "fees-eur")
@@ -87,16 +87,39 @@ func TestProcessorFees(t *testing.T) {
 		}, unavailable)
 		require.False(t, runPass(t, fleet), "a fee read that fails never fails the pass")
 		require.Equal(t, [2]int64{0, 590_000}, feeTotal(t, w, mid, "processor_fees", "USD"))
-		attempts, _ = feeRead(t, w, mid, "payment")
+		attempts, parked := feeRead(t, w, mid, "payment")
 		require.Equal(t, 1, attempts)
-		m.p.core.ClearIntercepts()
-		_, err = w.pool.Exec(t.Context(), "UPDATE "+booksTable(w, "stripe_fee_reads")+" SET due_at=now() WHERE merchant_id=$1", mid)
+		require.False(t, parked)
+
+		// The eighth failure raises books.fee.unread and the read waits for
+		// it: no pass reads it again until the finding is fixed.
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+booksTable(w, "stripe_fee_reads")+" SET attempts=7, due_at=now() WHERE merchant_id=$1", mid)
 		require.NoError(t, err)
+		require.False(t, runPass(t, fleet))
+		attempts, parked = feeRead(t, w, mid, "payment")
+		require.Equal(t, 8, attempts)
+		require.True(t, parked)
+		findings, err := m.a.alphaRemote.ListFindings(t.Context(), billing.FindingListParams{Type: "books.fee.unread"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1)
+		require.Equal(t, billing.FindingStatus("requires_review"), findings.Items[0].Status)
+		m.p.core.ClearIntercepts()
+		require.False(t, runPass(t, fleet))
+		attempts, parked = feeRead(t, w, mid, "payment")
+		require.Equal(t, 8, attempts, "a read waiting for its finding is not read")
+		require.True(t, parked)
+		require.Equal(t, [2]int64{0, 590_000}, feeTotal(t, w, mid, "processor_fees", "USD"))
+		_, err = m.a.alphaRemote.ResolveFinding(t.Context(), findings.Items[0].ID, billing.ResolveFindingParams{Outcome: billing.FindingApprove, Notes: "credentials fixed"})
+		require.NoError(t, err)
+		attempts, parked = feeRead(t, w, mid, "payment")
+		require.Zero(t, attempts)
+		require.False(t, parked)
 		require.False(t, runPass(t, fleet))
 		require.Equal(t, [2]int64{0, 590_000 + 940_000}, feeTotal(t, w, mid, "processor_fees", "USD"))
 		require.Equal(t, [2]int64{0, 0}, feeTotal(t, w, mid, "processor_fees", "EUR"))
 		require.Equal(t, 2, feeTransfers(t, w, mid, "processor_fee"))
 		require.Zero(t, queuedFeeReads(t, w, mid))
+
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+mid.String()), "Ledger integrity OK")
 	})
 	t.Run("OR-J40-S41/a-prevention-refund-reads-through-its-dispute", func(t *testing.T) {

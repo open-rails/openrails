@@ -234,6 +234,17 @@ func (q *Queries) CountMerchantRowsSolanaPayReferences(ctx context.Context, merc
 	return count, err
 }
 
+const countMerchantRowsStripeFeeReads = `-- name: CountMerchantRowsStripeFeeReads :one
+SELECT count(*) FROM billing.stripe_fee_reads WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsStripeFeeReads(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsStripeFeeReads, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsSubscriptions = `-- name: CountMerchantRowsSubscriptions :one
 SELECT count(*) FROM billing.subscriptions WHERE merchant_id = $1
 `
@@ -422,6 +433,15 @@ DELETE FROM billing.solana_pay_references WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsSolanaPayReferences(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsSolanaPayReferences, merchantID)
+	return err
+}
+
+const purgeMerchantRowsStripeFeeReads = `-- name: PurgeMerchantRowsStripeFeeReads :exec
+DELETE FROM billing.stripe_fee_reads WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsStripeFeeReads(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsStripeFeeReads, merchantID)
 	return err
 }
 

@@ -17,7 +17,7 @@ CREATE TABLE billing.stripe_fee_reads (
 );
 COMMENT ON TABLE billing.stripe_fee_reads IS 'A Stripe charge, refund or dispute whose balance transactions the general ledger has yet to read for their fees: queued by the payment or dispute that records it, read by the billing pass''s stripe_fees scan, deleted once its fees post.';
 COMMENT ON COLUMN billing.stripe_fee_reads.ref IS 'The Stripe object as the payment or dispute names it: a charge, payment intent or invoice for a payment, a refund, or a dispute.';
-COMMENT ON COLUMN billing.stripe_fee_reads.due_at IS 'When it is read next; a failed read waits longer each time, and a dispute whose status changes is read again at once.';
+COMMENT ON COLUMN billing.stripe_fee_reads.due_at IS 'When it is read next; a failed read waits longer each time, and after eight failures waits (infinity) until its books.fee.unread finding is fixed; a dispute whose status changes is read again at once.';
 
 CREATE INDEX stripe_fee_reads_due_at_idx ON billing.stripe_fee_reads (due_at, merchant_id, psp_id, ref);
 
@@ -62,6 +62,25 @@ CREATE TRIGGER payments_queue_stripe_fee_read AFTER INSERT OR UPDATE OF status, 
     FOR EACH ROW EXECUTE FUNCTION billing.queue_stripe_fee_read();
 CREATE TRIGGER disputes_queue_stripe_fee_read AFTER INSERT OR UPDATE OF status ON billing.disputes
     FOR EACH ROW EXECUTE FUNCTION billing.queue_stripe_fee_read();
+
+-- A read that kept failing is parked (due_at infinity) behind its
+-- books.fee.unread finding; resolving the finding reads it again.
+CREATE FUNCTION billing.requeue_stripe_fee_read() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
+BEGIN
+    IF NEW.finding_type <> 'books.fee.unread' OR NEW.status NOT IN ('fixed', 'auto_fixed')
+       OR OLD.status NOT IN ('reconcile_required', 'requires_review') THEN
+        RETURN NULL;
+    END IF;
+    UPDATE billing.stripe_fee_reads SET due_at = now(), attempts = 0, last_error = NULL
+     WHERE merchant_id = NEW.merchant_id AND psp_id::text = split_part(NEW.subject_key, '/', 1)
+       AND ref = substr(NEW.subject_key, length(split_part(NEW.subject_key, '/', 1)) + 2) AND due_at = 'infinity';
+    RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER reconciliation_findings_requeue_stripe_fee_read AFTER UPDATE OF status ON billing.reconciliation_findings
+    FOR EACH ROW EXECUTE FUNCTION billing.requeue_stripe_fee_read();
 
 -- A billing restore's destination holds none of the merchant's fee reads.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
