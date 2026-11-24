@@ -16,18 +16,21 @@ VALUES (sqlc.arg(merchant_id)::uuid, COALESCE(sqlc.narg(occurred_at)::timestampt
 -- result separates two observations of the same hold.
 INSERT INTO billing.operation_log
  (merchant_id,occurred_at,actor,source,object_type,object_id,action,changes,operation_id,rail,psp_id,custodian_id,subscription_id)
+-- An actor over the log's 4200 bytes keeps its first 1024 characters.
 SELECT i.merchant_id,clock_timestamp(),
- CASE
+ CASE WHEN octet_length(who.actor)<=4200 THEN who.actor ELSE left(who.actor,1024) END,
+ 'intent','provider_intent',i.id::text,'parked',
+ jsonb_strip_nulls(jsonb_build_object('version',1,'kind',i.intent_type,'attempt',i.attempts,'origin',i.origin,
+  'executor',NULLIF(sqlc.arg(executor)::text,''),'reason_code',sqlc.arg(reason_code)::text,
+  'truncated',CASE WHEN octet_length(who.actor)>4200 THEN true END)),
+ i.id,i.rail,i.psp_id,i.custodian_id,i.subscription_id
+FROM billing.provider_intents i
+CROSS JOIN LATERAL (SELECT CASE
   WHEN i.origin='admin' AND i.actor<>'' THEN 'staff:'||i.actor
   WHEN i.origin='user' AND i.actor<>'' THEN 'customer:'||i.actor
   WHEN i.origin='provider' THEN 'provider:'||i.rail
   ELSE 'system'
- END,
- 'intent','provider_intent',i.id::text,'parked',
- jsonb_strip_nulls(jsonb_build_object('version',1,'kind',i.intent_type,'attempt',i.attempts,'origin',i.origin,
-  'executor',NULLIF(sqlc.arg(executor)::text,''),'reason_code',sqlc.arg(reason_code)::text)),
- i.id,i.rail,i.psp_id,i.custodian_id,i.subscription_id
-FROM billing.provider_intents i
+ END AS actor) who
 WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.id=sqlc.arg(id)::uuid AND i.subscription_id IS NOT NULL
  AND NOT EXISTS (
   SELECT 1 FROM (

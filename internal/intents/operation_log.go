@@ -51,9 +51,15 @@ func (s *Store) LogOperation(ctx context.Context, intent gen.BillingProviderInte
 	if len(evidence) > 0 {
 		payload.Evidence = scrubOperationEvidence(evidence)
 	}
+	// An entry too large for the log is cut, never dropped: the attempt's
+	// record is what an operator reads.
+	payload, actor, err := payload.Fit(intentActor(intent))
+	if err != nil {
+		return fmt.Errorf("intents: operation log entry: %w", err)
+	}
 	// The database clock stamps it, ordering it with the holds.
 	p := history.ProvenanceAt(ctx, time.Time{})
-	p.Actor, p.Source, p.OperationID = intentActor(intent), billing.LogSourceIntent, &intent.ID
+	p.Actor, p.Source, p.OperationID = actor, billing.LogSourceIntent, &intent.ID
 	return history.WriteAhead(ctx, s.db.DataPool(), history.OperationLog, intent.MerchantID, p, history.Entry{
 		ObjectType: history.ObjectProviderIntent, ObjectID: intent.ID.String(), Action: billing.LogAction(phase), Changes: payload,
 		Address: &history.Address{Rail: intent.Rail, PSPID: intent.PspID, CustodianID: intent.CustodianID, SubscriptionID: intent.SubscriptionID},

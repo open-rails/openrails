@@ -161,17 +161,19 @@ const recordSubscriptionOperationHold = `-- name: RecordSubscriptionOperationHol
 INSERT INTO billing.operation_log
  (merchant_id,occurred_at,actor,source,object_type,object_id,action,changes,operation_id,rail,psp_id,custodian_id,subscription_id)
 SELECT i.merchant_id,clock_timestamp(),
- CASE
+ CASE WHEN octet_length(who.actor)<=4200 THEN who.actor ELSE left(who.actor,1024) END,
+ 'intent','provider_intent',i.id::text,'parked',
+ jsonb_strip_nulls(jsonb_build_object('version',1,'kind',i.intent_type,'attempt',i.attempts,'origin',i.origin,
+  'executor',NULLIF($1::text,''),'reason_code',$2::text,
+  'truncated',CASE WHEN octet_length(who.actor)>4200 THEN true END)),
+ i.id,i.rail,i.psp_id,i.custodian_id,i.subscription_id
+FROM billing.provider_intents i
+CROSS JOIN LATERAL (SELECT CASE
   WHEN i.origin='admin' AND i.actor<>'' THEN 'staff:'||i.actor
   WHEN i.origin='user' AND i.actor<>'' THEN 'customer:'||i.actor
   WHEN i.origin='provider' THEN 'provider:'||i.rail
   ELSE 'system'
- END,
- 'intent','provider_intent',i.id::text,'parked',
- jsonb_strip_nulls(jsonb_build_object('version',1,'kind',i.intent_type,'attempt',i.attempts,'origin',i.origin,
-  'executor',NULLIF($1::text,''),'reason_code',$2::text)),
- i.id,i.rail,i.psp_id,i.custodian_id,i.subscription_id
-FROM billing.provider_intents i
+ END AS actor) who
 WHERE i.merchant_id=$3::uuid AND i.id=$4::uuid AND i.subscription_id IS NOT NULL
  AND NOT EXISTS (
   SELECT 1 FROM (
@@ -195,6 +197,7 @@ type RecordSubscriptionOperationHoldParams struct {
 // The caller already updated (and therefore locked) the intent in this transaction.
 // Unknown readbacks do not end a hold. Only attempted execution or a terminal
 // result separates two observations of the same hold.
+// An actor over the log's 4200 bytes keeps its first 1024 characters.
 func (q *Queries) RecordSubscriptionOperationHold(ctx context.Context, arg RecordSubscriptionOperationHoldParams) error {
 	_, err := q.db.Exec(ctx, recordSubscriptionOperationHold,
 		arg.Executor,

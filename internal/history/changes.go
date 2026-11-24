@@ -126,15 +126,65 @@ const ObjectProviderIntent billing.LogObjectType = "provider_intent"
 
 // Operation is the payload of an operation entry: one phase of one attempt
 // of a provider intent. Reason is the outcome's, ReasonCode a hold's; both
-// and Evidence arrive scrubbed of credentials and card data.
+// and Evidence arrive scrubbed of credentials and card data. An entry too
+// large for the log keeps the start of its reason and, in EvidenceExcerpt,
+// of its evidence's JSON, and an actor too long the start of its name; it
+// says Truncated.
 type Operation struct {
-	Version        int            `json:"version"`
-	Kind           string         `json:"kind,omitempty"`
-	Attempt        int32          `json:"attempt"`
-	Origin         string         `json:"origin,omitempty"`
-	Executor       string         `json:"executor,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	Reason         string         `json:"reason,omitempty"`
-	ReasonCode     string         `json:"reason_code,omitempty"`
-	Evidence       map[string]any `json:"evidence,omitempty"`
+	Version         int            `json:"version"`
+	Kind            string         `json:"kind,omitempty"`
+	Attempt         int32          `json:"attempt"`
+	Origin          string         `json:"origin,omitempty"`
+	Executor        string         `json:"executor,omitempty"`
+	IdempotencyKey  string         `json:"idempotency_key,omitempty"`
+	Reason          string         `json:"reason,omitempty"`
+	ReasonCode      string         `json:"reason_code,omitempty"`
+	Evidence        map[string]any `json:"evidence,omitempty"`
+	EvidenceExcerpt string         `json:"evidence_excerpt,omitempty"`
+	Truncated       bool           `json:"truncated,omitempty"`
+}
+
+// The bounds an operation entry keeps within the log's: a payload whose JSON
+// exceeds MaxOperationPayload (stored with spacing that can add half again)
+// keeps MaxOperationReason characters of its reason and
+// MaxOperationEvidence of its evidence; an actor over MaxActorBytes keeps
+// MaxActorRunes characters.
+const (
+	MaxOperationPayload  = 160 << 10
+	MaxOperationReason   = 8192
+	MaxOperationEvidence = 16384
+	MaxActorBytes        = 4200
+	MaxActorRunes        = 1024
+)
+
+// Fit bounds an operation entry's payload and actor to the log's limits,
+// marking what it cut.
+func (o Operation) Fit(actor billing.LogActor) (Operation, billing.LogActor, error) {
+	if len(actor) > MaxActorBytes {
+		actor, o.Truncated = billing.LogActor(firstRunes(string(actor), MaxActorRunes)), true
+	}
+	raw, err := json.Marshal(o)
+	if err != nil || len(raw) <= MaxOperationPayload {
+		return o, actor, err
+	}
+	if o.Evidence != nil {
+		evidence, err := json.Marshal(o.Evidence)
+		if err != nil {
+			return o, actor, err
+		}
+		o.Evidence, o.EvidenceExcerpt = nil, firstRunes(string(evidence), MaxOperationEvidence)
+	}
+	o.Reason, o.Truncated = firstRunes(o.Reason, MaxOperationReason), true
+	return o, actor, nil
+}
+
+// firstRunes is s's first n characters.
+func firstRunes(s string, n int) string {
+	for i := range s {
+		if n == 0 {
+			return s[:i]
+		}
+		n--
+	}
+	return s
 }

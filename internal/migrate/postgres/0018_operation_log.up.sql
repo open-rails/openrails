@@ -59,23 +59,34 @@ CREATE TRIGGER immutable_operation_log_truncate BEFORE TRUNCATE ON billing.opera
     FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 
 -- Each mutation log row becomes one entry with its id. A row from before the
--- log named its subscription, origin or actor takes them from its intent.
+-- log named its subscription, origin or actor takes them from its intent. A
+-- row too large for the log keeps the start of its reason and of its
+-- evidence's JSON, and an actor over 4200 bytes its first 1024 characters;
+-- either says truncated.
 INSERT INTO billing.operation_log (merchant_id, id, occurred_at, actor, source, object_type, object_id, action, changes, operation_id, rail, psp_id, custodian_id, subscription_id)
 SELECT l.merchant_id, l.id, l.created_at,
+    CASE WHEN octet_length(w.actor) <= 4200 THEN w.actor ELSE left(w.actor, 1024) END,
+    'intent', 'provider_intent', COALESCE(l.operation_id, l.provider_intent_id, l.id)::text, l.phase,
+    CASE
+        WHEN octet_length(w.payload::text) > 262144 THEN (w.payload - 'reason' - 'evidence')
+            || jsonb_strip_nulls(jsonb_build_object('reason', left(l.reason, 8192), 'evidence_excerpt', left(l.evidence::text, 16384), 'truncated', true))
+        WHEN octet_length(w.actor) > 4200 THEN w.payload || '{"truncated": true}'::jsonb
+        ELSE w.payload
+    END,
+    COALESCE(l.operation_id, l.provider_intent_id), l.rail, l.psp_id, l.custodian_id, COALESCE(l.subscription_id, i.subscription_id)
+FROM billing.provider_mutation_logs l
+LEFT JOIN billing.provider_intents i ON i.merchant_id = l.merchant_id AND i.id = COALESCE(l.operation_id, l.provider_intent_id)
+CROSS JOIN LATERAL (SELECT
     CASE
         WHEN COALESCE(l.origin, i.origin) = 'admin' AND COALESCE(l.actor, i.actor) <> '' THEN 'staff:' || COALESCE(l.actor, i.actor)
         WHEN COALESCE(l.origin, i.origin) = 'user' AND COALESCE(l.actor, i.actor) <> '' THEN 'customer:' || COALESCE(l.actor, i.actor)
         WHEN COALESCE(l.origin, i.origin) = 'provider' THEN 'provider:' || l.rail
         ELSE 'system'
-    END,
-    'intent', 'provider_intent', COALESCE(l.operation_id, l.provider_intent_id, l.id)::text, l.phase,
+    END AS actor,
     (SELECT jsonb_object_agg(e.key, e.value) FROM jsonb_each(jsonb_build_object(
         'version', 1, 'kind', COALESCE(l.intent_type, i.intent_type), 'attempt', l.attempt, 'origin', COALESCE(l.origin, i.origin),
         'executor', l.executor, 'idempotency_key', l.idempotency_key, 'reason', l.reason, 'reason_code', l.reason_code,
-        'evidence', l.evidence)) e WHERE e.value <> 'null'::jsonb),
-    COALESCE(l.operation_id, l.provider_intent_id), l.rail, l.psp_id, l.custodian_id, COALESCE(l.subscription_id, i.subscription_id)
-FROM billing.provider_mutation_logs l
-LEFT JOIN billing.provider_intents i ON i.merchant_id = l.merchant_id AND i.id = COALESCE(l.operation_id, l.provider_intent_id);
+        'evidence', l.evidence)) e WHERE e.value <> 'null'::jsonb) AS payload) w;
 
 DROP TABLE billing.provider_mutation_logs;
 
