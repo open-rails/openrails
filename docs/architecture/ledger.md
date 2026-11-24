@@ -27,9 +27,9 @@ reversals post to it; card charges for products and their refunds are
   currency, type and lot it is the transfer's once-only identity.
 - **Lot**: a credit grant (`credit_grants`); a transfer that funds or draws it names it in `credit_grant_id` (a foreign key), and the legs on its balance account keep its `units_credited` and `units_debited`.
 - **Balance**: an account's `credits_posted - debits_posted`, kept by trigger.
-- **Held / available**: holds, pending refunds, unposted usage and running-charge
-  accrual live outside the ledger (`GetFinancialHeldAmount`); available is balance
-  less held.
+- **Held / available**: holds, pending refunds and running-charge accrual live
+  outside the ledger (`GetFinancialHeldAmount`), unposted usage in the event store
+  (`MoneyService.unpostedUsage`); available is balance less held.
 - **Owed**: the negated balance of the customer's `arrears_liability`
   (`Ledger.OutstandingOwed`).
 
@@ -73,12 +73,13 @@ customer row (`LockCustomerForSpend`, taken by `MoneyService.lockBalance` and `c
 | Usage order voided | `platform_revenue` → `arrears_liability` | `owed_writeoff` | `Ledger.WriteOffOwed` |
 | Purchased credit reversed or restored | through `credit_refund_clearing` | `credit_refund*` | `purchasedcredits.Service.ApplyReversal` |
 
-Usage reaches the ledger through one accrual per customer, currency, UTC day and
-pricing period (`usage_accruals`, `MoneyService.postUsageAccrualsTx`). It posts
-when its day ends, or earlier, before any other movement of that balance, each
-time at (`usage_accrual`, `usage_accrual:<id>`, next posting number): balance
-first, the rest owed. A payment that settles owed points at its transfer
-(`payments.ledger_transfer_id`).
+Usage reaches the ledger through postings (`usage_postings`,
+`MoneyService.postUsageTx`): at each month's end and before any other movement of
+that balance, per pricing period the price of the period's usage in the event
+store less what earlier postings took, at (`usage_posting`, `usage_posting:<id>`,
+`1`): balance first, the rest owed. A period whose volume price fell is credited
+back to a new lot (`usage_reversed`, `platform_revenue` → `customer_balance`). A
+payment that settles owed points at its transfer (`payments.ledger_transfer_id`).
 
 No FX: a transfer's currency must equal both accounts'. Rates
 (`internal/integrations/fx`) only price a Solana quote and convert a spend cap at
@@ -173,8 +174,8 @@ Checks:
 
 ### 7. Work scales with activity
 A balance or owed read is one counter row (`LedgerAccountBalance`); an insert
-locks two accounts and, for a lot's leg, its lot. A lot's remainder is its counters. No job scans the ledger: daily usage postings
-are found by `usage_accruals_due_idx`, balance looks are queued by crossings.
+locks two accounts and, for a lot's leg, its lot. A lot's remainder is its counters. No job scans the ledger: the month-end usage close
+finds its customers by `usage_unposted_due_at_idx`, balance looks are queued by crossings.
 `ledger-audit` reads a merchant's whole log, on demand only.
 
 Checks:

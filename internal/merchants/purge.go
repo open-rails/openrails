@@ -422,7 +422,8 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 	if cleanupPlan != nil && s.jobs == nil {
 		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: no job queue for its Vault cleanup", m.Slug)
 	}
-	if err := s.closeUsage(ctx, id); err != nil {
+	store, err := s.postUsage(ctx, id)
+	if err != nil {
 		return billing.MerchantPurge{}, fmt.Errorf("merchants: refusing to purge merchant %s: %w", m.Slug, err)
 	}
 	runID := uuid.New()
@@ -517,6 +518,12 @@ func (s *Service) Purge(ctx context.Context, id billing.MerchantID, params billi
 		s.config.Forget(id)
 	}
 	s.changed(id)
+	// The event store forgets the merchant's usage; what posted stays.
+	if store != nil {
+		if err := store.DeleteMerchant(merchant.WithID(ctx, id)); err != nil {
+			return billing.MerchantPurge{}, fmt.Errorf("merchants: purged merchant %s; its usage in the event store is not deleted, purge it again: %w", m.Slug, err)
+		}
+	}
 	return billing.MerchantPurge{RunID: billing.RunID(runID), Rows: total, CleanupQueued: cleanupPlan != nil}, nil
 }
 
@@ -554,9 +561,9 @@ func (s *Service) existingMerchantTables(ctx context.Context) ([]string, error) 
 	return out, nil
 }
 
-// closeUsage posts the merchant's usage the ledger has not taken, whose
-// money the purge keeps, then deletes its usage from the event store.
-func (s *Service) closeUsage(ctx context.Context, id billing.MerchantID) error {
+// postUsage posts the merchant's usage the ledger has not taken, whose money
+// the purge keeps, and answers the event store its usage is deleted from.
+func (s *Service) postUsage(ctx context.Context, id billing.MerchantID) (*eventstore.Store, error) {
 	var store *eventstore.Store
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -577,8 +584,5 @@ func (s *Service) closeUsage(ctx context.Context, id billing.MerchantID) error {
 		}
 		return nil
 	})
-	if err != nil || store == nil {
-		return err
-	}
-	return store.DeleteMerchant(merchant.WithID(ctx, id))
+	return store, err
 }

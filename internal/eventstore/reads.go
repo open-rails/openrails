@@ -341,3 +341,15 @@ func (s *Store) LastUsageDays(ctx context.Context, eventTypes []string) (map[str
 	})
 	return out, err
 }
+
+// LimitUsed reports whether usage of the merchant has counted toward a limit.
+func (s *Store) LimitUsed(ctx context.Context, key string) (bool, error) {
+	mid, err := s.merchant(ctx)
+	if err != nil {
+		return false, err
+	}
+	var used bool
+	err = s.query(ctx, "read limit usage", "SELECT count() > 0 FROM (SELECT 1 FROM {database}.limit_usage WHERE merchant_id = "+mid+
+		" AND limit_key = "+stringLiteral(key)+" LIMIT 1)", func(rows interface{ Scan(...any) error }) error { return rows.Scan(&used) })
+	return used, err
+}

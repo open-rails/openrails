@@ -26,11 +26,11 @@ A customer's prepaid balance in a currency is a set of credit lots: staff grants
 ### Spending
 
 - An admission holds its estimate against available. A capture
-  (`MoneyService.CaptureAdmission`) closes the hold and adds the priced usage to
-  the day's `usage_accruals` row, which stays held until it posts; a release
+  (`MoneyService.CaptureAdmission`) closes the hold and takes its usage into the
+  event store, held as the customer's unposted usage until it posts; a release
   returns the hold (OR-J22-S01).
-- A posting (`postUsageAccrualsTx`, running-charge postings) runs `spendBalanceThenOwedTx`. The balance leg is capped at what the spendable lots have available (`ListSpendableCreditLots`: started, not lapsed, not revoked, with units left, `credit_grants_live_idx`), and `credits.Lots.Spend` draws them soonest expiry first, one `credit_spend` per lot at the posting's coordinate. The rest is `owed_accrual` plus `owed_items`. A posting of admitted usage is never re-gated (`preAuthorized`): beyond the balance it is owed even without a credit line.
-- Unposted usage posts before a deposit. Before a lot is expired, revoked or refunded, the running charges and usage that accrued while it lived post first (`SettleRunningCharges`, through the `credits.PostRunningCharges` and `credits.PostUsageAccruals` hooks the money package installs).
+- A posting (`postUsageTx`, running-charge postings) runs `spendBalanceThenOwedTx`. The balance leg is capped at what the spendable lots have available (`ListSpendableCreditLots`: started, not lapsed, not revoked, with units left, `credit_grants_live_idx`), and `credits.Lots.Spend` draws them soonest expiry first, one `credit_spend` per lot at the posting's coordinate. The rest is `owed_accrual` plus `owed_items`. A posting of admitted usage is never re-gated (`preAuthorized`): beyond the balance it is owed even without a credit line.
+- Unposted usage posts before a deposit. Before a lot is expired, revoked or refunded, the running charges and usage that accrued while it lived post first (`SettleRunningCharges`, through the `credits.PostRunningCharges` hook and the usage ledger the runtime binds, `db.UsageLedger`).
 
 ### Lapse
 
@@ -136,7 +136,7 @@ Checks:
 - A new grant state, funding source or catalog field adds a value without renaming one.
 
 ### 6. Data lifecycle
-`credit_grants`, `credit_grant_events` and `usage_accruals` are permanent; `balance_watches` and `customer_low_balance_lines` are state. `limit_holds` and `limit_hold_parts` are partitioned by month, and the held total names a range: `created_at` and `hold_created_at` at or after `limits.HeldSince`.
+`credit_grants`, `credit_grant_events` and `usage_postings` are permanent; `balance_watches` and `customer_low_balance_lines` are state. `limit_holds` and `limit_hold_parts` are partitioned by month, and the held total names a range: `created_at` and `hold_created_at` at or after `limits.HeldSince`.
 
 Checks:
 - Those classes are in `internal/retention/tables.go` and the table comments.
@@ -146,7 +146,7 @@ Checks:
 - A restore inserts lots with their counters; `check_billing_restore_credit_grants` proves them against the restored legs and events at commit.
 
 ### 7. Work scales with activity
-Looks are queued by crossings; due watches are read by `balance_watches_next_check_at_idx` and daily postings by `usage_accruals_due_idx`. Lot reads are per customer and currency, and read a lot's columns, not its transfers: exhausted and revoked lots leave `credit_grants_live_idx`, and reservations are read by `credit_grants_reserved_idx`.
+Looks are queued by crossings; due watches are read by `balance_watches_next_check_at_idx` and month-end usage postings by `usage_unposted_due_at_idx`. Lot reads are per customer and currency, and read a lot's columns, not its transfers: exhausted and revoked lots leave `credit_grants_live_idx`, and reservations are read by `credit_grants_reserved_idx`.
 
 Checks:
 - `ListDueBalanceWatches` and `ListDueUsageAccruals` filter on the due instant and

@@ -16,6 +16,7 @@ import (
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/catalogrules/syntax"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/limits"
@@ -129,6 +130,11 @@ func writeLimit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, curre
 		used, err := q.CatalogLimitHasWindows(ctx, gen.CatalogLimitHasWindowsParams{MerchantID: merchantID, LimitKey: next.Key})
 		if err != nil {
 			return err
+		}
+		if store := db.EventStoreOf(q); !used && store != nil {
+			if used, err = store.LimitUsed(ctx, next.Key); err != nil {
+				return err
+			}
 		}
 		if used {
 			return apperr.Conflictf("limit %q has windows counted in %s; it keeps its unit", next.Key, current.Unit).WithParam("unit")
