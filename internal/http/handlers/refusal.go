@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -15,16 +16,28 @@ import (
 // Any other error is an internal failure: a stable message, the cause logged
 // against the request id, never raw driver text.
 func writeRefusal(r *httprequest.Request, err error, internalMessage string) {
-	var limited *destructive.UserActionRateError
-	if errors.As(err, &limited) {
-		r.SetHeader("Retry-After", strconv.FormatInt(limited.RetryAfterSeconds, 10))
-	}
+	setRetryAfter(r, err)
 
 	if out := refusalOf(err); out != nil {
 		r.APIError(out)
 		return
 	}
 	r.InternalError(internalMessage, err)
+}
+
+// setRetryAfter names when a refused destructive command may be tried again:
+// a customer action limit's rolling window, or a hold's next look.
+func setRetryAfter(r *httprequest.Request, err error) {
+	var limited *destructive.UserActionRateError
+	var budget *destructive.BudgetError
+	switch {
+	case errors.As(err, &limited):
+		r.SetHeader("Retry-After", strconv.FormatInt(limited.RetryAfterSeconds, 10))
+	case errors.As(err, &budget):
+		r.SetHeader("Retry-After", strconv.FormatInt(budget.RetryAfterSeconds, 10))
+	case errors.Is(err, destructive.ErrHeld):
+		r.SetHeader("Retry-After", strconv.FormatInt(int64(destructive.HeldRetryAfter/time.Second), 10))
+	}
 }
 
 // refusalOf is the answer to a typed refusal, nil for any other error. A
@@ -35,6 +48,10 @@ func refusalOf(err error) *api.APIError {
 		return api.Coded(billing.CodeRateLimitExceeded, limited.Error()).WithMetadata(map[string]any{"retry_after_seconds": limited.RetryAfterSeconds})
 	}
 
+	var budget *destructive.BudgetError
+	if errors.As(err, &budget) {
+		return api.Coded(billing.CodeRateLimitExceeded, budget.Error()).WithMetadata(map[string]any{"retry_after_seconds": budget.RetryAfterSeconds})
+	}
 	if errors.Is(err, destructive.ErrHeld) {
 		return api.Coded(billing.CodeRateLimitExceeded, "destructive actions are held until an authorized operator clears the incident")
 	}

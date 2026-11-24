@@ -171,6 +171,14 @@ type RevokeCreditGrantParams struct {
 	Reason string `json:"reason"`
 }
 
+// ReinstateCreditGrantParams reverses a grant's revocation: the units it
+// froze return to the balance. Reinstating a live grant returns it
+// (Replayed), as does a retry under the same idempotency key; a lapsed grant
+// is not reinstated (credit_grant_unavailable).
+type ReinstateCreditGrantParams struct {
+	Reason string `json:"reason"`
+}
+
 // BalanceTransactionType is what a balance movement did.
 type BalanceTransactionType string
 
@@ -376,11 +384,9 @@ type MerchantSettings struct {
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.
 	BalanceNotices *BalanceNoticeSettings `json:"balance_notices,omitempty"`
-	// UsageGateSafeSpend lets gates keep admitting while OpenRails is
-	// unreachable: each hold names a safe amount, its money size, that its
-	// gate may spend unreserved. Off by default. Unit limits are never spent
-	// past their holds.
-	UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
+	// Accounting is how the merchant's books are dated; a patch replaces it
+	// whole.
+	Accounting *AccountingSettings `json:"accounting,omitempty"`
 	// CardVault is where new cards are saved: a card PSP's key, whose own
 	// vault (or the custodian it names) holds them, or CardVaultPlatform.
 	// Absent: each card is saved where the PSP that takes it keeps cards. It
@@ -398,6 +404,16 @@ type MerchantSettings struct {
 	// They join the currency registry for this merchant alone; operations
 	// that move money refuse them (merchant_unit_unsupported).
 	Currencies []MerchantCurrency `json:"currencies,omitempty"`
+}
+
+// AccountingSettings date a merchant's books.
+type AccountingSettings struct {
+	// Timezone is the IANA zone (Europe/Berlin) whose days and months the
+	// metrics, MRR reports and usage history group in, and at whose month
+	// ends usage posts; empty is UTC. Rollups are kept in UTC quarter hours,
+	// so a change regroups every day and month, past ones too, usage history
+	// included. Posted books keep their effective instants and never change.
+	Timezone string `json:"timezone,omitempty"`
 }
 
 // BillingPolicy declares one named billing policy (or#897). The policy says

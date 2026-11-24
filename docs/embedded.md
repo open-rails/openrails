@@ -116,7 +116,8 @@ Go. Libraries never read the environment.
 | `ProviderWriteMode` | Required. `ProviderWritesFull`, `ProviderWritesLimited` (OpenRails initiates no provider writes; customers still buy) or `ProviderWritesReadOnly` (nothing is written to any provider). |
 | `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
 | `UsageBillingEnabled` | Bills owed usage automatically ([usage](client.md#usage-and-running-charges)). Deploy every worker first. |
-| `Database` | `DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews idempotency leases (default 4), part of your connection budget. |
+| `Database` | `DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
+| `ClickHouse` | `ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)). |
 | `PublicBillingBaseURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
 | `ReturnOrigins` | Origins a buyer may return to after a redirect step (`returnUrl`). |
@@ -126,7 +127,7 @@ Go. Libraries never read the environment.
 | `RateLimits` | Per-minute buckets on customer routes (`purchase`, `subscribe`, `payment`, `webhook`, `catalog-ask`): nil is the built-in set, empty is none. |
 | `Captcha` | `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`): challenges a subject at 3× a bucket's limit. |
 | `UserActionRateLimit` | The merchant-wide budget for customer cancellations and card removals. |
-| `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)). |
+| `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)), and each merchant's own budget for SCIM contact erasures (`ErasurePerHour`, `ErasurePerDay`). |
 | `Vault` | `KVMount` (merchant configuration in Vault), `ScopePrefix`, `TransitMount` (Solana signing). The client is `Deps.Vault`. |
 | `CardVault`, `HyperSwitch` | A platform card vault and HyperSwitch ([custody](client.md#merchant-configuration-and-psps)). |
 | `Solana` | The deployment's crankers: they publish plans and pull renewals. Without one, Solana rebilling is off. |
@@ -151,6 +152,7 @@ and closes none.
 | `PostgresSession` | A direct-connection `*pgxpool.Config` when `Postgres` goes through a transaction pooler ([PgBouncer](#pgbouncer)). |
 | `Redis` | Abuse state (rate limits, lockouts, captcha, card-testing declines, spent DPoP proofs) shared across instances. Without it each process counts alone: right for one instance. No money path needs Redis. |
 | `Vault` | A logged-in `*vaultapi.Client` (`helpers/vault`'s session); you keep it logged in, and `Config.Vault` names its mounts. |
+| `ClickHouse` | The event store usage needs, a `driver.Conn` from `github.com/ClickHouse/clickhouse-go/v2` (native protocol). Nil turns usage off ([event store](#event-store)). |
 | `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo` or SCIM. |
 | `MessageRenderer` | Renders customer messages in your code: content it returns true for is sent instead of the merchant's templates, and an error is retried. Nil renders every message from the templates. |
 | `Logger` | A `*slog.Logger`; nil is `slog.Default()`, read once in `New`. OpenRails never changes your logger or the default, and never logs secrets, card data or SQL arguments. |
@@ -161,6 +163,19 @@ and closes none.
 | `StripeTransport`, `NMITransport`, `BasisTheoryTransport`, `FXTransport`, `Clock` | Test seams; refused beside a live PSP. |
 
 `Deps` holds no auth: your `Routes.Auth` guards what you mount.
+
+## Event store
+
+Usage needs an event store on ClickHouse: `Deps.ClickHouse`, with `Config.ClickHouse.Database` naming its database. Money stays in PostgreSQL. Whether `Deps.ClickHouse` is set decides what is served; no setting does.
+
+- **With ClickHouse:** usage reporting (`SyncLeases`, admissions, the `Gate`), meters, limits, usage rate cards, spend windows, failed-usage grace and cutoffs, the accrual-rate cap, usage history and usage metrics.
+- **With PostgreSQL only:** subscriptions, one-time purchases, carts and checkout, entitlements, credit packs and balances, running charges, usage orders (billing what running charges leave owed), customer messages and the books.
+
+Without ClickHouse every usage route stays mounted and answers 409 `event_store_required` once its caller is authenticated, and the `Client`'s methods return the same error (`billing.ErrEventStoreRequired`). `ApplyCatalog` refuses a document declaring meters, limits, a product's `limits` or `rate_cards`, and `UpdateMerchantConfiguration` refuses the settings only usage reads. `NewGate` over the engine returns `billing.ErrEventStoreRequired`. Meters and limits already stored stay dormant: `New` names them in one log line and a `consistency.dormant_usage` finding, and the next document `ApplyCatalog` applies removes them. `GET /v1/config` reports `usage: false`.
+
+`New` creates or upgrades the ClickHouse database as it does PostgreSQL's schemas, and records the store's identity in PostgreSQL when one first attaches. It refuses a ClickHouse with another identity, an empty or different one, under a database that has used one, and refuses to start without ClickHouse while PostgreSQL holds usage the ledger has not taken (`billing.ErrEventStoreRequired`, naming the merchants): only the store can post it. You open and close the connection.
+
+Usage posts to the ledger at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass, and before any other movement of a customer's balance ([usage](client.md#usage-and-running-charges)), so up to a month of usage lives only in ClickHouse: back it up nightly as you back up PostgreSQL ([backups](standalone.md#backup-and-restore)). While ClickHouse is out of reach, syncs and admissions answer 503 `service_unavailable` and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 
 ## Merchants
 
@@ -200,6 +215,7 @@ The catalog has its own lifecycle: `New` never applies one ([catalog](client.md#
 one instance migrates, the rest wait. To migrate as a deploy step instead, run
 `openrails.Migrate(ctx, pool, cfg.Database)` (or `openrails migrate up`) and set
 `DatabaseConfig.SkipMigrations` on the servers, which then only check the ledger.
+With an event store, also run `openrails.MigrateClickHouse(ctx, conn, cfg.ClickHouse)`; `SkipMigrations` checks its migrations too.
 
 - An older build boots on a schema a newer one migrated (it leaves unknown
   migrations alone), so rolling upgrades work in both directions within v1.
@@ -257,6 +273,7 @@ and no sticky session.
   NTP-synchronized.
 - **Redis** (`Deps.Redis`) holds the abuse state. A Redis that stops answering
   costs sharing, not service: each instance counts in memory meanwhile.
+- **ClickHouse** (`Deps.ClickHouse`) is the event store: every instance uses the same database.
 - **Background work** runs on every instance with workers, each job on one.
   River's leader schedules periodic work; a crashed leader is replaced within
   about 20 seconds.
@@ -267,23 +284,18 @@ and no sticky session.
   and clocks within five minutes, and share periodic passes through leases in
   `periodic_leases`.
 
-Size PostgreSQL `max_connections` for every pool, plus `DatabaseConfig.LeaseConns`
-per instance, plus one per instance for each listener: customer messages, dispute responses and, with Vault configuration, configuration edits.
+Size PostgreSQL `max_connections` for every pool, plus `DatabaseConfig.LeaseConns` per instance, plus each instance's direct sessions:
+
+- **Listeners**, held while the instance runs: five on an instance running workers (unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes), and on every instance one for configuration edits with Vault configuration.
+- **Short session locks**: one while a usage policy write runs, one while a billing import lands, and `New`'s migration pool while it migrates.
+
+The billing pass and a merchant's pulls hold no session: each holds a lease row, renewed on the lease pool while it runs and lapsing within two minutes of its holder dying.
 
 ## PgBouncer
 
-With transaction pooling, give `Postgres` the PgBouncer pool and set
-`poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe` on
-it; set `PostgresSession` to a `pgxpool.ParseConfig` result for the same database
-and role through PostgreSQL's direct endpoint. OpenRails scopes the merchant to
-each transaction and uses direct sessions for migrations, listeners and session
-locks. Its own River workers poll in this mode; a host fleet on the PgBouncer
-pool sets `river.Config.PollOnly`.
+With transaction pooling, give `Postgres` the PgBouncer pool and set `poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe` on it; set `PostgresSession` to a `pgxpool.ParseConfig` result for the same database and role through PostgreSQL's direct endpoint. OpenRails scopes the merchant to each transaction, and everything else it runs, leases included, goes through the pooler. `PostgresSession` serves only the listeners and short session locks above: each instance's direct floor is five sessions with workers, one more with Vault configuration. Its own River workers poll in this mode; a host fleet on the PgBouncer pool sets `river.Config.PollOnly`.
 
-`LISTEN` needs a session: a transaction-pooled connection drops its
-notifications. Without `PostgresSession` the listeners (customer messages,
-dispute responses, configuration edits) run on the `Postgres` pool, so behind
-PgBouncer that pool must be in session mode.
+`LISTEN` needs a session: a transaction-pooled connection drops its notifications. Without `PostgresSession` the listeners dial with the `Postgres` pool's settings, so behind PgBouncer that pool must be in session mode.
 
 ## Routes
 

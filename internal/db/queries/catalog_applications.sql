@@ -2,7 +2,7 @@
 SELECT catalog_revision FROM billing.merchants WHERE id=sqlc.arg(merchant_id)::uuid;
 
 -- name: LockCatalogRevision :one
-SELECT catalog_revision FROM billing.merchants WHERE id=sqlc.arg(merchant_id)::uuid FOR UPDATE;
+SELECT catalog_revision FROM billing.merchants WHERE id=sqlc.arg(merchant_id)::uuid FOR NO KEY UPDATE;
 
 -- name: AdvanceCatalogRevision :one
 UPDATE billing.merchants SET catalog_revision=catalog_revision+1 WHERE id=sqlc.arg(merchant_id)::uuid RETURNING catalog_revision;

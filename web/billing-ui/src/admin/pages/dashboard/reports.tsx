@@ -315,7 +315,7 @@ function DailyReport({ range }: { range: DashboardRange }) {
     <ReportCard
       title={adminText("Daily subscriptions")}
       description={adminText(
-        "Subscriptions started and canceled each day (UTC), newest first."
+        "Subscriptions started and canceled each day in the accounting timezone, newest first."
       )}
       canDownload={rows.length > 0}
       onDownload={() => {
@@ -410,7 +410,7 @@ function MonthlyReport({ range }: { range: DashboardRange }) {
     <ReportCard
       title={adminText("Monthly renewals")}
       description={adminText(
-        "Renewal payments, cancellations and churn each calendar month (UTC); churn is the month's cancellations over the subscriptions it began with."
+        "Renewal payments, cancellations and churn each calendar month in the accounting timezone; churn is the month's cancellations over the subscriptions it began with."
       )}
       canDownload={rows.length > 0}
       onDownload={() => {

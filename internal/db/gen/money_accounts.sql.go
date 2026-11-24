@@ -22,9 +22,17 @@ SELECT
              WHERE hp.merchant_id = a.merchant_id AND hp.customer_id = a.customer_id AND hp.limit_key = 'balance'
                AND lh.currency = a.currency AND lh.state = 'open'
                AND hp.hold_created_at >= $1::timestamptz AND lh.created_at >= $1::timestamptz
-               AND CASE WHEN lh.request_id IS NOT NULL THEN lh.expires_at > $2::timestamptz
-                   ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
+               AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > $2::timestamptz
+                   ELSE lh.created_at > $3::timestamptz OR EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
                        AND l.closed_at IS NULL AND l.last_sync_at > $3::timestamptz) END), 0)
+     -- What live gates other than except_lease report in flight of the balance.
+     + COALESCE((SELECT SUM(f.amount)
+              FROM billing.lease_in_flight f
+              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+             WHERE f.merchant_id = a.merchant_id AND f.customer_id = a.customer_id
+               AND f.limit_key = 'balance' AND f.unit = a.currency
+               AND l.closed_at IS NULL AND l.last_sync_at > $3::timestamptz
+               AND ($4::uuid IS NULL OR f.lease_id <> $4::uuid)), 0)
      -- What pending refunds reserve of a purchased lot, up to its units left.
      -- Retired credit funds its refund from the retired account; an unswept
      -- lapsed lot is entirely unavailable.
@@ -33,11 +41,6 @@ SELECT
        FROM billing.credit_grants g
        WHERE g.merchant_id = a.merchant_id AND g.customer_id = a.customer_id AND g.unit = a.currency
          AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
-     -- What the customer's usage accrued and the ledger has not taken.
-     + COALESCE((SELECT SUM(ua.amount - ua.posted_amount)
-              FROM billing.usage_accruals ua
-             WHERE ua.merchant_id = a.merchant_id AND ua.customer_id = a.customer_id AND ua.currency = a.currency
-               AND ua.amount > ua.posted_amount), 0)
      -- What the customer's running charges have accrued and not posted.
      + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $2::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
@@ -58,11 +61,11 @@ LEFT JOIN billing.ledger_accounts ar
   ON ar.merchant_id = a.merchant_id
  AND ar.customer_id = a.customer_id
  AND ar.currency = a.currency
- AND ar.account_type = 'arrears_liability'
-WHERE a.merchant_id = $4::uuid
-  AND a.customer_id = $5::uuid
-  AND a.currency = $6::text
-  AND a.account_type = 'customer_balance'
+ AND ar.account_type = 'customer_owed'
+WHERE a.merchant_id = $5::uuid
+  AND a.customer_id = $6::uuid
+  AND a.currency = $7::text
+  AND a.account_type = 'customer_units'
 LIMIT 1
 `
 
@@ -70,6 +73,7 @@ type GetAdmissionCapacityParams struct {
 	HeldSince      time.Time
 	AsOf           time.Time
 	LeaseLiveSince time.Time
+	ExceptLease    *uuid.UUID
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
 	Currency       string
@@ -84,7 +88,7 @@ type GetAdmissionCapacityRow struct {
 	OutstandingOwed     int64
 }
 
-// Hot-path affordability snapshot for service admit: customer_balance counters,
+// Hot-path affordability snapshot for service admit: customer_units counters,
 // the held total, money_settings (missing = prepaid, no credit line) and
 // outstanding owed.
 func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapacityParams) (GetAdmissionCapacityRow, error) {
@@ -92,6 +96,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 		arg.HeldSince,
 		arg.AsOf,
 		arg.LeaseLiveSince,
+		arg.ExceptLease,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
@@ -233,7 +238,7 @@ SELECT DISTINCT customer_id::uuid AS customer_id, currency::text AS currency
 FROM (
     SELECT customer_id, currency FROM billing.ledger_accounts
     WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
-      AND account_type = 'customer_balance'
+      AND account_type = 'customer_units'
     UNION ALL
     SELECT customer_id, currency FROM billing.money_settings
     WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
@@ -288,7 +293,7 @@ const listCustomersMoneyAccounts = `-- name: ListCustomersMoneyAccounts :many
 SELECT a.customer_id::uuid AS customer_id, a.currency, a.account_type, (a.credits_posted - a.debits_posted)::bigint AS balance
 FROM billing.ledger_accounts a
 WHERE a.merchant_id = $1::uuid AND a.customer_id = ANY($2::uuid[])
-  AND a.account_type IN ('customer_balance', 'arrears_liability')
+  AND a.account_type IN ('customer_units', 'customer_owed')
 ORDER BY a.customer_id, a.currency, a.account_type
 LIMIT $3::int
 `

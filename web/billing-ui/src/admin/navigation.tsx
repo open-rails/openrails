@@ -12,6 +12,7 @@ import {
   useAdminArea,
   useCatalogArea,
   useMerchantConfig,
+  useMeteringArea,
   useMetrics,
 } from "./lib/capabilities"
 export interface AdminNavItem {
@@ -77,7 +78,11 @@ export const coreNav: AdminNavItem[] = [
     items: [
       { title: "Products", path: "/catalog" },
       { title: "Prices", path: "/catalog/prices" },
-      { title: "Metering", path: "/catalog/metering" },
+      {
+        title: "Metering",
+        path: "/catalog/metering",
+        useVisible: useMeteringArea,
+      },
     ],
   },
   {

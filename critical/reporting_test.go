@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -31,6 +32,91 @@ func TestReporting(t *testing.T) {
 	t.Run("OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement", consolidatedMeasures)
 	t.Run("OR-J53-S02/the-overview-validates-for-every-profile-answers-for-an-empty-merchant-and-switches-currency", healthOverview)
 	t.Run("OR-J53-S03/money-never-sums-across-currencies", moneyPerCurrency)
+	t.Run("OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day", accountingDays)
+	t.Run("OR-J53-S05/a-day-chart-across-a-midnight-clock-change-has-one-row-per-local-day", midnightTransition)
+}
+
+// Santiago moved its clocks from midnight to 01:00 on 2026-09-06: that day
+// starts at the transition. A sale at 01:30 counts on it, and a day chart
+// across it has one row per date, each starting at its first instant.
+func midnightTransition(t *testing.T) {
+	before, after := time.FixedZone("-04", -4*3600), time.FixedZone("-03", -3*3600)
+	sold := time.Date(2026, 9, 6, 1, 30, 0, 0, after)
+	a, p := newPaymentWorld(t, func(w *world) {
+		w.clock.Advance(sold.Sub(w.clock.Now()))
+		m := cfgMerchant(w.cfg, "alpha")
+		m.Accounting = &billing.AccountingSettings{Timezone: "America/Santiago"}
+		setCfgMerchant(&w.cfg, "alpha", m)
+	})
+	sellOnce(t, a, p, "after-the-change", "USD", 10_000_000)
+	cash := map[string]int64{}
+	var days []string
+	for _, row := range metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"time"}, Grain: "day",
+		Range: &billing.MetricsRange{From: "2026-09-05", To: "2026-09-07"}, Filters: map[string][]string{"currency": {"USD"}}}) {
+		day := fmt.Sprint(row["time"])
+		days = append(days, day)
+		cash[day] = whole(t, row["cash"])
+	}
+	at := func(day time.Time) string { return day.UTC().Format(time.RFC3339) }
+	require.ElementsMatch(t, []string{
+		at(time.Date(2026, 9, 5, 0, 0, 0, 0, before)), at(time.Date(2026, 9, 6, 1, 0, 0, 0, after)), at(time.Date(2026, 9, 7, 0, 0, 0, 0, after)),
+	}, days, "one row per local day, the changed one from its transition")
+	require.Equal(t, int64(10_000_000), cash[at(time.Date(2026, 9, 6, 1, 0, 0, 0, after))])
+
+	// Measures read from rollups kept per UTC date say so.
+	schema, err := a.alpha.GetMetricsSchema(t.Context())
+	require.NoError(t, err)
+	utc := map[string]bool{}
+	for _, m := range schema.Measures {
+		utc[m.Name] = m.UTCDays
+	}
+	require.True(t, utc["webhook_rejects"])
+	require.True(t, utc["nmi_history_authorizations"])
+	require.False(t, utc["cash"])
+}
+
+// A sale at 23:30 in Honolulu, ten hours behind UTC all year, falls on the
+// next UTC day; a merchant keeping its books there sees it on its own day.
+func accountingDays(t *testing.T) {
+	honolulu, err := time.LoadLocation("Pacific/Honolulu")
+	require.NoError(t, err)
+	before := time.Now().In(honolulu).AddDate(0, 0, -2)
+	sold := time.Date(before.Year(), before.Month(), before.Day(), 23, 30, 0, 0, honolulu)
+	a, p := newPaymentWorld(t, func(w *world) {
+		w.clock.Advance(sold.Sub(w.clock.Now()))
+		m := cfgMerchant(w.cfg, "alpha")
+		m.Accounting = &billing.AccountingSettings{Timezone: "Pacific/Honolulu"}
+		setCfgMerchant(&w.cfg, "alpha", m)
+	})
+	sellOnce(t, a, p, "late-night", "USD", 10_000_000)
+	day := time.Date(sold.Year(), sold.Month(), sold.Day(), 0, 0, 0, 0, honolulu)
+	q := billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"time"}, Grain: "day",
+		Range:   &billing.MetricsRange{From: day.Format("2006-01-02"), To: day.AddDate(0, 0, 1).Format("2006-01-02")},
+		Filters: map[string][]string{"currency": {"USD"}}}
+	result, err := a.alpha.QueryMetrics(t.Context(), q)
+	require.NoError(t, err)
+	require.Equal(t, "Pacific/Honolulu", result.Timezone)
+	require.True(t, result.Range.From.Equal(day), "the range starts at the local midnight, %s", result.Range.From)
+	cash := map[string]int64{}
+	for _, row := range metricTable(t, a.alpha, q) {
+		cash[fmt.Sprint(row["time"])] = whole(t, row["cash"])
+	}
+	require.Equal(t, map[string]int64{
+		day.UTC().Format(time.RFC3339):                  10_000_000,
+		day.AddDate(0, 0, 1).UTC().Format(time.RFC3339): 0,
+	}, cash, "the sale counts on its local day")
+
+	// Usage at the same instant folds into the same local day.
+	pricedMeter(t, a.alphaRemote, catalog.RatePrice{Model: catalog.ModelPerUnit, PerUnit: &catalog.PerUnitPrice{UnitAmount: 100, DivideBy: 1}})
+	settleUsage(t, a.alphaRemote, newLease(), numbered(1, usageInput(billing.CustomerID(uuid.MustParse(a.alice.ID)), "late-night-work", 2))...)
+	units := map[string]int64{}
+	for _, row := range metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"usage_units"}, By: []string{"time"}, Grain: "day", Range: q.Range}) {
+		units[fmt.Sprint(row["time"])] = whole(t, row["usage_units"])
+	}
+	require.Equal(t, map[string]int64{
+		day.UTC().Format(time.RFC3339):                  1,
+		day.AddDate(0, 0, 1).UTC().Format(time.RFC3339): 0,
+	}, units, "usage at 23:30 counts on its local day")
 }
 
 // Alice buys a $10 daily membership and four $100 orders: one refunded $30,
@@ -92,17 +178,14 @@ func consolidatedMeasures(t *testing.T) {
 	require.Empty(t, listed.Next)
 	answered := map[string]int64{}
 	for _, attempt := range listed.Items {
-		if attempt.Category == "approved" {
-			answered["approved"]++
-		} else {
-			answered["declined"]++
-		}
+		answered[string(attempt.Outcome)]++
 	}
-	require.Equal(t, int64(2), answered["declined"])
+	require.Equal(t, int64(2), int64(len(listed.Items))-answered["approved"])
 	attempts := query([]string{"attempts"}, closed, "outcome")
 	require.Equal(t, answered, split(t, attempts, "outcome", "attempts"))
-	failure := only(t, query([]string{"attempt_failure_rate"}, closed))
-	require.InDelta(t, 2/float64(len(listed.Items)), fraction(t, failure["attempt_failure_rate"]), 1e-12)
+	rates = only(t, query([]string{"attempt_failure_rate", "authorization_rate"}, closed))
+	require.InDelta(t, 2/float64(len(listed.Items)), fraction(t, rates["attempt_failure_rate"]), 1e-12)
+	require.InDelta(t, float64(answered["approved"])/float64(answered["approved"]+answered["declined"]), fraction(t, rates["authorization_rate"]), 1e-12)
 
 	// purchases by outcome are what failed_purchases, purchase_recovery_rate
 	// and settled_purchases counted: one recovered, one failed once quiet an
@@ -120,9 +203,10 @@ func consolidatedMeasures(t *testing.T) {
 	// rebills_open, rebills_missed and rebill_first_failures.
 	require.Equal(t, map[string]int64{"open": 1}, split(t, query([]string{"rebills"}, inDunning, "outcome"), "outcome", "rebills"))
 	require.Equal(t, map[string]int64{"missed": 1}, split(t, query([]string{"rebills"}, inDunning, "first_outcome"), "first_outcome", "rebills"))
-	open := only(t, query([]string{"rebills", "rebill_rate", "rebill_first_failure_rate"}, inDunning))
+	open := only(t, query([]string{"rebills", "rebill_rate", "rebill_first_failure_rate", "first_try_rebill_approval_rate"}, inDunning))
 	require.Nil(t, open["rebill_rate"], "no renewal has closed")
 	require.InDelta(t, 1.0, fraction(t, open["rebill_first_failure_rate"]), 1e-12)
+	require.Nil(t, open["first_try_rebill_approval_rate"], "a missed renewal had no first attempt")
 	require.Equal(t, map[string]int64{"lost": 1}, split(t, query([]string{"rebills"}, closed, "outcome"), "outcome", "rebills"))
 	lost := only(t, query([]string{"rebill_rate", "dunning_recovery_rate"}, closed))
 	require.InDelta(t, 0.0, fraction(t, lost["rebill_rate"]), 1e-12)

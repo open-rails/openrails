@@ -212,8 +212,8 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NotNil(t, health["openrails.billing_pass"].LastCompletedAt)
 		require.NotNil(t, health["openrails.billing_pass"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.billing_pass"].PeriodSeconds)
-		for _, scan := range []string{"openrails.usage_accruals", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.order_expiry",
-			"openrails.rebill_watch", "openrails.nmi_history", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
+		for _, scan := range []string{"openrails.usage_close", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.order_expiry",
+			"openrails.revenue_recognition", "openrails.rebill_watch", "openrails.nmi_history", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
 			require.NotContains(t, health, scan, "a scan runs in the billing pass; it is no job kind")
 		}
 		require.NotContains(t, health, "openrails.operation_wakes")
@@ -284,7 +284,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.Contains(t, []string{"created", "requires_action"}, attempt())
 		// A gate lease that stopped syncing; it is kept 61 days past its last sync.
 		leases := pgx.Identifier{w.schema, "leases"}.Sanitize()
-		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+leases+" (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts, hold_version) VALUES ($1, $2, $3, $3, 0, '[]', 0)",
+		_, err = w.pool.Exec(t.Context(), "INSERT INTO "+leases+" (merchant_id, id, created_at, last_sync_at, settled_through_n, receipts) VALUES ($1, $2, $3, $3, 0, '[]')",
 			w.alpha.MerchantID().UUID(), uuid.New(), w.clock.Now())
 		require.NoError(t, err)
 		leaseCount := func() int {

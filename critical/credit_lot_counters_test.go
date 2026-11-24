@@ -107,6 +107,7 @@ func lotViewEqualsLedger(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, captured[0].Err())
 	// A deposit posts the accrued usage first.
+	a.clock.Advance(time.Second)
 	topUp, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "post-the-usage"}})
 	require.NoError(t, err)
 	balance(t, a.alpha, m.customer, 31_000_000, 0, 31_000_000)
@@ -131,7 +132,7 @@ func lotViewEqualsLedger(t *testing.T) {
 	balance(t, a.alpha, m.customer, 30_000_000, 0, 30_000_000)
 
 	// Revocation.
-	revoked, err := a.alpha.RevokeCreditGrant(t.Context(), revocable[0].ID, billing.RevokeCreditGrantParams{Reason: "Promotion withdrawn"})
+	revoked, err := a.alpha.RevokeCreditGrant(t.Context(), "", revocable[0].ID, billing.RevokeCreditGrantParams{Reason: "Promotion withdrawn"})
 	require.NoError(t, err)
 	require.Equal(t, billing.CreditGrantRevoked, revoked.State)
 	require.NotNil(t, revoked.RevokedAt)
@@ -248,8 +249,8 @@ func unpostedDepositNotSpendable(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, spent[0].Err())
 	fleet := startFleet(t, w)
-	nextDay(w)
-	postDays(t, fleet)
+	nextMonth(w)
+	closeMonths(t, fleet)
 	balance(t, w.alpha, customer, 0, 0, 0)
 	lot = lotMatchesLedger(t, w, billing.CreditGrantID(unposted))
 	require.Zero(t, lot.SpentAmount, "the spend never draws a lot with no units")
@@ -352,4 +353,19 @@ func usageOrderChangeIsBought(t *testing.T) {
 	require.EqualValues(t, 6_299, *change.PaidAmount, "bought at face")
 	lotMatchesLedger(t, a.world, change.ID)
 	balance(t, a.alpha, customer, 6_299, 0, 6_299)
+	// Recorded before its payment, the change's price is deferred from that
+	// payment once it is: the commit's check passed.
+	require.Equal(t, []int64{6_299}, lotLegs(t, a.world, change.ID, "cash_applied"))
+	deferred, released := lotMoney(t, a.world, change.ID)
+	require.EqualValues(t, 6_299, deferred)
+	require.Zero(t, released)
+	require.EqualValues(t, 3_703_701, glBalance(t, a.world, "unapplied_cash"), "the order's share of the $3.71 waits for its application")
+	// The change applies its payment's cash, as a bill's line would: the
+	// per-payment audit counts it.
+	var payment, issued string
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT p.id::text, t.source || ':' || t.source_id FROM "+booksTable(a.world, "payments")+" p, "+booksTable(a.world, "ledger_transfers")+" t"+
+		" WHERE p.merchant_id = $1 AND p.order_id = $2 AND t.merchant_id = $1 AND t.credit_grant_id = $3 AND t.operation = 'credit_issue'",
+		a.alpha.MerchantID().UUID(), order.ID.UUID(), change.ID.UUID()).Scan(&payment, &issued))
+	require.Equal(t, "payment:"+payment, issued)
+	booksAudited(t, a.world)
 }

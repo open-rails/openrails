@@ -1,5 +1,5 @@
--- Rating at ingest: the rate cards an event type is priced by, each
--- customer's per-period meter quantities, and the period anchor.
+-- Rating at intake: the rate cards an event type is priced by, and the
+-- period anchor.
 
 -- Every meter of an event type that has a rate card, with the card.
 -- name: ListUsageRatingCards :many
@@ -17,34 +17,13 @@ WHERE cm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND COALESCE(NULLIF(cm.event_type, ''), cm.key) = sqlc.arg(event_type)::text
 ORDER BY cm.key;
 
--- Adds quantity to a meter's period quantity and answers the new total.
--- name: AddMeterPeriodQuantity :one
-INSERT INTO billing.meter_period_quantities (
-    merchant_id, customer_id, currency, meter_key, cell, period_starts_at, quantity, created_at, updated_at
-) VALUES (
-    sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(meter_key)::text,
-    sqlc.arg(cell)::text, sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(quantity)::bigint,
-    sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
-)
-ON CONFLICT (merchant_id, customer_id, currency, meter_key, cell, period_starts_at)
-DO UPDATE SET quantity = billing.meter_period_quantities.quantity + EXCLUDED.quantity, updated_at = EXCLUDED.updated_at
-RETURNING quantity;
-
--- name: GetMeterPeriodQuantity :one
-SELECT COALESCE((
-    SELECT quantity FROM billing.meter_period_quantities
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-      AND currency = sqlc.arg(currency)::text AND meter_key = sqlc.arg(meter_key)::text
-      AND cell = sqlc.arg(cell)::text AND period_starts_at = sqlc.arg(period_starts_at)::timestamptz
-), 0)::bigint AS quantity;
-
--- A customer's first recorded activity in a currency: its first transfer or
+-- A customer's first recorded activity in a currency: its first units-book transfer or
 -- the opening of its balance account. Anniversary periods are anchored on it.
 -- name: GetCustomerPeriodAnchor :one
 SELECT LEAST(
     (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
      WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id = sqlc.arg(customer_id)::uuid
-       AND lt.currency = sqlc.arg(currency)::text),
+       AND lt.currency = sqlc.arg(currency)::text AND lt.book = 'units'),
     (SELECT a.created_at FROM billing.ledger_accounts a
      WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = sqlc.arg(customer_id)::uuid
-       AND a.currency = sqlc.arg(currency)::text AND a.account_type = 'customer_balance'))::timestamptz AS period_anchor;
+       AND a.currency = sqlc.arg(currency)::text AND a.account_type = 'customer_units'))::timestamptz AS period_anchor;

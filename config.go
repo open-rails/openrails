@@ -21,6 +21,8 @@ type Config struct {
 
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig
+	// ClickHouse names the database of the event store, Deps.ClickHouse.
+	ClickHouse ClickHouseConfig
 	// Merchants declares the merchants an embedded engine provisions on
 	// start; none leaves that to run time (a standalone server's are
 	// provisioned through its API). A slug declared twice provisions neither
@@ -129,9 +131,17 @@ type DatabaseConfig struct {
 	// maintenance is unchanged.
 	SkipMigrations bool
 	// LeaseConns caps the separate pool, copied from Deps.Postgres's
-	// configuration, that renews idempotency leases. Zero is four
-	// connections.
+	// configuration, that renews leases: idempotency claims, the billing pass
+	// and merchant pulls. Zero is four connections.
 	LeaseConns int
+}
+
+// ClickHouseConfig names the ClickHouse database the event store keeps its
+// tables in. New creates or upgrades it; with Database.SkipMigrations it only
+// checks it, and MigrateClickHouse prepares it.
+type ClickHouseConfig struct {
+	// Database holds the event store's tables. Empty is "openrails".
+	Database string
 }
 
 // RateLimitsConfig maps a feature bucket (purchase, payment, subscribe,
@@ -168,8 +178,10 @@ type UserActionRateLimitConfig struct {
 // DestructiveActionLimitsConfig is how many destructive actions staff may
 // take in a rolling hour and day before a hold stops them: each actor's, each
 // merchant's and the deployment's. The merchant and deployment limits are
-// floors that rise with active customers. Zero fields select the defaults
-// (actor 5/15, merchant 15/25, deployment 50/100).
+// floors that rise with active customers. Contact erasures keep their own
+// budget per merchant, whose floors rise with its directory; past it they
+// wait rather than fail. Zero fields select the defaults (actor 5/15,
+// merchant 15/25, deployment 50/100, erasures 100/1000).
 type DestructiveActionLimitsConfig struct {
 	ActorPerHour      int64
 	ActorPerDay       int64
@@ -177,6 +189,8 @@ type DestructiveActionLimitsConfig struct {
 	MerchantPerDay    int64
 	DeploymentPerHour int64
 	DeploymentPerDay  int64
+	ErasurePerHour    int64
+	ErasurePerDay     int64
 }
 
 // VaultConfig names the mounts OpenRails uses on Deps.Vault. A KV mount
@@ -297,6 +311,7 @@ func engineConfig(cfg Config) config.Config {
 		EngineAdmissionHold:     cfg.EngineAdmissionHold,
 		UsageBillingEnabled:     cfg.UsageBillingEnabled,
 		Database:                config.DatabaseConfig(cfg.Database),
+		ClickHouse:              config.ClickHouseConfig(cfg.ClickHouse),
 		Merchants:               cfg.Merchants,
 		PublicBillingBaseURL:    cfg.PublicBillingBaseURL,
 		ReturnOrigins:           cfg.ReturnOrigins,

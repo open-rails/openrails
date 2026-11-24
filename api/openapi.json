@@ -1611,6 +1611,7 @@
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "catalog_revision_conflict",
+          "event_store_required",
           "merchant_unit_unsupported",
           "price_not_sellable",
           "product_not_found",
@@ -1831,6 +1832,7 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "default_rate_card_not_found",
@@ -1844,7 +1846,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -2921,6 +2924,13 @@
         "description": "ListSubscriptions returns one page of the merchant's subscriptions matching params, newest first.",
         "parameters": [
           {
+            "name": "at_risk",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "canceled_after",
             "in": "query",
             "schema": {
@@ -3020,6 +3030,28 @@
                 "solana",
                 "stripe"
               ]
+            }
+          },
+          {
+            "name": "risk_reason",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "card_expiring",
+                "delinquent",
+                "needs_payment_method",
+                "past_due",
+                "unverified"
+              ]
+            }
+          },
+          {
+            "name": "scheduled_change_before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -6021,7 +6053,7 @@
           "admin"
         ],
         "operationId": "RevokeCreditGrant",
-        "description": "RevokeCreditGrant revokes a grant's unspent remainder. Revoking a revoked grant returns it with Replayed set.",
+        "description": "RevokeCreditGrant revokes a grant's unspent remainder. Revoking a revoked grant returns it with Replayed set, as does a retry under the same idempotencyKey, even after the grant was reinstated. Without a key, revoking a reinstated grant revokes it again.",
         "parameters": [
           {
             "name": "id",
@@ -6038,6 +6070,13 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -6077,6 +6116,84 @@
         },
         "x-openrails-errors": [
           "credit_grant_held",
+          "credit_grant_not_found",
+          "credit_grant_unavailable",
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/admin/credit-grants/{id}/reinstate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "ReinstateCreditGrant",
+        "description": "ReinstateCreditGrant reverses a grant's revocation: the units it froze return to the balance. Reinstating a live grant returns it with Replayed set, as does a retry under the same idempotencyKey, even after a later revocation; a lapsed grant is refused.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReinstateCreditGrantParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditGrant"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:manage",
+          "root": "root:customer:manage"
+        },
+        "x-openrails-errors": [
           "credit_grant_not_found",
           "credit_grant_unavailable",
           "invalid_param"
@@ -6679,12 +6796,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6740,12 +6859,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6801,12 +6922,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6862,12 +6985,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6948,13 +7073,15 @@
           }
         ],
         "x-openrails-auth": "customer",
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "currency_unsupported",
           "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7471,6 +7598,7 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_revision_conflict",
@@ -7481,7 +7609,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7553,13 +7682,15 @@
           "merchant": "merchant:usage:read",
           "root": "root:usage:read"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_customer_id",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7607,9 +7738,11 @@
           }
         ],
         "x-openrails-auth": "customer",
+        "x-openrails-event-store": true,
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
-          "tier:customer"
+          "tier:customer",
+          "event_store"
         ]
       }
     },
@@ -7619,7 +7752,7 @@
           "app"
         ],
         "operationId": "SyncLeases",
-        "description": "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the lease's captured usage, numbered within the lease, its wants of customers' capacity, the holds it returns and the hold versions it applied; it answers how far the usage settled (a resend is matched by lease and number), a hold or a refusal per want (capacity_held when only other gates' holds stand in the way) and whether the lease is live. The first sync under a new LeaseID creates the lease; one not synced within seconds dies and its unused capacity is released, though its usage still settles. A lease answers resends for 61 days after its last sync, and settled usage posts as one deduction per customer and UTC day.",
+        "description": "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the lease's usage, numbered within the lease, what its gate has had in flight across a sync, the request holds of the lease it releases and the customers whose views it asks for; it answers how far the usage settled (a resend is matched by lease and number), each view (where the customer stands on its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate costs requests with, and how many of the merchant's leases are live. The first sync under a new LeaseID creates the lease; a lease answers resends for 61 days after its last sync. Settled usage posts to the ledger at each month's end in the merchant's accounting zone and before any other movement of the customer's balance.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -7665,19 +7798,22 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
+          "admission_not_found",
           "currency_unsupported",
           "idempotency_key_reused",
           "invalid_param",
           "lease_not_found",
-          "lease_not_held",
+          "resource_conflict",
           "service_unavailable",
           "usage_not_priced",
           "usage_out_of_order"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7741,6 +7877,7 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "idempotency_key_reused",
@@ -7751,7 +7888,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -8191,19 +8329,6 @@
             }
           },
           {
-            "name": "category",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "maxItems": 100
-            }
-          },
-          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -8235,6 +8360,27 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "decline_cause",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "customer",
+                  "fraud",
+                  "issuer",
+                  "merchant",
+                  "processing",
+                  "unknown"
+                ]
+              },
+              "maxItems": 100
             }
           },
           {
@@ -8289,6 +8435,25 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "approved",
+                  "declined",
+                  "error",
+                  "refused"
+                ]
+              },
+              "maxItems": 100
             }
           },
           {
@@ -10527,6 +10692,7 @@
           "card_vault_unknown",
           "charge_psp_incompatible",
           "charge_psp_unknown",
+          "event_store_required",
           "invalid_param",
           "merchant_unit_unsupported",
           "platform_vault_mixed_class",
@@ -11065,7 +11231,7 @@
           "merchant_config"
         ],
         "operationId": "ImportBilling",
-        "description": "ImportBilling lands declared billing facts under the bound merchant.",
+        "description": "ImportBilling lands declared billing facts under the bound merchant. The book's cancels and the provider stops it owes are the caller's destructive actions, admitted together: a cancel of a subscription the book did not create also waits for the destructive-action switch and its PSP's cancellation cap, keeping access meanwhile.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -11115,6 +11281,7 @@
           "as_of_required",
           "invalid_param",
           "invalid_psp_reference",
+          "rate_limit_exceeded",
           "resource_conflict"
         ],
         "x-openrails-error-sets": [
@@ -11693,7 +11860,7 @@
           "merchant_config"
         ],
         "operationId": "ApplyPSPImport",
-        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
+        "description": "ApplyPSPImport lands the import's linked records as customers, payment methods, subscriptions and payments, then approves its corrections (the proposals that keep or extend access) in the caller's name. Only a person signed in, or the in-process host, applies; one holding merchant:customer:manage too approves the corrections that move a subscription's price or terms, and without it an import with one open is refused. It runs in the background. A subscription lands on the provider price mapping its plan; one whose plan is unmapped stays blocked until it is mapped (CreateProviderPrice), linked and applied again.",
         "parameters": [
           {
             "name": "id",
@@ -11740,6 +11907,7 @@
         },
         "x-openrails-person": true,
         "x-openrails-errors": [
+          "finding_not_actionable",
           "invalid_param",
           "person_required",
           "psp_import_in_progress",
@@ -12466,7 +12634,7 @@
           "merchant_config"
         ],
         "operationId": "ClearDestructiveHold",
-        "description": "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other than the one whose action opened it, holding root:admin-rate-limits:unlock and merchant configuration authority: over HTTP a self-acting human's own credential; in process the handle ActingFor names them, once the host has authenticated them.",
+        "description": "ClearDestructiveHold clears an incident after review, recording who and why. It needs a person other than the one whose action opened it, holding merchant configuration authority and root:admin-rate-limits:unlock, or for the merchant's contact-erasure hold merchant:provisioning:manage: over HTTP a self-acting human's own credential; in process the handle ActingFor names them, once the host has authenticated them.",
         "parameters": [
           {
             "name": "id",
@@ -12520,6 +12688,80 @@
           "merchant": "merchant:config:manage",
           "root": "root:config:manage"
         },
+        "x-openrails-errors": [
+          "invalid_param",
+          "permission_required",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/erasure-holds/{id}/clear": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "ClearErasureHold",
+        "description": "ClearErasureHold clears the merchant's contact-erasure hold after review, recording who and why; its waiting erasures then run. It needs a person holding merchant:provisioning:manage: over HTTP a self-acting human's own credential; in process the handle ActingFor names them.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearDestructiveHoldParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DestructiveHold"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
+        },
+        "x-openrails-person": true,
         "x-openrails-errors": [
           "invalid_param",
           "permission_required",
@@ -12631,6 +12873,7 @@
           "root": "root:metrics:read"
         },
         "x-openrails-errors": [
+          "event_store_required",
           "metrics_query_invalid",
           "service_unavailable"
         ],
@@ -13228,7 +13471,7 @@
           "merchant_config"
         ],
         "operationId": "ApproveProposals",
-        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves. idempotencyKey is required: a retry with it answers the first call's results.",
+        "description": "ApproveProposals applies 1 to 100 proposals, each in its own transaction, under one approval run that `openrails undo-run` reverses. Only a person signed in, or the in-process host, approves; a change that refunds, revokes or cancels also needs merchant:customer:manage. idempotencyKey is required: a retry with it answers the first call's results.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -13283,6 +13526,7 @@
         },
         "x-openrails-person": true,
         "x-openrails-errors": [
+          "finding_not_actionable",
           "idempotency_key_in_use",
           "idempotency_key_required",
           "idempotency_key_reused",
@@ -13366,7 +13610,7 @@
           "merchant_config"
         ],
         "operationId": "ResolveFinding",
-        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding.",
+        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding. Approving a refund, cancellation or product-access recommendation also needs what that action's own route needs: merchant:customer:manage.",
         "parameters": [
           {
             "name": "id",
@@ -13515,8 +13759,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:read",
-          "root": "root:config:read"
+          "merchant": "merchant:provisioning:read",
+          "root": "root:provisioning:read"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": null,
@@ -13573,8 +13817,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
@@ -13627,8 +13871,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
+          "merchant": "merchant:provisioning:manage",
+          "root": "root:provisioning:manage"
         },
         "x-openrails-mounted-when": "customer_provisioning",
         "x-openrails-errors": [
@@ -13668,6 +13912,14 @@
           "as_of",
           "seconds"
         ]
+      },
+      "AccountingSettings": {
+        "type": "object",
+        "properties": {
+          "timezone": {
+            "type": "string"
+          }
+        }
       },
       "AdjustCustomerLimitParams": {
         "type": "object",
@@ -13731,11 +13983,12 @@
                 "merchant:config:read",
                 "merchant:customer:manage",
                 "merchant:customer:read",
-                "merchant:customers:read",
                 "merchant:entitlements:read",
                 "merchant:events:read",
                 "merchant:metrics:read",
                 "merchant:orders:manage",
+                "merchant:provisioning:manage",
+                "merchant:provisioning:read",
                 "merchant:usage:manage",
                 "merchant:usage:read",
                 "root:admin-rate-limits:unlock",
@@ -13745,7 +13998,6 @@
                 "root:config:read",
                 "root:customer:manage",
                 "root:customer:read",
-                "root:customers:read",
                 "root:entitlements:read",
                 "root:events:read",
                 "root:merchants:delete",
@@ -13753,6 +14005,8 @@
                 "root:merchants:restore",
                 "root:metrics:read",
                 "root:orders:manage",
+                "root:provisioning:manage",
+                "root:provisioning:read",
                 "root:usage:manage",
                 "root:usage:read",
                 "root:worker-health:read"
@@ -13820,7 +14074,6 @@
                 "enum": [
                   "accrual_rate_cap_reached",
                   "budget_exceeded",
-                  "capacity_held",
                   "delegated_spend_not_allowed",
                   "delinquent_unpaid_order",
                   "failure_rate_limited",
@@ -14093,6 +14346,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "lease_id": {
+            "type": "string"
           }
         }
       },
@@ -14396,12 +14652,12 @@
               }
             ]
           },
-          "rate_cards": {
+          "counts": {
             "oneOf": [
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/LimitRateCard"
+                  "$ref": "#/components/schemas/LimitCount"
                 }
               },
               {
@@ -19070,6 +19326,7 @@
               "embed_origins_required",
               "entitlement_required",
               "event_cursor_expired",
+              "event_store_required",
               "finding_action_failed",
               "finding_not_actionable",
               "finding_requires_merchant_config",
@@ -19725,241 +19982,21 @@
           "truncated"
         ]
       },
-      "Hold": {
+      "InFlight": {
         "type": "object",
         "properties": {
           "customer_id": {
             "type": "string"
           },
-          "limit_set": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "limits": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HoldLimit"
-            }
-          },
-          "rate_cards": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HoldRateCard"
-            }
-          },
-          "price_bounds": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PriceBound"
-            }
-          },
-          "safe": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "version": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "customer_id",
-          "limit_set",
-          "currency",
-          "limits",
-          "rate_cards",
-          "price_bounds",
-          "safe",
-          "version"
-        ]
-      },
-      "HoldApplied": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "limit_set": {
-            "type": "string"
-          },
-          "version": {
-            "type": "integer"
-          }
-        }
-      },
-      "HoldCommitment": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "limit_set": {
-            "type": "string"
-          },
-          "limits": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LimitCommitment"
-            }
-          }
-        }
-      },
-      "HoldLimit": {
-        "type": "object",
-        "properties": {
           "limit": {
             "type": "string"
           },
           "unit": {
             "type": "string"
           },
-          "held": {
+          "amount": {
             "type": "string",
             "description": "A number as a decimal string."
-          },
-          "overrun": {
-            "type": "string",
-            "enum": [
-              "admit_while_positive",
-              "require_estimate"
-            ]
-          },
-          "window_starts_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "window_ends_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "limit",
-          "unit",
-          "held",
-          "overrun",
-          "window_starts_at",
-          "window_ends_at"
-        ]
-      },
-      "HoldRateCard": {
-        "type": "object",
-        "properties": {
-          "limit": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "meter": {
-            "type": "string"
-          },
-          "event_type": {
-            "type": "string"
-          },
-          "value_property": {
-            "type": "string"
-          },
-          "aggregation": {
-            "type": "string",
-            "enum": [
-              "count",
-              "latest",
-              "max",
-              "min",
-              "sum",
-              "unique_count"
-            ]
-          },
-          "group_by": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "filter": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "allowance": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Allowance"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "price": {
-            "$ref": "#/components/schemas/RatePrice"
-          }
-        },
-        "required": [
-          "limit",
-          "meter",
-          "event_type",
-          "value_property",
-          "aggregation",
-          "group_by",
-          "filter",
-          "allowance",
-          "price"
-        ]
-      },
-      "HoldReturn": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "limit_set": {
-            "type": "string"
           }
         }
       },
@@ -20033,15 +20070,11 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "live": {
-            "type": "boolean"
           }
         },
         "required": [
           "id",
-          "expires_at",
-          "live"
+          "expires_at"
         ]
       },
       "LeaseUsage": {
@@ -20053,7 +20086,17 @@
           "customer_id": {
             "type": "string"
           },
-          "limit_set": {
+          "invoker": {
+            "type": "string"
+          },
+          "invoker_type": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "delegated"
+            ]
+          },
+          "trust_level": {
             "oneOf": [
               {
                 "type": "string"
@@ -20063,14 +20106,20 @@
               }
             ]
           },
-          "invoker": {
-            "type": "string"
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
-          "invoker_type": {
-            "type": "string",
-            "enum": [
-              "customer",
-              "delegated"
+          "resource": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "currency": {
@@ -20130,6 +20179,27 @@
           "occurred_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "admitted_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -20177,118 +20247,6 @@
           "refused"
         ]
       },
-      "LeaseWant": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "invoker_type": {
-            "type": "string",
-            "enum": [
-              "customer",
-              "delegated"
-            ]
-          },
-          "trust_level": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "roles": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "resource": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "currency": {
-            "type": "string"
-          },
-          "usage": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/UsageEstimate"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "estimated_amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
-      "LeaseWantResult": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "integer"
-          },
-          "limit_set": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ErrorDetails"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "refusal": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Refusal"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "status",
-          "limit_set",
-          "error",
-          "refusal"
-        ]
-      },
       "Limit": {
         "type": "object",
         "properties": {
@@ -20308,10 +20266,10 @@
               "require_estimate"
             ]
           },
-          "rate_cards": {
+          "counts": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LimitRateCard"
+              "$ref": "#/components/schemas/LimitCount"
             }
           },
           "products": {
@@ -20337,35 +20295,54 @@
           "unit",
           "reset",
           "overrun",
-          "rate_cards",
+          "counts",
           "products",
           "revision",
           "created_at",
           "updated_at"
         ]
       },
-      "LimitCommitment": {
+      "LimitCapacity": {
         "type": "object",
         "properties": {
           "limit": {
             "type": "string"
           },
-          "window_starts_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "committed": {
+          "capacity": {
             "type": "string",
             "description": "A number as a decimal string."
           }
-        }
+        },
+        "required": [
+          "limit",
+          "capacity"
+        ]
+      },
+      "LimitCount": {
+        "type": "object",
+        "properties": {
+          "meter": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer"
+          },
+          "per": {
+            "type": "integer"
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "meter"
+        ]
       },
       "LimitOverride": {
         "type": "object",
@@ -20406,30 +20383,6 @@
           "capacity"
         ]
       },
-      "LimitRateCard": {
-        "type": "object",
-        "properties": {
-          "meter": {
-            "type": "string"
-          },
-          "filter": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "price": {
-            "$ref": "#/components/schemas/RatePrice"
-          }
-        },
-        "required": [
-          "meter",
-          "price"
-        ]
-      },
       "LimitReset": {
         "type": "object",
         "properties": {
@@ -20457,6 +20410,66 @@
         },
         "required": [
           "kind"
+        ]
+      },
+      "LimitSet": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capacities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LimitCapacity"
+            }
+          },
+          "credit_line": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "balance_deny_code": {
+            "type": "string",
+            "enum": [
+              "accrual_rate_cap_reached",
+              "budget_exceeded",
+              "delegated_spend_not_allowed",
+              "delinquent_unpaid_order",
+              "failure_rate_limited",
+              "insufficient_balance",
+              "insufficient_credit",
+              "limit_reached",
+              "outstanding_cap_reached"
+            ]
+          },
+          "refusal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Refusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "limits",
+          "capacities",
+          "credit_line",
+          "balance_deny_code",
+          "refusal"
         ]
       },
       "LinkPSPImportParams": {
@@ -20624,6 +20637,43 @@
           "currency",
           "amount",
           "runway_hours"
+        ]
+      },
+      "MRRRisk": {
+        "type": "object",
+        "properties": {
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "card_expiring",
+                "delinquent",
+                "needs_payment_method",
+                "past_due",
+                "unverified"
+              ]
+            }
+          },
+          "entry_reason": {
+            "type": "string",
+            "enum": [
+              "card_expiring",
+              "delinquent",
+              "needs_payment_method",
+              "past_due",
+              "unverified"
+            ]
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reasons",
+          "entry_reason",
+          "since"
         ]
       },
       "Mandate": {
@@ -20903,8 +20953,8 @@
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
           },
-          "usage_gate_safe_spend": {
-            "type": "boolean"
+          "accounting": {
+            "$ref": "#/components/schemas/AccountingSettings"
           },
           "card_vault": {
             "type": "string"
@@ -21345,6 +21395,9 @@
           },
           "money": {
             "type": "boolean"
+          },
+          "utc_days": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -21393,6 +21446,9 @@
           "grain": {
             "type": "string"
           },
+          "timezone": {
+            "type": "string"
+          },
           "range": {
             "$ref": "#/components/schemas/MetricsResultRange"
           },
@@ -21421,6 +21477,7 @@
           }
         },
         "required": [
+          "timezone",
           "range",
           "columns",
           "rows"
@@ -23903,14 +23960,32 @@
           "observed_via": {
             "type": "string"
           },
-          "category": {
-            "type": "string"
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "declined",
+              "error",
+              "refused"
+            ]
+          },
+          "decline_cause": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "fraud",
+              "issuer",
+              "merchant",
+              "processing",
+              "unknown"
+            ]
           },
           "reason": {
             "type": "string",
             "enum": [
               "authentication_required",
               "blocked_by_psp",
+              "brand_not_accepted",
               "call_issuer",
               "card_not_supported",
               "communication_error",
@@ -23944,6 +24019,7 @@
               "stolen_card",
               "stop_recurring",
               "stored_credential_required",
+              "suspected_fraud",
               "transaction_not_allowed",
               "try_again_later",
               "unknown",
@@ -23963,6 +24039,12 @@
             "type": "string"
           },
           "issuer_text": {
+            "type": "string"
+          },
+          "advice_code": {
+            "type": "string"
+          },
+          "network_advice_code": {
             "type": "string"
           },
           "avs_result": {
@@ -24087,13 +24169,16 @@
           "card_entry",
           "source",
           "observed_via",
-          "category",
+          "outcome",
+          "decline_cause",
           "reason",
           "action",
           "response_code",
           "response_text",
           "issuer_code",
           "issuer_text",
+          "advice_code",
+          "network_advice_code",
           "avs_result",
           "cvv_result",
           "card",
@@ -24148,6 +24233,7 @@
             "enum": [
               "authentication_required",
               "blocked_by_psp",
+              "brand_not_accepted",
               "call_issuer",
               "card_not_supported",
               "communication_error",
@@ -24181,6 +24267,7 @@
               "stolen_card",
               "stop_recurring",
               "stored_credential_required",
+              "suspected_fraud",
               "transaction_not_allowed",
               "try_again_later",
               "unknown",
@@ -24445,6 +24532,7 @@
             "enum": [
               "authentication_required",
               "blocked_by_psp",
+              "brand_not_accepted",
               "call_issuer",
               "card_not_supported",
               "communication_error",
@@ -24478,6 +24566,7 @@
               "stolen_card",
               "stop_recurring",
               "stored_credential_required",
+              "suspected_fraud",
               "transaction_not_allowed",
               "try_again_later",
               "unknown",
@@ -25550,6 +25639,7 @@
               "embed_origins_required",
               "entitlement_required",
               "event_cursor_expired",
+              "event_store_required",
               "finding_action_failed",
               "finding_not_actionable",
               "finding_requires_merchant_config",
@@ -26033,13 +26123,17 @@
                 "type": "null"
               }
             ]
+          },
+          "usage": {
+            "type": "boolean"
           }
         },
         "required": [
           "capabilities",
           "currencies",
           "rails",
-          "captcha"
+          "captcha",
+          "usage"
         ]
       },
       "PublicMerchant": {
@@ -26412,7 +26506,6 @@
             "enum": [
               "accrual_rate_cap_reached",
               "budget_exceeded",
-              "capacity_held",
               "delegated_spend_not_allowed",
               "delinquent_unpaid_order",
               "failure_rate_limited",
@@ -26460,6 +26553,14 @@
           "resets_at",
           "retry_after_seconds"
         ]
+      },
+      "ReinstateCreditGrantParams": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
       },
       "ReleaseAdmissionBatchParams": {
         "type": "object",
@@ -26766,6 +26867,32 @@
           "created_at"
         ]
       },
+      "ScheduledMRR": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "churn",
+              "contraction",
+              "expansion"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "kind",
+          "amount",
+          "effective_at"
+        ]
+      },
       "SetCartLineParams": {
         "type": "object",
         "properties": {
@@ -26852,10 +26979,10 @@
               "require_estimate"
             ]
           },
-          "rate_cards": {
+          "counts": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LimitRateCard"
+              "$ref": "#/components/schemas/LimitCount"
             }
           },
           "expected_revision": {
@@ -27157,6 +27284,26 @@
               }
             ]
           },
+          "mrr": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionMRR"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mrr_risk": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MRRRisk"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "psp_id": {
             "type": "string"
           },
@@ -27339,6 +27486,8 @@
           "product_id",
           "price_id",
           "quantity",
+          "mrr",
+          "mrr_risk",
           "psp_id",
           "rail",
           "rail_subscription_id",
@@ -27617,6 +27766,7 @@
                 "enum": [
                   "authentication_required",
                   "blocked_by_psp",
+                  "brand_not_accepted",
                   "call_issuer",
                   "card_not_supported",
                   "communication_error",
@@ -27650,6 +27800,7 @@
                   "stolen_card",
                   "stop_recurring",
                   "stored_credential_required",
+                  "suspected_fraud",
                   "transaction_not_allowed",
                   "try_again_later",
                   "unknown",
@@ -27714,8 +27865,25 @@
           "kind": {
             "type": "string"
           },
-          "category": {
-            "type": "string"
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "declined",
+              "error",
+              "refused"
+            ]
+          },
+          "decline_cause": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "fraud",
+              "issuer",
+              "merchant",
+              "processing",
+              "unknown"
+            ]
           },
           "reason": {
             "type": "string"
@@ -27758,7 +27926,7 @@
         "required": [
           "id",
           "kind",
-          "category",
+          "outcome",
           "source",
           "observed_via",
           "amount",
@@ -27993,6 +28161,33 @@
           "to_period_end"
         ]
       },
+      "SubscriptionMRR": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "scheduled": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScheduledMRR"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "amount",
+          "currency",
+          "scheduled"
+        ]
+      },
       "SubscriptionRetryNowResult": {
         "type": "object",
         "properties": {
@@ -28024,32 +28219,26 @@
               "$ref": "#/components/schemas/LeaseUsage"
             }
           },
-          "wants": {
+          "in_flight": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LeaseWant"
+              "$ref": "#/components/schemas/InFlight"
             }
           },
-          "returns": {
+          "views": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/HoldReturn"
+              "$ref": "#/components/schemas/ViewParams"
+            }
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
           "close": {
             "type": "boolean"
-          },
-          "committed": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HoldCommitment"
-            }
-          },
-          "applied": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HoldApplied"
-            }
           }
         }
       },
@@ -28062,31 +28251,42 @@
           "usage": {
             "$ref": "#/components/schemas/LeaseUsageResult"
           },
-          "wants": {
+          "views": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LeaseWantResult"
+              "$ref": "#/components/schemas/View"
             }
           },
-          "holds": {
+          "limit_sets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Hold"
+              "$ref": "#/components/schemas/LimitSet"
             }
           },
-          "limits": {
+          "refused_views": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CustomerLimit"
+              "$ref": "#/components/schemas/ViewRefusal"
             }
+          },
+          "pricing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ViewPricing"
+            }
+          },
+          "gates": {
+            "type": "integer"
           }
         },
         "required": [
           "lease",
           "usage",
-          "wants",
-          "holds",
-          "limits"
+          "views",
+          "limit_sets",
+          "refused_views",
+          "pricing",
+          "gates"
         ]
       },
       "TestMessage": {
@@ -28306,8 +28506,8 @@
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
           },
-          "usage_gate_safe_spend": {
-            "type": "boolean"
+          "accounting": {
+            "$ref": "#/components/schemas/AccountingSettings"
           },
           "card_vault": {
             "type": "string"
@@ -28784,8 +28984,17 @@
       "UsageDeduction": {
         "type": "object",
         "properties": {
-          "day": {
-            "type": "string"
+          "period_starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "through": {
+            "type": "string",
+            "format": "date-time"
           },
           "amount": {
             "type": "string",
@@ -28799,7 +29008,9 @@
           }
         },
         "required": [
-          "day",
+          "period_starts_at",
+          "period_ends_at",
+          "through",
           "amount",
           "lines"
         ]
@@ -28903,6 +29114,455 @@
           "quantity"
         ]
       },
+      "View": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ViewLimit"
+            }
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "as_of",
+          "limits"
+        ]
+      },
+      "ViewCount": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "string"
+          },
+          "meter": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "value_property": {
+            "type": "string"
+          },
+          "aggregation": {
+            "type": "string",
+            "enum": [
+              "count",
+              "latest",
+              "max",
+              "min",
+              "sum",
+              "unique_count"
+            ]
+          },
+          "group_by": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filter": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "weight": {
+            "type": "integer"
+          },
+          "per": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "meter",
+          "event_type",
+          "value_property",
+          "aggregation",
+          "group_by",
+          "filter",
+          "weight",
+          "per"
+        ]
+      },
+      "ViewLimit": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "reset": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LimitReset"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overrun": {
+            "type": "string",
+            "enum": [
+              "admit_while_positive",
+              "require_estimate"
+            ]
+          },
+          "capacity": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "used": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "held": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "remaining": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "window_starts_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "window_ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resets_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ViewWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "drain_per_hour": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "settled": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "recent": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "limit",
+          "unit",
+          "reset",
+          "overrun",
+          "capacity",
+          "used",
+          "held",
+          "remaining",
+          "window_starts_at",
+          "window_ends_at",
+          "resets_at",
+          "next",
+          "drain_per_hour",
+          "settled",
+          "recent"
+        ]
+      },
+      "ViewParams": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "invoker": {
+            "type": "string"
+          },
+          "invoker_type": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "delegated"
+            ]
+          },
+          "trust_level": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resource": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "event_type": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ViewPricing": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "counts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ViewCount"
+            }
+          },
+          "rate_cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ViewRateCard"
+            }
+          },
+          "price_bounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceBound"
+            }
+          }
+        },
+        "required": [
+          "currency",
+          "event_type",
+          "counts",
+          "rate_cards",
+          "price_bounds"
+        ]
+      },
+      "ViewRateCard": {
+        "type": "object",
+        "properties": {
+          "meter": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "value_property": {
+            "type": "string"
+          },
+          "aggregation": {
+            "type": "string",
+            "enum": [
+              "count",
+              "latest",
+              "max",
+              "min",
+              "sum",
+              "unique_count"
+            ]
+          },
+          "group_by": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filter": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowance": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Allowance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price": {
+            "$ref": "#/components/schemas/RatePrice"
+          }
+        },
+        "required": [
+          "meter",
+          "event_type",
+          "value_property",
+          "aggregation",
+          "group_by",
+          "filter",
+          "allowance",
+          "price"
+        ]
+      },
+      "ViewRefusal": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "index",
+          "status",
+          "error"
+        ]
+      },
+      "ViewWindow": {
+        "type": "object",
+        "properties": {
+          "starts_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ends_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "remaining": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "starts_at",
+          "ends_at",
+          "remaining"
+        ]
+      },
       "WebhookReceipt": {
         "type": "object",
         "properties": {
@@ -28991,6 +29651,9 @@
     }
   },
   "x-openrails-error-sets": {
+    "event_store": [
+      "event_store_required"
+    ],
     "request": [
       "invalid_param",
       "invalid_query",
@@ -29351,6 +30014,11 @@
       "type": "invalid_request_error",
       "meaning": "The event cursor is no longer retained; resynchronize current state."
     },
+    "event_store_required": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."
+    },
     "finding_action_failed": {
       "status": 502,
       "type": "api_error",
@@ -29464,7 +30132,7 @@
     "lease_not_held": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease."
+      "meaning": "The admission names a lease that is closed or never synced, so it cannot own the hold."
     },
     "limit_not_found": {
       "status": 404,

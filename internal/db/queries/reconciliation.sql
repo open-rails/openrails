@@ -1004,7 +1004,7 @@ SELECT subscription_id, transaction_id::text, 'failed'::text, attempted_at::time
        COALESCE(currency, '')::text, COALESCE(response_code, '')::text
 FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[])
-  AND attempted_at >= sqlc.arg(since)::timestamptz AND category <> 'approved' AND transaction_id IS NOT NULL;
+  AND attempted_at >= sqlc.arg(since)::timestamptz AND outcome <> 'approved' AND transaction_id IS NOT NULL;
 
 -- Resumes an interrupted bulk read, or starts one.
 -- name: StartNMIBulkCheckpoint :one

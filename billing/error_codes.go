@@ -53,6 +53,9 @@ const (
 	CodeInsufficientFunds      ErrorCode = "insufficient_funds"
 	// CodeUsageNotPriced: a priced meter cannot price a usage event.
 	CodeUsageNotPriced ErrorCode = "usage_not_priced"
+	// CodeEventStoreRequired: the feature needs the event store, which the
+	// deployment does not have (Deps.ClickHouse).
+	CodeEventStoreRequired ErrorCode = "event_store_required"
 	// Orders.
 	CodeAlreadyOwned             ErrorCode = "already_owned"
 	CodeEntitlementRequired      ErrorCode = "entitlement_required"
@@ -107,8 +110,8 @@ const (
 	// horizon and no lease of the merchant has it: it was forgotten, and its
 	// items cannot be settled again safely.
 	CodeLeaseNotFound ErrorCode = "lease_not_found"
-	// CodeLeaseNotHeld: the lease is closed or stopped syncing, so it holds
-	// nothing and takes no hold.
+	// CodeLeaseNotHeld: an admission names a lease that is closed or that
+	// never synced, so it cannot own the hold.
 	CodeLeaseNotHeld ErrorCode = "lease_not_held"
 	// CodeUsageOutOfOrder: a usage item skips a number the lease has not
 	// settled.
@@ -491,12 +494,13 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeRateCardProductNotFound, 404, invalid, "The rate card names a product that does not exist."},
 	{CodeUsageRateCardInvalid, 400, invalid, "The usage rate card is invalid."},
 	{CodeUsageMeterInvalid, 400, invalid, "The meter definition is invalid."},
+	{CodeEventStoreRequired, 409, invalid, "The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."},
 	{CodeUsageNotPriced, 422, invalid, "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."},
 	{CodeMeterInUse, 409, invalid, "The meter is referenced and cannot change this way."},
 	{CodeMeterRateCardConflict, 409, invalid, "The meter and its rate card disagree."},
 	{CodeLimitNotFound, 404, invalid, "The catalog declares no limit under this key."},
 	{CodeLeaseNotFound, 404, invalid, "No lease of the merchant has this id, which is older than the replay horizon; start a new lease."},
-	{CodeLeaseNotHeld, 409, invalid, "The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease."},
+	{CodeLeaseNotHeld, 409, invalid, "The admission names a lease that is closed or never synced, so it cannot own the hold."},
 	{CodeUsageOutOfOrder, 409, invalid, "A usage item skips a number the lease has not settled; send the items in order."},
 	{CodePurchaseReviewResolved, 409, invalid, "The purchase review was already resolved."},
 

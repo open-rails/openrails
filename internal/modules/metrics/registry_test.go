@@ -89,11 +89,22 @@ func TestQueryShape(t *testing.T) {
 	}
 }
 
+// One name is one dimension: a second definition would shadow the first.
+func TestDimensionNamesAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range Dimensions {
+		if seen[d.Name] {
+			t.Errorf("dimension %q is defined twice", d.Name)
+		}
+		seen[d.Name] = true
+	}
+}
+
 // Every family a statement reads names its merchant: the predicate is the
-// merchant scope.
+// merchant scope. The event store's read the context's merchant.
 func TestEveryFamilyNamesItsMerchant(t *testing.T) {
 	for fam, spec := range families {
-		if spec.Kind != "depletion" && merchantCols[fam] == "" {
+		if spec.Kind != "depletion" && spec.Kind != "store" && merchantCols[fam] == "" {
 			t.Errorf("family %s names no merchant column", fam)
 		}
 	}
@@ -112,7 +123,7 @@ func TestEveryMeasureCompiles(t *testing.T) {
 			t.Errorf("%s: %v", m.Name, verr)
 			continue
 		}
-		stmts, err := compile(plan, uuid.New())
+		stmts, err := compile(plan, uuid.New(), nil)
 		if err != nil {
 			t.Errorf("%s: %v", m.Name, err)
 			continue

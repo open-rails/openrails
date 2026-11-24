@@ -48,6 +48,51 @@ func withMandates(r *httprequest.Request, subs []billing.Subscription) bool {
 	return true
 }
 
+// withMRR sets each subscription's MRR, which the merchant routes serve. It
+// answers a 500 on failure.
+func withMRR(r *httprequest.Request, subs []billing.Subscription) bool {
+	if len(subs) == 0 {
+		return true
+	}
+	ctx := r.Request.Context()
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		r.InternalError("merchant unresolved", err)
+		return false
+	}
+	ids := make([]uuid.UUID, len(subs))
+	for i, s := range subs {
+		ids[i] = s.ID.UUID()
+	}
+	byID, err := subscriptions.MRRViews(ctx, r.State.DB.Gen(ctx), mid.UUID(), ids)
+	if err != nil {
+		r.InternalError("failed to read subscription MRR", err)
+		return false
+	}
+	for i := range subs {
+		view := byID[subs[i].ID.UUID()]
+		subs[i].MRR, subs[i].MRRRisk = view.MRR, view.Risk
+	}
+	return true
+}
+
+// writeMerchantSubscriptions answers a merchant route's page of
+// subscriptions with their MRR and mandates.
+func writeMerchantSubscriptions(r *httprequest.Request, page billing.ListPage[billing.Subscription]) {
+	if withMRR(r, page.Items) {
+		writeSubscriptions(r, page)
+	}
+}
+
+// writeMerchantSubscriptionOne answers a merchant route's subscription with
+// its MRR and mandate.
+func writeMerchantSubscriptionOne(r *httprequest.Request, sub billing.Subscription) {
+	one := []billing.Subscription{sub}
+	if withMRR(r, one) {
+		writeSubscription(r, one[0])
+	}
+}
+
 // writeSubscriptions answers a page of subscriptions with their mandates.
 func writeSubscriptions(r *httprequest.Request, page billing.ListPage[billing.Subscription]) {
 	if withMandates(r, page.Items) {

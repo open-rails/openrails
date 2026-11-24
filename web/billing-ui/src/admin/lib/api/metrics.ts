@@ -53,6 +53,9 @@ export type MetricsCell = string | number | null
 
 export interface MetricsResult {
   grain?: string
+  // The merchant's accounting timezone: each time cell is the instant its
+  // bucket starts there.
+  timezone?: string
   range: { from: string; to: string }
   columns: MetricsColumn[]
   rows: MetricsCell[][]

@@ -67,7 +67,7 @@ func withCustodyMigrationRecord(t *testing.T, archive []byte) []byte {
 		if r.Kind != "table" {
 			return w.Row(r.Values)
 		}
-		if r.Table == "meter_period_quantities" {
+		if r.Table == "customer_delinquency" {
 			if err := w.Table("custody_migrations"); err != nil {
 				return err
 			}
@@ -332,6 +332,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &paid))
 		require.Equal(t, billing.OrderComplete, paid.Status, string(raw))
 		oneUsage(t, source.alpha, usageInput(customer, "archived-work", 3))
+		source.clock.Advance(time.Second)
 		runUsageDue(t, startFleet(t, source.world))
 		require.Eventually(t, func() bool {
 			rows, err := source.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})

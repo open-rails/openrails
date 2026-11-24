@@ -286,11 +286,11 @@ func dumpCatalogLimits(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		if out == nil {
 			out = map[string]catalog.ApplyLimit{}
 		}
-		cards := d.RateCards
-		if cards == nil {
-			cards = []catalog.LimitRateCard{}
+		counts := d.Counts
+		if counts == nil {
+			counts = []catalog.LimitCount{}
 		}
-		out[d.Key] = catalog.ApplyLimit{Unit: catalog.Value(d.Unit), Reset: catalog.Value(d.Reset), Overrun: catalog.Value(d.Overrun), RateCards: catalog.Value(cards)}
+		out[d.Key] = catalog.ApplyLimit{Unit: catalog.Value(d.Unit), Reset: catalog.Value(d.Reset), Overrun: catalog.Value(d.Overrun), Counts: catalog.Value(counts)}
 	}
 	rows, err := q.ListCatalogProductLimits(ctx, merchantID)
 	if err != nil {

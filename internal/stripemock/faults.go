@@ -52,6 +52,19 @@ func (m *Mock) SetAdvice(last4 string, a Advice) {
 	}
 }
 
+// SetRadarBlock makes Radar block future charges on every card ending in
+// last4 with a block reason (highest_risk_level, rule): the charge never
+// reaches the network, and the error reads as a fraudulent decline.
+func (m *Mock) SetRadarBlock(last4, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, pm := range m.methods {
+		if pm["card"].(Object)["last4"] == last4 {
+			m.blocks[id] = reason
+		}
+	}
+}
+
 // SetMethodDecline sets the issuer's answer for future charges on one
 // payment method.
 func (m *Mock) SetMethodDecline(pm, decline string) {

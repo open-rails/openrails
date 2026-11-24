@@ -36,6 +36,11 @@ const (
 	ActionAckResume = "ack_resume"
 )
 
+// Actions are every action a recommendation may name.
+func Actions() []string {
+	return []string{ActionCancelAndRefund, ActionRevokeProductAccess, ActionGrantProduct, ActionAckResume}
+}
+
 // EvidenceKey is where a Recommendation lives inside finding evidence.
 // Canonical location: top-level `evidence.recommendation`. Converge passes
 // nest their Evidence map under "local", so `evidence.local.recommendation`

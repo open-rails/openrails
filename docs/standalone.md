@@ -14,6 +14,7 @@ process instead, see [the embedded guide](embedded.md).
 | Service | Needed | Holds | Losing it |
 |---|---|---|---|
 | PostgreSQL 18+ | yes | everything: the ledger, grants, subscriptions, access, catalog, provider intents and River's queue. OpenRails owns one schema (`billing`), its River schema (`billing_river`) and the server's AuthKit schema (`profiles`); the instance may be shared. | data loss. Provider-owned facts can be re-read with a PSP import; the ledger, credits, access and catalog exist nowhere else. |
+| ClickHouse 26.8 LTS | for usage | the event store usage needs: usage reporting, the gate, meters, limits and usage history ([event store](#event-store)) | a ClickHouse without the store's identity is refused at boot: restore its backup |
 | Redis 6.2+ or Garnet | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines, AuthKit's rate limits and spent DPoP proofs | each instance keeps them in memory: right for one instance only. No money path needs Redis, and nothing in it needs a backup. |
 | Vault | optional | with `vault.kv_mount`, every merchant's configuration, credentials included; a Transit mount signs for Solana crankers | without a KV mount the merchant manifest is the configuration, read-only |
 | SMTP | optional | billing and operator mail, the server's own sign-in codes | no email; operator alerts still reach webhooks |
@@ -188,7 +189,7 @@ keys: `host`, `port`, `private_port`, `drain_delay`, `shutdown_timeout`,
 `usage_billing_enabled`, `event_retention`, `webhook_secret_overlap`,
 `merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
 `checkout_origin`, `return_origins`, `trusted_proxies`,
-`cloudflare_proxies`, `db`, `database`, `redis`,
+`cloudflare_proxies`, `db`, `database`, `clickhouse`, `redis`,
 `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`,
 `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`,
 `rate_limits_disabled`, `captcha`, `user_action_rate_limit`,
@@ -243,7 +244,7 @@ the deployment does not serve answers `404 route_not_found`.
 | `db.sslmode` | `verify-full`; `require` for a loopback host or Unix socket | libpq's `sslmode` for the parts |
 | `db.sslrootcert` | the system roots | PEM file of the CAs that verify the database's certificate, for the parts |
 | `db.sql_trace` | `false` | log every query at debug level |
-| `db.lease_conns` | `4` | the separate pool for idempotency lease renewals; count it in `max_connections` |
+| `db.lease_conns` | `4` | the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls); count it in `max_connections` |
 | `database.schema` | `billing` | every OpenRails table, function and type; a plain identifier |
 | `database.river_schema` | the schema plus `_river` | OpenRails' River jobs |
 | `database.skip_migrations` | `false` | only check the migration ledger at boot; run `openrails migrate up` yourself |
@@ -251,6 +252,14 @@ the deployment does not serve answers `404 route_not_found`.
 SQL is authored in `billing`; another schema is reached by one token-aware
 rewrite of schema qualifiers, never other strings. The server's AuthKit keeps its
 own schema (`auth.database.schema`, default `profiles`).
+
+**Event store**
+
+| Key | Meaning |
+|---|---|
+| `clickhouse.addr` | `host:port` of ClickHouse's native protocol. Set, the server waits for it at boot like the database; unset, usage is off |
+| `clickhouse.database` | the event store's database, created or upgraded at boot; default `openrails` |
+| `clickhouse.username`, `clickhouse.password` | the user (default `default`) and its password |
 
 **Redis**
 
@@ -348,6 +357,7 @@ root owner needs a second factor, so boot refuses without a 16, 24 or 32-byte
 | `destructive_action_limits.actor_per_hour`, `.actor_per_day` | 5, 15 | staff destructive actions per actor ([destructive holds](#destructive-holds)) |
 | `destructive_action_limits.merchant_per_hour`, `.merchant_per_day` | 15, 25 | per merchant, floors that rise with active customers |
 | `destructive_action_limits.deployment_per_hour`, `.deployment_per_day` | 50, 100 | per deployment, likewise |
+| `destructive_action_limits.erasure_per_hour`, `.erasure_per_day` | 100, 1000 | contact erasures over OpenRails' own SCIM routes per merchant, floors that rise with its directory; past them an erasure waits ([client](client.md#customers)) |
 
 The example file sets the shipped buckets explicitly:
 
@@ -443,6 +453,7 @@ mounted file or the environment, named like its key's variable.
 |---|---|
 | database URL | `DB_URL` (with `sslmode=verify-full` across a network) |
 | Redis | `REDIS_URL` or `REDIS_PASSWORD`, `REDIS_CA_CERT` |
+| ClickHouse | `CLICKHOUSE_PASSWORD` |
 | SMTP | `EMAIL_SMTP_PASSWORD` |
 | Vault | `VAULT_TOKEN`, or `VAULT_SECRET_ID` re-read from `vault.secrets_path` |
 | LLM | `LLM_API_KEY` |
@@ -565,6 +576,8 @@ vault write -f transit/keys/openrails-solana-cranker type=ed25519 exportable=fal
 **Purge.** `openrails merchant purge` queues the `openrails.merchant_secret_cleanup`
 job, which deletes every document under the merchant's id and retries until the
 subtree is empty; a changed Vault address or mount is refused until restored.
+With an event store attached it also queues `openrails.merchant_usage_purge`,
+which deletes the merchant's usage there and retries until the store takes it.
 
 ## Auth and trust
 
@@ -747,6 +760,14 @@ JWKS, `llm.base_url`):
 | `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | captcha, when set |
 | `api.anthropic.com`, `api.openai.com` | the catalog copilot, with `llm.api_key` and no `llm.base_url` |
 
+## Event store
+
+Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 100 days), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and 15-minute UTC history buckets kept 25 months, which readers fold into the merchant's `accounting.timezone` days). PostgreSQL keeps what the ledger took (`usage_postings`), who has usage it has not taken yet (`usage_unposted`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_close`), and before any other movement of a customer's balance, so up to a month of usage is only in ClickHouse: back it up nightly ([backup and restore](#backup-and-restore)).
+
+Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken does not start without ClickHouse (`event_store_required`, naming the merchants): only the store can post it.
+
+The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs and admissions answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
+
 ## Scaling and Redis
 
 Any number of instances can serve one book: `openrails run-server` replicas,
@@ -777,7 +798,7 @@ count, primary or sticky session.
   read per request. Merchant configuration is cached per instance (see
   [Vault](#vault)). An FX rate published more than 48 hours ago is never quoted.
 - **Connections:** size PostgreSQL `max_connections` for every instance's pool,
-  its `db.lease_conns` lease pool, and one connection per instance for each listener: customer messages, dispute responses and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode.
+  its `db.lease_conns` lease pool, and one connection per instance for each listener: unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode. The billing pass and merchant pulls hold lease rows, not sessions.
 
 A webhook takes effect once per provider event: a concurrent copy waits up to
 10 seconds, then answers 500 so the provider retries. An idempotent request runs
@@ -814,6 +835,7 @@ its own, as a deploy step; `openrails migrate status [--json]` compares the
 applied ledger with the binary's chain and exits non-zero on any mismatch. With
 `database.skip_migrations`, startup only checks and is refused with
 `ErrMigrationsRequired` until the step has run for the build.
+With `clickhouse`, the same step creates or upgrades the event store's database, and startup checks it too.
 
 The schema is one baseline migration and numbered migrations after it, each an
 addition, so the previous build runs on a schema the next one migrated and
@@ -937,24 +959,11 @@ Until then a cancel of an NMI- or CCBill-owned membership is
 `409 provider_cancel_held`: OpenRails will not cancel locally while the provider
 would keep charging.
 
-**Cancellation caps.** A provider read may cancel at most
-`min(25, max(3, 5% of the PSP's live linked book))` subscriptions per PSP, or
-the whole book when it has at most 5. Over that it cancels none, halts the
-merchant's pass and raises `pull.cancellation.capped`. The usual causes are a
-misdeclared `account_id`, a credential rotated onto a sibling sub-account, or a
-provider returning a short page.
+**Cancellation caps.** A provider read, or a billing import's cancels of subscriptions it did not create, may cancel at most `min(25, max(3, 5% of the PSP's live linked book))` subscriptions per PSP, or the whole book when it has at most 5. Over that it cancels none, halts the merchant's pass and raises `pull.cancellation.capped`; a held import cancel keeps the subscription `unverified` with access. The usual causes are a misdeclared `account_id`, a credential rotated onto a sibling sub-account, or a provider returning a short page.
 
 ## Destructive holds
 
-Staff refunds, cancellations, payment-method removal, access and credit
-revocation, write-offs and substantive catalog or configuration changes share
-one admission policy. It counts each staff member's and application's logical
-actions (affected targets in a batch, not requests), keyed on the verified
-issuer and invoker: rotating a credential creates no new allowance. Replays and
-proven no-ops spend nothing; creating a catalog object spends nothing; a file
-applied with `openrails catalog apply` spends the merchant's own budget. An
-in-process call that names no person is the host's own work and spends no
-allowance.
+Staff refunds, cancellations, payment-method removal, access and credit revocation, write-offs and substantive catalog or configuration changes share one admission policy. It counts each staff member's and application's logical actions (affected targets in a batch, not requests), keyed on the verified issuer and invoker: rotating a credential creates no new allowance. A billing import is a merchant-level operation: its cancels, the terminal declines it lands and the provider stops it owes a canceled subscription are `cancel_subscription` actions recorded in its caller's name and admitted together before any lands, against the merchant's and the deployment's budgets rather than the caller's; a book larger than what they have left is refused with 429 and `Retry-After`, opening no incident. Replays and proven no-ops spend nothing; creating a catalog object spends nothing; a file applied with `openrails catalog apply` spends the merchant's own budget. An in-process call that names no person is the host's own work: it is recorded, and spends no allowance.
 
 The defaults are `destructive_action_limits`: 5 an hour and 15 a day per actor;
 per merchant at least 15 and 25, per deployment at least 50 and 100, both rising
@@ -1150,17 +1159,11 @@ touches the ledger, grants or logs.
 
 ## Retention
 
-Periods are constants, the same for every merchant, except the event log's
-`event_retention`. Each table's comment states its class: **permanent** (the
-ledger, grants, payments, owed usage, usage accruals, receipts, operation
-authorizations, refusals, running charges, maintenance runs, the before-images of
-destructive runs), **partitioned** (monthly partitions dropped whole), **rows**
-(deleted by the hourly cleanup) or **state** (one row per thing that exists).
+Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage postings, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **partitioned** (monthly partitions dropped whole), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|
 | `limit_holds` (by `created_at`), `limit_hold_parts` (by `hold_created_at`) | partition dropped after 61 days |
-| `usage_daily` | 24 months after its usage was billed, about 26 months after the month began |
 | `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
@@ -1172,13 +1175,12 @@ destructive runs), **partitioned** (monthly partitions dropped whole), **rows**
 | `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
 | `user_destructive_reservations` | 24 hours |
-| `failed_usage_windows` | when the window ends |
-| `meter_period_quantities` | 100 days after `period_starts_at` |
 | `limit_windows` | 61 days after `window_ends_at`; a lifetime or rate limit's row stays |
 | `leases` (with their holds), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
-| `usage_minutes` | 25 hours |
 | `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
+
+The event store's tables expire by their own TTLs: raw usage events 100 days after they occurred, a pricing period's quantities 100 days after it starts, minutes after 2 days, usage history after 25 months, and a limit window's usage 61 days after it ends (a lifetime limit's stays).
 
 The hourly cleanup creates partitions two months ahead and drops expired ones
 (giving up after 2 seconds rather than queue behind a long reader), then deletes
@@ -1208,13 +1210,19 @@ Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an o
 Drill restores into a scratch instance: migrations current, PSPs arm, a refresh
 produces sane findings.
 
+**ClickHouse.** The event store holds every customer's usage the month-end close has not posted yet, so back it up nightly to S3-compatible storage: `BACKUP DATABASE openrails TO S3('https://<bucket>/clickhouse/<date>', '<key>', '<secret>')`, incremental (`SETTINGS base_backup = S3(...)`) from a weekly full one, kept 8 days like PostgreSQL's window. A backup carries the store's identity: restore it (`RESTORE DATABASE openrails FROM S3(...)`) before starting OpenRails, and the boot finds the store its database recorded. Usage that arrived after the backup is lost with it; what posted is in PostgreSQL. With no backup, `openrails usage attach` records an empty ClickHouse ([event store](#event-store)).
+
 **One merchant's archive.** `openrails billing export` writes a complete,
 integrity-protected snapshot of one merchant's billing to a private file, with
 every writer stopped (`--source-stopped` attests it), and leaves the source
 readonly. `openrails billing prepare-target` provisions the exact merchant
 identity at the destination; `openrails billing import --target-stopped` restores
 into it and lands readonly until `openrails merchant arm`. Over HTTP the same
-archive is `GET` and `POST /v1/merchant/billing-archive`. The event log, active
+archive is `GET` and `POST /v1/merchant/billing-archive`. With an event store the
+archive carries the merchant's usage from it: raw events within their 100 days,
+and the history and limit usage older events no longer rebuild. Restoring one
+with usage needs an event store holding none of the merchant's; without a store
+an export refuses a merchant with unposted usage. The event log, active
 destructive incidents and pending actions are not in an archive.
 
 **The catalog alone.** `openrails catalog export --merchant UUID --out FILE`
@@ -1264,6 +1272,7 @@ the merchant the token is bound to.
 | `openrails merchant arm`, `openrails merchant hold` | a merchant's write posture |
 | `openrails merchant purge` | record a purge inventory, or with it typed back delete the merchant permanently |
 | `openrails book status`, `openrails book arm --by NAME` | the book identity |
+| `openrails usage attach --actor NAME --reason TEXT [--discard-unposted]` | record the configured ClickHouse as the event store in place of a lost one; `--discard-unposted` discards usage not yet posted, recorded per merchant |
 | `openrails provider-refresh --merchant NAME` | queue a provider refresh and print its job |
 | `openrails intents`, `openrails intents resolve`, `openrails intents-log` | the provider intent ledger |
 | `openrails proposals list`, `proposals show`, `proposals approve`, `proposals dismiss`, `proposals foreign`, `proposals runs` | review what provider reads propose |
@@ -1271,7 +1280,7 @@ the merchant the token is bound to.
 | `openrails destructive-holds list`, `openrails destructive-holds clear` | destructive-action incidents |
 | `openrails admin-lockouts unlock <user-id>` | end an administrator's lockout |
 | `openrails workers [--json]` | job health from River's tables |
-| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters and credit lot counters; non-zero on a finding. Nothing schedules it |
+| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters, credit lot counters, rollups and sign rules, and warn of a general-ledger total opposite its normal side; non-zero on a finding, not a warning. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
 | `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |

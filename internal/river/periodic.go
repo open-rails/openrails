@@ -42,6 +42,8 @@ var Periodics = []Periodic{
 	{Args: StripeWebhookReconcileArgs{}, Every: StripeWebhookReconcileInterval},
 	// Customer messages queued while no dispatcher listened.
 	{Args: messages.DispatchArgs{}, Every: messages.DispatchInterval},
+	// MRR risk changes queued while no drain was woken.
+	{Args: MRRRiskArgs{}, Every: MRRRiskInterval},
 }
 
 // topOfHour is the cron schedule 0 * * * * in UTC.

@@ -31,11 +31,13 @@ func (q *Queries) GetPurchasedCreditPendingRefunds(ctx context.Context, arg GetP
 }
 
 const getPurchasedCreditRecoveryTotal = `-- name: GetPurchasedCreditRecoveryTotal :one
-SELECT COALESCE(sum(amount),0)::bigint AS amount
-FROM billing.ledger_transfers
-WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
- AND operation='purchased_credit_refund' AND transfer_type='credit_refund_cash_restore'
- AND source='cash_restore:' || $3::text
+SELECT COALESCE(sum(lt.amount),0)::bigint AS amount
+FROM billing.ledger_transfers lt
+JOIN billing.ledger_accounts dr ON dr.merchant_id=lt.merchant_id AND dr.id=lt.debit_account_id
+WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
+ AND lt.operation='purchased_credit_refund'
+ AND ((lt.book='units' AND lt.transfer_type='credit_refund_cash_restore' AND lt.source='cash_restore:' || $3::text)
+   OR (lt.book='general' AND dr.account_type IN ('cash_clearing','external_receipts') AND lt.source LIKE '%\_restore:' || $3::text))
 `
 
 type GetPurchasedCreditRecoveryTotalParams struct {
@@ -44,6 +46,7 @@ type GetPurchasedCreditRecoveryTotalParams struct {
 	ReversalID    string
 }
 
+// What recoveries restored of one reversal's cash, in either book.
 func (q *Queries) GetPurchasedCreditRecoveryTotal(ctx context.Context, arg GetPurchasedCreditRecoveryTotalParams) (int64, error) {
 	row := q.db.QueryRow(ctx, getPurchasedCreditRecoveryTotal, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
 	var amount int64
@@ -54,12 +57,18 @@ func (q *Queries) GetPurchasedCreditRecoveryTotal(ctx context.Context, arg GetPu
 const getPurchasedCreditRefundState = `-- name: GetPurchasedCreditRefundState :one
 
 SELECT
- COALESCE(sum(CASE transfer_type WHEN 'credit_refund_cash' THEN amount WHEN 'credit_refund_cash_restore' THEN -amount ELSE 0 END),0)::bigint AS cash,
- COALESCE(sum(CASE transfer_type WHEN 'credit_refund' THEN amount WHEN 'credit_refund_restore' THEN -amount ELSE 0 END),0)::bigint AS withdrawn,
- count(*)::bigint AS sequence
-FROM billing.ledger_transfers
-WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
- AND operation='purchased_credit_refund'
+ COALESCE(sum(CASE
+     WHEN lt.book='units' AND lt.transfer_type='credit_refund_cash' THEN lt.amount
+     WHEN lt.book='units' AND lt.transfer_type='credit_refund_cash_restore' THEN -lt.amount
+     WHEN lt.book='general' AND cr.account_type IN ('cash_clearing','external_receipts') THEN lt.amount
+     WHEN lt.book='general' AND dr.account_type IN ('cash_clearing','external_receipts') THEN -lt.amount
+     ELSE 0 END),0)::bigint AS cash,
+ COALESCE(sum(CASE WHEN lt.book<>'units' THEN 0 WHEN lt.transfer_type='credit_refund' THEN lt.amount WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE 0 END),0)::bigint AS withdrawn
+FROM billing.ledger_transfers lt
+JOIN billing.ledger_accounts dr ON dr.merchant_id=lt.merchant_id AND dr.id=lt.debit_account_id
+JOIN billing.ledger_accounts cr ON cr.merchant_id=lt.merchant_id AND cr.id=lt.credit_account_id
+WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
+ AND lt.operation='purchased_credit_refund'
 `
 
 type GetPurchasedCreditRefundStateParams struct {
@@ -70,14 +79,15 @@ type GetPurchasedCreditRefundStateParams struct {
 type GetPurchasedCreditRefundStateRow struct {
 	Cash      int64
 	Withdrawn int64
-	Sequence  int64
 }
 
 // What reversals of purchased credit lots posted, from the lots' ledger legs.
+// cash is what reversals returned of the lot's price, net of recoveries: the
+// units book's cash legs before the credit books, the general ledger's since.
 func (q *Queries) GetPurchasedCreditRefundState(ctx context.Context, arg GetPurchasedCreditRefundStateParams) (GetPurchasedCreditRefundStateRow, error) {
 	row := q.db.QueryRow(ctx, getPurchasedCreditRefundState, arg.MerchantID, arg.CreditGrantID)
 	var i GetPurchasedCreditRefundStateRow
-	err := row.Scan(&i.Cash, &i.Withdrawn, &i.Sequence)
+	err := row.Scan(&i.Cash, &i.Withdrawn)
 	return i, err
 }
 
@@ -88,7 +98,7 @@ SELECT COALESCE(sum(CASE
     WHEN operation='purchased_credit_refund' AND source LIKE 'repaid_owed_restore:%' THEN amount
     ELSE 0 END),0)::bigint AS amount
 FROM billing.ledger_transfers
-WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid
+WHERE merchant_id=$1::uuid AND credit_grant_id=$2::uuid AND book='units'
 `
 
 type GetPurchasedCreditRepaidOwedParams struct {
@@ -107,8 +117,8 @@ func (q *Queries) GetPurchasedCreditRepaidOwed(ctx context.Context, arg GetPurch
 
 const getPurchasedCreditRetiredBalance = `-- name: GetPurchasedCreditRetiredBalance :one
 SELECT
- COALESCE(sum(CASE WHEN cr.account_type='expired_credits' THEN lt.amount WHEN dr.account_type='expired_credits' THEN -lt.amount ELSE 0 END),0)::bigint AS expired,
- COALESCE(sum(CASE WHEN cr.account_type='revoked_credits' THEN lt.amount WHEN dr.account_type='revoked_credits' THEN -lt.amount ELSE 0 END),0)::bigint AS revoked
+ COALESCE(sum(CASE WHEN cr.account_type='units_expired' THEN lt.amount WHEN dr.account_type='units_expired' THEN -lt.amount ELSE 0 END),0)::bigint AS expired,
+ COALESCE(sum(CASE WHEN cr.account_type='units_revoked' THEN lt.amount WHEN dr.account_type='units_revoked' THEN -lt.amount ELSE 0 END),0)::bigint AS revoked
 FROM billing.ledger_transfers lt
 JOIN billing.ledger_accounts dr ON dr.merchant_id=lt.merchant_id AND dr.id=lt.debit_account_id
 JOIN billing.ledger_accounts cr ON cr.merchant_id=lt.merchant_id AND cr.id=lt.credit_account_id
@@ -134,15 +144,16 @@ func (q *Queries) GetPurchasedCreditRetiredBalance(ctx context.Context, arg GetP
 
 const getPurchasedCreditReversalState = `-- name: GetPurchasedCreditReversalState :one
 SELECT
- COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund_cash'),0)::bigint AS cash,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund'),0)::bigint AS withdrawn,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.source='expired_credit'),0)::bigint AS expired,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.source='revoked_credit'),0)::bigint AS revoked,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.source='repaid_owed'),0)::bigint AS repaid,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund' OR lt.source IN ('consumed_credit','expired_credit','revoked_credit','repaid_owed')),0)::bigint AS face,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund_cash_restore'),0)::bigint AS recovery,
+ (COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund_cash'),0)
+  + COALESCE(sum(lt.amount) FILTER (WHERE lt.book='general' AND cr.account_type IN ('cash_clearing','external_receipts')),0))::bigint AS cash,
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.transfer_type='credit_refund'),0)::bigint AS withdrawn,
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='expired_credit'),0)::bigint AS expired,
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='revoked_credit'),0)::bigint AS revoked,
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND lt.source='repaid_owed'),0)::bigint AS repaid,
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.book='units' AND (lt.transfer_type='credit_refund' OR lt.source IN ('consumed_credit','expired_credit','revoked_credit','repaid_owed'))),0)::bigint AS face,
  count(*)::bigint AS legs
 FROM billing.ledger_transfers lt
+JOIN billing.ledger_accounts cr ON cr.merchant_id=lt.merchant_id AND cr.id=lt.credit_account_id
 WHERE lt.merchant_id=$1::uuid AND lt.credit_grant_id=$2::uuid
  AND lt.operation='purchased_credit_refund' AND lt.source_id=$3::text
 `
@@ -160,10 +171,11 @@ type GetPurchasedCreditReversalStateRow struct {
 	Revoked   int64
 	Repaid    int64
 	Face      int64
-	Recovery  int64
 	Legs      int64
 }
 
+// What one reversal took of the lot: its cash from either book, its units by
+// where they were. legs counts both books', so a reversal posts once.
 func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPurchasedCreditReversalStateParams) (GetPurchasedCreditReversalStateRow, error) {
 	row := q.db.QueryRow(ctx, getPurchasedCreditReversalState, arg.MerchantID, arg.CreditGrantID, arg.ReversalID)
 	var i GetPurchasedCreditReversalStateRow
@@ -174,7 +186,6 @@ func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPu
 		&i.Revoked,
 		&i.Repaid,
 		&i.Face,
-		&i.Recovery,
 		&i.Legs,
 	)
 	return i, err

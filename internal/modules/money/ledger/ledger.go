@@ -1,8 +1,9 @@
-// Package ledger is the double-entry, append-only money ledger over
-// ledger_accounts / ledger_transfers. A ledger is a (merchant, currency) pair;
-// transfers move an amount debit->credit within one ledger and are immutable.
-// Account counters hold balances; transfers are the truth. Every transfer is
-// posted: holds live outside the ledger.
+// Package ledger is the units book's writer: the double-entry, append-only
+// record over ledger_accounts / ledger_transfers of what customers hold and
+// owe, at face. A ledger is a (merchant, currency) pair; transfers move an
+// amount debit->credit within one ledger and are immutable. Account counters
+// hold balances; transfers are the truth. Every transfer is posted: holds
+// live outside the ledger. The chart and the general ledger are package books.
 package ledger
 
 import (
@@ -17,72 +18,90 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 )
 
-// AccountType identifies an account's role within a (merchant, currency) ledger.
-type AccountType string
+// AccountType identifies an account's role in its book (books.Chart).
+type AccountType = books.AccountType
 
+// The units book's accounts.
 const (
-	CustomerBalance  AccountType = "customer_balance"
-	PlatformRevenue  AccountType = "platform_revenue"
-	RailClearing     AccountType = "processor_clearing"
-	ArrearsLiability AccountType = "arrears_liability"
-	ExpiredCredits   AccountType = "expired_credits"
-	// RevokedCredits holds the unspent remainder clawed back when a credit grant
-	// is revoked (ExpiredCredits is time-lapse): frozen and reversible, not
-	// refunded; a refund moves it out to RailClearing.
-	RevokedCredits       AccountType = "revoked_credits"
-	PromotionalFunding   AccountType = "promotional_funding"
-	CreditRefundClearing AccountType = "credit_refund_clearing"
-	CreditRefundLoss     AccountType = "credit_refund_loss"
+	CustomerUnits = books.CustomerUnits
+	UnitsRedeemed = books.UnitsRedeemed
+	UnitsSold     = books.UnitsSold
+	CustomerOwed  = books.CustomerOwed
+	UnitsExpired  = books.UnitsExpired
+	// UnitsRevoked holds the unspent remainder clawed back when a credit grant
+	// is revoked (UnitsExpired is time-lapse): frozen and reversible, not
+	// refunded; a refund moves it out to UnitsSold.
+	UnitsRevoked = books.UnitsRevoked
+	UnitsGranted = books.UnitsGranted
+	// UnitsRefunded is where a refunded lot's units go.
+	UnitsRefunded       = books.UnitsRefunded
+	UnitsRefundClearing = books.UnitsRefundClearing
+	UnitsRefundLoss     = books.UnitsRefundLoss
 )
 
-// TransferType is the closed vocabulary of ledger_transfers.transfer_type,
+// TransferType is ledger_transfers.transfer_type; these are the units book's,
 // mirrored by ledger_transfers_type_check. The lot-once index
 // ledger_transfers_credit_grant_id_transfer_type_key is partial on these literals, so
 // a typo would escape it and post a duplicate.
-type TransferType string
+type TransferType = books.TransferType
 
 const (
-	DepositBonus            TransferType = "deposit_bonus" // merchant-funded credit, not processor cash
-	CreditPurchaseRevenue   TransferType = "credit_purchase_revenue"
-	CreditRefund            TransferType = "credit_refund"
-	CreditRefundRestore     TransferType = "credit_refund_restore"
+	// DepositBonus and CreditPurchaseRevenue are history: a pack's bonus is
+	// part of its rate now, its money the general ledger's.
+	DepositBonus          TransferType = "deposit_bonus"
+	CreditPurchaseRevenue TransferType = "credit_purchase_revenue"
+	// CreditRefund takes a refunded lot's units left to units_refunded, and
+	// CreditRefundFunding its units already retired, owed or consumed;
+	// CreditRefundRestore and CreditRefundFunding return them.
+	CreditRefund        TransferType = "credit_refund"
+	CreditRefundRestore TransferType = "credit_refund_restore"
+	CreditRefundFunding TransferType = "credit_refund_funding"
+	// CreditRefundCash and CreditRefundCashRestore are history: a refund's
+	// cash is the general ledger's.
 	CreditRefundCash        TransferType = "credit_refund_cash"
 	CreditRefundCashRestore TransferType = "credit_refund_cash_restore"
-	CreditRefundFunding     TransferType = "credit_refund_funding"
-	Deposit                 TransferType = "deposit"       // rail clearing -> customer balance
-	CreditSpend             TransferType = "credit_spend"  // customer balance -> platform revenue
+	Deposit                 TransferType = "deposit"       // units_sold -> customer_units
+	CreditSpend             TransferType = "credit_spend"  // customer_units -> units_redeemed
 	CreditExpire            TransferType = "credit_expire" // unspent lot remainder, time-lapsed
 	CreditRevoke            TransferType = "credit_revoke" // unspent lot remainder, clawed back
-	// CreditReinstate reverses a clawback (revoked_credits -> customer_balance).
+	// CreditReinstate reverses a clawback (units_revoked -> customer_units).
 	CreditReinstate TransferType = "credit_reinstate"
-	OwedAccrual     TransferType = "owed_accrual" // postpaid usage -> arrears liability
+	OwedAccrual     TransferType = "owed_accrual" // postpaid usage -> customer_owed
 	OwedPayment     TransferType = "owed_payment" // arrears settled by an external charge
 	// OwedWriteoff cancels accrued debt without money moving when a usage order
 	// is voided: the inverse of OwedAccrual. OwedPayment means a rail collected.
 	OwedWriteoff TransferType = "owed_writeoff"
-	// OwedRepayment pays debt from a newly funded credit lot (customer balance
-	// -> arrears liability), naming that lot.
+	// OwedRepayment pays debt from a newly funded credit lot (customer_units
+	// -> customer_owed), naming that lot.
 	OwedRepayment TransferType = "owed_repayment"
+	// UsageReversed credits a lot with what a period's usage posted beyond
+	// its price, once a volume tier's price fell (units_redeemed ->
+	// customer_units), naming the lot; a leg that reduces owed names none.
+	// The general ledger shares the type.
+	UsageReversed = books.UsageReversed
 )
 
-// AllTransferTypes must equal the DB CHECK exactly (TestLedgerVocabularyMatchesSchema).
-var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment}
+// AllTransferTypes is the units book's whole vocabulary (OR-J40-S01 checks it
+// against ledger_transfers_type_check).
+var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment, UsageReversed}
 
 // fundingTransfers re-arm a customer's balance notices: money added to its
 // balance, and debt it paid.
 var fundingTransfers = map[TransferType]bool{Deposit: true, DepositBonus: true, CreditReinstate: true, OwedPayment: true}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
-// ledger_transfers_credit_grant_id_transfer_type_key.
-var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire, CreditRevoke}
+// ledger_transfers_credit_grant_id_transfer_type_key. A reinstated lot can be
+// revoked again.
+var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire}
 
 // Operation is the kind of money write that posted a transfer, part of the
 // idempotency coordinate. The engine composes it and a caller supplies only
 // (source, source_id), so two operations (an overage charge and the capture of
 // the same request) never alias on one caller key.
-type Operation string
+type Operation = books.Operation
 
 const (
 	OpSpend    Operation = "spend"    // history only
@@ -95,7 +114,7 @@ const (
 	OpCreditReinstate Operation = "credit_reinstate"
 
 	OpArrearsAccrual Operation = "arrears_accrual" // MoneyService.AccrueOwed
-	OpUsageAccrual   Operation = "usage_accrual"   // one posting of a customer's day of usage
+	OpUsagePosting   Operation = "usage_posting"   // one posting of a customer's usage in a period
 	// A usage order's owed payment and write-off. The stored names predate
 	// usage orders; the ledger is append-only, so history keeps them.
 	OpOrderPayment       Operation = "invoice_payment" // arrears settled by a rail charge
@@ -114,33 +133,10 @@ func UsageOperation(eventType string) Operation {
 // Coord is the idempotency coordinate a durable money write posts at, within
 // (merchant, customer, currency). All three parts are required;
 // money.NewIdempotencyKey builds one for callers.
-type Coord struct {
-	Operation Operation
-	Source    string
-	SourceID  string
-}
-
-// Validate refuses a partial coordinate: a blank part makes a money write
-// non-idempotent or ambiguous.
-func (c Coord) Validate() error {
-	if strings.TrimSpace(string(c.Operation)) == "" || c.Operation == usageOpPrefix {
-		return fmt.Errorf("ledger: operation required on the idempotency coordinate")
-	}
-	if strings.TrimSpace(c.Source) == "" || strings.TrimSpace(c.SourceID) == "" {
-		return fmt.Errorf("ledger: source and source_id required on the idempotency coordinate")
-	}
-	if len(c.Operation) > MaxCoordBytes || len(c.Source) > MaxCoordBytes || len(c.SourceID) > MaxCoordBytes {
-		return fmt.Errorf("ledger: each part of the idempotency coordinate is at most %d bytes", MaxCoordBytes)
-	}
-	return nil
-}
+type Coord = books.Coord
 
 // MaxCoordBytes bounds each part of a coordinate; ledger_transfers checks it.
-const MaxCoordBytes = 512
-
-func (c Coord) String() string {
-	return string(c.Operation) + "/" + c.Source + "/" + c.SourceID
-}
+const MaxCoordBytes = books.MaxCoordBytes
 
 // ErrInsufficientFunds is returned when a posting transfer would push the debit
 // account below its sign-constraint floor.
@@ -172,7 +168,7 @@ func (l *Ledger) SetClock(now func() time.Time) *Ledger {
 // EnsureSystemAccount get-or-creates the merchant's system account of the given
 // type + currency (customer_id NULL).
 func (l *Ledger) EnsureSystemAccount(ctx context.Context, t AccountType, currency string) (uuid.UUID, error) {
-	id, _, err := l.ensureAccount(ctx, t, currency, nil, false, false)
+	id, _, err := l.ensureAccount(ctx, t, currency, nil)
 	return id, err
 }
 
@@ -182,7 +178,7 @@ func (l *Ledger) EnsureSystemAccount(ctx context.Context, t AccountType, currenc
 // arrears is watched.
 func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
 	c := customer
-	id, created, err := l.ensureAccount(ctx, CustomerBalance, currency, &c, true, false)
+	id, created, err := l.ensureAccount(ctx, CustomerUnits, currency, &c)
 	if err != nil || !created {
 		return id, err
 	}
@@ -192,12 +188,12 @@ func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, 
 	return id, nil
 }
 
-// EnsureCustomerArrears get-or-creates the customer's own arrears-liability
-// account, so outstanding owed is one counter read, not a sum over history.
-// Not debits_must_not_exceed_credits: its negative balance IS the debt.
+// EnsureCustomerArrears get-or-creates the customer's own owed account, so
+// outstanding owed is one counter read, not a sum over history. Not
+// debits_must_not_exceed_credits: its negative balance IS the debt.
 func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
 	c := customer
-	id, _, err := l.ensureAccount(ctx, ArrearsLiability, currency, &c, false, false)
+	id, _, err := l.ensureAccount(ctx, CustomerOwed, currency, &c)
 	return id, err
 }
 
@@ -206,7 +202,7 @@ func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, 
 func (l *Ledger) CustomerArrearsAccountID(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, bool, error) {
 	c := customer
 	acc, err := l.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
-		MerchantID: l.merchant, AccountType: string(ArrearsLiability), Currency: currency, CustomerID: &c,
+		MerchantID: l.merchant, AccountType: string(CustomerOwed), Currency: currency, CustomerID: &c,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -242,39 +238,24 @@ func (l *Ledger) OutstandingOwed(ctx context.Context, customer uuid.UUID, curren
 func (l *Ledger) CustomerBalanceAccountID(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, bool, error) {
 	c := customer
 	acc, err := l.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
-		MerchantID: l.merchant, AccountType: string(CustomerBalance), Currency: currency, CustomerID: &c,
+		MerchantID: l.merchant, AccountType: string(CustomerUnits), Currency: currency, CustomerID: &c,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, false, nil
 		}
-		return uuid.Nil, false, fmt.Errorf("ledger: get customer_balance account: %w", err)
+		return uuid.Nil, false, fmt.Errorf("ledger: get %s account: %w", CustomerUnits, err)
 	}
 	return acc.ID, true, nil
 }
 
-// ensureAccount get-or-creates an account; created reports this call made it.
-func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency string, customer *uuid.UUID, dmnec, cmned bool) (id uuid.UUID, created bool, err error) {
-	get := gen.GetLedgerAccountParams{MerchantID: l.merchant, AccountType: string(t), Currency: currency, CustomerID: customer}
-	acc, err := l.q.GetLedgerAccount(ctx, get)
-	if err == nil {
-		return acc.ID, false, nil
+// ensureAccount get-or-creates a units-book account with the chart's sign
+// rules; created reports this call made it.
+func (l *Ledger) ensureAccount(ctx context.Context, t AccountType, currency string, customer *uuid.UUID) (id uuid.UUID, created bool, err error) {
+	if acct, ok := books.Lookup(t); !ok || acct.Book != books.Units {
+		return uuid.Nil, false, fmt.Errorf("ledger: %q is not a units-book account", t)
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, false, fmt.Errorf("ledger: get %s account: %w", t, err)
-	}
-	row, err := l.q.InsertLedgerAccount(ctx, gen.InsertLedgerAccountParams{
-		MerchantID: l.merchant, CustomerID: customer, AccountType: string(t), Currency: currency,
-		DebitsMustNotExceedCredits: dmnec, CreditsMustNotExceedDebits: cmned,
-	})
-	if err != nil {
-		// Lost a create race (unique index): re-read.
-		if acc2, gerr := l.q.GetLedgerAccount(ctx, get); gerr == nil {
-			return acc2.ID, false, nil
-		}
-		return uuid.Nil, false, fmt.Errorf("ledger: create %s account: %w", t, err)
-	}
-	return row.ID, true, nil
+	return books.EnsureAccount(ctx, l.q, l.merchant, t, currency, customer, nil)
 }
 
 // Transfer is one double-entry movement to append.
@@ -361,11 +342,12 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 	return gen.BillingLedgerTransfer{}, false, err
 }
 
-// transferAt resolves the row already committed at a transfer's full physical
-// identity (coordinate + lot), if any.
+// transferAt resolves the units-book row already committed at a transfer's
+// full physical identity (coordinate + lot), if any.
 func (l *Ledger) transferAt(ctx context.Context, t Transfer) (gen.BillingLedgerTransfer, bool, error) {
 	row, err := l.q.GetLedgerTransferAtCoordinate(ctx, gen.GetLedgerTransferAtCoordinateParams{
 		MerchantID:    l.merchant,
+		Book:          string(books.Units),
 		CustomerID:    t.Customer,
 		Currency:      t.Currency,
 		TransferType:  string(t.Type),
@@ -389,11 +371,14 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 	return l.q.LedgerAccountBalance(ctx, gen.LedgerAccountBalanceParams{AccountID: account, MerchantID: l.merchant})
 }
 
-// Deposit credits the customer's balance from the rail-clearing account
-// (DR processor_clearing / CR customer_balance). grantID attributes the deposit
-// to its credit lot (uuid.Nil for a non-lot deposit).
-func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
+// DepositFrom credits the customer's balance from units_sold (a lot bought)
+// or units_granted (a lot given). grantID attributes the deposit to its
+// credit lot (uuid.Nil for a non-lot deposit).
+func (l *Ledger) DepositFrom(ctx context.Context, from AccountType, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	if from != UnitsSold && from != UnitsGranted {
+		return gen.BillingLedgerTransfer{}, fmt.Errorf("ledger: a deposit's units are sold or granted, not %s", from)
+	}
+	clearing, err := l.EnsureSystemAccount(ctx, from, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}
@@ -413,8 +398,23 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 	return l.Apply(ctx, t)
 }
 
+// ReverseUsage credits a customer's lot with what its usage posted beyond a
+// period's price (DR units_redeemed / CR customer_units).
+func (l *Ledger) ReverseUsage(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, lot uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	rev, err := l.EnsureSystemAccount(ctx, UnitsRedeemed, currency)
+	if err != nil {
+		return gen.BillingLedgerTransfer{}, err
+	}
+	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
+	if err != nil {
+		return gen.BillingLedgerTransfer{}, err
+	}
+	c := customer
+	return l.Apply(ctx, Transfer{Debit: rev, Credit: cust, Amount: amount, Currency: currency, Type: UsageReversed, Coord: coord, Customer: &c, CreditGrantID: &lot})
+}
+
 // AccrueOwed recognizes postpaid usage as revenue against the customer's
-// arrears account (DR arrears_liability / CR platform_revenue), leaving the
+// arrears account (DR customer_owed / CR units_redeemed), leaving the
 // balance untouched; PayOwed settles it. The arrears account's negative
 // balance is the owed exposure.
 func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
@@ -429,7 +429,7 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, false, err
 	}
-	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
+	rev, err := l.EnsureSystemAccount(ctx, UnitsRedeemed, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, false, err
 	}
@@ -441,10 +441,10 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 }
 
 // WriteOffOwed cancels accrued arrears without money moving (DR
-// platform_revenue / CR arrears_liability), the inverse of AccrueOwed. Posted
+// units_redeemed / CR customer_owed), the inverse of AccrueOwed. Posted
 // when a usage order is voided, so the ledger stops counting it as owed.
 func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
+	rev, err := l.EnsureSystemAccount(ctx, UnitsRedeemed, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}
@@ -459,10 +459,10 @@ func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency 
 	})
 }
 
-// PayOwed settles accrued arrears via an external charge (DR processor_clearing /
-// CR arrears_liability), bringing the liability account back toward zero.
+// PayOwed settles accrued arrears via an external charge (DR units_sold /
+// CR customer_owed), bringing the liability account back toward zero.
 func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
-	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
+	clearing, err := l.EnsureSystemAccount(ctx, UnitsSold, currency)
 	if err != nil {
 		return gen.BillingLedgerTransfer{}, err
 	}
@@ -477,8 +477,8 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 	})
 }
 
-// RepayOwed pays a customer's debt from their balance (DR customer_balance /
-// CR arrears_liability), attributed to the funding credit lot.
+// RepayOwed pays a customer's debt from their balance (DR customer_units /
+// CR customer_owed), attributed to the funding credit lot.
 func (l *Ledger) RepayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, lot uuid.UUID, order *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
 	if err != nil {

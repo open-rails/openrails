@@ -307,7 +307,7 @@ func (v balanceView) watched() bool {
 // rate, by whole minutes: each minute is read by one look once it has ended;
 // minutes before the last sample, or more than one time constant ago, are left
 // out: the rate is an estimate.
-func sampleUsageRate(ctx context.Context, q *gen.Queries, watch gen.BillingBalanceWatch, now time.Time) (rate int64, sampledAt time.Time, err error) {
+func (s *MoneyService) sampleUsageRate(ctx context.Context, q *gen.Queries, watch gen.BillingBalanceWatch, now time.Time) (rate int64, sampledAt time.Time, err error) {
 	since := now.Add(-usageRateTimeConstant)
 	if prev := watch.RateSampledAt; prev != nil {
 		if !prev.Before(now) {
@@ -316,11 +316,20 @@ func sampleUsageRate(ctx context.Context, q *gen.Queries, watch gen.BillingBalan
 		since = later(since, *prev)
 		rate = decayRate(watch.UsageRatePerHour, now.Sub(*prev))
 	}
-	spent, err := q.SumUsageMinutesBetween(ctx, gen.SumUsageMinutesBetweenParams{
-		MerchantID: watch.MerchantID, CustomerID: watch.CustomerID, Currency: watch.Currency, Since: since, Until: now,
-	})
-	if err != nil {
-		return 0, now, err
+	// Only a customer with unposted usage reads the event store: one without
+	// any looks while it is out of reach.
+	var spent int64
+	if store := s.eventStore(q); store != nil {
+		_, err := q.GetUsageUnposted(ctx, gen.GetUsageUnpostedParams{MerchantID: watch.MerchantID, CustomerID: watch.CustomerID, Currency: watch.Currency})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return 0, now, err
+		default:
+			if spent, err = store.MinuteAmount(ctx, billing.CustomerID(watch.CustomerID), watch.Currency, since, now); err != nil {
+				return 0, now, err
+			}
+		}
 	}
 	// Spent within one time constant of an hour is that much per hour.
 	return satAdd(rate, satMul(spent, int64(time.Hour/usageRateTimeConstant))), now, nil
@@ -401,7 +410,7 @@ func (s *MoneyService) WatchBalanceInTx(ctx context.Context, txDB *db.DB, custom
 	if !view.watched() {
 		return q.DeleteBalanceWatch(ctx, gen.DeleteBalanceWatchParams{MerchantID: key.MerchantID, CustomerID: key.CustomerID, Currency: currency})
 	}
-	usageRate, sampledAt, err := sampleUsageRate(ctx, q, watch, bal.AsOf)
+	usageRate, sampledAt, err := txSvc.sampleUsageRate(ctx, q, watch, bal.AsOf)
 	if err != nil {
 		return err
 	}

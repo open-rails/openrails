@@ -66,8 +66,8 @@ func TestAdmissionBoundaries(t *testing.T) {
 		require.Len(t, ledger.Items, 1, "the capture is held until its day posts")
 		// The day's usage posts once its day ends.
 		fleet := startFleet(t, w)
-		nextDay(w)
-		postDays(t, fleet)
+		nextMonth(w)
+		closeMonths(t, fleet)
 		balance(t, w.alpha, customer, 900, 0, 900)
 		ledger, err = w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
@@ -153,10 +153,13 @@ func TestAdmissionBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, admitted[0].Allowed())
 		reason := billing.RevokeCreditGrantParams{Reason: "Revoke only unused credit"}
-		_, err = w.alpha.RevokeCreditGrant(t.Context(), grant.ID, reason)
+		_, err = w.alpha.RevokeCreditGrant(t.Context(), "", grant.ID, reason)
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
 		require.Equal(t, billing.CodeCreditGrantHeld, held.Code)
+		// The capture occurred when it was admitted: a revocation after it
+		// posts it first.
+		w.clock.Advance(time.Second)
 		type captureResult struct {
 			rows []billing.CaptureResult
 			err  error
@@ -175,7 +178,7 @@ func TestAdmissionBoundaries(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			result, err := w.alpha.RevokeCreditGrant(t.Context(), grant.ID, reason)
+			result, err := w.alpha.RevokeCreditGrant(t.Context(), "", grant.ID, reason)
 			rch <- revokeResult{result, err}
 		}()
 		close(start)
@@ -190,8 +193,8 @@ func TestAdmissionBoundaries(t *testing.T) {
 		// The capture's accrual posts before a revocation moves the lot, or
 		// once its day ends.
 		fleet := startFleet(t, w)
-		nextDay(w)
-		postDays(t, fleet)
+		nextMonth(w)
+		closeMonths(t, fleet)
 		final, err := w.alpha.GetCreditGrant(t.Context(), grant.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 450, final.SpentAmount)

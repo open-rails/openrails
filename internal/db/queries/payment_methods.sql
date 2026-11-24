@@ -63,8 +63,16 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND c.id = sqlc.arg(custodian_id)::uuid
 FOR SHARE OF p, c;
 
--- name: DeletePaymentMethod :execrows
-DELETE FROM billing.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
+-- name: DiscardPaymentMethod :execrows
+-- A card deleted at its holder outside an operation (a declined purchase's
+-- new card) stays as a removed tombstone: its versions are permanent.
+UPDATE billing.payment_methods
+SET status = CASE WHEN status IN ('active', 'requires_action') THEN 'removed' ELSE status END,
+    setup_ref = NULL,
+    park_reason = 'removed:' || id::text,
+    updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND NOT COALESCE(park_reason LIKE 'removed:%', false);
 
 -- name: ListPaymentMethodsByCustomer :many
 SELECT * FROM billing.payment_methods pm
@@ -165,7 +173,7 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = $1 AND pm.custome
 -- #589 derived health: each payment method's most recent charge attempt
 -- (#1111), approved or not.
 SELECT DISTINCT ON (a.payment_method_id)
-    a.payment_method_id, a.attempted_at, a.category
+    a.payment_method_id, a.attempted_at, a.outcome
 FROM billing.payment_attempts a
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.payment_method_id = ANY(sqlc.arg(ids)::uuid[]) AND a.kind <> 'verify'
 ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC;

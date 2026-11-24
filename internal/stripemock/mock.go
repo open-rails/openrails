@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,6 +66,7 @@ type Mock struct {
 	methods         map[string]Object
 	declines        map[string]string
 	advice          map[string]Advice
+	blocks          map[string]string
 	intents         map[string]Object
 	order           []string
 	charges         map[string]Object
@@ -101,6 +104,12 @@ type Mock struct {
 	events           []Event
 	// thinEvents are the v2 events a thin destination was sent, by id.
 	thinEvents map[string]Object
+
+	// balances are the balance transactions charges, refunds and disputes
+	// made, settled in settlement at settleRate when it is set.
+	balances   map[string]Object
+	settlement string
+	settleRate float64
 }
 
 // New starts a Mock on a loopback listener; see URL and Close.
@@ -116,8 +125,8 @@ func NewUnstarted(opts Options) *Mock {
 	if opts.Clock == nil {
 		opts.Clock = time.Now
 	}
-	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{}, advice: map[string]Advice{},
-		intents: map[string]Object{}, charges: map[string]Object{}, disputes: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
+	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{}, advice: map[string]Advice{}, blocks: map[string]string{},
+		intents: map[string]Object{}, charges: map[string]Object{}, disputes: map[string]Object{}, balances: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}, webhookEndpoints: map[string][]Object{},
 		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{}}
 }
@@ -432,12 +441,34 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return 200, pi
 	case r.Method == http.MethodGet && seg[0] == "payment_intents" && len(seg) == 2:
 		if pi, ok := m.intents[seg[1]]; ok {
+			nested := slices.Contains(q["expand[]"], "latest_charge.balance_transaction")
+			if ch, ok := m.charges[fmt.Sprint(pi["latest_charge"])]; ok && (nested || slices.Contains(q["expand[]"], "latest_charge")) {
+				expanded := clone(pi)
+				if nested {
+					ch = m.withBalanceLocked(ch)
+				}
+				expanded["latest_charge"] = ch
+				return 200, expanded
+			}
 			return 200, pi
 		}
 		return 404, stripeErr("resource_missing")
 	case r.Method == http.MethodGet && seg[0] == "charges" && len(seg) == 2:
 		if ch, ok := m.charges[seg[1]]; ok {
+			if slices.Contains(q["expand[]"], "balance_transaction") {
+				return 200, m.withBalanceLocked(ch)
+			}
 			return 200, ch
+		}
+		return 404, stripeErr("resource_missing")
+	case r.Method == http.MethodGet && seg[0] == "balance_transactions" && len(seg) == 2:
+		if bt, ok := m.balances[seg[1]]; ok {
+			return 200, bt
+		}
+		return 404, stripeErr("resource_missing")
+	case r.Method == http.MethodGet && seg[0] == "disputes" && len(seg) == 2:
+		if d, ok := m.disputes[seg[1]]; ok {
+			return 200, d
 		}
 		return 404, stripeErr("resource_missing")
 	case r.Method == http.MethodGet && p == "/v1/charges":
@@ -448,6 +479,9 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		return m.createRefund(form)
 	case r.Method == http.MethodGet && seg[0] == "refunds" && len(seg) == 2:
 		if re, ok := m.refunds[seg[1]]; ok {
+			if slices.Contains(q["expand[]"], "balance_transaction") {
+				return 200, m.withBalanceLocked(re)
+			}
 			return 200, re
 		}
 		return 404, stripeErr("resource_missing")
@@ -587,7 +621,11 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 	m.intents[pi["id"].(string)] = pi
 	m.visibleAt[pi["id"].(string)] = m.now().Add(m.visibilityDelay)
 	m.order = append(m.order, pi["id"].(string))
-	switch decline := m.declines[pm]; decline {
+	decline, blocked := m.declines[pm], m.blocks[pm]
+	if blocked != "" {
+		decline = "fraudulent" // Stripe answers a Radar block as a fraudulent decline
+	}
+	switch decline {
 	case "":
 		m.chargeLocked(pi)["created"] = m.now().Unix()
 		return 200, pi
@@ -598,6 +636,7 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 		// Stripe detaches the refused method from the intent; it survives
 		// only on last_payment_error.
 		pi["status"], pi["payment_method"] = "requires_payment_method", nil
+		pi["latest_charge"] = m.failedChargeLocked(pi, pm, decline, blocked)["id"]
 		refusal := Object{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_method": Object{"id": pm, "object": "payment_method"}}
 		m.advice[pm].on(refusal)
 		pi["last_payment_error"] = refusal
@@ -605,6 +644,30 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 		m.advice[pm].on(answer)
 		return 402, Object{"error": answer}
 	}
+}
+
+// failedChargeLocked records the failed charge of a refused attempt on pm. Its
+// outcome says whether the issuer declined it or Radar (blocked, a block
+// reason) stopped it before the network, with the network's advice.
+func (m *Mock) failedChargeLocked(pi Object, pm, decline, blocked string) Object {
+	outcome := Object{"type": "issuer_declined", "network_status": "declined_by_network", "reason": decline}
+	if blocked != "" {
+		outcome = Object{"type": "blocked", "network_status": "not_sent_to_network", "reason": blocked}
+	} else {
+		m.advice[pm].on(outcome)
+	}
+	card := Object{"country": "US"}
+	if method, ok := m.methods[pm]; ok {
+		for key, value := range method["card"].(Object) {
+			card[key] = value
+		}
+	}
+	ch := Object{"object": "charge", "id": m.id("ch"), "amount": pi["amount"], "amount_captured": int64(0), "currency": pi["currency"], "customer": pi["customer"], "payment_method": pm,
+		"payment_intent": pi["id"], "status": "failed", "paid": false, "captured": false, "refunded": false, "amount_refunded": int64(0), "disputed": false, "livemode": false,
+		"created": m.now().Unix(), "failure_code": "card_declined", "failure_message": "Your card was declined.", "outcome": outcome,
+		"payment_method_details": Object{"type": "card", "card": card}}
+	m.charges[ch["id"].(string)] = ch
+	return ch
 }
 
 // chargeLocked settles a payment intent with one succeeded charge; one that
@@ -616,9 +679,51 @@ func (m *Mock) chargeLocked(pi Object) Object {
 	amount := pi["amount"].(int64)
 	ch := Object{"object": "charge", "id": m.id("ch"), "amount": amount, "amount_captured": amount, "currency": pi["currency"], "customer": pi["customer"], "payment_method": pi["payment_method"],
 		"payment_intent": pi["id"], "status": "succeeded", "paid": true, "captured": true, "refunded": false, "amount_refunded": int64(0), "disputed": false, "livemode": false}
+	ch["balance_transaction"] = m.balanceLocked("charge", "charge", ch["id"].(string), amount, fmt.Sprint(ch["currency"]), chargeFee)["id"]
 	m.charges[ch["id"].(string)] = ch
 	pi["status"], pi["amount_received"], pi["latest_charge"] = "succeeded", amount, ch["id"]
 	return ch
+}
+
+// chargeFee is Stripe's card fee on a settled amount: 2.9% plus 30 minor
+// units, rounded half up.
+func chargeFee(settled int64) int64 { return (settled*29+500)/1000 + 30 }
+
+// DisputeFee is what a dispute's balance transaction charges, in minor units
+// of the settlement currency.
+const DisputeFee int64 = 1500
+
+// balanceLocked records the balance transaction a charge, refund or dispute
+// makes: amount in the presentment currency, settled in the settlement
+// currency at its rate when one is set, with fee on the settled amount.
+func (m *Mock) balanceLocked(typ, category, source string, amount int64, currency string, fee func(int64) int64) Object {
+	settled, cur := amount, strings.ToLower(currency)
+	var rate any
+	if m.settlement != "" && m.settlement != cur {
+		settled, cur, rate = int64(math.Round(float64(amount)*m.settleRate)), m.settlement, m.settleRate
+	}
+	magnitude := settled
+	if magnitude < 0 {
+		magnitude = -magnitude
+	}
+	f := fee(magnitude)
+	details := []Object{}
+	if f != 0 {
+		details = append(details, Object{"amount": f, "currency": cur, "type": "stripe_fee", "description": "Stripe processing fees"})
+	}
+	bt := Object{"object": "balance_transaction", "id": m.id("txn"), "amount": settled, "currency": cur, "fee": f, "fee_details": details, "net": settled - f,
+		"type": typ, "reporting_category": category, "source": source, "created": m.now().Unix(), "exchange_rate": rate, "status": "available"}
+	m.balances[bt["id"].(string)] = bt
+	return bt
+}
+
+// withBalanceLocked is o with its balance_transaction expanded.
+func (m *Mock) withBalanceLocked(o Object) Object {
+	out := clone(o)
+	if bt, ok := m.balances[fmt.Sprint(o["balance_transaction"])]; ok {
+		out["balance_transaction"] = clone(bt)
+	}
+	return out
 }
 
 func (m *Mock) createRefund(form url.Values) (int, any) {
@@ -643,6 +748,8 @@ func (m *Mock) createRefund(form url.Values) (int, any) {
 	ch["refunded"] = ch["amount_refunded"] == ch["amount"]
 	re := Object{"object": "refund", "id": m.id("re"), "amount": amount, "charge": ch["id"], "payment_intent": ch["payment_intent"], "currency": ch["currency"], "status": "succeeded",
 		"reason": form.Get("reason"), "metadata": metadataOf(form), "created": m.now().Unix()}
+	// Stripe keeps its fee when it refunds.
+	re["balance_transaction"] = m.balanceLocked("refund", "refund", re["id"].(string), -amount, fmt.Sprint(ch["currency"]), func(int64) int64 { return 0 })["id"]
 	m.refunds[re["id"].(string)] = re
 	m.refundOrder = append(m.refundOrder, re["id"].(string))
 	return 200, re

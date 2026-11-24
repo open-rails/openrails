@@ -2,10 +2,13 @@ package metrics
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // stmt is one compiled family statement.
@@ -21,7 +24,9 @@ type stmt struct {
 
 // compile builds one parameterized statement per source family involved.
 // Every SQL fragment comes from the registry; client values ride in args.
-func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
+// Usage families are the event store's (usage.go) and compile to none;
+// burns are the usage the depletion measure reads.
+func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 	// Group leaf components by family, preserving first-seen order. Snapshot
 	// leaves with different edge semantics (period-start components like churn's
 	// denominator) get their own statement in the non-time case.
@@ -50,6 +55,9 @@ func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
 	for _, k := range famOrder {
 		fam := k.fam
 		leaves := famLeaves[k]
+		if storeFamily(fam) {
+			continue
+		}
 		spec := families[fam]
 		var st stmt
 		var err error
@@ -58,10 +66,12 @@ func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
 			st, err = compileFlow(plan, merchantID, fam, spec, leaves)
 		case "snapshot":
 			st, err = compileSnapshot(plan, merchantID, fam, spec, leaves)
+		case "risk":
+			st, err = compileSnapshot(plan, merchantID, fam, riskSpec(plan, spec), leaves)
 		case "balance":
 			st, err = compileBalance(plan, merchantID, fam, spec, leaves)
 		case "depletion":
-			st, err = compileDepletion(plan, merchantID, leaves)
+			st, err = compileDepletion(plan, merchantID, leaves, burns)
 		default:
 			err = fmt.Errorf("metrics: family %s has no skeleton", fam)
 		}
@@ -80,8 +90,6 @@ var merchantCols = map[Family]string{
 	FamSubsNew:        "s.merchant_id",
 	FamSubsCanceled:   "s.merchant_id",
 	FamGrants:         "g.merchant_id",
-	FamUsage:          "ud.merchant_id",
-	FamUsageCharged:   "ud.merchant_id",
 	FamTransitions:    "st.merchant_id",
 	FamLimitsReached:  "lw.merchant_id",
 	FamSubsSnapshot:   "s.merchant_id",
@@ -100,6 +108,8 @@ var merchantCols = map[Family]string{
 	FamFraudReports:   "fr.merchant_id",
 	FamNetwork:        "na.merchant_id",
 	FamNetworkPrior:   "nap.merchant_id",
+	FamRiskTotals:     "t.merchant_id",
+	FamRiskFlows:      "rf.merchant_id",
 }
 
 func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
@@ -109,7 +119,7 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	sel := []string{}
 	group := []string{}
 	if plan.HasTime {
-		sel = append(sel, fmt.Sprintf("date_trunc(%s, %s AT TIME ZONE 'UTC') AS bucket", arg(plan.Grain), spec.TimeExpr))
+		sel = append(sel, bucketExpr(spec, arg(plan.Grain), arg(plan.zone().String()))+" AS bucket")
 		group = append(group, "1")
 	}
 	joins := map[string]bool{}
@@ -132,9 +142,13 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	if spec.BaseWhere != "" {
 		where = append(where, spec.BaseWhere)
 	}
+	from, to := plan.From, plan.To
+	if spec.Calendar {
+		from, to = calendarBound(from, plan.zone(), false), calendarBound(to, plan.zone(), true)
+	}
 	where = append(where,
-		fmt.Sprintf("%s >= %s", spec.TimeExpr, arg(plan.From)),
-		fmt.Sprintf("%s < %s", spec.TimeExpr, arg(plan.To)))
+		fmt.Sprintf("%s >= %s", spec.TimeExpr, arg(from)),
+		fmt.Sprintf("%s < %s", spec.TimeExpr, arg(to)))
 	for _, d := range sortedFilterDims(plan.Filters) {
 		expr, ok := spec.DimExprs[d]
 		if !ok {
@@ -210,6 +224,36 @@ func compileSnapshot(plan *Plan, merchantID uuid.UUID, fam Family, spec familySp
 	return stmt{family: fam, sql: sql, args: args, leaves: leaves, hasTime: true, snapshot: true}, nil
 }
 
+// bucketExpr is the start of a row's bucket at grain, on the calendar of
+// zone, as an instant: what bucketLabels gives. A calendar family's day is
+// its date wherever the zone is.
+func bucketExpr(spec familySpec, grain, zone string) string {
+	if spec.Calendar {
+		return fmt.Sprintf("(date_trunc(%s, (%s) AT TIME ZONE 'UTC') AT TIME ZONE %s)", grain, spec.TimeExpr, zone)
+	}
+	return fmt.Sprintf("date_trunc(%s, %s, %s)", grain, spec.TimeExpr, zone)
+}
+
+// calendarBound is the UTC midnight of t's date in zone, the date after when
+// up and t is not that day's start: a calendar family's rows are keyed so.
+func calendarBound(t time.Time, zone *time.Location, up bool) time.Time {
+	y, m, d := t.In(zone).Date()
+	if up && !t.Equal(calendarutil.DayStart(y, m, d, zone)) {
+		d++
+	}
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// riskSpec reads the per-reason at-risk rows when the query groups or
+// filters by risk_reason, else the rows that count a subscription once.
+func riskSpec(plan *Plan, spec familySpec) familySpec {
+	spec.BaseWhere = `t.reason = 'any'`
+	if slices.Contains(plan.Dims, "risk_reason") || plan.Filters["risk_reason"] != nil {
+		spec.BaseWhere = `t.reason <> 'any'`
+	}
+	return spec
+}
+
 func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
 	var args []any
 	arg := func(v any) string { args = append(args, v); return fmt.Sprintf("$%d", len(args)) }
@@ -221,9 +265,8 @@ func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpe
 	var firstEdge, lastEdge time.Time
 	if plan.HasTime {
 		firstEdge, lastEdge = plan.Buckets[0], plan.Buckets[len(plan.Buckets)-1]
-		sel = append(sel, fmt.Sprintf(
-			"CASE WHEN %s < %s THEN NULL ELSE date_trunc(%s, %s AT TIME ZONE 'UTC') END AS bucket",
-			spec.TimeExpr, arg(firstEdge), arg(plan.Grain), spec.TimeExpr))
+		sel = append(sel, fmt.Sprintf("CASE WHEN %s < %s THEN NULL ELSE %s END AS bucket",
+			spec.TimeExpr, arg(firstEdge), bucketExpr(spec, arg(plan.Grain), arg(plan.zone().String()))))
 		group = append(group, "1")
 	}
 	for _, d := range plan.Dims {
@@ -239,6 +282,9 @@ func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpe
 	}
 
 	where := []string{merchantCols[fam] + " = " + arg(merchantID)}
+	if spec.BaseWhere != "" {
+		where = append(where, spec.BaseWhere)
+	}
 	if plan.HasTime {
 		where = append(where, fmt.Sprintf("%s < %s", spec.TimeExpr, arg(lastEdge)))
 	} else {
@@ -262,9 +308,14 @@ func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpe
 }
 
 // compileDepletion: customers whose prepaid balance at the edge covers <= N days
-// of their trailing-7d burn, in any currency. Bounded: edges x customers.
-func compileDepletion(plan *Plan, merchantID uuid.UUID, leaves []*Measure) (stmt, error) {
+// of their trailing-7d burn, in any currency. Bounded: edges x customers. The
+// burns are read from the event store before.
+func compileDepletion(plan *Plan, merchantID uuid.UUID, leaves []*Measure, burns []burn) (stmt, error) {
 	edges := snapshotEdges(plan, leaves)
+	burnEdges, burnCustomers, burnCurrencies, burnAmounts := make([]time.Time, 0, len(burns)), make([]uuid.UUID, 0, len(burns)), make([]string, 0, len(burns)), make([]int64, 0, len(burns))
+	for _, b := range burns {
+		burnEdges, burnCustomers, burnCurrencies, burnAmounts = append(burnEdges, b.edge), append(burnCustomers, b.customer), append(burnCurrencies, b.currency), append(burnAmounts, b.amount)
+	}
 	sql := fmt.Sprintf(`SELECT edge.bucket AS bucket, COUNT(DISTINCT x.customer_id) AS m_customers_at_depletion_risk
 FROM unnest($2::timestamptz[]) AS edge(bucket)
 LEFT JOIN LATERAL (
@@ -277,20 +328,16 @@ LEFT JOIN LATERAL (
       ON (lt.credit_account_id = la.id OR lt.debit_account_id = la.id)
      AND lt.merchant_id = la.merchant_id
      AND lt.created_at < edge.bucket
-    WHERE la.merchant_id = $1 AND la.account_type = 'customer_balance' AND la.customer_id IS NOT NULL
+    WHERE la.merchant_id = $1 AND la.account_type = 'customer_units' AND la.customer_id IS NOT NULL
     GROUP BY la.customer_id, la.currency
   ) bal
-  JOIN (
-    SELECT ud.customer_id, ud.currency, SUM(ud.amount) AS burn
-    FROM billing.usage_daily ud
-    WHERE ud.merchant_id = $1 AND ud.day_at >= edge.bucket - interval '7 days' AND ud.day_at < edge.bucket
-    GROUP BY ud.customer_id, ud.currency
-  ) burn ON burn.customer_id = bal.customer_id AND burn.currency = bal.currency
+  JOIN unnest($3::timestamptz[], $4::uuid[], $5::text[], $6::bigint[]) AS burn(edge, customer_id, currency, burn)
+    ON burn.edge = edge.bucket AND burn.customer_id = bal.customer_id AND burn.currency = bal.currency
   WHERE burn.burn > 0 AND bal.balance <= (burn.burn / 7.0) * %d
 ) x ON TRUE
 GROUP BY edge.bucket`, depletionRiskDays)
 	return stmt{
-		family: FamDepletion, sql: sql, args: []any{merchantID, edges},
+		family: FamDepletion, sql: sql, args: []any{merchantID, edges, burnEdges, burnCustomers, burnCurrencies, burnAmounts},
 		leaves: leaves, hasTime: true, snapshot: true,
 	}, nil
 }

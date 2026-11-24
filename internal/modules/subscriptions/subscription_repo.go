@@ -32,6 +32,13 @@ type SubscriptionFilters struct {
 	CanceledAfter  *time.Time
 	CanceledBefore *time.Time
 	ExpiresBefore  *time.Time
+	// ScheduledChangeBefore keeps the subscriptions whose MRR is scheduled to
+	// change by then.
+	ScheduledChangeBefore *time.Time
+	// AtRisk keeps the subscriptions whose MRR is at risk; RiskReason, when
+	// set, those at risk for it.
+	AtRisk     bool
+	RiskReason string
 	// Dunning keeps the subscriptions past_due or awaiting_method.
 	Dunning bool
 	// Sort picks ListPage's order; Count ignores it.
@@ -196,6 +203,7 @@ func (r *SubscriptionRepo) updateAt(ctx context.Context, s *models.Subscription,
 		TransientRetries:      *models.IntPtrTo32(&s.TransientRetries),
 		NextRetryAt:           s.NextRetryAt,
 		GraceEndsAt:           s.GraceEndsAt,
+		RetryAdvisedAt:        s.RetryAdvisedAt,
 		CancelFeedback:        s.CancelFeedback,
 		CancelType:            cancelType,
 		CanceledAt:            s.CanceledAt,
@@ -688,33 +696,83 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 	}
 	q := r.db.Gen(ctx)
 	var rows []gen.BillingSubscription
-	switch f.Sort {
-	case billing.SubscriptionSortCurrentPeriodEndsAt:
-		rows, err = q.ListSubscriptionsPageByPeriodEnd(ctx, gen.ListSubscriptionsPageByPeriodEndParams{
-			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+	if f.AtRisk {
+		rows, err = r.listAtRiskPage(ctx, q, f, gen.ListAtRiskSubscriptionsPageParams{
+			MerchantID: mid.UUID(), RiskReason: optional(f.RiskReason), ScheduledChangeBefore: f.ScheduledChangeBefore,
+			CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
 			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
 			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 		})
-	case billing.SubscriptionSortCanceledAt:
-		rows, err = q.ListSubscriptionsPageByCanceledAt(ctx, gen.ListSubscriptionsPageByCanceledAtParams{
-			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+	} else if f.ScheduledChangeBefore != nil {
+		rows, err = r.listScheduledPage(ctx, q, f, gen.ListScheduledSubscriptionsPageParams{
+			MerchantID: mid.UUID(), ScheduledChangeBefore: *f.ScheduledChangeBefore, CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
 			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
 			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 		})
-	default:
-		rows, err = q.ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
-			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
-			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
-			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
-		})
+	} else {
+		switch f.Sort {
+		case billing.SubscriptionSortCurrentPeriodEndsAt:
+			rows, err = q.ListSubscriptionsPageByPeriodEnd(ctx, gen.ListSubscriptionsPageByPeriodEndParams{
+				MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+				CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+				CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+				AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+			})
+		case billing.SubscriptionSortCanceledAt:
+			rows, err = q.ListSubscriptionsPageByCanceledAt(ctx, gen.ListSubscriptionsPageByCanceledAtParams{
+				MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+				CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+				CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+				AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+			})
+		default:
+			rows, err = q.ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
+				MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+				CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+				CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+				AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+			})
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
 	return r.manyWithDetails(ctx, rows)
+}
+
+// listScheduledPage is ListPage for a scheduled-change filter, driven by
+// mrr_scheduled's index of open entries.
+func (r *SubscriptionRepo) listScheduledPage(ctx context.Context, q *gen.Queries, f SubscriptionFilters, p gen.ListScheduledSubscriptionsPageParams) ([]gen.BillingSubscription, error) {
+	switch f.Sort {
+	case billing.SubscriptionSortCurrentPeriodEndsAt:
+		return q.ListScheduledSubscriptionsPageByPeriodEnd(ctx, gen.ListScheduledSubscriptionsPageByPeriodEndParams(p))
+	case billing.SubscriptionSortCanceledAt:
+		return q.ListScheduledSubscriptionsPageByCanceledAt(ctx, gen.ListScheduledSubscriptionsPageByCanceledAtParams(p))
+	default:
+		return q.ListScheduledSubscriptionsPage(ctx, p)
+	}
+}
+
+// listAtRiskPage is ListPage for subscriptions at risk, driven by
+// subscription_mrr's index of at-risk rows.
+func (r *SubscriptionRepo) listAtRiskPage(ctx context.Context, q *gen.Queries, f SubscriptionFilters, p gen.ListAtRiskSubscriptionsPageParams) ([]gen.BillingSubscription, error) {
+	switch f.Sort {
+	case billing.SubscriptionSortCurrentPeriodEndsAt:
+		return q.ListAtRiskSubscriptionsPageByPeriodEnd(ctx, gen.ListAtRiskSubscriptionsPageByPeriodEndParams(p))
+	case billing.SubscriptionSortCanceledAt:
+		return q.ListAtRiskSubscriptionsPageByCanceledAt(ctx, gen.ListAtRiskSubscriptionsPageByCanceledAtParams(p))
+	default:
+		return q.ListAtRiskSubscriptionsPage(ctx, p)
+	}
+}
+
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // ListByIDs reads the named subscriptions, newest first.
@@ -739,6 +797,21 @@ func (r *SubscriptionRepo) Count(ctx context.Context, f SubscriptionFilters) (in
 	customer, status, rail, price, err := r.filterArgs(f)
 	if err != nil {
 		return 0, err
+	}
+	if f.AtRisk {
+		return r.db.Gen(ctx).CountAtRiskSubscriptions(ctx, gen.CountAtRiskSubscriptionsParams{
+			MerchantID: mid.UUID(), RiskReason: optional(f.RiskReason), ScheduledChangeBefore: f.ScheduledChangeBefore,
+			CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+		})
+	}
+	if f.ScheduledChangeBefore != nil {
+		return r.db.Gen(ctx).CountScheduledSubscriptions(ctx, gen.CountScheduledSubscriptionsParams{
+			MerchantID: mid.UUID(), ScheduledChangeBefore: *f.ScheduledChangeBefore, CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+		})
 	}
 	return r.db.Gen(ctx).CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
 		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
@@ -884,7 +957,7 @@ func decidedParams(p gen.UpdateSubscriptionAtParams, rev int64) gen.UpdateSubscr
 		StartedAt: p.StartedAt, EndedAt: p.EndedAt, CurrentPeriodStartsAt: p.CurrentPeriodStartsAt, CurrentPeriodEndsAt: p.CurrentPeriodEndsAt,
 		Rail: p.Rail, RailSubscriptionID: p.RailSubscriptionID, PaymentMethodID: p.PaymentMethodID,
 		LastRetryAt: p.LastRetryAt, RetryAttempts: p.RetryAttempts, TransientRetries: p.TransientRetries, NextRetryAt: p.NextRetryAt,
-		GraceEndsAt: p.GraceEndsAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CanceledAt: p.CanceledAt,
+		GraceEndsAt: p.GraceEndsAt, RetryAdvisedAt: p.RetryAdvisedAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CanceledAt: p.CanceledAt,
 		DeletionScheduledAt: p.DeletionScheduledAt, GatewayResponse: p.GatewayResponse, Quantity: p.Quantity,
 		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev, ExpectedVersion: p.ExpectedVersion, HistoryAttribution: p.HistoryAttribution, DunningPolicy: p.DunningPolicy,
 	}

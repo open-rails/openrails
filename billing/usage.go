@@ -81,8 +81,8 @@ const (
 	MaxUsagePageLimit     = 1000
 )
 
-// GetUsageParams selects a usage report: one currency over the UTC days
-// overlapping [From, To), grouped by GroupBy (event_type when empty), a page
+// GetUsageParams selects a usage report: one currency over the days of the
+// merchant's accounting zone overlapping [From, To), grouped by GroupBy (event_type when empty), a page
 // of at most Limit groups (DefaultUsagePageLimit when zero) after Cursor. A
 // zero From or To is the cursor's, or without a cursor the month before now.
 // A cursor reads only the report it came from: the same currency, window and
@@ -121,13 +121,17 @@ type Usage struct {
 	NextCursor *string          `json:"next_cursor"`
 }
 
-// UsageDeduction is what one posting of a customer's day of usage was for:
-// the UTC Day, Amount the day's usage charged, and per meter and cell its
-// requests, quantity and amount.
+// UsageDeduction is what one posting of a customer's usage was for: the
+// pricing period, the instant usage before which it took (Through), Amount
+// the period's price less what earlier postings took, and per meter and cell
+// what it added: requests, quantity and amount. A volume tier whose price
+// fell credits a negative Amount.
 type UsageDeduction struct {
-	Day    string               `json:"day"`
-	Amount int64                `json:"amount,string"`
-	Lines  []UsageDeductionLine `json:"lines"`
+	PeriodStartsAt time.Time            `json:"period_starts_at"`
+	PeriodEndsAt   time.Time            `json:"period_ends_at"`
+	Through        time.Time            `json:"through"`
+	Amount         int64                `json:"amount,string"`
+	Lines          []UsageDeductionLine `json:"lines"`
 }
 
 // UsageDeductionLine is one meter cell of a usage deduction; Cell is null

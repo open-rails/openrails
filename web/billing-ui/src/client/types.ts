@@ -827,8 +827,9 @@ export type PublicMerchant = z.infer<typeof publicMerchantSchema>
 
 /**
  * What any browser needs to know about the deployment (`GET /config`, no
- * credential): the mount's capabilities, the currency registry and the
- * captcha (null when the deployment challenges nobody).
+ * credential): the mount's capabilities, the currency registry, the captcha
+ * (null when the deployment challenges nobody) and whether it serves usage
+ * (an event store is attached).
  */
 export const publicConfigSchema = z.object({
   capabilities: z.object({
@@ -840,6 +841,7 @@ export const publicConfigSchema = z.object({
     .nullish()
     .transform((v) => v ?? []),
   captcha: captchaConfigSchema.nullish(),
+  usage: z.boolean().nullish().transform((v) => v ?? true),
 })
 export type PublicConfig = z.infer<typeof publicConfigSchema>
 

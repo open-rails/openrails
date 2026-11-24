@@ -59,9 +59,7 @@ and updates go through `write` (`UpdateCustomerContact`).
 - Newest wins: `directory_updated_at` holds the directory's date
   (`meta.lastModified`, else arrival). A POST or PUT older than it keeps the stored
   values (`newer`). A PATCH is dated by its arrival.
-- `DELETE /Users/{id}` clears the values and `provisioned_at`, keeps the row and
-  dates it by its arrival, so an older report cannot restore them. It also erases
-  the customer's notification events (`EraseCustomerNotificationEvents`); billing stays.
+- `DELETE /Users/{id}` clears the values and `provisioned_at`, keeps the row and dates it by its arrival, so an older report cannot restore them. It also erases the customer's notification events (`EraseCustomerNotificationEvents`) and message log (`EraseCustomerMessages`); billing stays. It is a destructive command (`destructive.EraseContact`) with a budget of its own; past it the contact still goes at once and the rest waits (guarantee 9).
 - `userName` is unique per merchant, ignoring case, among provisioned rows
   (`customer_contacts_user_name_key`); a clash is `409 uniqueness`.
 - Bulk applies each operation alone, in order, up to `MaxOperations` (1000) and
@@ -69,13 +67,7 @@ and updates go through `write` (`UpdateCustomerContact`).
   `startIndex` and `count` (at most `MaxResults`, 200) with one `eq` filter.
 - `active` is stored and shown, never enforced.
 
-**Authentication.** `provisioningGate` (`internal/http/routes/gate.go`) admits a
-provisioning token, resolved by its SHA-256 (`scim.Tokens.Resolve`) and bound to
-its row's merchant, or else what the programmatic gates admit: an application
-bound to the merchant, never a person. Both pass `boundMerchant`, which requires a
-live merchant. `scimMerchant` takes the merchant from the token or the
-application's binding, never from the request. A refusal before the SCIM server
-runs is rewritten as a SCIM error (`scimRefusals`).
+**Authentication.** `provisioningGate` (`internal/http/routes/gate.go`) admits a provisioning token, resolved by its SHA-256 (`scim.Tokens.Resolve`) and bound to its row's merchant, or else what the programmatic gates admit: an application bound to the merchant holding the route's permission (`merchant:provisioning:read` for reads, `merchant:provisioning:manage` for writes, or their `root:` twins), never a person. The token is the deliberate exception to a permission: it opens only these routes and acts as itself (`provisioningActor`, issuer `ProvisioningIssuer`, its id the subject). Both pass `boundMerchant`, which requires a live merchant. `scimMerchant` takes the merchant from the admitted token's or application's binding, never from the request. A refusal before the SCIM server runs is rewritten as a SCIM error (`scimRefusals`).
 
 **Tokens.** `Tokens.Create` mints `TokenPrefix` plus 32 random bytes and answers it
 once; `Tokens.Delete` revokes. A declaration's `secrets.scim_token` (at least
@@ -101,10 +93,8 @@ minute.
 - Go: `Deps.UserInfo`; `Client.GetCustomer` and `Client.ListCustomers` answer
   `Contact`; `Client.CreateProvisioningToken`, `ListProvisioningTokens`,
   `DeleteProvisioningToken`.
-- HTTP: `{Prefix}/v1/app/scim/v2` (`/Users`, `/Users/{id}`, `/Bulk`,
-  `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`) and
-  `/v1/merchant/provisioning-tokens` (`merchant:config:read`,
-  `merchant:config:manage`). [Routes](../api/routes.md).
+- HTTP: `{Prefix}/v1/app/scim/v2` (`/Users`, `/Users/{id}`, `/Bulk`, `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`; `merchant:provisioning:read`, `merchant:provisioning:manage`) and
+  `/v1/merchant/provisioning-tokens` (`merchant:provisioning:read`, `merchant:provisioning:manage`: a token grants SCIM's routes, so it is the provisioning permission's to mint or revoke). [Routes](../api/routes.md).
 - Configuration: `secrets.scim_token` in a merchant declaration or Vault document
   ([merchant configuration](../client.md#merchant-configuration-and-psps)).
 
@@ -129,13 +119,7 @@ Checks:
 Does not apply: the directory holds no amounts.
 
 ### 4. Access control and tenant isolation
-Every contact query names its merchant, and the merchant comes from the
-credential. `customer_contacts` has `PRIMARY KEY (merchant_id, customer_id)` and a
-composite foreign key to `customers`. A provisioning token names no subject
-(`provisioningToken.Identity`), so it opens only the SCIM routes. A live read
-keeps only the customer's own issuer's answer. Gap: the SCIM routes declare no
-permission, so any application credential bound to the merchant may write its copy
-([routes](../api/routes.md) states it).
+Every contact query names its merchant, and the merchant comes from the credential. `customer_contacts` has `PRIMARY KEY (merchant_id, customer_id)` and a composite foreign key to `customers`. A provisioning token names no subject to the gate (`provisioningToken.Identity`), so no issuer binds it to another merchant, and it opens only the SCIM routes. An application needs the route's provisioning permission. A live read keeps only the customer's own issuer's answer.
 
 Checks:
 - Every query in `internal/db/queries/customer_contacts.sql` and
@@ -145,6 +129,7 @@ Checks:
   `issuers[contact.CustomerID] == issuer`.
 - OR-J07-S03: a provisioning token is refused on `/v1/admin/customers` and is
   `401` on `/v1/app/scim/v2` once deleted.
+- OR-J07-S07: an application without the provisioning permission, one with only the other half, and a person are refused every SCIM read or write.
 - `customerscope.Bind` is called only from `internal/http/routes`.
 
 ### 5. Contracts match the code
@@ -160,14 +145,13 @@ Checks:
 ### 6. Data lifecycle
 Both tables are `State` in
 `internal/retention/tables.go`. Erasure keeps an empty row on purpose. Neither table
-moves with the billing archive. Gap: a merchant purge deletes neither, so a purged
-merchant's contacts and token hashes stay.
+moves with the billing archive. A merchant purge deletes both.
 
 Checks:
 - `internal/retention/tables.go` has `customer_contacts` and
   `provisioning_tokens`.
 - `internal/merchantarchive/checks.go` excludes both, with reasons and column lists.
-- `merchantOwnedTables` in `internal/merchants/purge.go` lists neither (the gap).
+- `merchantOwnedTables` in `internal/merchants/purge.go` lists both (OR-J32-S06).
 
 ### 7. Work scales with activity
 No job runs: the copy changes only when a directory pushes, and reads are per
@@ -192,14 +176,13 @@ Checks:
 - `SearchCustomerContacts` receives a LIKE pattern escaped by `likeEscaper`.
 
 ### 9. Destructive-action safeguards
-A `DELETE` erases only contact values and notification events; the customer, its
-ledger and subscriptions stay. Gap: no ceiling or hold bounds erasures (a Bulk
-request may carry 1000), and nothing records which token or application made one
-beyond `last_used_at`.
+A `DELETE` erases only contact values, notification events and the message log; the customer, its ledger and subscriptions stay. Each erasure is a destructive command, `destructive.EraseContact`, naming the token or application that asked, admitted to the merchant's own erasure scope (`destructive.AdmitErasure`, under the merchant's own lock): its budget (`ErasurePerHour`, `ErasurePerDay`, floors that rise to a fiftieth an hour and a tenth a day of the provisioned contacts) and its hold count and hold only erasures, and no other command counts toward or is held by them. The User leaves the directory and its contact's values go at once either way (`clearContact`): the directory can push them again. Within the budget, with nothing queued before it and no hold, the rest runs at once (`RunErasure`): the notification events and message log, which nothing restores. Otherwise that waits and is never refused: the answer is still `204`, and the first erasure past the budget opens the erasure hold. Waiting erasures run oldest first within the budget (`DrainErasures`, job `openrails.contact_erasures`, which every admitted erasure queues) once the hold is cleared: by a person holding `merchant:provisioning:manage` (`ClearErasureHold`) or a root operator holding `root:admin-rate-limits:unlock`. A new token is under the same hold. A create dated before an erasure (`meta.lastModified`, else its arrival) loses to it: `createUser` answers `409`, so a stale report restores nothing. Erasures do not read the convergence kill switch, which governs automated cancels and provider deletes and is off on a fresh deployment.
 
 Checks:
-- `deleteUser` writes only `customer_contacts` and `notification_events`.
-- `internal/scim` makes no `destructive` admission (the gap).
+- `withdraw` and `RunErasure` write only `customer_contacts`, `notification_events` and `customer_messages`; `RunErasure` records its outcome in the same transaction.
+- Every budget query but `CountErasureUnits` leaves out `kind = 'erase_contact'`, and `holdKeys` fences an erasure with its scope's key alone.
+- OR-J07-S08: two erasures run at once, name the token and queue their drain; the third waits under an erasure hold, its contact already gone; a rotated token's erasure waits too; two actors' revocations still fit the merchant's limit, the third opening the merchant's hold; a configuration-only person cannot clear the erasure hold, a provisioning-only person can, and so can a root operator holding the unlock.
+- OR-J07-S09: a waiting erasure leaves no contact on a customer read, a search or a message, and a create dated before it is refused.
 
 ## Tests
 

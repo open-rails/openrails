@@ -32,12 +32,20 @@ var creditsRoutes = []Route{
 		Args:      []any{billing.CreditGrantID{}},
 		Doc:       "GetCreditGrant reads one credit grant.",
 		Responses: []Reply{{200, billing.CreditGrant{}}}, Errors: codes("credit_grant_not_found", "invalid_param"), Handler: h(handlers.GetCreditGrant)},
-	{Method: POST, Path: "/v1/admin/credit-grants/{id}/revoke", Group: Admin, Auth: AuthMerchant, Name: "RevokeCreditGrant", Level: LevelUpdate,
+	{Method: POST, Path: "/v1/admin/credit-grants/{id}/revoke", Group: Admin, Auth: AuthMerchant, Name: "RevokeCreditGrant", Level: LevelUpdate, IdempotencyKey: true,
 		Args: []any{billing.CreditGrantID{}},
 		Doc: "RevokeCreditGrant revokes a grant's unspent remainder. Revoking a revoked grant returns it with " +
-			"Replayed set.",
+			"Replayed set, as does a retry under the same idempotencyKey, even after the grant was reinstated. " +
+			"Without a key, revoking a reinstated grant revokes it again.",
 		Request: billing.RevokeCreditGrantParams{}, Responses: []Reply{{200, billing.CreditGrant{}}},
 		Errors: codes("credit_grant_held", "credit_grant_not_found", "credit_grant_unavailable", "invalid_param"), Handler: h(handlers.RevokeCreditGrant)},
+	{Method: POST, Path: "/v1/admin/credit-grants/{id}/reinstate", Group: Admin, Auth: AuthMerchant, Name: "ReinstateCreditGrant", Level: LevelUpdate, IdempotencyKey: true,
+		Args: []any{billing.CreditGrantID{}},
+		Doc: "ReinstateCreditGrant reverses a grant's revocation: the units it froze return to the balance. " +
+			"Reinstating a live grant returns it with Replayed set, as does a retry under the same idempotencyKey, " +
+			"even after a later revocation; a lapsed grant is refused.",
+		Request: billing.ReinstateCreditGrantParams{}, Responses: []Reply{{200, billing.CreditGrant{}}},
+		Errors: codes("credit_grant_not_found", "credit_grant_unavailable", "invalid_param"), Handler: h(handlers.ReinstateCreditGrant)},
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}/balance/transactions", Group: Admin, Auth: AuthMerchant, Name: "ListBalanceTransactions", Level: LevelRead,
 		Args: []any{billing.CustomerID{}},
 		Doc: "ListBalanceTransactions lists a customer's balance transactions in one currency, newest first, or " +

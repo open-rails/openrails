@@ -26,7 +26,8 @@ LEFT JOIN LATERAL (
   ORDER BY e.created_at DESC, e.id DESC LIMIT 1
 ) revocation ON true
 LEFT JOIN LATERAL (
-  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment')) AS spent,
+  SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
+             FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
          sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,
@@ -96,7 +97,7 @@ func (q *Queries) GetCreditGrant(ctx context.Context, arg GetCreditGrantParams) 
 }
 
 const getCreditGrantBySourceID = `-- name: GetCreditGrantBySourceID :one
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND source_id = $3::text
 `
@@ -135,12 +136,44 @@ func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGra
 		&i.UnitsDebited,
 		&i.UnitsReserved,
 		&i.CreatedAt,
+		&i.DeferredCredited,
+		&i.DeferredDebited,
+	)
+	return i, err
+}
+
+const getCreditGrantEventByKey = `-- name: GetCreditGrantEventByKey :one
+SELECT merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at, request_key FROM billing.credit_grant_events
+WHERE merchant_id = $1::uuid AND credit_grant_id = $2::uuid
+  AND request_key = $3::text
+`
+
+type GetCreditGrantEventByKeyParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+	RequestKey    string
+}
+
+// The event a caller's key made, if any.
+func (q *Queries) GetCreditGrantEventByKey(ctx context.Context, arg GetCreditGrantEventByKeyParams) (BillingCreditGrantEvent, error) {
+	row := q.db.QueryRow(ctx, getCreditGrantEventByKey, arg.MerchantID, arg.CreditGrantID, arg.RequestKey)
+	var i BillingCreditGrantEvent
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.CreditGrantID,
+		&i.Event,
+		&i.EffectiveAt,
+		&i.Reason,
+		&i.Actor,
+		&i.CreatedAt,
+		&i.RequestKey,
 	)
 	return i, err
 }
 
 const getCreditLot = `-- name: GetCreditLot :one
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -176,12 +209,72 @@ func (q *Queries) GetCreditLot(ctx context.Context, arg GetCreditLotParams) (Bil
 		&i.UnitsDebited,
 		&i.UnitsReserved,
 		&i.CreatedAt,
+		&i.DeferredCredited,
+		&i.DeferredDebited,
 	)
 	return i, err
 }
 
+const getLatestCreditGrantEvent = `-- name: GetLatestCreditGrantEvent :one
+SELECT merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at, request_key FROM billing.credit_grant_events
+WHERE merchant_id = $1::uuid AND credit_grant_id = $2::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestCreditGrantEventParams struct {
+	MerchantID    uuid.UUID
+	CreditGrantID uuid.UUID
+}
+
+// A lot's latest revocation or reinstatement.
+func (q *Queries) GetLatestCreditGrantEvent(ctx context.Context, arg GetLatestCreditGrantEventParams) (BillingCreditGrantEvent, error) {
+	row := q.db.QueryRow(ctx, getLatestCreditGrantEvent, arg.MerchantID, arg.CreditGrantID)
+	var i BillingCreditGrantEvent
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.CreditGrantID,
+		&i.Event,
+		&i.EffectiveAt,
+		&i.Reason,
+		&i.Actor,
+		&i.CreatedAt,
+		&i.RequestKey,
+	)
+	return i, err
+}
+
+const getPaymentCashApplication = `-- name: GetPaymentCashApplication :one
+SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
+       COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
+FROM billing.ledger_transfers
+WHERE merchant_id = $1::uuid AND book = 'general' AND source = 'payment'
+  AND source_id = $2::text AND transfer_type IN ('cash_received', 'cash_applied')
+`
+
+type GetPaymentCashApplicationParams struct {
+	MerchantID uuid.UUID
+	PaymentID  string
+}
+
+type GetPaymentCashApplicationRow struct {
+	Received int64
+	Applied  int64
+}
+
+// What a payment's receipt brought and what the general ledger applied of
+// it: to its bill's lines at (application, payment, id) and to the credit lot
+// it bought at (credit_issue, payment, id).
+func (q *Queries) GetPaymentCashApplication(ctx context.Context, arg GetPaymentCashApplicationParams) (GetPaymentCashApplicationRow, error) {
+	row := q.db.QueryRow(ctx, getPaymentCashApplication, arg.MerchantID, arg.PaymentID)
+	var i GetPaymentCashApplicationRow
+	err := row.Scan(&i.Received, &i.Applied)
+	return i, err
+}
+
 const getPurchasedCreditGrant = `-- name: GetPurchasedCreditGrant :one
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid AND payment_id = $2::uuid
   AND paid_amount IS NOT NULL
 `
@@ -218,6 +311,8 @@ func (q *Queries) GetPurchasedCreditGrant(ctx context.Context, arg GetPurchasedC
 		&i.UnitsDebited,
 		&i.UnitsReserved,
 		&i.CreatedAt,
+		&i.DeferredCredited,
+		&i.DeferredDebited,
 	)
 	return i, err
 }
@@ -234,7 +329,7 @@ INSERT INTO billing.credit_grants (
     $13::uuid, $14::uuid, $15::text,
     $16::timestamptz, $17::timestamptz
 )
-RETURNING merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at
+RETURNING merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited
 `
 
 type InsertCreditGrantParams struct {
@@ -304,15 +399,17 @@ func (q *Queries) InsertCreditGrant(ctx context.Context, arg InsertCreditGrantPa
 		&i.UnitsDebited,
 		&i.UnitsReserved,
 		&i.CreatedAt,
+		&i.DeferredCredited,
+		&i.DeferredDebited,
 	)
 	return i, err
 }
 
 const insertCreditGrantEvent = `-- name: InsertCreditGrantEvent :one
-INSERT INTO billing.credit_grant_events (merchant_id, credit_grant_id, event, effective_at, reason, actor)
+INSERT INTO billing.credit_grant_events (merchant_id, credit_grant_id, event, effective_at, reason, actor, request_key)
 VALUES ($1::uuid, $2::uuid, $3::text,
-    $4::timestamptz, $5::text, $6::text)
-RETURNING merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at
+    $4::timestamptz, $5::text, $6::text, $7::text)
+RETURNING merchant_id, id, credit_grant_id, event, effective_at, reason, actor, created_at, request_key
 `
 
 type InsertCreditGrantEventParams struct {
@@ -322,6 +419,7 @@ type InsertCreditGrantEventParams struct {
 	EffectiveAt   time.Time
 	Reason        *string
 	Actor         *string
+	RequestKey    *string
 }
 
 // Its trigger sets or clears the lot's revoked_at, and refuses a revoke of a
@@ -334,6 +432,7 @@ func (q *Queries) InsertCreditGrantEvent(ctx context.Context, arg InsertCreditGr
 		arg.EffectiveAt,
 		arg.Reason,
 		arg.Actor,
+		arg.RequestKey,
 	)
 	var i BillingCreditGrantEvent
 	err := row.Scan(
@@ -345,6 +444,7 @@ func (q *Queries) InsertCreditGrantEvent(ctx context.Context, arg InsertCreditGr
 		&i.Reason,
 		&i.Actor,
 		&i.CreatedAt,
+		&i.RequestKey,
 	)
 	return i, err
 }
@@ -363,7 +463,8 @@ LEFT JOIN LATERAL (
   ORDER BY e.created_at DESC, e.id DESC LIMIT 1
 ) revocation ON true
 LEFT JOIN LATERAL (
-  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment')) AS spent,
+  SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
+             FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
          sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,
@@ -454,36 +555,55 @@ WITH logged AS (
            COALESCE(sum(t.amount) FILTER (WHERE t.debit_account_id = g.account_id), 0)::bigint AS debited
     FROM billing.ledger_transfers t
     JOIN billing.credit_grants g ON g.merchant_id = t.merchant_id AND g.id = t.credit_grant_id
-    WHERE t.merchant_id = $1::uuid AND t.credit_grant_id IS NOT NULL
+    WHERE t.merchant_id = $1::uuid AND t.credit_grant_id IS NOT NULL AND t.book = 'units'
+    GROUP BY t.credit_grant_id
+), deferred AS (
+    SELECT t.credit_grant_id AS id,
+           COALESCE(sum(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0)::bigint AS credited,
+           COALESCE(sum(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0)::bigint AS debited
+    FROM billing.ledger_transfers t
+    JOIN billing.credit_grants g ON g.merchant_id = t.merchant_id AND g.id = t.credit_grant_id
+    JOIN billing.ledger_accounts a ON a.merchant_id = t.merchant_id AND a.id IN (t.debit_account_id, t.credit_account_id)
+        AND a.account_type = 'deferred_revenue_credit' AND a.customer_id = g.customer_id AND a.currency = COALESCE(g.paid_currency, g.unit)
+    WHERE t.merchant_id = $1::uuid AND t.credit_grant_id IS NOT NULL AND t.book = 'general'
     GROUP BY t.credit_grant_id
 )
 SELECT g.id AS credit_grant_id, g.merchant_id, g.customer_id, g.unit,
        g.units_credited AS stored_credited, COALESCE(l.credited, 0)::bigint AS logged_credited,
        g.units_debited AS stored_debited, COALESCE(l.debited, 0)::bigint AS logged_debited,
-       g.units_reserved AS stored_reserved, COALESCE(r.reserved, 0)::bigint AS expected_reserved
+       g.units_reserved AS stored_reserved, COALESCE(r.reserved, 0)::bigint AS expected_reserved,
+       g.deferred_credited AS stored_deferred_credited, COALESCE(d.credited, 0)::bigint AS logged_deferred_credited,
+       g.deferred_debited AS stored_deferred_debited, COALESCE(d.debited, 0)::bigint AS logged_deferred_debited
 FROM billing.credit_grants g
 LEFT JOIN logged l ON l.id = g.id
+LEFT JOIN deferred d ON d.id = g.id
 CROSS JOIN LATERAL (SELECT billing.credit_grant_reservation(g.merchant_id, g.id) AS reserved) r
 WHERE g.merchant_id = $1::uuid
   AND (g.units_credited <> COALESCE(l.credited, 0) OR g.units_debited <> COALESCE(l.debited, 0)
-       OR g.units_reserved <> r.reserved)
+       OR g.units_reserved <> r.reserved
+       OR g.deferred_credited <> COALESCE(d.credited, 0) OR g.deferred_debited <> COALESCE(d.debited, 0))
 ORDER BY g.unit, g.id
 `
 
 type ListCreditLotDriftsRow struct {
-	CreditGrantID    uuid.UUID
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	Unit             string
-	StoredCredited   int64
-	LoggedCredited   int64
-	StoredDebited    int64
-	LoggedDebited    int64
-	StoredReserved   int64
-	ExpectedReserved int64
+	CreditGrantID          uuid.UUID
+	MerchantID             uuid.UUID
+	CustomerID             uuid.UUID
+	Unit                   string
+	StoredCredited         int64
+	LoggedCredited         int64
+	StoredDebited          int64
+	LoggedDebited          int64
+	StoredReserved         int64
+	ExpectedReserved       int64
+	StoredDeferredCredited int64
+	LoggedDeferredCredited int64
+	StoredDeferredDebited  int64
+	LoggedDeferredDebited  int64
 }
 
-// Lots whose counters disagree with the legs on their balance account, or
+// Lots whose counters disagree with the legs on their balance account or, for
+// their money, on their customer's deferred account in the paid currency, or
 // whose reservation with their payment's pending refunds.
 func (q *Queries) ListCreditLotDrifts(ctx context.Context, merchantID uuid.UUID) ([]ListCreditLotDriftsRow, error) {
 	rows, err := q.db.Query(ctx, listCreditLotDrifts, merchantID)
@@ -505,6 +625,10 @@ func (q *Queries) ListCreditLotDrifts(ctx context.Context, merchantID uuid.UUID)
 			&i.LoggedDebited,
 			&i.StoredReserved,
 			&i.ExpectedReserved,
+			&i.StoredDeferredCredited,
+			&i.LoggedDeferredCredited,
+			&i.StoredDeferredDebited,
+			&i.LoggedDeferredDebited,
 		); err != nil {
 			return nil, err
 		}
@@ -517,7 +641,7 @@ func (q *Queries) ListCreditLotDrifts(ctx context.Context, merchantID uuid.UUID)
 }
 
 const listCreditLotsMissingDeposit = `-- name: ListCreditLotsMissingDeposit :many
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND units_credited = 0 AND revoked_at IS NULL
@@ -566,6 +690,8 @@ func (q *Queries) ListCreditLotsMissingDeposit(ctx context.Context, arg ListCred
 			&i.UnitsDebited,
 			&i.UnitsReserved,
 			&i.CreatedAt,
+			&i.DeferredCredited,
+			&i.DeferredDebited,
 		); err != nil {
 			return nil, err
 		}
@@ -590,7 +716,7 @@ WITH candidates AS (
       AND ($3::uuid IS NULL OR r.customer_id = $3::uuid)
       AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL
 )
-SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.order_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at FROM billing.credit_grants g
+SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.order_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at, g.deferred_credited, g.deferred_debited FROM billing.credit_grants g
 JOIN candidates c ON c.id = g.id
 WHERE g.merchant_id = $1::uuid AND g.paid_amount IS NOT NULL
   AND g.units_reserved <> billing.credit_grant_reservation(g.merchant_id, g.id)
@@ -641,6 +767,8 @@ func (q *Queries) ListCreditReservationDrifts(ctx context.Context, arg ListCredi
 			&i.UnitsDebited,
 			&i.UnitsReserved,
 			&i.CreatedAt,
+			&i.DeferredCredited,
+			&i.DeferredDebited,
 		); err != nil {
 			return nil, err
 		}
@@ -655,7 +783,7 @@ func (q *Queries) ListCreditReservationDrifts(ctx context.Context, arg ListCredi
 const listCustomerCreditGrants = `-- name: ListCustomerCreditGrants :many
 
 WITH page AS (
-  SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.order_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at FROM billing.credit_grants g
+  SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.order_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at, g.deferred_credited, g.deferred_debited FROM billing.credit_grants g
   WHERE g.merchant_id = $1::uuid
     AND g.customer_id = $2::uuid
     AND ($3::text IS NULL OR g.unit = $3::text)
@@ -678,7 +806,8 @@ LEFT JOIN LATERAL (
   ORDER BY e.created_at DESC, e.id DESC LIMIT 1
 ) revocation ON true
 LEFT JOIN LATERAL (
-  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment')) AS spent,
+  SELECT sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
+             FILTER (WHERE lt.transfer_type IN ('credit_spend', 'owed_repayment', 'usage_reversed')) AS spent,
          sum(lt.amount) FILTER (WHERE lt.transfer_type = 'credit_expire') AS expired,
          sum(CASE WHEN lt.debit_account_id = g.account_id THEN lt.amount ELSE -lt.amount END)
              FILTER (WHERE lt.transfer_type IN ('credit_revoke', 'credit_reinstate')) AS revoked,
@@ -825,7 +954,7 @@ func (q *Queries) ListLapsedCreditLots(ctx context.Context, arg ListLapsedCredit
 }
 
 const listRevokedCreditLotsWithUnits = `-- name: ListRevokedCreditLotsWithUnits :many
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND revoked_at IS NOT NULL AND units_credited > units_debited
@@ -874,6 +1003,8 @@ func (q *Queries) ListRevokedCreditLotsWithUnits(ctx context.Context, arg ListRe
 			&i.UnitsDebited,
 			&i.UnitsReserved,
 			&i.CreatedAt,
+			&i.DeferredCredited,
+			&i.DeferredDebited,
 		); err != nil {
 			return nil, err
 		}

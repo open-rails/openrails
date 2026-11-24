@@ -59,6 +59,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `embed_origins_required` | 400 | `invalid_request_error` | An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
 | `entitlement_required` | 403 | `invalid_request_error` | A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks. |
 | `event_cursor_expired` | 410 | `invalid_request_error` | The event cursor is no longer retained; resynchronize current state. |
+| `event_store_required` | 409 | `invalid_request_error` | The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `finding_requires_merchant_config` | 409 | `invalid_request_error` | The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config. |
@@ -81,7 +82,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
 | `lease_not_found` | 404 | `invalid_request_error` | No lease of the merchant has this id, which is older than the replay horizon; start a new lease. |
-| `lease_not_held` | 409 | `invalid_request_error` | The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease. |
+| `lease_not_held` | 409 | `invalid_request_error` | The admission names a lease that is closed or never synced, so it cannot own the hold. |
 | `limit_not_found` | 404 | `invalid_request_error` | The catalog declares no limit under this key. |
 | `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
 | `merchant_mismatch` | 412 | `invalid_request_error` | The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed. |

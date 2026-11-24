@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	paycharge "github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -219,10 +220,14 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 	if err := subscriptions.WithdrawOrderPaymentNotices(ctx, d, order.CustomerID, order.ID); err != nil {
 		return "", err
 	}
+	services := map[uuid.UUID]books.Service{}
 	for _, line := range order.Lines {
-		if err := s.fulfil(ctx, d, order, line, charge, now); err != nil {
+		if err := s.fulfil(ctx, d, order, line, charge, services, now); err != nil {
 			return "", fmt.Errorf("fulfil order line %s: %w", line.ID, err)
 		}
+	}
+	if err := books.ApplyOrder(ctx, d, order.ID, services); err != nil {
+		return "", err
 	}
 	if charge != nil && !charge.Manual && charge.Reuse {
 		if err := mandates.RecordStored(ctx, q, mandates.Stored{MerchantID: order.MerchantID, CustomerID: order.CustomerID, PaymentMethodID: charge.PaymentMethodID, PSPID: charge.PSPID,
@@ -358,8 +363,9 @@ func linePaid(order *Order, line gen.BillingOrderLine, charge *Charge) *subscrip
 }
 
 // fulfil delivers one paid line: a subscription for a recurring line, a
-// credit lot for a credit product, product access otherwise.
-func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.BillingOrderLine, charge *Charge, now time.Time) error {
+// credit lot for a credit product, product access otherwise. A subscription's
+// first period is the service its line's revenue is recognised over.
+func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.BillingOrderLine, charge *Charge, services map[uuid.UUID]books.Service, now time.Time) error {
 	q := d.Gen(ctx)
 	var holderType string
 	var holder uuid.UUID
@@ -425,6 +431,10 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			}
 		}
 		holderType, holder = "subscription", sub.ID
+		services[line.ID] = books.Service{Starts: terms.PeriodStart, Ends: terms.PeriodEnd}
+		if line.BillingIntervalMonths != nil {
+			services[line.ID] = books.Service{Starts: terms.PeriodStart, Ends: terms.PeriodEnd, Months: int(*line.BillingIntervalMonths)}
+		}
 		if err := q.SetOrderLineProduced(ctx, gen.SetOrderLineProducedParams{MerchantID: order.MerchantID, ID: line.ID, SubscriptionID: &sub.ID}); err != nil {
 			return err
 		}

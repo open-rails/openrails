@@ -8,6 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
@@ -77,6 +78,8 @@ type stub struct {
 	notify.Publisher
 }
 
+type clickHouseStub struct{ driver.Conn }
+
 type emailCapture struct{ sent *Email }
 
 func (c emailCapture) Send(_ context.Context, m Email) error { *c.sent = m; return nil }
@@ -90,7 +93,7 @@ func TestEngineDepsCopiesEveryField(t *testing.T) {
 	var sent Email
 	var recipient NotificationRecipient
 	deps := Deps{
-		Postgres: &pgxpool.Pool{}, PostgresSession: &pgxpool.Config{}, MerchantGroups: stub{}, Redis: redisClient, Vault: &vaultapi.Client{},
+		Postgres: &pgxpool.Pool{}, PostgresSession: &pgxpool.Config{}, MerchantGroups: stub{}, Redis: redisClient, Vault: &vaultapi.Client{}, ClickHouse: clickHouseStub{},
 		Email: emailCapture{&sent}, Logger: slog.New(slog.DiscardHandler), UserInfo: stub{},
 		MessageRenderer: func(context.Context, billing.MessageData) (billing.MessageContent, bool, error) {
 			return billing.MessageContent{}, false, nil

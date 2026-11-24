@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -17,6 +18,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // Service executes validated metrics plans. Merchant scoping is structural:
@@ -64,6 +67,19 @@ type RangeOut = billing.MetricsResultRange
 // int64, a ratio a float64 (nil when its denominator is zero).
 type Result = billing.MetricsResult
 
+// Zone is the accounting timezone of the merchant in context, UTC when no
+// settings are bound.
+func (s *Service) Zone(ctx context.Context) (*time.Location, error) {
+	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
+	if errors.Is(err, merchantconfig.ErrNoSettings) {
+		return time.UTC, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return time.LoadLocation(settings.Config.AccountingTimezone)
+}
+
 // Execute runs a validated plan and returns the merged tabular result.
 func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 	rows, err := s.run(ctx, plan)
@@ -71,9 +87,10 @@ func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 		return nil, err
 	}
 	res := &Result{
-		Range:   RangeOut{From: plan.From, To: plan.To},
-		Columns: columns(plan),
-		Rows:    rows,
+		Timezone: plan.zone().String(),
+		Range:    RangeOut{From: plan.From.UTC(), To: plan.To.UTC()},
+		Columns:  columns(plan),
+		Rows:     rows,
 	}
 	if plan.HasTime {
 		res.Grain = plan.Grain
@@ -81,22 +98,32 @@ func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {
 	if plan.Compare != "" {
 		prev := *plan
 		if plan.Compare == "previous_year" {
-			prev.From, prev.To = plan.From.AddDate(-1, 0, 0), plan.To.AddDate(-1, 0, 0)
+			prev.From, prev.To = yearBefore(plan.From, plan.zone()), yearBefore(plan.To, plan.zone())
 		} else {
 			prev.From, prev.To = plan.From.Add(-plan.To.Sub(plan.From)), plan.From
 		}
 		prev.Compare = ""
 		if prev.HasTime {
-			prev.Buckets = bucketLabels(prev.From, prev.To, prev.Grain)
+			prev.Buckets = bucketLabels(prev.From, prev.To, prev.Grain, prev.zone())
 		}
 		prevRows, err := s.run(ctx, &prev)
 		if err != nil {
 			return nil, err
 		}
-		res.CompareRange = &RangeOut{From: prev.From, To: prev.To}
+		res.CompareRange = &RangeOut{From: prev.From.UTC(), To: prev.To.UTC()}
 		res.CompareRows = prevRows
 	}
 	return res, nil
+}
+
+// yearBefore is t a year earlier on zone's calendar: a day's start is the
+// same date's start, by date rather than wall clock.
+func yearBefore(t time.Time, zone *time.Location) time.Time {
+	if t.Equal(calendarutil.DateStart(t, zone)) {
+		y, m, d := t.In(zone).Date()
+		return calendarutil.DayStart(y-1, m, d, zone).UTC()
+	}
+	return t.In(zone).AddDate(-1, 0, 0).UTC()
 }
 
 func columns(plan *Plan) []Column {
@@ -192,12 +219,19 @@ func (s *Service) run(ctx context.Context, plan *Plan) ([][]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	stmts, err := compile(plan, mid.UUID())
+	burns, err := s.depletionBurns(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	stmts, err := compile(plan, mid.UUID(), burns)
 	if err != nil {
 		return nil, err
 	}
 
 	groups := map[string]*group{}
+	if err := s.runUsage(ctx, plan, groups); err != nil {
+		return nil, err
+	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		for _, st := range stmts {
 			if err := scanStmt(ctx, tx, plan, st, groups); err != nil {

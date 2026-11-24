@@ -92,6 +92,9 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		return transition(ctx, database, lc, sub, d, now)
 
 	case TransitionCancel:
+		if book := declaredBookOf(ctx); book != nil {
+			return book.cancel(ctx, database, lc, sub, d, now)
+		}
 		if cancelHeld(ctx, database, sub, d) {
 			if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
 				return false, nil
@@ -176,13 +179,21 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 	// The issuer's own code (NMI's Query API) may forbid a retry the rail's
 	// catch-all code would allow.
 	action := decline.ClassifyEvidence(decline.Evidence{Rail: string(sub.Rail), Code: code, IssuerCode: d.Decline.Answer.IssuerCode}).Action
-	certainty, blocked := "", ""
+	certainty := ""
 	if action == decline.NonRecoverable {
-		// The same certainty leg and kill switch OpenRails' own rebills use.
+		// The same certainty leg OpenRails' own rebills use.
 		certainty = collection.CertaintyNonRetryableDecline
-		if gate := destructive.New(database).Check(ctx, sub.MerchantID); !gate.Allowed {
-			blocked = gate.Reason
-		}
+	}
+	// Any decline may end the membership: a non-recoverable one, or one that
+	// spends the schedule. Either waits for the destructive switch; in a
+	// declared book it is one of the book's admitted cancels.
+	blocked := ""
+	var hold func() subscriptions.TerminalHold
+	book := declaredBookOf(ctx)
+	if book != nil {
+		ctx, hold = book.terminal(ctx, database, sub)
+	} else if gate := destructive.New(database).Check(ctx, sub.MerchantID); !gate.Allowed {
+		blocked = gate.Reason
 	}
 	applied := false
 	err := lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
@@ -195,6 +206,7 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 		AttemptRecorded:   true,
 		TerminalCertainty: certainty,
 		TerminalBlocked:   blocked,
+		HoldTerminal:      hold,
 		GraceEndsAt:       d.GraceEndsAt,
 		Expect: func(cur *models.Subscription) bool {
 			applied = (cur.Status == models.StatusActive || cur.Status == models.StatusUnverified) && !d.stale(cur) &&
@@ -202,7 +214,14 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 			return applied
 		},
 	})
-	return applied && err == nil, err
+	if err != nil || !applied || book == nil || !book.admitted {
+		return applied && err == nil, err
+	}
+	after, err := subscriptions.NewSubscriptionRepo(database).GetByID(ctx, sub.ID)
+	if err != nil || after.Status != models.StatusCanceled {
+		return true, err
+	}
+	return true, book.finish(ctx, database, destructive.OutcomeSucceeded)
 }
 
 // transition applies one event to the locked row and carries out its

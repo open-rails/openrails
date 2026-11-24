@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -67,11 +69,17 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
+	if params.RiskReason != "" && !slices.Contains(billing.MRRRiskReasons(), params.RiskReason) {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "risk_reason is one of past_due, needs_payment_method, unverified, card_expiring or delinquent").WithParam("risk_reason"))
+		return
+	}
 	page := params.PageRequest
 	filters := subscriptions.GetSubscriptionsFilters{
 		CustomerID: params.CustomerID, Status: string(params.Status), PriceID: params.PriceID, Rail: string(params.Rail),
 		CreatedAfter: instant(params.CreatedAfter), CreatedBefore: instant(params.CreatedBefore), CanceledAfter: instant(params.CanceledAfter),
-		CanceledBefore: instant(params.CanceledBefore), ExpiresBefore: instant(params.ExpiresBefore), Dunning: params.Dunning, Sort: params.Sort,
+		CanceledBefore: instant(params.CanceledBefore), ExpiresBefore: instant(params.ExpiresBefore),
+		ScheduledChangeBefore: instant(params.ScheduledChangeBefore), AtRisk: params.AtRisk, RiskReason: params.RiskReason,
+		Dunning: params.Dunning, Sort: params.Sort,
 		IDs: uuidutil.Of(ids),
 	}
 	svc := r.State.AdminSubscriptionService
@@ -96,7 +104,7 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 	for i := range out.Items {
 		out.Items[i].CustomerContact = contacts[out.Items[i].CustomerID]
 	}
-	writeSubscriptions(r, out)
+	writeMerchantSubscriptions(r, out)
 }
 
 func GetAdminSubscription(r *httprequest.Request) {
@@ -121,5 +129,5 @@ func GetAdminSubscription(r *httprequest.Request) {
 		writeRefusal(r, err, "failed to load subscription")
 		return
 	}
-	writeSubscription(r, subscriptionView(subscription, r.Clock.Now()))
+	writeMerchantSubscriptionOne(r, subscriptionView(subscription, r.Clock.Now()))
 }

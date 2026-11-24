@@ -96,10 +96,12 @@ func TestDoNotRetry(t *testing.T) {
 		for _, tc := range []struct {
 			name   string
 			advice stripemock.Advice
+			reason billing.DeclineReason
 		}{
-			{"stripe-do-not-try-again", stripemock.Advice{Code: "do_not_try_again"}},
-			{"mastercard-advice-03", stripemock.Advice{NetworkAdviceCode: "03"}},
-			{"visa-category-1-closed-account", stripemock.Advice{NetworkDeclineCode: "46"}},
+			{"stripe-do-not-try-again", stripemock.Advice{Code: "do_not_try_again"}, billing.DeclineGeneric},
+			{"mastercard-advice-03", stripemock.Advice{NetworkAdviceCode: "03"}, billing.DeclineGeneric},
+			// The issuer's code names the cause the generic decline left out.
+			{"visa-category-1-closed-account", stripemock.Advice{NetworkDeclineCode: "46"}, billing.DeclineInvalidAccount},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				a, p, sub := purchasedMembership(t, 7*24)
@@ -116,7 +118,7 @@ func TestDoNotRetry(t *testing.T) {
 				declines, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: sub.ID, Kind: []string{"rebill"}})
 				require.NoError(t, err)
 				require.Len(t, declines.Items, 1)
-				require.Equal(t, billing.DeclineGeneric, declines.Items[0].Reason, "the issuer's reason is kept")
+				require.Equal(t, tc.reason, declines.Items[0].Reason)
 				require.Equal(t, "fix_payment_method", declines.Items[0].Action)
 				require.Equal(t, tc.advice.NetworkDeclineCode, declines.Items[0].IssuerCode)
 				creates := paymentIntentCreates(p)

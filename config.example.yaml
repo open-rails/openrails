@@ -40,6 +40,13 @@ database:
   schema: billing # every OpenRails table lives here; defaults to 'billing' (env DATABASE_SCHEMA)
   # river_schema: billing_river # OpenRails' River jobs; defaults to the schema plus '_river'
 
+# The event store usage needs (ClickHouse's native protocol). Without it
+# usage, limits and admissions answer event_store_required.
+# clickhouse:
+#   addr: localhost:9000
+#   database: openrails # created or upgraded at boot
+#   username: default   # password from CLICKHOUSE_PASSWORD
+
 # Rate limits, lockouts, captcha challenges and card-testing declines, shared
 # by every instance.
 # Without redis they live in this process's memory: run one instance only.

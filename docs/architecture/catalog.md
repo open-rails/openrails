@@ -105,7 +105,7 @@ A price migration (`PriceMigrationService`, `internal/modules/subscriptions/pric
 
 **Cancel and list.** `CancelPriceMigration` sets `canceled_at` and cancels each still-scheduled move under its subscription's lock, with its waiting push; resolved moves stay, archived sources stay archived, and it spends no unit. A move an accepted renewal owns refuses it (`409 rebill_terms_committed`) until that renewal resolves. A provider-run Stripe subscription whose schedule may be planted is listed in `rail_release_required`: release that schedule in Stripe, or the price still changes. A staff change back to an engine subscription's current price and seats takes that one out (`ReplaceScheduledChange`). `ListPriceMigrations` pages newest first, by `ids` or by `product_key` and `price_key`; `matched` and creation skips are stored, the other counts are read from the moves.
 
-**Retiring prices and products.** Archiving stops sales and keeps subscribers; a migration moves them. A price or product a migration or move refers to is never deleted (`PricesHoldReferences`, `ProductHoldsReferences`): `DeleteProduct` answers `409 product_in_use` and `prune: true` archives it. The catalog assistant drafts only same-product migrations (`cross_product` refusal).
+**Retiring prices and products.** Archiving stops sales and keeps subscribers; a migration moves them. A price or product a migration, a move or a PSP import's price pick refers to is never deleted (`PricesHoldReferences`, `ProductHoldsReferences`; OR-J38-S77): `DeleteProduct` answers `409 product_in_use` and `prune: true` archives it. The catalog assistant drafts only same-product migrations (`cross_product` refusal).
 
 Tables: `price_migrations`; moves are `scheduled_changes` ([subscriptions](subscriptions.md)).
 
@@ -209,8 +209,7 @@ Checks:
 `change_log`, the history of every catalog and configuration change, is permanent and append-only (`immutable_change_log`): no update or delete, a merchant purge keeps it, and the merchant archive moves it. It is not in the billing restore guard: a destination records its own configuration's history as soon as that configuration loads, and a restore adds the archive's entries to it, once per merchant (the restore receipt makes a replay a no-op).
 
 Checks:
-- `internal/retention/tables.go` lists every catalog table (by hand: nothing
-  checks it against the schema).
+- `internal/retention/tables.go` lists every catalog table (`TestTablesMatchSchema`).
 - `no_product_delete`, `immutable_price_terms` and
   `immutable_catalog_application_receipt` triggers exist.
 

@@ -86,7 +86,8 @@ type Service struct {
 	dataLinkPacing ccbill.Pacing
 	// destructive gates the merchant purge; nil denies (the gate fails closed).
 	destructive *destructive.Gate
-	// jobs queues a purge's secret cleanup with the purge.
+	// jobs queues a purge's secret cleanup and event store deletion with the
+	// purge.
 	jobs *db.DB
 	// clock and webhookSecretOverlap bound rotated webhook secrets (SEC-29).
 	clock                clockwork.Clock

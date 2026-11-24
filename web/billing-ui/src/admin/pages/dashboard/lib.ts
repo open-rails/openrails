@@ -43,8 +43,13 @@ export function formatMeasure(
   }
 }
 
-// formatBucket renders a time-bucket label for the query grain.
-export function formatBucket(iso: string, grain?: string): string {
+// formatBucket renders a time-bucket label for the query grain, on the
+// calendar of the result's timezone.
+export function formatBucket(
+  iso: string,
+  grain?: string,
+  timeZone = "UTC"
+): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   switch (grain) {
@@ -53,18 +58,18 @@ export function formatBucket(iso: string, grain?: string): string {
       return d.toLocaleDateString(undefined, {
         month: "short",
         year: "numeric",
-        timeZone: "UTC",
+        timeZone,
       })
     case "year":
       return d.toLocaleDateString(undefined, {
         year: "numeric",
-        timeZone: "UTC",
+        timeZone,
       })
     default:
       return d.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
-        timeZone: "UTC",
+        timeZone,
       })
   }
 }
@@ -210,7 +215,10 @@ export function pivotTimeSeries(
     const t = String(row[idx.time])
     let entry = buckets.get(t)
     if (!entry) {
-      entry = { bucket: formatBucket(t, result.grain), bucketISO: t }
+      entry = {
+        bucket: formatBucket(t, result.grain, result.timezone),
+        bucketISO: t,
+      }
       buckets.set(t, entry)
     }
     const dimensions = idx.dims.map((d) => row[d.index])
@@ -311,11 +319,14 @@ export function chartColor(i: number): string {
 const HEALTH_MEASURES = new Set([
   "attempts",
   "attempt_failure_rate",
+  "authorization_rate",
+  "issuer_discretion_decline_rate",
   "purchases",
   "purchase_failure_rate",
   "rebills",
   "rebill_rate",
   "rebill_first_failure_rate",
+  "first_try_rebill_approval_rate",
   "dunning_recovery_rate",
   "nmi_history_authorizations",
 ])

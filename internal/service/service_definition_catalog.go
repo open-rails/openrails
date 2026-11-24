@@ -360,7 +360,19 @@ func newPriceID(productID uuid.UUID, key string, req billing.CreatePriceParams) 
 	return id
 }
 
+// CreatePrice is the public entry point: once the price commits, the
+// merchant's general ledger opens in its currency.
 func (s *Service) CreatePrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
+	price, err := s.commandCreatePrice(ctx, req)
+	if err == nil {
+		s.prepareBooks(ctx)
+	}
+	return price, err
+}
+
+// commandCreatePrice is CreatePrice without opening the general ledger: the
+// catalog's own transactions call it.
+func (s *Service) commandCreatePrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
 	return catalogCommand(ctx, s, "price/create", req, "", createPricePlan(req), func(ctx context.Context, s *Service) (*billing.Price, error) { return s.createPriceCommand(ctx, req) })
 }
 

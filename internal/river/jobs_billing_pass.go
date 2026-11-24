@@ -56,34 +56,40 @@ type PassReport struct {
 // BillingPassWorker runs each scan in turn under its own budget. One scan's
 // failure never stops the next; the pass fails with all of them. It then
 // records which critical scans hold rows a day overdue. A pass that starts
-// while another still runs, on any fleet, exits: the running one takes what is
-// due.
+// while another still runs, on any fleet, exits: the running one holds the
+// pass's lease and takes what is due. A pass whose lease is lost stops.
 type BillingPassWorker struct {
 	WorkerDefaults[BillingPassArgs]
-	DB    *db.DB
-	Scans []Scan
-	Clock clockwork.Clock
-	Log   *slog.Logger
+	DB *db.DB
+	// Leases renews the pass's lease, on connections the scans cannot take;
+	// nil is DB.
+	Leases *db.DB
+	Scans  []Scan
+	Clock  clockwork.Clock
+	Log    *slog.Logger
 }
 
 func (*BillingPassWorker) Kind() string { return KindBillingPass }
 
 func (w *BillingPassWorker) Work(ctx context.Context, _ *river.Job[BillingPassArgs]) error {
-	release, locked, err := w.DB.TryLockPass(ctx, KindBillingPass)
-	switch {
-	case err != nil:
-		// A duplicate pass is safe; a missed one is not.
-		w.Log.WarnContext(ctx, "billing pass: lock unavailable; running the pass", logx.Err(err))
-	case !locked:
+	leases := w.Leases
+	if leases == nil {
+		leases = w.DB
+	}
+	lease, err := leases.TryPassLease(ctx, KindBillingPass, db.RunLeaseTTL)
+	if err != nil {
+		return fmt.Errorf("billing pass: lease: %w", err)
+	}
+	if lease == nil {
 		w.Log.WarnContext(ctx, "billing pass: the previous pass is still running; this one exits")
 		return nil
-	default:
-		defer release()
 	}
+	defer lease.Release()
+	ctx = lease.Context()
 	var errs error
 	for _, s := range w.Scans {
 		if ctx.Err() != nil {
-			errs = errors.Join(errs, fmt.Errorf("%s: not run: %w", s.Kind, ctx.Err()))
+			errs = errors.Join(errs, fmt.Errorf("%s: not run: %w", s.Kind, context.Cause(ctx)))
 			continue
 		}
 		if err := runScan(ctx, s); err != nil {
@@ -145,19 +151,26 @@ func BillingPassTimeout() time.Duration {
 
 // billingScanBudgets are the scans' budgets.
 var billingScanBudgets = map[string]time.Duration{
-	KindUsageAccruals:                 DefaultTimeout,
+	KindUsageClose:                    DefaultTimeout,
 	KindDunning:                       DefaultTimeout,
 	KindSubscriptionVerificationRetry: DefaultTimeout,
 	KindBalanceWatch:                  DefaultTimeout,
 	KindDelinquency:                   DefaultTimeout,
 	KindOrderExpiry:                   DefaultTimeout,
+	KindRevenueRecognition:            DefaultTimeout,
 	money.KindUsageOrders:             DefaultTimeout,
 	KindRebillWatch:                   time.Hour,
 	KindNMIHistory:                    time.Hour,
 	KindConfigRealerts:                DefaultTimeout,
 	KindStoredCardRefreshDue:          time.Hour,
 	KindOperationWakes:                DefaultTimeout,
+	KindMRRDue:                        DefaultTimeout,
+	KindStripeFees:                    DefaultTimeout,
 }
+
+// KindStripeFees is the scan that reads the processor fees of the Stripe
+// charges, refunds and disputes queued in stripe_fee_reads.
+const KindStripeFees = "openrails.stripe_fees"
 
 // ScanBudget is a scan's budget inside the pass.
 func ScanBudget(kind string) time.Duration { return billingScanBudgets[kind] }

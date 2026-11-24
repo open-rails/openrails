@@ -7,7 +7,9 @@ Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limit
 ## Concepts
 
 - **Decline table:** `internal/decline`: rail code to `billing.DeclineReason`,
-  `Category` and `Action` (`Retry`, `FixPaymentMethod`, `NonRecoverable`).
+  its `billing.DeclineCause` (customer, issuer, fraud, merchant, processing or
+  unknown, which fixes the `billing.AttemptOutcome`: declined, refused or
+  error) and `Action` (`Retry`, `FixPaymentMethod`, `NonRecoverable`).
 - **Dunning policy:** the `dunning_policy` setting (`billing.DunningPolicy`),
   resolved into a `collection.Policy`.
 - **Case:** a `past_due` or `awaiting_method` membership, run under the policy
@@ -20,13 +22,20 @@ Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limit
 
 ## How it works
 
-**Classifying.** `decline.ClassifyEvidence` looks up the code. A CVV mismatch
-overrides it, and a ZIP mismatch replaces a generic decline. Network advice
-turns a retry into `FixPaymentMethod` but never makes it terminal. The advice
-is Stripe `do_not_try_again` or `confirm_card_data`, Mastercard 03, 21 or 01, or
-an issuer code in `decline.IssuerForbidsReattempt`. An `Unmapped` code still
-retries. `decline.AlertUnmapped` logs it, and the hourly health pass raises
-`life.decline.unmapped`. Each answer is a `payment_attempts` row.
+**Classifying.** `decline.ClassifyEvidence` looks up the code. The issuer's own
+code (NMI's `processor_response_code`, which a subscription collection's
+decline reads from the Query API, or Stripe's `network_decline_code`) names the
+cause of a generic decline, but never makes it terminal. A CVV mismatch
+overrides the code, and a ZIP mismatch replaces a generic decline. A Stripe
+charge Radar blocked is classified by its block reason (`blocked_by_psp`), not
+the fraudulent decline it reads as. Network advice turns a retry into
+`FixPaymentMethod` but never makes it terminal: Stripe `do_not_try_again` or
+`confirm_card_data`, Mastercard 03, 21, 01, 40 or 41, or an issuer code in
+`decline.IssuerForbidsReattempt`. Mastercard 24 to 30 set `Result.RetryAfter`.
+An `Unmapped` code still retries. `decline.AlertUnmapped` logs it, and the
+hourly health pass raises `life.decline.unmapped`. Each answer is a
+`payment_attempts` row with its outcome, cause, reason, action and the PSP's
+and network's advice codes.
 
 **Schedule.** `collection.DefaultPolicy` retries nothing under 4 days, +1 d and
 +2 d under 28 days, and +2, +4, +6 and +9 d beyond; transient answers first get
@@ -44,16 +53,28 @@ CCBill-owned subscriptions retry at the provider; OpenRails mirrors `past_due`.)
 - The first decline opens the case (`openCase`). It stores the policy in full
   (`collection.DeclaredOf`) in `subscriptions.dunning_policy`.
 - `Retry` bumps `transient_retries` or `retry_attempts` and sets
-  `next_retry_at`. A spent schedule is `lifecycle.DunningExhausted`.
+  `next_retry_at`, no sooner than the network advised after the decline
+  (`FailMembershipParams.RetryAfter`, from `DeclinedAt`) or an earlier
+  decline's advice still allows; `retry_advised_at` records an advised retry.
+  The case then ends at `subscriptions.CaseEnd`: the window's end, or the slack
+  past the last retry the schedule will make, so a delayed case still makes
+  every attempt its policy allows, but that slack never runs past the next
+  renewal (`NextRenewalAt`: NMI's own next charge for an NMI schedule whose
+  accepted schedule dates it, else the cycle). Advice that allows no retry
+  before the next renewal leaves the case `past_due` with no retry and
+  `grace_ends_at` at that renewal, where the due pass ends it
+  (`EndAdviceDeferred`). A case whose last scheduled retry the advice set ends
+  exhausted with cancel feedback `issuer_deferred`. A retry late for any other
+  reason keeps the policy's schedule, and a quick transient retry still waits
+  for standing advice. Advice is a card's: a new card, or the old one an
+  account updater replaced, drops it and the deferral it set (`ReplaceMethod`,
+  or `ForgetAdvice` when staff choose the card). A spent schedule is
+  `lifecycle.DunningExhausted`.
 - `FixPaymentMethod` moves the case to `awaiting_method`, sends
   `payment_method_update_required` (`payment_method_failed` when it queues a
   refresh of a possibly reissued card) and sets `grace_ends_at` to the window's end;
   an expired card may queue a refresh ([payment methods](payment-methods.md)).
-- `NonRecoverable` or a spent schedule cancels, ends access and queues the
-  provider cancel, given a certainty leg and an open `destructive.Gate` (a
-  Solana pull checks no gate). Otherwise `lifecycle.TerminalHeld` keeps engine
-  members `past_due`, makes NMI-schedule members `unverified`, and raises
-  `life.terminal_outcome.held`.
+- `NonRecoverable` or a spent schedule cancels, ends access and queues the provider cancel, given a certainty leg and an open `destructive.Gate`. Otherwise `lifecycle.TerminalHeld` keeps engine members `past_due`, makes NMI-schedule members `unverified`, and raises `life.terminal_outcome.held`, which alerts the merchant's operator once per case; its recommended action names what lets the outcome apply (the switch, a billing import's cancellation cap, a re-import, or a provider check).
 - Access while dunning is a grace grant (`dunningAccess`), unless
   `access_during_dunning` is `suspend`.
 
@@ -63,7 +84,8 @@ hourly `openrails.billing_pass`. It reads merchant ids
 each merchant's `RunInMerchantScope`. A due row gets one action: an NMI retry
 is enqueued (`ManualRebillHandler.EnqueueScheduled`); an engine renewal is
 admitted ([subscriptions](subscriptions.md)); an expired wait ends
-(`ExpireAwaitingMethod`); a stale row parks `unverified` (`ApplyLocalUnknown`);
+(`ExpireAwaitingMethod`), and so does a case the advice deferred to its renewal
+(`EndAdviceDeferred`); a stale row parks `unverified` (`ApplyLocalUnknown`);
 or the provider is asked by id (`AskProviderPastGrace`). A second scan asks about
 provider-billed renewals 48 hours overdue (`AskProviderOverdueRenewal`). A row
 whose processing fails raises `life.due_pass.refused`; every row left unchanged
@@ -198,16 +220,11 @@ Checks:
 - OR-J16-S51 and S52: the retry caps hold the networks' reattempt limits.
 
 ### 9. Destructive-action safeguards
-A terminal outcome needs a certainty leg and an open `destructive.Gate` (a
-Solana pull checks no gate). Under `limited`, the due pass holds the end of an
-`awaiting_method` case. A held outcome keeps access and raises
-`life.terminal_outcome.held`. Waiving and marking uncollectible run through
-`destructive.RunLocal` (`waive_order`, `mark_uncollectible`).
+A terminal outcome needs a certainty leg and an open `destructive.Gate`. Under `limited`, the due pass holds the end of an `awaiting_method` case. A held outcome keeps access and raises `life.terminal_outcome.held`, alerting the operator once (OR-J06-S70). Waiving and marking uncollectible run through `destructive.RunLocal` (`waive_order`, `mark_uncollectible`).
 `subscription_status_transitions` records the actor of each status change.
 
 Checks:
-- The engine, NMI and converge callers pass `TerminalBlocked` from
-  `destructive.Gate`; the Solana crank (`solana/pull/crank.go`) passes none.
+- The engine, NMI, converge and Solana crank callers pass `TerminalBlocked` from `destructive.Gate` (OR-J34-S39), for any decline, since spending the schedule is terminal too; a declared book holds it through `HoldTerminal` (OR-J34-S35).
 - `ExpireAwaitingMethod` keeps a blocked row (OR-J16-S31).
 
 ## Tests

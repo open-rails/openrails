@@ -42,6 +42,8 @@ type Config struct {
 
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig
+	// ClickHouse names the database of the event store (Deps.ClickHouse).
+	ClickHouse ClickHouseConfig
 	// Merchants declares the merchants an embedded engine provisions on
 	// start; none leaves that to run time (a standalone server's are
 	// provisioned through its API). A slug declared twice provisions neither
@@ -334,9 +336,30 @@ type DatabaseConfig struct {
 	// Normal request-time and scheduled partition maintenance is unchanged.
 	SkipMigrations bool
 	// LeaseConns caps the separate pool, copied from Deps.Postgres's
-	// configuration, that renews idempotency leases. Zero is four
-	// connections.
+	// configuration, that renews leases: idempotency claims, the billing pass
+	// and merchant pulls. Zero is four connections.
 	LeaseConns int
+}
+
+// ClickHouseConfig names the ClickHouse database the event store keeps its
+// tables in; New creates or upgrades it.
+type ClickHouseConfig struct {
+	// Database holds the event store's tables. Empty is "openrails".
+	Database string
+}
+
+// DefaultClickHouseDatabase is the event store's database when none is named.
+const DefaultClickHouseDatabase = "openrails"
+
+// ClickHouseDatabase is the event store's database: ClickHouse.Database, or
+// DefaultClickHouseDatabase.
+func ClickHouseDatabase(c *Config) string {
+	if c != nil {
+		if d := strings.ToLower(strings.TrimSpace(c.ClickHouse.Database)); d != "" {
+			return d
+		}
+	}
+	return DefaultClickHouseDatabase
 }
 
 // DefaultSchema is the Postgres schema used when none is configured. All SQL
@@ -750,6 +773,10 @@ type DestructiveActionLimitsConfig struct {
 	MerchantPerDay    int64
 	DeploymentPerHour int64
 	DeploymentPerDay  int64
+	// ErasurePerHour and ErasurePerDay are the floors of a merchant's own
+	// contact-erasure budget, which rises with its directory.
+	ErasurePerHour int64
+	ErasurePerDay  int64
 }
 
 // NormalizeDestructiveActionLimits fills the defaults and refuses limits that
@@ -759,7 +786,7 @@ func NormalizeDestructiveActionLimits(c DestructiveActionLimitsConfig) (Destruct
 	for _, f := range []struct {
 		v   *int64
 		def int64
-	}{{&c.ActorPerHour, 5}, {&c.ActorPerDay, 15}, {&c.MerchantPerHour, 15}, {&c.MerchantPerDay, 25}, {&c.DeploymentPerHour, 50}, {&c.DeploymentPerDay, 100}} {
+	}{{&c.ActorPerHour, 5}, {&c.ActorPerDay, 15}, {&c.MerchantPerHour, 15}, {&c.MerchantPerDay, 25}, {&c.DeploymentPerHour, 50}, {&c.DeploymentPerDay, 100}, {&c.ErasurePerHour, 100}, {&c.ErasurePerDay, 1000}} {
 		if *f.v == 0 {
 			*f.v = f.def
 		}
@@ -768,7 +795,7 @@ func NormalizeDestructiveActionLimits(c DestructiveActionLimitsConfig) (Destruct
 		}
 	}
 	switch {
-	case c.ActorPerHour > c.ActorPerDay || c.MerchantPerHour > c.MerchantPerDay || c.DeploymentPerHour > c.DeploymentPerDay:
+	case c.ActorPerHour > c.ActorPerDay || c.MerchantPerHour > c.MerchantPerDay || c.DeploymentPerHour > c.DeploymentPerDay || c.ErasurePerHour > c.ErasurePerDay:
 		return c, fmt.Errorf("destructive_action_limits: an hourly limit cannot exceed its daily limit")
 	case c.ActorPerHour > c.MerchantPerHour || c.ActorPerDay > c.MerchantPerDay:
 		return c, fmt.Errorf("destructive_action_limits: an actor limit cannot exceed the merchant limit")
@@ -926,6 +953,14 @@ func Validate(cfg *Config) error {
 	}
 	if err := ValidateDatabase(cfg.Database); err != nil {
 		return fmt.Errorf("database config validation failed: %w", err)
+	}
+	return ValidateClickHouse(cfg.ClickHouse)
+}
+
+// ValidateClickHouse refuses a database name that is not a plain identifier.
+func ValidateClickHouse(c ClickHouseConfig) error {
+	if d := ClickHouseDatabase(&Config{ClickHouse: c}); !schemaIdentRe.MatchString(d) {
+		return fmt.Errorf("clickhouse database %q is not a valid identifier (letters, digits, underscore only; must start with a letter or underscore)", d)
 	}
 	return nil
 }

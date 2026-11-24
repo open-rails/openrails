@@ -40,7 +40,7 @@ func setLimitOverrides(ctx context.Context, q *gen.Queries, merchantID, customer
 
 // limitReader reads one customer's limits on q at now.
 func (s *Service) limitReader(q *gen.Queries, merchantID, customerID uuid.UUID, now time.Time) limits.Customer {
-	return limits.Customer{Q: q, MerchantID: merchantID, CustomerID: customerID, Now: now,
+	return limits.Customer{Q: q, Events: s.rt.EventStore, MerchantID: merchantID, CustomerID: customerID, Now: now,
 		Period: func(ctx context.Context, unit string, at time.Time) (time.Time, time.Time, error) {
 			return s.moneyService().PricingPeriod(ctx, q, merchantID, customerID, unit, at)
 		}}

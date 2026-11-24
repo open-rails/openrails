@@ -10,10 +10,12 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/disputes"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/authkit/userinfo"
 
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/migrate"
@@ -100,6 +102,7 @@ type runtimeOverrides struct {
 	Notifications        *config.NotificationChannel
 	Migrations           fs.FS
 	Vault                *vaultapi.Client
+	ClickHouse           driver.Conn
 }
 
 // devnetParityPriceProvider wraps the Pyth client (#360) for a merchant whose
@@ -194,6 +197,15 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if err != nil {
 		return nil, err
 	}
+	var events *eventstore.Store
+	if overrides != nil && overrides.ClickHouse != nil {
+		if events, err = attachEventStore(ctx, cfg, database, overrides.ClickHouse, logger); err != nil {
+			return nil, err
+		}
+		database.SetEventStore(events)
+	} else if err := refuseUnpostedUsage(ctx, database); err != nil {
+		return nil, err
+	}
 	if overrides != nil && overrides.Notifications != nil {
 		if overrides.Notifications.Sink == nil || overrides.Notifications.Recipient == nil {
 			return nil, fmt.Errorf("notification channel requires a transactional sink and recipient mapping")
@@ -262,11 +274,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		directory = identity.Live{Lookup: overrides.UserInfo, DB: database}
 	}
 	customers := &identity.Customers{Directory: directory}
-	// #1099: idempotency leases renew on their own connections, so a pool
-	// saturated by the requests holding them can never starve a renewal.
+	// Leases renew on their own connections (idempotency claims, the billing
+	// pass, merchant pulls), so a pool their holders saturate never starves a
+	// renewal.
 	leaseDB, err := database.SeparatePool(ctx, leaseConns)
 	if err != nil {
-		return nil, fmt.Errorf("idempotency lease pool: %w", err)
+		return nil, fmt.Errorf("lease pool: %w", err)
 	}
 	defer func() {
 		if buildErr != nil {
@@ -282,6 +295,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if err != nil {
 		return nil, err
 	}
+	database.SetUsageLedger(serviceInstances.MoneyService)
 
 	// One sender for all of OpenRails' email: the host's.
 	var sender config.EmailSender
@@ -317,6 +331,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	runtime := &Runtime{
 		Log:           logger,
+		EventStore:    events,
 		StripeClients: stripeClients,
 		DB:            database,
 		leaseDB:       leaseDB,
@@ -527,6 +542,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.Contacts, runtime.HostUserInfo = directory, hostUserInfo
 	runtime.Messages = &messages.Service{DB: database, Email: sender, Contacts: directory,
 		Profiles: merchantconfig.NewStore(database), Renderer: renderer, Abuse: abuseState, Clock: clock, Log: logger}
+	runtime.MRRRisk = &subscriptions.MRRRisk{DB: database, Log: logger}
 
 	return runtime, nil
 }

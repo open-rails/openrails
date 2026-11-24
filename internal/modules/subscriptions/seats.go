@@ -2,14 +2,17 @@ package subscriptions
 
 import (
 	"errors"
+	"fmt"
 	"math"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
 // ErrSeatAmountOverflow refuses a unit price times quantity beyond int64.
 var ErrSeatAmountOverflow = errors.New("seat amount exceeds int64")
 
 // SeatAmount is unit × quantity, or the unit for a price without seats,
-// refusing a quantity below 1 and overflow.
+// refusing a quantity outside 1 to catalog.MaxQuantity and overflow.
 func SeatAmount(unit int64, quantity *int) (int64, error) {
 	if quantity == nil {
 		return unit, nil
@@ -17,10 +20,11 @@ func SeatAmount(unit int64, quantity *int) (int64, error) {
 	return Seats(unit, *quantity)
 }
 
-// Seats is unit × n, refusing n below 1 and overflow.
+// Seats is unit × n, refusing n outside 1 to catalog.MaxQuantity and
+// overflow.
 func Seats(unit int64, n int) (int64, error) {
-	if n < 1 || unit < 0 {
-		return 0, errors.New("seat amount needs a nonnegative unit and at least one seat")
+	if n < 1 || n > catalog.MaxQuantity || unit < 0 {
+		return 0, fmt.Errorf("seat amount needs a nonnegative unit and 1 to %d seats", catalog.MaxQuantity)
 	}
 	if unit > 0 && int64(n) > math.MaxInt64/unit {
 		return 0, ErrSeatAmountOverflow

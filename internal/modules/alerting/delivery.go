@@ -10,74 +10,24 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/alerting/alertjob"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
-// DeliveryKind is the operator alert job.
-const DeliveryKind = "openrails.operator_alert"
+// The operator alert job is alertjob's, below the modules that raise findings.
+const DeliveryKind = alertjob.DeliveryKind
 
-// DeliveryArgs is one operator alert: its fanout to the configured channels
-// (Channel nil), or its delivery to one. Its source is a destructive-action
-// hold or a finding's notification episode. It stores channel references,
-// never webhook URLs or credentials.
-type DeliveryArgs struct {
-	MerchantID uuid.UUID     `json:"merchant_id"`
-	Hold       *HoldAlert    `json:"hold,omitempty"`
-	Finding    *FindingAlert `json:"finding,omitempty"`
-	Channel    *ChannelRef   `json:"channel,omitempty"`
-}
+type (
+	DeliveryArgs = alertjob.DeliveryArgs
+	HoldAlert    = alertjob.HoldAlert
+	FindingAlert = alertjob.FindingAlert
+)
 
-// HoldAlert is a destructive-action incident.
-type HoldAlert struct {
-	ID       uuid.UUID `json:"id"`
-	Scope    string    `json:"scope"`
-	OpenedAt time.Time `json:"opened_at"`
-}
-
-// FindingAlert is one notification episode of a finding: the notified_at its
-// claim stamped.
-type FindingAlert struct {
-	ID         uuid.UUID `json:"id"`
-	NotifiedAt time.Time `json:"notified_at"`
-}
-
-func (DeliveryArgs) Kind() string { return DeliveryKind }
-
-// InsertOpts retries each delivery on its own. Arguments deduplicate, completed
-// jobs included, so a delivered alert is never sent again.
-func (DeliveryArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "billing", MaxAttempts: 100, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
-		rivertype.JobStateAvailable, rivertype.JobStateCompleted, rivertype.JobStatePending,
-		rivertype.JobStateRetryable, rivertype.JobStateRunning, rivertype.JobStateScheduled}}}
-}
-
-// Valid reports whether a names its merchant and exactly one source.
-func (a DeliveryArgs) Valid() bool {
-	switch {
-	case a.MerchantID == uuid.Nil || (a.Hold == nil) == (a.Finding == nil):
-		return false
-	case a.Hold != nil:
-		return a.Hold.ID != uuid.Nil
-	default:
-		return a.Finding.ID != uuid.Nil
-	}
-}
-
-// queueFindingAlert commits the alert of a finding's notification episode in
-// tx, the transaction that claimed it. A low finding stays in the console.
-func (s *Service) queueFindingAlert(ctx context.Context, tx pgx.Tx, merchantID, findingID uuid.UUID, severity reconcile.Severity, notifiedAt time.Time) error {
-	if severity == reconcile.SeverityLow {
-		return nil
-	}
-	_, err := s.db.InsertRiverJobTx(ctx, tx, DeliveryArgs{MerchantID: merchantID, Finding: &FindingAlert{ID: findingID, NotifiedAt: notifiedAt}}, nil)
-	if err != nil {
-		return fmt.Errorf("queue finding alert: %w", err)
-	}
-	return nil
+func queueFindingAlert(ctx context.Context, database *db.DB, tx pgx.Tx, merchantID, findingID uuid.UUID, severity reconcile.Severity, notifiedAt time.Time) error {
+	return alertjob.Queue(ctx, database, tx, merchantID, findingID, string(severity), notifiedAt)
 }
 
 // QueueRealerts commits the alerts of findings whose notification tx re-armed
@@ -87,7 +37,7 @@ func (s *Service) QueueRealerts(ctx context.Context, tx pgx.Tx, claimed []gen.Bi
 		if f.NotifiedAt == nil {
 			return fmt.Errorf("re-alert of finding %s claimed no episode", f.ID)
 		}
-		if err := s.queueFindingAlert(ctx, tx, f.MerchantID, f.ID, reconcile.Severity(f.Severity), *f.NotifiedAt); err != nil {
+		if err := queueFindingAlert(ctx, s.db, tx, f.MerchantID, f.ID, reconcile.Severity(f.Severity), *f.NotifiedAt); err != nil {
 			return err
 		}
 	}

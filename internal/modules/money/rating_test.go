@@ -9,8 +9,8 @@ import (
 	"github.com/open-rails/openrails/internal/catalogrules"
 )
 
-// Every usage price the catalog accepts settles: the probe settlement runs
-// before writing prices each model, a dynamic card at its stated amount.
+// Every usage price the catalog accepts prices: each model, a dynamic card at
+// its stated amount; a volume price only as a discount.
 func TestSettlementPricesEveryAcceptedUsageModel(t *testing.T) {
 	ten := int64(10)
 	stated := int64(450)
@@ -34,7 +34,9 @@ func TestSettlementPricesEveryAcceptedUsageModel(t *testing.T) {
 			require.Equal(t, test.want, got)
 		})
 	}
-	volume := catalog.RatePrice{Model: catalog.ModelTiered, Tiered: &catalog.TieredPrice{Mode: catalog.TierModeVolume, Tiers: []catalog.RateTier{{UnitAmount: 1}}}}
-	require.Error(t, catalogrules.ValidateUsagePrice("volume", &volume))
-	require.ErrorIs(t, usageQuantity{card: ratingCard{MeterKey: "work", Price: volume}, quantity: 4}.priceable(), errVolumeTiers)
+	discount := catalog.RatePrice{Model: catalog.ModelTiered, Tiered: &catalog.TieredPrice{Mode: catalog.TierModeVolume, Tiers: []catalog.RateTier{{UpTo: &ten, UnitAmount: 2}, {UnitAmount: 1}}}}
+	require.NoError(t, catalogrules.ValidateUsagePrice("volume", &discount))
+	require.NoError(t, usageQuantity{card: ratingCard{MeterKey: "work", Price: discount}, quantity: 4}.priceable())
+	rising := catalog.RatePrice{Model: catalog.ModelTiered, Tiered: &catalog.TieredPrice{Mode: catalog.TierModeVolume, Tiers: []catalog.RateTier{{UpTo: &ten, UnitAmount: 1}, {UnitAmount: 2}}}}
+	require.Error(t, catalogrules.ValidateUsagePrice("volume", &rising))
 }

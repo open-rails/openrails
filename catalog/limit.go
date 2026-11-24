@@ -104,22 +104,24 @@ func (o Overrun) Validate() error {
 	return nil
 }
 
-// LimitRateCard counts a meter's usage toward a limit: Price is a rate-card
-// price in the limit's unit, so it names no currency.
-type LimitRateCard struct {
+// LimitCount counts a meter's usage toward a limit: each event the filter
+// admits adds its quantity × Weight ÷ Per, rounded half up as a per-unit
+// price rounds. Weight and Per default to 1.
+type LimitCount struct {
 	Meter  string              `json:"meter"`
+	Weight int64               `json:"weight,omitempty"`
+	Per    int64               `json:"per,omitempty"`
 	Filter map[string][]string `json:"filter,omitempty"`
-	Price  RatePrice           `json:"price"`
 }
 
 // ApplyLimit declares the limit its map key names; omitted fields keep their
 // values. A new limit needs unit and reset; its overrun defaults to
 // require_estimate.
 type ApplyLimit struct {
-	Unit      Field[string]          `json:"unit,omitzero"`
-	Reset     Field[LimitReset]      `json:"reset,omitzero"`
-	Overrun   Field[Overrun]         `json:"overrun,omitzero"`
-	RateCards Field[[]LimitRateCard] `json:"rate_cards,omitzero"`
+	Unit    Field[string]       `json:"unit,omitzero"`
+	Reset   Field[LimitReset]   `json:"reset,omitzero"`
+	Overrun Field[Overrun]      `json:"overrun,omitzero"`
+	Counts  Field[[]LimitCount] `json:"counts,omitzero"`
 }
 
 // Capacity is a limit's units in one window, in the limit's unit (native
@@ -147,13 +149,13 @@ func (c *Capacity) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// validate checks the declaration's syntax; meters and prices are checked
-// against the catalog when it applies.
+// validate checks the declaration's syntax; meters are checked against the
+// catalog when it applies.
 func (l ApplyLimit) validate() error {
 	if err := validateApplicationFields(l); err != nil {
 		return err
 	}
-	if l.Unit.Null || l.Reset.Null || l.Overrun.Null || l.RateCards.Null {
+	if l.Unit.Null || l.Reset.Null || l.Overrun.Null || l.Counts.Null {
 		return fmt.Errorf("nonnullable field is null")
 	}
 	if l.Unit.Set {
@@ -171,23 +173,23 @@ func (l ApplyLimit) validate() error {
 			return err
 		}
 	}
-	if l.Unit.Set && syntax.LimitUnitCurrency(l.Unit.Value) && len(l.RateCards.Value) > 0 {
-		return fmt.Errorf("a currency limit counts the rated amount and has no rate_cards")
+	if l.Unit.Set && syntax.LimitUnitCurrency(l.Unit.Value) && len(l.Counts.Value) > 0 {
+		return fmt.Errorf("a currency limit counts the rated amount and has no counts")
 	}
-	for i, card := range l.RateCards.Value {
-		if err := card.validate(); err != nil {
-			return fmt.Errorf("rate card #%d: %w", i+1, err)
+	for i, c := range l.Counts.Value {
+		if err := c.validate(); err != nil {
+			return fmt.Errorf("count #%d: %w", i+1, err)
 		}
 	}
 	return nil
 }
 
-func (c LimitRateCard) validate() error {
+func (c LimitCount) validate() error {
 	if c.Meter == "" {
 		return fmt.Errorf("meter is required")
 	}
-	if c.Price.Currency != "" {
-		return fmt.Errorf("a limit's rate card is priced in the limit's unit and names no currency")
+	if c.Weight < 0 || c.Per < 0 {
+		return fmt.Errorf("weight and per must be positive")
 	}
 	return nil
 }

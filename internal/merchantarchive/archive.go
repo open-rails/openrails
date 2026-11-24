@@ -158,6 +158,9 @@ func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.
 				return &Error{Code: "integrity", Table: p.Name, Count: expected - count}
 			}
 		}
+		if err := exportUsage(ctx, database, q, id, w); err != nil {
+			return err
+		}
 		return w.Close()
 	})
 	if err != nil {
@@ -183,6 +186,10 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 	}
 	in = verified
 	ctx = merchant.WithID(ctx, id)
+	usage, err := restoringUsage(ctx, database)
+	if err != nil {
+		return result, err
+	}
 	// Archived rows may be older than anything written here: their months need
 	// partitions before the restore transaction, which must not hold DDL locks.
 	restoreNow := time.Now()
@@ -236,6 +243,9 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if previousDigest != nil {
 				return nil
 			}
+			if usage.takes(p) {
+				return usage.add(ctx, p, values)
+			}
 			args := make([]any, len(values), len(values)+1)
 			for i, v := range values {
 				if v != nil {
@@ -265,6 +275,9 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 				return &Error{Code: "not_empty"}
 			}
 			return nil
+		}
+		if err := usage.flush(ctx); err != nil {
+			return err
 		}
 		if err := q.SetCatalogRevision(ctx, gen.SetCatalogRevisionParams{MerchantID: id.UUID(), Revision: restoredCatalogRevision}); err != nil {
 			return err
@@ -299,6 +312,16 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := q.RebuildUsageDue(ctx, gen.RebuildUsageDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
+		// An archive from before MRR carries subscriptions without it: they
+		// open MRR now. The restore check proves the rest agree.
+		if err := q.SeedMRR(ctx, gen.SeedMRRParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {
+			return err
+		}
+		// The source's queued risk changes stay there: every customer whose
+		// MRR could be at risk is re-evaluated.
+		if err := q.QueueRestoredMRRRisk(ctx, gen.QueueRestoredMRRRiskParams{MerchantID: id.UUID(), At: restoreNow.UTC()}); err != nil {
+			return err
+		}
 		// The source's wakes stay in its River schema.
 		if err := queueWakes(ctx, database, tx, q, id); err != nil {
 			return err
@@ -313,6 +336,7 @@ VALUES($1,true) ON CONFLICT(merchant_id) DO UPDATE SET restore_required=true`, i
 		return q.FinishBillingRestore(ctx, gen.FinishBillingRestoreParams{MerchantID: id.UUID(), Digest: info.Digest, Rows: info.Rows})
 	})
 	if err != nil {
+		usage.discard(ctx)
 		return Result{}, classify(err)
 	}
 	return result, nil
@@ -457,9 +481,9 @@ func exportWhere(table string) string {
 	if table == "maintenance_runs" {
 		where += " AND t.kind IN ('prune','approval','merchant_purge')"
 	}
-	// A lease's holds die with it; only admitted requests' holds move.
+	// A gate's open hold dies with its lease; its settled ones move.
 	if table == "limit_holds" {
-		where += " AND t.request_id IS NOT NULL"
+		where += " AND (t.lease_id IS NULL OR t.state <> 'open')"
 	}
 	// Windows still open, and the end-less ones of lifetime and rate
 	// limits, carry their usage and staff adjustments to the destination.

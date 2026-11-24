@@ -74,6 +74,9 @@ type MoneyService struct {
 	clock                 clockwork.Clock
 	// posting is set on the service a running charge's posting runs on.
 	posting *runningChargePosting
+	// usagePosted marks running-charge postings made after the customer's
+	// usage before their instant posted.
+	usagePosted bool
 }
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {
@@ -236,11 +239,43 @@ func (s *MoneyService) AdmissionCapacityTx(ctx context.Context, q *gen.Queries, 
 	if err != nil {
 		return AdmissionCapacity{}, err
 	}
-	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
+	capacity, err := s.withUnposted(ctx, q, tenantID, payerID, cur, admissionCapacityFromRow(row))
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, capacity)
+}
+
+// ViewCapacityTx reads the customer's admission capacity in the caller's
+// transaction without its money lock, leaving out one lease's in-flight
+// report: what a gate's view starts from.
+func (s *MoneyService) ViewCapacityTx(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, except uuid.UUID) (AdmissionCapacity, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	tenantID, payerID, cur := tid.UUID(), payer.UUID(), normalizeCurrency(currency)
+	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+		return AdmissionCapacity{}, err
+	}
+	now := s.now()
+	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+		AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now), ExceptLease: &except})
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	capacity, err := s.withUnposted(ctx, q, tenantID, payerID, cur, admissionCapacityFromRow(row))
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, capacity)
 }
 
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
-// customer_balance counters, optional money_settings, and the payer's arrears
+// customer_units counters, optional money_settings, and the payer's arrears
 // account. Arrears debt never shows as a negative balance, so the credit line
 // must be checked against OutstandingOwed.
 func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string) (AdmissionCapacity, error) {
@@ -276,7 +311,11 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 	if err != nil {
 		return AdmissionCapacity{}, err
 	}
-	return s.usageAdmissionCapacity(ctx, q, payer, cur, admissionCapacityFromRow(row))
+	capacity, err := s.withUnposted(ctx, q, tenantID, payerID, cur, admissionCapacityFromRow(row))
+	if err != nil {
+		return AdmissionCapacity{}, err
+	}
+	return s.usageAdmissionCapacity(ctx, q, payer, cur, capacity)
 }
 
 func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity {
@@ -486,7 +525,7 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 }
 
 // depositTx records a money-in as a credit lot and posts its deposit (DR
-// processor_clearing / CR customer_balance). Idempotent on (merchant, payer,
+// units_sold / CR customer_units). Idempotent on (merchant, payer,
 // source_id) via the lot lookup. Runs under the customers-row lock so deposits
 // serialize per customer.
 func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositParams) (*models.MoneyTransaction, error) {
@@ -725,14 +764,24 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 }
 
 // heldAmount is the one held total against a customer's balance in a
-// currency as of now (live request reservations, provider authorizations and
-// running-charge accrual), and the accrual apart.
+// currency as of now (live request reservations, provider authorizations,
+// running-charge accrual and unposted usage), and the accrual apart. A
+// posting after the usage before its instant posted holds no usage: as of
+// that instant there is none, so usage after it never keeps a lot lapsing
+// then from what came before.
 func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string, now time.Time) (held, accrued int64, err error) {
 	row, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
 		HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now), AccruedAsOf: s.accruedAsOf(),
 	})
-	return row.Held, row.Accrued, err
+	if err != nil {
+		return 0, 0, err
+	}
+	if s.posting != nil && s.posting.usagePosted {
+		return row.Held, row.Accrued, nil
+	}
+	unposted, err := s.unpostedUsage(ctx, q, tenantID, payerID, cur)
+	return addSat(row.Held, unposted), row.Accrued, err
 }
 
 // SetDestructiveAdmissions wires the shared staff-command admission boundary.

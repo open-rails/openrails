@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/balancelook"
 
 	"github.com/open-rails/openrails/internal/convergejob"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -18,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/usageerasure"
 )
 
 // DefaultTimeout is an OpenRails job's budget: River cancels the job past it,
@@ -33,6 +35,7 @@ const RescueAfter = 10 * time.Minute
 // hour, PSP import gets two hours, and the billing pass uses its scan budgets.
 var kinds = map[string]time.Duration{
 	balancelook.Kind:                     DefaultTimeout,
+	usageerasure.Kind:                    DefaultTimeout,
 	money.KindUsageOrders:                DefaultTimeout,
 	KindSubscriptionConverge:             DefaultTimeout,
 	KindProviderObjectObserve:            DefaultTimeout,
@@ -45,12 +48,15 @@ var kinds = map[string]time.Duration{
 	wake.Kind:                            DefaultTimeout,
 	paymentmethods.KindStoredCardRefresh: DefaultTimeout,
 	merchants.SecretCleanupArgs{}.Kind(): DefaultTimeout,
+	merchants.UsagePurgeArgs{}.Kind():    DefaultTimeout,
+	destructive.DrainErasuresKind:        DefaultTimeout,
 	KindCleanupExpiredData:               time.Hour,
 	KindProviderRefreshRequested:         time.Hour,
 	KindPacedProviderRefresh:             time.Hour,
 	KindMerchantHealth:                   time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,
+	KindMRRRisk:                          DefaultTimeout,
 	KindBillingPass:                      BillingPassTimeout(),
 	KindPSPImport:                        2 * time.Hour,
 }

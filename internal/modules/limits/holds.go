@@ -9,30 +9,28 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/retention"
 )
 
-// Lease timing. None is a setting: correctness holds for any value, and
-// only speed depends on them.
+// Lease timing. None is a setting: the bound holds for any value, and only
+// speed depends on them.
 const (
-	// SyncInterval is how often a live gate syncs its lease.
+	// SyncInterval is how often an active gate syncs its lease.
 	SyncInterval = time.Second
-	// LeaseLifetime is how long a lease lives without a sync: a sync renews
-	// it only within this of its last one.
+	// LeaseLifetime is how long a lease stays live without a sync.
 	LeaseLifetime = 10 * time.Second
 	// SyncTimeout bounds one sync's transaction.
 	SyncTimeout = 5 * time.Second
-	// LeaseGrace is how much longer readers count a lease's holds: at least
-	// SyncTimeout, so a renewal that commits never revives holds a reader
-	// already counted dead.
-	LeaseGrace = SyncTimeout
 )
 
 // LeaseLiveSince is the oldest last sync of a lease readers count live at
 // now.
-func LeaseLiveSince(now time.Time) time.Time { return now.Add(-(LeaseLifetime + LeaseGrace)) }
+func LeaseLiveSince(now time.Time) time.Time { return now.Add(-LeaseLifetime) }
 
 // HeldSince is the oldest hold row that still holds at now: no hold lives
 // past the hold lifetime, a request's deadline included.
@@ -61,8 +59,8 @@ type Claim struct {
 }
 
 // Standing is where a limit stands in a claim's window: its capacity with
-// adjustments, its settled units (a rate limit's level now) and what live
-// holds set aside.
+// adjustments, the units usage took (a rate limit's level now) and what live
+// holds and gates' in-flight reports set aside.
 type Standing struct {
 	Capacity int64
 	Settled  int64
@@ -82,20 +80,28 @@ type Taken struct {
 	Standings []Standing
 }
 
-// Holder takes and settles one customer's claims. Its caller holds the
-// customer's spend lock; window rows are locked in key order.
+// Holder takes one customer's claims and reads where its limits stand. Its
+// caller holds the customer's spend lock to take; window rows are locked in
+// key order. What usage took of a window is the event store's (Events, else
+// the one bound to Q's transaction), and Loaded, when set, is the customer's
+// rows already read. ExceptLease leaves one lease's in-flight report out of
+// what it reads as held.
 type Holder struct {
-	Q          *gen.Queries
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Now        time.Time
+	Q           *gen.Queries
+	Events      *eventstore.Store
+	Loaded      []eventstore.LimitRow
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Now         time.Time
+	ExceptLease *uuid.UUID
 }
 
 // Take checks every claim and, when all fit, sets aside what each takes:
 // all or nothing. require_estimate fits when settled + held + cost is at
 // most capacity; admit_while_positive while any capacity remains, holding
-// at most what remains. A claim that takes its window to capacity records
-// reached_at. A refusal opens no window and holds nothing.
+// at most what remains. A claim that opens a session or first-use window
+// opens it, and one that takes its window to capacity records reached_at. A
+// refusal opens no window and holds nothing.
 func (h Holder) Take(ctx context.Context, claims []Claim) (Taken, error) {
 	h.Now = h.Now.UTC()
 	out := Taken{Refused: -1, Held: make([]int64, len(claims)), Standings: make([]Standing, len(claims))}
@@ -103,17 +109,12 @@ func (h Holder) Take(ctx context.Context, claims []Claim) (Taken, error) {
 	standings := out.Standings
 	for _, i := range lockOrder(claims) {
 		c := claims[i]
-		if !c.Opens {
-			if err := h.ensure(ctx, c.Key, c.Window, c.Capacity); err != nil {
-				return out, err
-			}
-		}
 		row, err := h.lock(ctx, c.Key, c.Window.StartsAt)
 		if err != nil {
 			return out, err
 		}
 		rows[i] = row
-		if standings[i], err = h.standing(ctx, c.Key, c.Reset, c.Window, c.Capacity, row); err != nil {
+		if standings[i], err = h.standing(ctx, c, row); err != nil {
 			return out, err
 		}
 	}
@@ -132,89 +133,29 @@ func (h Holder) Take(ctx context.Context, claims []Claim) (Taken, error) {
 				return out, err
 			}
 		}
-		var reached *time.Time
-		if total := addSat(addSat(s.Settled, s.Held), out.Held[i]); total > 0 && total >= s.Capacity && (row == nil || row.ReachedAt == nil) {
-			reached = &h.Now
-		}
-		if reached == nil && c.Reset.Kind != catalog.ResetRate {
-			continue
-		}
-		// A rate limit's level is written as of now, so its drain stays exact.
-		settled := s.Settled
-		if c.Reset.Kind != catalog.ResetRate && row != nil {
-			settled = row.Settled
-		}
-		if err := h.write(ctx, c.Key, c.Window.StartsAt, settled, c.Capacity, reached); err != nil {
+		s.Held = addSat(s.Held, out.Held[i])
+		if err := h.Reach(ctx, c, s, row); err != nil {
 			return out, err
 		}
 	}
 	return out, nil
 }
 
-// Locked is the claims' windows locked in order, with where each stands.
-type Locked struct {
-	Claims    []Claim
-	Standings []Standing
-	rows      []*gen.GetLimitWindowForUpdateRow
-}
-
-// Lock locks every claim's window in key order and reads where each stands,
-// for a caller that sizes what it sets aside itself. A session or first-use
-// window a claim opens is not written until Commit.
-func (h Holder) Lock(ctx context.Context, claims []Claim) (Locked, error) {
-	h.Now = h.Now.UTC()
-	l := Locked{Claims: claims, Standings: make([]Standing, len(claims)), rows: make([]*gen.GetLimitWindowForUpdateRow, len(claims))}
-	for _, i := range lockOrder(claims) {
-		c := claims[i]
-		if !c.Opens {
-			if err := h.ensure(ctx, c.Key, c.Window, c.Capacity); err != nil {
-				return l, err
-			}
-		}
-		row, err := h.lock(ctx, c.Key, c.Window.StartsAt)
-		if err != nil {
-			return l, err
-		}
-		l.rows[i] = row
-		if l.Standings[i], err = h.standing(ctx, c.Key, c.Reset, c.Window, c.Capacity, row); err != nil {
-			return l, err
-		}
+// Reach records the first time a claim's window is found at capacity: on
+// its row, which it adds for a window that has none (a rolling limit's
+// bucket, a rate or lifetime limit's one row).
+func (h Holder) Reach(ctx context.Context, c Claim, s Standing, row *gen.GetLimitWindowForUpdateRow) error {
+	total := addSat(s.Settled, s.Held)
+	if c.Ungranted || total <= 0 || total < s.Capacity || row != nil && row.ReachedAt != nil {
+		return nil
 	}
-	return l, nil
-}
-
-// Commit records what a caller changed of each locked claim's holds: added
-// (negative gives back) on top of the standing it read. It opens the windows
-// that held something, records reached_at and writes a rate limit's level as
-// of now, as Take does.
-func (h Holder) Commit(ctx context.Context, l Locked, added []int64) error {
-	h.Now = h.Now.UTC()
-	for _, i := range lockOrder(l.Claims) {
-		c, s, row := l.Claims[i], l.Standings[i], l.rows[i]
-		if c.Opens && row == nil {
-			if added[i] <= 0 {
-				continue
-			}
-			if err := h.ensure(ctx, c.Key, c.Window, c.Capacity); err != nil {
-				return err
-			}
-		}
-		var reached *time.Time
-		if total := addSat(addSat(s.Settled, s.Held), added[i]); added[i] > 0 && total > 0 && total >= s.Capacity && (row == nil || row.ReachedAt == nil) {
-			reached = &h.Now
-		}
-		if reached == nil && c.Reset.Kind != catalog.ResetRate {
-			continue
-		}
-		settled := s.Settled
-		if c.Reset.Kind != catalog.ResetRate && row != nil {
-			settled = row.Settled
-		}
-		if err := h.write(ctx, c.Key, c.Window.StartsAt, settled, c.Capacity, reached); err != nil {
+	if row == nil {
+		if err := h.ensure(ctx, c.Key, c.Window, c.Capacity); err != nil {
 			return err
 		}
 	}
-	return nil
+	return h.Q.ReachLimitWindow(ctx, gen.ReachLimitWindowParams{Capacity: c.Capacity, ReachedAt: h.Now.UTC(),
+		MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: c.Key, WindowStartsAt: c.Window.StartsAt})
 }
 
 // ResetsAt is when a refused claim's limit resets.
@@ -233,157 +174,98 @@ func Fits(c Claim, s Standing, extra int64) bool {
 	return c.Cost <= remaining
 }
 
-// Returnable names what live leases hold of one limit: from through to are
-// the windows a request counts in (a rolling limit's buckets, else one),
-// Currency narrows it to balance's, Except is the asking lease (none for an
-// admission).
-type Returnable struct {
-	Key      string
-	Currency *string
-	From, To time.Time
-	Except   uuid.UUID
-}
-
-// ReturnableOf is what a claim counts in.
-func ReturnableOf(c Claim, now time.Time, except uuid.UUID) Returnable {
-	r := Returnable{Key: c.Key, From: c.Window.StartsAt, To: c.Window.StartsAt, Except: except}
-	if c.Reset.Kind == catalog.ResetRolling {
-		r.From = RollingFrom(c.Reset.WindowSeconds, now)
-	}
-	return r
-}
-
-// BalanceReturnable is what balance counts in, in one currency.
-func BalanceReturnable(currency string, except uuid.UUID) Returnable {
-	return Returnable{Key: catalog.BalanceLimit, Currency: &currency, From: Epoch, To: Epoch, Except: except}
-}
-
-// LeaseHeld is what other live leases' holds set aside of r: capacity a
-// refused want or admission would get were they returned. Request holds are
-// never returned, so they do not count.
-func (h Holder) LeaseHeld(ctx context.Context, r Returnable) (int64, error) {
-	return h.Q.SumOtherLeaseHeld(ctx, gen.SumOtherLeaseHeldParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: r.Key, Currency: r.Currency,
-		FromWindow: r.From, ToWindow: r.To, HeldSince: HeldSince(h.Now), LeaseID: r.Except, LeaseLiveSince: LeaseLiveSince(h.Now)})
-}
-
-// TakeBack marks those holds to shrink at their leases' next sync. The
-// caller holds the customer's lock, as every writer of a lease's parts does.
-func (h Holder) TakeBack(ctx context.Context, r Returnable) error {
-	return h.Q.MarkLeaseHoldsContended(ctx, gen.MarkLeaseHoldsContendedParams{Now: h.Now, MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: r.Key, Currency: r.Currency,
-		FromWindow: r.From, ToWindow: r.To, HeldSince: HeldSince(h.Now), LeaseID: r.Except, LeaseLiveSince: LeaseLiveSince(h.Now)})
-}
-
-// Settlement is units a capture or report settles into one limit's window:
-// the window its hold was issued in, or the current one. KeepCapacity keeps
-// the capacity the window last stored (a spend window's). An ungranted
-// limit counts the units only in a window row that exists, and is never
-// reached.
-type Settlement struct {
-	Key          string
-	Reset        catalog.LimitReset
-	Window       Window
-	Capacity     int64
-	KeepCapacity bool
-	Units        int64
-	Ungranted    bool
-}
-
-// Settle adds each settlement's units to its window in full, never clamped,
-// and records reached_at when settled and held units first reach capacity.
-// The caller has ended the hold whose usage this is, so it no longer counts
-// as held.
-func (h Holder) Settle(ctx context.Context, settlements []Settlement) error {
-	h.Now = h.Now.UTC()
-	order := make([]int, 0, len(settlements))
-	for i, s := range settlements {
-		if s.Units != 0 {
-			order = append(order, i)
-		}
-	}
-	sort.SliceStable(order, func(a, b int) bool {
-		x, y := settlements[order[a]], settlements[order[b]]
-		return x.Key < y.Key || (x.Key == y.Key && x.Window.StartsAt.Before(y.Window.StartsAt))
-	})
-	for _, i := range order {
-		s := settlements[i]
-		if !s.Ungranted {
-			if err := h.ensure(ctx, s.Key, s.Window, s.Capacity); err != nil {
-				return err
-			}
-		}
-		row, err := h.lock(ctx, s.Key, s.Window.StartsAt)
-		if err != nil {
-			return err
-		}
-		if row == nil && s.Ungranted {
-			continue
-		}
-		if row == nil {
-			return errors.New("limit window vanished under its lock")
-		}
-		capacity := s.Capacity
-		if s.KeepCapacity {
-			capacity = row.Capacity
-		}
-		standing, err := h.standing(ctx, s.Key, s.Reset, s.Window, capacity, row)
-		if err != nil {
-			return err
-		}
-		settled := addSat(row.Settled, s.Units)
-		if s.Reset.Kind == catalog.ResetRate {
-			settled = addSat(standing.Settled, s.Units)
-		}
-		standing.Settled = addSat(standing.Settled, s.Units)
-		var reached *time.Time
-		if row.ReachedAt == nil && !s.Ungranted && addSat(standing.Settled, standing.Held) >= standing.Capacity {
-			reached = &h.Now
-		}
-		if err := h.write(ctx, s.Key, s.Window.StartsAt, settled, capacity, reached); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Held is what live holds set aside of a limit from window from through to.
-func (h Holder) Held(ctx context.Context, key string, from, to time.Time, countsExpired bool) (int64, error) {
+// Held is what live holds set aside of a limit from window from through to,
+// and in the current window (inFlight) what live gates report in flight.
+func (h Holder) Held(ctx context.Context, key string, from, to time.Time, countsExpired, inFlight bool) (int64, error) {
 	return h.Q.SumWindowHeld(ctx, gen.SumWindowHeldParams{
 		MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: key, FromWindow: from, ToWindow: to,
 		HeldSince: HeldSince(h.Now), CountsExpired: countsExpired, AsOf: h.Now, LeaseLiveSince: LeaseLiveSince(h.Now),
+		InFlight: inFlight, ExceptLease: h.ExceptLease,
 	})
 }
 
-// standing is a limit's standing in w given its row there (nil: none). A
-// rolling limit counts its buckets from the window's start; a rate limit's
-// level drains from the row's last write. An expired request hold still
-// counts in a window that ends.
-func (h Holder) standing(ctx context.Context, key string, reset catalog.LimitReset, w Window, capacity int64, row *gen.GetLimitWindowForUpdateRow) (Standing, error) {
-	s := Standing{Capacity: capacity}
-	from := w.StartsAt
-	switch reset.Kind {
+// Standing is where a claim's limit stands in its window, read without
+// locking it; Row is the window's row.
+func (h Holder) Standing(ctx context.Context, c Claim) (Standing, *gen.GetLimitWindowForUpdateRow, error) {
+	h.Now = h.Now.UTC()
+	row, err := h.read(ctx, c.Key, c.Window.StartsAt)
+	if err != nil {
+		return Standing{}, nil, err
+	}
+	s, err := h.standing(ctx, c, row)
+	return s, row, err
+}
+
+// standing is a claim's limit's standing in its window given the window's
+// row (nil: none). A rolling limit counts its buckets from the window's
+// start; a rate limit's level is read from its recent buckets. An expired
+// request hold still counts in a window that ends.
+func (h Holder) standing(ctx context.Context, c Claim, row *gen.GetLimitWindowForUpdateRow) (Standing, error) {
+	s := Standing{Capacity: c.Capacity}
+	w, from := c.Window, c.Window.StartsAt
+	switch c.Reset.Kind {
 	case catalog.ResetRolling:
-		from = RollingFrom(reset.WindowSeconds, h.Now)
-		buckets, err := h.Q.ListLimitWindowsFrom(ctx, gen.ListLimitWindowsFromParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: key, WindowStartsAt: from})
+		from = RollingFrom(c.Reset.WindowSeconds, h.Now)
+		adjusted, err := h.Q.ListLimitWindowsFrom(ctx, gen.ListLimitWindowsFromParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: c.Key, WindowStartsAt: from})
+		if err != nil {
+			return s, err
+		}
+		for _, b := range adjusted {
+			s.Capacity = addSat(s.Capacity, b.Adjusted)
+		}
+		buckets, err := h.Units(ctx, c.Key, from, h.Now)
 		if err != nil {
 			return s, err
 		}
 		for _, b := range buckets {
-			s.Capacity = addSat(s.Capacity, b.Adjusted)
-			s.Settled = addSat(s.Settled, b.Settled)
+			s.Settled = addSat(s.Settled, b.Units)
 		}
 	case catalog.ResetRate:
-		if row != nil {
-			s.Settled = RateLevel(row.Settled, capacity, reset.WindowSeconds, row.UpdatedAt, h.Now)
+		buckets, err := h.Units(ctx, c.Key, RateFrom(c.Reset.WindowSeconds, h.Now), h.Now)
+		if err != nil {
+			return s, err
 		}
+		s.Settled = RateLevelOf(buckets, c.Capacity, c.Reset.WindowSeconds, h.Now)
 	default:
 		if row != nil {
 			s.Capacity = addSat(s.Capacity, row.Adjusted)
-			s.Settled = row.Settled
+		}
+		if !c.Opens {
+			units, err := h.Units(ctx, c.Key, w.StartsAt, w.StartsAt)
+			if err != nil {
+				return s, err
+			}
+			for _, u := range units {
+				s.Settled = addSat(s.Settled, u.Units)
+			}
 		}
 	}
-	held, err := h.Held(ctx, key, from, w.StartsAt, w.EndsAt != nil)
+	current := !h.Now.Before(w.StartsAt) && (w.EndsAt == nil || h.Now.Before(*w.EndsAt)) || c.Reset.Kind == catalog.ResetRolling
+	held, err := h.Held(ctx, c.Key, from, w.StartsAt, w.EndsAt != nil, current)
 	s.Held = held
 	return s, err
+}
+
+// Units is what usage took of one limit in its windows (or buckets) that
+// start within [from, to], from the event store.
+func (h Holder) Units(ctx context.Context, key string, from, to time.Time) ([]eventstore.LimitRow, error) {
+	if h.Loaded != nil {
+		var out []eventstore.LimitRow
+		for _, r := range h.Loaded {
+			if r.Key == key && !r.WindowStartsAt.Before(from) && !r.WindowStartsAt.After(to) {
+				out = append(out, r)
+			}
+		}
+		return out, nil
+	}
+	store := h.Events
+	if store == nil {
+		store = db.EventStoreOf(h.Q)
+	}
+	if store == nil {
+		return nil, eventstore.Required("a usage limit")
+	}
+	return store.LimitUnits(ctx, billing.CustomerID(h.CustomerID), key, from, to)
 }
 
 // resetsAt is when a refused claim's limit resets: its window's end, a
@@ -396,24 +278,45 @@ func (h Holder) resetsAt(ctx context.Context, c Claim, s Standing) *time.Time {
 	case catalog.ResetRate:
 		return RateRefilledAt(addSat(s.Settled, s.Held), s.Capacity, c.Reset.WindowSeconds, h.Now)
 	case catalog.ResetRolling:
-		from := RollingFrom(c.Reset.WindowSeconds, h.Now)
-		buckets, err := h.Q.ListLimitWindowsFrom(ctx, gen.ListLimitWindowsFromParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: c.Key, WindowStartsAt: from})
-		if err != nil {
-			return c.Window.EndsAt
-		}
-		for _, b := range buckets {
-			if b.Settled != 0 {
-				return ptr(b.WindowStartsAt.UTC().Add(BucketWidth(c.Reset.WindowSeconds) + time.Duration(c.Reset.WindowSeconds)*time.Second))
-			}
+		if at := h.rollingResetsAt(ctx, c.Key, c.Reset); at != nil {
+			return at
 		}
 		return ptr(c.Window.StartsAt.Add(BucketWidth(c.Reset.WindowSeconds) + time.Duration(c.Reset.WindowSeconds)*time.Second))
 	}
 	return c.Window.EndsAt
 }
 
+// rollingResetsAt is when a rolling limit's oldest bucket with usage leaves
+// its window; nil when none has usage.
+func (h Holder) rollingResetsAt(ctx context.Context, key string, reset catalog.LimitReset) *time.Time {
+	buckets, err := h.Units(ctx, key, RollingFrom(reset.WindowSeconds, h.Now), h.Now)
+	if err != nil {
+		return nil
+	}
+	for _, b := range buckets {
+		if b.Units != 0 {
+			return ptr(b.WindowStartsAt.Add(BucketWidth(reset.WindowSeconds) + time.Duration(reset.WindowSeconds)*time.Second))
+		}
+	}
+	return nil
+}
+
 func (h Holder) ensure(ctx context.Context, key string, w Window, capacity int64) error {
 	return h.Q.EnsureLimitWindow(ctx, gen.EnsureLimitWindowParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: key,
 		WindowStartsAt: w.StartsAt, WindowEndsAt: w.EndsAt, Capacity: capacity, AsOf: h.Now})
+}
+
+// read is the window row at start without locking it.
+func (h Holder) read(ctx context.Context, key string, start time.Time) (*gen.GetLimitWindowForUpdateRow, error) {
+	row, err := h.Q.GetLimitWindow(ctx, gen.GetLimitWindowParams{MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: key, WindowStartsAt: start})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &gen.GetLimitWindowForUpdateRow{LimitKey: row.LimitKey, WindowStartsAt: row.WindowStartsAt, WindowEndsAt: row.WindowEndsAt,
+		Adjusted: row.Adjusted, ReachedAt: row.ReachedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 
 func (h Holder) lock(ctx context.Context, key string, start time.Time) (*gen.GetLimitWindowForUpdateRow, error) {
@@ -425,11 +328,6 @@ func (h Holder) lock(ctx context.Context, key string, start time.Time) (*gen.Get
 		return nil, err
 	}
 	return &row, nil
-}
-
-func (h Holder) write(ctx context.Context, key string, start time.Time, settled, capacity int64, reached *time.Time) error {
-	return h.Q.WriteLimitWindow(ctx, gen.WriteLimitWindowParams{Settled: settled, Capacity: capacity, ReachedAt: reached, AsOf: h.Now,
-		MerchantID: h.MerchantID, CustomerID: h.CustomerID, LimitKey: key, WindowStartsAt: start})
 }
 
 // lockOrder is the claims' indices in window id order.

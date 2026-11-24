@@ -203,6 +203,34 @@ func (p Policy) Outlook(cycleHours, failures int, next time.Time) (left int, fin
 	return left, final, nil
 }
 
+// CaseEnd is when collection of the renewal due at due stops: the window's
+// end, or later, the slack past the last retry the schedule will make from
+// next (Outlook) when the networks' advice delayed a retry, though that never
+// runs past renewal, the next renewal's due time. failures counts the case's
+// declines so far; next is its scheduled retry, nil for none.
+func (p Policy) CaseEnd(cycleHours int, due, renewal time.Time, failures int, next *time.Time) (time.Time, error) {
+	window, err := p.Window(cycleHours)
+	if err != nil {
+		return time.Time{}, err
+	}
+	end := due.Add(window)
+	if next == nil {
+		return end, nil
+	}
+	_, final, err := p.Outlook(cycleHours, failures, *next)
+	if err != nil {
+		return time.Time{}, err
+	}
+	last := final.Add(windowSlack(time.Duration(cycleHours) * time.Hour))
+	if last.After(renewal) {
+		last = renewal
+	}
+	if last.After(end) {
+		end = last
+	}
+	return end, nil
+}
+
 // LongestWindow is the longest window any cycle gets.
 func (p Policy) LongestWindow() time.Duration {
 	last := time.Duration(0)

@@ -114,7 +114,7 @@ func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdu
 }
 
 const listOverdueRebills = `-- name: ListOverdueRebills :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key, sub.checkout_order_id FROM billing.subscriptions sub
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key, sub.retry_advised_at, sub.checkout_order_id FROM billing.subscriptions sub
 WHERE sub.merchant_id = $1::uuid
   AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
   AND sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $2::timestamptz
@@ -200,6 +200,7 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 			&i.FactsAuthority,
 			&i.DueRecheckAt,
 			&i.RailSubscriptionKey,
+			&i.RetryAdvisedAt,
 			&i.CheckoutOrderID,
 		); err != nil {
 			return nil, err
@@ -244,13 +245,11 @@ WITH cy AS (
     SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency,
            c.missed_at, c.miss_reason, CASE WHEN w.id IS NOT NULL THEN w.attempted_at END AS won_at,
            CASE WHEN c.missed_at IS NOT NULL THEN 'missed'
-                WHEN f.category IS NULL THEN 'pending'
-                WHEN f.category = 'approved' THEN 'approved'
-                WHEN f.category = 'system_error' THEN 'error'
-                ELSE 'declined' END::text AS first_outcome,
+                WHEN f.outcome IS NULL THEN 'pending'
+                ELSE f.outcome END::text AS first_outcome,
            LEAST(w.attempted_at, CASE WHEN s.canceled_at IS NOT NULL THEN GREATEST(s.canceled_at, c.due_at) END,
                  c.due_at + interval '15 days')::timestamptz AS closed_at,
-           CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
+           CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.outcome <> 'approved', false)) THEN ''
                 WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
                 WHEN EXISTS (SELECT 1 FROM billing.payment_method_versions u
                               WHERE u.merchant_id = $13::uuid AND u.payment_method_id = w.payment_method_id
@@ -259,10 +258,10 @@ WITH cy AS (
                 WHEN w.kind = 'customer_retry' THEN 'customer_retry'
                 ELSE 'dunning_retry' END::text AS recovered_by
       FROM cy c
-      LEFT JOIN LATERAL (SELECT a.category, a.attempted_at FROM billing.payment_attempts a
+      LEFT JOIN LATERAL (SELECT a.outcome, a.attempted_at FROM billing.payment_attempts a
                           WHERE a.merchant_id = $13::uuid AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
       LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id FROM billing.payment_attempts a
-                          WHERE a.merchant_id = $13::uuid AND a.cycle_id = c.id AND a.category = 'approved'
+                          WHERE a.merchant_id = $13::uuid AND a.cycle_id = c.id AND a.outcome = 'approved'
                           ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
       LEFT JOIN billing.subscriptions s ON s.merchant_id = $13::uuid AND s.id = c.subscription_id AND s.deleted_at IS NULL
 )
@@ -411,13 +410,11 @@ WITH cy AS (
     SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency,
            c.missed_at, c.miss_reason, CASE WHEN w.id IS NOT NULL THEN w.attempted_at END AS won_at,
            CASE WHEN c.missed_at IS NOT NULL THEN 'missed'
-                WHEN f.category IS NULL THEN 'pending'
-                WHEN f.category = 'approved' THEN 'approved'
-                WHEN f.category = 'system_error' THEN 'error'
-                ELSE 'declined' END::text AS first_outcome,
+                WHEN f.outcome IS NULL THEN 'pending'
+                ELSE f.outcome END::text AS first_outcome,
            LEAST(w.attempted_at, CASE WHEN s.canceled_at IS NOT NULL THEN GREATEST(s.canceled_at, c.due_at) END,
                  c.due_at + interval '15 days')::timestamptz AS closed_at,
-           CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
+           CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.outcome <> 'approved', false)) THEN ''
                 WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
                 WHEN EXISTS (SELECT 1 FROM billing.payment_method_versions u
                               WHERE u.merchant_id = $1::uuid AND u.payment_method_id = w.payment_method_id
@@ -426,10 +423,10 @@ WITH cy AS (
                 WHEN w.kind = 'customer_retry' THEN 'customer_retry'
                 ELSE 'dunning_retry' END::text AS recovered_by
       FROM cy c
-      LEFT JOIN LATERAL (SELECT a.category, a.attempted_at FROM billing.payment_attempts a
+      LEFT JOIN LATERAL (SELECT a.outcome, a.attempted_at FROM billing.payment_attempts a
                           WHERE a.merchant_id = $1::uuid AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
       LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id FROM billing.payment_attempts a
-                          WHERE a.merchant_id = $1::uuid AND a.cycle_id = c.id AND a.category = 'approved'
+                          WHERE a.merchant_id = $1::uuid AND a.cycle_id = c.id AND a.outcome = 'approved'
                           ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
       LEFT JOIN billing.subscriptions s ON s.merchant_id = $1::uuid AND s.id = c.subscription_id AND s.deleted_at IS NULL
      WHERE c.id = ANY($5::uuid[])
@@ -516,7 +513,7 @@ CROSS JOIN LATERAL (
     SELECT count(*)::int AS declines,
            (array_agg(pa.reason ORDER BY pa.attempted_at DESC, pa.id DESC))[1]::text AS reason
     FROM billing.payment_attempts pa
-    WHERE pa.merchant_id = c.merchant_id AND pa.cycle_id = c.id AND pa.category <> 'approved'
+    WHERE pa.merchant_id = c.merchant_id AND pa.cycle_id = c.id AND pa.outcome <> 'approved'
 ) d
 WHERE d.declines > 0
 LIMIT $4::int

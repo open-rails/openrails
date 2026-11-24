@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
@@ -30,8 +31,9 @@ type Deps struct {
 	Postgres *pgxpool.Pool
 	// PostgresSession is the direct connection configuration for a transaction-
 	// pooled Postgres. It connects to the same database and role without the
-	// pooler, for migrations, notifications and session locks. When supplied,
-	// merchant scope on the application pool is transaction-local.
+	// pooler, for migrations, listeners and session locks (usage policy writes,
+	// billing imports). When supplied, merchant scope on the application pool
+	// is transaction-local.
 	PostgresSession *pgxpool.Config
 	// MerchantGroups reads live ownership metadata for explicit bound merchant
 	// declarations. It authenticates no request and is never closed by the engine.
@@ -44,6 +46,11 @@ type Deps struct {
 	// Vault is an authenticated client (helpers/vault's Session.Client);
 	// Config.Vault names its mounts. The host keeps it logged in.
 	Vault *vaultapi.Client
+	// ClickHouse is the event store usage needs, Config.ClickHouse naming
+	// its database, which New creates or upgrades. Nil turns usage off:
+	// usage reporting, admissions and the Gate, meters, limits, usage rate
+	// cards, spend windows and usage history answer event_store_required.
+	ClickHouse driver.Conn
 
 	// Email delivers OpenRails' email: customers' billing messages
 	// (receipts, payment problems, cancellations, price changes) and the
@@ -140,6 +147,7 @@ func engineDeps(deps Deps) engine.Deps {
 			PostgresSession:      deps.PostgresSession,
 			Redis:                deps.Redis,
 			Vault:                deps.Vault,
+			ClickHouse:           deps.ClickHouse,
 			UserInfo:             deps.UserInfo,
 			StripeTransport:      deps.StripeTransport,
 			BasisTheoryTransport: deps.BasisTheoryTransport,

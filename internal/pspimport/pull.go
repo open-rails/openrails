@@ -453,7 +453,7 @@ func notReadable(err error) error {
 }
 
 // Run runs one step of the import in ctx's merchant scope.
-func (im *Importer) Run(ctx context.Context, mid billing.MerchantID, id billing.PSPImportID, step Step, approvalActor *destructive.Actor) error {
+func (im *Importer) Run(ctx context.Context, mid billing.MerchantID, id billing.PSPImportID, step Step, approvalActor *destructive.Actor, approved []billing.ChangeKind) error {
 	return im.DB.RunInMerchantScope(ctx, mid, "psp import "+string(step), func(ctx context.Context) error {
 		if _, err := merchant.Require(ctx); err != nil {
 			return err
@@ -464,7 +464,7 @@ func (im *Importer) Run(ctx context.Context, mid billing.MerchantID, id billing.
 		case StepRelink:
 			return im.Pull(ctx, id, true)
 		case StepApply:
-			return im.Apply(ctx, id, approvalActor)
+			return im.Apply(ctx, id, approvalActor, approved)
 		}
 		return Permanent(fmt.Errorf("unknown step %q", step))
 	})

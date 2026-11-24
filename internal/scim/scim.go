@@ -18,6 +18,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -50,10 +51,13 @@ const (
 
 // Server serves the SCIM routes. Authenticate resolves the merchant a request
 // acts for, or refuses it; every route needs it, discovery included.
+// Admissions admits each erasure as a destructive command; without it none
+// runs.
 type Server struct {
 	DB           *db.DB
 	Now          func() time.Time
 	Authenticate func(*http.Request) (billing.MerchantID, error)
+	Admissions   *destructive.Admissions
 	Log          *slog.Logger
 }
 

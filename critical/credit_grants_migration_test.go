@@ -35,8 +35,8 @@ func TestCreditGrantsMigration(t *testing.T) {
 	})
 }
 
-// legacySchema is a schema migrated up to the migration that moves credit
-// lots, and the full chain that then moves them.
+// legacySchema is a schema migrated up to the migration under test, and the
+// full chain that then runs it.
 type legacySchema struct {
 	pool   *pgxpool.Pool
 	schema string
@@ -44,6 +44,13 @@ type legacySchema struct {
 }
 
 func newLegacySchema(t *testing.T) *legacySchema {
+	t.Helper()
+	return newLegacySchemaBefore(t, "_credit_grants.up.sql")
+}
+
+// newLegacySchemaBefore is a schema migrated up to the migration whose name
+// ends in suffix.
+func newLegacySchemaBefore(t *testing.T, suffix string) *legacySchema {
 	t.Helper()
 	dsn := os.Getenv("OPENRAILS_CRITICAL_DSN")
 	require.NotEmpty(t, dsn, "OPENRAILS_CRITICAL_DSN must name a disposable PostgreSQL database; critical scenarios never skip")
@@ -60,7 +67,7 @@ func newLegacySchema(t *testing.T) *legacySchema {
 	names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 	require.NoError(t, err)
 	slices.Sort(names)
-	at := slices.IndexFunc(names, func(name string) bool { return strings.HasSuffix(name, "_credit_grants.up.sql") })
+	at := slices.IndexFunc(names, func(name string) bool { return strings.HasSuffix(name, suffix) })
 	require.GreaterOrEqual(t, at, 0)
 	before := fstest.MapFS{}
 	for _, name := range names[:at] {
@@ -414,7 +421,7 @@ func migrateCreditLots(t *testing.T) {
 	require.Zero(t, lots[unposted].credited, "no unit of the unposted lot posted")
 	var accounts int
 	require.NoError(t, s.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+s.table("ledger_accounts")+
-		" WHERE merchant_id = $1 AND customer_id = $2 AND account_type = 'customer_balance' AND currency = 'USD'", d.m, unfunded).Scan(&accounts))
+		" WHERE merchant_id = $1 AND customer_id = $2 AND account_type = 'customer_units' AND currency = 'USD'", d.m, unfunded).Scan(&accounts))
 	require.Equal(t, 1, accounts, "the unposted lot's customer has the balance it will be deposited to")
 
 	var left, kept int
@@ -489,12 +496,22 @@ func migratedPurchaseDepositReplays(t *testing.T) {
 	opening, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "opening"}})
 	require.NoError(t, err)
 	migrated := uuid.New()
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+
+	// The migrated lot predates the credit books: its price was never deferred.
+	lots := pgx.Identifier{w.schema, "credit_grants"}.Sanitize()
+	tx, err := w.pool.Begin(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	_, err = tx.Exec(t.Context(), "ALTER TABLE "+lots+" DISABLE TRIGGER credit_grants_require_books")
+	require.NoError(t, err)
+	_, err = tx.Exec(t.Context(), "INSERT INTO "+lots+
 		" (merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, starts_at)"+
 		" SELECT merchant_id, $3, customer_id, account_id, unit, 2000, 'purchase', 2000, 'USD', 'pack_purchase', 'pack-42', 'host', starts_at"+
-		" FROM "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
+		" FROM "+lots+" WHERE merchant_id = $1 AND id = $2",
 		w.alpha.MerchantID().UUID(), opening[0].ID.UUID(), migrated)
 	require.NoError(t, err)
+	_, err = tx.Exec(t.Context(), "ALTER TABLE "+lots+" ENABLE TRIGGER credit_grants_require_books")
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(t.Context()))
 	retry := billing.CreateCreditGrantParams{CustomerID: customer, Currency: "USD", Amount: 2000, Source: "pack_purchase", SourceID: "pack-42", Invoker: "host"}
 	replayed, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{retry})
 	require.NoError(t, err)

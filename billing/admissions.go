@@ -46,11 +46,16 @@ type AdmitParams struct {
 	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty,string"`
 	Source                  string `json:"source,omitempty"`
 	// ExpiresAt is the admitted work's deadline, required when the admission
-	// holds anything. A hold lives at most 30 days past its admission.
+	// holds anything and names no lease. A hold lives at most 30 days past its
+	// admission.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// Roles are the invoker's role UUIDs; role-scoped spend delegations gate
 	// on them.
 	Roles []uuid.UUID `json:"roles,omitempty"`
+	// LeaseID makes the hold a gate's: it counts while the lease is live,
+	// takes no ExpiresAt, is captured by the lease's usage and released by
+	// its sync or close.
+	LeaseID *LeaseID `json:"lease_id,omitempty"`
 }
 
 // UsageEstimate is the usage an admission expects, e.g. {requests: 1} for a
@@ -99,8 +104,7 @@ const (
 	AdmissionBlockedByMoney  AdmissionBlock = "money"
 	AdmissionBlockedByBudget AdmissionBlock = "budget"
 	AdmissionBlockedByAbuse  AdmissionBlock = "abuse"
-	// AdmissionBlockedByLimit is a usage limit: deny code limit_reached, or
-	// capacity_held when only gates' lease holds keep the request out.
+	// AdmissionBlockedByLimit is a usage limit: deny code limit_reached.
 	AdmissionBlockedByLimit AdmissionBlock = "limit"
 )
 
@@ -110,7 +114,7 @@ type Admission struct {
 	CustomerID CustomerID `json:"customer_id"`
 	Allowed    bool       `json:"allowed"`
 	// BlockedBy and DenyCode name a refusal; RetryAfterSeconds is when a
-	// window refusal clears, or when to retry capacity_held. A limit_reached
+	// window refusal clears. A limit_reached
 	// refusal names its Limit and when it ResetsAt (null when nothing refills
 	// it). All are null when allowed.
 	BlockedBy         *AdmissionBlock  `json:"blocked_by"`
