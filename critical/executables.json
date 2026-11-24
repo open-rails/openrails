@@ -2066,6 +2066,57 @@
     ],
     "OR-J40-S24": [
       "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit"
+    ],
+    "OR-J41-S01": [
+      "TestRevenueRecognition/OR-J41-S01/a-monthly-plan-bought-mid-month-books-cash-per-psp-and-recognises-at-the-boundary-and-the-end"
+    ],
+    "OR-J41-S02": [
+      "TestRevenueRecognition/OR-J41-S02/an-annual-calendar-plan-recognises-a-twelfth-a-month-and-a-zone-boundary-follows-dst"
+    ],
+    "OR-J41-S03": [
+      "TestRevenueRecognition/OR-J41-S03/lifetime-access-at-once-a-pass-ratable-and-seats-funded-per-seat"
+    ],
+    "OR-J41-S04": [
+      "TestRevenueRecognition/OR-J41-S04/provider-bills-book-cash-to-their-psp-and-non-cash-to-revenue-adjustments"
+    ],
+    "OR-J41-S05": [
+      "TestRevenueRecognition/OR-J41-S05/a-seat-increase-defers-its-charge-over-the-rest-of-the-period"
+    ],
+    "OR-J41-S06": [
+      "TestRevenueRecognition/OR-J41-S06/an-idle-pass-locks-no-schedule-and-a-replayed-boundary-posts-once"
+    ],
+    "OR-J41-S07": [
+      "TestRevenueRecognition/OR-J41-S07/an-external-payment-books-to-external-receipts-and-a-payment-beyond-the-bill-stays-unapplied"
+    ],
+    "OR-J41-S08": [
+      "TestRevenueRecognition/OR-J41-S08/an-immediate-cancellation-without-a-refund-forfeits-the-remainder"
+    ],
+    "OR-J41-S09": [
+      "TestRevenueRecognition/OR-J41-S09/a-usage-orders-payment-books-its-cash-and-leaves-it-for-the-receivable"
+    ],
+    "OR-J41-S10": [
+      "TestRevenueRecognition/OR-J41-S10/revoked-access-ends-its-schedule-and-an-undone-revocation-takes-the-forfeit-back"
+    ],
+    "OR-J41-S11": [
+      "TestRevenueRecognition/OR-J41-S11/a-late-payment-on-an-order-another-holds-stays-unapplied"
+    ],
+    "OR-J41-S12": [
+      "TestRevenueRecognition/OR-J41-S12/a-purchase-is-applied-over-the-access-its-grant-gives-and-a-replay-applies-an-order-with-no-schedule"
+    ],
+    "OR-J41-S13": [
+      "TestRevenueRecognition/OR-J41-S13/a-prune-that-hides-booked-money-or-a-recognising-subscription-raises-a-finding-its-undo-resolves"
+    ],
+    "OR-J41-S14": [
+      "TestRevenueRecognition/OR-J41-S14/an-end-before-the-schedule-exists-reaches-it"
+    ],
+    "OR-J41-S15": [
+      "TestRevenueRecognition/OR-J41-S15/ledger-audit-warns-of-lines-from-before-the-books-and-a-tax-line-and-fails-a-later-unscheduled-line"
+    ],
+    "OR-J41-S16": [
+      "TestRevenueRecognition/OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-order-is-applied-again"
+    ],
+    "OR-J41-S17": [
+      "TestRevenueRecognition/OR-J41-S17/an-imported-purchase-is-applied-over-the-access-its-import-grants"
     ]
   }
 }

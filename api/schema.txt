@@ -24,6 +24,7 @@ migration 0025_usage_on_event_store.up.sql sha256:5332fadccb74fa286a91e9a8d4fce6
 migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c321d951aac93b728ca4
 migration 0027_mrr_at_risk.up.sql sha256:e2fdd4b8664adc64b11d71405c1b8be66ac173c5d761f2afb15c3c6437c654d6
 migration 0028_usage_posting_watermark.up.sql sha256:0e646875e208f9c138878ffbd7d01cf52d7212b8f6817c33904a5a39d5d6b392
+migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc3092fb10211ba49b2f43c3627121c7a
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1041,6 +1042,7 @@ table billing.ledger_transfers
   column effective_at timestamp with time zone NOT NULL
   column order_line_id uuid
   column product_id uuid
+  column revenue_schedule_id uuid
   constraint ledger_transfers_amount_positive_check CHECK ((amount > 0))
   constraint ledger_transfers_coordinate_not_blank_check CHECK (((operation <> ''::text) AND (source <> ''::text) AND (source_id <> ''::text)))
   constraint ledger_transfers_credit_account_id_fkey FOREIGN KEY (merchant_id, credit_account_id) REFERENCES billing.ledger_accounts(merchant_id, id)
@@ -1054,6 +1056,7 @@ table billing.ledger_transfers
   constraint ledger_transfers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint ledger_transfers_operation_check CHECK (((octet_length(operation) >= 1) AND (octet_length(operation) <= 512)))
   constraint ledger_transfers_pkey PRIMARY KEY (merchant_id, id)
+  constraint ledger_transfers_revenue_schedule_check CHECK (((book = 'general'::text) OR (revenue_schedule_id IS NULL)))
   constraint ledger_transfers_source_check CHECK (((octet_length(source) >= 1) AND (octet_length(source) <= 512)))
   constraint ledger_transfers_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 512)))
   constraint ledger_transfers_type_check CHECK ((((book = 'units'::text) AND (transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'owed_repayment'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text, 'usage_reversed'::text]))) OR ((book = 'general'::text) AND (transfer_type = ANY (ARRAY['cash_received'::text, 'cash_applied'::text, 'cash_returned'::text, 'revenue_adjusted'::text, 'revenue_recognized'::text, 'refund_deferred'::text, 'refund_recognized'::text, 'chargeback_deferred'::text, 'chargeback_recognized'::text, 'dispute_won'::text, 'credit_released'::text, 'credit_breakage'::text, 'credit_forfeited'::text, 'credit_forfeit_reversed'::text, 'promotional_credit_applied'::text, 'usage_accrued'::text, 'usage_collected'::text, 'usage_repaid'::text, 'usage_waived'::text, 'usage_reopened'::text, 'bad_debt'::text, 'bad_debt_recovery'::text, 'processor_fee'::text, 'chargeback_fee'::text, 'opening_balance'::text, 'usage_reversed'::text])))))
@@ -2522,6 +2525,7 @@ table billing.product_access
   index CREATE UNIQUE INDEX product_access_pkey ON billing.product_access USING btree (merchant_id, id)
   index CREATE INDEX product_access_product_idx ON billing.product_access USING btree (merchant_id, product_id, customer_id) INCLUDE (starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
   index CREATE INDEX product_access_source_idx ON billing.product_access USING btree (merchant_id, source_type, source_id)
+  trigger CREATE TRIGGER product_access_end_revenue_schedules AFTER UPDATE OF revoked_at, deleted_at, ends_at ON billing.product_access FOR EACH ROW WHEN (((new.revoked_at IS DISTINCT FROM old.revoked_at) OR (new.deleted_at IS DISTINCT FROM old.deleted_at) OR (new.ends_at IS DISTINCT FROM old.ends_at))) EXECUTE FUNCTION billing.end_revenue_schedules()
   trigger CREATE TRIGGER product_access_release_ownership_claims AFTER UPDATE OF revoked_at, deleted_at ON billing.product_access FOR EACH ROW EXECUTE FUNCTION billing.release_ended_ownership_claims()
 
 table billing.product_entitlements
@@ -3047,6 +3051,56 @@ table billing.reconciliation_state
   constraint reconciliation_state_pkey PRIMARY KEY (merchant_id, source_domain)
   index CREATE UNIQUE INDEX reconciliation_state_pkey ON billing.reconciliation_state USING btree (merchant_id, source_domain)
 
+table billing.revenue_schedules
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column order_id uuid NOT NULL
+  column order_line_id uuid NOT NULL
+  column subscription_id uuid
+  column product_access_id uuid
+  column product_id uuid
+  column price_id uuid
+  column method text NOT NULL
+  column revenue_account text NOT NULL
+  column funded bigint NOT NULL
+  column recognized_net bigint NOT NULL
+  column service_starts_at timestamp with time zone NOT NULL
+  column service_ends_at timestamp with time zone NOT NULL
+  column service_months integer
+  column ended_at timestamp with time zone
+  column recognized_through_at timestamp with time zone NOT NULL
+  column next_recognition_at timestamp with time zone
+  column reinstatements integer NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint revenue_schedules_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint revenue_schedules_ended_check CHECK (((ended_at >= service_starts_at) AND (ended_at < service_ends_at)))
+  constraint revenue_schedules_funded_check CHECK (((0 <= recognized_net) AND (recognized_net <= funded)))
+  constraint revenue_schedules_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint revenue_schedules_method_check CHECK ((method = ANY (ARRAY['ratable'::text, 'point_in_time'::text])))
+  constraint revenue_schedules_order_id_fkey FOREIGN KEY (merchant_id, customer_id, order_id) REFERENCES billing.orders(merchant_id, customer_id, id)
+  constraint revenue_schedules_order_line_id_fkey FOREIGN KEY (merchant_id, order_line_id) REFERENCES billing.order_lines(merchant_id, id)
+  constraint revenue_schedules_order_line_id_key UNIQUE (merchant_id, order_line_id)
+  constraint revenue_schedules_pkey PRIMARY KEY (merchant_id, id)
+  constraint revenue_schedules_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id)
+  constraint revenue_schedules_product_access_id_fkey FOREIGN KEY (merchant_id, product_access_id) REFERENCES billing.product_access(merchant_id, id)
+  constraint revenue_schedules_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
+  constraint revenue_schedules_recognized_through_check CHECK (((recognized_through_at >= service_starts_at) AND (recognized_through_at <= service_ends_at)))
+  constraint revenue_schedules_reinstatements_check CHECK ((reinstatements >= 0))
+  constraint revenue_schedules_revenue_account_check CHECK ((revenue_account = ANY (ARRAY['subscription_revenue'::text, 'one_time_revenue'::text])))
+  constraint revenue_schedules_service_check CHECK ((((method = 'ratable'::text) AND (service_ends_at > service_starts_at)) OR ((method = 'point_in_time'::text) AND (service_ends_at = service_starts_at) AND (service_months IS NULL))))
+  constraint revenue_schedules_service_months_check CHECK (((service_months >= 1) AND (service_months <= 1200)))
+  constraint revenue_schedules_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id)
+  index CREATE INDEX revenue_schedules_due_idx ON billing.revenue_schedules USING btree (next_recognition_at, merchant_id, id) WHERE (next_recognition_at IS NOT NULL)
+  index CREATE UNIQUE INDEX revenue_schedules_order_line_id_key ON billing.revenue_schedules USING btree (merchant_id, order_line_id)
+  index CREATE UNIQUE INDEX revenue_schedules_pkey ON billing.revenue_schedules USING btree (merchant_id, id)
+  index CREATE INDEX revenue_schedules_product_access_id_idx ON billing.revenue_schedules USING btree (merchant_id, product_access_id) WHERE (product_access_id IS NOT NULL)
+  index CREATE INDEX revenue_schedules_subscription_id_idx ON billing.revenue_schedules USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
+  trigger CREATE TRIGGER immutable_revenue_schedule_facts BEFORE DELETE OR UPDATE ON billing.revenue_schedules FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('funded', 'recognized_net', 'ended_at', 'recognized_through_at', 'next_recognition_at', 'reinstatements', 'updated_at')
+  trigger CREATE TRIGGER immutable_revenue_schedules_truncate BEFORE TRUNCATE ON billing.revenue_schedules FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
 table billing.running_charges
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -3442,6 +3496,7 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_status_idx ON billing.subscriptions USING btree (status)
   trigger CREATE TRIGGER subscriptions_close_landed_park AFTER INSERT ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.close_landed_park()
   trigger CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collection_policy ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.preserve_subscription_collection_policy()
+  trigger CREATE TRIGGER subscriptions_end_revenue_schedules AFTER UPDATE OF ended_at, cancel_type ON billing.subscriptions FOR EACH ROW WHEN (((new.ended_at IS DISTINCT FROM old.ended_at) OR (new.cancel_type IS DISTINCT FROM old.cancel_type))) EXECUTE FUNCTION billing.end_revenue_schedules()
   trigger CREATE TRIGGER subscriptions_facts_authority_one_way BEFORE UPDATE OF facts_authority ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_facts_authority_one_way()
   trigger CREATE TRIGGER subscriptions_lifecycle_single_writer BEFORE UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscriptions_lifecycle_single_writer()
   trigger CREATE TRIGGER subscriptions_mark_stored_card_check AFTER INSERT OR UPDATE ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.subscription_marks_stored_card_check()
@@ -4194,6 +4249,47 @@ function billing.effect_due_mrr_risk(uuid,integer,uuid)
   END;
   $function$
 
+function billing.end_revenue_schedules()
+  CREATE OR REPLACE FUNCTION billing.end_revenue_schedules()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE
+      ended timestamptz;
+  BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NULL; END IF;
+      IF TG_TABLE_NAME = 'subscriptions' THEN
+          ended := CASE WHEN NEW.cancel_type IS DISTINCT FROM 'upgrade' THEN NEW.ended_at END;
+          UPDATE billing.revenue_schedules s
+             SET ended_at = CASE WHEN ended < s.service_ends_at THEN GREATEST(ended, s.service_starts_at) END,
+                 next_recognition_at = LEAST(s.next_recognition_at, s.ended_at), updated_at = now()
+           WHERE s.merchant_id = NEW.merchant_id AND s.subscription_id = NEW.id
+             AND s.ended_at IS NOT NULL AND (ended IS NULL OR ended > s.ended_at);
+          UPDATE billing.revenue_schedules s
+             SET ended_at = GREATEST(ended, s.service_starts_at),
+                 next_recognition_at = LEAST(s.next_recognition_at, GREATEST(ended, s.service_starts_at)), updated_at = now()
+           WHERE s.merchant_id = NEW.merchant_id AND s.subscription_id = NEW.id
+             AND s.next_recognition_at IS NOT NULL AND ended < s.service_ends_at
+             AND (s.ended_at IS NULL OR ended < s.ended_at);
+          RETURN NULL;
+      END IF;
+      ended := LEAST(COALESCE(NEW.revoked_at, 'infinity'), COALESCE(NEW.deleted_at, 'infinity'), COALESCE(NEW.ends_at, 'infinity'));
+      UPDATE billing.revenue_schedules s
+         SET ended_at = CASE WHEN ended < s.service_ends_at THEN GREATEST(ended, s.service_starts_at) END,
+             next_recognition_at = LEAST(s.next_recognition_at, s.ended_at), updated_at = now()
+       WHERE s.merchant_id = NEW.merchant_id AND s.product_access_id = NEW.id
+         AND s.ended_at IS NOT NULL AND ended > s.ended_at;
+      UPDATE billing.revenue_schedules s
+         SET ended_at = GREATEST(ended, s.service_starts_at),
+             next_recognition_at = LEAST(s.next_recognition_at, GREATEST(ended, s.service_starts_at)), updated_at = now()
+       WHERE s.merchant_id = NEW.merchant_id AND s.product_access_id = NEW.id
+         AND s.next_recognition_at IS NOT NULL AND ended < s.service_ends_at
+         AND (s.ended_at IS NULL OR ended < s.ended_at);
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.enqueue_payment_settlement_event()
   CREATE OR REPLACE FUNCTION billing.enqueue_payment_settlement_event()
    RETURNS trigger
@@ -4557,6 +4653,7 @@ function billing.guard_billing_restore_receipt()
                     'rebill_cycles',
                     'reconciliation_findings',
                     'reconciliation_state',
+                    'revenue_schedules',
                     'running_charges',
                     'scheduled_changes',
                     'solana_pay_receipts',

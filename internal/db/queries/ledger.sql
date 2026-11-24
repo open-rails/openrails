@@ -79,7 +79,7 @@ RETURNING *;
 INSERT INTO billing.ledger_transfers (
     merchant_id, book, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to, operation, source, source_id, credit_grant_id, customer_id,
-    invoker_id, resource, order_id, order_line_id, product_id, effective_at
+    invoker_id, resource, order_id, order_line_id, product_id, effective_at, revenue_schedule_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, 'general', sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text,
@@ -87,7 +87,7 @@ INSERT INTO billing.ledger_transfers (
     sqlc.narg(credit_grant_id)::uuid, sqlc.narg(customer_id)::uuid,
     sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(order_id)::uuid,
     sqlc.narg(order_line_id)::uuid, sqlc.narg(product_id)::uuid,
-    sqlc.arg(effective_at)::timestamptz
+    sqlc.arg(effective_at)::timestamptz, sqlc.narg(revenue_schedule_id)::uuid
 )
 ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
 DO NOTHING

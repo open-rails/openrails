@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/notificationinbox"
@@ -205,6 +206,9 @@ func Record(ctx context.Context, d *db.DB, bill Bill, now time.Time) (Result, er
 			return result, err
 		}
 		if err := notificationinbox.WithdrawOrder(ctx, d, result.Order.CustomerID, result.Order.ID); err != nil {
+			return result, err
+		}
+		if err := books.ApplyRecorded(ctx, d, result.Order.ID); err != nil {
 			return result, err
 		}
 	}

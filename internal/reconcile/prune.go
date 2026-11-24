@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -280,6 +282,9 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 			if _, e := tq.PruneSoftDeleteSubscriptionByID(ctx, gen.PruneSoftDeleteSubscriptionByIDParams{MerchantID: mid, ID: subID, Now: now, RunID: runID}); e != nil {
 				return e
 			}
+			if e := prunedRecognisingSubscription(ctx, tq, mid, subID, runID); e != nil {
+				return e
+			}
 			res.OrderAttempts += int(cs)
 			res.ProductAccess += int(ent)
 			return nil
@@ -288,7 +293,14 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 		}
 	}
 	for _, payID := range eligiblePays {
-		if _, e := q.PruneSoftDeletePaymentByID(ctx, gen.PruneSoftDeletePaymentByIDParams{MerchantID: mid, ID: payID, Now: now, RunID: runID}); e != nil {
+		payment, e := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid, ID: payID})
+		if e == nil {
+			_, e = q.PruneSoftDeletePaymentByID(ctx, gen.PruneSoftDeletePaymentByIDParams{MerchantID: mid, ID: payID, Now: now, RunID: runID})
+		}
+		if e == nil {
+			e = prunedBookedPayment(ctx, q, payment, runID)
+		}
+		if e != nil {
 			return res, finishRunFailed(ctx, q, mid, runID, res, fmt.Errorf("prune excess payment %s: %w", payID, e))
 		}
 	}
@@ -299,6 +311,41 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 		return res, fmt.Errorf("close destructive run %s: %w", runID, err)
 	}
 	return res, nil
+}
+
+// prunedBookedPayment raises a finding for a pruned payment whose money the
+// general ledger booked: its cash and any application stand until a person
+// reverses them or undoes the prune.
+func prunedBookedPayment(ctx context.Context, q *gen.Queries, p gen.BillingPayment, runID uuid.UUID) error {
+	booked, err := q.PaymentBookedCash(ctx, gen.PaymentBookedCashParams{MerchantID: p.MerchantID, CustomerID: p.CustomerID, Currency: p.Currency, PaymentID: p.ID.String()})
+	if err != nil || !booked {
+		return err
+	}
+	evidence, err := json.Marshal(map[string]any{"payment_id": billing.PaymentID(p.ID).String(), "run_id": runID.String(), "currency": p.Currency, "amount": strconv.FormatInt(p.Amount, 10)})
+	if err != nil {
+		return err
+	}
+	action := "The pruned payment's cash and its application remain in the general ledger; reverse them if the prune stands, or undo the prune."
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: p.MerchantID, FindingType: "books.payment.pruned",
+		SubjectKey: "payment:" + p.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+	return err
+}
+
+// prunedRecognisingSubscription raises a finding for a pruned subscription
+// whose revenue schedules keep recognising: a prune is no end of service.
+func prunedRecognisingSubscription(ctx context.Context, q *gen.Queries, mid, subID, runID uuid.UUID) error {
+	live, err := q.SubscriptionHasLiveSchedules(ctx, gen.SubscriptionHasLiveSchedulesParams{MerchantID: mid, SubscriptionID: subID})
+	if err != nil || !live {
+		return err
+	}
+	evidence, err := json.Marshal(map[string]any{"subscription_id": billing.SubscriptionID(subID).String(), "run_id": runID.String()})
+	if err != nil {
+		return err
+	}
+	action := "The pruned subscription's revenue schedules keep recognising; end its service if the prune stands, or undo the prune."
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: mid, FindingType: "books.subscription.pruned",
+		SubjectKey: "subscription:" + subID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+	return err
 }
 
 func affectedJSON(res PruneResult) []byte {
@@ -388,6 +435,9 @@ func RollbackDestructiveRun(ctx context.Context, database *db.DB, runID uuid.UUI
 		}
 		if _, e = tq.MarkDestructiveRunReversed(ctx, gen.MarkDestructiveRunReversedParams{MerchantID: mid, ID: runID, Now: now, ReversedBy: actor}); e != nil {
 			return fmt.Errorf("mark run reversed: %w", e)
+		}
+		if _, e = tq.ResolvePrunedBooksFindings(ctx, gen.ResolvePrunedBooksFindingsParams{MerchantID: mid, RunID: runID.String()}); e != nil {
+			return fmt.Errorf("resolve the books' prune findings: %w", e)
 		}
 		return nil
 	}); err != nil {

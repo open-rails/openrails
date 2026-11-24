@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 635,
+  "scenario_count": 652,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3177,6 +3177,91 @@
       "id": "OR-J45-S15",
       "journey": "J45",
       "name": "A new card on a case the old card's advice deferred is not held to that advice: its plain decline keeps dunning, and the case ends as the card failed, not issuer_deferred"
+    },
+    {
+      "id": "OR-J41-S01",
+      "journey": "J41",
+      "name": "A monthly plan bought mid-month posts its cash to its PSP's clearing account, defers it, and recognises at the month boundary and the period end"
+    },
+    {
+      "id": "OR-J41-S02",
+      "journey": "J41",
+      "name": "An annual calendar plan recognises a twelfth a month across a leap February; a non-UTC accounting zone's boundary follows DST"
+    },
+    {
+      "id": "OR-J41-S03",
+      "journey": "J41",
+      "name": "Lifetime access is recognised at once, a time-limited pass ratably over its window, and seats are funded per seat"
+    },
+    {
+      "id": "OR-J41-S04",
+      "journey": "J41",
+      "name": "A Stripe invoice with non-cash credit, NMI and CCBill rebills and a Solana pull in USDC book cash to their PSPs and recognise from payment"
+    },
+    {
+      "id": "OR-J41-S05",
+      "journey": "J41",
+      "name": "A seat increase defers its charge over the rest of the period"
+    },
+    {
+      "id": "OR-J41-S06",
+      "journey": "J41",
+      "name": "An idle recognition pass takes no schedule; a replayed boundary or order posts once"
+    },
+    {
+      "id": "OR-J41-S07",
+      "journey": "J41",
+      "name": "An external payment books to external_receipts; a payment beyond its bill stays unapplied"
+    },
+    {
+      "id": "OR-J41-S08",
+      "journey": "J41",
+      "name": "An immediate cancellation without a refund forfeits the remainder"
+    },
+    {
+      "id": "OR-J41-S09",
+      "journey": "J41",
+      "name": "A usage order's card and remitted payments book their cash and leave it for the receivable"
+    },
+    {
+      "id": "OR-J41-S10",
+      "journey": "J41",
+      "name": "Revoked access ends its schedule; an undone revocation takes the forfeit back"
+    },
+    {
+      "id": "OR-J41-S11",
+      "journey": "J41",
+      "name": "A late payment on an expired order whose product another order holds stays unapplied"
+    },
+    {
+      "id": "OR-J41-S12",
+      "journey": "J41",
+      "name": "A purchase is applied over the access its grant gives; a replay applies an order with no schedule"
+    },
+    {
+      "id": "OR-J41-S13",
+      "journey": "J41",
+      "name": "A prune that hides booked money or a recognising subscription raises a finding its undo resolves"
+    },
+    {
+      "id": "OR-J41-S14",
+      "journey": "J41",
+      "name": "An end before the schedule exists reaches it: a charge after a cancellation is forfeited at payment"
+    },
+    {
+      "id": "OR-J41-S15",
+      "journey": "J41",
+      "name": "ledger-audit warns of revenue lines completed before the books started and of a provider's tax line, skips a merchant's own unit, and fails a line completed since"
+    },
+    {
+      "id": "OR-J41-S16",
+      "journey": "J41",
+      "name": "An order applied again after a payment sorting earlier arrives applies no payment beyond what it brought"
+    },
+    {
+      "id": "OR-J41-S17",
+      "journey": "J41",
+      "name": "An imported purchase is applied over the access its import grants"
     }
   ]
 }

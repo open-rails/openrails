@@ -62,6 +62,7 @@ continuations. The other scan names label work inside the pass.
 | `openrails.balance_watch` | Due balance checks and failed or missed balance looks. [Source](../internal/river/jobs_balance_watch.go) |
 | `openrails.delinquency` | Usage arrears due for evaluation after a payment or grace deadline. [Source](../internal/river/jobs_delinquency.go) |
 | `openrails.order_expiry` | Expired orders and attempts, including abandoned card saves. [Source](../internal/river/jobs_order_expiry.go) |
+| `openrails.revenue_recognition` | Revenue schedules due: a month boundary reached in the merchant's accounting timezone, a schedule's end or an early end. The read is indexed on the due instant. [Source](../internal/river/jobs_revenue_recognition.go) |
 | `openrails.usage_orders` | Due usage bills and collections when usage billing is enabled. [Source](../internal/river/jobs_usage_orders.go) |
 | `openrails.rebill_watch` | Overdue provider-billed renewals that need an evidence check. [Source](../internal/river/jobs_rebill_watch.go) |
 | `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions that still need a targeted provider check after a missed notification or failed read. [Source](../internal/reconcile/verify.go) |

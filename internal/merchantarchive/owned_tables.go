@@ -113,6 +113,7 @@ var ownedTables = []string{
 	"rebill_cycles",
 	"reconciliation_findings",
 	"reconciliation_state",
+	"revenue_schedules",
 	"running_charges",
 	"scheduled_changes",
 	"solana_crankers",
