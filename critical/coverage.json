@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 466,
+  "scenario_count": 467,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2157,6 +2157,11 @@
       "id": "OR-J28-S11",
       "journey": "J28",
       "name": "A CCBill account another merchant already declares, in any subaccount, is refused as psp_exists before its credentials are probed"
+    },
+    {
+      "id": "OR-J28-S10",
+      "journey": "J28",
+      "name": "A signed NMI delivery dated before its event_id record would be kept is acknowledged and applies nothing; one of its own time applies"
     },
     {
       "id": "OR-J39-S01",

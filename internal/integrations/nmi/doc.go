@@ -41,8 +41,9 @@
 // on custodian-held cards. Webhooks verify HMAC-SHA256 over "<nonce>.<body>"
 // from Webhook-Signature "t=<nonce>,s=<hex>". The nonce is not a time, so no
 // replay window applies: a replay or retry carries its event_id, which is
-// applied once. Subscription events only wake convergence, which re-reads
-// NMI. An unknown live schedule is adopted
+// applied once while its record is kept (90 days); a delivery whose body is
+// dated before that is refused as a replay. Subscription events only wake
+// convergence, which re-reads NMI. An unknown live schedule is adopted
 // through the billing import or parked (price_unmapped, customer_unlinked,
 // product_held, import_owned). Unverified schedules are read in batches of 50,
 // or in bulk above 200. nmi_history_months holds a daily read of 25 months of

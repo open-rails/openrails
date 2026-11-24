@@ -142,11 +142,17 @@ func nmiScheduleNotice(t *testing.T, a *authorityWorld, id, schedule string) {
 	require.Equal(t, http.StatusOK, status, raw)
 }
 
-// nmiSignedNotice posts that notice signed under nonce, as NMI signs:
-// HMAC-SHA256 over "<nonce>.<body>", sent as "t=<nonce>,s=<hex>".
+// nmiSignedNotice posts that notice signed under nonce.
 func nmiSignedNotice(t *testing.T, a *authorityWorld, id, schedule, nonce string) (int, string) {
 	t.Helper()
-	body, err := json.Marshal(map[string]any{"event_id": id, "event_type": "recurring.subscription.update", "event_body": map[string]any{"subscription_id": schedule, "merchant": map[string]string{"id": "critical-gateway"}}})
+	return nmiSignedDelivery(t, a, map[string]any{"event_id": id, "event_type": "recurring.subscription.update", "event_body": map[string]any{"subscription_id": schedule, "merchant": map[string]string{"id": "critical-gateway"}}}, nonce)
+}
+
+// nmiSignedDelivery posts event signed under nonce, as NMI signs:
+// HMAC-SHA256 over "<nonce>.<body>", sent as "t=<nonce>,s=<hex>".
+func nmiSignedDelivery(t *testing.T, a *authorityWorld, event map[string]any, nonce string) (int, string) {
+	t.Helper()
+	body, err := json.Marshal(event)
 	require.NoError(t, err)
 	h := hmac.New(sha256.New, []byte("critical-nmi-webhook"))
 	_, _ = h.Write([]byte(nonce + "."))

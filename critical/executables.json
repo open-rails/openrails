@@ -1372,6 +1372,9 @@
     "OR-J28-S11": [
       "TestProviderTime/OR-J28-S11/a-ccbill-account-another-merchant-declares-is-refused-before-a-probe"
     ],
+    "OR-J28-S10": [
+      "TestProviderTime/OR-J28-S10/an-nmi-delivery-dated-before-its-replay-record-is-kept-applies-nothing"
+    ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],

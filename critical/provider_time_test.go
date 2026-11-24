@@ -176,6 +176,30 @@ func TestProviderTime(t *testing.T) {
 		require.Len(t, converges(), 1, "another event under that nonce applies")
 	})
 
+	t.Run("OR-J28-S10/an-nmi-delivery-dated-before-its-replay-record-is-kept-applies-nothing", func(t *testing.T) {
+		a, _, sub := nmiMembership(t)
+		queue := hostFleet(t, a.world)
+		converges := func() int {
+			t.Helper()
+			jobs, err := queue.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.subscription_converge"))
+			require.NoError(t, err)
+			return len(jobs.Jobs)
+		}
+		sale := func(id string, at time.Time) {
+			t.Helper()
+			status, raw := nmiSignedDelivery(t, a, map[string]any{"event_id": id, "event_type": "transaction.sale.success", "event_body": map[string]any{
+				"transaction_id": "9" + id[len(id)-3:], "subscription": map[string]any{"subscription_id": *sub.RailSubscriptionID}, "merchant": map[string]string{"id": "critical-gateway"},
+				"action": map[string]any{"amount": "10.00", "action_type": "sale", "date": at.UTC().Format("20060102150405")}}}, uuid.NewString())
+			require.Equal(t, http.StatusOK, status, raw)
+		}
+		// Signed, and its event_id long forgotten: a sale dated before the
+		// replay record would be kept is a replay, acknowledged unapplied.
+		sale("evt_replayed_old", a.clock.Now().Add(-91*24*time.Hour))
+		require.Zero(t, converges())
+		sale("evt_recent_new", a.clock.Now().Add(-time.Hour))
+		require.Equal(t, 1, converges(), "a delivery of its own time applies")
+	})
+
 	t.Run("OR-J15-S73/prune-keeps-an-nmi-sale-settled-refunded-or-voided-after-its-window", func(t *testing.T) {
 		for name, later := range map[string]func(p *nmiJournal, sale string){
 			"settled":  func(p *nmiJournal, sale string) { p.core.Settle(sale) },
