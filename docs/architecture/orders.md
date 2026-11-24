@@ -84,6 +84,17 @@ payment of a complete order (`PaidAgain`). `RecordExternalPayment`
 (`RecordRemittance`) pays an open order with money received elsewhere: exactly the
 total, no recurring line, replayed by `transaction_id`.
 
+**Checkout facts** (`internal/modules/orders/checkout.go`). A checkout is an order `Create` makes for a customer to pay (origin `customer` or `merchant`); renewals, usage orders and provider bills are not. Each records, on the order:
+
+- `purchase_number`: 1 + the customer's paid purchases (complete checkouts and observed initial enrollments) when it was created, counted under the same lock.
+- `opened_at`: the customer's first read of the open order in person (`MarkCheckoutOpened`): billing-ui's `OrderPayment` and the payment page both read it on load. A merchant creating a pay URL, staff reads and later reads change nothing.
+- `submitted_at`: the first pay request (`MarkCheckoutSubmitted`), written before captcha, card-attempt limits or the provider can refuse it. A one-call buy is opened and submitted when it is created.
+- Countries, never the address: `billing_country` from the latest pay request's billing details or the saved card's, and `ip_country` from a trusted proxy's `CF-IPCountry` on the first request in person (`TrustedProxies.Country`, `XX` and `T1` ignored). `card_country`, the card's issuing country, is not recorded yet and reads null, so `country` is the billing country, else the IP's.
+- `language`: the first in-person request's `Accept-Language`, as language[-region] (`request.PreferredLanguage`).
+- Attribution (`billing.OrderAttribution`): source, medium, campaign, referrer and affiliate, set on creation (`orders.CheckAttribution`); the referrer keeps only its host. Reopening the open order of the same lines keeps the first.
+
+A subscription's later bills name the checkout that bought it (`checkout_order_id`, set by the `assign_checkout_order` trigger for every writer). Staff and application reads show the facts as `Order.checkout`; the customer's own reads never do.
+
 **Payment page** (`internal/paymentpage`). `Attach` stores the secret's sha256 on a
 merchant order, with a creation receipt (`idempotency_keys`, `pay_url_creation`)
 that lets only an authenticated retry of the same create recover the URL
@@ -180,7 +191,7 @@ Checks:
 
 ### 6. Data lifecycle
 Retention classes (`retention.Tables`): `orders` rows (unpaid closed orders that
-never started an attempt go 90 days after closing, `DeleteClosedUnpaidOrders`),
+never started an attempt go 397 days after closing, `DeleteClosedUnpaidOrders`, so a checkout's abandonment can be compared with the same month a year before),
 `order_attempts` rows (expired never-sent attempts after 90 days), `order_lines`
 with their order, `carts` 30 days after the last change, `ownership_claims` state.
 None is partitioned. Carts stay out of the merchant archive, and a live order
@@ -189,6 +200,7 @@ attempt refuses an export (`preflightChecks`).
 Checks:
 - Each table comment carries the `Retention:` rule `retention.Tables` states.
 - OR-J29-S08 (cleanup and expiry) and OR-J31-S09 (a paid hosted order exports).
+- OR-J47-S09: an unpaid checkout keeps its facts for 397 days, then is deleted.
 
 ### 7. Work scales with activity
 Payment runs in the request; settlement comes from intents and webhooks. The only
@@ -238,11 +250,12 @@ Journeys:
   refused lines and stale totals, settled orders survive cancel and expiry.
 - OR-J09-S01 to S06, S70: one-off charge, challenge, decline, rollback, lost
   answer, partial approval, expiry during a challenge.
+- OR-J47-S01, S02, S04 to S07, S09: checkout steps where they happen, purchase number, country, language, attribution and retention.
 - Also: OR-J05-S05, OR-J10-S01 to S05, OR-J21-S01 to S03, OR-J28-S04, OR-J28-S08,
   OR-J04-S04, OR-J04-S37, OR-J04-S46, OR-J29-S02, OR-J29-S08, OR-J31-S09,
   OR-J37-S70, OR-J38-S43.
 
-Other tests: none; the order, payment and payment-page packages have no unit tests.
+Other tests: `orders.CheckAttribution` and `request.PreferredLanguage` have unit tests; the payment and payment-page packages have none.
 
 Gaps:
 - No scenario for the customer's own embedded pay URL (`AttachMine`,

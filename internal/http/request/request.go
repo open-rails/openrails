@@ -20,6 +20,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jonboulle/clockwork"
+	"golang.org/x/text/language"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
@@ -351,6 +353,36 @@ func (r *Request) ClientCountry() string {
 		return ""
 	}
 	return r.State.TrustedProxies.Country(r.Request)
+}
+
+// ClientLanguage is the language the request's Accept-Language prefers, or "".
+func (r *Request) ClientLanguage() string {
+	if r.Request == nil {
+		return ""
+	}
+	return PreferredLanguage(r.Request.Header.Get("Accept-Language"))
+}
+
+// PreferredLanguage is an Accept-Language header's first language by weight,
+// as language[-region] (en, pt-BR, es-419), or "" when it names none.
+func PreferredLanguage(header string) string {
+	if header == "" || len(header) > 1024 {
+		return ""
+	}
+	tags, _, err := language.ParseAcceptLanguage(header)
+	if err != nil || len(tags) == 0 {
+		return ""
+	}
+	base, confidence := tags[0].Base()
+	// "*" reads as mul (several languages); und and zxx name none.
+	if confidence == language.No || base.String() == "und" || base.String() == "mul" || base.String() == "zxx" {
+		return ""
+	}
+	out := base.String()
+	if region, confidence := tags[0].Region(); confidence == language.Exact {
+		out += "-" + region.String()
+	}
+	return out
 }
 
 // ClientIP is the request's client IP: the socket peer, or, when that peer is

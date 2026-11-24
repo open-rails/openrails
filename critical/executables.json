@@ -1588,6 +1588,27 @@
     ],
     "OR-J43-S07": [
       "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
+    ],
+    "OR-J47-S01": [
+      "TestCheckoutFunnel/OR-J47-S01/steps-are-recorded-where-the-customer-takes-them"
+    ],
+    "OR-J47-S02": [
+      "TestCheckoutFunnel/OR-J47-S02/a-pay-url-is-opened-only-by-its-page"
+    ],
+    "OR-J47-S04": [
+      "TestCheckoutFunnel/OR-J47-S04/purchase-number-counts-the-customers-paid-purchases"
+    ],
+    "OR-J47-S05": [
+      "TestCheckoutFunnel/OR-J47-S05/the-country-is-the-billing-address-then-the-ip-never-the-address"
+    ],
+    "OR-J47-S06": [
+      "TestCheckoutFunnel/OR-J47-S06/the-language-is-the-first-in-person-requests"
+    ],
+    "OR-J47-S07": [
+      "TestCheckoutFunnel/OR-J47-S07/attribution-is-bounded-and-the-referrer-keeps-its-host"
+    ],
+    "OR-J47-S09": [
+      "TestCheckoutFunnel/OR-J47-S09/an-unpaid-checkout-keeps-its-facts-for-397-days"
     ]
   }
 }

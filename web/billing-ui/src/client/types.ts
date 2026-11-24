@@ -611,6 +611,9 @@ export const customerLimitSchema: z.ZodType<wire.CustomerLimit> = z.object({
 })
 export type CustomerLimit = wire.CustomerLimit
 
+/** Where the host's page says a checkout's customer came from; each field is optional. */
+export type OrderAttribution = Partial<wire.OrderAttribution>
+
 /**
  * A customer's money in one currency, as of `as_of`. `accrued_amount` is what
  * its running charges have charged and the ledger does not hold yet, already

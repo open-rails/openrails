@@ -550,6 +550,7 @@ export type CreateMyOrderParams = {
   payment?: OrderPaymentParams
   reusable?: boolean
   pay_url?: MyOrderPayURLParams
+  attribution?: OrderAttribution
 }
 
 export type CreateOrderParams = {
@@ -557,6 +558,7 @@ export type CreateOrderParams = {
   lines?: OrderLineParams[]
   expires_at?: string
   pay_url?: OrderPayURLParams
+  attribution?: OrderAttribution
 }
 
 export type CreatePSPImportParams = {
@@ -1658,6 +1660,28 @@ export type Order = {
   voided_at: string | null
   uncollectible_at: string | null
   created_at: string
+  checkout: OrderCheckout | null
+}
+
+export type OrderAttribution = {
+  source: string | null
+  medium: string | null
+  campaign: string | null
+  referrer: string | null
+  affiliate: string | null
+}
+
+export type OrderCheckout = {
+  purchase_number: number
+  opened_at: string | null
+  submitted_at: string | null
+  country: string | null
+  country_source: "billing_address" | "card" | "ip" | null
+  billing_country: string | null
+  card_country: string | null
+  ip_country: string | null
+  language: string | null
+  attribution: OrderAttribution
 }
 
 export type OrderLine = {

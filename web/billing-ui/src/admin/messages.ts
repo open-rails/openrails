@@ -1096,4 +1096,11 @@ export const billingAdminMessages = {
   "Chart any measure, split by its dimensions, over the range picked.":
     "Chart any measure, split by its dimensions, over the range picked.",
   Signals: "Signals",
+  Checkout: "Checkout",
+  "Purchase number: ": "Purchase number: ",
+  "Opened: ": "Opened: ",
+  "Submitted: ": "Submitted: ",
+  "Country: ": "Country: ",
+  "Language: ": "Language: ",
+  "Attribution: ": "Attribution: ",
 } as const

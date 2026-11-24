@@ -44,11 +44,24 @@ var (
 )
 
 // OrderActor is the customer acting on their orders, as the request proved
-// them. Principal is the interactive session paying needs.
+// them. Principal is the interactive session paying needs. Present is the
+// customer in person; Country (a trusted proxy's) and Language
+// (Accept-Language) are their request's, recorded on a checkout only then.
 type OrderActor struct {
 	Customer  billing.CustomerID
 	Principal billingauth.Payer
 	ClientIP  string
+	Present   bool
+	Country   string
+	Language  string
+}
+
+// checkout is what the actor's request tells a checkout of its customer.
+func (a OrderActor) checkout() orders.CheckoutFacts {
+	if !a.Present {
+		return orders.CheckoutFacts{}
+	}
+	return orders.CheckoutFacts{IPCountry: a.Country, Language: a.Language}
 }
 
 const (
@@ -205,6 +218,9 @@ func (s *Service) createOrder(ctx context.Context, rt *orderRuntime, actor Order
 	if params.Payment != nil && params.ExpectedTotal == nil {
 		return OrderAnswer{}, apperr.Invalidf("expected_total is required with a payment").WithParam("expected_total")
 	}
+	if _, err := orders.CheckAttribution(params.Attribution); err != nil {
+		return OrderAnswer{}, err
+	}
 	if err := s.orderCustomerAllowed(ctx, actor.Customer); err != nil {
 		return OrderAnswer{}, err
 	}
@@ -289,8 +305,14 @@ func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor Ord
 // placeOrder answers the customer's open order of params' lines (found), or
 // creates it. A cart's order is always a new one: buying the cart empties it.
 func (s *Service) placeOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams) (*orders.Order, bool, error) {
+	attribution, err := orders.CheckAttribution(params.Attribution)
+	if err != nil {
+		return nil, false, err
+	}
+	facts := actor.checkout()
+	facts.Attribution = attribution
 	in := orders.CreateInput{CustomerID: actor.Customer.UUID(), Origin: billing.OrderOriginCustomer, Lines: params.Lines, FromCart: params.Cart,
-		ExpectedTotal: params.ExpectedTotal, TTL: orders.CustomerTTL}
+		ExpectedTotal: params.ExpectedTotal, TTL: orders.CustomerTTL, Checkout: facts}
 	if !params.Cart {
 		digest, err := s.orderLinesDigest(ctx, params.Lines)
 		if err != nil {
@@ -453,6 +475,16 @@ func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderAct
 	if err != nil {
 		return payment.OrderCharge{}, err
 	}
+	if order.PurchaseNumber != nil {
+		// Asking to pay is recorded before anything may refuse it.
+		var country string
+		if pay.card != nil && pay.card.Billing != nil && pay.card.Billing.Address != nil && pay.card.Billing.Address.Country != nil {
+			country = *pay.card.Billing.Address.Country
+		}
+		if err := rt.Orders.MarkSubmitted(ctx, actor.Customer.UUID(), order.ID, actor.checkout(), country, pay.method); err != nil {
+			s.Log.WarnContext(ctx, "checkout: cannot record its submission", logx.Err(err), "order_id", order.ID.String())
+		}
+	}
 	if err := s.reconsentPaying(ctx, actor.Customer.UUID(), pay.method, key); err != nil {
 		return payment.OrderCharge{}, err
 	}
@@ -547,6 +579,12 @@ func (s *Service) GetOrder(ctx context.Context, actor OrderActor, id billing.Ord
 	if err != nil {
 		return nil, err
 	}
+	if actor.Present {
+		// The payment form loading it is the checkout opened.
+		if err := rt.Orders.MarkOpened(ctx, actor.Customer.UUID(), id.UUID(), actor.checkout()); err != nil {
+			s.Log.WarnContext(ctx, "checkout: cannot record its opening", logx.Err(err), "order_id", id.String())
+		}
+	}
 	return s.orderView(ctx, rt, actor, id.UUID())
 }
 
@@ -557,12 +595,12 @@ func (s *Service) ListOrders(ctx context.Context, actor OrderActor, params billi
 		return billing.ListPage[billing.Order]{}, orders.ErrNotFound
 	}
 	params.CustomerID = actor.Customer
-	return s.listOrders(ctx, params)
+	return s.listOrders(ctx, params, false)
 }
 
 // ListMerchantOrders pages the merchant's orders for staff, newest first.
 func (s *Service) ListMerchantOrders(ctx context.Context, params billing.OrderListParams) (billing.ListPage[billing.Order], error) {
-	return s.listOrders(ctx, params)
+	return s.listOrders(ctx, params, true)
 }
 
 // GetMerchantOrder reads one order for staff. Staff never pay, so it carries
@@ -582,10 +620,12 @@ func (s *Service) GetMerchantOrder(ctx context.Context, id billing.OrderID) (*bi
 		return nil, err
 	}
 	view := order.AsOf(s.now()).View(nil, nil)
+	view.Checkout = order.Checkout()
 	return &view, s.markDelinquent(ctx, &view)
 }
 
-func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams) (billing.ListPage[billing.Order], error) {
+// listOrders pages orders; merchant reads carry their checkout facts.
+func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams, merchant bool) (billing.ListPage[billing.Order], error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return billing.ListPage[billing.Order]{}, err
@@ -607,7 +647,11 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 		out := billing.ListPage[billing.Order]{Items: make([]billing.Order, 0, len(rows))}
 		for _, o := range rows {
 			if params.CustomerID.IsZero() || o.CustomerID == params.CustomerID.UUID() {
-				out.Items = append(out.Items, o.AsOf(s.now()).View(nil, nil))
+				view := o.AsOf(s.now()).View(nil, nil)
+				if merchant {
+					view.Checkout = o.Checkout()
+				}
+				out.Items = append(out.Items, view)
 			}
 		}
 		return out, s.markDelinquentPage(ctx, out.Items)
@@ -645,6 +689,9 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 	out := billing.ListPage[billing.Order]{Items: make([]billing.Order, len(page.Items)), Next: page.Next}
 	for i, o := range page.Items {
 		out.Items[i] = o.AsOf(s.now()).View(nil, nil)
+		if merchant {
+			out.Items[i].Checkout = o.Checkout()
+		}
 	}
 	return out, s.markDelinquentPage(ctx, out.Items)
 }
@@ -919,6 +966,10 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	if err := orders.CheckLines(params.Lines); err != nil {
 		return nil, false, err
 	}
+	attribution, err := orders.CheckAttribution(params.Attribution)
+	if err != nil {
+		return nil, false, err
+	}
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil, false, apperr.New(http.StatusBadRequest, billing.CodeIdempotencyKeyRequired, "Idempotency-Key header is required")
@@ -1004,7 +1055,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		}
 	}
 	order, err := rt.Orders.Create(ctx, orders.CreateInput{CustomerID: params.CustomerID.UUID(), Origin: billing.OrderOriginMerchant, Lines: params.Lines,
-		IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl, Attach: attach})
+		IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl, Attach: attach, Checkout: orders.CheckoutFacts{Attribution: attribution}})
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			return nil, false, ErrIdempotencyKeyInUse
@@ -1133,6 +1184,7 @@ func (s *Service) merchantOrderView(ctx context.Context, order *orders.Order) (*
 		return nil, err
 	}
 	view := order.View(nil, options)
+	view.Checkout = order.Checkout()
 	return &view, nil
 }
 

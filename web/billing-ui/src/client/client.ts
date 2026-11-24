@@ -69,7 +69,10 @@ export interface BillingClientOptions {
    */
   getToken?: () =>
     string | null | undefined | Promise<string | null | undefined>
-  /** Sent as Accept-Language. */
+  /**
+   * Sent as Accept-Language: the language the checkout is shown in, which
+   * an order records.
+   */
   language?: () => string | null | undefined
   /**
    * Extra or overriding currency scales (code -> native-unit decimals). The
@@ -595,6 +598,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       payment?: OrderPaymentInput
       reusable?: boolean
       payUrl?: wire.MyOrderPayURLParams
+      /** Where the host's page says the customer came from. */
+      attribution?: Partial<wire.OrderAttribution>
       idempotencyKey?: string
     }): Promise<OrderResult> {
       return orderResult("/me/orders", {
@@ -607,6 +612,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           ...(input.payment === undefined ? {} : { payment: input.payment }),
           ...(input.reusable === undefined ? {} : { reusable: input.reusable }),
           ...(input.payUrl === undefined ? {} : { pay_url: input.payUrl }),
+          ...(input.attribution === undefined
+            ? {}
+            : { attribution: input.attribution }),
         },
         headers: input.idempotencyKey
           ? { "Idempotency-Key": input.idempotencyKey }

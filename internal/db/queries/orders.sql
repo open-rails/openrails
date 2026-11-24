@@ -3,13 +3,52 @@
 -- name: CreateOrder :exec
 INSERT INTO billing.orders (
     merchant_id, id, customer_id, origin, status, payment_status, currency, total,
-    idempotency_key, request_digest, lines_digest, expires_at, created_at, updated_at
+    idempotency_key, request_digest, lines_digest, expires_at, created_at, updated_at,
+    purchase_number, ip_country, language,
+    attribution_source, attribution_medium, attribution_campaign, attribution_referrer, attribution_affiliate
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(origin)::text,
     'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
     sqlc.narg(idempotency_key)::text, sqlc.narg(request_digest)::bytea, sqlc.narg(lines_digest)::bytea,
-    sqlc.arg(expires_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+    sqlc.arg(expires_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz,
+    sqlc.arg(purchase_number)::int,
+    sqlc.narg(ip_country)::text, sqlc.narg(language)::text,
+    sqlc.narg(attribution_source)::text, sqlc.narg(attribution_medium)::text, sqlc.narg(attribution_campaign)::text,
+    sqlc.narg(attribution_referrer)::text, sqlc.narg(attribution_affiliate)::text
 );
+
+-- name: CountCustomerPurchases :one
+-- The customer's paid purchases: complete checkouts and observed initial
+-- enrollments.
+SELECT count(*)::int AS purchases FROM billing.orders
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial');
+
+-- name: MarkCheckoutOpened :execrows
+-- The customer's first read of the open checkout in person.
+UPDATE billing.orders
+SET opened_at = sqlc.arg(now)::timestamptz,
+    ip_country = COALESCE(ip_country, sqlc.narg(ip_country)::text),
+    language = COALESCE(language, sqlc.narg(language)::text)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND purchase_number IS NOT NULL AND opened_at IS NULL AND status = 'open'
+  AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz);
+
+-- name: MarkCheckoutSubmitted :execrows
+-- A pay request on the checkout: the first is when it was submitted; the
+-- latest billing country (the request's, else the saved card's) is kept.
+UPDATE billing.orders o
+SET submitted_at = COALESCE(o.submitted_at, sqlc.arg(now)::timestamptz),
+    opened_at = COALESCE(o.opened_at, sqlc.arg(now)::timestamptz),
+    ip_country = COALESCE(o.ip_country, sqlc.narg(ip_country)::text),
+    language = COALESCE(o.language, sqlc.narg(language)::text),
+    billing_country = COALESCE(sqlc.narg(billing_country)::text, (
+        SELECT CASE WHEN upper(pm.metadata->>'billing_country') ~ '^[A-Z]{2}$' THEN upper(pm.metadata->>'billing_country') END
+        FROM billing.payment_methods pm
+        WHERE pm.merchant_id = o.merchant_id AND pm.customer_id = o.customer_id AND pm.id = sqlc.narg(payment_method_id)::uuid
+    ), o.billing_country)
+WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(customer_id)::uuid AND o.id = sqlc.arg(id)::uuid
+  AND o.purchase_number IS NOT NULL;
 
 -- name: GetOpenOrderByLines :one
 -- The customer's open order of these lines, expired or not.
@@ -223,7 +262,7 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- name: DeleteClosedUnpaidOrders :execrows
 -- Retention: an unpaid closed order that never started a payment attempt goes
--- 90 days after it closed; its lines and claims go with it.
+-- 397 days after it closed; its lines and claims go with it.
 DELETE FROM billing.orders o
 WHERE o.ctid IN (
     SELECT c.ctid FROM billing.orders c

@@ -526,6 +526,8 @@ if err != nil {
 return *order.PayURL, nil // redirect the buyer there
 ```
 
+**Checkout facts.** Pass where the customer came from as `Attribution` (`billing.OrderAttribution`: source, medium and campaign as your `utm_*`, referrer, affiliate) on `CreateOrder`, or as billing-ui's `attribution` prop on `BuyButton` and `Cart`. Values are at most 100 bytes, without `@` or a card number (`400 invalid_param` naming the field); a referrer keeps only its host. Browser-supplied attribution is unverified: set an affiliate you pay on orders your server creates. Staff and application reads of a checkout carry `checkout`: `purchase_number` (the customer's paid purchases before it, plus one), `opened_at` (the payment form first loaded), `submitted_at` (the first pay request), `billing_country`, `ip_country` (a trusted proxy's `CF-IPCountry`; the address is never stored), `card_country` (null until cards' issuing countries are recorded), `country` with its `country_source`, `language` and `attribution`. The customer's own reads show `checkout: null`. Pass billing-ui's client `language` the language your checkout is shown in: it is sent as `Accept-Language` and recorded.
+
 Generate the idempotency key when the buyer decides to buy, store it with the
 cart, and resend it on every retry: the same key recovers the same order and URL;
 a new key is a new purchase (a duplicate subscription or permanent product is

@@ -18,7 +18,8 @@
 // rebill_cycles and nmi_history_months 25 months; instruction-only
 // provider_intents 25 months after they last changed (the rest are
 // permanent); resolved reconciliation_findings 12 months; order_attempts that
-// never reached a provider, and unpaid closed orders with none, 90 days;
+// never reached a provider 90 days, and unpaid closed orders with none 397
+// days;
 // parked_provider_subscriptions 90 days after release; carts 30 days idle;
 // notification_events, host_outbox and the event log 90 days, never before
 // EventRetention; webhook_events 90 days after completion; idempotency_keys and

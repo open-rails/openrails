@@ -52,8 +52,9 @@ const (
 	// reaching a provider 90 days past its expiry.
 	ExpiredOrderAttempts = 90 * Day
 	// UnpaidOrders keeps an unpaid closed order that never started a payment
-	// attempt 90 days past its close.
-	UnpaidOrders = 90 * Day
+	// attempt 397 days past its close: the checkout funnel compares a month
+	// with the same month a year before.
+	UnpaidOrders = 397 * Day
 	// MetricCounters keeps a daily webhook-health count 13 months: a month is
 	// compared with a year before.
 	MetricCounters = 397 * Day

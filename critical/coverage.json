@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 499,
+  "scenario_count": 506,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2497,6 +2497,41 @@
       "id": "OR-J43-S07",
       "journey": "J43",
       "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
+    },
+    {
+      "id": "OR-J47-S01",
+      "journey": "J47",
+      "name": "Checkout steps are recorded where the customer takes them: created, opened on the first read in person, submitted on the first pay request, paid"
+    },
+    {
+      "id": "OR-J47-S02",
+      "journey": "J47",
+      "name": "A merchant's pay URL is opened only when its page reads it; an expired checkout is abandoned at the step it reached"
+    },
+    {
+      "id": "OR-J47-S04",
+      "journey": "J47",
+      "name": "A checkout's purchase number counts the customer's paid purchases; an abandoned checkout is not one"
+    },
+    {
+      "id": "OR-J47-S05",
+      "journey": "J47",
+      "name": "A checkout's country is its billing address, then the trusted proxy's IP country, never the address; an untrusted header is ignored"
+    },
+    {
+      "id": "OR-J47-S06",
+      "journey": "J47",
+      "name": "A checkout's language is the first in-person request's Accept-Language, canonicalized"
+    },
+    {
+      "id": "OR-J47-S07",
+      "journey": "J47",
+      "name": "Checkout attribution is bounded, refused with its field, kept first, and the referrer keeps only its host"
+    },
+    {
+      "id": "OR-J47-S09",
+      "journey": "J47",
+      "name": "An unpaid checkout that never started an attempt keeps its facts for 397 days, then is deleted"
     }
   ]
 }

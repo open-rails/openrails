@@ -911,7 +911,7 @@ type BillingNotificationIssueRevision struct {
 	SourceEvent *uuid.UUID
 }
 
-// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
+// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 397 days after they closed; every other order is permanent.
 type BillingOrder struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -978,6 +978,28 @@ type BillingOrder struct {
 	LinesDigest []byte
 	// The merchant's page frames the pay URL, only on its registered origins (settings payment_page.embed_origins); otherwise the customer is sent to it.
 	Embedded *bool
+	// Set on a checkout (an order OpenRails started for its customer to pay): 1 + the customer's paid purchases before it was created. NULL on every other order and on checkouts created before it was recorded.
+	PurchaseNumber *int32
+	// When the customer first read the open checkout in person (the payment form loaded), or created it with its payment.
+	OpenedAt *time.Time
+	// When the customer first asked to pay the checkout, whatever the answer.
+	SubmittedAt *time.Time
+	// ISO 3166-1 alpha-2 country of the billing address the latest pay request gave, or of the saved card it charged.
+	BillingCountry *string
+	// ISO 3166-1 alpha-2 issuing country of the card, as its PSP reports it.
+	CardCountry *string
+	// ISO 3166-1 alpha-2 country a trusted proxy reported for the customer's first request in person. The address itself is never stored.
+	IpCountry *string
+	// The language the customer's first request in person preferred (Accept-Language), as language[-region].
+	Language            *string
+	AttributionSource   *string
+	AttributionMedium   *string
+	AttributionCampaign *string
+	// The host of the referrer the merchant reported; never its path or query.
+	AttributionReferrer  *string
+	AttributionAffiliate *string
+	// On a subscription's bill: the checkout that bought the subscription, whose facts its money is reported under.
+	CheckoutOrderID *uuid.UUID
 }
 
 // An order payment attempt: provider execution and any customer action are tied to the order. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
