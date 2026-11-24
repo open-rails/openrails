@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 712,
+  "scenario_count": 713,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -177,6 +177,11 @@
       "id": "OR-J05-S14",
       "journey": "J05",
       "name": "Meter edits preserve exact document keys, refuse invalid keys with 400, and accept nonbilling aggregations with the same billing support reporting"
+    },
+    {
+      "id": "OR-J05-S15",
+      "journey": "J05",
+      "name": "Identical product creates return 201 with the same product, including concurrent creates and normalized definitions; a different definition under the same key returns 409 resource_conflict"
     },
     {
       "id": "OR-J06-S01",

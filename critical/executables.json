@@ -97,6 +97,9 @@
     "OR-J05-S14": [
       "TestPublicCatalog/OR-J05-S14/meter-edits-preserve-document-keys-and-aggregations"
     ],
+    "OR-J05-S15": [
+      "TestPublicCatalog/OR-J05-S15/product-creates-retry-by-content-including-concurrently"
+    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],

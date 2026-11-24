@@ -49,6 +49,92 @@ func publicPurchase(t *testing.T, a *authorityWorld, p *providerLedger, price bi
 }
 
 func TestPublicCatalog(t *testing.T) {
+	t.Run("OR-J05-S15/product-creates-retry-by-content-including-concurrently", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		const path = "/v1/catalog/products"
+		input := billing.CreateProductParams{Key: "retry-prod", DisplayName: "Retry"}
+		status, raw := a.request(t, http.MethodPost, path, a.alphaKey.Secret, input)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var first billing.Product
+		require.NoError(t, json.Unmarshal(raw, &first))
+		require.False(t, first.ID.IsZero())
+		for _, headers := range []map[string]string{nil, {"Idempotency-Key": "product-retry"}, {"Idempotency-Key": "product-retry"}} {
+			status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, input, headers)
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var replay billing.Product
+			require.NoError(t, json.Unmarshal(raw, &replay))
+			require.Equal(t, first, replay)
+		}
+		input.DisplayName = "Different"
+		status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, input)
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), `"code":"resource_conflict"`)
+
+		// Match the stored create definition after trimming, sorting, currency
+		// normalization, credit expiry defaults and the empty tier group's NULL.
+		full := billing.CreateProductParams{
+			Key: " retry-full ", DisplayName: " Retry full ", Description: " Description ",
+			Entitlements: []string{"z:read", "a:read"}, RequiredEntitlements: []string{"z:owned", "a:owned"},
+			CreditGrant: &catalog.CreditGrantSpec{Currency: "usd", Amount: ptr(int64(1_000_000))},
+			TierGroup:   ptr(""), TierRank: 2, Ownership: catalog.OwnershipConsumable, Archived: true,
+		}
+		status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, full)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var stored billing.Product
+		require.NoError(t, json.Unmarshal(raw, &stored))
+		full.Key, full.DisplayName, full.Description = "retry-full", "Retry full", "Description"
+		full.Entitlements, full.RequiredEntitlements = []string{"a:read", "z:read"}, []string{"a:owned", "z:owned"}
+		full.CreditGrant = &catalog.CreditGrantSpec{Currency: "USD", Amount: ptr(int64(1_000_000)), ExpiresAfterDays: ptr(365)}
+		full.TierGroup = nil
+		status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, full)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var normalized billing.Product
+		require.NoError(t, json.Unmarshal(raw, &normalized))
+		require.Equal(t, stored, normalized)
+		for _, change := range []func(*billing.CreateProductParams){
+			func(p *billing.CreateProductParams) { p.DisplayName = "Different" },
+			func(p *billing.CreateProductParams) { p.Description = "Different" },
+			func(p *billing.CreateProductParams) { p.Entitlements = []string{"other:read"} },
+			func(p *billing.CreateProductParams) { p.RequiredEntitlements = []string{"other:owned"} },
+			func(p *billing.CreateProductParams) { p.CreditGrant = nil },
+			func(p *billing.CreateProductParams) { p.TierGroup = ptr("other") },
+			func(p *billing.CreateProductParams) { p.TierRank++ },
+			func(p *billing.CreateProductParams) { p.Ownership = catalog.OwnershipUnique },
+			func(p *billing.CreateProductParams) { p.Archived = false },
+		} {
+			conflict := full
+			change(&conflict)
+			status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, conflict)
+			require.Equal(t, http.StatusConflict, status, string(raw))
+			require.Contains(t, string(raw), `"code":"resource_conflict"`)
+		}
+
+		input = billing.CreateProductParams{Key: "retry-concurrent", DisplayName: "Concurrent retry"}
+		type result struct {
+			status int
+			raw    []byte
+			err    error
+		}
+		start := make(chan struct{})
+		results := make(chan result, 2)
+		for range 2 {
+			go func() {
+				<-start
+				s, b, err := a.do(t.Context(), http.MethodPost, path, a.alphaKey.Secret, input)
+				results <- result{s, b, err}
+			}()
+		}
+		close(start)
+		observed := []result{<-results, <-results}
+		var concurrent [2]billing.Product
+		for i, r := range observed {
+			require.NoError(t, r.err)
+			require.Equal(t, http.StatusCreated, r.status, string(r.raw))
+			require.NoError(t, json.Unmarshal(r.raw, &concurrent[i]))
+			require.False(t, concurrent[i].ID.IsZero())
+		}
+		require.Equal(t, concurrent[0], concurrent[1])
+	})
 	t.Run("OR-J05-S14/meter-edits-preserve-document-keys-and-aggregations", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"meters":{"Mixed Case":{"event_type":"x","aggregation":"count"},"maximum":{"event_type":"x","value_property":"units","aggregation":"max"}}}`))
