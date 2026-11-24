@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // An order of one subscription paid on a CCBill FlexForm: CCBill's page
@@ -289,7 +290,7 @@ func (s *OrderAttemptService) SettleOrderCCBill(ctx context.Context, attemptID u
 			end = limit
 		}
 	}
-	paymentID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:ccbill-sale:"+attemptID.String()+":"+sale.TransactionID))
+	paymentID := uuidutil.DerivedV7(uuidutil.TimeOf(attemptID), uuid.NameSpaceURL, "openrails:ccbill-sale:"+attemptID.String()+":"+sale.TransactionID)
 	// CCBill bills the subscription on the provider price its FlexForm sold.
 	var billedPrice *uuid.UUID
 	if id, err := uuid.Parse(railStateText(attempt.RailState, "price_id")); err == nil {

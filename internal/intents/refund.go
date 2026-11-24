@@ -351,7 +351,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 		return parkedBeforeEffect(fmt.Sprintf("nmi rail is not armed for provider %q", intent.Rail))
 	}
 	if client.ReadOnly {
-		return parkedBeforeEffect("nmi client is read-only (mode=readonly)")
+		return parkedBeforeEffect("nmi client is read-only (readonly write posture)")
 	}
 
 	if intent.Attempts > 1 {
@@ -365,7 +365,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 	result, err := client.Refund(ctx, nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents, Currency: p.Currency})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
-			return parkedBeforeEffect("nmi provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("nmi provider writes blocked (readonly write posture)")
 		}
 		if errors.Is(err, providerposture.ErrDisarmed) {
 			// The posture gate refused before any bytes were sent.
@@ -495,7 +495,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingPro
 	})
 	if err != nil {
 		if errors.Is(err, stripeapi.ErrProviderReadOnly) {
-			return parkedBeforeEffect("stripe provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("stripe provider writes blocked (readonly write posture)")
 		}
 		if errors.Is(err, providerposture.ErrDisarmed) {
 			return parkedBeforeEffect("stripe refund held by sandbox posture gate: " + err.Error())

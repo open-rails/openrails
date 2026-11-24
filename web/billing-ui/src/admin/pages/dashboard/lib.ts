@@ -7,18 +7,20 @@ import type {
   MetricsRange,
   MetricsResult,
 } from "#orck/admin/lib/api/metrics"
-import { formatSummaryAmount } from "#orck/admin/lib/format"
+import { formatSummaryAmount, type MerchantUnits } from "#orck/admin/lib/format"
 
 // formatMeasure renders one measure cell by its column unit.
 export function formatMeasure(
   value: MetricsCell,
   unit: string | undefined,
-  currency?: string
+  currency?: string,
+  units?: MerchantUnits
 ): string {
   if (value === null || value === undefined) return "—"
   // "money" cells are exact decimal strings of native units at the
-  // currency's registered scale; a tile or chart shows them to the cent.
-  if (unit === "money") return formatSummaryAmount(value, currency ?? "")
+  // currency's scale: the registry's, or a merchant unit's (units); a tile
+  // or chart shows a fiat amount to the cent.
+  if (unit === "money") return formatSummaryAmount(value, currency ?? "", units)
   const n = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(n)) return String(value)
   switch (unit) {

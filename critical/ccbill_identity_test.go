@@ -226,7 +226,7 @@ func TestCCBillIdentity(t *testing.T) {
 
 		t.Run("an-order-sale-names-the-card-ccbill-billed", func(t *testing.T) {
 			// Selling a FlexForm is a provider write.
-			a := ccbillWebhookWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+			a := ccbillWebhookWorld(t, func(w *world) { w.posture = "full" })
 			price := ccbillMemberPrice(t, a.alpha)
 			erin := authtest.NewUser(t, a.auth)
 			token := authtest.SignIn(t, a.auth, erin).AccessToken

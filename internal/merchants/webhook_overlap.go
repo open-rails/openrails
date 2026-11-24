@@ -4,17 +4,14 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // SEC-29: a rotated-out webhook signing secret verifies only until an explicit
 // expiry, the PSP's webhook_overlap_expires_at setting. Rotation records it; a
 // declared previous secret must carry it too. No expiry, or an unparsable one,
 // means the old secret is refused.
-const (
-	DefaultWebhookSecretOverlap = 24 * time.Hour
-	MaxWebhookSecretOverlap     = 7 * 24 * time.Hour
-	WebhookOverlapExpiresKey    = "webhook_overlap_expires_at"
-)
+const WebhookOverlapExpiresKey = "webhook_overlap_expires_at"
 
 // WithClock sets the clock that bounds webhook secret overlaps.
 func (s *Service) WithClock(clock clockwork.Clock) *Service {
@@ -25,10 +22,10 @@ func (s *Service) WithClock(clock clockwork.Clock) *Service {
 }
 
 // WithWebhookSecretOverlap sets how long a rotated-out webhook secret keeps
-// verifying. Zero keeps the default; values are capped at MaxWebhookSecretOverlap.
+// verifying. Zero keeps the default; values are capped at config.MaxWebhookSecretOverlap.
 func (s *Service) WithWebhookSecretOverlap(d time.Duration) *Service {
 	if s != nil && d > 0 {
-		s.webhookSecretOverlap = min(d, MaxWebhookSecretOverlap)
+		s.webhookSecretOverlap = min(d, config.MaxWebhookSecretOverlap)
 	}
 	return s
 }
@@ -42,7 +39,7 @@ func (s *Service) now() time.Time {
 
 func (s *Service) overlapWindow() time.Duration {
 	if s == nil || s.webhookSecretOverlap <= 0 {
-		return DefaultWebhookSecretOverlap
+		return config.DefaultWebhookSecretOverlap
 	}
 	return s.webhookSecretOverlap
 }

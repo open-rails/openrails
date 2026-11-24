@@ -30296,7 +30296,7 @@
     "provider_writes_disabled": {
       "status": 503,
       "type": "api_error",
-      "meaning": "Provider writes are off for the merchant, so it takes no payment; the message names why (provider_write_mode or the merchant's write posture)."
+      "meaning": "Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture)."
     },
     "provider_writes_held": {
       "status": 409,

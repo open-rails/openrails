@@ -54,8 +54,8 @@ const (
 )
 
 // ProbeTestMode determines whether this account is currently simulating
-// transactions (NMI Test Mode / sandbox). Call only when the operating mode
-// expects sandbox money; on a live account the probe costs one declined auth.
+// transactions (NMI Test Mode / sandbox). Call only when the PSP declares
+// sandbox money; on a live account the probe costs one declined auth.
 func (c *NMIClient) ProbeTestMode(ctx context.Context) (TestModeProbeResult, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return ProbeIndeterminate, err

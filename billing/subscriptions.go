@@ -219,13 +219,13 @@ type MRRRisk struct {
 // card, and is canceled at FinalRetryAt if none arrives. LastFailureReason is
 // the latest decline's reason, null when none was recorded.
 type SubscriptionDunning struct {
-	// Paused means the effective operating mode holds OpenRails' automatic
+	// Paused means the merchant's write posture holds OpenRails' automatic
 	// retries. The dates below remain the planned schedule, not a promise to
 	// charge. False does not bypass other payment or provider checks.
 	Paused bool `json:"paused"`
-	// PauseReason is automatic_collection_paused (limited mode) or
-	// provider_writes_disabled (readonly). Full mode clears this hold; a
-	// provider-owned retry schedule is not paused by OpenRails' mode.
+	// PauseReason is automatic_collection_paused (a limited write posture) or
+	// provider_writes_disabled (readonly). A full posture clears this hold; a
+	// provider-owned retry schedule is not paused by OpenRails' posture.
 	PauseReason       string         `json:"pause_reason,omitempty"`
 	Attempts          int            `json:"attempts"`
 	RetriesLeft       *int           `json:"retries_left"`

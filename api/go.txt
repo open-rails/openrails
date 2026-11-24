@@ -1,7 +1,4 @@
 pkg openrails, const DefaultEntitlementCheckMaxAge time.Duration = 120000000000
-pkg openrails, const ProviderWritesFull ProviderWriteMode = "full"
-pkg openrails, const ProviderWritesLimited ProviderWriteMode = "limited"
-pkg openrails, const ProviderWritesReadOnly ProviderWriteMode = "readonly"
 pkg openrails, const QueueBilling untyped string = "billing"
 pkg openrails, const QueuePSPImport untyped string = "psp_import"
 pkg openrails, const ReadCatalog Read = "catalog"
@@ -235,7 +232,6 @@ pkg openrails, type Config struct, HyperSwitch *HyperSwitchConfig
 pkg openrails, type Config struct, LLM *LLMConfig
 pkg openrails, type Config struct, Merchants []billing.MerchantDeclaration
 pkg openrails, type Config struct, ProviderSandbox *ProviderSandboxConfig
-pkg openrails, type Config struct, ProviderWriteMode ProviderWriteMode
 pkg openrails, type Config struct, PublicBillingBaseURL string
 pkg openrails, type Config struct, RateLimits RateLimitsConfig
 pkg openrails, type Config struct, ReadCache ReadCache
@@ -350,7 +346,6 @@ pkg openrails, type ProviderSandboxConfig struct, CCBillWebhookSources []string
 pkg openrails, type ProviderSandboxConfig struct, NMIGatewayURL string
 pkg openrails, type ProviderSandboxConfig struct, SolanaRPCURL string
 pkg openrails, type ProviderSandboxConfig struct, StripeAPIURL string
-pkg openrails, type ProviderWriteMode string
 pkg openrails, type RateLimit struct
 pkg openrails, type RateLimit struct, RequestsPerMinute int
 pkg openrails, type RateLimitsConfig map[string]*RateLimit
@@ -4807,14 +4802,12 @@ pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, Addr string
 pkg openrails/server, type Config struct, AdminConsole *AdminConsole
 pkg openrails/server, type Config struct, Auth authkit.Config
-pkg openrails/server, type Config struct, DrainDelay time.Duration
 pkg openrails/server, type Config struct, Engine openrails.Config
 pkg openrails/server, type Config struct, LocalSignIn bool
 pkg openrails/server, type Config struct, MerchantCreation *MerchantCreationConfig
 pkg openrails/server, type Config struct, Naming NamingConfig
 pkg openrails/server, type Config struct, PrivateAddr string
 pkg openrails/server, type Config struct, RouteGroups openrails.RouteGroups
-pkg openrails/server, type Config struct, ShutdownTimeout time.Duration
 pkg openrails/server, type ConsoleIssuer struct
 pkg openrails/server, type ConsoleIssuer struct, ClientID string
 pkg openrails/server, type ConsoleIssuer struct, Name string

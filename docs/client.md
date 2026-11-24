@@ -823,7 +823,7 @@ if err != nil {
 
 ```go guide:gate-admit
 ticket, err := gate.Admit(r.Context(), billing.AdmitParams{
-	RequestID: uuid.NewString(), CustomerID: customer, Invoker: customer.String(), Currency: "USD",
+	RequestID: uuid.Must(uuid.NewV7()).String(), CustomerID: customer, Invoker: customer.String(), Currency: "USD",
 	Usage: &billing.UsageEstimate{EventType: "work", Dimensions: map[string]int64{"units": estimate}},
 })
 if err != nil {

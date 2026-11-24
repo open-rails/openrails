@@ -228,7 +228,7 @@ func TestProviderTime(t *testing.T) {
 	})
 
 	t.Run("OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch", func(t *testing.T) {
-		a, p := newNMIWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+		a, p := newNMIWorld(t, func(w *world) { w.posture = "full" })
 		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
 		receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
 		require.NoError(t, err)
@@ -567,7 +567,7 @@ func TestProviderTime(t *testing.T) {
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		w := newWorld(t, func(w *world) {
 			declareCCBillAccount(w, account, dataLink.URL())
-			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			w.posture = "full"
 		})
 		// Lifecycle repairs are armed: what keeps the paid period is the
 		// cancellation's meaning, not a held write.
@@ -613,7 +613,7 @@ func TestProviderTime(t *testing.T) {
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		w := newWorld(t, func(w *world) {
 			declareCCBillAccount(w, account, dataLink.URL())
-			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			w.posture = "full"
 		})
 		armWorldDestructive(t, w, true)
 		dataLink.SetClock(w.clock.Now)
@@ -657,7 +657,7 @@ func TestProviderTime(t *testing.T) {
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		w := newWorld(t, func(w *world) {
 			declareCCBillAccount(w, account, dataLink.URL())
-			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			w.posture = "full"
 			// The world runs a day behind the database's clock, which dates
 			// no payment in its future.
 			w.clock.Advance(-24 * time.Hour)

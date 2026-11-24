@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
@@ -73,15 +72,10 @@ func TestMerchantCardRemoval(t *testing.T) {
 		kept, err := a.alpha.ListPaymentMethods(t.Context(), method.CustomerID, billing.PaymentMethodListParams{})
 		require.NoError(t, err)
 		require.Len(t, kept.Items, 1)
-		readonlyConfig := a.cfg
-		readonlyConfig.ProviderWriteMode = openrails.ProviderWritesReadOnly
-		readonly, err := openrails.New(t.Context(), readonlyConfig, a.deps)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, readonly.Close(t.Context())) })
-		readonlyMerchant, err := readonly.Merchant(a.alpha.MerchantID())
-		require.NoError(t, err)
-		require.Error(t, readonlyMerchant.DeletePaymentMethod(t.Context(), method.CustomerID, method.ID), "an explicit host request never bypasses provider read-only mode")
+		setWritePosture(t, a.world, "readonly", a.alpha.MerchantID())
+		require.Error(t, a.alpha.DeletePaymentMethod(t.Context(), method.CustomerID, method.ID), "an explicit host request never bypasses the merchant's readonly write posture")
 		require.Len(t, journal.core.Vaults(), 1, "read-only removal sends no provider mutation")
+		setWritePosture(t, a.world, "full", a.alpha.MerchantID())
 		status, raw = a.request(t, http.MethodDelete, path, a.alphaKey.Secret, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
 		require.NoError(t, a.alphaRemote.DeletePaymentMethod(t.Context(), method.CustomerID, method.ID))

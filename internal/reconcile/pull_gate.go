@@ -22,7 +22,7 @@ func OverwriteHeld(ctx context.Context, database *db.DB, cfg *config.Config, mer
 	if !verdict.Allowed {
 		return verdict.Reason, false
 	}
-	if posture := (writeposture.View{Config: cfg, DB: database}).Posture(ctx, merchantID); posture.ReadOnly() {
+	if posture := (writeposture.View{DB: database}).Posture(ctx, merchantID); posture.ReadOnly() {
 		return posture.Reason, verdict.EnforceArmed
 	}
 	return "", verdict.EnforceArmed

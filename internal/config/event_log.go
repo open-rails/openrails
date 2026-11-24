@@ -4,13 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/open-rails/openrails/internal/retention"
 )
 
 func EventRetentionDuration(c *Config) (time.Duration, error) {
 	if c == nil || strings.TrimSpace(c.EventRetention) == "" {
-		return retention.EventLog, nil
+		return DefaultEventRetention, nil
 	}
 	value, err := time.ParseDuration(strings.TrimSpace(c.EventRetention))
 	if err != nil || value < time.Second {

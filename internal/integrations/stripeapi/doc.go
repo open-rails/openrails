@@ -1,8 +1,9 @@
 // Package stripeapi is the choke point for all outbound Stripe HTTP (there is
 // no stripe-go dependency). Every call site takes its *http.Client from here:
-// the transport pins Stripe-Version to APIVersion and, in readonly mode, fails
-// every non-GET/HEAD request locally with ErrProviderReadOnly, so no path can
-// write to Stripe around it.
+// the transport pins Stripe-Version to APIVersion and, for a readonly client
+// or a merchant whose write posture is readonly, fails every non-GET/HEAD
+// request locally with ErrProviderReadOnly, so no path can write to Stripe
+// around it.
 //
 // A PSP's key (sk_ or rk_) must match its declared environment (live keys
 // only on live, test keys only on test; publishable keys alike) and belong to

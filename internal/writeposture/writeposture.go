@@ -1,7 +1,7 @@
 // Package writeposture is how much OpenRails may write to payment providers for
-// one merchant: the lower of the process's provider_write_mode and the
-// merchant's stored posture, and readonly in a database the billing book was
-// never armed in. Two live copies of one book would bill its customers twice.
+// one merchant: its stored posture (full when it has none), and readonly in a
+// database the billing book was never armed in. Two live copies of one book
+// would bill its customers twice.
 package writeposture
 
 import (
@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
@@ -32,11 +31,11 @@ const (
 // ParseMode reads full, limited or readonly.
 func ParseMode(s string) (Mode, bool) {
 	switch s {
-	case config.ProviderWriteModeFull:
+	case "full":
 		return Full, true
-	case config.ProviderWriteModeLimited:
+	case "limited":
 		return Limited, true
-	case config.ProviderWriteModeReadOnly:
+	case "readonly":
 		return ReadOnly, true
 	}
 	return ReadOnly, false
@@ -45,11 +44,11 @@ func ParseMode(s string) (Mode, bool) {
 func (m Mode) String() string {
 	switch m {
 	case Full:
-		return config.ProviderWriteModeFull
+		return "full"
 	case Limited:
-		return config.ProviderWriteModeLimited
+		return "limited"
 	}
-	return config.ProviderWriteModeReadOnly
+	return "readonly"
 }
 
 // Reasons a merchant's stored posture was set.
@@ -72,22 +71,31 @@ func (p Posture) ReadOnly() bool { return p.Mode == ReadOnly }
 // Limited: proactive (system-origin) provider writes wait.
 func (p Posture) Limited() bool { return p.Mode < Full }
 
-// View reads merchants' postures. It fails closed: without a Config or a
-// database, or when the posture cannot be read, the posture is readonly.
+// Reader is merchants' effective postures. View is one; Fixed is one for a
+// wire with no database behind it.
+type Reader interface {
+	Posture(ctx context.Context, merchantID uuid.UUID) Posture
+}
+
+// Fixed is every merchant at one mode.
+type Fixed Mode
+
+// Posture is the fixed mode.
+func (f Fixed) Posture(context.Context, uuid.UUID) Posture {
+	if Mode(f) == Full {
+		return Posture{Mode: Full}
+	}
+	return Posture{Mode(f), "the write posture is fixed at " + Mode(f).String()}
+}
+
+// View reads merchants' postures from the database. It fails closed: without
+// a database, or when the posture cannot be read, the posture is readonly.
 type View struct {
-	Config *config.Config
-	DB     *db.DB
+	DB *db.DB
 }
 
 // Posture is merchantID's effective posture.
 func (v View) Posture(ctx context.Context, merchantID uuid.UUID) Posture {
-	if v.Config == nil {
-		return Posture{ReadOnly, "operating mode is unknown (no config wired)"}
-	}
-	process, _ := ParseMode(config.GetProviderWriteMode(v.Config))
-	if process == ReadOnly {
-		return Posture{ReadOnly, "provider_write_mode=readonly blocks all provider writes: set provider_write_mode to full (or limited)"}
-	}
 	if v.DB == nil {
 		return Posture{ReadOnly, "write posture unreadable (no database wired)"}
 	}
@@ -95,19 +103,12 @@ func (v View) Posture(ctx context.Context, merchantID uuid.UUID) Posture {
 	if err != nil {
 		return Posture{ReadOnly, fmt.Sprintf("write posture unreadable (%v)", err)}
 	}
-	return effective(process, row)
+	return effective(row)
 }
 
 // Read is merchantID's effective posture; an unreadable posture is an error
 // to retry, not a posture.
 func (v View) Read(ctx context.Context, merchantID uuid.UUID) (Posture, error) {
-	if v.Config == nil {
-		return Posture{}, errors.New("operating mode is unknown (no config wired)")
-	}
-	process, _ := ParseMode(config.GetProviderWriteMode(v.Config))
-	if process == ReadOnly {
-		return Posture{ReadOnly, "provider_write_mode=readonly blocks all provider writes: set provider_write_mode to full (or limited)"}, nil
-	}
 	if v.DB == nil {
 		return Posture{}, errors.New("write posture unreadable (no database wired)")
 	}
@@ -115,10 +116,10 @@ func (v View) Read(ctx context.Context, merchantID uuid.UUID) (Posture, error) {
 	if err != nil {
 		return Posture{}, fmt.Errorf("read write posture: %w", err)
 	}
-	return effective(process, row), nil
+	return effective(row), nil
 }
 
-func effective(process Mode, row gen.GetWritePostureRow) Posture {
+func effective(row gen.GetWritePostureRow) Posture {
 	if !row.BookArmed {
 		return Posture{ReadOnly, "this database is a copy of the billing book: run `openrails book arm` once it is the only live copy"}
 	}
@@ -126,13 +127,10 @@ func effective(process Mode, row gen.GetWritePostureRow) Posture {
 	if !ok {
 		return Posture{ReadOnly, fmt.Sprintf("unknown stored write posture %q", row.Mode)}
 	}
-	if stored < process {
-		return Posture{stored, storedReason(row)}
+	if stored == Full {
+		return Posture{Mode: Full}
 	}
-	if process == Limited {
-		return Posture{Limited, "provider_write_mode=limited blocks proactive (system-origin) provider writes"}
-	}
-	return Posture{Mode: Full}
+	return Posture{stored, storedReason(row)}
 }
 
 func storedReason(row gen.GetWritePostureRow) string {

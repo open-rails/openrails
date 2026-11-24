@@ -70,8 +70,8 @@ existing one on cached terms, with a warning. Stripe product and price events qu
 
 **Solana plans.** A recurring USD price of ours that sells on Solana gets an
 on-chain plan (`publishSolanaPlan`) whose id derives from price, mint and
-treasury (`solanaPlanID`); `verifySolanaCatalogReference` reads it back. Under
-`provider_write_mode` `limited` or `readonly` only an existing plan is attached.
+treasury (`solanaPlanID`); `verifySolanaCatalogReference` reads it back. Under a
+`limited` or `readonly` merchant write posture only an existing plan is attached.
 
 **Catalog assistant** (`internal/modules/copilot`). `Service.Ask` runs a capped
 tool loop (`askMaxToolCalls` 6, `askMaxTokens` 2048) over read-only tools

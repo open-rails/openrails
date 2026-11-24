@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Invoice collection arms rail credentials per merchant from the
@@ -67,7 +68,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiFactory() *railresolve.NMIFactory 
 	if b.NMIClients != nil {
 		return b.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: b.Config, Log: b.Log}
+	return &railresolve.NMIFactory{Config: b.Config, Postures: writeposture.View{DB: b.DB}, Log: b.Log}
 }
 
 // nmiProxyPosture is the posture identity of scope's gateway credential

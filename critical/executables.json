@@ -105,7 +105,8 @@
     "OR-J06-S03": [
       "TestPSPControls/OR-J06-S03",
       "TestPSPControls/OR-J06-S03/readonly",
-      "TestPSPControls/OR-J06-S03/limited"
+      "TestPSPControls/OR-J06-S03/limited",
+      "TestPSPControls/OR-J06-S03/copied-book"
     ],
     "OR-J06-S04": [
       "TestPSPControls/OR-J06-S04/rotation-and-archive-preserve-identity-without-exposing-secrets"
@@ -1155,6 +1156,9 @@
     "OR-J26-S62": [
       "TestCreditLotCounters/OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
     ],
+    "OR-J26-S63": [
+      "TestUsageBillingContracts/OR-J26-S63/a-usage-orders-period-covers-the-usage-it-bills"
+    ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
     ],
@@ -1303,6 +1307,9 @@
     ],
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
+    ],
+    "OR-J38-S85": [
+      "TestMerchantConsole/OR-J38-S85/console-dashboard-shows-merchant-units-at-their-scale"
     ],
     "OR-J38-S75": [
       "TestCCBillIdentity/OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal"
@@ -2295,6 +2302,9 @@
     ],
     "OR-J48-S12": [
       "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"
+    ],
+    "OR-J06-S72": [
+      "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
     ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"
