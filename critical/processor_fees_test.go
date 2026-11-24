@@ -28,12 +28,14 @@ func TestProcessorFees(t *testing.T) {
 		fleet := quietFleet(t, w)
 
 		// The $10.00 charge queued its fee read; the billing pass posts
-		// Stripe's 2.9% + 30¢, 59¢: 590000 micros, out of the PSP's cash.
+		// Stripe's 2.9% + 30¢, 59¢: 590000 micros, out of the PSP's cash,
+		// beside the charge's own $10.00 in.
 		require.False(t, runPass(t, fleet))
 		require.Equal(t, [2]int64{0, 590_000}, feeTotal(t, w, mid, "processor_fees", "USD"))
-		require.Equal(t, [2]int64{590_000, 0}, feeTotal(t, w, mid, "cash_clearing", "USD"))
+		require.Equal(t, [2]int64{590_000, 10_000_000}, feeTotal(t, w, mid, "cash_clearing", "USD"))
 		require.Equal(t, 1, feeTransfers(t, w, mid, "processor_fee"))
 		require.Zero(t, queuedFeeReads(t, w, mid))
+		require.Zero(t, cashSideWarnings(t, w, mid))
 
 		// Its balance transaction read again posts nothing new.
 		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "stripe_fee_reads")+" (merchant_id, psp_id, ref, kind, due_at)"+
@@ -74,12 +76,13 @@ func TestProcessorFees(t *testing.T) {
 		require.Equal(t, [2]int64{15_000_000, 15_000_000}, feeTotal(t, w, mid, "chargeback_fees", "USD"))
 		require.Equal(t, 2, feeTransfers(t, w, mid, "chargeback_fee"))
 		require.Zero(t, queuedFeeReads(t, w, mid))
+		require.Zero(t, cashSideWarnings(t, w, mid))
 
-		// A charge in euros settles in the account's dollars: its fee posts in
-		// dollars, on the settled amount (20.00 EUR at 1.1 is 22.00 USD; 2.9%
-		// + 30¢ is 94¢), and the euro books take none. A read Stripe fails
+		// A charge in euros settles in the account's pounds: its fee posts in
+		// pounds, on the settled amount (20.00 EUR at 0.8 is 16.00 GBP; 2.9%
+		// + 30p is 76p), and the euro books take none. A read Stripe fails
 		// waits, and the pass and the charge stand.
-		m.p.core.SetSettlement("usd", 1.1)
+		m.p.core.SetSettlement("gbp", 0.8)
 		price := mrrPlan(t, m.a.alpha, "fees-eur", billing.CreatePriceParams{UnitAmount: 20_000_000, Currency: "EUR", BillingIntervalMonths: ptr(1)})
 		buyMRRPlan(t, m.a, m.p, price, 20_000_000, "fees-eur")
 		m.p.core.Intercept(func(r *http.Request) bool {
@@ -115,8 +118,10 @@ func TestProcessorFees(t *testing.T) {
 		require.Zero(t, attempts)
 		require.False(t, parked)
 		require.False(t, runPass(t, fleet))
-		require.Equal(t, [2]int64{0, 590_000 + 940_000}, feeTotal(t, w, mid, "processor_fees", "USD"))
+		require.Equal(t, [2]int64{0, 760_000}, feeTotal(t, w, mid, "processor_fees", "GBP"))
+		require.Equal(t, [2]int64{0, 590_000}, feeTotal(t, w, mid, "processor_fees", "USD"))
 		require.Equal(t, [2]int64{0, 0}, feeTotal(t, w, mid, "processor_fees", "EUR"))
+		require.Equal(t, [2]int64{0, 20_000_000}, feeTotal(t, w, mid, "cash_clearing", "EUR"))
 		require.Equal(t, 2, feeTransfers(t, w, mid, "processor_fee"))
 		require.Zero(t, queuedFeeReads(t, w, mid))
 
@@ -132,15 +137,16 @@ func TestProcessorFees(t *testing.T) {
 		require.NoError(t, err)
 		m.notice(t, "evt_fee_refund", "refund.created", refund)
 		require.False(t, runPass(t, fleet))
-		require.Equal(t, [2]int64{150_000, 590_000 + 940_000}, feeTotal(t, w, mid, "processor_fees", "USD"))
+		require.Equal(t, [2]int64{150_000, 760_000}, feeTotal(t, w, mid, "processor_fees", "GBP"))
 		require.Equal(t, 3, feeTransfers(t, w, mid, "processor_fee"))
 		require.Zero(t, queuedFeeReads(t, w, mid))
 
-		// The euro charge's fee leaves the dollar cash short: a side warning,
-		// never a failure.
+		// The pound fees sit in a cash clearing that took no pounds in: the
+		// only side warning, never a failure.
 		audit := hostCLI(t, w, "ledger-audit", "--merchant", "id:"+mid.String())
 		require.Contains(t, audit, "Ledger integrity OK")
-		require.Contains(t, audit, "side: general/cash_clearing")
+		require.Equal(t, 1, strings.Count(audit, "side: general/cash_clearing"))
+		require.Contains(t, audit, "side: general/cash_clearing balance=0.61 GBP")
 	})
 	t.Run("OR-J40-S41/a-prevention-refund-reads-through-its-dispute", func(t *testing.T) {
 		m := newDisputedMembership(t)
@@ -215,6 +221,15 @@ func deliverAsync(a *authorityWorld, body []byte) <-chan error {
 		done <- nil
 	}()
 	return done
+}
+
+// cashSideWarnings counts the side warnings ledger-audit reports on the
+// merchant's cash clearing.
+func cashSideWarnings(t *testing.T, w *world, merchant uuid.UUID) int {
+	t.Helper()
+	audit := hostCLI(t, w, "ledger-audit", "--merchant", "id:"+merchant.String())
+	require.Contains(t, audit, "Ledger integrity OK")
+	return strings.Count(audit, "side: general/cash_clearing")
 }
 
 // feeTotal is one general-ledger account type's credits and debits in a
