@@ -1168,12 +1168,7 @@ touches the ledger, grants or logs.
 
 ## Retention
 
-Periods are constants, the same for every merchant, except the event log's
-`event_retention`. Each table's comment states its class: **permanent** (the
-ledger, grants, payments, owed usage, usage accruals, receipts, operation
-authorizations, refusals, running charges, maintenance runs, the before-images of
-destructive runs), **partitioned** (monthly partitions dropped whole), **rows**
-(deleted by the hourly cleanup) or **state** (one row per thing that exists).
+Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage accruals, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **partitioned** (monthly partitions dropped whole), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|

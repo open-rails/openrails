@@ -66,6 +66,7 @@ continuations. The other scan names label work inside the pass.
 | `openrails.config_realerts` | Unresolved undeclared-account findings due for another operator alert. [Source](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
 | `openrails.operation_wakes` | Live provider operations more than an hour overdue that need another wake. [Source](../internal/river/jobs_operation_wakes.go) |
+| `openrails.mrr_due` | Subscriptions canceled at period end whose end has come: each leaves MRR, dated at its end. The read is indexed on the change instant. [Source](../internal/river/jobs_mrr_due.go) |
 
 ## Inspect a running deployment
 

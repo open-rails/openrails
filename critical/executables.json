@@ -1432,6 +1432,36 @@
     "OR-J31-S11": [
       "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
     ],
+    "OR-J42-S01": [
+      "TestMRR/OR-J42-S01/new-expansion-contraction-churn-reactivation-once-normalised-per-currency"
+    ],
+    "OR-J42-S02": [
+      "TestMRR/OR-J42-S02/cancel-at-period-end-is-scheduled-churn-a-resume-reverses-it-the-end-churns"
+    ],
+    "OR-J42-S03": [
+      "TestMRR/OR-J42-S03/scheduled-downgrade-is-scheduled-contraction-applied-at-renewal-a-canceled-change-reverses-it"
+    ],
+    "OR-J42-S04": [
+      "TestMRR/OR-J42-S04/stripe-cancel-at-period-end-is-scheduled-churn-a-portal-resume-reverses-it"
+    ],
+    "OR-J42-S05": [
+      "TestMRR/OR-J42-S05/ccbill-upgrade-replacing-a-subscription-is-one-expansion-an-import-opens"
+    ],
+    "OR-J42-S06": [
+      "TestMRR/OR-J42-S06/mrr-at-a-past-date-equals-the-movements-and-every-report-read-has-an-index"
+    ],
+    "OR-J42-S07": [
+      "TestMRR/OR-J42-S07/an-engine-upgrade-replacing-a-subscription-is-one-expansion"
+    ],
+    "OR-J42-S08": [
+      "TestMRR/OR-J42-S08/a-prune-and-its-undo-are-corrections-the-pruned-scheduled-churn-is-superseded"
+    ],
+    "OR-J42-S09": [
+      "TestMRR/OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book"
+    ],
+    "OR-J42-S10": [
+      "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],

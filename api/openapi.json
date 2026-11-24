@@ -3026,6 +3026,14 @@
             }
           },
           {
+            "name": "scheduled_change_before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "schema": {
@@ -13771,6 +13779,14 @@
           "seconds"
         ]
       },
+      "AccountingSettings": {
+        "type": "object",
+        "properties": {
+          "timezone": {
+            "type": "string"
+          }
+        }
+      },
       "AdjustCustomerLimitParams": {
         "type": "object",
         "properties": {
@@ -20756,6 +20772,9 @@
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
           },
+          "accounting": {
+            "$ref": "#/components/schemas/AccountingSettings"
+          },
           "card_vault": {
             "type": "string"
           },
@@ -26404,6 +26423,32 @@
           "created_at"
         ]
       },
+      "ScheduledMRR": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "churn",
+              "contraction",
+              "expansion"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "kind",
+          "amount",
+          "effective_at"
+        ]
+      },
       "SetCartLineParams": {
         "type": "object",
         "properties": {
@@ -26795,6 +26840,16 @@
               }
             ]
           },
+          "mrr": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionMRR"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "psp_id": {
             "type": "string"
           },
@@ -26977,6 +27032,7 @@
           "product_id",
           "price_id",
           "quantity",
+          "mrr",
           "psp_id",
           "rail",
           "rail_subscription_id",
@@ -27631,6 +27687,33 @@
           "to_period_end"
         ]
       },
+      "SubscriptionMRR": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "scheduled": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScheduledMRR"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "amount",
+          "currency",
+          "scheduled"
+        ]
+      },
       "SubscriptionRetryNowResult": {
         "type": "object",
         "properties": {
@@ -27941,6 +28024,9 @@
           },
           "balance_notices": {
             "$ref": "#/components/schemas/BalanceNoticeSettings"
+          },
+          "accounting": {
+            "$ref": "#/components/schemas/AccountingSettings"
           },
           "card_vault": {
             "type": "string"

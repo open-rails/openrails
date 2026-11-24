@@ -15,7 +15,7 @@ const lockCustomerForSpend = `-- name: LockCustomerForSpend :one
 
 SELECT id FROM billing.customers
 WHERE id = $1 AND merchant_id = $2
-FOR UPDATE
+FOR NO KEY UPDATE
 `
 
 type LockCustomerForSpendParams struct {
@@ -25,9 +25,11 @@ type LockCustomerForSpendParams struct {
 
 // modules/money serialization: balance comes from the ledger (ledger.sql),
 // credit lots are grants (grants.sql), and the per-customer spend mutex is a
-// FOR UPDATE lock on the customers row.
+// FOR NO KEY UPDATE lock on the customers row.
 // The per-customer spend mutex: every spend, capture and deposit path locks this
-// row FOR UPDATE before touching the customer's ledger. Returns the customer id.
+// row before touching the customer's ledger. NO KEY: rows that only reference
+// the customer (its MRR) take KEY SHARE and never wait on it. Returns the
+// customer id.
 func (q *Queries) LockCustomerForSpend(ctx context.Context, arg LockCustomerForSpendParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, lockCustomerForSpend, arg.ID, arg.MerchantID)
 	var id uuid.UUID

@@ -1,6 +1,6 @@
 // Package cadence holds the cadence definitions shared by price keys, notices
 // and receipts. The analytics buckets have SQL twins in the schema
-// (billing_cycle_label, monthly_normalized_amount).
+// (billing_cycle_label, and billing.price_mrr's named cadences).
 package cadence
 
 import (

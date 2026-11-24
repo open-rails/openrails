@@ -157,6 +157,7 @@ var billingScanBudgets = map[string]time.Duration{
 	KindConfigRealerts:                DefaultTimeout,
 	KindStoredCardRefreshDue:          time.Hour,
 	KindOperationWakes:                DefaultTimeout,
+	KindMRRDue:                        DefaultTimeout,
 }
 
 // ScanBudget is a scan's budget inside the pass.

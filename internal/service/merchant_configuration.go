@@ -262,6 +262,9 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.Checkout != nil {
 		current.Checkout = patch.Checkout
 	}
+	if patch.Accounting != nil {
+		current.Accounting = patch.Accounting
+	}
 	if patch.BalanceNotices != nil {
 		current.BalanceNotices = patch.BalanceNotices
 	}

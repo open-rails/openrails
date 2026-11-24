@@ -24,6 +24,15 @@ var NeverRollbackableTables = map[string]string{
 	"change_log":              "configuration history, price-key moves included: forensics an undo reads, never rewinds",
 	"disputes":                "provider facts: the network counted the dispute whatever a rollback restores",
 	"fraud_reports":           "provider facts: the network counted the report whatever a rollback restores",
+	"mrr_movements":           "MRR history: an undo's restored subscriptions record their own corrections",
+	"mrr_movement_lines":      "MRR history, with its movements",
+	"subscription_mrr":        "trigger-maintained MRR projection of subscriptions; restoring a row desynchronises it from its movements",
+	"customer_mrr":            "trigger-maintained MRR projection; restoring a row desynchronises it from its movements",
+	"mrr_scheduled":           "MRR history: an undo's restored subscriptions schedule their own churn and changes",
+	"mrr_flows":               "MRR rollup of the movements; restoring a row desynchronises it from them",
+	"mrr_totals":              "MRR rollup of customer_mrr; restoring a row desynchronises it from them",
+	"mrr_product_flows":       "MRR rollup of the movements; restoring a row desynchronises it from them",
+	"mrr_cohort_flows":        "MRR rollup of the movements; restoring a row desynchronises it from them",
 }
 
 // maintenance_runs and destructive_run_before_images are absent on purpose: an

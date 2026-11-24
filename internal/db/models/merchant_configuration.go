@@ -56,6 +56,10 @@ type MerchantConfiguration struct {
 
 	// BalanceNotices are the customers' default low-balance lines.
 	BalanceNotices BalanceNoticeConfiguration `json:"balance_notices,omitempty"`
+
+	// AccountingTimezone is the IANA zone the merchant's books are dated in;
+	// never empty (UTC by default).
+	AccountingTimezone string `json:"accounting_timezone,omitempty"`
 }
 
 // BalanceNoticeConfiguration is a merchant's validated default low-balance

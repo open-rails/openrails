@@ -32,6 +32,9 @@ type SubscriptionFilters struct {
 	CanceledAfter  *time.Time
 	CanceledBefore *time.Time
 	ExpiresBefore  *time.Time
+	// ScheduledChangeBefore keeps the subscriptions whose MRR is scheduled to
+	// change by then.
+	ScheduledChangeBefore *time.Time
 	// Dunning keeps the subscriptions past_due or awaiting_method.
 	Dunning bool
 	// Sort picks ListPage's order; Count ignores it.
@@ -688,33 +691,55 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 	}
 	q := r.db.Gen(ctx)
 	var rows []gen.BillingSubscription
-	switch f.Sort {
-	case billing.SubscriptionSortCurrentPeriodEndsAt:
-		rows, err = q.ListSubscriptionsPageByPeriodEnd(ctx, gen.ListSubscriptionsPageByPeriodEndParams{
-			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+	if f.ScheduledChangeBefore != nil {
+		rows, err = r.listScheduledPage(ctx, q, f, gen.ListScheduledSubscriptionsPageParams{
+			MerchantID: mid.UUID(), ScheduledChangeBefore: *f.ScheduledChangeBefore, CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
 			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
 			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 		})
-	case billing.SubscriptionSortCanceledAt:
-		rows, err = q.ListSubscriptionsPageByCanceledAt(ctx, gen.ListSubscriptionsPageByCanceledAtParams{
-			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
-			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
-			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
-		})
-	default:
-		rows, err = q.ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
-			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
-			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
-			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
-		})
+	} else {
+		switch f.Sort {
+		case billing.SubscriptionSortCurrentPeriodEndsAt:
+			rows, err = q.ListSubscriptionsPageByPeriodEnd(ctx, gen.ListSubscriptionsPageByPeriodEndParams{
+				MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+				CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+				CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+				AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+			})
+		case billing.SubscriptionSortCanceledAt:
+			rows, err = q.ListSubscriptionsPageByCanceledAt(ctx, gen.ListSubscriptionsPageByCanceledAtParams{
+				MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+				CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+				CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+				AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+			})
+		default:
+			rows, err = q.ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
+				MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+				CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+				CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+				AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+			})
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
 	return r.manyWithDetails(ctx, rows)
+}
+
+// listScheduledPage is ListPage for a scheduled-change filter, driven by
+// mrr_scheduled's index of open entries.
+func (r *SubscriptionRepo) listScheduledPage(ctx context.Context, q *gen.Queries, f SubscriptionFilters, p gen.ListScheduledSubscriptionsPageParams) ([]gen.BillingSubscription, error) {
+	switch f.Sort {
+	case billing.SubscriptionSortCurrentPeriodEndsAt:
+		return q.ListScheduledSubscriptionsPageByPeriodEnd(ctx, gen.ListScheduledSubscriptionsPageByPeriodEndParams(p))
+	case billing.SubscriptionSortCanceledAt:
+		return q.ListScheduledSubscriptionsPageByCanceledAt(ctx, gen.ListScheduledSubscriptionsPageByCanceledAtParams(p))
+	default:
+		return q.ListScheduledSubscriptionsPage(ctx, p)
+	}
 }
 
 // ListByIDs reads the named subscriptions, newest first.
@@ -739,6 +764,13 @@ func (r *SubscriptionRepo) Count(ctx context.Context, f SubscriptionFilters) (in
 	customer, status, rail, price, err := r.filterArgs(f)
 	if err != nil {
 		return 0, err
+	}
+	if f.ScheduledChangeBefore != nil {
+		return r.db.Gen(ctx).CountScheduledSubscriptions(ctx, gen.CountScheduledSubscriptionsParams{
+			MerchantID: mid.UUID(), ScheduledChangeBefore: *f.ScheduledChangeBefore, CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+		})
 	}
 	return r.db.Gen(ctx).CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
 		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,

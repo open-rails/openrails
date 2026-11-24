@@ -421,5 +421,5 @@ func writeMerchantSubscription(r *httprequest.Request, id uuid.UUID) {
 		writeRefusal(r, err, "failed to load subscription")
 		return
 	}
-	writeSubscription(r, subscriptionView(subscription, r.Clock.Now()))
+	writeMerchantSubscriptionOne(r, subscriptionView(subscription, r.Clock.Now()))
 }

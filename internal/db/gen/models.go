@@ -357,6 +357,17 @@ type BillingCustomerMessage struct {
 	UpdatedAt time.Time
 }
 
+// Each customer's MRR in each currency, as its movements left it: the sum of its subscriptions' recorded MRR, how many add to it, and when it first had any (its cohort).
+type BillingCustomerMrr struct {
+	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
+	Currency      string
+	Mrr           int64
+	Subscriptions int32
+	// When the customer first had MRR in the currency: its cohort.
+	FirstActiveAt *time.Time
+}
+
 // Per-merchant dashboard widget layout: [{id, title, viz (kpi|stat|line|area|bar|donut|table|heading), query, grid{x,y,w,h}, fixed_range}]. Absent row = the health overview built in code for the merchant's profile.
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
@@ -983,6 +994,103 @@ type BillingMoneySetting struct {
 	UsageCollectionDue        bool
 	// When the usage account is next checked: its next bill date, or now once spending crossed its threshold, an admission asked to collect or the merchant's usage terms changed. Null: nothing is pending.
 	UsageDueAt *time.Time
+}
+
+// Movements per currency of the customers who first had MRR in the 15-minute UTC bucket cohort_at, per 15-minute UTC bucket: a read groups both into the merchant's local months, and a cohort's MRR at a month's end is the sum of its buckets through it.
+type BillingMrrCohortFlow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	CohortAt   time.Time
+	BucketAt   time.Time
+	Amount     int64
+	Logos      int64
+}
+
+// MRR flows per currency and 15-minute UTC bucket (billing.mrr_bucket): movements by kind (and churn_voluntary, a part of churn) with their sum, count and logo change, written only at commit. A read groups the buckets into the merchant's local days with AT TIME ZONE; MRR at an instant is mrr_totals less the movements of the buckets from it on.
+type BillingMrrFlow struct {
+	MerchantID uuid.UUID
+	Currency   string
+	BucketAt   time.Time
+	Measure    string
+	Amount     int64
+	Entries    int64
+	Logos      int64
+}
+
+// One change of a customer's MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer's or merchant's cancel), opening (an import or backfill adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.
+type BillingMrrMovement struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	Kind       string
+	Delta      int64
+	MrrBefore  int64
+	MrrAfter   int64
+	// 1 when the customer gains MRR from none, -1 when it loses all, 0 otherwise.
+	LogoDelta int32
+	// The customer's first_active_at in the currency: its cohort.
+	CohortAt  time.Time
+	Cause     string
+	Voluntary *bool
+	// Written by a backfill from current state, not when the change happened.
+	Backfilled bool
+	// The business instant of the change: its writer's, or the end a scheduled churn took effect at.
+	OccurredAt time.Time
+	CreatedAt  time.Time
+}
+
+// Each subscription's part of a movement: its product and price, its change of MRR and whether it began or stopped adding to it. Retention: permanent, never pruned.
+type BillingMrrMovementLine struct {
+	MerchantID      uuid.UUID
+	ID              uuid.UUID
+	MovementID      uuid.UUID
+	SubscriptionID  uuid.UUID
+	ProductID       uuid.UUID
+	PriceID         uuid.UUID
+	Delta           int64
+	MrrBefore       int64
+	MrrAfter        int64
+	SubscriberDelta int32
+	Cause           string
+}
+
+// The change of every product's MRR and subscribers per currency and 15-minute UTC bucket; a product's MRR now is the sum of its buckets.
+type BillingMrrProductFlow struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	BucketAt    time.Time
+	ProductID   uuid.UUID
+	Amount      int64
+	Subscribers int64
+}
+
+// MRR a subscription will lose or gain at a date: churn from a cancellation at period end, contraction or expansion from a scheduled change at its renewal. scheduled until it is effected, reversed (a resume, a canceled change) or superseded (a later cancel or change). At most one is scheduled per subscription. A report counts what was added in a period by scheduled_at and what was reversed, effected or superseded by resolved_at. Retention: permanent, never pruned.
+type BillingMrrScheduled struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	Kind           string
+	// The change of the subscription's MRR it schedules: negative for churn and contraction.
+	MrrDelta int64
+	// When it takes effect: the end a cancellation runs to, or the renewal on or after the scheduled change's date.
+	EffectiveAt       time.Time
+	Cause             string
+	ScheduledChangeID *uuid.UUID
+	Status            string
+	ScheduledAt       time.Time
+	ResolvedAt        *time.Time
+}
+
+// The merchant's MRR now per currency, the customers with any and the subscriptions adding to it: the sums of customer_mrr.
+type BillingMrrTotal struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	Mrr         int64
+	Customers   int64
+	Subscribers int64
 }
 
 // Per card PSP, network, currency and UTC day: settled sales, refunds, chargebacks, fraud chargebacks (reason fraud or unrecognized) and fraud reports, each counted and summed. Triggers on payments, disputes and fraud_reports keep it for every writer, a restore included. currency is empty for a chargeback that named none.
@@ -2171,6 +2279,32 @@ type BillingSubscriptionBillingChange struct {
 	Actor                *string
 	Executor             *string
 	OperationID          *uuid.UUID
+}
+
+// What each subscription adds to MRR now, kept by trg_subscriptions_track_mrr for every writer: its price's MRR for its seats (billing.price_mrr), while it is live or canceled with its end ahead; a pending subscription, a trial and an ended one add 0. The recorded_ columns are what the customer's MRR last counted; a row that differs (dirty) is settled into a movement at commit.
+type BillingSubscriptionMrr struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	ProductID      uuid.UUID
+	PriceID        uuid.UUID
+	Mrr            int64
+	// The subscription counts toward MRR: live, or canceled with its end ahead, and past any trial.
+	Contributes bool
+	// When a cancellation at period end takes the subscription out of MRR; NULL when none is scheduled.
+	EndsAt *time.Time
+	// When time alone next changes the row; openrails.mrr_due takes it then by this column's index.
+	NextChangeAt *time.Time
+	// The business instant of the change not yet recorded, or of the last one recorded: the writer's updated_at, or the end a due change took effect at.
+	ChangedAt time.Time
+	// Why the row last changed; the movement it settles into takes the cause of its largest change.
+	Cause             string
+	RecordedCurrency  string
+	RecordedProductID uuid.UUID
+	RecordedPriceID   uuid.UUID
+	RecordedMrr       int64
+	Dirty             bool
 }
 
 // Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

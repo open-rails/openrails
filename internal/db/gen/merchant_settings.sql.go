@@ -12,7 +12,7 @@ import (
 )
 
 const lockMerchantSettings = `-- name: LockMerchantSettings :one
-SELECT id FROM billing.merchants WHERE id = $1 FOR UPDATE
+SELECT id FROM billing.merchants WHERE id = $1 FOR NO KEY UPDATE
 `
 
 func (q *Queries) LockMerchantSettings(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {

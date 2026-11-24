@@ -209,6 +209,17 @@ func (m *Mock) PortalPriceChangePaid(sub, price string, amount, proration int64)
 	return m.changePrice(sub, price, amount, proration, true)
 }
 
+// PortalCancelAtPeriodEnd is the customer, in Stripe's portal, canceling at
+// the end of the period (cancel true) or undoing that (false); it returns the
+// subscription.
+func (m *Mock) PortalCancelAtPeriodEnd(sub string, cancel bool) Object {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.subs[sub]
+	s["cancel_at_period_end"] = cancel
+	return clone(s)
+}
+
 // RenewSubscription is Stripe billing its subscription for the next period;
 // it returns the invoice.
 func (m *Mock) RenewSubscription(sub string, paid bool) Object {
