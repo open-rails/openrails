@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 477,
+  "scenario_count": 478,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2387,6 +2387,11 @@
       "id": "OR-J45-S02",
       "journey": "J45",
       "name": "An NMI catch-all decline is classified by the issuer's code the Query API reports: a never-retry code waits for a new card and never cancels, a retryable one keeps the schedule"
+    },
+    {
+      "id": "OR-J45-S03",
+      "journey": "J45",
+      "name": "A Stripe renewal Radar blocked is the merchant's refusal and waits for a new card; an issuer's fraudulent decline stays the issuer's"
     }
   ]
 }

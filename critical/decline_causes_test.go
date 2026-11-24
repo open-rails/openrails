@@ -18,6 +18,36 @@ import (
 // Each refusal is stored with what caused it: the customer, the issuer's
 // discretion, suspected fraud, the merchant or gateway, or processing.
 func TestDeclineCauses(t *testing.T) {
+	t.Run("OR-J45-S03/a-stripe-renewal-radar-blocked-is-the-merchants-refusal-not-the-issuers-fraud", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			block  func(*providerLedger)
+			code   string
+			reason billing.DeclineReason
+			action string
+		}{
+			// Radar stops the charge before the network; its error still reads
+			// as a fraudulent decline.
+			{"radar-block-waits-for-a-new-card", func(p *providerLedger) { p.core.SetRadarBlock("4242", "highest_risk_level") }, "highest_risk_level", billing.DeclineBlockedByPSP, "fix_payment_method"},
+			{"issuer-fraud-is-the-issuers", func(p *providerLedger) { p.core.SetDecline("4242", "fraudulent") }, "fraudulent", billing.DeclineFraudulent, "non_recoverable"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				a, p, sub := purchasedMembership(t, 7*24)
+				tc.block(p)
+				a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+				fleet := startFleet(t, a.world)
+				runRegistered(t, fleet, "openrails.billing_pass", 1)
+				rebill := awaitAttempt(t, a, sub.ID, "rebill")
+				require.Equal(t, tc.reason, rebill.Reason)
+				require.Equal(t, tc.action, rebill.Action)
+				require.Equal(t, tc.code, rebill.ResponseCode)
+				if tc.reason == billing.DeclineBlockedByPSP {
+					waiting := subscriptionState(t, a, sub.ID, "awaiting_method")
+					require.True(t, waiting.Dunning.WaitingForNewCard, "a block never cancels the subscription")
+				}
+			})
+		}
+	})
 	t.Run("OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code", func(t *testing.T) {
 		for _, tc := range []struct {
 			name, issuer string

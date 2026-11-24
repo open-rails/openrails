@@ -383,7 +383,8 @@ func (s *StripeService) readEngineIntent(ctx context.Context, p StripeEnginePaym
 	if !stripeEngineID(reference, "pi_") {
 		return pi, false, errors.New("invalid Stripe engine payment reference")
 	}
-	body, status, err := s.stripeGet(ctx, "/v1/payment_intents/"+url.PathEscape(reference), nil)
+	// The latest charge's outcome tells Radar's block from an issuer's decline.
+	body, status, err := s.stripeGet(ctx, "/v1/payment_intents/"+url.PathEscape(reference), url.Values{"expand[]": {"latest_charge"}})
 	if err != nil {
 		return pi, false, errors.New("Stripe engine read failed")
 	}
@@ -451,7 +452,31 @@ func (s *StripeService) engineResult(ctx context.Context, p StripeEnginePaymentP
 		e := pi.LastPaymentError
 		r.AdviceCode, r.NetworkAdviceCode, r.NetworkDeclineCode = strings.TrimSpace(e.AdviceCode), strings.TrimSpace(e.NetworkAdviceCode), strings.TrimSpace(e.NetworkDeclineCode)
 	}
+	if reason := radarBlock(pi.LatestCharge); reason != "" && r.State == StripeEngineDeclined {
+		// Radar stopped it before the network: the block reason is the answer,
+		// not the fraudulent decline it reads as.
+		if r.FailureCode == "canceled" {
+			r.DeclineCode = reason
+		} else {
+			r.FailureCode = reason
+		}
+	}
 	return r, nil
+}
+
+// radarBlock is the block reason of a charge Radar blocked (highest_risk_level,
+// rule, ...), read from an expanded latest_charge; "" otherwise.
+func radarBlock(charge json.RawMessage) string {
+	var ch struct {
+		Outcome struct {
+			Type   string `json:"type"`
+			Reason string `json:"reason"`
+		} `json:"outcome"`
+	}
+	if json.Unmarshal(charge, &ch) != nil || ch.Outcome.Type != "blocked" {
+		return ""
+	}
+	return strings.TrimSpace(ch.Outcome.Reason)
 }
 func (s *StripeService) engineReceipt(ctx context.Context, p StripeEnginePaymentParams, pi stripeEngineIntent) (StripeEngineReceipt, error) {
 	ref := rawID(pi.LatestCharge)

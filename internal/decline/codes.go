@@ -150,9 +150,15 @@ var stripeCodes = map[string]billing.DeclineReason{
 	"revocation_of_authorization":           billing.DeclineStopRecurring,
 	"revocation_of_all_authorizations":      billing.DeclineStopRecurring,
 	"merchant_blacklist":                    billing.DeclineBlockedByPSP,
-	"processing_error":                      billing.DeclineProcessingError,
-	"issuer_not_available":                  billing.DeclineIssuerUnavailable,
-	"duplicate_transaction":                 billing.DeclineDuplicateTransaction,
+	// Radar's block reasons (a charge's outcome.reason when its type is
+	// blocked): the charge never reached the network.
+	"highest_risk_level":               billing.DeclineBlockedByPSP,
+	"elevated_risk_level":              billing.DeclineBlockedByPSP,
+	"rule":                             billing.DeclineBlockedByPSP,
+	"low_probability_of_authorization": billing.DeclineBlockedByPSP,
+	"processing_error":                 billing.DeclineProcessingError,
+	"issuer_not_available":             billing.DeclineIssuerUnavailable,
+	"duplicate_transaction":            billing.DeclineDuplicateTransaction,
 }
 
 // ccbillCodes is CCBill's own BE-nnn vocabulary
