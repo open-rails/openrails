@@ -229,11 +229,15 @@ func resumeStripe(ctx context.Context, r *httprequest.Request, sub *models.Subsc
 	if posture := (writeposture.View{Config: r.State.Config, DB: r.State.DB}).Posture(ctx, sub.MerchantID); posture.ReadOnly() {
 		return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "provider writes are off, so Stripe cannot be told of the resume: "+posture.Reason)
 	}
-	if _, _, err := subscriptions.RequireStripeSecretKey(ctx, r.State.RailConfigs); err != nil {
+	_, key, err := subscriptions.RequireStripeSecretKey(ctx, r.State.RailConfigs)
+	if err != nil {
 		return err
 	}
+	if err := r.State.StripeClients.WriteDisarmed(key); err != nil {
+		return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "the Stripe key cannot write, so Stripe cannot be told of the resume: "+err.Error())
+	}
 	var operation uuid.UUID
-	_, err := r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID,
+	_, err = r.State.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: sub.ID,
 		Within: func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription, canceledAt time.Time) error {
 			store := intents.NewStore(r.State.DB.NewWithPgxTx(tx))
 			// A cancel that never reached Stripe is undone before it is sent.

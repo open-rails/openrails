@@ -3380,6 +3380,7 @@
           "default_payment_method_required",
           "invalid_param",
           "payment_method_stale",
+          "provider_writes_disabled",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
@@ -4236,6 +4237,7 @@
           "default_payment_method_required",
           "invalid_param",
           "payment_method_stale",
+          "provider_writes_disabled",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
