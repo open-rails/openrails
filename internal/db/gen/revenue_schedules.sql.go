@@ -174,7 +174,7 @@ func (q *Queries) GetPurchaseAccessByPayment(ctx context.Context, arg GetPurchas
 
 const listCreditLineReleases = `-- name: ListCreditLineReleases :many
 SELECT t.order_line_id::uuid AS order_line_id, t.currency, t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(t.amount)::bigint AS amount,
-    max(t.effective_at)::timestamptz AS released_at
+    max(t.effective_at)::timestamptz AS released_at, (array_agg(t.id ORDER BY t.effective_at DESC, t.id DESC))[1]::uuid AS last_release_id
 FROM billing.ledger_transfers t
 JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
 WHERE t.merchant_id = $1::uuid AND t.source = 'order_line' AND t.source_id = ANY($2::text[])
@@ -195,11 +195,12 @@ type ListCreditLineReleasesRow struct {
 	RevenueScheduleID uuid.UUID
 	Amount            int64
 	ReleasedAt        time.Time
+	LastReleaseID     uuid.UUID
 }
 
 // What spends of credit released into an order's lines priced in a merchant's
 // own unit: per line and paid currency, the lots' money credited to
-// deferred_revenue under the schedule the spends named.
+// deferred_revenue under the schedule the spends named, and the latest release.
 func (q *Queries) ListCreditLineReleases(ctx context.Context, arg ListCreditLineReleasesParams) ([]ListCreditLineReleasesRow, error) {
 	rows, err := q.db.Query(ctx, listCreditLineReleases, arg.MerchantID, arg.OrderLineIds)
 	if err != nil {
@@ -215,6 +216,7 @@ func (q *Queries) ListCreditLineReleases(ctx context.Context, arg ListCreditLine
 			&i.RevenueScheduleID,
 			&i.Amount,
 			&i.ReleasedAt,
+			&i.LastReleaseID,
 		); err != nil {
 			return nil, err
 		}
@@ -230,7 +232,7 @@ const listCreditLotRevenue = `-- name: ListCreditLotRevenue :many
 SELECT t.revenue_schedule_id, t.order_id, t.order_line_id, sum(CASE
     WHEN t.transfer_type = 'credit_released' THEN t.amount
     WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
-    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    WHEN t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
     ELSE 0 END)::bigint AS held
 FROM billing.ledger_transfers t
 WHERE t.merchant_id = $1::uuid AND t.credit_grant_id = $2::uuid AND t.book = 'general'
@@ -287,8 +289,8 @@ SELECT t.revenue_schedule_id, t.order_id, t.order_line_id,
 FROM billing.ledger_transfers t
 JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
 WHERE t.merchant_id = $1::uuid AND t.credit_grant_id = $2::uuid AND t.book = 'general'
-  AND t.operation = 'purchased_credit_refund'
-  AND (t.source = 'money_recognized' AND t.source_id = $3::text OR t.source = 'money_recognized_restore:' || $3::text)
+  AND (t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' AND t.source_id = $3::text
+    OR t.source = 'money_recognized_restore:' || $3::text)
 GROUP BY t.revenue_schedule_id, t.order_id, t.order_line_id
 ORDER BY t.revenue_schedule_id NULLS LAST
 `
@@ -557,7 +559,7 @@ const listScheduleLotMoney = `-- name: ListScheduleLotMoney :many
 SELECT t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(CASE
     WHEN t.transfer_type = 'credit_released' THEN t.amount
     WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
-    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    WHEN t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
     ELSE 0 END)::bigint AS held
 FROM billing.ledger_transfers t
 WHERE t.merchant_id = $1::uuid AND t.book = 'general' AND t.revenue_schedule_id = ANY($2::uuid[])
@@ -638,7 +640,7 @@ const listUnscheduledCreditReleases = `-- name: ListUnscheduledCreditReleases :m
 SELECT t.order_id::uuid AS order_id, t.order_line_id::uuid AS order_line_id, t.currency, sum(CASE
     WHEN t.transfer_type = 'credit_released' THEN t.amount
     WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
-    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    WHEN t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
     ELSE 0 END)::bigint AS amount
 FROM billing.ledger_transfers t
 WHERE t.merchant_id = $1::uuid AND t.book = 'general' AND t.credit_grant_id IS NOT NULL
@@ -648,7 +650,7 @@ GROUP BY t.order_id, t.order_line_id, t.currency
 HAVING sum(CASE
     WHEN t.transfer_type = 'credit_released' THEN t.amount
     WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
-    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    WHEN t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
     ELSE 0 END) > 0
 ORDER BY t.order_id, t.order_line_id, t.currency
 `

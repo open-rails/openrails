@@ -2310,6 +2310,15 @@
     ],
     "OR-J48-S16": [
       "TestMerchantUnits/OR-J48-S16/a-unit-lines-later-money-adds-to-its-schedule-and-the-audit-fails-money-with-none"
+    ],
+    "OR-J48-S17": [
+      "TestMerchantUnits/OR-J48-S17/a-refund-of-a-pack-at-the-provider-reduces-the-schedules-its-spends-funded"
+    ],
+    "OR-J48-S18": [
+      "TestMerchantUnits/OR-J48-S18/a-packs-chargeback-splits-what-its-spends-earned-between-usage-and-a-schedule"
+    ],
+    "OR-J48-S19": [
+      "TestMerchantUnits/OR-J48-S19/a-chargeback-of-one-currencys-pack-reduces-only-that-currencys-schedule"
     ]
   }
 }

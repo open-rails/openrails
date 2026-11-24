@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -129,16 +128,22 @@ type scheduleLegs struct {
 
 // changeSchedule moves one schedule's funding by its share: a lot
 // reversal's (reduce) or a recovery's, as a payment's reversal moves the
-// schedules it funded (moveFunding). A line not applied yet has no schedule:
-// the share moves its deferred revenue, and the application funds the
-// schedule with what the lots' money holds then.
+// schedules it funded (moveFunding). A recovery's legs are at the won
+// dispute's operations, as a payment's are: its contra and deferred parts
+// each at its own. A line not applied yet has no schedule: the share moves
+// its deferred revenue, and the application funds the schedule with what the
+// lots' money holds then.
 func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce bool, legs scheduleLegs) error {
-	post := func(debit, credit Ref, amount int64, typ TransferType, currency string, product *uuid.UUID, lot bool) error {
+	post := func(debit, credit Ref, amount int64, typ TransferType, op Operation, currency string, product *uuid.UUID, lot bool) error {
 		if amount <= 0 {
 			return nil
 		}
 		customer := legs.lot.Customer
-		p := Posting{Debit: debit, Credit: credit, Amount: amount, Currency: currency, Type: typ, Coord: legs.coord, EffectiveAt: legs.at,
+		coord := legs.coord
+		if op != "" {
+			coord.Operation = op
+		}
+		p := Posting{Debit: debit, Credit: credit, Amount: amount, Currency: currency, Type: typ, Coord: coord, EffectiveAt: legs.at,
 			Customer: &customer, OrderLine: &sh.line, Product: product, RevenueSchedule: &sh.id}
 		if sh.order != uuid.Nil {
 			p.Order = &sh.order
@@ -155,9 +160,9 @@ func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce boo
 	if errors.Is(err, pgx.ErrNoRows) {
 		c := legs.lot.PaidCurrency
 		if reduce {
-			return post(Ref{Type: DeferredRevenue}, legs.cash, sh.amount, legs.deferredType, c, nil, true)
+			return post(Ref{Type: DeferredRevenue}, legs.cash, sh.amount, legs.deferredType, "", c, nil, true)
 		}
-		return post(legs.cash, Ref{Type: DeferredRevenue}, sh.amount, DisputeWon, c, nil, true)
+		return post(legs.cash, Ref{Type: DeferredRevenue}, sh.amount, DisputeWon, OpDisputeWonDeferred, c, nil, true)
 	}
 	if err != nil {
 		return fmt.Errorf("books: lock revenue schedule %s: %w", sh.id, err)
@@ -171,20 +176,20 @@ func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce boo
 		return err
 	}
 	if reduce {
-		if err := post(Ref{Type: legs.contra}, legs.cash, contra, legs.recognizedType, row.Currency, row.ProductID, true); err != nil {
+		if err := post(Ref{Type: legs.contra}, legs.cash, contra, legs.recognizedType, "", row.Currency, row.ProductID, true); err != nil {
 			return err
 		}
-		if err := post(Ref{Type: DeferredRevenue}, legs.cash, deferred, legs.deferredType, row.Currency, row.ProductID, true); err != nil {
+		if err := post(Ref{Type: DeferredRevenue}, legs.cash, deferred, legs.deferredType, "", row.Currency, row.ProductID, true); err != nil {
 			return err
 		}
 	} else {
-		if err := post(legs.cash, Ref{Type: legs.contra}, contra, DisputeWon, row.Currency, row.ProductID, true); err != nil {
+		if err := post(legs.cash, Ref{Type: legs.contra}, contra, DisputeWon, OpDisputeWon, row.Currency, row.ProductID, true); err != nil {
 			return err
 		}
-		if err := post(legs.cash, Ref{Type: DeferredRevenue}, deferred, DisputeWon, row.Currency, row.ProductID, true); err != nil {
+		if err := post(legs.cash, Ref{Type: DeferredRevenue}, deferred, DisputeWon, OpDisputeWonDeferred, row.Currency, row.ProductID, true); err != nil {
 			return err
 		}
-		if err := post(Ref{Type: DeferredRevenue}, Ref{Type: AccountType(row.RevenueAccount)}, earned, RevenueRecognized, row.Currency, row.ProductID, false); err != nil {
+		if err := post(Ref{Type: DeferredRevenue}, Ref{Type: AccountType(row.RevenueAccount)}, earned, RevenueRecognized, OpDisputeWon, row.Currency, row.ProductID, false); err != nil {
 			return err
 		}
 	}
@@ -193,10 +198,10 @@ func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce boo
 
 // fundMore brings a unit line's schedule up to what the lots' money funds of
 // it now, held: money released into it since it was made, already in
-// deferred revenue, at the latest release. The schedule takes it as a
-// recovery would (moveFunding), and what that recognises at once posts at the
-// funding it reaches.
-func (b *Books) fundMore(ctx context.Context, id uuid.UUID, held int64, at time.Time, loc *time.Location) error {
+// deferred revenue, release the latest, at. The schedule takes it as a
+// recovery would (moveFunding), and what that recognises at once posts at
+// that release.
+func (b *Books) fundMore(ctx context.Context, id uuid.UUID, held int64, release uuid.UUID, at time.Time, loc *time.Location) error {
 	row, err := b.q.LockRevenueSchedule(ctx, gen.LockRevenueScheduleParams{MerchantID: b.merchant, ID: id})
 	if err != nil {
 		return fmt.Errorf("books: lock revenue schedule %s: %w", id, err)
@@ -209,7 +214,7 @@ func (b *Books) fundMore(ctx context.Context, id uuid.UUID, held int64, at time.
 		return err
 	}
 	if amount := recognized + earned; amount > 0 {
-		coord := Coord{Operation: OpApplication, Source: "revenue_schedule", SourceID: id.String() + "@funded:" + strconv.FormatInt(s.funded, 10)}
+		coord := Coord{Operation: OpApplication, Source: "revenue_schedule", SourceID: id.String() + "@release:" + release.String()}
 		_, applied, err := b.Post(ctx, Posting{
 			Debit: Ref{Type: DeferredRevenue}, Credit: Ref{Type: AccountType(row.RevenueAccount)}, Amount: amount, Currency: row.Currency, Type: RevenueRecognized,
 			Coord: coord, EffectiveAt: maxTime(at, s.through), Customer: &row.CustomerID, Order: &row.OrderID, OrderLine: &row.OrderLineID, Product: row.ProductID,

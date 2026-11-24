@@ -38,9 +38,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 -- name: ListCreditLineReleases :many
 -- What spends of credit released into an order's lines priced in a merchant's
 -- own unit: per line and paid currency, the lots' money credited to
--- deferred_revenue under the schedule the spends named.
+-- deferred_revenue under the schedule the spends named, and the latest release.
 SELECT t.order_line_id::uuid AS order_line_id, t.currency, t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(t.amount)::bigint AS amount,
-    max(t.effective_at)::timestamptz AS released_at
+    max(t.effective_at)::timestamptz AS released_at, (array_agg(t.id ORDER BY t.effective_at DESC, t.id DESC))[1]::uuid AS last_release_id
 FROM billing.ledger_transfers t
 JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
 WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.source = 'order_line' AND t.source_id = ANY(sqlc.arg(order_line_ids)::text[])
@@ -56,7 +56,7 @@ ORDER BY t.order_line_id, t.currency;
 SELECT t.revenue_schedule_id, t.order_id, t.order_line_id, sum(CASE
     WHEN t.transfer_type = 'credit_released' THEN t.amount
     WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
-    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    WHEN t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
     ELSE 0 END)::bigint AS held
 FROM billing.ledger_transfers t
 WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.credit_grant_id = sqlc.arg(credit_grant_id)::uuid AND t.book = 'general'
@@ -75,8 +75,8 @@ SELECT t.revenue_schedule_id, t.order_id, t.order_line_id,
 FROM billing.ledger_transfers t
 JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
 WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.credit_grant_id = sqlc.arg(credit_grant_id)::uuid AND t.book = 'general'
-  AND t.operation = 'purchased_credit_refund'
-  AND (t.source = 'money_recognized' AND t.source_id = sqlc.arg(reversal_id)::text OR t.source = 'money_recognized_restore:' || sqlc.arg(reversal_id)::text)
+  AND (t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' AND t.source_id = sqlc.arg(reversal_id)::text
+    OR t.source = 'money_recognized_restore:' || sqlc.arg(reversal_id)::text)
 GROUP BY t.revenue_schedule_id, t.order_id, t.order_line_id
 ORDER BY t.revenue_schedule_id NULLS LAST;
 
@@ -87,7 +87,7 @@ ORDER BY t.revenue_schedule_id NULLS LAST;
 SELECT t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(CASE
     WHEN t.transfer_type = 'credit_released' THEN t.amount
     WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
-    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    WHEN t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
     ELSE 0 END)::bigint AS held
 FROM billing.ledger_transfers t
 WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.revenue_schedule_id = ANY(sqlc.arg(revenue_schedule_ids)::uuid[])
@@ -105,7 +105,7 @@ ORDER BY t.revenue_schedule_id;
 SELECT t.order_id::uuid AS order_id, t.order_line_id::uuid AS order_line_id, t.currency, sum(CASE
     WHEN t.transfer_type = 'credit_released' THEN t.amount
     WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
-    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    WHEN t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
     ELSE 0 END)::bigint AS amount
 FROM billing.ledger_transfers t
 WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.book = 'general' AND t.credit_grant_id IS NOT NULL
@@ -115,7 +115,7 @@ GROUP BY t.order_id, t.order_line_id, t.currency
 HAVING sum(CASE
     WHEN t.transfer_type = 'credit_released' THEN t.amount
     WHEN t.operation = 'purchased_credit_refund' AND t.source = 'money_recognized' THEN -t.amount
-    WHEN t.operation = 'purchased_credit_refund' AND t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
+    WHEN t.source LIKE 'money\_recognized\_restore:%' THEN t.amount
     ELSE 0 END) > 0
 ORDER BY t.order_id, t.order_line_id, t.currency;
 

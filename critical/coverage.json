@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 714,
+  "scenario_count": 717,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3041,7 +3041,7 @@
     {
       "id": "OR-J48-S14",
       "journey": "J48",
-      "name": "A chargeback of a pack whose units paid for a 30-day pass takes the consumed share of its cash from the pass's schedule as a price reduction with catch-up, and recognition goes on at the lower price"
+      "name": "A chargeback of a pack whose units paid for a 30-day pass takes the consumed share of its cash from the pass's schedule as a price reduction with catch-up; winning the dispute restores it, its contra and deferred parts at dispute_won and dispute_won_deferred, and recognition resumes at the restored price"
     },
     {
       "id": "OR-J48-S15",
@@ -3051,7 +3051,22 @@
     {
       "id": "OR-J48-S16",
       "journey": "J48",
-      "name": "Money of a lot released into a unit-priced line's schedule after it was made adds to its funding when the order is applied again, and ledger-audit fails money released under a schedule that does not exist"
+      "name": "Money of a lot released into a unit-priced line's schedule after it was made adds to its funding when the order is applied again, also when a chargeback took some back and the funding returns to a level it reached before; ledger-audit fails money released under a schedule that does not exist"
+    },
+    {
+      "id": "OR-J48-S17",
+      "journey": "J48",
+      "name": "A $15 refund at Stripe of a $20 pack of 400 GOLD whose 200 GOLD paid for a 30-day pass takes the 200 left and $5 of the pass's schedule against refunds, as a price reduction with catch-up"
+    },
+    {
+      "id": "OR-J48-S18",
+      "journey": "J48",
+      "name": "A full chargeback of a pack whose units paid $5 of usage and a $10 pass takes the $15 it spent pro rata: the pass's schedule to zero and $5 against usage revenue"
+    },
+    {
+      "id": "OR-J48-S19",
+      "journey": "J48",
+      "name": "A statue paid from a dollar lot and a euro lot: a chargeback of the euro pack reduces the statue's euro schedule alone, and the dollar schedule stands"
     },
     {
       "id": "OR-J53-S01",
