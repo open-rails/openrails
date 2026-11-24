@@ -249,8 +249,10 @@ func TestUsageContracts(t *testing.T) {
 		w := newWorld(t)
 		_, params := usageMeter(t, w.alpha, 100)
 		usageMeter(t, w.beta, 100)
-		customer := billing.CustomerID(uuid.New())
+		customer, own := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 		_, err := w.beta.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "funded"}})
+		require.NoError(t, err)
+		_, err = w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: own, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "funded"}})
 		require.NoError(t, err)
 		// Alpha's correction stops while it holds its usage fence.
 		held, release := make(chan struct{}), make(chan struct{})
@@ -281,6 +283,24 @@ func TestUsageContracts(t *testing.T) {
 		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_locks WHERE locktype = 'relation' AND relation = to_regclass($1::text) AND mode = 'ShareRowExclusiveLock'",
 			pgx.Identifier{w.schema, "usage_daily"}.Sanitize()).Scan(&tableLocks))
 		require.Zero(t, tableLocks, "the correction does not lock usage_daily")
+		// Alpha's own settlement of the meter waits on the fence.
+		settled := make(chan error, 1)
+		go func() {
+			_, err := w.alpha.SyncLeases(t.Context(), billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usageInput(own, "alpha-during-correction", 2))})
+			settled <- err
+		}()
+		fence := "openrails.usage_activity:" + w.alpha.MerchantID().UUID().String() + ":compute"
+		require.Eventually(t, func() bool {
+			var waiting int
+			require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+				AND classid::bigint = (hashtextextended($1, 0) >> 32) & 4294967295 AND objid::bigint = hashtextextended($1, 0) & 4294967295`, fence).Scan(&waiting))
+			return waiting == 1
+		}, 20*time.Second, 20*time.Millisecond, "alpha's settlement waits for its own merchant's correction")
+		select {
+		case err := <-settled:
+			t.Fatalf("alpha's settlement finished while its correction held the fence: %v", err)
+		default:
+		}
 		// Beta settles usage while alpha's correction is open.
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
@@ -291,6 +311,7 @@ func TestUsageContracts(t *testing.T) {
 		balance(t, w.beta, customer, 800, 200, 1000)
 		open.Do(func() { close(release) })
 		require.NoError(t, <-corrected)
+		require.NoError(t, <-settled, "and settles once the correction commits")
 		meter, err := w.alpha.GetMeter(t.Context(), "compute")
 		require.NoError(t, err)
 		require.Equal(t, "corrected-units", meter.ValueProperty)

@@ -786,7 +786,7 @@
     {
       "id": "OR-J24-S36",
       "journey": "J24",
-      "name": "A meter correction fences only its own merchant's usage of the meter's event types: it takes no table lock, and another merchant's usage settles while it is open"
+      "name": "A meter correction fences only its own merchant's usage of the meter's event types: it takes no table lock, its own merchant's settlement waits for it, and another merchant's usage settles while it is open"
     },
     {
       "id": "OR-J25-S01",
