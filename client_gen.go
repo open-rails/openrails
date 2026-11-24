@@ -1278,7 +1278,8 @@ func (c *Client) DismissProposals(ctx context.Context, params billing.DismissPro
 }
 
 // ResolveFinding approves (runs the recommendation) or ignores one open
-// finding.
+// finding. Approving a refund, cancellation or product-access recommendation
+// also needs what that action's own route needs: merchant:customer:manage.
 func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, params billing.ResolveFindingParams) (*billing.FindingResolution, error) {
 	var out billing.FindingResolution
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/findings/{id}/resolve", args: []string{id.String()}, body: params}, &out); err != nil {

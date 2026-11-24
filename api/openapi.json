@@ -13010,7 +13010,7 @@
           "merchant_config"
         ],
         "operationId": "ResolveFinding",
-        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding.",
+        "description": "ResolveFinding approves (runs the recommendation) or ignores one open finding. Approving a refund, cancellation or product-access recommendation also needs what that action's own route needs: merchant:customer:manage.",
         "parameters": [
           {
             "name": "id",

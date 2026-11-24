@@ -1622,6 +1622,9 @@
     ],
     "OR-J07-S08": [
       "TestDirectoryAuthority/OR-J07-S08/erasures-spend-the-destructive-budget-and-name-their-actor"
+    ],
+    "OR-J01-S21": [
+      "TestRoutePermissions/OR-J01-S21/a-config-only-credential-cannot-approve-a-refund"
     ]
   }
 }

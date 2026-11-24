@@ -617,6 +617,34 @@ func inPerson(c billingauth.Identity) bool {
 	return billingauth.Interactive(c) || c.Issuer == billingauth.HostIssuer && c.Subject == hostSubject
 }
 
+// staffCan answers whether the request's admitted staff member or
+// application also holds another staff route's permission, at the merchant
+// this route admitted it for: a handler asks before it runs that route's
+// effect itself (handlers.StaffCan). A name the Authenticator does not know
+// is held by no one.
+func (e *Env) staffCan(r *http.Request, routeKey string) error {
+	other, ok := routeByKey(routeKey)
+	if !ok || !other.Staff() {
+		return errors.Join(auth.ErrUnavailable, fault(routeKey+" is not a staff route"))
+	}
+	staff, admitted := billingauth.StaffFromContext(r.Context())
+	v, verified := billingauth.VerifiedFrom(r.Context())
+	if !admitted || !verified {
+		return billingauth.Refusal(billing.CodeAuthenticationRequired)
+	}
+	root, err := rootScope(r.Context(), e.Auth)
+	if err != nil {
+		return err
+	}
+	switch allowed, err := holds(r.Context(), v, root, staff.Merchant, asked(e.Auth, other.Needs())); {
+	case err != nil:
+		return err
+	case !allowed:
+		return billingauth.Refusal(billing.CodePermissionRequired, "this also needs "+string(other.Needs().Merchant)+" or "+string(other.Needs().Root))
+	}
+	return nil
+}
+
 // routeByKey reads the catalog at request time: the catalog's declarations
 // refer to staffCan, so it cannot read the index statically.
 var routeByKey func(key string) (Route, bool)

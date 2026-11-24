@@ -3,7 +3,9 @@
 package critical_test
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"slices"
@@ -17,7 +19,11 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/stretchr/testify/require"
 )
 
@@ -162,6 +168,45 @@ func TestRoutePermissions(t *testing.T) {
 		}
 		require.Greater(t, checked, 100, "the catalog's gated routes are mounted and probed")
 		t.Logf("probed %d mounted routes of the catalog", checked)
+	})
+	t.Run("OR-J01-S21/a-config-only-credential-cannot-approve-a-refund", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		raise := func(subject string, rec recommend.Recommendation) billing.FindingID {
+			t.Helper()
+			var finding reconcile.FindingRecord
+			require.NoError(t, database.RunInMerchantConn(ctx, func(ctx context.Context) error {
+				var err error
+				finding, err = (&reconcile.PGStore{DB: database, Now: a.clock.Now}).RaiseFinding(ctx, reconcile.RaisedFinding{Type: "consistency.duplicate.ownership",
+					SubjectKey: subject, Severity: reconcile.SeverityHigh, Evidence: map[string]any{recommend.EvidenceKey: rec.Map()}})
+				return err
+			}))
+			return billing.FindingID(finding.ID)
+		}
+		refund := raise("ownership:refund", recommend.CancelAndRefundRec(billing.SubscriptionID{}, billing.PaymentID(uuid.New())))
+		ack := raise("ownership:acknowledge", recommend.Recommendation{Action: recommend.ActionAckResume})
+		before, err := a.alpha.GetFinding(t.Context(), refund)
+		require.NoError(t, err)
+
+		config := a.remote(t, a.alpha.MerchantID(), roleKey(t, a, "config-only", billing.MerchantConfigRead, billing.MerchantConfigManage))
+		_, err = config.ResolveFinding(t.Context(), refund, billing.ResolveFindingParams{Outcome: billing.FindingApprove, Notes: "refund the later purchase"})
+		requireCode(t, err, billing.CodePermissionRequired)
+		after, err := a.alpha.GetFinding(t.Context(), refund)
+		require.NoError(t, err)
+		require.Equal(t, before.Status, after.Status, "a refused approval leaves the finding as it was")
+		// A resolution that touches no customer stays the configuration's.
+		_, err = config.ResolveFinding(t.Context(), ack, billing.ResolveFindingParams{Outcome: billing.FindingApprove, Notes: "acknowledged"})
+		require.NoError(t, err)
+
+		// Holding customer support's manage permission too, the approval runs
+		// its action, which finds no such payment.
+		both := a.remote(t, a.alpha.MerchantID(), roleKey(t, a, "config-and-support", billing.MerchantConfigManage, billing.MerchantCustomerManage))
+		_, err = both.ResolveFinding(t.Context(), refund, billing.ResolveFindingParams{Outcome: billing.FindingApprove, Notes: "refund the later purchase"})
+		var refusal *billing.StatusError
+		require.ErrorAs(t, err, &refusal)
+		require.NotEqual(t, billing.CodePermissionRequired, refusal.Code, refusal.Error())
 	})
 }
 

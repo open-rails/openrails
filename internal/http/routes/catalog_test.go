@@ -3,6 +3,8 @@ package routes
 import (
 	"strings"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/http/handlers"
 )
 
 func declared(t *testing.T, key string) Route {
@@ -56,6 +58,18 @@ func TestCatalogRoutesNameTheirPermission(t *testing.T) {
 		if r.Auth == AuthMerchant || r.Auth == AuthApplication || r.Auth == AuthProvisioning {
 			if names := r.Needs().Names(); len(names) != 2 {
 				t.Errorf("%s: checks %v, want its merchant: and root: names", r.Key(), names)
+			}
+		}
+	}
+}
+
+// Approving a finding's recommendation asks for staff routes that exist and
+// need customer support's manage permission.
+func TestFindingActionsNeedCustomerManage(t *testing.T) {
+	for action, keys := range handlers.FindingActionRoutes {
+		for _, key := range keys {
+			if r := declared(t, key); r.Needs() != needAdminUpdate {
+				t.Errorf("%s: %s checks %v, want %v", action, key, r.Needs().Names(), needAdminUpdate.Names())
 			}
 		}
 	}

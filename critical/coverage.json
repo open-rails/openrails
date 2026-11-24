@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 508,
+  "scenario_count": 509,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1177,6 +1177,11 @@
       "id": "OR-J01-S20",
       "journey": "J01",
       "name": "Every catalog route refuses a bound credential without its permission and admits its root twin"
+    },
+    {
+      "id": "OR-J01-S21",
+      "journey": "J01",
+      "name": "A configuration-only credential cannot approve a finding's refund, cancellation or access action"
     },
     {
       "id": "OR-J22-S05",

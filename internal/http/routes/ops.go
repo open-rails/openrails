@@ -3,6 +3,7 @@ package routes
 import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/http/router"
 )
 
 // opsRoutes is how a merchant watches its books: findings (the one inbox),
@@ -61,7 +62,9 @@ var opsRoutes = []Route{
 			"signed in, or the in-process host, dismisses.",
 		Request: billing.DismissProposalsParams{}, Responses: []Reply{{200, billing.ProposalResults{}}}, Errors: codes("invalid_param", "person_required", "service_unavailable"), Handler: h(handlers.DismissProposals)},
 	{Method: POST, Path: "/v1/merchant/findings/{id}/resolve", Group: MerchantConfig, Auth: AuthMerchant, Name: "ResolveFinding", Level: LevelUpdate,
-		Args:    []any{billing.FindingID{}},
-		Doc:     "ResolveFinding approves (runs the recommendation) or ignores one open finding.",
-		Request: billing.ResolveFindingParams{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("finding_action_failed", "finding_not_actionable", "finding_requires_merchant_config", "idempotency_key_reused", "invalid_param", "payment_not_found", "payment_not_refundable", "provider_cancel_held", "rebill_terms_committed", "refund_failed", "refund_rail_unavailable", "refund_unsupported", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminResolveFinding)},
+		Args: []any{billing.FindingID{}},
+		Doc: "ResolveFinding approves (runs the recommendation) or ignores one open finding. Approving a " +
+			"refund, cancellation or product-access recommendation also needs what that action's own route " +
+			"needs: merchant:customer:manage.",
+		Request: billing.ResolveFindingParams{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("finding_action_failed", "finding_not_actionable", "finding_requires_merchant_config", "idempotency_key_reused", "invalid_param", "payment_not_found", "payment_not_refundable", "provider_cancel_held", "rebill_terms_committed", "refund_failed", "refund_rail_unavailable", "refund_unsupported", "resource_conflict", "resource_not_found", "service_unavailable"), Bind: func(e *Env) router.Handler { return h(handlers.AdminResolveFinding(e.staffCan)) }},
 }
