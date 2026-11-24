@@ -59,6 +59,16 @@ func TestIssuerCodeRefinesOnlyUnspecificReasons(t *testing.T) {
 	}
 }
 
+// The issuer's code is read before a postal-code mismatch explains a generic
+// decline; the migration's backfill reads stored rows the same way.
+func TestIssuerCodeComesBeforeTheZIPMismatch(t *testing.T) {
+	for issuer, want := range map[string]billing.DeclineReason{"51": billing.DeclineInsufficientFunds, "05": billing.DeclineIncorrectZip, "": billing.DeclineIncorrectZip} {
+		if r := ClassifyEvidence(Evidence{Rail: "nmi", Code: "200", IssuerCode: issuer, AVS: "N"}); r.Reason != want {
+			t.Errorf("NMI 200, issuer %q, AVS N: %s, want %s", issuer, r.Reason, want)
+		}
+	}
+}
+
 func TestCauseDecidesOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		rail, code string

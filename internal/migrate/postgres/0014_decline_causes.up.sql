@@ -41,9 +41,10 @@ FROM (VALUES
 ) AS m (code, reason)
 WHERE a.rail = 'stripe' AND a.reason = 'unknown' AND a.response_code = m.code;
 
--- The issuer's code names the cause of a generic decline.
-UPDATE billing.payment_attempts a SET reason = m.reason
-FROM (VALUES
+-- The issuer's code names the cause of a generic decline, as the classifier
+-- reads it now: before a postal-code mismatch is taken for the cause.
+CREATE TEMPORARY TABLE issuer_reasons (code text PRIMARY KEY, reason text NOT NULL);
+INSERT INTO issuer_reasons VALUES
     ('01', 'call_issuer'), ('02', 'call_issuer'), ('03', 'merchant_config'), ('58', 'merchant_config'),
     ('04', 'pickup_card'), ('07', 'pickup_card'), ('05', 'do_not_honor'),
     ('12', 'transaction_not_allowed'), ('57', 'transaction_not_allowed'), ('93', 'transaction_not_allowed'),
@@ -54,9 +55,16 @@ FROM (VALUES
     ('59', 'suspected_fraud'), ('61', 'over_limit'), ('65', 'over_limit'), ('62', 'restricted_card'),
     ('63', 'security_violation'), ('82', 'incorrect_cvc'), ('N7', 'incorrect_cvc'), ('1A', 'authentication_required'),
     ('91', 'issuer_unavailable'), ('94', 'duplicate_transaction'), ('96', 'processing_error'),
-    ('R0', 'stop_recurring'), ('R1', 'stop_recurring'), ('R3', 'stop_recurring')
-) AS m (code, reason)
+    ('R0', 'stop_recurring'), ('R1', 'stop_recurring'), ('R3', 'stop_recurring');
+UPDATE billing.payment_attempts a SET reason = m.reason
+FROM issuer_reasons m
 WHERE a.reason IN ('generic_decline', 'do_not_honor', 'unknown') AND upper(a.issuer_code) = m.code AND a.reason <> m.reason;
+UPDATE billing.payment_attempts a SET reason = m.reason
+FROM issuer_reasons m
+WHERE a.reason = 'incorrect_zip' AND upper(a.issuer_code) = m.code
+  AND m.reason NOT IN ('generic_decline', 'do_not_honor', 'incorrect_number')
+  AND ((a.rail = 'nmi' AND a.response_code IN ('200', '201', '260'))
+    OR (a.rail = 'stripe' AND a.response_code IN ('generic_decline', 'card_declined', 'do_not_honor', 'no_action_taken', 'do_not_try_again')));
 
 UPDATE billing.payment_attempts SET outcome = 'approved' WHERE category = 'approved';
 UPDATE billing.payment_attempts a SET decline_cause = COALESCE((SELECT c.cause FROM decline_causes c WHERE c.reason = a.reason), 'unknown')
@@ -113,3 +121,4 @@ ALTER TABLE billing.nmi_history_months
 COMMENT ON TABLE billing.nmi_history_months IS 'Authorizations NMI answered per PSP, month_at (the month''s first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and answer: a refusal''s reason from the one classifier, with its outcome and decline_cause, or an approval (reason empty). A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.';
 
 DROP TABLE decline_causes;
+DROP TABLE issuer_reasons;

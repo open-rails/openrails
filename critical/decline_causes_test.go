@@ -115,6 +115,10 @@ func TestDeclineCauses(t *testing.T) {
 			"issuer-51":       {"nmi", "issuer_soft", "generic_decline", "retry", "200", "51"},
 			"issuer-05":       {"nmi", "issuer_soft", "do_not_honor", "retry", "201", "05"},
 			"processing":      {"stripe", "system_error", "processing_error", "retry", "processing_error", ""},
+			// A postal-code mismatch read as the cause of NMI's 200; the issuer's
+			// code says what it was, unless it says no more than do not honor.
+			"zip-issuer-51": {"nmi", "card_data", "incorrect_zip", "fix_payment_method", "200", "51"},
+			"zip-issuer-05": {"nmi", "card_data", "incorrect_zip", "fix_payment_method", "200", "05"},
 		}
 		ids := map[string]uuid.UUID{}
 		for step, r := range rows {
@@ -143,6 +147,8 @@ func TestDeclineCauses(t *testing.T) {
 			"issuer-51":       {"declined", "customer", "insufficient_funds", "retry"},
 			"issuer-05":       {"declined", "issuer", "do_not_honor", "retry"},
 			"processing":      {"error", "processing", "processing_error", "retry"},
+			"zip-issuer-51":   {"declined", "customer", "insufficient_funds", "fix_payment_method"},
+			"zip-issuer-05":   {"declined", "customer", "incorrect_zip", "fix_payment_method"},
 		} {
 			var outcome, cause, reason, action string
 			require.NoError(t, pool.QueryRow(ctx, `SELECT outcome, COALESCE(decline_cause, ''), COALESCE(reason, ''), COALESCE(action, '') FROM `+table("payment_attempts")+` WHERE id = $1`,
