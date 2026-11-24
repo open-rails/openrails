@@ -1,6 +1,7 @@
 package decline
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -52,6 +53,19 @@ var visaCategories = func() map[string]int {
 	}
 	return m
 }()
+
+// VisaCategoryCodes are the issuer codes of Visa's categories 1 to 3; every
+// other code is 4.
+func VisaCategoryCodes() map[int][]string {
+	out := map[int][]string{}
+	for code, category := range visaCategories {
+		out[category] = append(out[category], code)
+	}
+	for _, codes := range out {
+		slices.Sort(codes)
+	}
+	return out
+}
 
 // VisaCategory is Visa's category of an issuer response code: 1 never
 // approve, 2 cannot approve now, 3 fix the data, 4 any other; 0 without a

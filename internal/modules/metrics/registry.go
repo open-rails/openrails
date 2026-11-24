@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -199,7 +200,7 @@ var Dimensions = []Dimension{
 	{Name: "charge", Description: "priced usage: charged (billed to the customer) | forgiven (failed usage the customer's grace absorbed)", Values: []string{"charged", "forgiven"}},
 	{Name: "rate_card", Description: "metered event type (usage_daily.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
-	{Name: "token_type", Description: "credential form presented at charge time: network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); attempt_failure_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
+	{Name: "token_type", Description: "credential form presented at charge time: network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); authorization_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
 	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},
 	{Name: "entitlement", Description: "entitlement key string (e.g. premium)"},
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
@@ -215,7 +216,11 @@ var Dimensions = []Dimension{
 	{Name: "issuer_code", Description: "the issuer's raw answer (NMI processor_response_code); empty until enriched"},
 	{Name: "avs_result", Description: "AVS result letter or check (empty when absent)"},
 	{Name: "cvv_result", Description: "CVV result letter or check (empty when absent)"},
-	{Name: "card_bin", Description: "card BIN (first 6-8 digits; empty until known)"},
+	{Name: "card_bin", Description: "card BIN (first 6-8 digits; empty until known): the issuing bank's range"},
+	{Name: "advice_code", Description: "the PSP's advice on a refusal, verbatim (Stripe advice_code: do_not_try_again, confirm_card_data, try_again_later; empty otherwise)"},
+	{Name: "network_advice_code", Description: "the card network's advice on a refusal, verbatim (Mastercard's Merchant Advice Code: 01 new card data, 02 try later, 03 do not try again, 21 payment canceled, 24-30 retry after; empty otherwise)"},
+	{Name: "visa_category", Description: "Visa's category of a refused Visa card's issuer code: 1 never approve | 2 cannot approve now | 3 fix the data | 4 other (empty on approvals, without an issuer code or on another brand)", Values: []string{"", "1", "2", "3", "4"}},
+	{Name: "network_transaction_id", Description: "whether a charge on a stored credential sent the network transaction id of its storing transaction: sent (Stripe links its own) | missing | none (no stored credential cited: a new card or the storing charge); on rebills the first attempt's, empty without one", Values: []string{"sent", "missing", "none"}},
 	{Name: "first_outcome", Description: "a rebill cycle's first outcome: approved | declined | refused | error | missed | pending (nothing yet)", Values: []string{"approved", "declined", "refused", "error", "missed", "pending"}},
 	{Name: "first_decline_cause", Description: "the decline cause of a cycle's failed first attempt (empty otherwise)", Values: append([]string{""}, declineCauseValues()...)},
 	{Name: "first_failure_reason", Description: "the decline reason of a cycle's failed first attempt (empty otherwise)"},
@@ -441,24 +446,28 @@ var families = map[Family]familySpec{
 		From:     `billing.payment_attempts a`,
 		TimeExpr: `a.attempted_at`,
 		DimExprs: map[string]string{
-			"currency":      `COALESCE(a.currency, '')`,
-			"rail":          `a.rail`,
-			"psp":           `COALESCE('psp_' || a.psp_id::text, '')`,
-			"owner":         `a.owner`,
-			"kind":          `a.kind`,
-			"card_entry":    `a.card_entry`,
-			"source":        `a.source`,
-			"observed_via":  `a.observed_via`,
-			"decline_cause": `COALESCE(a.decline_cause, '')`,
-			"reason":        `COALESCE(a.reason, '')`,
-			"response_code": `COALESCE(a.response_code, '')`,
-			"issuer_code":   `COALESCE(a.issuer_code, '')`,
-			"avs_result":    `COALESCE(a.avs_result, '')`,
-			"cvv_result":    `COALESCE(a.cvv_result, '')`,
-			"card_brand":    `COALESCE(a.card_brand, '')`,
-			"card_bin":      `COALESCE(a.card_bin, '')`,
-			"token_type":    `COALESCE(a.token_type, 'unknown')`,
-			"outcome":       `a.outcome`,
+			"currency":               `COALESCE(a.currency, '')`,
+			"rail":                   `a.rail`,
+			"psp":                    `COALESCE('psp_' || a.psp_id::text, '')`,
+			"owner":                  `a.owner`,
+			"kind":                   `a.kind`,
+			"card_entry":             `a.card_entry`,
+			"source":                 `a.source`,
+			"observed_via":           `a.observed_via`,
+			"decline_cause":          `COALESCE(a.decline_cause, '')`,
+			"reason":                 `COALESCE(a.reason, '')`,
+			"response_code":          `COALESCE(a.response_code, '')`,
+			"issuer_code":            `COALESCE(a.issuer_code, '')`,
+			"avs_result":             `COALESCE(a.avs_result, '')`,
+			"cvv_result":             `COALESCE(a.cvv_result, '')`,
+			"card_brand":             `COALESCE(a.card_brand, '')`,
+			"card_bin":               `COALESCE(a.card_bin, '')`,
+			"token_type":             `COALESCE(a.token_type, 'unknown')`,
+			"outcome":                `a.outcome`,
+			"advice_code":            `COALESCE(a.advice_code, '')`,
+			"network_advice_code":    `COALESCE(a.network_advice_code, '')`,
+			"visa_category":          visaCategory("a"),
+			"network_transaction_id": networkTransactionID("a"),
 		},
 		DimValues: map[string][]string{
 			"kind":    {"verify", "initial", "upgrade", "rebill", "dunning_retry", "customer_retry", "collection"},
@@ -484,22 +493,26 @@ var families = map[Family]familySpec{
 		From:     rebillCyclesFrom,
 		TimeExpr: `cy.due_at`,
 		DimExprs: map[string]string{
-			"currency":             `cy.currency`,
-			"rail":                 `cy.rail`,
-			"psp":                  `COALESCE('psp_' || cy.psp_id::text, '')`,
-			"owner":                `cy.owner`,
-			"outcome":              rebillOutcome,
-			"first_outcome":        `cy.first_outcome`,
-			"first_decline_cause":  `COALESCE(cy.first_cause, '')`,
-			"first_failure_reason": `COALESCE(cy.first_reason, '')`,
-			"miss_reason":          `COALESCE(cy.miss_reason, '')`,
-			"recovered_by":         `cy.recovered_by`,
+			"currency":               `cy.currency`,
+			"rail":                   `cy.rail`,
+			"psp":                    `COALESCE('psp_' || cy.psp_id::text, '')`,
+			"owner":                  `cy.owner`,
+			"outcome":                rebillOutcome,
+			"first_outcome":          `cy.first_outcome`,
+			"first_decline_cause":    `COALESCE(cy.first_cause, '')`,
+			"card_brand":             `COALESCE(cy.first_card_brand, '')`,
+			"card_bin":               `COALESCE(cy.first_card_bin, '')`,
+			"token_type":             `COALESCE(cy.first_token_type, 'unknown')`,
+			"network_transaction_id": `COALESCE(cy.first_transaction_link, '')`,
+			"first_failure_reason":   `COALESCE(cy.first_reason, '')`,
+			"miss_reason":            `COALESCE(cy.miss_reason, '')`,
+			"recovered_by":           `cy.recovered_by`,
 			"recovery_attempt": `CASE WHEN NOT cy.first_failed OR cy.won_ordinal IS NULL THEN ''
 				WHEN cy.won_ordinal >= 5 THEN '5+' ELSE cy.won_ordinal::text END`,
 			"days_to_recover": `CASE WHEN NOT cy.first_failed OR cy.won_at IS NULL THEN ''
 				ELSE floor(EXTRACT(EPOCH FROM cy.won_at - COALESCE(cy.missed_at, cy.first_at)) / 86400)::bigint::text END`,
 		},
-		DimValues: map[string][]string{"outcome": {"approved", "recovered", "lost", "open"}},
+		DimValues: map[string][]string{"outcome": {"approved", "recovered", "lost", "open"}, "network_transaction_id": {"", "sent", "missing", "none"}},
 	},
 	FamFindings: {
 		Kind: "snapshot",
@@ -568,6 +581,7 @@ var rebillCycles = fmt.Sprintf(`(SELECT c.merchant_id, c.id, c.subscription_id, 
 // (the dunning window is at most 14). ListRenewals derives the same facts.
 var rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason,
 		f.outcome AS first_attempt_outcome, f.decline_cause AS first_cause, f.reason AS first_reason, f.attempted_at AS first_at,
+		f.card_brand AS first_card_brand, f.card_bin AS first_card_bin, f.token_type AS first_token_type, f.transaction_link AS first_transaction_link,
 		w.attempted_at AS won_at, w.ordinal AS won_ordinal,
 		(c.missed_at IS NOT NULL OR COALESCE(f.outcome <> 'approved', false)) AS first_failed,
 		CASE WHEN c.missed_at IS NOT NULL THEN 'missed'
@@ -583,7 +597,8 @@ var rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, 
 			WHEN w.kind = 'customer_retry' THEN 'customer_retry'
 			ELSE 'dunning_retry' END AS recovered_by
 	FROM ` + rebillCycles + ` c
-	LEFT JOIN LATERAL (SELECT a.outcome, a.decline_cause, a.reason, a.attempted_at FROM billing.payment_attempts a
+	LEFT JOIN LATERAL (SELECT a.outcome, a.decline_cause, a.reason, a.attempted_at, a.card_brand, a.card_bin, a.token_type,
+			` + networkTransactionID("a") + ` AS transaction_link FROM billing.payment_attempts a
 		WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
 	LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id,
 			(SELECT count(*) FROM billing.payment_attempts b
@@ -644,9 +659,9 @@ func quoted(values []string) string {
 
 // Dimension sets.
 var (
-	attemptDims     = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "decline_cause", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"}
+	attemptDims     = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "decline_cause", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type", "advice_code", "network_advice_code", "visa_category", "network_transaction_id"}
 	purchaseDims    = []string{"currency", "rail", "psp", "owner", "card_entry"}
-	cycleDims       = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_decline_cause", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
+	cycleDims       = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_decline_cause", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover", "card_brand", "card_bin", "token_type", "network_transaction_id"}
 	nmiHistDims     = []string{"psp", "nmi_kind", "decline_cause", "reason"}
 	cashDims        = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "kind", "discount_code"}
 	usageDims       = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
@@ -767,7 +782,7 @@ var declared = []Measure{
 		Dims:        subscriptionDim},
 	// --- payment health: one measure per funnel, its rates slice it ---------------
 	{Name: "attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count", Direction: Neutral,
-		Description: "authorizations a PSP answered (card verifications, sales, rebills and retries), by outcome: approved or declined",
+		Description: "authorizations a PSP answered (card verifications, sales, rebills and retries), by outcome (approved, declined, refused, error) and decline_cause; the decline mix is attempts by decline_cause with outcome declined",
 		Formula:     "COUNT(payment attempts)",
 		Agg:         count(""),
 		Dims:        with(attemptDims, "outcome")},
@@ -775,6 +790,14 @@ var declared = []Measure{
 		Num: "attempts", NumSlice: Slice{"outcome": {"declined", "refused", "error"}}, Den: "attempts",
 		Description: "declined / all authorizations; the new-card decline rate is kind in (verify, initial) with card_entry=new",
 		Formula:     "attempts(declined) / attempts"},
+	{Name: "authorization_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "attempts", NumSlice: Slice{"outcome": {"approved"}}, Den: "attempts", DenSlice: Slice{"outcome": {"approved", "declined"}},
+		Description: "approved / authorizations the issuer answered; refusals by the merchant or its gateway and errors are left out. kind=rebill is each renewal's first try, kind in (initial, rebill) Visa's first attempts",
+		Formula:     "attempts(approved) / attempts(approved, declined)"},
+	{Name: "issuer_discretion_decline_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
+		Num: "attempts", NumSlice: Slice{"outcome": {"declined"}, "decline_cause": {"issuer", "fraud"}}, Den: "attempts", DenSlice: Slice{"outcome": {"approved", "declined"}},
+		Description: "declines at the issuer's discretion (do not honor, generic, not permitted, restricted, suspected fraud) / authorizations the issuer answered",
+		Formula:     "attempts(declined: issuer, fraud) / attempts(approved, declined)"},
 	{Name: "purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Direction: Neutral,
 		Description: "purchases (a buyer's attempts on one order or card save) started in the bucket, by outcome as of the range end: approved at the first try, recovered after a failure, failed (no approval and quiet for an hour), open",
 		Formula:     "COUNT(purchases)",
@@ -789,6 +812,10 @@ var declared = []Measure{
 		Formula:     "COUNT(rebill cycles)",
 		Agg:         count(""),
 		Dims:        with(cycleDims, "outcome")},
+	{Name: "first_try_rebill_approval_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "rebills", NumSlice: Slice{"first_outcome": {"approved"}}, Den: "rebills", DenSlice: Slice{"first_outcome": {"approved", "declined", "refused", "error"}},
+		Description: "renewals whose first attempt was approved / renewals with a first attempt, by the period that came due; a missed renewal is rebills by miss_reason",
+		Formula:     "rebills(first_outcome approved) / rebills(first_outcome approved, declined, refused, error)"},
 	{Name: "rebill_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
 		Num: "rebills", NumSlice: Slice{"outcome": {"approved", "recovered"}}, Den: "rebills", DenSlice: Slice{"outcome": {"approved", "recovered", "lost"}},
 		Description: "collected / closed rebill cycles: the share of renewals that came due and were paid",
@@ -895,7 +922,7 @@ var declared = []Measure{
 		Expr:        `COALESCE(SUM(whd.drift), 0)::bigint`,
 		Dims:        webhookDims},
 	{Name: "nmi_history_authorizations", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count", Group: GroupOps, Direction: Neutral,
-		Description: "authorizations NMI answered, read daily from its transaction history (card verifications, one-off sales and NMI-scheduled rebills, whoever sent them), by outcome: approved or declined; dated by month",
+		Description: "authorizations NMI answered, read daily from its transaction history (card verifications, one-off sales and NMI-scheduled rebills, whoever sent them), by outcome (approved, declined, refused, error) and decline_cause; dated by month",
 		Formula:     "SUM(authorizations in NMI's history)",
 		Agg:         sum(`h.authorizations`, ""),
 		Dims:        with(nmiHistDims, "outcome")},
@@ -950,14 +977,13 @@ var Removed = map[string]Retired{
 }
 
 // RemovedDimensions names each retired dimension's replacement.
-var RemovedDimensions = map[string]string{"attempt_kind": "kind"}
+var RemovedDimensions = map[string]string{"attempt_kind": "kind", "category": "decline_cause", "first_failure_category": "first_decline_cause"}
 
 // Deferred names the measures later phases build (MRR movements, retention,
-// authorization health, the books, trials); naming one is refused as planned.
+// the books, trials); naming one is refused as planned.
 var Deferred = []string{
 	"mrr_movements", "subscriber_movements", "subscribers", "scheduled_mrr", "subscriber_churn_rate",
 	"nrr", "grr", "cohort_retention", "arpa", "ltv", "mrr_at_risk", "at_risk_recovery_rate",
-	"authorization_rate", "first_try_rebill_approval_rate", "issuer_discretion_decline_rate",
 	"recognized_revenue", "balance", "trials", "trial_conversion_rate", "revenue_nrr",
 }
 
@@ -1160,6 +1186,23 @@ func (m *Measure) components() []*Measure {
 }
 
 // declineReasonValues are the reason dimension's values.
+// visaCategory is Visa's category of a declined Visa row's issuer code.
+func visaCategory(alias string) string {
+	in := func(codes []string) string { return "('" + strings.Join(codes, "', '") + "')" }
+	codes := decline.VisaCategoryCodes()
+	return fmt.Sprintf(`CASE WHEN %[1]s.outcome = 'approved' OR %[1]s.card_brand IS DISTINCT FROM 'visa' OR %[1]s.issuer_code IS NULL THEN ''
+		WHEN upper(btrim(%[1]s.issuer_code)) IN %[2]s THEN '1' WHEN upper(btrim(%[1]s.issuer_code)) IN %[3]s THEN '2'
+		WHEN upper(btrim(%[1]s.issuer_code)) IN %[4]s THEN '3' ELSE '4' END`, alias, in(codes[1]), in(codes[2]), in(codes[3]))
+}
+
+// networkTransactionID is whether a row's stored-credential charge cited
+// its storing transaction: an initial transaction id sent, or a Stripe card
+// Stripe stored and links itself.
+func networkTransactionID(alias string) string {
+	return fmt.Sprintf(`CASE WHEN %[1]s.mandate_id IS NULL THEN 'none'
+		WHEN %[1]s.sent_initial_transaction_id IS NOT NULL OR %[1]s.rail = 'stripe' THEN 'sent' ELSE 'missing' END`, alias)
+}
+
 func attemptOutcomeValues() []string {
 	var out []string
 	for _, o := range billing.AttemptOutcomes() {

@@ -122,3 +122,28 @@ COMMENT ON TABLE billing.nmi_history_months IS 'Authorizations NMI answered per 
 
 DROP TABLE decline_causes;
 DROP TABLE issuer_reasons;
+
+-- Saved dashboards drop every widget naming a dimension decline_cause
+-- renamed; a layout left without widgets is deleted, so its merchant gets the
+-- health overview.
+WITH widgets AS (
+    SELECT c.merchant_id, w.widget, w.position,
+        COALESCE(w.widget #> '{query,by}' ?| ARRAY['category', 'first_failure_category'], false)
+            OR COALESCE(w.widget #> '{query,filters}' ?| ARRAY['category', 'first_failure_category'], false) AS stale
+    FROM billing.dashboard_configs c
+    CROSS JOIN LATERAL jsonb_array_elements(c.layout) WITH ORDINALITY AS w(widget, position)
+    WHERE jsonb_typeof(c.layout) = 'array'
+), cleaned AS (
+    SELECT merchant_id, COALESCE(jsonb_agg(widget ORDER BY position) FILTER (WHERE NOT stale), '[]'::jsonb) AS layout
+    FROM widgets
+    GROUP BY merchant_id
+    HAVING bool_or(stale)
+), emptied AS (
+    DELETE FROM billing.dashboard_configs c
+    USING cleaned k
+    WHERE c.merchant_id = k.merchant_id AND k.layout = '[]'::jsonb
+)
+UPDATE billing.dashboard_configs c
+SET layout = k.layout, updated_at = now()
+FROM cleaned k
+WHERE c.merchant_id = k.merchant_id AND k.layout <> '[]'::jsonb;

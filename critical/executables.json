@@ -1554,6 +1554,37 @@
       "TestDeclineCauses/OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card/stripe-confirm-card-data",
       "TestDeclineCauses/OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card/mastercard-40-non-reloadable-prepaid",
       "TestDeclineCauses/OR-J45-S06/new-card-data-and-cards-that-wont-recur-wait-for-a-new-card/mastercard-41-single-use-virtual-card"
+    ],
+    "OR-J45-S01": [
+      "TestDeclineCauses/OR-J45-S01/each-refusal-is-stored-with-its-outcome-cause-and-advice",
+      "TestDeclineCauses/OR-J45-S01/each-refusal-is-stored-with-its-outcome-cause-and-advice/insufficient-funds-is-the-customers",
+      "TestDeclineCauses/OR-J45-S01/each-refusal-is-stored-with-its-outcome-cause-and-advice/do-not-honor-is-the-issuers-discretion",
+      "TestDeclineCauses/OR-J45-S01/each-refusal-is-stored-with-its-outcome-cause-and-advice/a-stolen-card-is-fraud",
+      "TestDeclineCauses/OR-J45-S01/each-refusal-is-stored-with-its-outcome-cause-and-advice/a-radar-block-is-refused-by-the-merchant",
+      "TestDeclineCauses/OR-J45-S01/each-refusal-is-stored-with-its-outcome-cause-and-advice/a-processing-error-is-an-error"
+    ],
+    "OR-J45-S07": [
+      "TestDeclineCauses/OR-J45-S07/authorization-rates-the-decline-mix-and-their-cuts-read-the-stored-answers"
+    ],
+    "OR-J45-S08": [
+      "TestDeclineCauses/OR-J45-S08/nmi-history-months-carry-each-answers-outcome-and-cause"
+    ],
+    "OR-J45-S09": [
+      "TestDeclineCauses/OR-J45-S09/the-migration-classifies-existing-attempts-and-history-from-their-stored-codes"
+    ],
+    "OR-J45-S10": [
+      "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers",
+      "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers/an-issuers-malfunction-is-not-ours",
+      "TestDeclineCauses/OR-J45-S10/the-system-errors-finding-counts-the-rails-own-errors-not-the-issuers/a-processor-error-is"
+    ],
+    "OR-J45-S11": [
+      "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code",
+      "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code/a-never-retry-code-behind-200-waits-for-a-new-card",
+      "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code/a-lost-answer-takes-the-issuers-code-from-the-order-read",
+      "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code/a-failed-issuer-read-keeps-nmis-own-code"
+    ],
+    "OR-J45-S12": [
+      "TestDeclineCauses/OR-J45-S12/an-issuer-that-keeps-deferring-ends-the-case-at-the-next-renewal"
     ]
   }
 }

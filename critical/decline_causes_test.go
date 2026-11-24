@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -24,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/migrate"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
+	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
@@ -103,7 +105,7 @@ func TestDeclineCauses(t *testing.T) {
 		// Rows without their parents: the foreign keys are not under test.
 		_, err = pool.Exec(ctx, `DO $$ DECLARE c record; BEGIN
 			FOR c IN SELECT conrelid::regclass AS t, conname FROM pg_constraint WHERE contype = 'f' AND connamespace = '`+schema+`'::regnamespace
-				AND conrelid::regclass::text LIKE ANY (ARRAY['%payment_attempts', '%nmi_history_months'])
+				AND conrelid::regclass::text LIKE ANY (ARRAY['%payment_attempts', '%nmi_history_months', '%dashboard_configs'])
 			LOOP EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', c.t, c.conname); END LOOP; END $$`)
 		require.NoError(t, err)
 		merchant, customer, psp := uuid.New(), uuid.New(), uuid.New()
@@ -138,8 +140,32 @@ func TestDeclineCauses(t *testing.T) {
 				merchant, psp, month, h.kind, h.category, h.reason, h.n)
 			require.NoError(t, err)
 		}
+		// Saved dashboards naming a dimension decline_cause renamed.
+		widget := func(id string, q billing.QueryMetricsParams) billing.DashboardWidget {
+			return billing.DashboardWidget{ID: id, Title: id, Viz: "line", Grid: billing.DashboardGrid{W: 6, H: 4}, Query: q}
+		}
+		kept := widget("cash", billing.QueryMetricsParams{Measures: []string{"cash"}})
+		emptied := uuid.New()
+		for owner, widgets := range map[uuid.UUID][]billing.DashboardWidget{
+			merchant: {widget("by-category", billing.QueryMetricsParams{Measures: []string{"attempts"}, By: []string{"category"}}), kept,
+				widget("first-category", billing.QueryMetricsParams{Measures: []string{"rebills"}, Filters: map[string][]string{"first_failure_category": {"issuer_hard"}}})},
+			emptied: {widget("by-first-category", billing.QueryMetricsParams{Measures: []string{"rebills"}, By: []string{"time", "first_failure_category"}})},
+		} {
+			layout, err := json.Marshal(widgets)
+			require.NoError(t, err)
+			_, err = pool.Exec(ctx, `INSERT INTO `+table("dashboard_configs")+` (merchant_id, layout) VALUES ($1, $2::jsonb)`, owner, string(layout))
+			require.NoError(t, err)
+		}
 
 		require.NoError(t, migrate.Apply(ctx, pool, migrate.Options{Schema: schema, Logger: logger}))
+		var layout []byte
+		require.NoError(t, pool.QueryRow(ctx, `SELECT layout FROM `+table("dashboard_configs")+` WHERE merchant_id = $1`, merchant).Scan(&layout))
+		var left []billing.DashboardWidget
+		require.NoError(t, json.Unmarshal(layout, &left))
+		require.Equal(t, []billing.DashboardWidget{kept}, left, "the widgets naming a renamed dimension are dropped")
+		var layouts int
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM `+table("dashboard_configs")+` WHERE merchant_id = $1`, emptied).Scan(&layouts))
+		require.Zero(t, layouts, "a layout left empty is deleted")
 		for step, want := range map[string]struct{ outcome, cause, reason, action string }{
 			"approved":        {"approved", "", "", ""},
 			"nmi-461":         {"refused", "merchant", "brand_not_accepted", "fix_payment_method"},
@@ -500,6 +526,214 @@ func TestDeclineCauses(t *testing.T) {
 				require.Nil(t, waiting.Dunning.NextRetryAt, "no retry is scheduled on the card")
 			})
 		}
+	})
+	t.Run("OR-J45-S07/authorization-rates-the-decline-mix-and-their-cuts-read-the-stored-answers", func(t *testing.T) {
+		ctx := t.Context()
+		a, _, sub := nmiMembership(t)
+		table := func(name string) string { return pgx.Identifier{a.schema, name}.Sanitize() }
+		listed, err := a.alpha.ListPSPs(ctx, billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, listed.Items, 1)
+		merchant, customer, psp := a.alpha.MerchantID().UUID(), sub.CustomerID.UUID(), listed.Items[0].ID.UUID()
+		// The stored credential the rebills cite.
+		mandate := uuid.New()
+		_, err = a.pool.Exec(ctx, `INSERT INTO `+table("mandates")+` (id, merchant_id, customer_id, psp_id, rail, kind, status, end_reason, ended_at, accepted_at)
+			VALUES ($1, $2, $3, $4, 'nmi', 'card_on_file', 'ended', 'replaced', now(), now())`, mandate, merchant, customer, psp)
+		require.NoError(t, err)
+		// Two days before the membership began, where nothing else happened.
+		from := a.clock.Now().Add(-72 * time.Hour)
+		window := &billing.MetricsRange{From: from.Format(time.RFC3339), To: from.Add(48 * time.Hour).Format(time.RFC3339)}
+		at := from
+		type answer struct{ outcome, cause, reason, brand, bin, token, issuer, cited string }
+		var (
+			visa       = answer{brand: "visa", bin: "411111", token: "psp_token"}
+			mastercard = answer{brand: "mastercard", bin: "555555", token: "network_token"}
+		)
+		with := func(card answer, outcome, cause, reason, issuer, cited string) answer {
+			card.outcome, card.cause, card.reason, card.issuer, card.cited = outcome, cause, reason, issuer, cited
+			return card
+		}
+		record := func(kind string, cycle *uuid.UUID, r answer) {
+			t.Helper()
+			at = at.Add(time.Minute)
+			entry, action := "new", ""
+			if cycle != nil {
+				entry = "saved"
+			}
+			if r.outcome != "approved" {
+				action = "retry"
+			}
+			var cites *uuid.UUID
+			if r.cited != "" {
+				cites = &mandate
+			}
+			sent := ""
+			if r.cited == "sent" {
+				sent = "storing-" + uuid.NewString()
+			}
+			_, err := a.pool.Exec(ctx, `INSERT INTO `+table("payment_attempts")+` (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
+				outcome, decline_cause, reason, action, card_brand, card_bin, token_type, issuer_code, cycle_id, subscription_id, mandate_id, sent_initial_transaction_id,
+				amount, currency, attempted_at, step)
+				VALUES ($1, $2, $3, 'nmi', $4, 'nmi_schedule', $5, 'openrails', 'response', $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10, $11, $12, NULLIF($13, ''),
+				$14, $15, $16, NULLIF($17, ''), 10000000, 'USD', $18, '')`,
+				merchant, customer, psp, kind, entry, r.outcome, r.cause, r.reason, action, r.brand, r.bin, r.token, r.issuer, cycle, sub.ID.UUID(), cites, sent, at)
+			require.NoError(t, err)
+		}
+		cycle := func(missed bool) *uuid.UUID {
+			t.Helper()
+			at = at.Add(time.Minute)
+			id := uuid.New()
+			var missedAt *time.Time
+			var reason *string
+			if missed {
+				missedAt, reason = &at, ptr("not_attempted")
+			}
+			_, err := a.pool.Exec(ctx, `INSERT INTO `+table("rebill_cycles")+` (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, missed_at, miss_reason)
+				VALUES ($1, $2, $3, $4, $5, 'nmi', 'nmi_schedule', $6, 10000000, 'USD', $7, $8)`, id, merchant, sub.ID.UUID(), customer, psp, at, missedAt, reason)
+			require.NoError(t, err)
+			return &id
+		}
+		// New-card sales: six approved, four declined by the customer, the
+		// issuer or fraud, one refused by the gateway, one that errored.
+		for range 4 {
+			record("initial", nil, with(visa, "approved", "", "", "", ""))
+		}
+		for range 2 {
+			record("initial", nil, with(mastercard, "approved", "", "", "", ""))
+		}
+		for range 2 {
+			record("initial", nil, with(visa, "declined", "customer", "insufficient_funds", "51", ""))
+		}
+		record("initial", nil, with(visa, "declined", "issuer", "do_not_honor", "05", ""))
+		record("initial", nil, with(visa, "declined", "fraud", "stolen_card", "43", ""))
+		record("initial", nil, with(visa, "refused", "merchant", "blocked_by_psp", "", ""))
+		record("initial", nil, with(visa, "error", "processing", "processing_error", "", ""))
+		// Renewals: three approved at the first try, one declined then
+		// recovered, one refused, one missed. Those that sent the storing
+		// transaction's id cite it; the others cite the credential without it.
+		record("rebill", cycle(false), with(visa, "approved", "", "", "", "sent"))
+		record("rebill", cycle(false), with(visa, "approved", "", "", "", "sent"))
+		record("rebill", cycle(false), with(mastercard, "approved", "", "", "", "missing"))
+		recovered := cycle(false)
+		record("rebill", recovered, with(visa, "declined", "issuer", "do_not_honor", "05", "sent"))
+		record("dunning_retry", recovered, with(visa, "approved", "", "", "", "sent"))
+		record("rebill", cycle(false), with(visa, "refused", "merchant", "blocked_by_psp", "", "missing"))
+		cycle(true)
+
+		query := func(measures []string, filters map[string][]string, by ...string) []map[string]any {
+			t.Helper()
+			return metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: measures, By: by, Filters: filters, Range: window})
+		}
+		rates := func(rows []map[string]any, dim, measure string) map[string]float64 {
+			t.Helper()
+			out := map[string]float64{}
+			for _, row := range rows {
+				if row[measure] != nil {
+					out[fmt.Sprint(row[dim])] = fraction(t, row[measure])
+				}
+			}
+			return out
+		}
+		near := func(want, got map[string]float64) {
+			t.Helper()
+			require.Len(t, got, len(want), "%v", got)
+			for k, v := range want {
+				require.InDelta(t, v, got[k], 1e-12, k)
+			}
+		}
+		// Of the fifteen authorizations the issuer answered (refusals and
+		// errors are not its answers), ten approved and three were declined
+		// at its discretion: do not honor twice and a stolen card.
+		require.Equal(t, map[string]int64{"approved": 10, "declined": 5, "refused": 2, "error": 1},
+			split(t, query([]string{"attempts"}, nil, "outcome"), "outcome", "attempts"))
+		all := only(t, query([]string{"authorization_rate", "issuer_discretion_decline_rate"}, nil))
+		require.InDelta(t, 10.0/15, fraction(t, all["authorization_rate"]), 1e-12)
+		require.InDelta(t, 3.0/15, fraction(t, all["issuer_discretion_decline_rate"]), 1e-12)
+		byKind := query([]string{"authorization_rate", "issuer_discretion_decline_rate"}, nil, "kind")
+		near(map[string]float64{"initial": 0.6, "rebill": 0.75, "dunning_retry": 1}, rates(byKind, "kind", "authorization_rate"))
+		near(map[string]float64{"initial": 0.2, "rebill": 0.25, "dunning_retry": 0}, rates(byKind, "kind", "issuer_discretion_decline_rate"))
+		// The decline mix, and Visa's category of each declined Visa card.
+		declined := map[string][]string{"outcome": {"declined"}}
+		require.Equal(t, map[string]int64{"customer": 2, "issuer": 2, "fraud": 1},
+			split(t, query([]string{"attempts"}, declined, "decline_cause"), "decline_cause", "attempts"))
+		require.Equal(t, map[string]int64{"1": 1, "2": 2, "4": 2},
+			split(t, query([]string{"attempts"}, declined, "visa_category"), "visa_category", "attempts"))
+		// The cuts: by card, BIN, token type and whether the stored
+		// credential's transaction id was sent.
+		byBrand := query([]string{"authorization_rate", "issuer_discretion_decline_rate"}, nil, "card_brand")
+		near(map[string]float64{"visa": 7.0 / 12, "mastercard": 1}, rates(byBrand, "card_brand", "authorization_rate"))
+		near(map[string]float64{"visa": 0.25, "mastercard": 0}, rates(byBrand, "card_brand", "issuer_discretion_decline_rate"))
+		near(map[string]float64{"411111": 7.0 / 12, "555555": 1}, rates(query([]string{"authorization_rate"}, nil, "card_bin"), "card_bin", "authorization_rate"))
+		near(map[string]float64{"psp_token": 7.0 / 12, "network_token": 1}, rates(query([]string{"authorization_rate"}, nil, "token_type"), "token_type", "authorization_rate"))
+		require.Equal(t, map[string]int64{"none": 12, "sent": 4, "missing": 2},
+			split(t, query([]string{"attempts"}, nil, "network_transaction_id"), "network_transaction_id", "attempts"))
+
+		// First-try rebill approval: three of the five renewals attempted; the
+		// missed one had no first attempt.
+		require.Equal(t, map[string]int64{"approved": 3, "declined": 1, "refused": 1, "missed": 1},
+			split(t, query([]string{"rebills"}, nil, "first_outcome"), "first_outcome", "rebills"))
+		require.InDelta(t, 0.6, fraction(t, only(t, query([]string{"first_try_rebill_approval_rate"}, nil))["first_try_rebill_approval_rate"]), 1e-12)
+		near(map[string]float64{"visa": 0.5, "mastercard": 1},
+			rates(query([]string{"first_try_rebill_approval_rate"}, nil, "card_brand"), "card_brand", "first_try_rebill_approval_rate"))
+		near(map[string]float64{"sent": 2.0 / 3, "missing": 0.5},
+			rates(query([]string{"first_try_rebill_approval_rate"}, nil, "network_transaction_id"), "network_transaction_id", "first_try_rebill_approval_rate"))
+
+		// The dimensions decline_cause renamed are refused with it.
+		_, err = a.alpha.QueryMetrics(ctx, billing.QueryMetricsParams{Measures: []string{"rebills"}, By: []string{"first_failure_category"}, Range: window})
+		require.Equal(t, "first_decline_cause", metricRefusals(t, err)["by[0]"]["did_you_mean"])
+		_, err = a.alpha.QueryMetrics(ctx, billing.QueryMetricsParams{Measures: []string{"attempts"}, Filters: map[string][]string{"category": {"issuer_soft"}}, Range: window})
+		require.Equal(t, "decline_cause", metricRefusals(t, err)["filters.category"]["did_you_mean"])
+
+		// The overview shows them: the rates as tiles, the decline mix and the
+		// cuts in Payment health, every one answering.
+		widgets := dashboard.DefaultWidgets(billing.DashboardProfile{Subscriptions: true, CardPayments: true})
+		shown := map[string]billing.DashboardWidget{}
+		for _, w := range widgets {
+			shown[w.ID] = w
+		}
+		for id, measure := range map[string]string{"kpi-authorization-rate": "authorization_rate", "kpi-issuer-discretion": "issuer_discretion_decline_rate", "kpi-first-try-rebill": "first_try_rebill_approval_rate"} {
+			require.Equal(t, "kpi", shown[id].Viz, id)
+			require.Equal(t, []string{measure}, shown[id].Query.Measures, id)
+		}
+		answers := overviewAnswers(t, a.alpha, widgets, "")
+		require.Equal(t, map[string]int64{"customer": 2, "issuer": 2, "fraud": 1},
+			split(t, answers["declines-by-cause"], "decline_cause", "attempts"), "the stacked mix is the declines by cause")
+		for _, id := range []string{"authorization-by-psp", "authorization-by-brand", "authorization-by-bin", "authorization-by-token"} {
+			require.NotEmpty(t, answers[id], id)
+		}
+	})
+	t.Run("OR-J45-S08/nmi-history-months-carry-each-answers-outcome-and-cause", func(t *testing.T) {
+		a, p := newNMIWorld(t)
+		vault := p.core.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
+		at := a.clock.Now().Add(-48 * time.Hour)
+		for _, sale := range []nmimock.Sale{
+			{},
+			{},
+			{Declined: "200", IssuerCode: "51"},
+			{Declined: "200", IssuerCode: "05"},
+			{Declined: "200", IssuerCode: "59"},
+			{Declined: "461"},
+		} {
+			sale.Vault, sale.Amount, sale.At = vault, "10.00", at
+			p.core.AddSale(sale)
+			at = at.Add(time.Minute)
+		}
+		require.NoError(t, p.persist(t.Context()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		rows := metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"nmi_history_authorizations"},
+			By: []string{"outcome", "decline_cause", "reason"}, Range: &billing.MetricsRange{Last: "90d"}})
+		got := map[string]int64{}
+		for _, row := range rows {
+			got[fmt.Sprintf("%v/%v/%v", row["outcome"], row["decline_cause"], row["reason"])] += whole(t, row["nmi_history_authorizations"])
+		}
+		require.Equal(t, map[string]int64{
+			"approved//":                           2,
+			"declined/customer/insufficient_funds": 1,
+			"declined/issuer/do_not_honor":         1,
+			"declined/fraud/suspected_fraud":       1,
+			"refused/merchant/brand_not_accepted":  1,
+		}, got, "NMI's catch-all 200 is the issuer's code; its 461 is the merchant account's")
 	})
 }
 
