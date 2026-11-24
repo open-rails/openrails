@@ -505,8 +505,18 @@ version before it keeps serving, the `openrails_configuration` probe names it an
 a `consistency.merchant_config.not_served` finding stays open. Credentials are
 written, never read back over the API.
 
-**Availability.** Startup waits (bounded) for Vault and fails when it does not
-answer. Afterwards an outage is ridden out from each replica's cache: purchase,
+**Availability.** The server logs in to Vault in the background; startup waits
+up to 5 seconds for Vault to answer, then serves either way. Until it answers,
+merchant configuration is unavailable: reads and edits are refused (PSP, card and
+webhook routes answer `503 service_unavailable`) and Solana Transit signing fails.
+`/health/ready` stays ready; `openrails_dependency_up{dependency="vault_login"}`
+and `{dependency="configuration"}` are 0, and the log names
+`subject=vault.merchant_configuration`. Login retries with capped backoff, and
+configuration serves once Vault answers, without a restart. A malformed `vault`
+section (its login settings, an unreadable `vault.ca_cert`) is not retried: it is
+refused as `subject=vault.login` and Vault stays unused until it is fixed.
+
+Once loaded, an outage is ridden out from each replica's cache: purchase,
 renewals and webhooks keep working for every merchant already loaded; a merchant
 first used during the outage fails until Vault returns.
 
@@ -835,7 +845,7 @@ with the command ([provider refresh](#provider-refresh)).
 | `GET /health/live` | the process serves HTTP; only after PostgreSQL answers and migrations finish, so allow a long startup probe |
 | `GET /health/ready` | PostgreSQL, the merchants service, the River producer and a local River consumer. Redis, Vault, PSP posture and refused configuration are degraded, never failing. Public and detail-free: a failure is logged and answers 503 |
 | `GET /metrics` on `private_port` | `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Never route it publicly; `Server.PrivateHandler` mounts it in your own binary |
-| probes | `openrails_vault`, `openrails_psp_posture`, `openrails_configuration` (what is not served and why) and `openrails_job_progress` |
+| probes | `openrails_psp_posture`, `openrails_configuration` (what is not served and why), `openrails_solana_crankers` and `openrails_job_progress` |
 | `openrails workers [--json]` | each job kind as River holds it: overrunning, retrying and discarded jobs, last completion and the newest error |
 | logs | structured (`logger.format`), to stderr, at `logger.level`. Secrets, card data and SQL arguments are never logged |
 
