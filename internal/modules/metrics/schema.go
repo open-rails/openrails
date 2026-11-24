@@ -36,7 +36,7 @@ func Schema() SchemaDoc {
 		QueryShape: `POST body: {"measures":[...], "by":[dims incl "time"], "grain":"auto|day|week|month|quarter|year", ` +
 			`"range":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} or {"last":"7d"}, "filters":{dim:[values]}, ` +
 			`"order":[{"measure"|"dimension":name,"dir":"asc|desc"}], "limit":N, "compare":"previous_period|previous_year"}. ` +
-			`Dates are inclusive UTC days (RFC3339 accepted, [from,to)); "last" is a relative trailing window ending today ` +
+			`Dates are inclusive days in the merchant's accounting timezone (RFC3339 accepted, [from,to)); "last" is a relative trailing window ending today ` +
 			`(Nd|Nw|Nm|Ny, e.g. "7d" = past 7 days incl. today — prefer it for recurring/saved queries so they stay current). ` +
 			`grain "auto" is day up to 45 days, week up to 26 weeks, then month. ` +
 			`A funnel measure (attempts, purchases, rebills, payments) splits by its outcome or kind dimension; its rates are ratio measures over it. ` +
@@ -65,7 +65,7 @@ func Schema() SchemaDoc {
 			Name: m.Name, Class: m.Class, Unit: m.Unit,
 			Group: m.Group, Direction: m.Direction, Thresholds: thresholds,
 			Description: m.Description, Formula: m.Formula,
-			Dims: m.Dims, DimValues: dimValues, Money: m.Money,
+			Dims: m.Dims, DimValues: dimValues, Money: m.Money, UTCDays: m.utcDays(),
 		})
 	}
 	for i := range Dimensions {

@@ -2,10 +2,13 @@ package metrics
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 )
 
 // stmt is one compiled family statement.
@@ -63,6 +66,8 @@ func compile(plan *Plan, merchantID uuid.UUID, burns []burn) ([]stmt, error) {
 			st, err = compileFlow(plan, merchantID, fam, spec, leaves)
 		case "snapshot":
 			st, err = compileSnapshot(plan, merchantID, fam, spec, leaves)
+		case "risk":
+			st, err = compileSnapshot(plan, merchantID, fam, riskSpec(plan, spec), leaves)
 		case "balance":
 			st, err = compileBalance(plan, merchantID, fam, spec, leaves)
 		case "depletion":
@@ -101,6 +106,8 @@ var merchantCols = map[Family]string{
 	FamFraudReports:   "fr.merchant_id",
 	FamNetwork:        "na.merchant_id",
 	FamNetworkPrior:   "nap.merchant_id",
+	FamRiskTotals:     "t.merchant_id",
+	FamRiskFlows:      "rf.merchant_id",
 }
 
 func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
@@ -110,7 +117,7 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	sel := []string{}
 	group := []string{}
 	if plan.HasTime {
-		sel = append(sel, fmt.Sprintf("date_trunc(%s, %s AT TIME ZONE 'UTC') AS bucket", arg(plan.Grain), spec.TimeExpr))
+		sel = append(sel, bucketExpr(spec, arg(plan.Grain), arg(plan.zone().String()))+" AS bucket")
 		group = append(group, "1")
 	}
 	joins := map[string]bool{}
@@ -133,9 +140,13 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	if spec.BaseWhere != "" {
 		where = append(where, spec.BaseWhere)
 	}
+	from, to := plan.From, plan.To
+	if spec.Calendar {
+		from, to = calendarBound(from, plan.zone(), false), calendarBound(to, plan.zone(), true)
+	}
 	where = append(where,
-		fmt.Sprintf("%s >= %s", spec.TimeExpr, arg(plan.From)),
-		fmt.Sprintf("%s < %s", spec.TimeExpr, arg(plan.To)))
+		fmt.Sprintf("%s >= %s", spec.TimeExpr, arg(from)),
+		fmt.Sprintf("%s < %s", spec.TimeExpr, arg(to)))
 	for _, d := range sortedFilterDims(plan.Filters) {
 		expr, ok := spec.DimExprs[d]
 		if !ok {
@@ -211,6 +222,36 @@ func compileSnapshot(plan *Plan, merchantID uuid.UUID, fam Family, spec familySp
 	return stmt{family: fam, sql: sql, args: args, leaves: leaves, hasTime: true, snapshot: true}, nil
 }
 
+// bucketExpr is the start of a row's bucket at grain, on the calendar of
+// zone, as an instant: what bucketLabels gives. A calendar family's day is
+// its date wherever the zone is.
+func bucketExpr(spec familySpec, grain, zone string) string {
+	if spec.Calendar {
+		return fmt.Sprintf("(date_trunc(%s, (%s) AT TIME ZONE 'UTC') AT TIME ZONE %s)", grain, spec.TimeExpr, zone)
+	}
+	return fmt.Sprintf("date_trunc(%s, %s, %s)", grain, spec.TimeExpr, zone)
+}
+
+// calendarBound is the UTC midnight of t's date in zone, the date after when
+// up and t is not that day's start: a calendar family's rows are keyed so.
+func calendarBound(t time.Time, zone *time.Location, up bool) time.Time {
+	y, m, d := t.In(zone).Date()
+	if up && !t.Equal(calendarutil.DayStart(y, m, d, zone)) {
+		d++
+	}
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// riskSpec reads the per-reason at-risk rows when the query groups or
+// filters by risk_reason, else the rows that count a subscription once.
+func riskSpec(plan *Plan, spec familySpec) familySpec {
+	spec.BaseWhere = `t.reason = 'any'`
+	if slices.Contains(plan.Dims, "risk_reason") || plan.Filters["risk_reason"] != nil {
+		spec.BaseWhere = `t.reason <> 'any'`
+	}
+	return spec
+}
+
 func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
 	var args []any
 	arg := func(v any) string { args = append(args, v); return fmt.Sprintf("$%d", len(args)) }
@@ -222,9 +263,8 @@ func compileBalance(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpe
 	var firstEdge, lastEdge time.Time
 	if plan.HasTime {
 		firstEdge, lastEdge = plan.Buckets[0], plan.Buckets[len(plan.Buckets)-1]
-		sel = append(sel, fmt.Sprintf(
-			"CASE WHEN %s < %s THEN NULL ELSE date_trunc(%s, %s AT TIME ZONE 'UTC') END AS bucket",
-			spec.TimeExpr, arg(firstEdge), arg(plan.Grain), spec.TimeExpr))
+		sel = append(sel, fmt.Sprintf("CASE WHEN %s < %s THEN NULL ELSE %s END AS bucket",
+			spec.TimeExpr, arg(firstEdge), bucketExpr(spec, arg(plan.Grain), arg(plan.zone().String()))))
 		group = append(group, "1")
 	}
 	for _, d := range plan.Dims {

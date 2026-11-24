@@ -238,6 +238,12 @@ export function QueryBuilder({
         <p key={m.name} className="text-xs text-muted-foreground">
           <span className="font-medium">{measureLabel(m.name)}</span>:{" "}
           {m.description}
+          {m.utc_days ? (
+            <>
+              {" "}
+              <AdminMessage id={"Days are UTC dates."} />
+            </>
+          ) : null}
         </p>
       ))}
       <div className="flex flex-wrap items-end gap-3">

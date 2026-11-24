@@ -70,7 +70,8 @@ func withMRR(r *httprequest.Request, subs []billing.Subscription) bool {
 		return false
 	}
 	for i := range subs {
-		subs[i].MRR = byID[subs[i].ID.UUID()]
+		view := byID[subs[i].ID.UUID()]
+		subs[i].MRR, subs[i].MRRRisk = view.MRR, view.Risk
 	}
 	return true
 }

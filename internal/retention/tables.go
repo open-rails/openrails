@@ -71,6 +71,8 @@ var Tables = map[string]Table{
 	"mrr_movements":                 {Permanent, permanent},
 	"mrr_movement_lines":            {Permanent, permanent},
 	"mrr_scheduled":                 {Permanent, permanent},
+	"mrr_risk_cases":                {Permanent, permanent},
+	"mrr_risk_episodes":             {Permanent, permanent},
 
 	"limit_holds":      {PartitionedMonthly, "monthly partitions on created_at, dropped once older than the 61-day replay horizon."},
 	"limit_hold_parts": {PartitionedMonthly, "monthly partitions on hold_created_at, dropped with their hold's, each month before its month of holds."},
@@ -154,6 +156,9 @@ var Tables = map[string]Table{
 	"mrr_totals":                  {Class: State},
 	"mrr_product_flows":           {Class: State},
 	"mrr_cohort_flows":            {Class: State},
+	"mrr_risk_flows":              {Class: State},
+	"mrr_risk_totals":             {Class: State},
+	"mrr_risk_due":                {Class: State},
 	"nmi_history_reads":           {Class: State},
 	"reconciliation_state":        {Class: State},
 	"ownership_claims":            {Class: State},

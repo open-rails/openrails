@@ -1083,6 +1083,74 @@ type BillingMrrProductFlow struct {
 	Subscribers int64
 }
 
+// One stretch of a subscription's MRR at risk, from its first reason to its last: opened by its entry_reason, chaining reasons (mrr_risk_episodes), and closed recovered (healthy again while adding MRR), churned (its MRR ended while the case was open; voluntary for a customer's or merchant's cancel) or superseded (a prune, an upgrade or a change of currency). A cancel at period end keeps the case open until the MRR ends; a resume continues it. The recovery rate is recovered MRR over recovered and churned. Retention: permanent, never pruned.
+type BillingMrrRiskCase struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	Currency       string
+	EntryReason    string
+	OpenedAt       time.Time
+	MrrAtEntry     int64
+	ClosedAt       *time.Time
+	Outcome        *string
+	// The MRR recovered, or the MRR at risk when it churned.
+	MrrAtExit *int64
+	Voluntary *bool
+	// Opened from current state by a backfill: opened_at is when its delinquency or unverified state began where the book records it, else the backfill.
+	Backfilled bool
+}
+
+// Changes outside a subscription row that may change the risk of its customer's subscriptions: a card, a default card, a provider's decline or delinquency. Each change appends its own row, so no writer waits on another's; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer's subscriptions, locking them in id order. changed_at dates the change; a claimed row is deleted.
+type BillingMrrRiskDue struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	ChangedAt  time.Time
+	// Set on the changes of a customer whose evaluation failed alone (an mrr.risk.evaluation_failed finding): drains skip them until then. Any evaluation of the customer that succeeds takes them too.
+	HeldUntil *time.Time
+}
+
+// One reason a subscription's MRR was at risk, from when it entered to when it left, within its case. A delinquent one keeps the customer's overdue amount in the currency when it entered. Retention: permanent, never pruned.
+type BillingMrrRiskEpisode struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	CaseID         uuid.UUID
+	SubscriptionID uuid.UUID
+	Currency       string
+	Reason         string
+	EnteredAt      time.Time
+	MrrAtEntry     int64
+	OverdueAmount  *int64
+	LeftAt         *time.Time
+	MrrAtExit      *int64
+}
+
+// At-risk MRR flows per currency, 15-minute UTC bucket (billing.mrr_bucket) and reason: the change of at-risk MRR, the subscriptions entering and leaving it, and the cases closed recovered or churned, by their entry reason. The reason any counts each subscription once whatever its reasons, and carries no closed cases. At-risk MRR at an instant is mrr_risk_totals less the amounts of the buckets from it on.
+type BillingMrrRiskFlow struct {
+	MerchantID   uuid.UUID
+	Currency     string
+	BucketAt     time.Time
+	Reason       string
+	Amount       int64
+	Entered      int64
+	LeftCount    int64
+	RecoveredMrr int64
+	Recovered    int64
+	ChurnedMrr   int64
+	Churned      int64
+}
+
+// The merchant's MRR at risk now per currency and reason, and how many subscriptions it is; any counts each subscription once.
+type BillingMrrRiskTotal struct {
+	MerchantID    uuid.UUID
+	Currency      string
+	Reason        string
+	Mrr           int64
+	Subscriptions int64
+}
+
 // MRR a subscription will lose or gain at a date: churn from a cancellation at period end, contraction or expansion from a scheduled change at its renewal. scheduled until it is effected, reversed (a resume, a canceled change) or superseded (a later cancel or change). At most one is scheduled per subscription. A report counts what was added in a period by scheduled_at and what was reversed, effected or superseded by resolved_at. Retention: permanent, never pruned.
 type BillingMrrScheduled struct {
 	MerchantID     uuid.UUID
@@ -2368,6 +2436,12 @@ type BillingSubscriptionMrr struct {
 	RecordedPriceID   uuid.UUID
 	RecordedMrr       int64
 	Dirty             bool
+	// Why the subscription's MRR is at risk now: past_due, needs_payment_method, unverified, card_expiring (the card it charges expires before its renewal) and delinquent (its customer, in its currency), in that order; empty when it is not at risk or adds no MRR. Canceled at its period end, it keeps the reasons its status gave at the cancel until its MRR ends; card_expiring and delinquent are taken anew.
+	Risk []string
+	// The reasons its open risk episodes record.
+	RecordedRisk []string
+	// The business instant of the latest change of its reasons.
+	RiskChangedAt *time.Time
 }
 
 // Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.
