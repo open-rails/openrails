@@ -46,12 +46,7 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
 
 ### Configuration
 
-`hostconfig.Load` (`server/internal/hostconfig`) layers defaults, `config.yaml`
-(`--config`, `OPENRAILS_CONFIG`), a logged `.env`, the environment (`DB_URL` is
-`db.url`), files under `VAULT_SECRETS_PATH` and flags (`WithOverride`). Unknown keys
-and retired names (`ENV`, `API_URL`, `MERCHANT_CONFIG_SOURCE`, …) refuse boot;
-`Validate` checks the result. One-off commands load less: `LoadForCommand`, `LoadDatabaseForCommand`,
-`LoadDirectoryForCommand`.
+`hostconfig.Load` (`server/internal/hostconfig`) layers `server.DefaultConfig()` (the engine's `billing.DefaultConfig()` with the server's own), `config.yaml` (`--config`, `OPENRAILS_CONFIG`), a logged `.env`, files under `VAULT_SECRETS_PATH` and the environment (`DATABASE_URL` is `database.url`). It decodes the one tree twice, into `server.Config` (the engine's keys inline) and the binary's own keys (connections, logger, signing key); a key neither reads, and a retired name (`ENV`, `API_URL`, `db`, …), refuses boot. Every command loads the same way. `server.New` takes `server.Config` as decoded and passes its `Engine` to `openrails.New`.
 
 ### Boot merchants
 

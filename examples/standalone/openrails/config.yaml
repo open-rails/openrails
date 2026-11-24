@@ -1,8 +1,8 @@
 # The OpenRails server's configuration: `openrails run-server --config
 # config.yaml`. Every key also reads from the environment, its path
-# upper-cased and joined by "_" (db.url is DB_URL); the environment wins. This
-# file is the local stack in ../compose.yaml; README.md says what production
-# changes.
+# upper-cased and joined by "_" (database.url is DATABASE_URL); the environment
+# wins. This file is the local stack in ../compose.yaml; README.md says what
+# production changes.
 
 # guide:standalone-config
 # The merchant's configuration, its PSPs and their keys, is merchant.yaml: read
@@ -13,7 +13,7 @@ host: 0.0.0.0
 port: 3053
 public_billing_base_url: http://localhost:3053 # where browsers and PSPs reach this server
 
-db:
+database:
   url: postgres://openrails:openrails@postgres:5432/openrails?sslmode=disable
 redis: # optional for one server; replicas share rate limits and spent proofs through it
   addr: redis:6379
