@@ -1,0 +1,480 @@
+package books
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"strconv"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
+)
+
+// ApplyOrder applies a completed bill's money to its lines, once per line:
+// each payment's cash, the order's own first, until the bill is paid (DR
+// unapplied_cash), then each line's share of the bill's non-cash settlement
+// (DR revenue_adjustments), CR deferred_revenue, into a revenue schedule over
+// the service the line sells, funded with exactly what it was applied. The
+// schedule recognises at once what that service earned by the application. A
+// provider's negative adjustment lines reduce the others in proportion; a
+// positive one (tax or shipping) is no revenue and waits, unapplied, with a
+// finding. Money beyond the bill stays unapplied; a credit line's waits for
+// its credit lot, and a usage order's settles its receivable. A purchase's
+// timed line with no access granted is left unapplied with a finding.
+// services names the service of a line its caller knows better than the order
+// does.
+func ApplyOrder(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.UUID]Service) error {
+	return apply(ctx, d, orderID, services, true)
+}
+
+// ApplyRecorded applies a provider bill as it is recorded: as ApplyOrder,
+// except that a timed line waits silently for the access its caller grants
+// next, when the caller applies the order again (ApplyOrder).
+func ApplyRecorded(ctx context.Context, d *db.DB, orderID uuid.UUID) error {
+	return apply(ctx, d, orderID, nil, false)
+}
+
+func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.UUID]Service, final bool) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	q := d.Gen(ctx)
+	// One application of an order at a time: each allocates what the ones
+	// before it left.
+	order, err := q.LockOrder(ctx, gen.LockOrderParams{MerchantID: mid.UUID(), ID: orderID})
+	if err != nil {
+		return err
+	}
+	if order.Status != "complete" || order.CompletedAt == nil || order.Origin == "usage" || order.Total <= 0 || CheckCurrency(order.Currency) != nil {
+		return nil
+	}
+	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{orderID}})
+	if err != nil {
+		return err
+	}
+	receipts, err := q.ListOrderReceipts(ctx, gen.ListOrderReceiptsParams{MerchantID: mid.UUID(), OrderID: orderID})
+	if err != nil {
+		return err
+	}
+	nonCash, err := q.GetOrderNonCashSettlement(ctx, gen.GetOrderNonCashSettlementParams{MerchantID: mid.UUID(), OrderID: orderID})
+	if err != nil {
+		return err
+	}
+	ids := make([]uuid.UUID, len(lines))
+	for i, l := range lines {
+		ids[i] = l.ID
+	}
+	scheduled, err := q.ListScheduledOrderLines(ctx, gen.ListScheduledOrderLinesParams{MerchantID: mid.UUID(), OrderLineIds: ids})
+	if err != nil {
+		return err
+	}
+	payments := make([]string, len(receipts))
+	for i, p := range receipts {
+		payments[i] = p.ID.String()
+	}
+	earlier, err := q.ListOrderApplications(ctx, gen.ListOrderApplicationsParams{MerchantID: mid.UUID(), PaymentIds: payments, OrderID: orderID.String()})
+	if err != nil {
+		return err
+	}
+	applied := map[string]int64{}
+	for _, e := range earlier {
+		applied[e.Source+":"+e.SourceID] = e.Applied
+	}
+	amounts, done := make([]int64, len(lines)), make([]bool, len(lines))
+	var unbooked int64
+	for i, l := range lines {
+		if pendingTax(l) {
+			unbooked += l.Amount
+			continue
+		}
+		amounts[i], done[i] = l.Amount, slices.Contains(scheduled, l.ID)
+	}
+	paid, before := make([]int64, len(receipts)), make([]int64, len(receipts))
+	for i, p := range receipts {
+		paid[i], before[i] = p.Amount, applied["payment:"+p.ID.String()]
+	}
+	a := allocateRest(amounts, done, paid, before, nonCash, applied["order:"+orderID.String()])
+	// The bill is paid when the last money it took arrived, and applied when
+	// it completed, whichever is first.
+	var last time.Time
+	for r, p := range receipts {
+		if sum(a.cash[r]) > 0 && p.PurchasedAt.After(last) {
+			last = p.PurchasedAt
+		}
+	}
+	at := *order.CompletedAt
+	if !last.IsZero() && last.Before(at) {
+		at = last
+	}
+	at = at.UTC().Truncate(time.Microsecond)
+
+	type made struct {
+		index int
+		row   gen.BillingRevenueSchedule
+		steps []recognition
+	}
+	var schedules []made
+	var loc *time.Location
+	for i, line := range lines {
+		funded := a.nonCash[i]
+		for r := range receipts {
+			funded += a.cash[r][i]
+		}
+		if funded <= 0 {
+			continue
+		}
+		credit, err := creditLine(ctx, q, line)
+		if err != nil {
+			return err
+		}
+		if credit {
+			continue
+		}
+		plan, ready, err := planLine(ctx, q, order, line, services, at)
+		if err != nil {
+			return fmt.Errorf("books: order line %s: %w", line.ID, err)
+		}
+		if !ready {
+			if final {
+				if err := unappliedLine(ctx, q, order, line); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if plan.method == Ratable && loc == nil {
+			if loc, err = AccountingZone(ctx, d); err != nil {
+				return err
+			}
+		}
+		s := schedule{service: plan.service, funded: funded, through: plan.service.Starts, ended: plan.ended}
+		steps, next := s.catchUp(at, loc)
+		params := gen.CreateRevenueScheduleParams{
+			MerchantID: mid.UUID(), ID: uuidutil.NewV7(), CustomerID: order.CustomerID, Currency: order.Currency, OrderID: order.ID, OrderLineID: line.ID,
+			SubscriptionID: plan.subscription, ProductAccessID: plan.access, ProductID: line.ProductID, PriceID: line.PriceID,
+			Method: string(plan.method), RevenueAccount: string(plan.account), Funded: s.funded, RecognizedNet: s.recognized,
+			ServiceStartsAt: plan.service.Starts, ServiceEndsAt: plan.service.Ends, EndedAt: s.ended, RecognizedThroughAt: s.through, NextRecognitionAt: next,
+		}
+		if plan.service.Months > 1 {
+			months := int32(plan.service.Months) // #nosec G115 -- a calendar interval is at most 1200 months
+			params.ServiceMonths = &months
+		}
+		row, err := q.CreateRevenueSchedule(ctx, params)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := q.ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: mid.UUID(), FindingType: findingUnappliedLine, SubjectKey: "order_line:" + line.ID.String()}); err != nil {
+			return err
+		}
+		schedules = append(schedules, made{index: i, row: row, steps: steps})
+	}
+	if unbooked > 0 {
+		if err := unbookedAdjustment(ctx, q, order, unbooked); err != nil {
+			return err
+		}
+	}
+	if len(schedules) == 0 {
+		return nil
+	}
+
+	// Every transaction takes the general ledger's accounts in one order:
+	// receipts, cash applied, non-cash, then recognition. A receipt was booked
+	// when its payment was stored; one stored before the books is booked now.
+	b := New(q, mid.UUID())
+	for r, p := range receipts {
+		if sum(a.cash[r]) > 0 {
+			if err := ReceivePayment(ctx, q, p); err != nil {
+				return err
+			}
+		}
+	}
+	for r, p := range receipts {
+		for _, m := range schedules {
+			if amount := a.cash[r][m.index]; amount > 0 {
+				if err := b.fund(ctx, m.row, Ref{Type: UnappliedCash}, CashApplied, Coord{Operation: OpApplication, Source: "payment", SourceID: p.ID.String()}, amount, at); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for _, m := range schedules {
+		if amount := a.nonCash[m.index]; amount > 0 {
+			if err := b.fund(ctx, m.row, Ref{Type: RevenueAdjustments}, RevenueAdjusted, Coord{Operation: OpApplication, Source: "order", SourceID: order.ID.String()}, amount, at); err != nil {
+				return err
+			}
+		}
+	}
+	for _, m := range schedules {
+		if err := b.recognize(ctx, m.row, m.steps); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pendingTax is a provider's positive adjustment line: its tax, discounts and
+// shipping beyond the catalog lines. It is no revenue, and the tax in it is
+// not yet told apart.
+func pendingTax(l gen.BillingOrderLine) bool {
+	return l.Amount > 0 && l.Source != nil && *l.Source == "provider_adjustment"
+}
+
+const (
+	findingUnappliedLine       = "books.line.unapplied"
+	findingUnappliedAdjustment = "books.adjustment.unapplied"
+)
+
+// unappliedLine records a paid timed line whose access was never granted: its
+// money stays unapplied, with no service to recognise over.
+func unappliedLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, line gen.BillingOrderLine) error {
+	evidence, err := json.Marshal(map[string]any{"order_id": order.ID.String(), "order_line_id": line.ID.String(), "currency": order.Currency, "amount": strconv.FormatInt(line.Amount, 10)})
+	if err != nil {
+		return err
+	}
+	action := "The line's timed access was never granted, so its money stays in unapplied_cash: grant the access and apply the order again, or refund it."
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: order.MerchantID, FindingType: findingUnappliedLine,
+		SubjectKey: "order_line:" + line.ID.String(), Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+	return err
+}
+
+// unbookedAdjustment records that money a provider billed beyond the catalog
+// lines stays unapplied until its tax is booked: raised once, so a later
+// application never reopens one a person settled.
+func unbookedAdjustment(ctx context.Context, q *gen.Queries, order gen.BillingOrder, amount int64) error {
+	subject := "order:" + order.ID.String()
+	_, err := q.GetPSPFindingByIdentity(ctx, gen.GetPSPFindingByIdentityParams{MerchantID: order.MerchantID, FindingType: findingUnappliedAdjustment, SubjectKey: subject})
+	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	evidence, err := json.Marshal(map[string]any{"order_id": order.ID.String(), "currency": order.Currency, "amount": strconv.FormatInt(amount, 10)})
+	if err != nil {
+		return err
+	}
+	action := "The provider billed tax, discounts or shipping beyond the order's catalog lines; that money stays in unapplied_cash until its tax is booked."
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: order.MerchantID, FindingType: findingUnappliedAdjustment,
+		SubjectKey: subject, Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+	return err
+}
+
+// fund credits a schedule's deferred revenue from debit.
+func (b *Books) fund(ctx context.Context, row gen.BillingRevenueSchedule, debit Ref, typ TransferType, coord Coord, amount int64, at time.Time) error {
+	_, _, err := b.Post(ctx, Posting{
+		Debit: debit, Credit: Ref{Type: DeferredRevenue}, Amount: amount, Currency: row.Currency, Type: typ, Coord: coord, EffectiveAt: at,
+		Customer: &row.CustomerID, Order: &row.OrderID, OrderLine: &row.OrderLineID, Product: row.ProductID, RevenueSchedule: &row.ID,
+	})
+	return err
+}
+
+// recognize posts a schedule's recognitions: DR deferred_revenue / CR its
+// revenue account (a reinstatement the other way), each at (operation,
+// schedule, instant). The schedule's lock makes each one new: one already
+// posted means the schedule and its transfers disagree.
+func (b *Books) recognize(ctx context.Context, row gen.BillingRevenueSchedule, steps []recognition) error {
+	for _, st := range steps {
+		debit, credit := Ref{Type: DeferredRevenue}, Ref{Type: AccountType(row.RevenueAccount)}
+		if st.op == OpReinstatement {
+			debit, credit = credit, debit
+		}
+		coord := Coord{Operation: st.op, Source: "revenue_schedule", SourceID: row.ID.String() + "@" + st.at.UTC().Format(time.RFC3339Nano)}
+		if st.op == OpTermination || st.op == OpReinstatement {
+			coord.SourceID += "#" + strconv.Itoa(st.gen)
+		}
+		_, applied, err := b.Post(ctx, Posting{
+			Debit: debit, Credit: credit, Amount: st.amount, Currency: row.Currency, Type: RevenueRecognized, Coord: coord,
+			EffectiveAt: st.dated, Customer: &row.CustomerID, Order: &row.OrderID, OrderLine: &row.OrderLineID, Product: row.ProductID, RevenueSchedule: &row.ID,
+		})
+		if err != nil {
+			return err
+		}
+		if !applied {
+			return fmt.Errorf("%w: revenue schedule %s already posted %s", ErrCoordinateReused, row.ID, coord)
+		}
+	}
+	return nil
+}
+
+// allocateRest allocates what a bill's earlier applications left: to its
+// lines not done, each payment's cash and the non-cash settlement less what
+// was applied of them. No payment is applied beyond what it brought, however
+// its receipts changed between applications.
+func allocateRest(amounts []int64, done []bool, receipts, applied []int64, nonCash, nonCashApplied int64) allocation {
+	left := make([]int64, len(receipts))
+	for r, amount := range receipts {
+		left[r] = max(amount-applied[r], 0)
+	}
+	return allocate(amounts, done, left, max(nonCash-nonCashApplied, 0))
+}
+
+// allocation is a bill's money per line: its net price, and the parts of it
+// the non-cash settlement and each payment paid.
+type allocation struct {
+	net, nonCash []int64
+	cash         [][]int64
+}
+
+// allocate spreads a bill's negative lines over its positive ones, then, over
+// the lines not done, its non-cash settlement and each payment in turn, until
+// none lacks anything. A done line was applied before: it takes nothing.
+func allocate(amounts []int64, done []bool, receipts []int64, nonCash int64) allocation {
+	a := allocation{net: make([]int64, len(amounts)), cash: make([][]int64, len(receipts))}
+	positive := make([]int64, len(amounts))
+	var negative int64
+	for i, v := range amounts {
+		if v > 0 {
+			positive[i] = v
+		} else {
+			negative -= v
+		}
+	}
+	off := spread(negative, positive)
+	open := make([]int64, len(amounts))
+	var total int64
+	for i, v := range positive {
+		a.net[i] = max(v-off[i], 0)
+		if !done[i] {
+			open[i] = a.net[i]
+			total += open[i]
+		}
+	}
+	a.nonCash = spread(min(nonCash, total), open)
+	need := make([]int64, len(amounts))
+	var left int64
+	for i := range need {
+		need[i] = open[i] - a.nonCash[i]
+		left += need[i]
+	}
+	for r, amount := range receipts {
+		applied := min(amount, left)
+		a.cash[r] = spread(applied, need)
+		for i, part := range a.cash[r] {
+			need[i] -= part
+		}
+		left -= applied
+	}
+	return a
+}
+
+func sum(parts []int64) int64 {
+	var s int64
+	for _, p := range parts {
+		s += p
+	}
+	return s
+}
+
+// creditLine reports a line that buys credit: its money is its credit lot's.
+func creditLine(ctx context.Context, q *gen.Queries, line gen.BillingOrderLine) (bool, error) {
+	if granted(line.CreditGrant) {
+		return true, nil
+	}
+	if line.ProductID == nil {
+		return false, nil
+	}
+	product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: line.MerchantID, ID: *line.ProductID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && granted(product.CreditGrant), err
+}
+
+func granted(raw []byte) bool { return len(raw) > 0 && string(raw) != "null" }
+
+// linePlan is how a line's revenue is recognised.
+type linePlan struct {
+	method       Method
+	account      AccountType
+	service      Service
+	subscription *uuid.UUID
+	access       *uuid.UUID
+	ended        *time.Time
+}
+
+// planLine is the service a paid line sells: a subscription's period
+// (subscription revenue, ratable, by the month for a calendar price), a
+// purchase's access window (one-time revenue, ratable), or else delivery at
+// once (one-time revenue, point in time). ready is false for timed access not
+// yet granted. An end already reached (a subscription's, revoked access)
+// carries over.
+func planLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, line gen.BillingOrderLine, services map[uuid.UUID]Service, at time.Time) (p linePlan, ready bool, err error) {
+	p = linePlan{method: Ratable, account: OneTimeRevenue}
+	switch {
+	case line.BillingIntervalHours != nil || line.BillingIntervalMonths != nil || order.PeriodStartsAt != nil:
+		p.account, p.subscription = SubscriptionRevenue, line.SubscriptionID
+		if p.subscription == nil {
+			p.subscription = order.SubscriptionID
+		}
+		months := 0
+		if line.BillingIntervalMonths != nil {
+			months = int(*line.BillingIntervalMonths)
+		}
+		switch svc, known := services[line.ID]; {
+		case known:
+			p.service = svc
+		case order.PeriodStartsAt != nil && order.PeriodEndsAt != nil:
+			p.service = Service{Starts: *order.PeriodStartsAt, Ends: *order.PeriodEndsAt, Months: months}
+		case months > 0:
+			p.service = Service{Starts: *order.CompletedAt, Ends: calendarutil.AddMonths(*order.CompletedAt, months), Months: months}
+		case line.BillingIntervalHours != nil:
+			p.service = Service{Starts: *order.CompletedAt, Ends: order.CompletedAt.Add(time.Duration(*line.BillingIntervalHours) * time.Hour)}
+		}
+		p.service = p.service.calendar()
+		// An end before the schedule existed (a charge after cancellation, a
+		// subscription imported canceled) reaches it here; later ones by
+		// trigger, and an undone one is taken back. A replaced subscription
+		// (an upgrade) keeps its periods running.
+		if p.subscription != nil {
+			sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: order.MerchantID, ID: *p.subscription})
+			switch {
+			case err == nil && sub.EndedAt != nil && (sub.CancelType == nil || *sub.CancelType != "upgrade"):
+				p.ended = sub.EndedAt
+			case err != nil && !errors.Is(err, pgx.ErrNoRows):
+				return p, false, err
+			}
+		}
+	case line.AccessDurationHours != nil:
+		var access gen.BillingProductAccess
+		switch {
+		case line.ProductAccessID != nil:
+			access, err = q.GetProductAccessByID(ctx, gen.GetProductAccessByIDParams{MerchantID: order.MerchantID, ID: *line.ProductAccessID})
+		case order.PaymentID != nil && line.ProductID != nil:
+			access, err = q.GetPurchaseAccessByPayment(ctx, gen.GetPurchaseAccessByPaymentParams{MerchantID: order.MerchantID, PaymentID: *order.PaymentID, ProductID: *line.ProductID})
+		default:
+			return p, false, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && access.EndsAt == nil {
+			return p, false, nil
+		}
+		if err != nil {
+			return p, false, err
+		}
+		p.access, p.service, p.ended = &access.ID, Service{Starts: access.StartsAt, Ends: *access.EndsAt}, access.RevokedAt
+	default:
+		p.method, p.service = PointInTime, Service{Starts: at, Ends: at}
+	}
+	if p.method == Ratable && !p.service.Ends.After(p.service.Starts) {
+		return p, false, fmt.Errorf("no service period to recognise over")
+	}
+	// An end at or after the service's own is no early end.
+	if p.ended != nil {
+		if !p.ended.Before(p.service.Ends) {
+			p.ended = nil
+		} else {
+			e := maxTime(*p.ended, p.service.Starts)
+			p.ended = &e
+		}
+	}
+	return p, true, nil
+}

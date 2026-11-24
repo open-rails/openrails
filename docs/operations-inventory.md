@@ -253,7 +253,7 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
 | [write_posture.sql](../internal/db/queries/write_posture.sql) | 2 | `merchant_write_posture` |
 
-The migrations declare these 128 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
+The migrations declare these 129 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
 
 - `balance_watches`, `book_identity`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`, `catalog_meters`
 - `catalog_product_limits`, `catalog_rate_cards`, `catalog_restore_receipts`, `credit_grant_events`, `credit_grants`, `custodians`, `customer_contacts`
@@ -270,9 +270,9 @@ The migrations declare these 128 billing tables; usage events live in the event 
 - `price_keys`, `price_migrations`, `price_psp_bindings`, `prices`, `product_access`, `product_entitlements`, `products`
 - `provider_bills`, `provider_catalog_objects`, `provider_charge_attributions`, `provider_cycle_receipts`, `provider_intents`, `provider_schedules`, `provisioning_tokens`
 - `psp_customers`, `psp_import_basis`, `psp_import_mappings`, `psp_import_records`, `psp_imports`, `psp_refresh_watermarks`, `psps`
-- `rebill_cycles`, `reconciliation_findings`, `reconciliation_state`, `running_charges`, `scheduled_changes`, `solana_crankers`, `solana_pay_receipts`
-- `solana_pay_references`, `solana_subscriptions`, `stored_card_checks`, `subscription_billing_changes`, `subscription_cancellations`, `subscription_mrr`, `subscription_status_transitions`
-- `subscription_verifications`, `subscriptions`, `usage_card_prints`, `usage_postings`, `usage_unposted`, `user_destructive_reservations`, `webhook_events`
-- `webhook_health`, `webhook_health_daily`
+- `rebill_cycles`, `reconciliation_findings`, `reconciliation_state`, `revenue_schedules`, `running_charges`, `scheduled_changes`, `solana_crankers`
+- `solana_pay_receipts`, `solana_pay_references`, `solana_subscriptions`, `stored_card_checks`, `subscription_billing_changes`, `subscription_cancellations`, `subscription_mrr`
+- `subscription_status_transitions`, `subscription_verifications`, `subscriptions`, `usage_card_prints`, `usage_postings`, `usage_unposted`, `user_destructive_reservations`
+- `webhook_events`, `webhook_health`, `webhook_health_daily`
 
 </details>

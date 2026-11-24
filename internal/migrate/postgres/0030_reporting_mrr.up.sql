@@ -565,6 +565,7 @@ BEGIN
                   'rebill_cycles',
                   'reconciliation_findings',
                   'reconciliation_state',
+                  'revenue_schedules',
                   'running_charges',
                   'scheduled_changes',
                   'solana_pay_receipts',
