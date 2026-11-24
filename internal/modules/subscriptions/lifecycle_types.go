@@ -205,9 +205,9 @@ type FailMembershipParams struct {
 	// provider delete is queued.
 	TerminalBlocked string
 	// HoldTerminal, when set, is asked once a certain terminal outcome is
-	// reached and TerminalBlocked is empty: a non-empty reason holds it as
+	// reached and TerminalBlocked is empty: a hold with a reason holds it as
 	// TerminalBlocked would.
-	HoldTerminal func() string
+	HoldTerminal func() TerminalHold
 	// Expect, when set, must accept the locked row, or the failure is not
 	// recorded: the row moved since the caller decided.
 	Expect func(*models.Subscription) bool
@@ -215,6 +215,15 @@ type FailMembershipParams struct {
 	// without one takes it.
 	GraceEndsAt time.Time
 }
+
+// TerminalHold is why a terminal outcome waits, and what lets it apply.
+type TerminalHold struct {
+	Reason string
+	Remedy string
+}
+
+// SwitchRemedy lets an outcome the destructive switch holds apply.
+const SwitchRemedy = "Turn the destructive-action switch on for the deployment and the merchant (billing.destructive_action_switch, billing.merchant_destructive_policy) to let it end, or end it by hand."
 
 func NormalizeCancelType(cancelType *models.CancelType) string {
 	if cancelType == nil {

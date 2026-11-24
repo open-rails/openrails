@@ -1176,6 +1176,12 @@
     "OR-J06-S69": [
       "TestFindingAlerts/OR-J06-S69/a-rate-limited-customer-alerts-the-operator-once"
     ],
+    "OR-J06-S70": [
+      "TestFindingAlerts/OR-J06-S70/a-held-terminal-outcome-alerts-the-operator-once"
+    ],
+    "OR-J06-S71": [
+      "TestFindingAlerts/OR-J06-S71/distinct-repairs-of-one-transaction-alert-separately"
+    ],
     "OR-J14-S70": [
       "TestDueWork/OR-J14-S70/an-engine-renewal-nothing-attempted-reads-as-missed"
     ],

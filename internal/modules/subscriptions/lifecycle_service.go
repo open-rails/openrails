@@ -1903,17 +1903,17 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// and an open operator kill switch. Refused terminals park as
 		// `unknown`: access intact, out of the dunning queue, for provider
 		// verification.
-		terminalRefusal := func(leg string) string {
-			if params.TerminalBlocked != "" {
-				return params.TerminalBlocked
-			}
-			if leg == "" {
-				return "no certainty leg named (collection.Certainty*): terminal cancellation requires provider truth, a non-retryable decline, or exhausted dunning attempts"
-			}
-			if params.HoldTerminal != nil {
+		terminalRefusal := func(leg string) TerminalHold {
+			switch {
+			case params.TerminalBlocked != "":
+				return TerminalHold{Reason: params.TerminalBlocked, Remedy: SwitchRemedy}
+			case leg == "":
+				return TerminalHold{Reason: "no certainty leg named (collection.Certainty*): terminal cancellation requires provider truth, a non-retryable decline, or exhausted dunning attempts",
+					Remedy: "Verify it at its provider, or end it by hand."}
+			case params.HoldTerminal != nil:
 				return params.HoldTerminal()
 			}
-			return ""
+			return TerminalHold{}
 		}
 		// Schedule exhaustion is certainty only when every failure was a real,
 		// recorded charge attempt; attempts skipped for missing data exhaust
@@ -1933,7 +1933,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if subscription.CurrentPeriodEndsAt != nil {
 			periodStart = subscription.CurrentPeriodEndsAt.UTC()
 		}
-		heldTerminal := ""
+		var held TerminalHold
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
 		// moment; the rest of the case runs under it.
@@ -1952,7 +1952,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		case decline.NonRecoverable:
 			// Bucket 3: the mandate is gone. Cancel at the rail, unless the kill
 			// switch or a missing certainty leg holds the outcome.
-			if heldTerminal = terminalRefusal(params.TerminalCertainty); heldTerminal != "" {
+			if held = terminalRefusal(params.TerminalCertainty); held.Reason != "" {
 				event = lifecycle.TerminalHeld{}
 			} else {
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.NonRecoverable, At: now}
@@ -2029,10 +2029,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				leg = scheduleExhaustionLeg()
 			}
 			if terminal {
-				heldTerminal = terminalRefusal(leg)
+				held = terminalRefusal(leg)
 			}
 			switch {
-			case terminal && heldTerminal != "":
+			case terminal && held.Reason != "":
 				event = lifecycle.TerminalHeld{}
 			case terminal:
 				event = lifecycle.DunningExhausted{At: now}
@@ -2048,8 +2048,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				}
 			}
 		}
-		if heldTerminal != "" {
-			s.Log.WarnContext(ctx, "Terminal cancellation REFUSED; the subscription waits with access intact and no provider delete queued", "subscription_id", subscription.ID, "failure_reason", normalize.FromPtr(params.FailureReason), "terminal_certainty", params.TerminalCertainty, "refusal", heldTerminal)
+		if held.Reason != "" {
+			s.Log.WarnContext(ctx, "Terminal cancellation REFUSED; the subscription waits with access intact and no provider delete queued", "subscription_id", subscription.ID, "failure_reason", normalize.FromPtr(params.FailureReason), "terminal_certainty", params.TerminalCertainty, "refusal", held.Reason)
 		}
 		if event != nil {
 			if _, err := Transition(subscription, event, now); err != nil {
@@ -2100,11 +2100,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// A terminal outcome the operator's switch (or a missing certainty
 		// leg) refused is a standing finding: the member is neither charged
 		// nor canceled until someone decides.
-		if heldTerminal != "" {
-			evidence, _ := json.Marshal(map[string]any{"subscription_id": subscription.ID, "collection_policy": subscription.CollectionPolicy, "status": subscription.Status, "refusal": heldTerminal, "failure_code": normalize.FromPtr(params.FailureCode)})
-			action := fmt.Sprintf("subscription %s reached a terminal decline but cancellation was refused (%s); it waits %s with no further charges. Arm the destructive-action switch to let terminal outcomes apply, or resolve it by hand", subscription.ID, heldTerminal, subscription.Status)
-			if _, err := db.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: subscription.MerchantID, FindingType: FindingTerminalHeld, SubjectKey: subscription.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
-				return fmt.Errorf("record held terminal outcome for %s: %w", subscription.ID, err)
+		if held.Reason != "" {
+			action := fmt.Sprintf("subscription %s reached a terminal decline but ending it was refused (%s); it waits %s with no further charges. %s", subscription.ID, held.Reason, subscription.Status, held.Remedy)
+			if err := s.raiseTerminalHeld(ctx, db, subscription, held, action, map[string]any{"failure_code": normalize.FromPtr(params.FailureCode)}, now); err != nil {
+				return err
 			}
 		}
 		// Engine access through dunning follows the merchant's policy: by
@@ -2164,7 +2163,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// A collection failure is a payment fact even when retries stop. The
 		// access ledger independently publishes the actual membership expiry.
 		eventType := models.NotificationPaymentMethodFailed
-		data := subscriptionFailureNotice(subscription, params, heldTerminal != "")
+		data := subscriptionFailureNotice(subscription, params, held.Reason != "")
 		switch {
 		case needsPaymentMethodUpdate:
 			eventType = models.NotificationPaymentMethodUpdateRequired

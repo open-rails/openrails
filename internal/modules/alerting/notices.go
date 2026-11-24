@@ -49,8 +49,8 @@ type LedgerRepair struct {
 }
 
 // RecordLedgerRepair raises a consistency.ledger.unbooked finding. Its subject
-// is the IdempotencyKey, else the provider's transaction: a repeat observes
-// the same finding again.
+// is the IdempotencyKey, else the event itself: its operation, transaction and
+// the resources it names. A repeat observes the same finding again.
 func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, repair LedgerRepair) error {
 	if database == nil {
 		return fmt.Errorf("ledger repair: database is required")
@@ -89,11 +89,10 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	}
 	subject := strings.TrimSpace(repair.IdempotencyKey)
 	if subject == "" {
-		subject = strings.Join([]string{provider, operation, transaction}, ":")
-		if transaction == "" {
-			// The same unbookable event is the same finding.
-			subject += ":" + repairDigest(evidence["customer_id"], evidence["original_payment_id"], evidence["subscription_id"], evidence["error"])
-		}
+		// The same unbookable event is the same finding; a transaction alone
+		// does not tell two refunds of it apart.
+		subject = strings.Join([]string{provider, operation, transaction}, ":") + ":" +
+			repairDigest(provider, operation, transaction, evidence["customer_id"], evidence["original_payment_id"], evidence["subscription_id"], evidence["error"], metadata)
 	}
 	action := strings.TrimSpace(provider + " " + operation)
 	if transaction != "" {
@@ -114,7 +113,8 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	return nil
 }
 
-// repairDigest names an unbookable event by what it is about.
+// repairDigest names an unbookable event by its operation and the resources
+// it is about, so distinct events never share a finding.
 func repairDigest(parts ...any) string {
 	raw, _ := json.Marshal(parts)
 	sum := sha256.Sum256(raw)

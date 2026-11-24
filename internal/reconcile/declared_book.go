@@ -47,7 +47,7 @@ type DeclaredBook struct {
 	admitted bool
 	actions  map[declaredRef]destructive.Action
 	revs     map[declaredRef]int64
-	held     map[declaredRef]string
+	held     map[declaredRef]subscriptions.TerminalHold
 	// owned are the actions this book finishes: admitted for it, or replays
 	// an earlier attempt left unfinished.
 	owned map[uuid.UUID]bool
@@ -62,6 +62,24 @@ type DeclaredBook struct {
 // admitted actor).
 func NewDeclaredBook(admissions *destructive.Admissions, actor *destructive.Actor, asOf time.Time) *DeclaredBook {
 	return &DeclaredBook{admissions: admissions, actor: actor, asOf: asOf.UTC()}
+}
+
+// Holds a book's effects wait under, and what lets each apply.
+var (
+	holdAwaiting = subscriptions.TerminalHold{Reason: "awaiting the book's admission", Remedy: "Import the book again."}
+	holdNoActor  = subscriptions.TerminalHold{Reason: "the book has no admitted actor",
+		Remedy: "Import the book again as a person, an application or the in-process host, or end it by hand."}
+	holdUnplanned = subscriptions.TerminalHold{Reason: "the book was admitted without this effect", Remedy: "Import the book again."}
+	holdMoved     = subscriptions.TerminalHold{Reason: "the subscription changed after the book was admitted", Remedy: "Import the book again: it is decided on the subscription as it now is."}
+)
+
+func switchHold(reason string) subscriptions.TerminalHold {
+	return subscriptions.TerminalHold{Reason: reason, Remedy: subscriptions.SwitchRemedy}
+}
+
+func capHold(reason string) subscriptions.TerminalHold {
+	return subscriptions.TerminalHold{Reason: reason,
+		Remedy: "Review the book: it ends more of the PSP's live subscriptions at once than its cancellation cap allows. Import it in smaller parts, or end them by hand."}
 }
 
 // declaredRef is a book row by its provider identity, the same in every
@@ -139,8 +157,6 @@ func (b *DeclaredBook) reset(m bookMark) { b.wanted, b.finished = m.wanted, m.fi
 // needsAdmission reports a landing that wanted effects before any admission.
 func (b *DeclaredBook) needsAdmission() bool { return !b.admitted && len(b.wanted) > 0 }
 
-const awaitingAdmission = "awaiting the book's admission"
-
 // want records an effect for admission.
 func (b *DeclaredBook) want(sub *models.Subscription, kind effectKind) {
 	ref := refOf(sub)
@@ -155,27 +171,27 @@ func switchGated(kind effectKind, created bool) bool {
 
 // effect returns the context an admitted effect on sub runs in, or why it is
 // held. Before admission it holds every effect.
-func (b *DeclaredBook) effect(ctx context.Context, database *db.DB, sub *models.Subscription, kind effectKind) (context.Context, string) {
+func (b *DeclaredBook) effect(ctx context.Context, database *db.DB, sub *models.Subscription, kind effectKind) (context.Context, subscriptions.TerminalHold) {
 	if !b.admitted {
-		return ctx, awaitingAdmission
+		return ctx, holdAwaiting
 	}
 	ref := refOf(sub)
-	if hold := b.held[ref]; hold != "" {
+	if hold, ok := b.held[ref]; ok {
 		return ctx, hold
 	}
 	action, ok := b.actions[ref]
 	switch {
 	case !ok:
-		return ctx, "the book was admitted without this effect"
+		return ctx, holdUnplanned
 	case b.revs[ref] != sub.LifecycleRev:
-		return ctx, "the subscription changed after the book was admitted"
+		return ctx, holdMoved
 	}
 	if switchGated(kind, b.created[ref]) {
 		if v := destructive.New(database).Check(ctx, sub.MerchantID); !v.Allowed {
-			return ctx, v.Reason
+			return ctx, switchHold(v.Reason)
 		}
 	}
-	return destructive.BindAction(destructive.BindAdmissions(ctx, b.admissions), action), ""
+	return destructive.BindAction(destructive.BindAdmissions(ctx, b.admissions), action), subscriptions.TerminalHold{}
 }
 
 // cancel applies a declared cancel of sub when the book's admission allows
@@ -186,8 +202,8 @@ func (b *DeclaredBook) cancel(ctx context.Context, database *db.DB, lc *subscrip
 		return false, nil
 	}
 	ctx, hold := b.effect(ctx, database, sub, cancelEffect)
-	if hold != "" {
-		database.Log.WarnContext(ctx, "declared cancel held; the subscription keeps its access", "subscription_id", sub.ID, "rail", sub.Rail, "reason", d.Reason, "held_by", hold)
+	if hold.Reason != "" {
+		database.Log.WarnContext(ctx, "declared cancel held; the subscription keeps its access", "subscription_id", sub.ID, "rail", sub.Rail, "reason", d.Reason, "held_by", hold.Reason)
 		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
 			return false, nil
 		}
@@ -203,15 +219,15 @@ func (b *DeclaredBook) cancel(ctx context.Context, database *db.DB, lc *subscrip
 // terminal prepares a FailMembership whose terminal outcome is one of the
 // book's cancels: the context it runs in, and its hold, asked only once the
 // outcome is terminal.
-func (b *DeclaredBook) terminal(ctx context.Context, database *db.DB, sub *models.Subscription) (context.Context, func() string) {
+func (b *DeclaredBook) terminal(ctx context.Context, database *db.DB, sub *models.Subscription) (context.Context, func() subscriptions.TerminalHold) {
 	if !b.admitted {
-		return ctx, func() string {
+		return ctx, func() subscriptions.TerminalHold {
 			b.want(sub, terminalEffect)
-			return awaitingAdmission
+			return holdAwaiting
 		}
 	}
 	bound, hold := b.effect(ctx, database, sub, terminalEffect)
-	return bound, func() string { return hold }
+	return bound, func() subscriptions.TerminalHold { return hold }
 }
 
 // stopProvider schedules the provider stop a canceled row is owed, once
@@ -222,8 +238,8 @@ func (b *DeclaredBook) stopProvider(ctx context.Context, database *db.DB, sub *m
 		return nil
 	}
 	ctx, hold := b.effect(ctx, database, sub, stopEffect)
-	if hold != "" {
-		return fmt.Errorf("declared book: the provider stop of %s is not admitted (%s); import the book again", refOf(sub).target(), hold)
+	if hold.Reason != "" {
+		return fmt.Errorf("declared book: the provider stop of %s is not admitted (%s); import the book again", refOf(sub).target(), hold.Reason)
 	}
 	if err := schedule(ctx); err != nil {
 		return err
@@ -275,7 +291,7 @@ func (b *DeclaredBook) end(ctx context.Context, database *db.DB) error {
 // denied admission is a destructive.HeldError and starts nothing.
 func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.MerchantID) error {
 	b.admitted, b.mid = true, mid.UUID()
-	b.actions, b.revs, b.held, b.owned = map[declaredRef]destructive.Action{}, map[declaredRef]int64{}, map[declaredRef]string{}, map[uuid.UUID]bool{}
+	b.actions, b.revs, b.held, b.owned = map[declaredRef]destructive.Action{}, map[declaredRef]int64{}, map[declaredRef]subscriptions.TerminalHold{}, map[uuid.UUID]bool{}
 	refs := slices.SortedFunc(maps.Keys(b.wanted), declaredRef.compare)
 	var admit []declaredRef
 	byPSP := map[uuid.UUID][]declaredRef{}
@@ -287,7 +303,7 @@ func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.M
 				gate = &v
 			}
 			if !gate.Allowed {
-				b.held[ref] = gate.Reason
+				b.held[ref] = switchHold(gate.Reason)
 				continue
 			}
 		}
@@ -311,7 +327,7 @@ func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.M
 				return nil
 			}
 			for _, ref := range planned {
-				b.held[ref] = reason
+				b.held[ref] = capHold(reason)
 			}
 			recordGuardFinding(ctx, database.Log, q, mid, ProviderDeclared, "cancellation_cap:"+psp.String(), reason)
 			return nil
@@ -332,7 +348,7 @@ func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.M
 	if b.admissions == nil || actor == nil {
 		// Work no one is answerable for destroys nothing.
 		for _, ref := range admit {
-			b.held[ref] = "the book has no admitted actor"
+			b.held[ref] = holdNoActor
 		}
 		return nil
 	}

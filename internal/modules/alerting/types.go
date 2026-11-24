@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/alerting/alertjob"
 )
 
 // Severity routes an alert to channels and colors the notification. warning is
@@ -19,20 +20,16 @@ const (
 	SeverityCritical Severity = "critical"
 )
 
-// ChannelType is a delivery sink kind.
-type ChannelType string
-
-const (
-	ChannelEmail   ChannelType = "email"
-	ChannelWebhook ChannelType = "webhook"
+// ChannelType is a delivery sink kind; ChannelRef names one destination.
+type (
+	ChannelType = alertjob.ChannelType
+	ChannelRef  = alertjob.ChannelRef
 )
 
-// ChannelRef identifies a notification destination. A webhook ref names
-// one of the merchant document's alert webhooks; email carries no reference.
-type ChannelRef struct {
-	Type      ChannelType `json:"type"`
-	WebhookID *uuid.UUID  `json:"webhook_id,omitempty"`
-}
+const (
+	ChannelEmail   = alertjob.ChannelEmail
+	ChannelWebhook = alertjob.ChannelWebhook
+)
 
 // WebhookFormat shapes the outbound POST body.
 type WebhookFormat string

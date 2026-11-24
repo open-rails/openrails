@@ -48,6 +48,37 @@ func TestFindingAlerts(t *testing.T) {
 		require.Equal(t, 1, mail.count("consistency.ledger.unbooked"), "once")
 	})
 
+	t.Run("OR-J06-S71/distinct-repairs-of-one-transaction-alert-separately", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a := ccbillWebhookWorld(t, func(w *world) {
+			alertEmail(w)
+			w.deps.Email = mail
+		})
+		price := ccbillMemberPrice(t, a.alpha)
+		now := a.clock.Now().UTC().Truncate(time.Second)
+		const ref, sale = "556677889900114466", "0812233445566779922"
+		importLegacyCCBill(t, a.alpha, now)(legacyCCBillMember(customerOf(a.alice), price, ref, sale, now.Add(5*24*time.Hour)))
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+
+		// Two refunds of the sale with no time to tell them apart: each is its
+		// own repair, though both name the sale.
+		for _, amount := range []string{"2.00", "3.00"} {
+			status, body := ccbillNotice(t, a, "Refund", map[string]any{"subscriptionId": ref, "transactionId": sale,
+				"amount": amount, "currencyCode": "840", "reason": "customer request", "timestamp": ""})
+			require.Equal(t, http.StatusOK, status, body)
+		}
+		unbooked, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
+		require.NoError(t, err)
+		require.Len(t, unbooked.Items, 2)
+		require.Eventually(t, func() bool { return mail.count("consistency.ledger.unbooked") == 2 }, 20*time.Second, 20*time.Millisecond,
+			"each repair alerts its operator")
+		alertsSettled(t, fleet)
+		require.Equal(t, 2, mail.count("consistency.ledger.unbooked"))
+	})
+
 	t.Run("OR-J06-S67/a-low-cranker-alerts-the-operator", func(t *testing.T) {
 		mail := &alertMailbox{}
 		s := newSolanaWorld(t, true, solanaFixtureOptions{alerts: mail})
@@ -125,6 +156,30 @@ func TestFindingAlerts(t *testing.T) {
 		}
 		require.Equal(t, 1, alerts, "two messages past the cap alert once")
 		require.Zero(t, mail.count("life.customer.messages_rate_limited"), "a medium finding goes to alert webhooks, not email")
+	})
+
+	t.Run("OR-J06-S70/a-held-terminal-outcome-alerts-the-operator-once", func(t *testing.T) {
+		// The switch is off, as it ships: a declined charge that spends an NMI
+		// schedule's dunning keeps the member's access, and tells the operator.
+		mail := &alertMailbox{}
+		b := newNMIBook(t, func(w *world) {
+			alertEmail(w)
+			w.deps.Email = mail
+		})
+		fleet := hostFleet(t, b.a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, b.a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		asOf := b.started.Add(10 * 24 * time.Hour)
+		member := billing.CustomerID(uuid.New())
+		book := b.dunnedBook(asOf, member, "alerted-dunned")
+		b.land(b.a.alpha, book)
+		require.NotEqual(t, billing.SubscriptionCanceled, b.status(member))
+		require.Eventually(t, func() bool { return mail.count("life.terminal_outcome.held") == 1 }, 20*time.Second, 20*time.Millisecond,
+			"the held outcome alerts its operator")
+		b.land(b.a.alpha, book)
+		alertsSettled(t, fleet)
+		require.Equal(t, 1, mail.count("life.terminal_outcome.held"), "once per case")
 	})
 }
 

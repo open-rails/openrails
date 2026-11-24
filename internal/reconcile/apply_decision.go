@@ -177,7 +177,7 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 	// spends the schedule. Either waits for the destructive switch; in a
 	// declared book it is one of the book's admitted cancels.
 	blocked := ""
-	var hold func() string
+	var hold func() subscriptions.TerminalHold
 	book := declaredBookOf(ctx)
 	if book != nil {
 		ctx, hold = book.terminal(ctx, database, sub)

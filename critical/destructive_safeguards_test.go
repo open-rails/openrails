@@ -181,6 +181,8 @@ func TestDestructiveSafeguards(t *testing.T) {
 		findings, err := b.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.terminal_outcome.held"})
 		require.NoError(t, err)
 		require.Len(t, findings.Items, 1)
+		require.NotNil(t, findings.Items[0].RecommendedAction)
+		require.Contains(t, *findings.Items[0].RecommendedAction, "Turn the destructive-action switch on", "the action names what lets it end")
 		require.Empty(t, b.stops(t))
 
 		// With it on, the cancel is the book's action and so is its stop.
