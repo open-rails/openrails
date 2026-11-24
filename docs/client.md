@@ -222,7 +222,7 @@ nests under `merchants.<slug>`, with one PSP on each rail:
 
 ```yaml guide:psps
 psps:
-  mobius: # your name for the account; any key
+  nmi-main: # your name for the account; any key
     rail: nmi
     environment: sandbox # live (the default) | test | sandbox
     gateway_id: "1234567" # the NMI dashboard's Gateway ID

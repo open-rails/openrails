@@ -103,7 +103,7 @@ merchants:
     profile:
       from_email: billing@onlydemo.example # receipts come from this address
     psps:
-      mobius: # your name for this account; any key you like
+      nmi-main: # your name for this account; any key you like
         rail: nmi
         environment: sandbox # live (real money; the default), test (an NMI account in test mode) or sandbox (a sandbox.nmi.com account)
         gateway_id: "000000" # the NMI dashboard's Gateway ID
@@ -415,7 +415,7 @@ the manifest stays the authority for identities, account ids and settings.
 merchants:
   onlydemo:
     psps:
-      mobius:
+      nmi-main:
         secrets: {security_key: replace-me, webhook_signing_secret: replace-me}
 ```
 
@@ -478,7 +478,7 @@ that catch one gateway account declared twice: back it up with Vault.
 
 ```sh
 id=$(openrails merchants get shop | jq -r .id)
-vault kv put -mount=kv openrails/merchants/$id/psps/mobius @mobius.json
+vault kv put -mount=kv openrails/merchants/$id/psps/nmi-main @nmi-main.json
 ```
 
 **Revisions.** A document's KV version is its revision. Edits through OpenRails write with check-and-set, and `expected_revision` refuses an object changed since (`409 revision_mismatch`). An edit through OpenRails reaches every replica at once (PostgreSQL `NOTIFY`); one made in Vault directly is reloaded in the background by the merchant's first use 30 seconds or more after a replica last loaded it, and served from then on. A document that fails validation is not served: the version before it keeps serving, the `openrails_configuration` probe names it and a `consistency.merchant_config.not_served` finding stays open. Credentials are written, never read back over the API.
