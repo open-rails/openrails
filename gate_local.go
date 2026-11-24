@@ -64,9 +64,12 @@ type localGate struct {
 	failedAt    time.Time
 	attempts    uint64
 	synced      chan struct{}
-	closing     bool
-	stopped     bool
-	recovered   bool
+	// writing counts settlements whose outbox acks and moves are not yet
+	// written: a flush waits for them.
+	writing   int
+	closing   bool
+	stopped   bool
+	recovered bool
 
 	kick    chan struct{}
 	stop    chan struct{}
@@ -793,8 +796,7 @@ func (g *localGate) syncOnce() {
 	res, err := g.c.SyncLeases(ctx, params)
 	cancel()
 	acks, moves := g.apply(lease, params, entries, returned, res, err, sent)
-	g.ack(acks)
-	g.persistMoves(moves)
+	g.write(acks, moves)
 	g.resendEarlier()
 	g.mu.Lock()
 	more := len(g.wants) > 0 && err == nil || len(sendableLocked(g.queues[g.lease], 1)) > 0 && (len(usage) == billing.MaxSyncUsageItems || len(moves) > 0 || partial(usage, res, err))
@@ -852,8 +854,7 @@ func (g *localGate) apply(lease billing.LeaseID, params billing.SyncLeasesParams
 	g.mu.Lock()
 	defer func() {
 		g.attempts++
-		close(g.synced)
-		g.synced = make(chan struct{})
+		g.writing++
 		g.mu.Unlock()
 		for _, e := range entries {
 			close(e.done)
@@ -1184,6 +1185,18 @@ func (g *localGate) persistMoves(moves []move) {
 	g.poke()
 }
 
+// write writes a settlement's outbox acks and moves, then wakes the
+// flushes waiting for it.
+func (g *localGate) write(acks []billing.LeaseUsageRef, moves []move) {
+	g.ack(acks)
+	g.persistMoves(moves)
+	g.mu.Lock()
+	g.writing--
+	close(g.synced)
+	g.synced = make(chan struct{})
+	g.mu.Unlock()
+}
+
 func (g *localGate) ack(refs []billing.LeaseUsageRef) {
 	if g.outbox == nil || len(refs) == 0 {
 		return
@@ -1251,9 +1264,9 @@ func (g *localGate) resendEarlier() {
 				h.mu.Unlock()
 			}
 		}
+		g.writing++
 		g.mu.Unlock()
-		g.ack(acks)
-		g.persistMoves(moves)
+		g.write(acks, moves)
 		if unreachable {
 			return
 		}
@@ -1308,7 +1321,7 @@ func (g *localGate) flush(ctx context.Context, closing bool) error {
 	var kicked time.Time
 	for {
 		g.mu.Lock()
-		done := !closing || len(g.returns) == 0
+		done := (!closing || len(g.returns) == 0) && g.writing == 0
 		for _, q := range g.queues {
 			for _, e := range q.items {
 				done = done && !targets[e]

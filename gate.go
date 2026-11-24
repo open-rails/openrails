@@ -206,10 +206,10 @@ func (g *Gate) ListCustomerLimits(ctx context.Context, customer billing.Customer
 }
 
 // Flush syncs now and returns once every usage item captured before the call
-// is settled, or with ErrUnavailable, the sync's refusal or ctx's error;
-// under a ctx with no deadline it gives up after a bound with
-// ErrUnavailable. It returns the errors of items OpenRails refused since the
-// last Flush; those posted nothing.
+// is settled (and acked in the Outbox), or with ErrUnavailable, the sync's
+// refusal or ctx's error; under a ctx with no deadline it gives up after a
+// bound with ErrUnavailable. It returns the errors of items OpenRails
+// refused since the last Flush; those posted nothing.
 func (g *Gate) Flush(ctx context.Context) error {
 	if g.shared != nil {
 		return errors.Join(g.shared.flush(ctx), g.shared.fallback().flushIfStarted(ctx))

@@ -1222,6 +1222,13 @@ type stepOutbox struct {
 	memOutbox
 	failN   int64
 	release chan struct{}
+	// ackDelay is how long an Ack takes, as a disk's does.
+	ackDelay time.Duration
+}
+
+func (o *stepOutbox) Ack(ctx context.Context, refs []billing.LeaseUsageRef) error {
+	time.Sleep(o.ackDelay)
+	return o.memOutbox.Ack(ctx, refs)
 }
 
 func (o *stepOutbox) Put(ctx context.Context, items []billing.OutboxItem) error {
@@ -1239,7 +1246,8 @@ func TestGateFailsAnUnstoredCaptureAndMovesUsagePastTheGap(t *testing.T) {
 	f.pool(t, 3)
 	synctest.Test(t, func(t *testing.T) {
 		f.size = func(int64) int64 { return 50 }
-		outbox := &stepOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, release: make(chan struct{})}
+		// A slow Ack: a flush returns only once what settled is acked.
+		outbox := &stepOutbox{memOutbox: memOutbox{items: map[billing.LeaseUsageRef]billing.LeaseUsage{}}, failN: 2, release: make(chan struct{}), ackDelay: time.Millisecond}
 		g := newTestGate(t, f, GateDeps{Outbox: outbox})
 		defer closeGate(t, g)
 		customer := billing.CustomerID(uuid.New())
