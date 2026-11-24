@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -48,7 +49,9 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		return err
 	}
 	q := d.Gen(ctx)
-	order, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: orderID})
+	// One application of an order at a time: each allocates what the ones
+	// before it left.
+	order, err := q.LockOrder(ctx, gen.LockOrderParams{MerchantID: mid.UUID(), ID: orderID})
 	if err != nil {
 		return err
 	}
@@ -67,20 +70,40 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 	if err != nil {
 		return err
 	}
-	amounts := make([]int64, len(lines))
+	ids := make([]uuid.UUID, len(lines))
+	for i, l := range lines {
+		ids[i] = l.ID
+	}
+	scheduled, err := q.ListScheduledOrderLines(ctx, gen.ListScheduledOrderLinesParams{MerchantID: mid.UUID(), OrderLineIds: ids})
+	if err != nil {
+		return err
+	}
+	payments := make([]string, len(receipts))
+	for i, p := range receipts {
+		payments[i] = p.ID.String()
+	}
+	earlier, err := q.ListOrderApplications(ctx, gen.ListOrderApplicationsParams{MerchantID: mid.UUID(), PaymentIds: payments, OrderID: orderID.String()})
+	if err != nil {
+		return err
+	}
+	applied := map[string]int64{}
+	for _, e := range earlier {
+		applied[e.Source+":"+e.SourceID] = e.Applied
+	}
+	amounts, done := make([]int64, len(lines)), make([]bool, len(lines))
 	var unbooked int64
 	for i, l := range lines {
 		if pendingTax(l) {
 			unbooked += l.Amount
 			continue
 		}
-		amounts[i] = l.Amount
+		amounts[i], done[i] = l.Amount, slices.Contains(scheduled, l.ID)
 	}
-	paid := make([]int64, len(receipts))
+	paid, before := make([]int64, len(receipts)), make([]int64, len(receipts))
 	for i, p := range receipts {
-		paid[i] = p.Amount
+		paid[i], before[i] = p.Amount, applied["payment:"+p.ID.String()]
 	}
-	a := allocate(amounts, paid, nonCash)
+	a := allocateRest(amounts, done, paid, before, nonCash, applied["order:"+orderID.String()])
 	// The bill is paid when the last money it took arrived, and applied when
 	// it completed, whichever is first.
 	var last time.Time
@@ -102,9 +125,6 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 	}
 	var schedules []made
 	var loc *time.Location
-	// The order's first application raises its findings; a replay finds the
-	// schedules it made and raises none again.
-	first := true
 	for i, line := range lines {
 		funded := a.nonCash[i]
 		for r := range receipts {
@@ -151,8 +171,6 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		}
 		row, err := q.CreateRevenueSchedule(ctx, params)
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Applied when its order first completed.
-			first = false
 			continue
 		}
 		if err != nil {
@@ -163,7 +181,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		}
 		schedules = append(schedules, made{index: i, row: row, steps: steps})
 	}
-	if unbooked > 0 && first && len(schedules) > 0 {
+	if unbooked > 0 {
 		if err := unbookedAdjustment(ctx, q, order, unbooked); err != nil {
 			return err
 		}
@@ -214,7 +232,10 @@ func pendingTax(l gen.BillingOrderLine) bool {
 	return l.Amount > 0 && l.Source != nil && *l.Source == "provider_adjustment"
 }
 
-const findingUnappliedLine = "books.line.unapplied"
+const (
+	findingUnappliedLine       = "books.line.unapplied"
+	findingUnappliedAdjustment = "books.adjustment.unapplied"
+)
 
 // unappliedLine records a paid timed line whose access was never granted: its
 // money stays unapplied, with no service to recognise over.
@@ -230,16 +251,21 @@ func unappliedLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, 
 }
 
 // unbookedAdjustment records that money a provider billed beyond the catalog
-// lines stays unapplied until its tax is booked: once, at the order's first
-// application.
+// lines stays unapplied until its tax is booked: raised once, so a later
+// application never reopens one a person settled.
 func unbookedAdjustment(ctx context.Context, q *gen.Queries, order gen.BillingOrder, amount int64) error {
+	subject := "order:" + order.ID.String()
+	_, err := q.GetPSPFindingByIdentity(ctx, gen.GetPSPFindingByIdentityParams{MerchantID: order.MerchantID, FindingType: findingUnappliedAdjustment, SubjectKey: subject})
+	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	evidence, err := json.Marshal(map[string]any{"order_id": order.ID.String(), "currency": order.Currency, "amount": strconv.FormatInt(amount, 10)})
 	if err != nil {
 		return err
 	}
 	action := "The provider billed tax, discounts or shipping beyond the order's catalog lines; that money stays in unapplied_cash until its tax is booked."
-	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: order.MerchantID, FindingType: "books.adjustment.unapplied",
-		SubjectKey: "order:" + order.ID.String(), Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: order.MerchantID, FindingType: findingUnappliedAdjustment,
+		SubjectKey: subject, Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
 	return err
 }
 
@@ -280,6 +306,18 @@ func (b *Books) recognize(ctx context.Context, row gen.BillingRevenueSchedule, s
 	return nil
 }
 
+// allocateRest allocates what a bill's earlier applications left: to its
+// lines not done, each payment's cash and the non-cash settlement less what
+// was applied of them. No payment is applied beyond what it brought, however
+// its receipts changed between applications.
+func allocateRest(amounts []int64, done []bool, receipts, applied []int64, nonCash, nonCashApplied int64) allocation {
+	left := make([]int64, len(receipts))
+	for r, amount := range receipts {
+		left[r] = max(amount-applied[r], 0)
+	}
+	return allocate(amounts, done, left, max(nonCash-nonCashApplied, 0))
+}
+
 // allocation is a bill's money per line: its net price, and the parts of it
 // the non-cash settlement and each payment paid.
 type allocation struct {
@@ -287,10 +325,10 @@ type allocation struct {
 	cash         [][]int64
 }
 
-// allocate spreads a bill's negative lines over its positive ones, its
-// non-cash settlement over the net lines, then each payment in turn over what
-// the lines still lack until none lacks anything.
-func allocate(amounts, receipts []int64, nonCash int64) allocation {
+// allocate spreads a bill's negative lines over its positive ones, then, over
+// the lines not done, its non-cash settlement and each payment in turn, until
+// none lacks anything. A done line was applied before: it takes nothing.
+func allocate(amounts []int64, done []bool, receipts []int64, nonCash int64) allocation {
 	a := allocation{net: make([]int64, len(amounts)), cash: make([][]int64, len(receipts))}
 	positive := make([]int64, len(amounts))
 	var negative int64
@@ -302,16 +340,20 @@ func allocate(amounts, receipts []int64, nonCash int64) allocation {
 		}
 	}
 	off := spread(negative, positive)
+	open := make([]int64, len(amounts))
 	var total int64
 	for i, v := range positive {
 		a.net[i] = max(v-off[i], 0)
-		total += a.net[i]
+		if !done[i] {
+			open[i] = a.net[i]
+			total += open[i]
+		}
 	}
-	a.nonCash = spread(min(nonCash, total), a.net)
+	a.nonCash = spread(min(nonCash, total), open)
 	need := make([]int64, len(amounts))
 	var left int64
 	for i := range need {
-		need[i] = a.net[i] - a.nonCash[i]
+		need[i] = open[i] - a.nonCash[i]
 		left += need[i]
 	}
 	for r, amount := range receipts {

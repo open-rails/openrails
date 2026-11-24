@@ -784,7 +784,7 @@ type BillingLedgerTransfer struct {
 	RevenueScheduleID *uuid.UUID
 }
 
-// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters, and settling it refuses the commit when it crosses that account's sign rule. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
+// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters; settling it raises books.sign_breach when it crosses that account's sign rule, and never refuses the commit. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
 type BillingLedgerTypeTotal struct {
 	MerchantID    uuid.UUID
 	Book          string

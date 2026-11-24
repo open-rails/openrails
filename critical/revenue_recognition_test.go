@@ -633,16 +633,22 @@ func TestRevenueRecognition(t *testing.T) {
 		now := a.clock.Now().UTC().Truncate(time.Microsecond)
 		priceID := priceUUID(t, a.world, product)
 
-		// The provider's sale is recorded before its access is granted: its
-		// timed line waits, its money unapplied.
+		// The provider's sale, and its tax, is recorded before its access is
+		// granted: its timed line waits, its money unapplied. The tax is no
+		// revenue: the application that leaves it unapplied says so.
 		paid := recordBill(t, a.world, observed.Bill{PSPID: psp, CustomerID: customer.UUID(), Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "provider_purchase", SourceKey: "pass-sale",
-			Currency: "USD", Total: 9_000_000, Lines: []observed.Line{{PriceID: &priceID, ProductID: &product, Description: "Pass", Quantity: ptr(1), UnitAmount: 9_000_000, Amount: 9_000_000, AccessDurationHours: ptr(720)}},
-			Payment: &models.Payment{CustomerID: customer.UUID(), Rail: models.RailStripe, TransactionID: "ch_pass_sale", Amount: 9_000_000, ListAmount: 9_000_000, Currency: "USD",
+			Currency: "USD", Total: 10_000_000, Lines: []observed.Line{{PriceID: &priceID, ProductID: &product, Description: "Pass", Quantity: ptr(1), UnitAmount: 9_000_000, Amount: 9_000_000, AccessDurationHours: ptr(720)},
+				{Source: "provider_adjustment", Description: "Stripe invoice tax", UnitAmount: 1_000_000, Amount: 1_000_000}},
+			Payment: &models.Payment{CustomerID: customer.UUID(), Rail: models.RailStripe, TransactionID: "ch_pass_sale", Amount: 10_000_000, ListAmount: 10_000_000, Currency: "USD",
 				Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now},
 			Settled: true, SettlementSource: "cash"}, now)
 		require.True(t, paid.Completed)
 		require.Empty(t, orderSchedules(t, a.world, paid.Order.ID), "no access yet, no service to recognise over")
-		require.EqualValues(t, 9_000_000, unappliedCash(t, a.world, "USD"))
+		require.EqualValues(t, 10_000_000, unappliedCash(t, a.world, "USD"))
+		tax, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.adjustment.unapplied"})
+		require.NoError(t, err)
+		require.Len(t, tax.Items, 1)
+		require.Equal(t, "order:"+paid.Order.ID.String(), tax.Items[0].SubjectKey)
 		unapplied := func() []billing.Finding {
 			t.Helper()
 			found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.line.unapplied"})
@@ -686,7 +692,7 @@ func TestRevenueRecognition(t *testing.T) {
 		sched := schedules[0]
 		require.Equal(t, granted.ID, *sched.ProductAccess)
 		require.Equal(t, revenueSchedule{Method: "ratable", Account: "one_time_revenue", Funded: 9_000_000, Starts: from, Ends: until, Through: from, Next: ptr(time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC))}, sched.terms())
-		require.Zero(t, unappliedCash(t, a.world, "USD"))
+		require.EqualValues(t, 1_000_000, unappliedCash(t, a.world, "USD"), "the tax waits")
 		require.Equal(t, billing.FindingStatus("fixed"), unapplied()[0].Status, "the line is scheduled at last")
 		require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", audit), "Ledger integrity OK")
 
@@ -801,6 +807,195 @@ func TestRevenueRecognition(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, after.Items, 1, "and the charge is a person's to refund")
 	})
+
+	t.Run("OR-J41-S15/ledger-audit-warns-of-lines-from-before-the-books-and-a-tax-line-and-fails-a-later-unscheduled-line", func(t *testing.T) {
+		w := newWorld(t)
+		audit := "id:" + w.alpha.MerchantID().String()
+		customer := uuid.New()
+		// An order completed two days before the merchant's books started,
+		// from before OpenRails kept them.
+		before := time.Now().Add(-48 * time.Hour)
+		legacy, legacyLine := rawOrder(t, w, customer, "USD", &before, rawLine{amount: 10_000_000})
+
+		// The books start: a provider's sale, its tax unapplied.
+		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sale", DisplayName: "Sale", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"sale:owned"}})
+		require.NoError(t, err)
+		_, err = w.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "sale", UnitAmount: 10_000_000, Currency: "USD"})
+		require.NoError(t, err)
+		priceID, productID := priceUUID(t, w, product.ID.UUID()), product.ID.UUID()
+		psp := railPSP(t, w, "stripe")
+		now := w.clock.Now().UTC().Truncate(time.Microsecond)
+		sold := recordBill(t, w, observed.Bill{PSPID: psp, CustomerID: customer, Owner: observed.OwnerProvider, Kind: "purchase", SourceKind: "provider_purchase", SourceKey: "taxed-sale",
+			Currency: "USD", Total: 11_000_000, Lines: []observed.Line{{PriceID: &priceID, ProductID: &productID, Description: "Sale", Quantity: ptr(1), UnitAmount: 10_000_000, Amount: 10_000_000},
+				{Source: "provider_adjustment", Description: "Stripe invoice tax", UnitAmount: 1_000_000, Amount: 1_000_000}},
+			Payment: &models.Payment{CustomerID: customer, Rail: models.RailStripe, TransactionID: "ch_taxed_sale", Amount: 11_000_000, ListAmount: 11_000_000, Currency: "USD",
+				Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now},
+			Settled: true, SettlementSource: "cash"}, now)
+		require.True(t, sold.Completed)
+		require.Len(t, orderSchedules(t, w, sold.Order.ID), 1)
+		// An order priced in the merchant's own unit: the books keep no unit.
+		gems, _ := rawOrder(t, w, customer, "GEMS", nil, rawLine{amount: 500})
+
+		output := hostCLI(t, w, "ledger-audit", "--merchant", audit)
+		require.Contains(t, output, "Ledger integrity OK")
+		require.Contains(t, output, "unscheduled line: order="+legacy.String()+" line="+legacyLine.String()+" amount=10.00 USD completed before the books started, awaiting their rebuild (warning)")
+		require.Contains(t, output, "unapplied adjustment: order="+sold.Order.ID.String())
+		require.NotContains(t, output, gems.String())
+
+		// A line completed since the books started has no excuse.
+		late, lateLine := rawOrder(t, w, customer, "USD", nil, rawLine{amount: 7_000_000})
+		output, err = hostCLIResult(t, w, "ledger-audit", "--merchant", audit)
+		require.Error(t, err)
+		require.Contains(t, output, "unscheduled line: order="+late.String()+" line="+lateLine.String()+" amount=7.00 USD; ", "a failure, before the warnings")
+		require.Contains(t, output, "completed before the books started")
+	})
+
+	t.Run("OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-order-is-applied-again", func(t *testing.T) {
+		start := time.Date(2026, time.July, 6, 9, 0, 0, 0, time.UTC)
+		a, _ := newPaymentWorld(t, atClock(start))
+		pass, passProduct := catalogLine(t, a, "pass", 22_000_000, ptr(720))
+		sale, saleProduct := catalogLine(t, a, "sale", 14_000_000, nil)
+		customer := uuid.MustParse(a.alice.ID)
+		now := a.clock.Now().UTC().Truncate(time.Microsecond)
+
+		// A bill of 36.00 that 20.00 in two payments paid: its sale is applied
+		// at once, its pass waits for its access.
+		order, _ := rawOrder(t, a.world, customer, "USD", &now, rawLine{price: &pass, product: &passProduct, amount: 22_000_000, accessHours: ptr(720)},
+			rawLine{price: &sale, product: &saleProduct, amount: 14_000_000})
+		own := rawReceipt(t, a.world, customer, order, 5_000_000, now.Add(-2*time.Hour))
+		_, err := a.pool.Exec(t.Context(), "UPDATE "+booksTable(a.world, "orders")+" SET payment_id=$3 WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), order, own)
+		require.NoError(t, err)
+		other := rawReceipt(t, a.world, customer, order, 15_000_000, now.Add(-time.Hour))
+		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
+		require.NoError(t, err)
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			return books.ApplyRecorded(ctx, database.NewWithPgxTx(tx), order)
+		}))
+		require.Len(t, orderSchedules(t, a.world, order), 1)
+
+		// A payment reported late sorts between the two; the access is
+		// granted, and the order is applied again.
+		late := rawReceipt(t, a.world, customer, order, 12_500_000, now.Add(-90*time.Minute))
+		until := now.Add(720 * time.Hour)
+		_, err = entitlements.NewEntitlementService(database, a.clock).PushAccess(ctx, entitlements.PushAccessParams{UserID: customer.String(), CustomerID: customer, ProductID: passProduct,
+			NotBefore: &now, EndsAt: &until, SourceType: models.AccessSourcePurchase, SourceID: own.String(), PaymentID: &own})
+		require.NoError(t, err)
+		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			return books.ApplyOrder(ctx, database.NewWithPgxTx(tx), order, nil)
+		}))
+		schedules := orderSchedules(t, a.world, order)
+		require.Len(t, schedules, 2)
+		require.EqualValues(t, 7_777_779, schedules[0].Funded, "the sale had what the two payments brought")
+		require.EqualValues(t, 22_000_000, schedules[1].Funded)
+
+		// Each payment within what it brought: the first application's share
+		// counts against the second.
+		rows, err := a.pool.Query(t.Context(), "SELECT source_id, sum(amount)::bigint FROM "+booksTable(a.world, "ledger_transfers")+
+			" WHERE merchant_id=$1 AND book='general' AND transfer_type='cash_applied' AND source='payment' GROUP BY source_id", a.alpha.MerchantID().UUID())
+		require.NoError(t, err)
+		applied := map[string]int64{}
+		for rows.Next() {
+			var id string
+			var amount int64
+			require.NoError(t, rows.Scan(&id, &amount))
+			applied[id] = amount
+		}
+		require.NoError(t, rows.Err())
+		require.Equal(t, map[string]int64{own.String(): 5_000_000, late.String(): 12_500_000, other.String(): 12_277_779}, applied)
+		require.EqualValues(t, 2_722_221, unappliedCash(t, a.world, "USD"))
+		require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", "id:"+a.alpha.MerchantID().String()), "Ledger integrity OK")
+	})
+
+	t.Run("OR-J41-S17/an-imported-purchase-is-applied-over-the-access-its-import-grants", func(t *testing.T) {
+		start := time.Date(2026, time.July, 6, 9, 0, 0, 0, time.UTC)
+		a, _ := newPaymentWorld(t, atClock(start))
+		pass := oneOffPrice(t, a, "pass", 9_000_000, ptr(720))
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		paid := start.Add(-240 * time.Hour)
+		imported, err := a.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: a.clock.Now(), DefaultPSP: billing.PSPRef{Key: "stripe"}, Customers: []billing.DeclaredCustomer{{Customer: customer}},
+			Purchases: []billing.DeclaredPurchase{{SourceID: "imported-pass", Customer: customer, Rail: "stripe", TransactionID: "ch_imported_pass", Currency: "USD", Amount: 9_000_000, PaidAt: paid,
+				Lines: []billing.DeclaredOrderLine{{Price: pass, Quantity: ptr(1), UnitAmount: 9_000_000}}}}})
+		require.NoError(t, err)
+		require.Empty(t, imported.Blocked)
+
+		// Recorded with its pass waiting, then applied again once the import
+		// granted the access: over the window it granted, from when it was paid.
+		schedules := schedulesWhere(t, a.world, "customer_id=$2", customer.UUID())
+		require.Len(t, schedules, 1)
+		require.NotNil(t, schedules[0].ProductAccess)
+		require.Equal(t, revenueSchedule{Method: "ratable", Account: "one_time_revenue", Funded: 9_000_000, Starts: paid, Ends: paid.Add(720 * time.Hour), Through: paid,
+			Next: ptr(time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC))}, schedules[0].terms())
+		require.Zero(t, unappliedCash(t, a.world, "USD"))
+		found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.line.unapplied"})
+		require.NoError(t, err)
+		require.Empty(t, found.Items)
+	})
+}
+
+// catalogLine is a one-off price of a new product, and that product.
+func catalogLine(t *testing.T, a *authorityWorld, key string, amount int64, hours *int) (price, product uuid.UUID) {
+	t.Helper()
+	oneOffPrice(t, a, key, amount, hours)
+	products, err := a.alpha.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{key}})
+	require.NoError(t, err)
+	require.Len(t, products.Items, 1)
+	product = products.Items[0].ID.UUID()
+	return priceUUID(t, a.world, product), product
+}
+
+// rawLine is a line of a rawOrder: a catalog line when it names a price, else
+// a provider's line.
+type rawLine struct {
+	price, product *uuid.UUID
+	amount         int64
+	accessHours    *int
+}
+
+// rawOrder is a completed order as stored data, written by no writer: made
+// and completed at made (the database's now when nil). It returns the order
+// and its first line.
+func rawOrder(t *testing.T, w *world, customer uuid.UUID, currency string, made *time.Time, lines ...rawLine) (order, first uuid.UUID) {
+	t.Helper()
+	mid := w.alpha.MerchantID().UUID()
+	order = uuid.New()
+	var total int64
+	for _, l := range lines {
+		total += l.amount
+	}
+	_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "customers")+" (merchant_id, id) VALUES ($1, $2) ON CONFLICT DO NOTHING", mid, customer)
+	require.NoError(t, err)
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "orders")+" (merchant_id, id, customer_id, origin, status, currency, total, number, payment_status, collection_owner, completed_at, created_at, updated_at)"+
+		" VALUES ($1, $2, $3, 'customer', 'complete', $4, $5, (SELECT COALESCE(max(number), 0) + 1000 FROM "+booksTable(w, "orders")+" WHERE merchant_id = $1), 'succeeded', 'provider',"+
+		" COALESCE($6::timestamptz, now()), COALESCE($6::timestamptz, now()), COALESCE($6::timestamptz, now()))", mid, order, customer, currency, total, made)
+	require.NoError(t, err)
+	for i, l := range lines {
+		id := uuid.New()
+		if i == 0 {
+			first = id
+		}
+		var source, ownership *string
+		if l.price == nil {
+			source = ptr("provider_line")
+		} else {
+			ownership = ptr("consumable")
+		}
+		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "order_lines")+" (merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, access_duration_hours, source)"+
+			" VALUES ($1, $2, $3, $4, $5, $6, $7, 'Fixture line', 1, $8, $8, $9, $10, $11)", mid, id, order, customer, i, l.price, l.product, l.amount, ownership, l.accessHours, source)
+		require.NoError(t, err)
+	}
+	return order, first
+}
+
+// rawReceipt is a payment received outside OpenRails toward an order, as
+// stored data.
+func rawReceipt(t *testing.T, w *world, customer, order uuid.UUID, amount int64, at time.Time) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "payments")+" (merchant_id, id, customer_id, order_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at)"+
+		" VALUES ($1, $2, $3, $4, 'manual', $5, $6, $6, 'USD', 'succeeded', $7)", w.alpha.MerchantID().UUID(), id, customer, order, "receipt-"+id.String(), amount, at)
+	require.NoError(t, err)
+	return id
 }
 
 // atClock sets a world's clock before its engine starts.

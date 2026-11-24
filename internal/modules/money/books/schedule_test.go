@@ -80,18 +80,65 @@ func TestRecognitionBoundaries(t *testing.T) {
 
 func TestAllocation(t *testing.T) {
 	// 20.00 less a 2.00 adjustment, 3.00 settled without cash, 15.00 paid.
-	a := allocate([]int64{20_000_000, -2_000_000}, []int64{15_000_000}, 3_000_000)
+	a := allocate([]int64{20_000_000, -2_000_000}, []bool{false, false}, []int64{15_000_000}, 3_000_000)
 	require.Equal(t, []int64{18_000_000, 0}, a.net)
 	require.Equal(t, []int64{3_000_000, 0}, a.nonCash)
 	require.Equal(t, [][]int64{{15_000_000, 0}}, a.cash)
 
 	// Two lines, an adjustment spread in proportion, two payments and more
 	// money than the bill: the excess stays unapplied.
-	a = allocate([]int64{10, 20, -3}, []int64{20, 20}, 0)
+	a = allocate([]int64{10, 20, -3}, []bool{false, false, false}, []int64{20, 20}, 0)
 	require.Equal(t, []int64{9, 18, 0}, a.net)
 	require.Equal(t, [][]int64{{6, 14, 0}, {3, 4, 0}}, a.cash)
 	for i := range a.net {
 		require.Equal(t, a.net[i], a.cash[0][i]+a.cash[1][i])
+	}
+}
+
+// Two applications of one bill: a line applied first, the other once its
+// access exists, with a payment added between them that sorts before one
+// already applied. No payment is applied beyond what it brought.
+func TestApplicationsStayWithinReceipts(t *testing.T) {
+	type second struct {
+		receipts []int64
+		// from[i] is the first application's receipt that second receipt i is.
+		from []int
+	}
+	for _, c := range []struct {
+		lines    []int64
+		receipts []int64
+		second   second
+	}{
+		// The order's own 5.00 and another 15.00 paid 20.00 of 36.00; a
+		// 12.50 reported late sorts between them.
+		{[]int64{22_000_000, 14_000_000}, []int64{5_000_000, 15_000_000}, second{[]int64{5_000_000, 12_500_000, 15_000_000}, []int{0, -1, 1}}},
+		{[]int64{4_000_000, 23_000_000}, []int64{7_500_000, 12_000_000}, second{[]int64{7_500_000, 2_000_000, 12_000_000}, []int{0, -1, 1}}},
+		// One payment pruned, another added.
+		{[]int64{10_000_000, 17_000_000}, []int64{8_000_000, 19_000_000}, second{[]int64{8_000_000, 19_000_000}, []int{-1, 1}}},
+	} {
+		done := []bool{false, false}
+		first := allocateRest(c.lines, done, c.receipts, make([]int64, len(c.receipts)), 0, 0)
+		// Only the second line is ready: it is applied.
+		applied := make([]int64, len(c.receipts))
+		for r := range c.receipts {
+			applied[r] = first.cash[r][1]
+		}
+		before := make([]int64, len(c.second.receipts))
+		for r, from := range c.second.from {
+			if from >= 0 {
+				before[r] = applied[from]
+			}
+		}
+		next := allocateRest(c.lines, []bool{false, true}, c.second.receipts, before, 0, 0)
+		var line int64
+		for r, amount := range c.second.receipts {
+			require.LessOrEqual(t, before[r]+next.cash[r][0], amount, "receipt %d of %v", r, c.second.receipts)
+			line += next.cash[r][0]
+		}
+		for r := range c.second.receipts {
+			require.Zero(t, next.cash[r][1], "an applied line takes nothing again")
+		}
+		require.LessOrEqual(t, line, c.lines[0])
 	}
 }
 

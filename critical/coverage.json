@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 626,
+  "scenario_count": 629,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3132,6 +3132,21 @@
       "id": "OR-J41-S14",
       "journey": "J41",
       "name": "An end before the schedule exists reaches it: a charge after a cancellation is forfeited at payment"
+    },
+    {
+      "id": "OR-J41-S15",
+      "journey": "J41",
+      "name": "ledger-audit warns of revenue lines completed before the books started and of a provider's tax line, skips a merchant's own unit, and fails a line completed since"
+    },
+    {
+      "id": "OR-J41-S16",
+      "journey": "J41",
+      "name": "An order applied again after a payment sorting earlier arrives applies no payment beyond what it brought"
+    },
+    {
+      "id": "OR-J41-S17",
+      "journey": "J41",
+      "name": "An imported purchase is applied over the access its import grants"
     }
   ]
 }

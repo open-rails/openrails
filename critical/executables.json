@@ -2033,6 +2033,15 @@
     ],
     "OR-J41-S14": [
       "TestRevenueRecognition/OR-J41-S14/an-end-before-the-schedule-exists-reaches-it"
+    ],
+    "OR-J41-S15": [
+      "TestRevenueRecognition/OR-J41-S15/ledger-audit-warns-of-lines-from-before-the-books-and-a-tax-line-and-fails-a-later-unscheduled-line"
+    ],
+    "OR-J41-S16": [
+      "TestRevenueRecognition/OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-order-is-applied-again"
+    ],
+    "OR-J41-S17": [
+      "TestRevenueRecognition/OR-J41-S17/an-imported-purchase-is-applied-over-the-access-its-import-grants"
     ]
   }
 }

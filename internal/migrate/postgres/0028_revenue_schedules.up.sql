@@ -69,6 +69,9 @@ ALTER TABLE billing.ledger_transfers
     ADD CONSTRAINT ledger_transfers_revenue_schedule_check CHECK (book = 'general' OR revenue_schedule_id IS NULL);
 COMMENT ON COLUMN billing.ledger_transfers.revenue_schedule_id IS 'The revenue schedule whose deferred revenue a general-ledger transfer funds, recognises or reduces. No foreign key (ledger purity).';
 
+-- A sign breach is raised at commit, never refused.
+COMMENT ON TABLE billing.ledger_type_totals IS 'What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account''s balance, since that account keeps no counters; settling it raises books.sign_breach when it crosses that account''s sign rule, and never refuses the commit. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.';
+
 -- A service that ends early ends its schedules there: they fall due then, and
 -- the recognition job forfeits what remains. An end undone or moved later
 -- (a reactivation, a destructive run's undo) makes them due at the old end, and

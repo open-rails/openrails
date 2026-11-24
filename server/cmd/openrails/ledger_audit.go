@@ -115,6 +115,9 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 				for _, u := range res.Report.Unscheduled {
 					parts = append(parts, u.String())
 				}
+				for _, u := range res.Report.Awaiting {
+					parts = append(parts, u.String())
+				}
 				for _, b := range res.Report.Signs {
 					parts = append(parts, b.String())
 				}

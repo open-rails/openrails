@@ -219,6 +219,49 @@ func (q *Queries) ListDueRevenueSchedules(ctx context.Context, arg ListDueRevenu
 	return items, nil
 }
 
+const listOrderApplications = `-- name: ListOrderApplications :many
+SELECT source, source_id, sum(amount)::bigint AS applied
+FROM billing.ledger_transfers
+WHERE merchant_id = $1::uuid AND book = 'general' AND operation = 'application'
+  AND (source = 'payment' AND source_id = ANY($2::text[]) OR source = 'order' AND source_id = $3::text)
+GROUP BY source, source_id
+`
+
+type ListOrderApplicationsParams struct {
+	MerchantID uuid.UUID
+	PaymentIds []string
+	OrderID    string
+}
+
+type ListOrderApplicationsRow struct {
+	Source   string
+	SourceID string
+	Applied  int64
+}
+
+// What the general ledger already applied of an order's money: each
+// payment's cash, at (application, payment, id), and the order's non-cash
+// settlement, at (application, order, id).
+func (q *Queries) ListOrderApplications(ctx context.Context, arg ListOrderApplicationsParams) ([]ListOrderApplicationsRow, error) {
+	rows, err := q.db.Query(ctx, listOrderApplications, arg.MerchantID, arg.PaymentIds, arg.OrderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrderApplicationsRow
+	for rows.Next() {
+		var i ListOrderApplicationsRow
+		if err := rows.Scan(&i.Source, &i.SourceID, &i.Applied); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrderReceipts = `-- name: ListOrderReceipts :many
 SELECT p.id, p.channel, p.rail, p.transaction_id, p.amount, p.list_amount, p.currency, p.status, p.subscription_id, p.refunded_payment_id, p.discount_code, p.discount_reason, p.discount_metadata, p.metadata, p.purchased_at, p.created_at, p.card_brand, p.card_last4, p.merchant_id, p.customer_id, p.psp_id, p.attempt_kind, p.failure_code, p.failure_reason, p.reversal_kind, p.token_type, p.deleted_at, p.destructive_run_id, p.destructive_run_class, p.money_movement, p.credit_grant_snapshot, p.order_id, p.ledger_transfer_id, p.quantity FROM billing.payments p
 JOIN billing.orders o ON o.merchant_id = p.merchant_id AND o.id = p.order_id
@@ -337,16 +380,53 @@ func (q *Queries) ListOverappliedPayments(ctx context.Context, merchantID uuid.U
 	return items, nil
 }
 
+const listScheduledOrderLines = `-- name: ListScheduledOrderLines :many
+SELECT order_line_id FROM billing.revenue_schedules
+WHERE merchant_id = $1::uuid AND order_line_id = ANY($2::uuid[])
+`
+
+type ListScheduledOrderLinesParams struct {
+	MerchantID   uuid.UUID
+	OrderLineIds []uuid.UUID
+}
+
+// The lines among an order's that already have their revenue schedule.
+func (q *Queries) ListScheduledOrderLines(ctx context.Context, arg ListScheduledOrderLinesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listScheduledOrderLines, arg.MerchantID, arg.OrderLineIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var order_line_id uuid.UUID
+		if err := rows.Scan(&order_line_id); err != nil {
+			return nil, err
+		}
+		items = append(items, order_line_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnscheduledOrderLines = `-- name: ListUnscheduledOrderLines :many
-SELECT l.order_id, l.id AS order_line_id, o.currency, l.amount
+WITH started AS (
+    SELECT min(created_at) AS at FROM billing.ledger_transfers
+    WHERE merchant_id = $1::uuid AND book = 'general'
+)
+SELECT l.order_id, l.id AS order_line_id, o.currency, l.amount,
+       (l.source IS NOT DISTINCT FROM 'provider_adjustment')::boolean AS adjustment,
+       COALESCE(o.created_at < s.at AND o.completed_at < s.at, true)::boolean AS before_books
 FROM billing.order_lines l
 JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+CROSS JOIN started s
 LEFT JOIN billing.products p ON p.merchant_id = l.merchant_id AND p.id = l.product_id
 WHERE l.merchant_id = $1::uuid AND o.status = 'complete' AND o.origin <> 'usage' AND o.total > 0 AND l.amount > 0
-  AND COALESCE(l.source, '') <> 'provider_adjustment'
   AND (l.credit_grant IS NULL OR l.credit_grant = 'null'::jsonb)
   AND (p.credit_grant IS NULL OR p.credit_grant = 'null'::jsonb)
-  AND NOT EXISTS (SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id = l.merchant_id AND s.order_line_id = l.id)
+  AND NOT EXISTS (SELECT 1 FROM billing.revenue_schedules r WHERE r.merchant_id = l.merchant_id AND r.order_line_id = l.id)
 ORDER BY l.order_id, l.position
 `
 
@@ -355,10 +435,14 @@ type ListUnscheduledOrderLinesRow struct {
 	OrderLineID uuid.UUID
 	Currency    string
 	Amount      int64
+	Adjustment  bool
+	BeforeBooks bool
 }
 
-// A completed bill's line that sells revenue (not credit, usage, or a
-// provider's tax and shipping) but has no revenue schedule.
+// A completed bill's line that sells revenue (not credit or usage) but has no
+// revenue schedule: a provider's tax and shipping line among them, which is
+// never scheduled. before_books is a line whose order was made and completed
+// before the merchant's general ledger took its first transfer.
 func (q *Queries) ListUnscheduledOrderLines(ctx context.Context, merchantID uuid.UUID) ([]ListUnscheduledOrderLinesRow, error) {
 	rows, err := q.db.Query(ctx, listUnscheduledOrderLines, merchantID)
 	if err != nil {
@@ -373,6 +457,8 @@ func (q *Queries) ListUnscheduledOrderLines(ctx context.Context, merchantID uuid
 			&i.OrderLineID,
 			&i.Currency,
 			&i.Amount,
+			&i.Adjustment,
+			&i.BeforeBooks,
 		); err != nil {
 			return nil, err
 		}

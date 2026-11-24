@@ -89,6 +89,21 @@ GROUP BY source_id, currency
 HAVING COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0) > COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)
 ORDER BY source_id, currency;
 
+-- name: ListScheduledOrderLines :many
+-- The lines among an order's that already have their revenue schedule.
+SELECT order_line_id FROM billing.revenue_schedules
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_line_id = ANY(sqlc.arg(order_line_ids)::uuid[]);
+
+-- name: ListOrderApplications :many
+-- What the general ledger already applied of an order's money: each
+-- payment's cash, at (application, payment, id), and the order's non-cash
+-- settlement, at (application, order, id).
+SELECT source, source_id, sum(amount)::bigint AS applied
+FROM billing.ledger_transfers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND operation = 'application'
+  AND (source = 'payment' AND source_id = ANY(sqlc.arg(payment_ids)::text[]) OR source = 'order' AND source_id = sqlc.arg(order_id)::text)
+GROUP BY source, source_id;
+
 -- name: PaymentBookedCash :one
 -- Whether the general ledger booked a payment's money.
 SELECT EXISTS (
@@ -99,17 +114,25 @@ SELECT EXISTS (
 )::boolean AS booked;
 
 -- name: ListUnscheduledOrderLines :many
--- A completed bill's line that sells revenue (not credit, usage, or a
--- provider's tax and shipping) but has no revenue schedule.
-SELECT l.order_id, l.id AS order_line_id, o.currency, l.amount
+-- A completed bill's line that sells revenue (not credit or usage) but has no
+-- revenue schedule: a provider's tax and shipping line among them, which is
+-- never scheduled. before_books is a line whose order was made and completed
+-- before the merchant's general ledger took its first transfer.
+WITH started AS (
+    SELECT min(created_at) AS at FROM billing.ledger_transfers
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general'
+)
+SELECT l.order_id, l.id AS order_line_id, o.currency, l.amount,
+       (l.source IS NOT DISTINCT FROM 'provider_adjustment')::boolean AS adjustment,
+       COALESCE(o.created_at < s.at AND o.completed_at < s.at, true)::boolean AS before_books
 FROM billing.order_lines l
 JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+CROSS JOIN started s
 LEFT JOIN billing.products p ON p.merchant_id = l.merchant_id AND p.id = l.product_id
 WHERE l.merchant_id = sqlc.arg(merchant_id)::uuid AND o.status = 'complete' AND o.origin <> 'usage' AND o.total > 0 AND l.amount > 0
-  AND COALESCE(l.source, '') <> 'provider_adjustment'
   AND (l.credit_grant IS NULL OR l.credit_grant = 'null'::jsonb)
   AND (p.credit_grant IS NULL OR p.credit_grant = 'null'::jsonb)
-  AND NOT EXISTS (SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id = l.merchant_id AND s.order_line_id = l.id)
+  AND NOT EXISTS (SELECT 1 FROM billing.revenue_schedules r WHERE r.merchant_id = l.merchant_id AND r.order_line_id = l.id)
 ORDER BY l.order_id, l.position;
 
 -- name: SubscriptionHasLiveSchedules :one

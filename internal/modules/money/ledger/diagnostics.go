@@ -32,7 +32,8 @@ import (
 //     class's normal side. Reported, never a failure.
 //  7. Applications: no payment's cash is applied beyond its receipt
 //     (books.CheckApplications), and every completed revenue line has its
-//     revenue schedule (books.CheckSchedules).
+//     revenue schedule (books.CheckSchedules). A line from before the books
+//     started, or a provider's tax and shipping, is a warning.
 //
 // Each takes an explicitly selected merchant; ledger-audit calls once per merchant.
 
@@ -170,9 +171,13 @@ type IntegrityReport struct {
 	Sides        []SideWarning           `json:"side_warnings"`
 	Applications []books.Overapplication `json:"overapplied_payments"`
 	Unscheduled  []books.UnscheduledLine `json:"unscheduled_lines"`
+	// Awaiting are warnings: revenue lines unscheduled by design, until the
+	// books' rebuild or a tax booking.
+	Awaiting []books.UnscheduledLine `json:"awaiting_lines"`
 }
 
-// OK reports whether the books are intact; side warnings do not count.
+// OK reports whether the books are intact; side warnings and awaiting lines
+// do not count.
 func (r IntegrityReport) OK() bool {
 	return len(r.Conservation) == 0 && len(r.Counters) == 0 && len(r.Lots) == 0 && len(r.Rollups) == 0 && len(r.Signs) == 0 && len(r.Applications) == 0 && len(r.Unscheduled) == 0
 }
@@ -196,7 +201,7 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 	if r.Applications, err = books.CheckApplications(ctx, q, merchant); err != nil {
 		return r, err
 	}
-	if r.Unscheduled, err = books.CheckSchedules(ctx, q, merchant); err != nil {
+	if r.Unscheduled, r.Awaiting, err = books.CheckSchedules(ctx, q, merchant); err != nil {
 		return r, err
 	}
 	if r.Signs, err = CheckSignBreaches(ctx, q, merchant); err != nil {
