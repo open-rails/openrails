@@ -217,7 +217,7 @@ Checks:
 
 `products`, `product_entitlements`, `prices`, `price_key_movements`, `catalog_applications`, `catalog_restore_receipts` and `price_migrations` are permanent, the rest state; none is partitioned. Products and prices soft-delete.
 
-`change_log`, the history of every catalog and configuration change, is permanent and append-only (`immutable_change_log`): no update or delete, a merchant purge keeps it, and the merchant archive moves it. It is not in the billing restore guard, because a destination records its own configuration's history as soon as that configuration loads.
+`change_log`, the history of every catalog and configuration change, is permanent and append-only (`immutable_change_log`): no update or delete, a merchant purge keeps it, and the merchant archive moves it. It is not in the billing restore guard: a destination records its own configuration's history as soon as that configuration loads, and a restore adds the archive's entries to it, once per merchant (the restore receipt makes a replay a no-op).
 
 Checks:
 - `internal/retention/tables.go` lists every catalog table (by hand: nothing

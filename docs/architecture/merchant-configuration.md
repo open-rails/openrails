@@ -210,7 +210,7 @@ The directory, alias, posture, book, PSP and custodian tables are `State`;
 creates partitions before its transaction (`retention.EnsureRetainedPartitions`). The
 archive refuses an OpenRails table or column without a reviewed decision.
 
-`change_log` is `Permanent` and append-only: a purge keeps it, the archive moves it, and restore adds its entries to the destination's own (it is not in the restore guard).
+`change_log` is `Permanent` and append-only: a purge keeps it, the archive moves it, and a restore adds the archive's entries to the destination's own, once per merchant (the restore receipt makes a replay a no-op). It is not in the restore guard: the destination records history as soon as its configuration loads.
 
 Checks:
 - `internal/retention/tables.go` classifies `merchants`, `merchant_slug_aliases`,
