@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 417,
+  "scenario_count": 419,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1087,6 +1087,16 @@
       "id": "OR-J01-S17",
       "journey": "J01",
       "name": "Personal access token reads as its customer and holds its permissions but never pays or takes a person-only action"
+    },
+    {
+      "id": "OR-J01-S18",
+      "journey": "J01",
+      "name": "Merchant tenant binding adopts with its group in one transaction, replays as a no-op, refuses another tenant and never changes"
+    },
+    {
+      "id": "OR-J01-S19",
+      "journey": "J01",
+      "name": "A customer route refuses a signed-in account of another tenant than its merchant's binding"
     },
     {
       "id": "OR-J22-S05",

@@ -25,6 +25,12 @@
     "OR-J01-S08": [
       "TestAuthorityBoundaries/OR-J01-S08/real-authority-storage-failure-denies-mutations"
     ],
+    "OR-J01-S18": [
+      "TestTenantBinding/OR-J01-S18/binding-adopts-once-and-never-changes"
+    ],
+    "OR-J01-S19": [
+      "TestTenantBinding/OR-J01-S19/a-customer-of-another-tenant-is-refused-at-me"
+    ],
     "OR-J03-S01": [
       "TestHostedCheckout/OR-J03-S01/capability-pays-only-its-order"
     ],
