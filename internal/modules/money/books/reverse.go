@@ -3,12 +3,14 @@ package books
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -75,6 +77,16 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 	}
 	posted, err := q.PaymentPosted(ctx, gen.PaymentPostedParams{MerchantID: mid.UUID(), PaymentID: r.ID.String()})
 	if err != nil || posted {
+		return err
+	}
+	// While the lot's poster has not decided its share (a pack of a
+	// merchant's unit the books never booked waits), the rest waits with it.
+	if g, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: p.ID}); err == nil {
+		decided, err := q.CreditReversalDecided(ctx, gen.CreditReversalDecidedParams{MerchantID: mid.UUID(), ReversalID: r.ID, CreditGrantID: g.ID})
+		if err != nil || !decided {
+			return err
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
 	// The credit lot the payment bought is first: its poster has moved its
@@ -187,7 +199,7 @@ func paymentBooksFrom(payment uuid.UUID, rows []gen.ListPaymentBooksLegsRow) pay
 				pb.received += row.Amount
 			case typ == CashApplied && row.RevenueScheduleID != nil:
 				pb.applied[*row.RevenueScheduleID] += row.Amount
-			case typ == CashApplied, typ == "usage_collected":
+			case typ == CashApplied, typ == UsageCollected:
 				// A usage payment's cash settling its receivable is applied
 				// too, to no schedule.
 				pb.other += row.Amount
@@ -313,19 +325,11 @@ func (w *reverser) reverse(ctx context.Context, k reversal, amount int64, pb pay
 // took: to unapplied cash and to each schedule. A recovery its chargeback
 // accounts for none of (one the books never held) stays in unapplied cash.
 func (w *reverser) restore(ctx context.Context, amount int64, pb paymentBooks) error {
-	var c *reversalLegs
-	switch named := reversesOf(w.reversal); {
-	case named == "":
-		reversals, err := reversalsOf(ctx, w.q, w.merchant, *w.reversal.RefundedPaymentID)
-		if err != nil {
-			return err
-		}
-		c = pb.chargebacksLeft(reversals, w.reversal.ID.String(), amount)
-	case pb.legs[named] != nil:
-		c = pb.legs[named]
-	default:
-		c = &reversalLegs{schedules: map[uuid.UUID]taken{}}
+	reversals, err := reversalsOf(ctx, w.q, w.merchant, *w.reversal.RefundedPaymentID)
+	if err != nil {
+		return err
 	}
+	c := pb.chargebackLegs(reversals, rowOf(w.reversal), amount)
 	ids, shares := bySchedule(c.totals())
 	legs := append([]int64{max(c.returned, 0), max(c.reopened, 0)}, shares...)
 	parts := spread(min(amount, sum(legs)), legs)
@@ -358,7 +362,16 @@ func (w *reverser) restore(ctx context.Context, amount int64, pb paymentBooks) e
 // reversalRow is one reversal of a payment, as its row records it.
 type reversalRow struct {
 	id, kind, reverses string
-	at                 time.Time
+	// at is when it occurred; recorded, when it was stored.
+	at, recorded time.Time
+}
+
+func rowOf(r gen.BillingPayment) reversalRow {
+	kind := ""
+	if r.ReversalKind != nil {
+		kind = *r.ReversalKind
+	}
+	return reversalRow{id: r.ID.String(), kind: kind, reverses: reversesOf(r), at: r.PurchasedAt, recorded: r.CreatedAt}
 }
 
 // reversalsOf reads a payment's settled reversals, oldest first by when they
@@ -370,10 +383,9 @@ func reversalsOf(ctx context.Context, q *gen.Queries, merchant, payment uuid.UUI
 	}
 	var out []reversalRow
 	for _, r := range rows {
-		if r.Status != "succeeded" || r.ReversalKind == nil {
-			continue
+		if r.Status == "succeeded" && r.ReversalKind != nil {
+			out = append(out, rowOf(r))
 		}
-		out = append(out, reversalRow{id: r.ID.String(), kind: *r.ReversalKind, reverses: reversesOf(r), at: r.PurchasedAt})
 	}
 	slices.SortFunc(out, func(a, b reversalRow) int {
 		if c := a.at.Compare(b.at); c != 0 {
@@ -395,60 +407,122 @@ func reversesOf(r gen.BillingPayment) string {
 	return ""
 }
 
-// chargebacksLeft is what amount of a recovery naming no chargeback brings
-// back: every other recovery counts against the chargeback it names, those
-// naming none against the oldest first, and amount restores what is left,
-// the oldest chargeback first, each in its own proportions.
-func (pb paymentBooks) chargebacksLeft(reversals []reversalRow, current string, amount int64) *reversalLegs {
-	out := &reversalLegs{schedules: map[uuid.UUID]taken{}}
-	left, named := map[string]int64{}, map[string]bool{}
-	var chargebacks []string
+// chargebackLegs is what a recovery brings back. Naming a chargeback, what
+// earlier recoveries left of it; naming none, amount of what the chargebacks
+// stored before it have left, the oldest by occurrence first, each in its own
+// proportions. Earlier recoveries are replayed in the order they were stored,
+// each against the chargebacks stored by then, so a chargeback observed late
+// never takes back what an earlier recovery restored.
+func (pb paymentBooks) chargebackLegs(reversals []reversalRow, current reversalRow, amount int64) *reversalLegs {
+	brought := map[string]*reversalLegs{}
+	var chargebacks []reversalRow
 	for _, r := range reversals {
-		if r.kind != "chargeback" {
-			continue
-		}
-		named[r.id] = true
-		if pb.legs[r.id] != nil {
-			chargebacks = append(chargebacks, r.id)
-			left[r.id] = pb.legs[r.id].total()
+		if r.kind == "chargeback" && pb.legs[r.id] != nil {
+			chargebacks = append(chargebacks, r)
+			brought[r.id] = newLegs()
 		}
 	}
-	var unnamed int64
+	left := func(id string) *reversalLegs { return pb.legs[id].less(brought[id]) }
+	fifo := func(by reversalRow, amount int64) *reversalLegs {
+		out := newLegs()
+		for _, c := range chargebacks {
+			if c.recorded.After(by.recorded) {
+				continue
+			}
+			l := left(c.id)
+			portion := min(amount, l.total())
+			if portion <= 0 {
+				continue
+			}
+			amount -= portion
+			part := l.share(portion)
+			brought[c.id].add(part)
+			out.add(part)
+		}
+		return out
+	}
+	var earlier []reversalRow
 	for _, r := range reversals {
-		l := pb.legs[r.id]
-		if r.kind != "dispute_reversal" || r.id == current || l == nil {
-			continue
-		}
-		if named[r.reverses] {
-			left[r.reverses] += l.total()
-		} else {
-			unnamed -= l.total()
+		if r.kind == "dispute_reversal" && r.id != current.id && pb.legs[r.id] != nil && r.storedBefore(current) {
+			earlier = append(earlier, r)
 		}
 	}
-	for _, id := range chargebacks {
-		taken := min(max(unnamed, 0), max(left[id], 0))
-		left[id] -= taken
-		unnamed -= taken
+	slices.SortFunc(earlier, func(a, b reversalRow) int {
+		if c := a.recorded.Compare(b.recorded); c != 0 {
+			return c
+		}
+		return strings.Compare(a.id, b.id)
+	})
+	for _, r := range earlier {
+		got := pb.legs[r.id].negated()
+		switch {
+		case r.reverses == "":
+			fifo(r, got.total())
+		case brought[r.reverses] != nil:
+			brought[r.reverses].add(got)
+		}
 	}
-	for _, id := range chargebacks {
-		portion := min(amount, max(left[id], 0))
-		if portion <= 0 {
+	switch {
+	case current.reverses == "":
+		return fifo(current, amount)
+	case brought[current.reverses] != nil:
+		return left(current.reverses)
+	}
+	return newLegs()
+}
+
+func (r reversalRow) storedBefore(s reversalRow) bool {
+	if c := r.recorded.Compare(s.recorded); c != 0 {
+		return c < 0
+	}
+	return r.id < s.id
+}
+
+func newLegs() *reversalLegs { return &reversalLegs{schedules: map[uuid.UUID]taken{}} }
+
+func (l *reversalLegs) add(o *reversalLegs) {
+	l.returned += o.returned
+	l.reopened += o.reopened
+	for id, t := range o.schedules {
+		s := l.schedules[id]
+		l.schedules[id] = taken{deferred: s.deferred + t.deferred, contra: s.contra + t.contra}
+	}
+}
+
+// negated is a recovery's legs as what it brought back.
+func (l *reversalLegs) negated() *reversalLegs {
+	out := &reversalLegs{returned: -l.returned, reopened: -l.reopened, schedules: map[uuid.UUID]taken{}}
+	for id, t := range l.schedules {
+		out.schedules[id] = taken{deferred: -t.deferred, contra: -t.contra}
+	}
+	return out
+}
+
+// less is what of a chargeback's legs recoveries bringing back brought leave,
+// never below nothing: each schedule's rest in the chargeback's own split.
+func (l *reversalLegs) less(brought *reversalLegs) *reversalLegs {
+	out := &reversalLegs{chargeback: true, returned: max(l.returned-brought.returned, 0), reopened: max(l.reopened-brought.reopened, 0), schedules: map[uuid.UUID]taken{}}
+	for id, t := range l.schedules {
+		rest := max(t.total()-brought.schedules[id].total(), 0)
+		if rest == 0 {
 			continue
 		}
-		amount -= portion
-		l := pb.legs[id]
-		sched, shares := bySchedule(l.totals())
-		parts := spread(portion, append([]int64{max(l.returned, 0), max(l.reopened, 0)}, shares...))
-		out.returned += parts[0]
-		out.reopened += parts[1]
-		for k, s := range sched {
-			t := l.schedules[s]
-			contra := spread(parts[k+2], []int64{max(t.contra, 0), max(t.deferred, 0)})[0]
-			sum := out.schedules[s]
-			sum.contra += contra
-			sum.deferred += parts[k+2] - contra
-			out.schedules[s] = sum
-		}
+		contra := spread(rest, []int64{max(t.contra, 0), max(t.deferred, 0)})[0]
+		out.schedules[id] = taken{contra: contra, deferred: rest - contra}
+	}
+	return out
+}
+
+// share is amount of l, spread over its parts in their proportions.
+func (l *reversalLegs) share(amount int64) *reversalLegs {
+	out := newLegs()
+	ids, shares := bySchedule(l.totals())
+	parts := spread(amount, append([]int64{max(l.returned, 0), max(l.reopened, 0)}, shares...))
+	out.returned, out.reopened = parts[0], parts[1]
+	for k, id := range ids {
+		t := l.schedules[id]
+		contra := spread(parts[k+2], []int64{max(t.contra, 0), max(t.deferred, 0)})[0]
+		out.schedules[id] = taken{contra: contra, deferred: parts[k+2] - contra}
 	}
 	return out
 }

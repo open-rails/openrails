@@ -34,6 +34,28 @@ COMMENT ON TABLE billing.credit_reversal_shares IS 'One row per settled reversal
 COMMENT ON COLUMN billing.credit_reversal_shares.cash IS 'The lot''s money it moved, in the lot''s paid_currency.';
 COMMENT ON COLUMN billing.credit_reversal_shares.units IS 'The lot''s units it moved, in the lot''s unit.';
 
+-- A reversal settled before this migration was decided then: its share is
+-- what its legs moved, nothing when it has none. One of a merchant-unit pack
+-- the books never booked still waits, undecided.
+INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, cash, units)
+SELECT r.merchant_id, r.id, g.id, COALESCE(m.cash, 0)::bigint, COALESCE(m.units, 0)::bigint
+FROM billing.payments r
+JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id AND g.paid_amount IS NOT NULL
+CROSS JOIN LATERAL (
+    SELECT count(*) AS legs,
+           sum(lt.amount) FILTER (WHERE lt.book = 'units' AND lt.transfer_type IN ('credit_refund_cash', 'credit_refund_cash_restore')
+               OR lt.book = 'general' AND (c.account_type IN ('cash_clearing', 'external_receipts') OR d.account_type IN ('cash_clearing', 'external_receipts'))) AS cash,
+           sum(lt.amount) FILTER (WHERE lt.book = 'units' AND (lt.transfer_type IN ('credit_refund', 'credit_refund_restore')
+               OR lt.source IN ('consumed_credit', 'expired_credit', 'revoked_credit', 'repaid_owed')
+               OR lt.source ~ '^(retired_credit|expired_credit|revoked_credit|repaid_owed|consumed_credit)_restore:')) AS units
+    FROM billing.ledger_transfers lt
+    JOIN billing.ledger_accounts d ON d.merchant_id = lt.merchant_id AND d.id = lt.debit_account_id
+    JOIN billing.ledger_accounts c ON c.merchant_id = lt.merchant_id AND c.id = lt.credit_account_id
+    WHERE lt.merchant_id = r.merchant_id AND lt.credit_grant_id = g.id AND lt.operation = 'purchased_credit_refund' AND lt.source_id = r.id::text
+) m
+WHERE r.refunded_payment_id IS NOT NULL AND r.status = 'succeeded' AND r.amount <> 0 AND r.deleted_at IS NULL
+  AND (m.legs > 0 OR g.deferred_credited > 0 OR g.paid_currency = g.unit);
+
 CREATE TRIGGER immutable_credit_reversal_shares BEFORE DELETE OR UPDATE ON billing.credit_reversal_shares
     FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 CREATE TRIGGER immutable_credit_reversal_shares_truncate BEFORE TRUNCATE ON billing.credit_reversal_shares

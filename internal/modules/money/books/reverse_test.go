@@ -139,14 +139,51 @@ func TestRecoveryNamingNoChargebackRestoresTheOldestFirst(t *testing.T) {
 		"named":   {schedules: map[uuid.UUID]taken{one: {deferred: -750_000, contra: -250_000}}},
 	}}
 	reversals := []reversalRow{
-		{id: older, kind: "chargeback", at: at},
-		{id: newer, kind: "chargeback", at: at.Add(time.Hour)},
-		{id: "unnamed", kind: "dispute_reversal", at: at.Add(2 * time.Hour)},
-		{id: "named", kind: "dispute_reversal", reverses: newer, at: at.Add(3 * time.Hour)},
+		{id: older, kind: "chargeback", at: at, recorded: at},
+		{id: newer, kind: "chargeback", at: at.Add(time.Hour), recorded: at.Add(time.Hour)},
+		{id: "unnamed", kind: "dispute_reversal", at: at.Add(2 * time.Hour), recorded: at.Add(2 * time.Hour)},
+		{id: "named", kind: "dispute_reversal", reverses: newer, at: at.Add(3 * time.Hour), recorded: at.Add(3 * time.Hour)},
 	}
 	// 3.00 more, naming none: the older's last 0.50, then 2.50 of the newer.
-	left := pb.chargebacksLeft(reversals, "current", 3_000_000)
+	current := reversalRow{id: "current", kind: "dispute_reversal", at: at.Add(4 * time.Hour), recorded: at.Add(4 * time.Hour)}
+	left := pb.chargebackLegs(reversals, current, 3_000_000)
 	require.EqualValues(t, 500_000, left.returned)
-	require.EqualValues(t, 2_500_000, left.schedules[one].total())
 	require.Equal(t, taken{deferred: 1_875_000, contra: 625_000}, left.schedules[one])
+}
+
+func TestNamedRecoveryRestoresWhatIsLeft(t *testing.T) {
+	one := uuid.New()
+	at := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
+	pb := paymentBooks{legs: map[string]*reversalLegs{
+		"cb": {chargeback: true, returned: 1_000_000, schedules: map[uuid.UUID]taken{one: {deferred: 3_000_000, contra: 1_000_000}}},
+		// An earlier recovery of it brought back 2.00 of the schedule.
+		"first": {schedules: map[uuid.UUID]taken{one: {deferred: -2_000_000}}},
+	}}
+	reversals := []reversalRow{
+		{id: "cb", kind: "chargeback", at: at, recorded: at},
+		{id: "first", kind: "dispute_reversal", reverses: "cb", at: at.Add(time.Hour), recorded: at.Add(time.Hour)},
+	}
+	left := pb.chargebackLegs(reversals, reversalRow{id: "second", kind: "dispute_reversal", reverses: "cb", recorded: at.Add(2 * time.Hour)}, 3_000_000)
+	require.EqualValues(t, 1_000_000, left.returned)
+	require.Equal(t, taken{deferred: 1_500_000, contra: 500_000}, left.schedules[one], "2.00 left, in the chargeback's own split")
+}
+
+func TestLateObservedChargebackKeepsEarlierRecoveries(t *testing.T) {
+	one := uuid.New()
+	at := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
+	pb := paymentBooks{legs: map[string]*reversalLegs{
+		"seen":  {chargeback: true, schedules: map[uuid.UUID]taken{one: {deferred: 2_000_000}}},
+		"late":  {chargeback: true, returned: 3_000_000},
+		"first": {schedules: map[uuid.UUID]taken{one: {deferred: -2_000_000}}},
+	}}
+	// "late" occurred first but was stored after the recovery naming none:
+	// that recovery restored "seen", the only chargeback stored by then.
+	reversals := []reversalRow{
+		{id: "late", kind: "chargeback", at: at, recorded: at.Add(3 * time.Hour)},
+		{id: "seen", kind: "chargeback", at: at.Add(time.Hour), recorded: at.Add(time.Hour)},
+		{id: "first", kind: "dispute_reversal", at: at.Add(2 * time.Hour), recorded: at.Add(2 * time.Hour)},
+	}
+	left := pb.chargebackLegs(reversals, reversalRow{id: "next", kind: "dispute_reversal", recorded: at.Add(4 * time.Hour)}, 5_000_000)
+	require.EqualValues(t, 3_000_000, left.returned, "all of the late one")
+	require.Empty(t, left.schedules, "none of the one already restored")
 }
