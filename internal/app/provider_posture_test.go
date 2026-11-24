@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,35 +15,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/providerposture"
-	"github.com/open-rails/openrails/internal/stripemock"
 )
-
-// After a restart no key has a verdict, and an archived PSP is no live PSP;
-// the load of its merchant's configuration registers its check, so its
-// refund goes out on that check's verdict.
-func TestAnArchivedStripePSPsRefundAfterARestartIsSent(t *testing.T) {
-	stripe := stripemock.NewUnstarted(stripemock.Options{})
-	r := &Runtime{StripeClients: stripeapi.NewWiredFactory(stripe)}
-	name := strings.ReplaceAll(uuid.NewString(), "-", "")
-	secret := "sk_test_acct_" + name
-	set := merchantdocs.Set{PSPs: map[string]merchantdocs.Doc[merchantdocs.PSP]{"retired": {Value: merchantdocs.PSP{
-		Rail: "stripe", Environment: "test", AccountID: "acct_" + name, Archived: true, Secrets: map[string]string{"secret_key": secret}}}}}
-	r.registerStripePosture(billing.MerchantID(uuid.New()), set, map[string]bool{"retired": true})
-	refund, err := http.NewRequestWithContext(t.Context(), http.MethodPost, stripeapi.APIBase+"/v1/refunds", strings.NewReader("payment_intent=pi_retired&amount=100"))
-	require.NoError(t, err)
-	refund.Header.Set("Authorization", "Bearer "+secret)
-	response, err := r.StripeClients.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0).Do(refund)
-	require.NoError(t, err)
-	require.NoError(t, response.Body.Close())
-	require.Len(t, stripe.Submitted("/v1/refunds"), 1)
-}
 
 // A live Stripe key is proven at load like a test one: its mode and its
 // declared account (OR-J06-S09 drives the check itself).

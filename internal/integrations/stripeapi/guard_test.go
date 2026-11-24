@@ -49,10 +49,32 @@ func TestAWriteIsSentOnlyOnItsPSPsVerdict(t *testing.T) {
 	require.Empty(t, stripe.Submitted("/v1/customers"), "a write no PSP registered is not sent")
 	require.NoError(t, send(t, client, http.MethodGet, key))
 
-	factory.RegisterPosture(uuid.New(), uuid.New(), "acct_"+name, key)
+	factory.RegisterPosture("guard/"+name, uuid.New(), uuid.New(), "acct_"+name, key)
 	require.NoError(t, send(t, client, http.MethodPost, key))
 	require.Len(t, stripe.Submitted("/v1/customers"), 1)
 	require.Equal(t, 1, stripe.Reads("/v1/account"), "the registered check ran once")
+}
+
+// A key Stripe stops accepting (401 on a write) is refused from then on before
+// a byte is sent: the write did nothing, and so does every next one until a
+// re-check or a new key arms it.
+func TestARevokedKeyStopsItsWrites(t *testing.T) {
+	stripe := stripemock.NewUnstarted(stripemock.Options{})
+	factory := stripeapi.NewWiredFactory(stripe)
+	client := factory.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0)
+	name := strings.ReplaceAll(uuid.NewString(), "-", "")
+	key := "sk_test_acct_" + name
+	factory.RegisterPosture("revoked/"+name, uuid.New(), uuid.New(), "acct_"+name, key)
+	stripe.Intercept(func(r *http.Request) bool { return r.Method == http.MethodPost }, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{}, Request: r,
+			Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"Expired API Key provided: ` + key + `"}}`))}, nil
+	})
+	err := send(t, client, http.MethodPost, key)
+	require.ErrorIs(t, err, providerposture.ErrDisarmed)
+	require.ErrorContains(t, err, "401")
+	require.NotContains(t, err.Error(), key)
+	require.ErrorIs(t, send(t, client, http.MethodPost, key), providerposture.ErrDisarmed)
+	require.Len(t, stripe.Submitted("/v1/customers"), 1, "the next write is refused before it is sent")
 }
 
 // A live restricted key proves its account and nothing else: its mode is its

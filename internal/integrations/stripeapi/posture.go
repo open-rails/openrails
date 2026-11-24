@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/providerposture"
 )
 
@@ -120,11 +121,18 @@ func refusalReason(body io.Reader) string {
 	return reason
 }
 
-// RegisterPosture names the check of a PSP's key when its merchant's
-// configuration loads, and starts it unless the key has a verdict: a write
-// with the key waits for that first check (requirePosture).
-func (f *Factory) RegisterPosture(merchantID, pspID uuid.UUID, declared, secretKey string) {
-	providerposture.Process().Register(PostureKey(merchantID, pspID, declared, secretKey), f.PostureCheckFor(secretKey, declared))
+// RegisterPosture makes a PSP's key its declaration's registration when its
+// merchant's configuration loads (merchants.RegisterStripePosture), and
+// checks it unless its verdict stands: a write with the key waits for that
+// first check (requirePosture).
+func (f *Factory) RegisterPosture(declaration string, merchantID, pspID uuid.UUID, declared, secretKey string) {
+	providerposture.Process().Register(declaration, PostureKey(merchantID, pspID, declared, secretKey), f.PostureCheckFor(secretKey, declared))
+}
+
+// DropPosture drops a declaration's registration: its document is gone or
+// holds no key.
+func (f *Factory) DropPosture(declaration string) {
+	providerposture.Process().Unregister(declaration)
 }
 
 // VerifyPosture verifies a PSP's key now and records the verdict for the
@@ -150,12 +158,12 @@ func (f *Factory) PostureCheckFor(secretKey, declared string) providerposture.Ch
 	return PostureCheck(http.DefaultTransport, secretKey, declared)
 }
 
-// WriteDisarmed is the refusal a write with secretKey would meet at the
-// transport, from what is known without asking Stripe: a live key to a fake
-// provider, a key no loaded PSP declares, or one whose recorded verdict
-// refuses writes. A key still being checked is not refused here; its write's
-// gate waits for it.
-func (f *Factory) WriteDisarmed(secretKey string) error {
+// WriteDisarmed is the refusal a write with secretKey for ctx's merchant would
+// meet at the transport, from what is known without asking Stripe: a live key
+// to a fake provider, a key no loaded PSP of the merchant declares, or one
+// whose every declaration's recorded verdict refuses writes. A key still
+// being checked is not refused here; its write's gate waits for it.
+func (f *Factory) WriteDisarmed(ctx context.Context, secretKey string) error {
 	fixture := f != nil && f.base != nil && !f.wired
 	switch {
 	case fixture && liveSecretKey(secretKey):
@@ -163,17 +171,19 @@ func (f *Factory) WriteDisarmed(secretKey string) error {
 	case fixture:
 		return nil
 	}
-	return providerposture.Process().CredentialRefusal("stripe", APIBase, providerposture.Fingerprint(secretKey))
+	mid, _ := merchant.FromContext(ctx)
+	return providerposture.Process().CredentialRefusal("stripe", APIBase, providerposture.Fingerprint(secretKey), mid.UUID())
 }
 
-// requirePosture gates a mutation on its key's verdict, from the check its
-// PSP registered when its merchant's configuration loaded (RegisterPosture):
-// a live key's account, a test key's account and test mode. A key no loaded
-// PSP declares is refused at once (ErrPending, an ErrDisarmed that parks an
-// intent); one whose first check is running waits for it. A write for a
-// connected account (Stripe-Account) is never proven. A live key never
-// reaches a fake provider (an injected transport or a literal loopback IP); a
-// test key's mutation there is a fixture's.
+// requirePosture gates a mutation on its key's verdict, from the check a PSP
+// of the request's merchant registered when its configuration loaded
+// (RegisterPosture): a live key's account, a test key's account and test
+// mode. A key no loaded PSP of the merchant declares is refused at once
+// (ErrPending, an ErrDisarmed that parks an intent); one whose first check is
+// running waits for it. A write for a connected account (Stripe-Account) is
+// never proven. A live key never reaches a fake provider (an injected
+// transport or a literal loopback IP); a test key's mutation there is a
+// fixture's.
 func (t *guardTransport) requirePosture(req *http.Request) error {
 	secretKey := requestSecret(req)
 	switch {
@@ -185,7 +195,31 @@ func (t *guardTransport) requirePosture(req *http.Request) error {
 	case req.Header.Get("Stripe-Account") != "":
 		return fmt.Errorf("%w: stripe writes for a connected account are not proven", providerposture.ErrDisarmed)
 	}
-	return providerposture.Process().RequireCredential(req.Context(), "stripe", req.URL.Scheme+"://"+req.URL.Host, providerposture.Fingerprint(secretKey))
+	return providerposture.Process().RequireCredential(req.Context(), "stripe", req.URL.Scheme+"://"+req.URL.Host, providerposture.Fingerprint(secretKey), requestMerchant(req))
+}
+
+// gated reports a mutation the posture gate holds: not to a fake provider.
+func (t *guardTransport) gated(req *http.Request) bool {
+	return req.Method != http.MethodGet && req.Method != http.MethodHead && !t.fixture && !loopbackDestination(req)
+}
+
+// refused turns Stripe's 401 to a gated write into the refusal of its key:
+// Stripe did nothing, and the key's writes stop until a re-check or a new key
+// arms it. Any other answer is the caller's.
+func refused(req *http.Request, resp *http.Response) error {
+	if resp.StatusCode != http.StatusUnauthorized {
+		return nil
+	}
+	why := fmt.Errorf("stripe refused the key (401): %s", refusalReason(resp.Body))
+	_ = resp.Body.Close()
+	providerposture.Process().RefuseCredential("stripe", req.URL.Scheme+"://"+req.URL.Host, providerposture.Fingerprint(requestSecret(req)), requestMerchant(req), why)
+	return fmt.Errorf("%w: %w", providerposture.ErrDisarmed, why)
+}
+
+// requestMerchant is the merchant a request acts for, uuid.Nil when unnamed.
+func requestMerchant(req *http.Request) uuid.UUID {
+	mid, _ := merchant.FromContext(req.Context())
+	return mid.UUID()
 }
 
 // loopbackDestination reports a request to a literal loopback IP: a fixture.

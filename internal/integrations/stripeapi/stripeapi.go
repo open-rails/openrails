@@ -59,7 +59,13 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if mutating {
 		req = tagBook(req)
 	}
-	return t.transport().RoundTrip(req)
+	resp, err := t.transport().RoundTrip(req)
+	if err == nil && t.gated(req) {
+		if refusal := refused(req, resp); refusal != nil {
+			return nil, refusal
+		}
+	}
+	return resp, err
 }
 
 func (t *guardTransport) transport() http.RoundTripper {
@@ -104,6 +110,15 @@ type Factory struct {
 // NewFactory sends Stripe's requests to base when it is set: a fake provider,
 // where a test key's writes need no posture and a live key's are refused.
 func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
+
+// ConfiguredFactory is the factory cfg's deployment uses: Stripe itself, or
+// the loopback Stripe its provider_sandbox.stripe_api_url names.
+func ConfiguredFactory(cfg *config.Config) *Factory {
+	if api := config.SandboxStripeAPIURL(cfg); api != "" {
+		return NewFactory(HostRewriteTransport(api))
+	}
+	return NewFactory(nil)
+}
 
 // NewWiredFactory sends every request to wire and exempts nothing: posture is
 // checked through wire and every write is gated as against Stripe (a test

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -153,6 +154,10 @@ type entry struct {
 // key's stands.
 const VerdictTTL = time.Hour
 
+// RefusedRecheck is how long a lasting key's Refused verdict stands before a
+// write or its registration asks the provider again.
+const RefusedRecheck = 5 * time.Minute
+
 // DefaultTimeout bounds one posture check, whatever the provider client's own
 // timeout: a purchase waiting on it must not hang.
 const DefaultTimeout = 5 * time.Second
@@ -171,8 +176,10 @@ type Registry struct {
 	clock   atomic.Pointer[func() time.Time]
 	mu      sync.Mutex
 	entries map[Key]*entry
-	// credentials are the keys each credential is registered under.
-	credentials map[credentialKey][]Key
+	// declarations are each PSP declaration's registered key, and
+	// credentials count the declarations of each key by its credential.
+	declarations map[string]Key
+	credentials  map[credentialKey]map[Key]int
 }
 
 // NewRegistry returns an empty registry retrying unknown verdicts after backoff.
@@ -221,18 +228,36 @@ func (r *Registry) entry(k Key) *entry {
 // Verify checks k now (joining a check already running) and records the
 // verdict, replacing any prior one; check becomes k's.
 func (r *Registry) Verify(ctx context.Context, k Key, check Check) Status {
-	r.name(k, check)
+	e := r.entry(k)
+	e.mu.Lock()
+	e.check = check
+	e.mu.Unlock()
 	return r.resolve(ctx, k, check, true)
 }
 
-// Register names check as k's and starts verifying k when it has no verdict
-// and no check is running: a credential is checked as soon as the PSP that
-// declares it loads, archived or not, and RequireCredential finds it.
-func (r *Registry) Register(k Key, check Check) {
-	e := r.name(k, check)
+// Register makes k, checked by check, the registration of declaration (a
+// merchant's PSP document), replacing the one it had, and starts checking k
+// when its verdict does not stand: a credential is checked as soon as the PSP
+// that declares it loads, archived or not, and an unarmed one again once its
+// re-check is due. RequireCredential finds it by its credential.
+func (r *Registry) Register(declaration string, k Key, check Check) {
+	e := r.entry(k)
+	r.mu.Lock()
+	if prior, ok := r.declarations[declaration]; ok && prior != k {
+		r.unindex(prior)
+	}
+	if prior, ok := r.declarations[declaration]; !ok || prior != k {
+		if r.declarations == nil {
+			r.declarations = map[string]Key{}
+		}
+		r.declarations[declaration] = k
+		r.index(k)
+	}
+	r.mu.Unlock()
 	e.mu.Lock()
+	e.check = check
 	var flight chan struct{}
-	if !e.done && e.flight == nil {
+	if !r.settled(e) && e.flight == nil {
 		flight = make(chan struct{})
 		e.flight = flight
 	}
@@ -242,22 +267,38 @@ func (r *Registry) Register(k Key, check Check) {
 	}
 }
 
-// name records check as k's and indexes k under its credential.
-func (r *Registry) name(k Key, check Check) *entry {
-	e := r.entry(k)
+// Unregister drops declaration's registration: its document is gone or no
+// longer holds a credential.
+func (r *Registry) Unregister(declaration string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if prior, ok := r.declarations[declaration]; ok {
+		r.unindex(prior)
+		delete(r.declarations, declaration)
+	}
+}
+
+// index counts one more declaration of k under its credential; r.mu is held.
+func (r *Registry) index(k Key) {
 	if r.credentials == nil {
-		r.credentials = map[credentialKey][]Key{}
+		r.credentials = map[credentialKey]map[Key]int{}
 	}
 	ck := credentialKey{k.Rail, k.Endpoint, k.Credential}
-	if !slices.Contains(r.credentials[ck], k) {
-		r.credentials[ck] = append(r.credentials[ck], k)
+	if r.credentials[ck] == nil {
+		r.credentials[ck] = map[Key]int{}
 	}
-	r.mu.Unlock()
-	e.mu.Lock()
-	e.check = check
-	e.mu.Unlock()
-	return e
+	r.credentials[ck][k]++
+}
+
+// unindex counts one declaration of k less; r.mu is held.
+func (r *Registry) unindex(k Key) {
+	ck := credentialKey{k.Rail, k.Endpoint, k.Credential}
+	if r.credentials[ck][k]--; r.credentials[ck][k] <= 0 {
+		delete(r.credentials[ck], k)
+	}
+	if len(r.credentials[ck]) == 0 {
+		delete(r.credentials, ck)
+	}
 }
 
 // credentialKey is one credential at one endpoint of a rail.
@@ -266,51 +307,87 @@ type credentialKey struct {
 	credential     [sha256.Size]byte
 }
 
-// RequireCredential returns nil only when every key the credential is
-// registered under is armed: a request carries the credential, not the PSP
-// it acts for. It never checks with a check of its own. A credential no PSP
-// has registered is refused at once with ErrPending; a first check still
-// running is waited for, bounded by ctx; a stale or Unknown verdict is checked
-// again with the registered check.
-func (r *Registry) RequireCredential(ctx context.Context, rail, endpoint string, credential [sha256.Size]byte) error {
+// registered are the keys declarations hold for the credential, of merchant
+// alone unless it is uuid.Nil.
+func (r *Registry) registered(rail, endpoint string, credential [sha256.Size]byte, merchant uuid.UUID) []Key {
 	r.mu.Lock()
-	keys := slices.Clone(r.credentials[credentialKey{rail, endpoint, credential}])
-	r.mu.Unlock()
+	defer r.mu.Unlock()
+	var keys []Key
+	for k := range r.credentials[credentialKey{rail, endpoint, credential}] {
+		if merchant == uuid.Nil || k.MerchantID == merchant {
+			keys = append(keys, k)
+		}
+	}
+	slices.SortFunc(keys, func(a, b Key) int { return strings.Compare(a.String(), b.String()) })
+	return keys
+}
+
+// RequireCredential returns nil when one of merchant's declarations of the
+// credential is armed (any merchant's, for uuid.Nil): a request carries the
+// credential, not the PSP it acts for, and a declaration of another account,
+// a typo or a wrong duplicate, disarms only itself. It never checks with a
+// check of its own. A credential the merchant declares nowhere is refused at
+// once with ErrPending; a first check still running is waited for, bounded by
+// ctx; a verdict that no longer stands is checked again with the registered
+// check.
+func (r *Registry) RequireCredential(ctx context.Context, rail, endpoint string, credential [sha256.Size]byte, merchant uuid.UUID) error {
+	keys := r.registered(rail, endpoint, credential, merchant)
 	if len(keys) == 0 {
 		return fmt.Errorf("%w: %s credential for %s: %w", ErrDisarmed, rail, endpoint, ErrPending)
 	}
+	var first error
 	for _, k := range keys {
 		e := r.entry(k)
 		e.mu.Lock()
 		check := e.check
 		e.mu.Unlock()
-		if err := r.resolve(ctx, k, check, false).Error(); err != nil {
-			return err
+		err := r.resolve(ctx, k, check, false).Error()
+		if err == nil {
+			return nil
+		}
+		if first == nil {
+			first = err
 		}
 	}
-	return nil
+	return first
+}
+
+// RefuseCredential records the provider's refusal of the credential (a key
+// it no longer accepts) on every declaration of merchant's (any merchant's,
+// for uuid.Nil): their writes stop until a re-check (RefusedRecheck) or a new
+// credential arms them.
+func (r *Registry) RefuseCredential(rail, endpoint string, credential [sha256.Size]byte, merchant uuid.UUID, why error) {
+	for _, k := range r.registered(rail, endpoint, credential, merchant) {
+		e := r.entry(k)
+		e.mu.Lock()
+		e.status = Status{Key: k, Verdict: Refused, Err: why, CheckedAt: r.now()}
+		e.done, e.failures, e.retryAt = true, 0, time.Time{}
+		e.mu.Unlock()
+	}
 }
 
 // CredentialRefusal is what RequireCredential would refuse from recorded
-// verdicts alone, never asking the provider: nil while a write may pass or a
-// check is still to run.
-func (r *Registry) CredentialRefusal(rail, endpoint string, credential [sha256.Size]byte) error {
-	r.mu.Lock()
-	keys := slices.Clone(r.credentials[credentialKey{rail, endpoint, credential}])
-	r.mu.Unlock()
+// verdicts alone, never asking the provider: nil while a declaration of
+// merchant's may pass or is still to be checked.
+func (r *Registry) CredentialRefusal(rail, endpoint string, credential [sha256.Size]byte, merchant uuid.UUID) error {
+	keys := r.registered(rail, endpoint, credential, merchant)
 	if len(keys) == 0 {
 		return fmt.Errorf("%w: %s credential for %s: %w", ErrDisarmed, rail, endpoint, ErrPending)
 	}
+	var first error
 	for _, k := range keys {
 		e := r.entry(k)
 		e.mu.Lock()
 		settled, status := r.settled(e), e.status
 		e.mu.Unlock()
-		if settled && !status.Armed() {
-			return status.Error()
+		if !settled || status.Armed() {
+			return nil
+		}
+		if first == nil {
+			first = status.Error()
 		}
 	}
-	return nil
+	return first
 }
 
 // Require returns nil only for an armed key. An unseen key is verified, an
@@ -335,6 +412,10 @@ func (r *Registry) settled(e *entry) bool {
 		return now.Before(e.retryAt)
 	case e.status.Armed():
 		return e.status.Key.Lasting || now.Before(e.status.CheckedAt.Add(VerdictTTL))
+	case e.status.Verdict == Refused && e.status.Key.Lasting:
+		// A permission may be granted, or a key restored, on the provider's
+		// side: a lasting refusal is asked again, at most this often.
+		return now.Before(e.status.CheckedAt.Add(RefusedRecheck))
 	default:
 		return true
 	}

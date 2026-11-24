@@ -290,8 +290,8 @@ func TestPSPControls(t *testing.T) {
 		}
 		// Each key is registered as its PSP's configuration loads it.
 		merchant := uuid.New()
-		factory.RegisterPosture(merchant, uuid.New(), declared, own)
-		factory.RegisterPosture(merchant, uuid.New(), declared, foreign)
+		factory.RegisterPosture("own", merchant, uuid.New(), declared, own)
+		factory.RegisterPosture("foreign", merchant, uuid.New(), declared, foreign)
 		require.NoError(t, write(own), "the declared account's live key goes through the gate")
 		require.Len(t, stripe.Submitted("/v1/customers"), 1)
 		err := write(foreign)
