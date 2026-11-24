@@ -274,11 +274,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		directory = identity.Live{Lookup: overrides.UserInfo, DB: database}
 	}
 	customers := &identity.Customers{Directory: directory}
-	// #1099: idempotency leases renew on their own connections, so a pool
-	// saturated by the requests holding them can never starve a renewal.
+	// Leases renew on their own connections (idempotency claims, the billing
+	// pass, merchant pulls), so a pool their holders saturate never starves a
+	// renewal.
 	leaseDB, err := database.SeparatePool(ctx, leaseConns)
 	if err != nil {
-		return nil, fmt.Errorf("idempotency lease pool: %w", err)
+		return nil, fmt.Errorf("lease pool: %w", err)
 	}
 	defer func() {
 		if buildErr != nil {

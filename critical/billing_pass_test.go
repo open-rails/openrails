@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -85,6 +86,53 @@ func blockedBy(t *testing.T, w *world, holder int32) int {
 	var n int
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))", holder).Scan(&n))
 	return n
+}
+
+// holdOrder locks the order's row, as a writer would, until unlock: a pass
+// reaching it waits.
+func holdOrder(t *testing.T, w *world, order billing.OrderID) (holder int32, unlock func()) {
+	t.Helper()
+	conn, err := w.pool.Acquire(t.Context())
+	require.NoError(t, err)
+	tx, err := conn.Begin(t.Context())
+	require.NoError(t, err)
+	var once sync.Once
+	unlock = func() {
+		once.Do(func() {
+			_ = tx.Rollback(context.Background())
+			conn.Release()
+		})
+	}
+	t.Cleanup(unlock)
+	_, err = tx.Exec(t.Context(), "SELECT 1 FROM "+pgx.Identifier{w.schema, "orders"}.Sanitize()+" WHERE id = $1 FOR UPDATE", order.UUID())
+	require.NoError(t, err)
+	require.NoError(t, tx.QueryRow(t.Context(), "SELECT pg_backend_pid()").Scan(&holder))
+	return holder, unlock
+}
+
+// awaitAnyJob waits for the first of the jobs to finish.
+func awaitAnyJob(t *testing.T, events <-chan *river.Event, ids map[int64]bool) *river.Event {
+	t.Helper()
+	deadline := time.NewTimer(60 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case event := <-events:
+			if event != nil && ids[event.Job.ID] {
+				return event
+			}
+		case <-deadline.C:
+			t.Fatal("no billing pass finished")
+		}
+	}
+}
+
+// reported tells whether the job recorded a pass report.
+func reported(t *testing.T, w *world, job int64) bool {
+	t.Helper()
+	var ok bool
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT metadata ? 'output' FROM "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+" WHERE id = $1", job).Scan(&ok))
+	return ok
 }
 
 // nextHour is the top of the UTC hour after at: the next pass.
@@ -287,6 +335,60 @@ func TestBillingPass(t *testing.T) {
 			}
 		}
 		require.Zero(t, openOrders(t, a.world), "the first pass takes what is due")
+	})
+	t.Run("OR-J04-S80/two-passes-started-together-one-scans-the-other-exits-and-neither-holds-a-session", func(t *testing.T) {
+		a, _ := newPaymentWorld(t, withTaggedSessions)
+		fleet := quietFleet(t, a.world)
+		_, price := publicSale(t, a, "raced-order", 9_990_000, nil)
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		expires := a.clock.Now().Add(time.Hour)
+		order, err := a.alpha.CreateOrder(t.Context(), "raced", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
+		require.NoError(t, err)
+		advanceTo(a.world, nextHour(expires))
+		holder, unlock := holdOrder(t, a.world, order.ID)
+		defer unlock()
+		events, unsubscribe := fleet.Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+		defer unsubscribe()
+		passes, err := fleet.InsertMany(t.Context(), []river.InsertManyParams{{Args: billingPass{}}, {Args: billingPass{}}})
+		require.NoError(t, err)
+		ids := map[int64]bool{passes[0].Job.ID: true, passes[1].Job.ID: true}
+		exited := awaitAnyJob(t, events, ids)
+		require.Equal(t, river.EventKindJobCompleted, exited.Kind)
+		require.False(t, reported(t, a.world, exited.Job.ID), "the pass that found the other running exits without a report")
+		require.Eventually(t, func() bool { return blockedBy(t, a.world, holder) > 0 }, 30*time.Second, 20*time.Millisecond, "the other scans")
+		require.Equal(t, 1, blockedBy(t, a.world, holder), "and only it")
+		require.Equal(t, 1, openOrders(t, a.world))
+		require.Equal(t, 1, liveLeases(t, a.world, "periodic_leases", "openrails.billing_pass.run"))
+		require.Zero(t, heldSessions(t, a.world), "the running pass holds a lease row, not a session")
+		unlock()
+		delete(ids, exited.Job.ID)
+		ran := awaitAnyJob(t, events, ids)
+		require.Equal(t, river.EventKindJobCompleted, ran.Kind)
+		require.True(t, reported(t, a.world, ran.Job.ID))
+		require.Zero(t, openOrders(t, a.world), "the running pass takes what is due")
+		require.Zero(t, liveLeases(t, a.world, "periodic_leases", "openrails.billing_pass.run"), "and frees its lease")
+	})
+	t.Run("OR-J04-S81/a-dead-passs-lease-lapses-and-the-next-pass-runs", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		fleet := quietFleet(t, a.world)
+		_, price := publicSale(t, a, "after-a-crash", 9_990_000, nil)
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		expires := a.clock.Now().Add(time.Hour)
+		_, err := a.alpha.CreateOrder(t.Context(), "after-a-crash", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
+		require.NoError(t, err)
+		advanceTo(a.world, nextHour(expires))
+		// A pass whose process dies stops renewing its lease and never frees it.
+		alive, die := context.WithCancel(t.Context())
+		dead, err := worldDB(t, a.world).TryPassLease(alive, "openrails.billing_pass", 5*time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, dead)
+		die()
+		require.False(t, runPass(t, fleet), "a pass under a live lease exits")
+		require.Equal(t, 1, openOrders(t, a.world), "and runs no scan")
+		require.Eventually(t, func() bool { return liveLeases(t, a.world, "periodic_leases", "openrails.billing_pass.run") == 0 }, 20*time.Second, 100*time.Millisecond, "the dead pass's lease lapses")
+		require.False(t, runPass(t, fleet))
+		require.Zero(t, openOrders(t, a.world), "the next pass takes what is due")
+		require.Zero(t, liveLeases(t, a.world, "periodic_leases", "openrails.billing_pass.run"))
 	})
 	t.Run("OR-J04-S47/the-next-pass-takes-what-a-failed-or-missed-pass-left-due", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
