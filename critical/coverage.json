@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 469,
+  "scenario_count": 471,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1907,6 +1907,16 @@
       "id": "OR-J06-S67",
       "journey": "J06",
       "name": "A low Solana cranker alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S68",
+      "journey": "J06",
+      "name": "A refused message sender alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S69",
+      "journey": "J06",
+      "name": "A rate-limited customer alerts the operator once"
     },
     {
       "id": "OR-J14-S70",

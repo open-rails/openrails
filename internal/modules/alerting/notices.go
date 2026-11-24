@@ -169,7 +169,7 @@ func RecordMessageRateLimit(ctx context.Context, database *db.DB, now time.Time,
 		return fmt.Errorf("message rate limit: database is required")
 	}
 	customer := billing.CustomerID(limit.CustomerID).String()
-	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+	rec, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingCustomerMessagesRateLimited, SubjectKey: customer, Severity: reconcile.SeverityMedium,
 		RecommendedAction: fmt.Sprintf("Customer %s reached %d messages in %s, so a %s message was not sent. Find what records so many billing facts for them.",
 			customer, limit.Cap, limit.Window, limit.EventType),
@@ -179,6 +179,7 @@ func RecordMessageRateLimit(ctx context.Context, database *db.DB, now time.Time,
 	if err != nil {
 		return fmt.Errorf("message rate limit: %w", err)
 	}
+	alertRaised(ctx, database, rec, now)
 	return nil
 }
 
@@ -215,7 +216,7 @@ func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.T
 	if r.From == "" {
 		sender = "the deployment's sender"
 	}
-	_, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+	rec, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingCustomerMessagesSenderRefused, SubjectKey: subject, Severity: reconcile.SeverityHigh,
 		RecommendedAction: fmt.Sprintf("The mail server refused %s at %s (%d %s), so customer messages are not sent; each is retried. Fix the sender's credentials or let it send as this address.",
 			sender, r.Step, r.Code, r.Reply),
@@ -225,6 +226,7 @@ func RecordMessageSenderRefused(ctx context.Context, database *db.DB, now time.T
 	if err != nil {
 		return fmt.Errorf("message sender refused: %w", err)
 	}
+	alertRaised(ctx, database, rec, now)
 	return nil
 }
 

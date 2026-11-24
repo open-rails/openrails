@@ -1165,6 +1165,12 @@
     "OR-J06-S67": [
       "TestFindingAlerts/OR-J06-S67/a-low-cranker-alerts-the-operator"
     ],
+    "OR-J06-S68": [
+      "TestFindingAlerts/OR-J06-S68/a-refused-message-sender-alerts-the-operator-once"
+    ],
+    "OR-J06-S69": [
+      "TestFindingAlerts/OR-J06-S69/a-rate-limited-customer-alerts-the-operator-once"
+    ],
     "OR-J14-S70": [
       "TestDueWork/OR-J14-S70/an-engine-renewal-nothing-attempted-reads-as-missed"
     ],
