@@ -76,7 +76,7 @@ func (r *CatalogApplicationReceipt) String() string {
 		fmt.Fprintf(&b, "%d object(s) skipped: an edit set the fields above. Change the file to agree, remove those fields, or apply with force.\n", len(r.Conflicts))
 	}
 	if refused > 0 {
-		fmt.Fprintf(&b, "%d price(s) refused: document not recorded as applied. Fix the file and apply again.\n", refused)
+		fmt.Fprintf(&b, "%d price(s) refused and left out; the rest of the document applied. Fix the file and apply it again.\n", refused)
 	}
 	return b.String()
 }

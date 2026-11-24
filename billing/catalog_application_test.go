@@ -45,7 +45,7 @@ func TestCatalogApplicationReceiptString(t *testing.T) {
   refused price quarterly of product pro: no Solana PSP configured
   applied price monthly of product pro with warning: Solana plan not published
 2 object(s) skipped: an edit set the fields above. Change the file to agree, remove those fields, or apply with force.
-1 price(s) refused: document not recorded as applied. Fix the file and apply again.
+1 price(s) refused and left out; the rest of the document applied. Fix the file and apply it again.
 `
 	if got := receipt.String(); got != want {
 		t.Fatalf("receipt =\n%s\nwant\n%s", got, want)
