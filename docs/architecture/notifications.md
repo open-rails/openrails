@@ -31,8 +31,9 @@ sends no SMS. Integration guides: [events](../client.md#events),
 deterministic id) in the domain transaction. Insert triggers call
 `billing.queue_event_log`, which refuses an event whose merchant differs from the
 pinned `openrails.merchant_id` and stages it in `eventlog_pending`. The deferred
-constraint trigger `eventlog_flush_at_commit` runs `billing.eventlog_flush` at
-commit: it locks each touched `eventlog_streams` row, numbers the events into
+constraint trigger `eventlog_flush_at_commit` runs the books' commit-time
+sequence ([books](books.md#how-it-works)), whose last step, `billing.flush_event_log`,
+locks each touched `eventlog_streams` row, numbers the events into
 `eventlog_events`, and `pg_notify`s `<schema>.eventlog`. Positions are assigned at
 commit under the stream lock, so no reader sees a later fact before an earlier one
 commits. `billing.event_log_data` writes money fields as decimal strings and

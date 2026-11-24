@@ -703,16 +703,16 @@ type BillingLeaseInFlight struct {
 	UpdatedAt time.Time
 }
 
-// Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
+// Double-entry accounts of two books: the units book (a customer's units held and owed, at face) and the general ledger (money, registry currencies only). One account belongs to one (merchant, book, currency); its counters are maintained from immutable ledger_transfers, except a merchant-wide general-ledger account's, which stay 0: its balance is its ledger_type_totals row. Retention: permanent, never pruned.
 type BillingLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// NULL for system accounts (one per merchant+currency); set for per-customer balance accounts.
+	// Set for customer-scoped accounts (customer_units, customer_owed, usage_receivable, deferred_revenue_credit); NULL for system accounts, one per merchant, currency and PSP.
 	CustomerID *uuid.UUID
-	// Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER: its negated balance is that payer's outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits are merchant-wide system accounts.
+	// The account's role in its book (books.Chart). customer_owed is per customer: its negated balance is what the customer owes, read O(1) on the admission path.
 	AccountType string
 	Currency    string
-	// TB sign flag: balance (credits-debits) may not go below zero (minus an applier-supplied arrears floor). Set on customer_balance.
+	// Sign rule: the balance (credits - debits) may not go below zero. Set by the chart. The units book refuses a breach, less a floor the transfer supplies; the general ledger never refuses one: it raises books.sign_breach, a merchant-wide account's on its type total at commit.
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
 	// Maintained counter: posted credits, for O(1) balance reads.
@@ -720,9 +720,36 @@ type BillingLedgerAccount struct {
 	// Maintained counter: posted debits, for O(1) balance reads.
 	DebitsPosted int64
 	CreatedAt    time.Time
+	// units or general. A transfer never crosses books.
+	Book string
+	// The account type's class, which sets its normal side: units book held, owed, issued, retired or clearing; general ledger asset, contra_asset, liability, revenue, contra_revenue, expense or equity.
+	Class string
+	// The PSP of a cash_clearing account, one per PSP and currency; NULL for every other account.
+	PspID *uuid.UUID
 }
 
-// Immutable double-entry transfers. Append-only. A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table. Retention: permanent, never pruned.
+// What the transfers of one type credited and debited the accounts of one type in one 15-minute UTC bucket of effective_at: per merchant, book, currency, account type, bucket, transfer type, (cash_clearing) PSP and product. A reader groups buckets into days in the accounting timezone; a value at a past instant is the total less the flows after it. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers. Retention: permanent, never pruned.
+type BillingLedgerDaily struct {
+	MerchantID  uuid.UUID
+	Book        string
+	Currency    string
+	AccountType string
+	// The start of the 15-minute UTC bucket: date_bin('15 minutes', effective_at, '2000-01-01 00:00:00+00').
+	BucketAt     time.Time
+	TransferType string
+	PspID        *uuid.UUID
+	ProductID    *uuid.UUID
+	Credits      int64
+	Debits       int64
+}
+
+// Transfers this transaction posted whose rollups it has not yet kept: transaction scratch, empty at commit.
+type BillingLedgerRollupPending struct {
+	MerchantID uuid.UUID
+	TransferID uuid.UUID
+}
+
+// Immutable double-entry transfers. Append-only. A transfer moves amount debit->credit within ONE (merchant, book, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters and the ledger_daily and ledger_type_totals rollups are maintained projections of this table. Retention: permanent, never pruned.
 type BillingLedgerTransfer struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -745,6 +772,25 @@ type BillingLedgerTransfer struct {
 	CreatedAt     time.Time
 	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
+	// The book of both accounts: units or general. transfer_type belongs to it; usage_reversed alone is in both.
+	Book string
+	// When the transfer takes effect, its business date: when it posted, for the units book; the event's own instant, for the general ledger. ledger_daily counts it in its 15-minute UTC bucket.
+	EffectiveAt time.Time
+	// The order line a general-ledger transfer belongs to. No foreign key (ledger purity).
+	OrderLineID *uuid.UUID
+	// The product a general-ledger transfer belongs to. No foreign key (ledger purity).
+	ProductID *uuid.UUID
+}
+
+// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters, and settling it refuses the commit when it crosses that account's sign rule. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
+type BillingLedgerTypeTotal struct {
+	MerchantID    uuid.UUID
+	Book          string
+	Currency      string
+	AccountType   string
+	PspID         *uuid.UUID
+	CreditsPosted int64
+	DebitsPosted  int64
 }
 
 // One staff adjustment of a customer's limit window, so a retry with its source_id adds nothing again; the capacity it added is the window's adjusted. Retention: rows are deleted 61 days after created_at.

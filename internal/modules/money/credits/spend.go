@@ -40,7 +40,7 @@ func (l *Lots) Spend(ctx context.Context, customer uuid.UUID, unit string, amoun
 	if err != nil {
 		return false, err
 	}
-	revenue, err := l.money.EnsureSystemAccount(ctx, ledger.PlatformRevenue, unit)
+	revenue, err := l.money.EnsureSystemAccount(ctx, ledger.UnitsRedeemed, unit)
 	if err != nil {
 		return false, err
 	}
@@ -122,7 +122,7 @@ func (l *Lots) settleUsage(ctx context.Context, customer uuid.UUID, unit string,
 }
 
 // ExpireLapsed moves the units left on every lot past its expiry to
-// expired_credits, one transfer per lot, and returns the total. Idempotent:
+// units_expired, one transfer per lot, and returns the total. Idempotent:
 // an expired lot has none left. It takes the customer's lock.
 func (l *Lots) ExpireLapsed(ctx context.Context, customer uuid.UUID, unit string) (int64, error) {
 	return l.ExpireLapsedBy(ctx, customer, unit, l.now())
@@ -145,7 +145,7 @@ func (l *Lots) ExpireLapsedBy(ctx context.Context, customer uuid.UUID, unit stri
 	if err != nil {
 		return 0, err
 	}
-	expiredAccount, err := l.money.EnsureSystemAccount(ctx, ledger.ExpiredCredits, unit)
+	expiredAccount, err := l.money.EnsureSystemAccount(ctx, ledger.UnitsExpired, unit)
 	if err != nil {
 		return 0, err
 	}

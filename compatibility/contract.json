@@ -1839,10 +1839,13 @@
       "type runningChargeCursor struct {\n\tID uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/modules/money/ledger": [
-      "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
-      "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
-      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n}",
-      "type LotDrift struct {\n\tCreditGrantID    uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID       uuid.UUID `json:\"merchant_id\"`\n\tCustomerID       uuid.UUID `json:\"customer_id\"`\n\tUnit             string    `json:\"unit\"`\n\tStoredCredited   int64     `json:\"stored_credited\"`\n\tLoggedCredited   int64     `json:\"logged_credited\"`\n\tStoredDebited    int64     `json:\"stored_debited\"`\n\tLoggedDebited    int64     `json:\"logged_debited\"`\n\tStoredReserved   int64     `json:\"stored_reserved\"`\n\tExpectedReserved int64     `json:\"expected_reserved\"`\n}"
+      "type ConservationBreach struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\tBook       string    `json:\"book\"`\n\tCurrency   string    `json:\"currency\"`\n\tNet        int64     `json:\"net\"`\n\tAccounts   int64     `json:\"accounts\"`\n}",
+      "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
+      "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n\tLots         []LotDrift           `json:\"lot_drifts\"`\n\tRollups      []RollupDrift        `json:\"rollup_drifts\"`\n\tSigns        []SignBreach         `json:\"sign_breaches\"`\n\n\tSides []SideWarning `json:\"side_warnings\"`\n}",
+      "type LotDrift struct {\n\tCreditGrantID    uuid.UUID `json:\"credit_grant_id\"`\n\tMerchantID       uuid.UUID `json:\"merchant_id\"`\n\tCustomerID       uuid.UUID `json:\"customer_id\"`\n\tUnit             string    `json:\"unit\"`\n\tStoredCredited   int64     `json:\"stored_credited\"`\n\tLoggedCredited   int64     `json:\"logged_credited\"`\n\tStoredDebited    int64     `json:\"stored_debited\"`\n\tLoggedDebited    int64     `json:\"logged_debited\"`\n\tStoredReserved   int64     `json:\"stored_reserved\"`\n\tExpectedReserved int64     `json:\"expected_reserved\"`\n}",
+      "type RollupDrift struct {\n\tBook          string     `json:\"book\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tBucket        *time.Time `json:\"bucket,omitempty\"`\n\tTransferType  string     `json:\"transfer_type,omitempty\"`\n\tProductID     *uuid.UUID `json:\"product_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
+      "type SideWarning struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tClass         string     `json:\"class\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}",
+      "type SignBreach struct {\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tPSPID         *uuid.UUID `json:\"psp_id,omitempty\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tCreditsPosted int64      `json:\"credits_posted\"`\n\tDebitsPosted  int64      `json:\"debits_posted\"`\n}"
     ],
     "internal/modules/orders": [
       "type cartLine struct {\n\tPriceID  uuid.UUID `json:\"price_id\"`\n\tQuantity *int      `json:\"quantity,omitempty\"`\n\tAmount   *int64    `json:\"amount,omitempty,string\"`\n}"
@@ -3943,6 +3946,7 @@
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "time": "time",
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/money/metering_catalog.go": {
@@ -4683,6 +4687,7 @@
     "internal/pspimport/importer.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
+      "books": "github.com/open-rails/openrails/internal/modules/money/books",
       "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",

@@ -421,7 +421,7 @@ func migrateCreditLots(t *testing.T) {
 	require.Zero(t, lots[unposted].credited, "no unit of the unposted lot posted")
 	var accounts int
 	require.NoError(t, s.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+s.table("ledger_accounts")+
-		" WHERE merchant_id = $1 AND customer_id = $2 AND account_type = 'customer_balance' AND currency = 'USD'", d.m, unfunded).Scan(&accounts))
+		" WHERE merchant_id = $1 AND customer_id = $2 AND account_type = 'customer_units' AND currency = 'USD'", d.m, unfunded).Scan(&accounts))
 	require.Equal(t, 1, accounts, "the unposted lot's customer has the balance it will be deposited to")
 
 	var left, kept int

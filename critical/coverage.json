@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 602,
+  "scenario_count": 612,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2514,9 +2514,59 @@
       "name": "Two credit lots that lapsed before their expiry ran expire only what each still holds after the usage settled at the first lapse"
     },
     {
+      "id": "OR-J40-S01",
+      "journey": "J40",
+      "name": "Every account type has one book and class; the general ledger refuses a merchant unit"
+    },
+    {
+      "id": "OR-J40-S02",
+      "journey": "J40",
+      "name": "A transfer across books, across currencies or naming another customer's account is refused"
+    },
+    {
+      "id": "OR-J40-S03",
+      "journey": "J40",
+      "name": "ledger-audit catches injected counter and rollup corruption"
+    },
+    {
       "id": "OR-J40-S04",
       "journey": "J40",
       "name": "A credit lot whose deposit did not post is not spendable until convergence posts it once"
+    },
+    {
+      "id": "OR-J40-S05",
+      "journey": "J40",
+      "name": "A ledger from before the books migrates with rollups that ledger-audit and an export accept"
+    },
+    {
+      "id": "OR-J40-S06",
+      "journey": "J40",
+      "name": "Concurrent top-ups, one posting unposted usage first, all commit"
+    },
+    {
+      "id": "OR-J40-S07",
+      "journey": "J40",
+      "name": "An archive written before the books restores as the units book"
+    },
+    {
+      "id": "OR-J40-S08",
+      "journey": "J40",
+      "name": "A ledger transfer and an MRR change in either statement order, in two transactions held at commit, both commit"
+    },
+    {
+      "id": "OR-J40-S09",
+      "journey": "J40",
+      "name": "Two first checkouts in a currency a catalog apply opened overlap; a posting nothing opened for raises a finding; two checkouts and a usage collection in opposite lock orders all commit"
+    },
+    {
+      "id": "OR-J40-S23",
+      "journey": "J40",
+      "name": "An event queued before or after a ledger transfer, in two transactions held at commit, both commit"
+    },
+    {
+      "id": "OR-J40-S24",
+      "journey": "J40",
+      "name": "One transaction posting for two merchants in either order, two held at commit, both commit"
     },
     {
       "id": "OR-J42-S01",

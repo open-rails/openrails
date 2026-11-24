@@ -22,7 +22,8 @@ import (
 // whose notice is armed, or when a funding lifts it over one whose notice was
 // sent. Any other change queues nothing. A watch it queues is also marked due,
 // so the billing pass looks at it if the look fails. Every caller holds the
-// customer's LockCustomerForSpend, which the look takes too.
+// customer's LockCustomerForSpend, which the look takes too. Only the units
+// book reaches it: a general-ledger posting changes no spendable balance.
 func WatchChange(ctx context.Context, q *gen.Queries, merchant, customer uuid.UUID, currency string, funded bool, now time.Time) error {
 	key := gen.GetBalanceWatchParams{MerchantID: merchant, CustomerID: customer, Currency: currency}
 	w, err := q.GetBalanceWatch(ctx, key)

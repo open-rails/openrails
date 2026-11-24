@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/parking"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -519,6 +520,13 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		if err := validateReceiptSources(opts.Book, history); err != nil {
 			return res, err
 		}
+		// A valid batch's currencies are opened before any of it posts; a
+		// refused one opens nothing.
+		var currencies []string
+		for _, t := range opts.Book.Transactions {
+			currencies = append(currencies, string(t.Currency))
+		}
+		books.Prepare(ctx, database.DataPool(), logger, merchantID.UUID(), currencies...)
 		err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			if err := land(ctx, tx); err != nil {
 				return err

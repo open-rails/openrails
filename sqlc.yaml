@@ -23,6 +23,7 @@ sql:
       - "internal/migrate/postgres/0023_decline_causes.up.sql"
       - "internal/migrate/postgres/0024_payment_method_versions_restrict.up.sql"
       - "internal/migrate/postgres/0025_usage_on_event_store.up.sql"
+      - "internal/migrate/postgres/0026_books.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

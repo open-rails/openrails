@@ -134,6 +134,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if err := dropUnreadColumns(p, &r.Values); err != nil {
 			return err
 		}
+		if err := normalizePreBooks(p, &r.Values); err != nil {
+			return err
+		}
 		// Older exports always carried an explicit credit limit, including
 		// zero. Preserve that meaning; no schedule existed before #1289.
 		if p.Name == "money_settings" && len(r.Values) == len(p.Columns)-5 {

@@ -272,7 +272,7 @@ func (s *MoneyService) ViewCapacityTx(ctx context.Context, q *gen.Queries, payer
 }
 
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
-// customer_balance counters, optional money_settings, and the payer's arrears
+// customer_units counters, optional money_settings, and the payer's arrears
 // account. Arrears debt never shows as a negative balance, so the credit line
 // must be checked against OutstandingOwed.
 func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string) (AdmissionCapacity, error) {
@@ -522,7 +522,7 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 }
 
 // depositTx records a money-in as a credit lot and posts its deposit (DR
-// processor_clearing / CR customer_balance). Idempotent on (merchant, payer,
+// units_sold / CR customer_units). Idempotent on (merchant, payer,
 // source_id) via the lot lookup. Runs under the customers-row lock so deposits
 // serialize per customer.
 func (s *MoneyService) depositTx(ctx context.Context, d *db.DB, params DepositParams) (*models.MoneyTransaction, error) {

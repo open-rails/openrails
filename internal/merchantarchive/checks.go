@@ -72,6 +72,9 @@ var excludedTables = map[string]string{
 	"psp_import_mappings":           "the merchant's own identifiers; it maps them again for an import",
 	"provider_catalog_objects":      "provider observations; the destination observes again",
 	"parked_provider_subscriptions": "converge working state: the next provider event parks again",
+	"ledger_type_totals":            "derived: the transfers rebuild it as they are restored, and the restore check proves it",
+	"ledger_daily":                  "derived: the transfers rebuild it as they are restored, and the restore check proves it",
+	"ledger_rollup_pending":         "transaction scratch, empty at commit",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -124,6 +127,9 @@ var excludedColumns = map[string]string{
 	"price_keys":             "merchant_id product_id key revision created_at updated_at",
 	"network_activity_daily": "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
 	"balance_watches":        "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
+	"ledger_type_totals":     "merchant_id book currency account_type psp_id credits_posted debits_posted",
+	"ledger_daily":           "merchant_id book currency account_type bucket_at transfer_type psp_id product_id credits debits",
+	"ledger_rollup_pending":  "merchant_id transfer_id",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment
@@ -392,7 +398,9 @@ var referenceChecks = []rowCheck{
        AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
-	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id AND o.currency=ledger_transfers.currency))`},
+	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id AND o.currency=ledger_transfers.currency))
+	 OR (order_line_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.id=ledger_transfers.order_line_id AND l.order_id=ledger_transfers.order_id))
+	 OR (product_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=ledger_transfers.product_id))`},
 	// Restore preserves historical denormalized tiers, but a live subscription
 	// must still agree with its product, as required by the ordinary tier
 	// derivation and product-update guards. Include remaining paid access.

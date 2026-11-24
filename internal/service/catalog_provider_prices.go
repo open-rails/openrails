@@ -380,6 +380,14 @@ func (s *Service) providerObjectHolders(ctx context.Context, productKey string, 
 // its terms are read from the provider (declared for CCBill), and nothing is
 // written to the provider.
 func (s *Service) CreateProviderPrice(ctx context.Context, params billing.CreateProviderPriceParams) (*billing.Price, error) {
+	price, err := s.createProviderPrice(ctx, params)
+	if err == nil {
+		s.prepareBooks(ctx)
+	}
+	return price, err
+}
+
+func (s *Service) createProviderPrice(ctx context.Context, params billing.CreateProviderPriceParams) (*billing.Price, error) {
 	decl := catalogwire.ApplyProviderPrice{PSP: params.PSP, PlanID: params.PlanID, PriceID: params.PriceID, FlexID: params.FlexID, RecurringBillingOptionID: params.RecurringBillingOptionID,
 		Currency: params.Currency, UnitAmount: params.UnitAmount, BillingIntervalHours: params.BillingIntervalHours, AccessDurationHours: params.AccessDurationHours,
 		TrialUnitAmount: params.TrialUnitAmount, TrialDurationHours: params.TrialDurationHours, OneOff: params.OneOff, Archived: catalogwire.Value(params.Archived)}

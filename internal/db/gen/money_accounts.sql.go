@@ -61,11 +61,11 @@ LEFT JOIN billing.ledger_accounts ar
   ON ar.merchant_id = a.merchant_id
  AND ar.customer_id = a.customer_id
  AND ar.currency = a.currency
- AND ar.account_type = 'arrears_liability'
+ AND ar.account_type = 'customer_owed'
 WHERE a.merchant_id = $5::uuid
   AND a.customer_id = $6::uuid
   AND a.currency = $7::text
-  AND a.account_type = 'customer_balance'
+  AND a.account_type = 'customer_units'
 LIMIT 1
 `
 
@@ -88,7 +88,7 @@ type GetAdmissionCapacityRow struct {
 	OutstandingOwed     int64
 }
 
-// Hot-path affordability snapshot for service admit: customer_balance counters,
+// Hot-path affordability snapshot for service admit: customer_units counters,
 // the held total, money_settings (missing = prepaid, no credit line) and
 // outstanding owed.
 func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapacityParams) (GetAdmissionCapacityRow, error) {
@@ -238,7 +238,7 @@ SELECT DISTINCT customer_id::uuid AS customer_id, currency::text AS currency
 FROM (
     SELECT customer_id, currency FROM billing.ledger_accounts
     WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
-      AND account_type = 'customer_balance'
+      AND account_type = 'customer_units'
     UNION ALL
     SELECT customer_id, currency FROM billing.money_settings
     WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
@@ -293,7 +293,7 @@ const listCustomersMoneyAccounts = `-- name: ListCustomersMoneyAccounts :many
 SELECT a.customer_id::uuid AS customer_id, a.currency, a.account_type, (a.credits_posted - a.debits_posted)::bigint AS balance
 FROM billing.ledger_accounts a
 WHERE a.merchant_id = $1::uuid AND a.customer_id = ANY($2::uuid[])
-  AND a.account_type IN ('customer_balance', 'arrears_liability')
+  AND a.account_type IN ('customer_units', 'customer_owed')
 ORDER BY a.customer_id, a.currency, a.account_type
 LIMIT $3::int
 `

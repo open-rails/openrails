@@ -1961,6 +1961,36 @@
     ],
     "OR-J45-S15": [
       "TestDeclineCauses/OR-J45-S15/a-new-card-is-not-held-to-the-old-cards-advice"
+    ],
+    "OR-J40-S01": [
+      "TestBooks/OR-J40-S01/every-account-type-has-one-book-and-class-and-the-general-ledger-holds-money"
+    ],
+    "OR-J40-S02": [
+      "TestBooks/OR-J40-S02/a-transfer-across-books-currencies-or-customers-is-refused"
+    ],
+    "OR-J40-S03": [
+      "TestBooks/OR-J40-S03/ledger-audit-catches-injected-counter-and-rollup-corruption"
+    ],
+    "OR-J40-S05": [
+      "TestBooksMigration/OR-J40-S05/a-ledger-from-before-the-books-migrates-with-its-rollups"
+    ],
+    "OR-J40-S06": [
+      "TestBooks/OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit"
+    ],
+    "OR-J40-S07": [
+      "TestBooks/OR-J40-S07/an-archive-written-before-the-books-restores-as-the-units-book"
+    ],
+    "OR-J40-S08": [
+      "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-order-both-commit"
+    ],
+    "OR-J40-S09": [
+      "TestBooks/OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-orders-all-commit"
+    ],
+    "OR-J40-S23": [
+      "TestBooks/OR-J40-S23/an-event-queued-before-or-after-a-ledger-transfer-both-commit"
+    ],
+    "OR-J40-S24": [
+      "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit"
     ]
   }
 }

@@ -191,7 +191,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		remaining := credits.Remaining(g)
 		face := g.Units
 		var faceDelta, withdrawn, retired, expired, revoked, repaid int64
-		retiredAccount := ledger.RevokedCredits
+		retiredAccount := ledger.UnitsRevoked
 		source := "credit"
 		cashSource := "cash"
 		lossSource := "consumed_credit"
@@ -226,7 +226,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			if g.RevokedAt != nil || pastExpiry {
 				retired, withdrawn = withdrawn, 0
 				if pastExpiry {
-					retiredAccount = ledger.ExpiredCredits
+					retiredAccount = ledger.UnitsExpired
 				}
 			}
 			source = "credit_restore:" + reversesID.String()
@@ -234,7 +234,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			lossSource = "consumed_credit_restore:" + reversesID.String()
 		}
 		l := ledger.New(q, mid.UUID())
-		clearing, err := l.EnsureSystemAccount(ctx, ledger.CreditRefundClearing, currency)
+		clearing, err := l.EnsureSystemAccount(ctx, ledger.UnitsRefundClearing, currency)
 		if err != nil {
 			return err
 		}
@@ -246,10 +246,10 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			var err error
 			var customer *uuid.UUID
 			switch account {
-			case ledger.CustomerBalance:
+			case ledger.CustomerUnits:
 				id, err = l.EnsureCustomerBalance(ctx, g.CustomerID, currency)
 				customer = &g.CustomerID
-			case ledger.ArrearsLiability:
+			case ledger.CustomerOwed:
 				id, err = l.EnsureCustomerArrears(ctx, g.CustomerID, currency)
 				customer = &g.CustomerID
 			default:
@@ -269,7 +269,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if restoring {
 			balanceType, cashType = ledger.CreditRefundRestore, ledger.CreditRefundCashRestore
 		}
-		if err := post(ledger.CustomerBalance, withdrawn, balanceType, !restoring, source); err != nil {
+		if err := post(ledger.CustomerUnits, withdrawn, balanceType, !restoring, source); err != nil {
 			return err
 		}
 		if err := post(retiredAccount, retired, ledger.CreditRefundFunding, false, "retired_"+source); err != nil {
@@ -281,25 +281,25 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			revokedSource += "_restore:" + reversesID.String()
 			repaidSource += "_restore:" + reversesID.String()
 		}
-		if err := post(ledger.ExpiredCredits, expired, ledger.CreditRefundFunding, !restoring, expiredSource); err != nil {
+		if err := post(ledger.UnitsExpired, expired, ledger.CreditRefundFunding, !restoring, expiredSource); err != nil {
 			return err
 		}
-		if err := post(ledger.RevokedCredits, revoked, ledger.CreditRefundFunding, !restoring, revokedSource); err != nil {
+		if err := post(ledger.UnitsRevoked, revoked, ledger.CreditRefundFunding, !restoring, revokedSource); err != nil {
 			return err
 		}
-		if err := post(ledger.ArrearsLiability, repaid, ledger.CreditRefundFunding, !restoring, repaidSource); err != nil {
+		if err := post(ledger.CustomerOwed, repaid, ledger.CreditRefundFunding, !restoring, repaidSource); err != nil {
 			return err
 		}
-		if err := post(ledger.CreditRefundLoss, faceDelta-withdrawn-retired-expired-revoked-repaid, ledger.CreditRefundFunding, !restoring, lossSource); err != nil {
+		if err := post(ledger.UnitsRefundLoss, faceDelta-withdrawn-retired-expired-revoked-repaid, ledger.CreditRefundFunding, !restoring, lossSource); err != nil {
 			return err
 		}
-		if err := post(ledger.RailClearing, cashDelta, cashType, restoring, cashSource); err != nil {
+		if err := post(ledger.UnitsSold, cashDelta, cashType, restoring, cashSource); err != nil {
 			return err
 		}
 		if faceDelta > cashDelta {
-			return post(ledger.PromotionalFunding, faceDelta-cashDelta, ledger.CreditRefundFunding, restoring, "promotion")
+			return post(ledger.UnitsGranted, faceDelta-cashDelta, ledger.CreditRefundFunding, restoring, "promotion")
 		}
-		return post(ledger.PlatformRevenue, cashDelta-faceDelta, ledger.CreditRefundFunding, !restoring, "revenue")
+		return post(ledger.UnitsRedeemed, cashDelta-faceDelta, ledger.CreditRefundFunding, !restoring, "revenue")
 	})
 	return posted && err == nil, err
 }

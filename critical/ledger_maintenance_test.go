@@ -33,7 +33,7 @@ func TestLedgerMaintenance(t *testing.T) {
 				// Assertions exercise the shipped database contract at COMMIT.
 				corrupt := func() {
 					_, err := tx.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "ledger_accounts"}.Sanitize()+
-						" (merchant_id,account_type,currency,debits_must_not_exceed_credits,credits_must_not_exceed_debits,credits_posted) VALUES ($1,'processor_clearing','USD',false,false,1)", merchant)
+						" (merchant_id,book,class,account_type,currency,debits_must_not_exceed_credits,credits_must_not_exceed_debits,credits_posted) VALUES ($1,'units','issued','units_sold','USD',false,false,1)", merchant)
 					require.NoError(t, err)
 				}
 				if mode == "malformed" {
@@ -124,7 +124,7 @@ func TestLedgerMaintenance(t *testing.T) {
 		table := pgx.Identifier{w.schema, "ledger_accounts"}.Sanitize()
 		_, err = tx.Exec(t.Context(), "ALTER TABLE "+table+" DISABLE TRIGGER guard_ledger_account_facts")
 		require.NoError(t, err)
-		_, err = tx.Exec(t.Context(), "UPDATE "+table+" SET credits_posted=credits_posted+1 WHERE merchant_id=$1 AND customer_id=$2 AND account_type='customer_balance'", w.alpha.MerchantID().UUID(), customer.UUID())
+		_, err = tx.Exec(t.Context(), "UPDATE "+table+" SET credits_posted=credits_posted+1 WHERE merchant_id=$1 AND customer_id=$2 AND account_type='customer_units'", w.alpha.MerchantID().UUID(), customer.UUID())
 		require.NoError(t, err)
 		_, err = tx.Exec(t.Context(), "ALTER TABLE "+table+" ENABLE TRIGGER guard_ledger_account_facts")
 		require.NoError(t, err)
