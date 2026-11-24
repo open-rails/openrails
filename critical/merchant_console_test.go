@@ -525,6 +525,20 @@ func TestMerchantConsole(t *testing.T) {
 		require.NotNil(t, cleared.Items[0].ClearedAt)
 	})
 
+	t.Run("OR-J38-S85/console-dashboard-shows-merchant-units-at-their-scale", func(t *testing.T) {
+		// Alice buys a pack of each of alpha's units, CREDITS (scale 2) and
+		// GOLD (scale 0), by card: credits sold in units the registry does
+		// not know.
+		s, _ := unitPaymentWorld(t, 0)
+		credits := s.pack(t, "credits-20", "CREDITS", 2000, 365, unitPrice{"usd", 20_000_000, "USD"})
+		gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
+		s.buy(t, credits["usd"], 20_000_000, "console-buy-credits")
+		s.buy(t, gold["usd"], 20_000_000, "console-buy-gold")
+		staff := consoleStaff(t, s.a, "console-metrics", billing.MerchantMetricsRead, billing.MerchantConfigRead)
+		counts := consoleBrowser(t, s.a, map[string]any{"tokens": map[string]string{"staff": staff}}, nil, "console-dashboard-shows-merchant-units")
+		require.NotZero(t, counts["GET /v1/merchant/configuration"], "the dashboard reads the declared units")
+	})
+
 	t.Run("OR-J38-S34/console-failed-pull-and-read-only-access", func(t *testing.T) {
 		iw := bootImportWorld(t, "nmi", "stripe")
 		iw.stripe.Intercept(func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer sk_test_import" },
