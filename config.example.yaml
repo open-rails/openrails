@@ -27,22 +27,22 @@ logger:
   level: info       # debug | info | warn | error
   format: json      # json | text
 
-# One role: the server migrates as it at boot and owns what it creates.
-# Merchant isolation is per-query merchant predicates, not login flags.
-db:
-  # With no db key set: Compose's Postgres. Or the parts below, all four of
-  # host, port, database and username.
+# The database: its connection and OpenRails' schemas. One role: the server
+# migrates as it at boot and owns what it creates. Merchant isolation is
+# per-query merchant predicates, not login flags.
+database:
+  # With no connection key set: Compose's Postgres (env DATABASE_URL). Or the
+  # parts below, all four of host, port, name and username.
   url: postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable
   # host: db.example.com
   # port: "5432"
-  # database: openrails
+  # name: openrails
   # username: openrails
   # password: ""
   # sslmode: verify-full # default; require for a loopback host or Unix socket
   # sslrootcert: /etc/openrails/db-ca.pem # the CAs that verify the database; unset, the system roots
+  # sql_trace: false # log every query at debug level
   lease_conns: 4
-
-database:
   schema: billing # every OpenRails table lives here (env DATABASE_SCHEMA)
   # river_schema: billing_river # OpenRails' River jobs; default the schema plus '_river'
 
@@ -116,8 +116,8 @@ naming:
 # can use their own mount while merchant configuration stays in files.
 # vault:
 #   kv_mount: ""      # KV v2 mount holding merchant configuration
-#   scope_prefix: ""  # path under the mount; default openrails
-#   transit_mount: "" # Transit mount for Solana crankers; default transit
+#   scope_prefix: openrails # path under the mount
+#   transit_mount: transit  # Transit mount for Solana crankers
 #   address: ""       # VAULT_ADDR; default https://127.0.0.1:8200
 #   ca_cert: ""       # path of the private CA's PEM (VAULT_CACERT); the only trust when set
 #   auth_method: ""   # token | approle | kubernetes

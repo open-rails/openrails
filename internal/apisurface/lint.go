@@ -60,6 +60,7 @@ type exception struct {
 
 // exceptions are the findings the conventions allow.
 var exceptions = []exception{
+	{"alias", "openrails.Config", "the engine's settings, defined in billing so the internal packages share the one type"},
 	{"untyped-const", "openrails.Queue*", "River queue names, which River's config takes as strings"},
 	{"untyped-const", "billing.Scope*", "OAuth scope strings of an issuer's access tokens"},
 	{"untyped-const", "billing.*GroupPersona", "AuthKit permission-group personas, which AuthKit takes as strings"},

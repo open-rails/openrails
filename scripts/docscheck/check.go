@@ -601,7 +601,11 @@ func (x *goIndex) subjectOf(d *doc, s span) subject {
 // or a field.
 func (x *goIndex) listed(sc subject, n string) bool {
 	if sc.table == "Field" {
-		return x.isField(sc.typ, n)
+		t := sc.typ
+		if q, name, ok := strings.Cut(t.alias, "."); ok && len(t.members) == 0 && x.types[q][name] != nil {
+			t = x.types[q][name] // openrails.Config is billing.Config
+		}
+		return x.isField(t, n)
 	}
 	return x.isMethod(sc.typ, n) || x.funcs[sc.typ.pkg][n]
 }

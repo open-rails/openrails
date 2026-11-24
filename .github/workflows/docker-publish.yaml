@@ -253,12 +253,12 @@ jobs:
         run: |
           docker run --rm --network host \
             -e AUTH_DEFAULT_TENANT_ID=51336692-ef57-4cdb-a189-a8d388465c11 \
-            -e DB_HOST=127.0.0.1 \
-            -e DB_PORT=5434 \
-            -e DB_DATABASE=openrails_db \
-            -e DB_USERNAME=smoke \
-            -e DB_PASSWORD=smoke_password \
-            -e DB_SSLMODE=disable \
+            -e DATABASE_HOST=127.0.0.1 \
+            -e DATABASE_PORT=5434 \
+            -e DATABASE_NAME=openrails_db \
+            -e DATABASE_USERNAME=smoke \
+            -e DATABASE_PASSWORD=smoke_password \
+            -e DATABASE_SSLMODE=disable \
             -e REDIS_ADDR=127.0.0.1:6380 \
             "openrails-smoke:${GITHUB_SHA}" migrate pg
 
@@ -281,12 +281,12 @@ jobs:
             -e AUTH_KEYS_PATH=/tmp/openrails-smoke-keys.json \
             -e AUTH_TOKEN_ISSUER=http://127.0.0.1:3053 \
             -e AUTH_RESOURCE_ID=http://127.0.0.1:3053 \
-            -e DB_HOST=127.0.0.1 \
-            -e DB_PORT=5434 \
-            -e DB_DATABASE=openrails_db \
-            -e DB_USERNAME=smoke \
-            -e DB_PASSWORD=smoke_password \
-            -e DB_SSLMODE=disable \
+            -e DATABASE_HOST=127.0.0.1 \
+            -e DATABASE_PORT=5434 \
+            -e DATABASE_NAME=openrails_db \
+            -e DATABASE_USERNAME=smoke \
+            -e DATABASE_PASSWORD=smoke_password \
+            -e DATABASE_SSLMODE=disable \
             -e REDIS_ADDR=127.0.0.1:6380 \
             "openrails-smoke:${GITHUB_SHA}" run-server)"
           trap 'docker logs "$cid"; docker rm -f "$cid"' EXIT
