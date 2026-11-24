@@ -119,18 +119,16 @@ func spread(amount int64, weights []int64) []int64 {
 }
 
 // MonthStart is the instant the next 1st begins in loc after t: where the
-// accounting month that holds t ends. Where clocks spring forward at midnight
-// on the 1st, that midnight never happens and the 1st begins at the
-// transition.
+// accounting month that holds t ends. The 1st begins as PostgreSQL resolves
+// its midnight (calendarutil.DayStart): at the transition where clocks spring
+// forward over it, at the later one where it happens twice. An instant in that
+// repeated hour is still before its 1st begins.
 func MonthStart(t time.Time, loc *time.Location) time.Time {
 	l := t.In(loc)
-	b := time.Date(l.Year(), l.Month()+1, 1, 0, 0, 0, 0, loc)
-	if !b.After(t) || b.In(loc).Day() != 1 {
-		if _, transition := b.ZoneBounds(); !transition.IsZero() {
-			b = transition
-		}
+	if b := calendarutil.DayStart(l.Year(), l.Month(), 1, loc); b.After(t) {
+		return b
 	}
-	return b
+	return calendarutil.DayStart(l.Year(), l.Month()+1, 1, loc)
 }
 
 // schedule is a revenue schedule's terms and progress.

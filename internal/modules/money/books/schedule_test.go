@@ -174,6 +174,37 @@ func TestMonthStartWhereMidnightIsSkipped(t *testing.T) {
 	require.EqualValues(t, 61_000_000, s.recognized)
 }
 
+func TestMonthStartWhereMidnightRepeats(t *testing.T) {
+	// Cuba falls back from 01:00 to midnight on 1 November 2026: that midnight
+	// happens at 04:00 and again at 05:00 UTC. November begins at the later,
+	// as PostgreSQL's date_trunc has it.
+	havana, err := time.LoadLocation("America/Havana")
+	require.NoError(t, err)
+	november := time.Date(2026, time.November, 1, 5, 0, 0, 0, time.UTC)
+	for _, from := range []time.Time{
+		time.Date(2026, time.October, 15, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, time.November, 1, 3, 59, 0, 0, time.UTC),
+		// In the repeated hour, before November begins.
+		time.Date(2026, time.November, 1, 4, 30, 0, 0, time.UTC),
+	} {
+		require.Equal(t, november, MonthStart(from, havana).UTC(), from)
+	}
+	require.Equal(t, time.Date(2026, time.December, 1, 5, 0, 0, 0, time.UTC), MonthStart(november, havana).UTC())
+
+	// A schedule starting in that hour recognises its half hour of October at
+	// November's start: the boundary is not skipped.
+	start := time.Date(2026, time.November, 1, 4, 30, 0, 0, time.UTC)
+	end := start.Add(30 * 24 * time.Hour)
+	s := schedule{service: Service{Starts: start, Ends: end}, funded: 30_000_000, through: start}
+	got, next, err := s.advance(context.Background(), havana, start.Add(2*time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, &end, next, "December begins after the service ends")
+	require.Len(t, got, 1)
+	require.Equal(t, november, got[0].at.UTC())
+	require.Equal(t, november.Add(-time.Microsecond), got[0].dated.UTC())
+	require.EqualValues(t, 20_833, got[0].amount, "half an hour of 720")
+}
+
 func TestScheduleEnds(t *testing.T) {
 	at := func(s string) time.Time {
 		v, err := time.Parse(time.RFC3339, s)
