@@ -18,9 +18,10 @@ import (
 type catalogKeyRename struct{ product, from, to string }
 
 // catalogHistory is what one catalog mutation changed, as history entries:
-// for each object its create, update, archive, unarchive or delete, and a
-// product's key changes as entries of their own, each with the object's
-// revision after: revisions' where the mutation stepped it, else after's.
+// for each object its create, update, archive, unarchive or delete, a
+// product's key changes and a price key's move as entries of their own, each
+// with the object's revision after: revisions' where the mutation stepped
+// it, else after's.
 func catalogHistory(before, after catalogState, revisions map[catalogObject]int64, renames []catalogKeyRename, applicationID string) ([]history.Entry, error) {
 	objects := slices.Collect(maps.Keys(after))
 	for obj := range before {
@@ -85,8 +86,46 @@ func catalogHistory(before, after catalogState, revisions map[catalogObject]int6
 		if a != nil {
 			out = append(out, keys...)
 		}
+		move, moved, err := priceMove(obj, before, after, revision)
+		if err != nil {
+			return nil, err
+		}
+		if moved {
+			out = append(out, move)
+		}
 	}
 	return out, nil
+}
+
+// priceMove is a price key's move when the mutation moved it: to another of
+// its prices, or between naming its price and, archived, none. A key names
+// nothing while its price or its product is archived, and once its price is
+// deleted.
+func priceMove(obj catalogObject, before, after catalogState, revision *int64) (history.Entry, bool, error) {
+	if obj.kind != billing.CatalogObjectPrice {
+		return history.Entry{}, false, nil
+	}
+	live := func(s *catalogObjectState) bool { return s != nil && string(s.fields["archived"]) == "false" }
+	archived := func(state catalogState, s *catalogObjectState) bool {
+		product := state[productObject(obj.key)]
+		return !live(s) || product == nil || string(product.fields["archived"]) == "true"
+	}
+	b, a := before[obj], after[obj]
+	var named *catalogObjectState
+	switch {
+	case a != nil && b == nil && live(a),
+		a != nil && b != nil && (a.priceID != b.priceID || archived(after, a) != archived(before, b)):
+		named = a
+	case a == nil && live(b):
+		named = b
+	default:
+		return history.Entry{}, false, nil
+	}
+	price, err := billing.NewPriceID(obj.key, obj.priceKey, named.version)
+	if err != nil {
+		return history.Entry{}, false, err
+	}
+	return history.PriceMoved(obj.key, obj.priceKey, revision, price, a == nil || archived(after, a)), true, nil
 }
 
 // catalogHistoryFields are the fields an object's entries carry: its owned

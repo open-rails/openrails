@@ -343,24 +343,3 @@ func OrderAttemptFromGen(c gen.BillingOrderAttempt) (*OrderAttempt, error) {
 	}
 	return m, nil
 }
-
-// PriceKeyMovementFromGen maps a generated price_key_movements row.
-func PriceKeyMovementFromGen(r gen.BillingPriceKeyMovement) *PriceKeyMovement {
-	return &PriceKeyMovement{
-		Archived:    r.Archived,
-		ID:          r.ID,
-		MerchantID:  r.MerchantID,
-		Key:         r.Key,
-		PriceID:     r.PriceID,
-		EffectiveAt: r.EffectiveAt,
-		CreatedAt:   r.CreatedAt,
-	}
-}
-
-func PriceKeyMovementsFromGen(rows []gen.BillingPriceKeyMovement) []*PriceKeyMovement {
-	out := make([]*PriceKeyMovement, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, PriceKeyMovementFromGen(r))
-	}
-	return out
-}

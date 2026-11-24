@@ -298,8 +298,8 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- Destructive intents that reached the provider in the rolling window: succeeded
 -- by executed_at, unresolved outcomes (unknown_needs_verify, failed_*) by last
--- transition, and in_flight ones only once their current attempt is logged (a
--- claim alone sends nothing). Parks were never attempted.
+-- transition, and in_flight ones only once the breaker sent their current
+-- attempt (a claim alone sends nothing). Parks were never attempted.
 -- name: CountDestructiveProviderIntentsExecutedSince :one
 SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -310,15 +310,17 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         OR (status IN ('unknown_needs_verify', 'failed_retryable', 'failed_terminal')
             AND updated_at >= sqlc.arg(since)::timestamptz)
         -- admitted by the breaker and executing now
-        OR (status = 'in_flight' AND EXISTS (
-              SELECT 1 FROM billing.provider_mutation_logs l
-              WHERE l.merchant_id = provider_intents.merchant_id AND l.provider_intent_id = provider_intents.id
-                AND l.phase = 'attempting' AND l.attempt = provider_intents.attempts))
+        OR (status = 'in_flight' AND sent_attempt = attempts)
       );
 
+-- name: MarkProviderIntentSent :execrows
+-- The breaker admits the in-flight intent's current attempt to the provider.
+UPDATE billing.provider_intents SET sent_attempt = attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'in_flight';
+
 -- name: LockDestructiveBreaker :exec
--- Serializes one merchant's breaker admissions; an admission records its
--- attempt before the lock is released, so the next check counts it.
+-- Serializes one merchant's breaker admissions; an admission marks its
+-- attempt sent before the lock is released, so the next check counts it.
 SELECT pg_advisory_xact_lock(hashtextextended('openrails.destructive_breaker:' || sqlc.arg(merchant_id)::uuid::text, 0));
 
 -- The breaker's budget baseline: max(floor, pct of active subscriptions).

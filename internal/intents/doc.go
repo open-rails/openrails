@@ -7,7 +7,7 @@
 // (openrails.provider_operation). The job claims it under a lease, rechecks
 // relevance, gates on mode and origin (user and admin run under limited,
 // system only under full, nothing under readonly), executes and classifies the
-// outcome; each attempt is appended to provider_mutation_logs. A blocked
+// outcome; each attempt's phases are written ahead to operation_log. A blocked
 // intent stays pending with its reason and drains when the blocker lifts; one
 // past its window is superseded or expires instead of firing stale.
 //

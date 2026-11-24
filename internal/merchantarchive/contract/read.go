@@ -29,6 +29,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// An archive from before usage settled in batches carries raw usage
 	// events: their money is in the ledger it carries, and they are not read.
 	events := false
+	// An archive from before configuration history carries its price keys'
+	// moves in a table of their own, which change_log holds since.
+	moves := false
 	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
 		if r.Kind == "table" {
 			invoices = r.Table == "invoices"
@@ -41,6 +44,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return nil
 			}
 			if events = r.Table == "usage_events"; events {
+				return nil
+			}
+			if moves = r.Table == PriceKeyMovements.Name; moves {
 				return nil
 			}
 			if watermarks = r.Table == "metered_rating_watermarks"; watermarks {
@@ -68,6 +74,15 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			return errArchivedInvoices
 		}
 		if watermarks || custody || cadence || events {
+			return nil
+		}
+		if moves {
+			if err := ValidateValues(PriceKeyMovements, r.Values); err != nil {
+				return err
+			}
+			if row != nil {
+				return row(PriceKeyMovements, r.Values)
+			}
 			return nil
 		}
 		p := Profiles[table]

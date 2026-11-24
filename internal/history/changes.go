@@ -102,3 +102,39 @@ func KeyRenamed(product string, revision *int64, from, to string) Entry {
 
 // PriceObjectID is a price key's object id: product-key:price-key.
 func PriceObjectID(product, price string) string { return product + ":" + price }
+
+// Move is the payload of a price key's move: from the entry's time the key
+// named PriceID or, archived, nothing; with the key's revision after. A move
+// recorded before configuration history carries no revision.
+type Move struct {
+	Version  int             `json:"version"`
+	Revision *int64          `json:"revision,omitempty"`
+	PriceID  billing.PriceID `json:"price_id"`
+	Archived bool            `json:"archived"`
+}
+
+// PriceMoved is the entry for product's price key moving to price, or, archived,
+// to nothing, at revision.
+func PriceMoved(product, key string, revision *int64, price billing.PriceID, archived bool) Entry {
+	return Entry{ObjectType: billing.LogObjectPrice, ObjectID: PriceObjectID(product, key), Action: billing.LogActionMove,
+		Changes: Move{Version: Version, Revision: revision, PriceID: price, Archived: archived}}
+}
+
+// ObjectProviderIntent is an operation entry's object: a provider intent, by
+// its id.
+const ObjectProviderIntent billing.LogObjectType = "provider_intent"
+
+// Operation is the payload of an operation entry: one phase of one attempt
+// of a provider intent. Reason is the outcome's, ReasonCode a hold's; both
+// and Evidence arrive scrubbed of credentials and card data.
+type Operation struct {
+	Version        int            `json:"version"`
+	Kind           string         `json:"kind,omitempty"`
+	Attempt        int32          `json:"attempt"`
+	Origin         string         `json:"origin,omitempty"`
+	Executor       string         `json:"executor,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	ReasonCode     string         `json:"reason_code,omitempty"`
+	Evidence       map[string]any `json:"evidence,omitempty"`
+}

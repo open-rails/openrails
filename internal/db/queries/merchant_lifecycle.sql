@@ -81,11 +81,11 @@ SELECT count(*) FROM billing.order_attempts WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsOrderAttempts :exec
 DELETE FROM billing.order_attempts WHERE merchant_id = $1;
 
--- name: CountMerchantRowsExternalProviderMutationLogs :one
-SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1;
+-- name: CountMerchantRowsOperationLog :one
+SELECT count(*) FROM billing.operation_log WHERE merchant_id = $1;
 
--- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
-DELETE FROM billing.provider_mutation_logs WHERE merchant_id = $1;
+-- name: PurgeMerchantRowsOperationLog :exec
+DELETE FROM billing.operation_log WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsProviderIntents :one
 SELECT count(*) FROM billing.provider_intents WHERE merchant_id = $1;
