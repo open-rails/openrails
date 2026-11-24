@@ -1212,6 +1212,12 @@
     "OR-J38-S75": [
       "TestCCBillIdentity/OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal"
     ],
+    "OR-J38-S76": [
+      "TestCCBillIdentity/OR-J38-S76/a-ccbill-cancel-the-pull-lands-is-restored-by-its-rebill"
+    ],
+    "OR-J38-S77": [
+      "TestCCBillIdentity/OR-J38-S77/a-ccbill-cancellation-is-undone-by-reactivation-or-a-late-rebill"
+    ],
     "OR-J27-S10": [
       "TestImportedAdminGrants/OR-J27-S10/imported-window-changes-and-replay"
     ],

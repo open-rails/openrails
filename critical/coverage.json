@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 453,
+  "scenario_count": 455,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1592,6 +1592,16 @@
       "id": "OR-J38-S75",
       "journey": "J38",
       "name": "A subscription end the provider confirmed is stored as the provider's: read back, a later renewal is kept for refund review and does not reopen it"
+    },
+    {
+      "id": "OR-J38-S76",
+      "journey": "J38",
+      "name": "A CCBill cancel the pull lands is a lapse, and the member's reactivation and rebill restore access"
+    },
+    {
+      "id": "OR-J38-S77",
+      "journey": "J38",
+      "name": "A CCBill Cancellation is a lapse: a reactivation inside the paid period resumes it, and a late rebill past it restores it"
     },
     {
       "id": "OR-J22-S06",

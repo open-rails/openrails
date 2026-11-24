@@ -131,6 +131,10 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 			at = now
 		}
 		switch {
+		case d.RemoteGone && cur.Rail == models.RailCCBill:
+			// CCBill's own end is a lapse, as its cancel and expiration
+			// webhooks read it: its reactivation or next rebill restores it.
+			return lifecycle.Cancel{Kind: lifecycle.CancelExpired, At: at}
 		case d.RemoteGone && subscriptions.OwnerOf(cur) == lifecycle.Provider:
 			// A provider that owns the schedule decides its access: its
 			// confirmed end is immediate.
