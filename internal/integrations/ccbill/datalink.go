@@ -27,8 +27,10 @@ type DataLinkClient struct {
 	ReadOnly bool
 	// LoopbackFixture marks an explicitly declared loopback fake DataLink.
 	LoopbackFixture bool
-	HTTPClient      *http.Client
-	Log             *slog.Logger
+	// Pacing spaces a live account's requests an hour apart (Paced).
+	Pacing     Pacing
+	HTTPClient *http.Client
+	Log        *slog.Logger
 }
 
 const defaultDataLinkBaseURL = "https://datalink.ccbill.com"
@@ -88,6 +90,11 @@ func (c *DataLinkClient) FetchActiveMembers(ctx context.Context) ([]CCBillRecord
 // auth/test-mode form fields merged in, retries transient failures, and
 // returns the raw response body after rejecting error payloads. extra carries
 // the report-specific fields (transactionTypes, startTime, endTime, ...).
+//
+// A live account's request first takes the account's hourly slot, or fails
+// with a PacedError naming when it opens, and is sent once: a retry would be
+// another request. CCBill refusing one for coming within the hour is a
+// PacedError too.
 func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (string, error) {
 	apiURL := fmt.Sprintf("%s/data/main.cgi", c.BaseURL)
 
@@ -111,6 +118,13 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 	var resp *http.Response
 	var err error
 	maxRetries := 5
+	slot := c.now().Add(DataLinkInterval)
+	if c.Paced() {
+		if slot, err = c.claimSlot(ctx); err != nil {
+			return "", err
+		}
+		maxRetries = 1
+	}
 
 	for tries := 1; tries <= maxRetries; tries++ {
 		c.Log.InfoContext(ctx, "Requesting data from CCBill DataLink API (POST)", "try", tries, "endpoint", apiURL)
@@ -174,6 +188,9 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 
 	// CCBill errors arrive as plain text; CSV data starts with a quote.
 	if lower := strings.ToLower(content); !strings.HasPrefix(content, `"`) {
+		if strings.Contains(lower, "within the last 60 minutes") {
+			return "", &PacedError{Until: slot, Wait: slot.Sub(c.now())}
+		}
 		if strings.Contains(lower, "authentication failed") || strings.Contains(lower, "access denied") {
 			return "", fmt.Errorf("%w: it answered an authentication error", ErrDataLinkAuth)
 		}

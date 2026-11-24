@@ -103,6 +103,25 @@ func (f *Factory) PostureCheckFor(secretKey, declared string) providerposture.Ch
 	return PostureCheck(http.DefaultTransport, secretKey, "", declared)
 }
 
+// WriteDisarmed is the refusal a write with secretKey would meet at the
+// transport, from what is known without asking Stripe: a live key to an
+// injected (fake) provider, or a test key whose recorded verdict refuses
+// writes. A key not checked yet is not refused here; its write's gate checks
+// it.
+func (f *Factory) WriteDisarmed(secretKey string) error {
+	fixture := f != nil && f.base != nil
+	live := liveSecretKey(secretKey)
+	switch {
+	case live && fixture:
+		return fmt.Errorf("%w: stripe live key to a fake provider", providerposture.ErrDisarmed)
+	case !live && !fixture:
+		if s, known := providerposture.Process().Lookup(PostureKey(secretKey, APIBase, "")); known && s.Verdict != providerposture.Unknown && !s.Armed() {
+			return fmt.Errorf("%w: stripe key posture is %s", providerposture.ErrDisarmed, s.Verdict)
+		}
+	}
+	return nil
+}
+
 // requirePosture gates one test key's mutation on its verdict.
 // Requests to a literal loopback IP are fixtures (code-level test seams): they
 // still require a test-mode key prefix but cannot reach Stripe.

@@ -185,9 +185,10 @@ func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params
 // reads leave it out, and creating its key again revives it. A product a
 // purchase, subscription, grant, access, purchase, migration, provider
 // write, PSP link or rate card refers to is refused (billing.ErrConflict,
-// code product_in_use): archive it with UpdateProduct instead.
-func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID) error {
-	return c.send(ctx, routeCall{method: http.MethodDelete, path: "/v1/catalog/products/{id}", args: []string{id.String()}}, nil)
+// code product_in_use): archive it with UpdateProduct instead. A stale
+// ExpectedRevision is refused with revision_mismatch.
+func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID, params billing.DeleteProductParams) error {
+	return c.send(ctx, routeCall{method: http.MethodDelete, path: "/v1/catalog/products/{id}", args: []string{id.String()}, query: params}, nil)
 }
 
 // CreatePrice creates a price on the product named by exactly one of
@@ -450,8 +451,8 @@ func (c *Client) ListProductAccess(ctx context.Context, params billing.ProductAc
 // CreateProductAccess grants 1 to billing.MaxBatchItems products free,
 // across any customers, all or none; the answer is in request order. Each
 // grant is a window of its product: the customer holds the product's current
-// keys while it is live. A retry with idempotencyKey replays the first
-// answer; with none, OpenRails names the batch itself.
+// keys while it is live. idempotencyKey is required: a retry with it replays
+// the first answer and grants nothing again.
 func (c *Client) CreateProductAccess(ctx context.Context, idempotencyKey string, items []billing.CreateProductAccessParams) ([]billing.ProductAccessGrant, error) {
 	var out billing.CreateProductAccessBatchResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/product-access", idempotencyKey: idempotencyKey, body: billing.CreateProductAccessBatchParams{Items: items}}, &out); err != nil {
@@ -930,6 +931,19 @@ func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing
 	return &out, nil
 }
 
+// ListChanges lists the merchant's configuration history, newest first: each
+// change to a product, price, meter or limit and to the merchant, messages,
+// PSP and custodian documents, with who made it and how. A credential reads
+// "changed", never its value. ObjectType and ObjectID narrow it to one
+// object, Since and Until to a time range.
+func (c *Client) ListChanges(ctx context.Context, params billing.LogListParams) (*billing.ListPage[billing.LogEntry], error) {
+	var out billing.ListPage[billing.LogEntry]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/changes", query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ListAlertWebhooks returns where the merchant's operational alerts are
 // posted.
 func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebhookListParams) (*billing.ListPage[billing.AlertWebhook], error) {
@@ -1089,6 +1103,41 @@ func (c *Client) ListProviderCatalog(ctx context.Context, params billing.Provide
 func (c *Client) ListParkedSubscriptions(ctx context.Context, params billing.ParkedSubscriptionListParams) (*billing.ListPage[billing.ParkedSubscription], error) {
 	var out billing.ListPage[billing.ParkedSubscription]
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/parked-subscriptions", query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListCustomerMessages lists the messages OpenRails sent a customer about
+// its billing facts, newest first, and those it did not send and why: each
+// one's event, status, attempts and recipient. It keeps no body.
+func (c *Client) ListCustomerMessages(ctx context.Context, customerID billing.CustomerID, params billing.CustomerMessageListParams) (*billing.ListPage[billing.CustomerMessage], error) {
+	var out billing.ListPage[billing.CustomerMessage]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/customers/{customer_id}/messages", args: []string{customerID.String()}, query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PreviewMessage renders an event type's message from the merchant's
+// templates over a sample customer and fact, in params.Language or the
+// default language. params.Template, when set, is rendered in place of that
+// language's template and not saved: a template is checked before it is
+// saved.
+func (c *Client) PreviewMessage(ctx context.Context, params billing.PreviewMessageParams) (*billing.MessagePreview, error) {
+	var out billing.MessagePreview
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/messages/preview", body: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreateTestMessage sends one sample message, as PreviewMessage renders it,
+// to the merchant's alert email address. It is sent to no other address, at
+// most ten an hour.
+func (c *Client) CreateTestMessage(ctx context.Context, params billing.CreateTestMessageParams) (*billing.TestMessage, error) {
+	var out billing.TestMessage
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/merchant/messages/test", body: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

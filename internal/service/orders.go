@@ -900,8 +900,9 @@ func (s *Service) PreviewMerchantOrder(ctx context.Context, params billing.Previ
 }
 
 // CreateMerchantOrder creates an unpaid order for a customer. key is the
-// request's Idempotency-Key, kept on the order: the same key answers the same
-// order (replayed), another body with it is idempotency_key_reused.
+// request's Idempotency-Key, kept on the order and unique per merchant: the
+// same key answers the same order (replayed), another body with it (another
+// customer's included) is idempotency_key_reused.
 func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.CreateOrderParams, key string) (*billing.Order, bool, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -930,7 +931,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		return nil, false, err
 	}
 	scoped := "app:" + key
-	existing, err := rt.Orders.ByIdempotencyKey(ctx, params.CustomerID.UUID(), scoped)
+	existing, err := rt.Orders.ByIdempotencyKey(ctx, scoped)
 	if err != nil {
 		return nil, false, err
 	}

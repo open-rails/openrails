@@ -197,6 +197,9 @@ function CreditSupport({
                       <AdminMessage id={"Revoked"} />
                     </TableHead>
                     <TableHead>
+                      <AdminMessage id={"Refunded"} />
+                    </TableHead>
+                    <TableHead>
                       <AdminMessage id={"State"} />
                     </TableHead>
                     <TableHead>
@@ -214,7 +217,7 @@ function CreditSupport({
                           {formatDate(grant.created_at)}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {grant.description ?? grant.source_type}
+                          {grant.description ?? grant.funding_source}
                         </div>
                       </TableCell>
                       {[
@@ -223,6 +226,7 @@ function CreditSupport({
                         grant.spent_amount,
                         grant.expired_amount,
                         grant.revoked_amount,
+                        grant.refunded_amount,
                       ].map((amount, index) => (
                         <TableCell key={index} className="tabular-nums">
                           {formatNativeAmount(amount, grant.currency)}

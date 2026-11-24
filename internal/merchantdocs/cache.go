@@ -38,9 +38,12 @@ type Cache struct {
 	now     func() time.Time
 	base    context.Context
 	stop    context.CancelFunc
+	// reloads are the background reloads running; Close waits for them.
+	reloads sync.WaitGroup
 
 	mu             sync.Mutex
 	reconcile      SyncFunc
+	record         RecordFunc
 	announce       func(context.Context, billing.MerchantID) error
 	entries        map[billing.MerchantID]*entry
 	admissions     *destructive.Admissions
@@ -137,8 +140,13 @@ func (c *Cache) SetAnnounce(f func(context.Context, billing.MerchantID) error) {
 	c.announce = f
 }
 
-// Close stops background reloads.
-func (c *Cache) Close() { c.stop() }
+// Close stops background reloads and waits for any running.
+func (c *Cache) Close() {
+	c.mu.Lock()
+	c.stop()
+	c.mu.Unlock()
+	c.reloads.Wait()
+}
 
 func (c *Cache) entry(id billing.MerchantID) *entry {
 	c.mu.Lock()
@@ -238,7 +246,16 @@ func (c *Cache) refresh(id billing.MerchantID, e *entry) {
 	if !e.refreshing.CompareAndSwap(false, true) {
 		return
 	}
+	c.mu.Lock()
+	if c.base.Err() != nil {
+		c.mu.Unlock()
+		e.refreshing.Store(false)
+		return
+	}
+	c.reloads.Add(1)
+	c.mu.Unlock()
 	go func() {
+		defer c.reloads.Done()
 		defer e.refreshing.Store(false)
 		for e.again.Swap(false) {
 			if c.base.Err() != nil {
@@ -279,17 +296,26 @@ func (c *Cache) write(ctx context.Context, id billing.MerchantID, put func() err
 
 // PutMerchant writes the merchant document at revision cas.
 func (c *Cache) PutMerchant(ctx context.Context, id billing.MerchantID, doc Merchant, cas int64) (Set, error) {
-	return c.admittedWrite(ctx, id, MerchantDoc, doc, cas, func() error { _, err := c.source.PutMerchant(ctx, id, doc, cas); return err })
+	return c.admittedWrite(ctx, id, MerchantDoc, doc, cas, func() (int64, error) {
+		written, err := c.source.PutMerchant(ctx, id, doc, cas)
+		return written.Revision, err
+	})
 }
 
 // PutPSP writes one PSP document at revision cas.
 func (c *Cache) PutPSP(ctx context.Context, id billing.MerchantID, key string, doc PSP, cas int64) (Set, error) {
-	return c.admittedWrite(ctx, id, PSPDoc(key), doc, cas, func() error { _, err := c.source.PutPSP(ctx, id, key, doc, cas); return err })
+	return c.admittedWrite(ctx, id, PSPDoc(key), doc, cas, func() (int64, error) {
+		written, err := c.source.PutPSP(ctx, id, key, doc, cas)
+		return written.Revision, err
+	})
 }
 
 // PutCustodian writes one custodian document at revision cas.
 func (c *Cache) PutCustodian(ctx context.Context, id billing.MerchantID, key string, doc Custodian, cas int64) (Set, error) {
-	return c.admittedWrite(ctx, id, CustodianDoc(key), doc, cas, func() error { _, err := c.source.PutCustodian(ctx, id, key, doc, cas); return err })
+	return c.admittedWrite(ctx, id, CustodianDoc(key), doc, cas, func() (int64, error) {
+		written, err := c.source.PutCustodian(ctx, id, key, doc, cas)
+		return written.Revision, err
+	})
 }
 
 // Delete removes every document of the merchant.
@@ -302,6 +328,16 @@ func (c *Cache) Delete(ctx context.Context, id billing.MerchantID) error {
 	}
 	c.Forget(id)
 	return nil
+}
+
+// MerchantMessages is the messages document the merchant serves; none is
+// the zero settings.
+func (c *Cache) MerchantMessages(ctx context.Context, id billing.MerchantID) (billing.MessageSettings, error) {
+	set, err := c.Get(ctx, id)
+	if err != nil {
+		return billing.MessageSettings{}, err
+	}
+	return set.Messages.Value, nil
 }
 
 // MerchantSettings is the merchant document's display name and settings.

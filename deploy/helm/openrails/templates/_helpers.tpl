@@ -31,9 +31,15 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "openrails.image" -}}
 {{- if .Values.image.digest }}
 {{- printf "%s@%s" .Values.image.repository .Values.image.digest }}
+{{- else if eq (include "openrails.tag" .) "latest" }}
+{{- fail "image.tag or image.digest is required: this chart's appVersion is latest, which names no release (a published chart X.Y.Z runs vX.Y.Z)" }}
 {{- else }}
 {{- printf "%s:%s" .Values.image.repository (include "openrails.tag" .) }}
 {{- end }}
+{{- end }}
+
+{{- define "openrails.metricsName" -}}
+{{- printf "%s-metrics" (include "openrails.fullname" . | trunc 55 | trimSuffix "-") }}
 {{- end }}
 
 {{- define "openrails.serviceAccountName" -}}

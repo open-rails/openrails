@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -129,18 +131,39 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 			at = now
 		}
 		switch {
-		case d.RemoteGone && subscriptions.OwnerOf(cur) == lifecycle.Provider:
+		case d.RemoteGone && !d.KeepsPaidTime && cur.Rail == models.RailCCBill:
+			// CCBill's own end is a lapse, as its cancel and expiration
+			// webhooks read it: its reactivation or next rebill restores it.
+			return lifecycle.Cancel{Kind: lifecycle.CancelExpired, At: at}
+		case d.RemoteGone && !d.KeepsPaidTime && subscriptions.OwnerOf(cur) == lifecycle.Provider:
 			// A provider that owns the schedule decides its access: its
 			// confirmed end is immediate.
 			return lifecycle.Cancel{Kind: lifecycle.CancelProvider, Immediate: true, At: at}
 		case d.RemoteGone:
-			return lifecycle.ProviderCanceled{At: at} // NMI ended the schedule; paid time is kept
+			// The schedule ended (NMI), or only its rebilling (a CCBill
+			// cancellation): paid time is kept, through the provider's own
+			// paid-through when it states one. A stopped rebill is a lapse.
+			ev := lifecycle.ProviderCanceled{At: at, Lapse: d.KeepsPaidTime}
+			if d.KeepsPaidTime && d.PaidThrough != nil {
+				ev.PaidThrough = d.PaidThrough.UTC()
+			}
+			return ev
 		case d.Certainty == collection.CertaintyNonRetryableDecline:
 			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.NonRecoverable, At: at}
 		default:
 			return lifecycle.DunningExhausted{At: at}
 		}
 	}
+}
+
+// declineFailureID is the FailureID of a decline seen at the provider: its
+// transaction, else its time.
+func declineFailureID(subscription uuid.UUID, decline *RemoteTransaction) uuid.UUID {
+	key := "decline:" + strings.TrimSpace(decline.TransactionID)
+	if key == "decline:" {
+		key = "decline_at:" + decline.OccurredAt.UTC().Format(time.RFC3339Nano)
+	}
+	return uuid.NewSHA1(subscription, []byte(key))
 }
 
 // applyDunnedDecline hands a seen decline of an OpenRails-dunned NMI schedule
@@ -165,6 +188,7 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 	err := lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
 		Rail:              sub.Rail,
 		SubscriptionID:    &sub.ID,
+		FailureID:         declineFailureID(sub.ID, d.Decline),
 		FailureCode:       normalize.OptionalString(code),
 		DeclinedAt:        d.Decline.OccurredAt,
 		Decline:           action,

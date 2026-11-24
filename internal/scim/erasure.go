@@ -45,9 +45,10 @@ func erasureCommand(ctx context.Context, row gen.BillingCustomerContact) (destru
 	return destructive.CommandFromContext(ctx, destructive.EraseContact, user, "scim-erase:"+user+":"+at, struct{ User, Provisioned string }{user, at})
 }
 
-// deleteUser erases the User's contact and keeps the customer's billing. The
-// row stays, without values, so an older report cannot restore them. batch
-// holds a Bulk request's admissions; any other erasure is admitted here.
+// deleteUser erases the User's contact, notifications and message log, and
+// keeps the customer's billing. The contact row stays, without values, so an
+// older report cannot restore them. batch holds a Bulk request's admissions;
+// any other erasure is admitted here.
 func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id string, batch *erasures) *Error {
 	if s.Admissions == nil {
 		return errNoAdmissions
@@ -79,7 +80,10 @@ func (s *Server) deleteUser(ctx context.Context, mid billing.MerchantID, id stri
 		}); err != nil {
 			return false, err
 		}
-		return true, q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: locked.MerchantID, CustomerID: locked.CustomerID})
+		if err := q.EraseCustomerNotificationEvents(ctx, gen.EraseCustomerNotificationEventsParams{MerchantID: locked.MerchantID, CustomerID: locked.CustomerID}); err != nil {
+			return false, err
+		}
+		return true, q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: locked.MerchantID, CustomerID: locked.CustomerID})
 	})
 	return s.erasureError(ctx, err)
 }

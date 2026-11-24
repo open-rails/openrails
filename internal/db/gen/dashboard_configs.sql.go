@@ -34,20 +34,32 @@ func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) 
 	return i, err
 }
 
-const hasUsageActivity = `-- name: HasUsageActivity :one
-SELECT (EXISTS (SELECT 1 FROM billing.usage_daily
-WHERE usage_daily.merchant_id = $1::uuid
-)
-    OR EXISTS (SELECT 1 FROM billing.grants WHERE grants.merchant_id = $1::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity
+const getDashboardProfile = `-- name: GetDashboardProfile :one
+SELECT EXISTS (SELECT 1 FROM billing.subscriptions WHERE subscriptions.merchant_id = $1::uuid)::boolean AS has_subscriptions,
+    EXISTS (SELECT 1 FROM billing.payments WHERE payments.merchant_id = $1::uuid AND payments.rail IN ('nmi', 'ccbill', 'stripe'))::boolean AS has_card_payments,
+    EXISTS (SELECT 1 FROM billing.usage_daily WHERE usage_daily.merchant_id = $1::uuid)::boolean AS has_usage,
+    EXISTS (SELECT 1 FROM billing.credit_grants WHERE credit_grants.merchant_id = $1::uuid AND funding_source IN ('purchase', 'recurring'))::boolean AS has_credits
 `
 
-// Any usage-stream signal for the merchant: settled usage or purchased credit
-// lots. Decides whether the default dashboard seeds usage widgets.
-func (q *Queries) HasUsageActivity(ctx context.Context, merchantID uuid.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, hasUsageActivity, merchantID)
-	var has_activity bool
-	err := row.Scan(&has_activity)
-	return has_activity, err
+type GetDashboardProfileRow struct {
+	HasSubscriptions bool
+	HasCardPayments  bool
+	HasUsage         bool
+	HasCredits       bool
+}
+
+// What the merchant's data shows it sells: subscriptions, card payments,
+// metered usage and purchased credit lots. Decides the default dashboard.
+func (q *Queries) GetDashboardProfile(ctx context.Context, merchantID uuid.UUID) (GetDashboardProfileRow, error) {
+	row := q.db.QueryRow(ctx, getDashboardProfile, merchantID)
+	var i GetDashboardProfileRow
+	err := row.Scan(
+		&i.HasSubscriptions,
+		&i.HasCardPayments,
+		&i.HasUsage,
+		&i.HasCredits,
+	)
+	return i, err
 }
 
 const upsertDashboardConfig = `-- name: UpsertDashboardConfig :one

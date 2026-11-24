@@ -3,6 +3,7 @@
 export type OpenRailsErrorCode =
   | "admission_captured"
   | "admission_not_found"
+  | "alert_email_required"
   | "already_owned"
   | "application_required"
   | "as_of_required"
@@ -79,7 +80,10 @@ export type OpenRailsErrorCode =
   | "limit_not_found"
   | "merchant_config_read_only"
   | "merchant_mismatch"
+  | "merchant_unit_unsupported"
   | "merchant_unresolved"
+  | "message_send_failed"
+  | "message_template_invalid"
   | "meter_in_use"
   | "meter_rate_card_conflict"
   | "method_not_allowed"
@@ -148,6 +152,7 @@ export type OpenRailsErrorCode =
   | "psp_key_taken"
   | "psp_last_active"
   | "psp_not_found"
+  | "psp_probe_limited"
   | "purchase_review_resolved"
   | "quantity_not_allowed"
   | "rate_card_product_not_found"
@@ -209,6 +214,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
 > = {
   admission_captured: { status: 409, type: "invalid_request_error", meaning: "The admission was captured; it can no longer be released." },
   admission_not_found: { status: 404, type: "invalid_request_error", meaning: "No admission was made under this request id." },
+  alert_email_required: { status: 409, type: "invalid_request_error", meaning: "The merchant has no alert_email to send a test message to." },
   already_owned: { status: 409, type: "invalid_request_error", meaning: "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume." },
   application_required: { status: 403, type: "authorization_error", meaning: "The route is your backend's: it takes an application's credential, never a person's." },
   as_of_required: { status: 400, type: "invalid_request_error", meaning: "The import needs as_of, its RFC 3339 evidence horizon." },
@@ -285,7 +291,10 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   limit_not_found: { status: 404, type: "invalid_request_error", meaning: "The catalog declares no limit under this key." },
   merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
   merchant_mismatch: { status: 412, type: "invalid_request_error", meaning: "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed." },
+  merchant_unit_unsupported: { status: 400, type: "invalid_request_error", meaning: "The currency is one of the merchant's own units, which the operation does not take: it takes a currency from OpenRails' registry." },
   merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The credential is bound to no merchant here." },
+  message_send_failed: { status: 502, type: "api_error", meaning: "The email sender did not accept the message." },
+  message_template_invalid: { status: 400, type: "invalid_request_error", meaning: "The message template does not render against its event type's sample data; the message says why." },
   meter_in_use: { status: 409, type: "invalid_request_error", meaning: "The meter is referenced and cannot change this way." },
   meter_rate_card_conflict: { status: 409, type: "invalid_request_error", meaning: "The meter and its rate card disagree." },
   method_not_allowed: { status: 405, type: "invalid_request_error", meaning: "The path exists but not for this method; Allow lists its methods." },
@@ -354,6 +363,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   psp_key_taken: { status: 409, type: "invalid_request_error", meaning: "Another live PSP holds the key." },
   psp_last_active: { status: 409, type: "invalid_request_error", meaning: "The PSP is the last active one on its rail; pass allow_last to archive it." },
   psp_not_found: { status: 404, type: "invalid_request_error", meaning: "The PSP does not exist." },
+  psp_probe_limited: { status: 429, type: "rate_limit_error", meaning: "The provider refused this login twice within the hour, or it is being checked, and it locks out repeated failed logins; Retry-After says when it may be checked again." },
   purchase_review_resolved: { status: 409, type: "invalid_request_error", meaning: "The purchase review was already resolved." },
   quantity_not_allowed: { status: 422, type: "invalid_request_error", meaning: "A quantity was sent for a price that is not sold per seat." },
   rate_card_product_not_found: { status: 404, type: "invalid_request_error", meaning: "The rate card names a product that does not exist." },

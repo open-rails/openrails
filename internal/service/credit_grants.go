@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -22,8 +22,12 @@ var (
 	ErrCreditGrantHeld        = money.ErrCreditGrantHeld
 )
 
-// maxSourceIDBytes bounds a caller's source_id, as the tables holding it do.
-const maxSourceIDBytes = 255
+// maxSourceIDBytes bounds a caller's source_id, as the tables holding it do;
+// maxInvokerBytes its invoker, as credit_grants does.
+const (
+	maxSourceIDBytes = 255
+	maxInvokerBytes  = 512
+)
 
 // CreateCreditGrants grants 1 to billing.MaxBatchItems customers prepaid
 // credit, all or none, in one transaction; the answer is in request order.
@@ -55,9 +59,19 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		if strings.TrimSpace(item.SourceID) == "" || len(item.SourceID) > maxSourceIDBytes {
 			return nil, apperr.Invalidf("source_id must contain 1 to %d bytes", maxSourceIDBytes).WithParam(param("source_id"))
 		}
+		// Left out, a new grant is a grant and a replay matches what the lot
+		// recorded (a deposit migrated as a purchase among them).
+		var funding credits.FundingSource
+		switch item.FundingSource {
+		case "":
+		case billing.CreditGrantFundingGrant, billing.CreditGrantFundingPromotion, billing.CreditGrantFundingImport:
+			funding = credits.FundingSource(item.FundingSource)
+		default:
+			return nil, apperr.Invalidf("funding_source must be grant, promotion or import").WithParam(param("funding_source"))
+		}
 		currency := moneyutil.NormalizeCurrency(strings.TrimSpace(string(item.Currency)))
 		if err := moneyutil.ValidateCurrency(currency); err != nil {
-			return nil, fmt.Errorf("%w: %q", ErrCurrencyUnsupported.WithParam(param("currency")), currency)
+			return nil, s.currencyRefusal(ctx, param("currency"), currency)
 		}
 		key, err := money.NewIdempotencyKey(money.OpDeposit, item.Source, item.SourceID)
 		if err != nil {
@@ -73,6 +87,9 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		if invoker == "" {
 			invoker = customer.String()
 		}
+		if len(invoker) > maxInvokerBytes {
+			return nil, apperr.Invalidf("invoker must contain at most %d bytes", maxInvokerBytes).WithParam(param("invoker"))
+		}
 		var expiresAt *time.Time
 		if item.ExpiresAt != nil {
 			v := item.ExpiresAt.UTC()
@@ -81,7 +98,7 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 		deposits[i] = money.DepositParams{
 			CustomerID: &customer, Invoker: invoker, Currency: currency, Amount: item.Amount,
 			Source: key.Source(), SourceID: &sourceID, ExpiresAt: expiresAt, Description: item.Description,
-			RepayOwed: true,
+			Funding: funding, RepayOwed: true,
 		}
 	}
 	trxs, err := s.moneyService().DepositBatch(ctx, deposits)
@@ -143,7 +160,7 @@ func (s *Service) ListBalanceTransactions(ctx context.Context, customer identity
 	}
 	defer release()
 	if params.IDs == nil {
-		currency, err := requireCurrency(string(params.Currency))
+		currency, err := s.registryCurrency(ctx, "currency", string(params.Currency))
 		if err != nil {
 			return billing.ListPage[billing.BalanceTransaction]{}, err
 		}

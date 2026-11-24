@@ -72,6 +72,12 @@ func FormatAmount(amount int64, currency string) string {
 	if !ok {
 		return fmt.Sprintf("%d units of unregistered currency %q", amount, currency)
 	}
+	return FormatUnits(amount, cur)
+}
+
+// FormatUnits renders native units at cur's scale, as FormatAmount does; a
+// merchant's unit shows its whole scale ("400 GOLD", "12.50 CREDITS").
+func FormatUnits(amount int64, cur Currency) string {
 	whole, fraction, _ := strings.Cut(formatDecimal(amount, pow10(cur.Decimals), cur.Decimals), ".")
 	shown := cur.MinorDecimals
 	if cur.Kind == "crypto" {

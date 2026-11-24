@@ -15,6 +15,11 @@ import (
 // it drives validation, SQL compilation, /schema, and the LLM context doc.
 // SQL text comes ONLY from fragments declared here; client strings are bind
 // parameters, never SQL.
+//
+// A funnel is one measure (attempts, purchases, rebills, payments) whose
+// family exposes an outcome or kind dimension, and its rates are ratios over
+// slices of it (NumSlice, DenSlice): a rate and the dimension it slices share
+// one SQL expression, so they cannot disagree.
 
 // Class is a measure's aggregation class.
 type Class = billing.MetricsClass
@@ -27,6 +32,23 @@ const (
 	ClassSnapshot   Class = "snapshot"   // point-in-time; never summed across buckets
 )
 
+// Group is the view a measure belongs to.
+type Group = billing.MetricsGroup
+
+const (
+	GroupBusiness Group = "business" // the health overview and reports
+	GroupOps      Group = "ops"      // operator signals: the ops view and findings
+)
+
+// Direction is which way a change is good news.
+type Direction = billing.MetricsDirection
+
+const (
+	UpIsGood   Direction = "up_is_good"
+	DownIsGood Direction = "down_is_good"
+	Neutral    Direction = "neutral"
+)
+
 // Family is an internal source family: one SQL statement is issued per family
 // involved in a query. Invisible to clients.
 type Family string
@@ -35,21 +57,21 @@ const (
 	FamPayments       Family = "payments"        // flow over billing.payments (purchased_at)
 	FamSubsNew        Family = "subs_new"        // flow over subscriptions (started_at)
 	FamSubsCanceled   Family = "subs_canceled"   // flow over subscriptions (canceled_at)
-	FamSubsEnded      Family = "subs_ended"      // flow over subscriptions (ended_at)
 	FamGrants         Family = "grants"          // flow over credit-purchase grant lots (created_at)
 	FamUsage          Family = "usage"           // flow over daily usage rollups (day_at)
+	FamUsageCharged   Family = "usage_charged"   // flow over daily usage rollups, one row per charge (day_at)
 	FamTransitions    Family = "transitions"     // flow over subscription_status_transitions (occurred_at)
 	FamLimitsReached  Family = "limits_reached"  // flow over limit windows (reached_at)
 	FamSubsSnapshot   Family = "subs_snapshot"   // interval reconstruction over subscriptions
 	FamEntitlSnapshot Family = "entitl_snapshot" // interval reconstruction over product access and product keys
 	FamBalance        Family = "balance"         // cumulative sums over ledger_transfers
 	FamDepletion      Family = "depletion"       // per-customer balance vs trailing-7d burn
-	FamWebhookHealth  Family = "webhook_health"  // snapshot over webhook_health watermarks (#786)
-	FamWebhookDaily   Family = "webhook_daily"   // flow over webhook_health_daily counter buckets (#786)
-	FamAttempts       Family = "attempts"        // flow over payment_attempts (attempted_at, #1116)
+	FamWebhookHealth  Family = "webhook_health"  // snapshot over webhook_health watermarks
+	FamWebhookDaily   Family = "webhook_daily"   // flow over webhook_health_daily counter buckets
+	FamAttempts       Family = "attempts"        // flow over payment_attempts (attempted_at)
 	FamPurchases      Family = "purchases"       // flow over purchases, one per purchase_id (first attempt)
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
-	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at, #1120)
+	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at)
 	FamFindings       Family = "findings"        // snapshot over reconciliation_findings: open at t
 )
 
@@ -62,32 +84,54 @@ type familySpec struct {
 	DimJoins map[string]string
 	// DimExprs: dimension name -> SQL expression valid in this family.
 	DimExprs map[string]string
+	// DimValues: a dimension's closed vocabulary in this family, where it
+	// differs from the dimension's own (outcome, kind).
+	DimValues map[string][]string
 	// BaseWhere: family-invariant predicate (no params).
 	BaseWhere string
 }
+
+// Slice restricts a funnel measure to the rows whose dimensions take the
+// given values: registry constants, inlined as SQL literals.
+type Slice map[string][]string
 
 // Measure is one registry entry.
 type Measure struct {
 	Name        string
 	Class       Class
 	Family      Family
+	Group       Group     // GroupBusiness when empty
+	Direction   Direction // required on every public measure
+	Thresholds  []billing.MetricsThreshold
 	Description string // one line, token-lean (rides in LLM context)
 	Formula     string // /schema formula text
 	Unit        string // UnitMoney | "count" | "ratio" | "days" | "seconds"
 	// Expr is the aggregate SQL expression (flow + snapshot families).
 	Expr string
-	// Dims are the allowed group-by/filter dimensions (besides time).
+	// Agg builds a funnel measure's aggregate over the rows an extra
+	// predicate admits ("" admits all); it sets Expr and lets rates slice it.
+	Agg func(extra string) string
+	// Dims are the allowed group-by/filter dimensions (besides time). A
+	// sliced ratio without Dims takes its components' dimensions less the
+	// sliced ones.
 	Dims []string
 	// Money marks currency-sensitive measures (implicit currency group-by).
 	Money bool
 	// Components of a ratio (Num / Den) or a difference (Num - Den):
 	// resolved through the registry; may be internal-only measures.
 	Num, Den string
+	// NumSlice and DenSlice restrict a ratio's components to slices of their
+	// funnel measures.
+	NumSlice, DenSlice Slice
 	// Internal measures are compiler components: not requestable, not in /schema.
 	Internal bool
 	// SnapshotAtPeriodStart: snapshot evaluated at bucket/range START instead of
 	// bucket start/range END (used by churn's denominator).
 	SnapshotAtPeriodStart bool
+
+	// values: each allowed dimension's closed vocabulary on this measure
+	// (nil: open), set by registry.
+	values map[string][]string
 }
 
 // Dimension is one group-by/filter axis.
@@ -125,17 +169,22 @@ const (
 		WHEN p.subscription_id IS NOT NULL THEN 'subscription'
 		ELSE 'one_time' END`
 
-	// saleRows / mirror rows: a sale row has refunded_payment_id NULL; refund and
-	// chargeback mirrors carry refunded_payment_id + reversal_kind.
-	saleSettled = `p.status IN ('succeeded','refunded') AND p.refunded_payment_id IS NULL`
+	// A sale row has no refunded_payment_id; a reversal (refund, chargeback,
+	// won dispute) names its sale and its reversal_kind. Settled rows count;
+	// a pending or failed refund does not.
+	settledRow     = `p.status IN ('succeeded','refunded')`
+	reversalKindOf = `CASE WHEN p.refunded_payment_id IS NULL THEN '%s'
+		WHEN p.reversal_kind = 'refund' THEN 'refund'
+		WHEN p.reversal_kind = 'chargeback' THEN 'chargeback'
+		ELSE 'dispute_won' END`
 )
 
 // Dimensions is the dimension registry.
 var Dimensions = []Dimension{
-	{Name: "time", Description: "bucket by the query grain (day|week|month|quarter|year, UTC calendar)"},
+	{Name: "time", Description: "bucket by the query grain (auto|day|week|month|quarter|year, UTC calendar)"},
 	{Name: "currency", Description: "currency code; added implicitly when a money measure is grouped without a single-currency filter"},
 	{Name: "rail", Description: "payment rail: nmi, ccbill, stripe or solana"},
-	{Name: "psp", Description: "the PSP's id (psp_…), empty when none; VAMP thresholds apply per PSP"},
+	{Name: "psp", Description: "the PSP's id (psp_…), empty when none"},
 	{Name: "stream", Description: "revenue stream: subscription | one_time", Values: []string{"subscription", "one_time"}},
 	{Name: "product_id", Description: "product id (prod_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseProductID(s) })},
 	{Name: "price_id", Description: "immutable price id (product:price:v1)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParsePriceID(s) })},
@@ -144,18 +193,19 @@ var Dimensions = []Dimension{
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
 	{Name: "customer", Description: "the customer id (usage and limit measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures)"},
-	{Name: "outcome", Description: "usage outcome: succeeded | failed (failed usage is charged only past the customer's grace)", Values: []string{"succeeded", "failed"}},
+	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts and nmi_history_authorizations approved | declined; purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; usage succeeded | failed"},
+	{Name: "cash_kind", Description: "what moved the cash: payment | refund | chargeback | dispute_won (a won dispute's return)", Values: []string{"payment", "refund", "chargeback", "dispute_won"}},
+	{Name: "payment_kind", Description: "sale | refund | chargeback | dispute_won", Values: []string{"sale", "refund", "chargeback", "dispute_won"}},
+	{Name: "charge", Description: "priced usage: charged (billed to the customer) | forgiven (failed usage the customer's grace absorbed)", Values: []string{"charged", "forgiven"}},
 	{Name: "rate_card", Description: "metered event type (usage_daily.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
 	{Name: "token_type", Description: "credential form presented at charge time: network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); attempt_failure_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
-	{Name: "attempt_kind", Description: "payment attempt kind stamped at write time: initial | renewal | unknown (pre-instrumentation or imported rows)", Values: []string{"initial", "renewal", "unknown"}},
 	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},
 	{Name: "entitlement", Description: "entitlement key string (e.g. premium)"},
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
 	{Name: "limit", Description: "a declared usage limit's key (limit measures)"},
-	// #1116 attempt and rebill-cycle dimensions.
 	{Name: "owner", Description: "who collects the subscription: engine (OpenRails) | nmi_schedule (NMI charges, OpenRails duns) | provider (Stripe Billing, CCBill) | none (no subscription)", Values: []string{"engine", "nmi_schedule", "provider", "none"}},
-	{Name: "kind", Description: "attempt kind: verify ($0 card verification) | initial | upgrade | rebill (a cycle's first try) | dunning_retry | customer_retry | invoice", Values: []string{"verify", "initial", "upgrade", "rebill", "dunning_retry", "customer_retry", "invoice"}},
+	{Name: "kind", Description: "what was charged; on attempts verify ($0 card verification) | initial | upgrade | rebill (a cycle's first try) | dunning_retry | customer_retry | collection (a usage order's); on cash and payments initial | renewal | unknown (imported or pre-instrumentation rows)"},
 	{Name: "card_entry", Description: "new (card entered in this checkout or card add) | saved", Values: []string{"new", "saved"}},
 	{Name: "source", Description: "who sent the attempt: openrails | provider_schedule (the PSP's own schedule) | external", Values: []string{"openrails", "provider_schedule", "external"}},
 	{Name: "observed_via", Description: "how OpenRails learned the answer: response | webhook | pull", Values: []string{"response", "webhook", "pull"}},
@@ -175,9 +225,9 @@ var Dimensions = []Dimension{
 	{Name: "days_to_recover", Description: "whole days from a cycle's first failure to its collection (empty otherwise)"},
 	// Findings: problems OpenRails found.
 	{Name: "finding_type", Description: "finding type, e.g. life.provider_intent.stuck or pull.subscription.mismatch"},
+	{Name: "finding_group", Description: "orphaned (payment without access) | freeloader (access without payment) | duplicate_coverage (the same coverage paid twice) | other", Values: []string{"orphaned", "freeloader", "duplicate_coverage", "other"}},
 	{Name: "severity", Description: "finding severity", Values: []string{"critical", "high", "medium", "low"}},
 	{Name: "finding_status", Description: "requires_review (needs a person; the console's bell counts these) | reconcile_required (OpenRails is repairing it)", Values: []string{"requires_review", "reconcile_required"}},
-	// #1120 NMI history.
 	{Name: "nmi_kind", Description: "what NMI's own history tells apart: verification ($0 card verification) | one_off_sale (initial sales, upgrades and retries of declined rebills, whoever sent them) | scheduled_rebill (NMI's own schedule charge)", Values: []string{"verification", "one_off_sale", "scheduled_rebill"}},
 }
 
@@ -190,6 +240,11 @@ const paymentPriceJoin = `LEFT JOIN LATERAL (
   HAVING count(*) = count(l.price_id) AND count(DISTINCT l.price_id)=1
 ) paid_line ON true
 LEFT JOIN billing.prices pr ON pr.merchant_id=p.merchant_id AND pr.id=paid_line.price_id`
+
+var (
+	approvedDeclined = []string{"approved", "declined"}
+	usageOutcomes    = []string{"succeeded", "failed"}
+)
 
 // families declares each family's SQL skeleton inputs.
 var families = map[Family]familySpec{
@@ -212,9 +267,12 @@ var families = map[Family]familySpec{
 			"billing_cycle": billingCycleExpr,
 			"card_brand":    `COALESCE(p.card_brand, '')`,
 			"token_type":    `COALESCE(p.token_type, 'unknown')`,
-			"attempt_kind":  `COALESCE(p.attempt_kind, 'unknown')`,
+			"kind":          `COALESCE(p.attempt_kind, 'unknown')`,
 			"discount_code": `COALESCE(p.discount_code, '')`,
+			"cash_kind":     fmt.Sprintf(reversalKindOf, "payment"),
+			"payment_kind":  fmt.Sprintf(reversalKindOf, "sale"),
 		},
+		DimValues: map[string][]string{"kind": {"initial", "renewal", "unknown"}},
 	},
 	FamSubsNew: {
 		Kind:     "flow",
@@ -257,29 +315,16 @@ var families = map[Family]familySpec{
 		},
 		BaseWhere: `s.canceled_at IS NOT NULL`,
 	},
-	FamSubsEnded: {
-		Kind:     "flow",
-		From:     `billing.subscriptions s`,
-		TimeExpr: `s.ended_at`,
-		DimJoins: map[string]string{"price_id": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`},
-		DimExprs: map[string]string{
-			"rail":        `s.rail`,
-			"product_id":  `'prod_' || s.product_id::text`,
-			"price_id":    `COALESCE(pr.public_id, '')`,
-			"cancel_type": `COALESCE(s.cancel_type, 'unknown')`,
-		},
-		BaseWhere: `s.ended_at IS NOT NULL`,
-	},
 	FamGrants: {
 		Kind:     "flow",
-		From:     `billing.grants g`,
+		From:     `billing.credit_grants g`,
 		TimeExpr: `g.created_at`,
 		DimExprs: map[string]string{
-			"currency":   `g.currency`,
+			"currency":   `g.unit`,
 			"product_id": `COALESCE('prod_' || g.product_id::text, '')`,
 			"customer":   `g.customer_id::text`,
 		},
-		BaseWhere: `g.kind = 'credit' AND g.event = 'grant' AND g.source_type = 'purchase'`,
+		BaseWhere: `g.funding_source IN ('purchase', 'recurring')`,
 	},
 	FamUsage: {
 		Kind:     "flow",
@@ -292,6 +337,23 @@ var families = map[Family]familySpec{
 			"outcome":   `ud.outcome`,
 			"rate_card": `ud.event_type`,
 		},
+		DimValues: map[string][]string{"outcome": usageOutcomes},
+	},
+	// Each rollup row is priced twice: what was charged and what grace
+	// forgave, so charge splits one total.
+	FamUsageCharged: {
+		Kind:     "flow",
+		From:     `billing.usage_daily ud CROSS JOIN LATERAL (VALUES ('charged', ud.amount), ('forgiven', ud.forgiven_amount)) AS uc(charge, amount)`,
+		TimeExpr: `ud.day_at`,
+		DimExprs: map[string]string{
+			"currency":  `ud.currency`,
+			"customer":  `ud.customer_id::text`,
+			"invoker":   `ud.invoker`,
+			"outcome":   `ud.outcome`,
+			"rate_card": `ud.event_type`,
+			"charge":    `uc.charge`,
+		},
+		DimValues: map[string][]string{"outcome": usageOutcomes},
 	},
 	FamTransitions: {
 		Kind:     "flow",
@@ -396,6 +458,11 @@ var families = map[Family]familySpec{
 			"card_brand":    `COALESCE(a.card_brand, '')`,
 			"card_bin":      `COALESCE(a.card_bin, '')`,
 			"token_type":    `COALESCE(a.token_type, 'unknown')`,
+			"outcome":       `CASE WHEN a.category = 'approved' THEN 'approved' ELSE 'declined' END`,
+		},
+		DimValues: map[string][]string{
+			"kind":    {"verify", "initial", "upgrade", "rebill", "dunning_retry", "customer_retry", "collection"},
+			"outcome": approvedDeclined,
 		},
 	},
 	FamPurchases: {
@@ -408,7 +475,9 @@ var families = map[Family]familySpec{
 			"psp":        `COALESCE('psp_' || ck.psp_id::text, '')`,
 			"owner":      `ck.owner`,
 			"card_entry": `CASE WHEN ck.new_card THEN 'new' ELSE 'saved' END`,
+			"outcome":    purchaseOutcome,
 		},
+		DimValues: map[string][]string{"outcome": {"approved", "recovered", "failed", "open"}},
 	},
 	FamRebillCycles: {
 		Kind:     "flow",
@@ -419,6 +488,7 @@ var families = map[Family]familySpec{
 			"rail":                   `cy.rail`,
 			"psp":                    `COALESCE('psp_' || cy.psp_id::text, '')`,
 			"owner":                  `cy.owner`,
+			"outcome":                rebillOutcome,
 			"first_outcome":          `cy.first_outcome`,
 			"first_failure_category": `CASE WHEN cy.first_category <> 'approved' THEN cy.first_category ELSE '' END`,
 			"first_failure_reason":   `COALESCE(cy.first_reason, '')`,
@@ -429,6 +499,7 @@ var families = map[Family]familySpec{
 			"days_to_recover": `CASE WHEN NOT cy.first_failed OR cy.won_at IS NULL THEN ''
 				ELSE floor(EXTRACT(EPOCH FROM cy.won_at - COALESCE(cy.missed_at, cy.first_at)) / 86400)::bigint::text END`,
 		},
+		DimValues: map[string][]string{"outcome": {"approved", "recovered", "lost", "open"}},
 	},
 	FamFindings: {
 		Kind: "snapshot",
@@ -438,6 +509,7 @@ var families = map[Family]familySpec{
 		BaseWhere: `f.created_at <= edge.bucket AND ((f.resolved_at IS NULL AND f.status IN ('requires_review','reconcile_required')) OR f.resolved_at > edge.bucket)`,
 		DimExprs: map[string]string{
 			"finding_type":   `f.finding_type`,
+			"finding_group":  findingGroup,
 			"severity":       `f.severity`,
 			"finding_status": `CASE WHEN f.status IN ('reconcile_required','auto_fixed') THEN 'reconcile_required' ELSE 'requires_review' END`,
 		},
@@ -451,7 +523,9 @@ var families = map[Family]familySpec{
 			"nmi_kind": `h.kind`,
 			"category": `h.category`,
 			"reason":   `h.reason`,
+			"outcome":  `CASE WHEN h.category = 'approved' THEN 'approved' ELSE 'declined' END`,
 		},
+		DimValues: map[string][]string{"outcome": approvedDeclined},
 	},
 }
 
@@ -521,9 +595,17 @@ var rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, 
 		ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
 	LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL) cy`
 
-// #1116: a purchase is one buyer's attempts on one target (purchase_id). It
-// is approved when its target is: a verification for a card save, an initial
-// or upgrade charge for a purchase.
+// rebillOutcome is a cycle as of the range end: approved when its first try
+// collected it, recovered when a later one did, lost when it closed
+// uncollected, open otherwise.
+const rebillOutcome = `CASE WHEN cy.won_at <= @to AND NOT cy.first_failed THEN 'approved'
+	WHEN cy.won_at <= @to THEN 'recovered'
+	WHEN cy.closed_at <= @to THEN 'lost'
+	ELSE 'open' END`
+
+// A purchase is one buyer's attempts on one target (purchase_id). It is
+// approved when its target is: a verification for a card save, an initial or
+// upgrade charge for a purchase.
 const purchasesFrom = `(SELECT a.merchant_id, a.purchase_id,
 		MIN(a.attempted_at) AS started_at, MAX(a.attempted_at) AS last_at, COUNT(*) AS attempts,
 		bool_or(a.category = 'approved' AND CASE WHEN a.purchase_target = 'card_save' THEN a.kind = 'verify' ELSE a.kind IN ('initial', 'upgrade') END) AS approved,
@@ -537,37 +619,54 @@ const purchasesFrom = `(SELECT a.merchant_id, a.purchase_id,
 	WHERE a.purchase_id IS NOT NULL
 	GROUP BY a.merchant_id, a.purchase_id) ck`
 
-// purchaseSettled: approved, or quiet for an hour before the query's end.
-const purchaseSettled = `(ck.approved OR ck.last_at < @to - interval '1 hour')`
+// purchaseOutcome: approved at the first try, recovered after a failure,
+// failed when quiet for an hour before the range end without an approval,
+// open otherwise.
+const purchaseOutcome = `CASE WHEN ck.approved AND NOT ck.had_failure THEN 'approved'
+	WHEN ck.approved THEN 'recovered'
+	WHEN ck.last_at < @to - interval '1 hour' THEN 'failed'
+	ELSE 'open' END`
 
-// Rebill cycle states; closed states are as of the query's range end.
-const (
-	cycleClosed = `(cy.closed_at <= @to)`
-	cycleLost   = `(cy.won_at IS NULL AND cy.closed_at <= @to)`
-)
+// findingGroup sorts open findings into what they mean for the merchant.
+var findingGroup = `CASE WHEN f.finding_type IN (` + quoted(reconcile.OrphanedFindingTypes) + `) THEN 'orphaned'
+	WHEN f.finding_type IN (` + quoted(reconcile.FreeloaderFindingTypes) + `) THEN 'freeloader'
+	WHEN f.finding_type IN (` + quoted(reconcile.DuplicateCoverageFindingTypes) + `) THEN 'duplicate_coverage'
+	ELSE 'other' END`
 
-// #1116 dimension sets.
+func quoted(values []string) string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		if strings.ContainsRune(v, '\'') {
+			panic(fmt.Sprintf("metrics: %q cannot be a SQL literal", v))
+		}
+		out[i] = "'" + v + "'"
+	}
+	return strings.Join(out, ", ")
+}
+
+// Dimension sets.
 var (
-	attemptDims  = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"}
-	purchaseDims = []string{"currency", "rail", "psp", "owner", "card_entry"}
-	cycleDims    = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
-	nmiHistDims  = []string{"psp", "nmi_kind", "category", "reason"}
+	attemptDims     = []string{"currency", "rail", "psp", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"}
+	purchaseDims    = []string{"currency", "rail", "psp", "owner", "card_entry"}
+	cycleDims       = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
+	nmiHistDims     = []string{"psp", "nmi_kind", "category", "reason"}
+	cashDims        = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "kind", "discount_code"}
+	usageDims       = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
+	creditDims      = []string{"currency", "product_id", "customer"}
+	webhookDims     = []string{"rail", "psp"}
+	subscriptionDim = []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}
+	// What a sale and its reversals both carry.
+	reversalRateDims = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand"}
 )
+
+// with is dims and more, copied.
+func with(dims []string, more ...string) []string {
+	return append(slices.Clone(dims), more...)
+}
 
 // verificationPressure is an unverified subscription past its paid-through
 // date at t.
 const verificationPressure = `s.status = 'unverified' AND s.deleted_at IS NULL AND s.current_period_ends_at < edge.bucket`
-
-// countFindingTypes counts open findings of one registry-declared type set.
-func countFindingTypes(types []string) string {
-	quoted := make([]string, len(types))
-	for i, t := range types {
-		quoted[i] = "'" + t + "'"
-	}
-	return `COUNT(f.id) FILTER (WHERE f.finding_type IN (` + strings.Join(quoted, ", ") + `))`
-}
-
-func typeList(types []string) string { return strings.Join(types, "|") }
 
 // UnitMoney marks a measure whose cells are MoneyCell values: exact native
 // units of the row's currency (the registry scale, not always millionths).
@@ -577,395 +676,424 @@ const UnitMoney = "money"
 // covers <= this many days of their trailing-7d average burn.
 const depletionRiskDays = 7
 
-// Measures is the measure registry (CORE tier + internal ratio components).
-var Measures = []Measure{
-	// --- payments: additive money -------------------------------------------
-	{Name: "gross_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
-		Description: "sum of settled sale amounts (native currency units), before refunds/chargebacks; gross of processor fees",
-		Formula:     "SUM(amount) over settled sale payments (incl. later-refunded)",
-		Expr:        `COALESCE(SUM(p.amount) FILTER (WHERE ` + saleSettled + ` AND p.amount > 0), 0)::bigint`,
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
-	{Name: "net_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
-		Description: "gross_revenue minus refunds and chargebacks (net of returns, NOT net of fees); Stripe's 'net volume'",
-		Formula:     "gross_revenue - refunds - chargebacks",
-		Expr:        `COALESCE(SUM(p.amount) FILTER (WHERE p.status IN ('succeeded','refunded')), 0)::bigint`,
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
-	{Name: "refunds", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
-		Description: "sum of refunded amounts (native currency units, positive), from refund mirror rows",
-		Formula:     "SUM(amount) of refunds",
-		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'succeeded' AND p.reversal_kind = 'refund'), 0)::bigint`,
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
-	{Name: "chargebacks", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
-		Description: "sum of chargeback amounts (native currency units, positive), net of won disputes",
-		Formula:     "SUM(amount) of chargebacks and dispute reversals",
-		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'succeeded' AND p.reversal_kind IN ('chargeback','dispute_reversal')), 0)::bigint`,
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
-	// --- payments: additive counts -------------------------------------------
-	{Name: "payment_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
-		Description: "count of settled sale payments (approved attempts)",
-		Formula:     "COUNT(settled sale payments)",
-		Expr:        `COUNT(*) FILTER (WHERE ` + saleSettled + `)`,
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "token_type", "attempt_kind", "discount_code"}},
-	{Name: "refund_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
-		Description: "count of refunds issued",
-		Formula:     "COUNT(refunds)",
-		Expr:        `COUNT(*) FILTER (WHERE p.status = 'succeeded' AND p.reversal_kind = 'refund')`,
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
-	{Name: "chargeback_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
-		Description: "count of chargebacks/disputes received",
-		Formula:     "COUNT(chargebacks)",
-		Expr:        `COUNT(*) FILTER (WHERE p.status = 'succeeded' AND p.reversal_kind = 'chargeback')`,
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
-	// --- payments: distinct ---------------------------------------------------
-	{Name: "unique_rebilled_customers", Class: ClassDistinct, Family: FamPayments, Unit: "count",
-		Description: "distinct customers successfully rebilled (settled renewal payments) in the bucket",
-		Formula:     "COUNT(DISTINCT customers) over settled renewal payments",
-		Expr:        `COUNT(DISTINCT p.customer_id) FILTER (WHERE ` + saleSettled + ` AND p.attempt_kind = 'renewal')`,
-		Dims:        []string{"currency", "rail", "psp"}},
-	{Name: "paying_customers", Class: ClassDistinct, Family: FamPayments, Unit: "count", Internal: true,
-		Expr: `COUNT(DISTINCT p.customer_id) FILTER (WHERE ` + saleSettled + `)`,
-		Dims: []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
-	// --- payments: ratios ------------------------------------------------------
-	{Name: "chargeback_rate", Class: ClassRatio, Unit: "ratio", Num: "chargeback_count", Den: "payment_count",
-		Description: "chargebacks / settled payments; group by psp for the per-PSP VAMP number",
-		Formula:     "chargeback_count / payment_count",
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
-	{Name: "realized_revenue_per_customer", Class: ClassRatio, Unit: "money", Money: true, Num: "net_revenue", Den: "paying_customers",
-		Description: "net revenue per distinct paying customer in the window (LTV-to-date when windowed over lifetime)",
-		Formula:     "net_revenue / COUNT(DISTINCT paying customers)",
-		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "attempt_kind", "discount_code"}},
-	// --- subscriptions: flow ----------------------------------------------------
-	{Name: "new_subscriptions", Class: ClassAdditive, Family: FamSubsNew, Unit: "count",
+// count is COUNT(*) over the rows admits (all when empty) and extra narrow.
+func count(admits string) func(string) string {
+	return func(extra string) string {
+		if where := both(admits, extra); where != "" {
+			return `COUNT(*) FILTER (WHERE ` + where + `)`
+		}
+		return `COUNT(*)`
+	}
+}
+
+// sum is the bigint sum of value over the rows admits and extra narrow.
+func sum(value, admits string) func(string) string {
+	return func(extra string) string {
+		if where := both(admits, extra); where != "" {
+			return `COALESCE(SUM(` + value + `) FILTER (WHERE ` + where + `), 0)::bigint`
+		}
+		return `COALESCE(SUM(` + value + `), 0)::bigint`
+	}
+}
+
+func both(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return "(" + a + ") AND (" + b + ")"
+}
+
+// Measures is the measure registry: the declared measures completed by
+// registry (sliced ratio components are internal measures).
+var Measures = registry(declared)
+
+var declared = []Measure{
+	// --- cash and payments ------------------------------------------------------
+	{Name: "cash", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: UnitMoney, Direction: UpIsGood,
+		Description: "money received less money returned, signed by cash_kind: payment and dispute_won add, refund and chargeback subtract; the total is net cash, gross of processor fees",
+		Formula:     "SUM(signed amount) over settled payments and their reversals",
+		Agg:         sum(`p.amount`, settledRow),
+		Dims:        with(cashDims, "cash_kind")},
+	{Name: "payments", Class: ClassAdditive, Family: FamPayments, Unit: "count", Direction: Neutral,
+		Description: "settled payments and reversals, by payment_kind: sale, refund, chargeback, dispute_won",
+		Formula:     "COUNT(settled payments and reversals)",
+		Agg:         count(settledRow),
+		Dims:        with(cashDims, "token_type", "payment_kind")},
+	{Name: "refund_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
+		Num: "payments", NumSlice: Slice{"payment_kind": {"refund"}}, Den: "payments", DenSlice: Slice{"payment_kind": {"sale"}},
+		Description: "refunds / settled sales, by count, in the same bucket",
+		Formula:     "payments(refund) / payments(sale)",
+		Dims:        reversalRateDims},
+	{Name: "chargeback_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
+		Num: "payments", NumSlice: Slice{"payment_kind": {"chargeback"}}, Den: "payments", DenSlice: Slice{"payment_kind": {"sale"}},
+		Description: "chargebacks / settled sales, by count, in the same bucket; group by psp for each PSP's",
+		Formula:     "payments(chargeback) / payments(sale)",
+		Dims:        reversalRateDims},
+	// --- subscriptions ------------------------------------------------------------
+	{Name: "new_subscriptions", Class: ClassAdditive, Family: FamSubsNew, Unit: "count", Direction: UpIsGood,
 		Description: "subscriptions started in the bucket (excludes never-activated pending)",
 		Formula:     "COUNT(subscriptions started in the bucket, not pending)",
-		// or#893: `failed` left the lifecycle enum, and naming a label the type
-		// no longer has is a runtime cast error, not a no-op predicate. A
-		// subscription whose first charge failed is past_due or canceled; only
-		// `pending` still means never-activated.
+		// A subscription whose first charge failed is past_due or canceled;
+		// only pending still means never-activated.
 		Expr: `COUNT(*) FILTER (WHERE s.status <> 'pending')`,
 		Dims: []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "subscriber_type"}},
-	{Name: "cancellations", Class: ClassAdditive, Family: FamSubsCanceled, Unit: "count",
+	{Name: "cancellations", Class: ClassAdditive, Family: FamSubsCanceled, Unit: "count", Direction: DownIsGood,
 		Description: "subscriptions canceled in the bucket, by cancel_type",
 		Formula:     "COUNT(subscriptions canceled in the bucket)",
 		Expr:        `COUNT(*)`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "cancel_type"}},
-	{Name: "net_new_subscriptions", Class: ClassDifference, Unit: "count", Num: "new_subscriptions", Den: "cancellations",
+	{Name: "net_new_subscriptions", Class: ClassDifference, Unit: "count", Direction: UpIsGood, Num: "new_subscriptions", Den: "cancellations",
 		Description: "subscriptions started minus subscriptions canceled in the bucket",
 		Formula:     "new_subscriptions - cancellations",
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id"}},
-	{Name: "ended_membership_days", Class: ClassAdditive, Family: FamSubsEnded, Unit: "days", Internal: true,
-		Expr: `COALESCE(SUM(EXTRACT(EPOCH FROM (s.ended_at - s.started_at)) / 86400.0), 0)::float8`,
-		Dims: []string{"rail", "product_id", "price_id", "cancel_type"}},
-	{Name: "ended_subscriptions", Class: ClassAdditive, Family: FamSubsEnded, Unit: "count", Internal: true,
-		Expr: `COUNT(*)`,
-		Dims: []string{"rail", "product_id", "price_id", "cancel_type"}},
-	{Name: "avg_membership_duration_days", Class: ClassRatio, Unit: "days", Num: "ended_membership_days", Den: "ended_subscriptions",
-		Description: "average started->ended lifetime (days) of subs that ENDED in the bucket; survivors not counted (censoring)",
-		Formula:     "SUM(lifetime) / COUNT(subscriptions ended in the bucket)",
-		Dims:        []string{"rail", "product_id", "price_id", "cancel_type"}},
 	{Name: "subscriptions_at_period_start", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count", Internal: true,
 		SnapshotAtPeriodStart: true,
 		Expr:                  `COUNT(s.id)`,
-		Dims:                  []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}},
-	{Name: "churn_rate", Class: ClassRatio, Unit: "ratio", Num: "cancellations", Den: "subscriptions_at_period_start",
+		Dims:                  subscriptionDim},
+	{Name: "churn_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "cancellations", Den: "subscriptions_at_period_start",
 		Description: "cancellations in the bucket / subscriptions existing at bucket start; currency groups by price currency",
 		Formula:     "cancellations / subscriptions(at period start)",
 		Dims:        []string{"currency", "rail", "product_id", "price_id"}},
-	// --- attempts (#1116): every authorization a PSP answered --------------------
-	{Name: "attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count",
-		Description: "authorizations a PSP answered: card verifications, sales, rebills and retries",
+	{Name: "subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count", Direction: UpIsGood,
+		Description: "subscriptions existing at t (interval reconstruction); filter/group by status for active/past_due/pending views",
+		Formula:     "COUNT(subscriptions started at or before t and not ended)",
+		Expr:        `COUNT(s.id)`,
+		Dims:        subscriptionDim},
+	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: UnitMoney, Direction: UpIsGood,
+		Description: "monthly-normalized recurring price of auto-renew subs existing at t and not canceled by t; group by status to split healthy vs in-dunning",
+		Formula:     "SUM(monthly-normalized price) over auto-renewing subscriptions at t that were not canceled by t",
+		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE (pr.billing_interval_hours IS NOT NULL OR pr.billing_interval_months IS NOT NULL) AND (s.canceled_at IS NULL OR s.canceled_at > edge.bucket)), 0)::bigint`,
+		Dims:        subscriptionDim},
+	// --- payment health: one measure per funnel, its rates slice it ---------------
+	{Name: "attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count", Direction: Neutral,
+		Description: "authorizations a PSP answered (card verifications, sales, rebills and retries), by outcome: approved or declined",
 		Formula:     "COUNT(payment attempts)",
-		Expr:        `COUNT(*)`,
-		Dims:        attemptDims},
-	{Name: "approved_attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count",
-		Description: "approved authorizations",
-		Formula:     "COUNT(attempts with category='approved')",
-		Expr:        `COUNT(*) FILTER (WHERE a.category = 'approved')`,
-		Dims:        attemptDims},
-	{Name: "failed_attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count",
-		Description: "refused or failed authorizations, by the one decline classifier's category and reason",
-		Formula:     "COUNT(attempts with category<>'approved')",
-		Expr:        `COUNT(*) FILTER (WHERE a.category <> 'approved')`,
-		Dims:        attemptDims},
-	{Name: "attempt_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "failed_attempts", Den: "attempts",
-		Description: "failed / all authorizations; the new-card decline rate is kind in (verify, initial) with card_entry=new",
-		Formula:     "failed_attempts / attempts",
-		Dims:        attemptDims},
-	// --- purchases (#1116): one buyer's attempts on one target -------------------
-	{Name: "purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count",
-		Description: "purchases (a buyer's attempts on one purchase or card save) started in the bucket",
+		Agg:         count(""),
+		Dims:        with(attemptDims, "outcome")},
+	{Name: "attempt_failure_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
+		Num: "attempts", NumSlice: Slice{"outcome": {"declined"}}, Den: "attempts",
+		Description: "declined / all authorizations; the new-card decline rate is kind in (verify, initial) with card_entry=new",
+		Formula:     "attempts(declined) / attempts"},
+	{Name: "purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Direction: Neutral,
+		Description: "purchases (a buyer's attempts on one order or card save) started in the bucket, by outcome as of the range end: approved at the first try, recovered after a failure, failed (no approval and quiet for an hour), open",
 		Formula:     "COUNT(purchases)",
-		Expr:        `COUNT(*)`,
-		Dims:        purchaseDims},
-	{Name: "settled_purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE ` + purchaseSettled + `)`,
-		Dims: purchaseDims},
-	{Name: "failed_purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count",
-		Description: "purchases that never reached an approval of their target and went quiet for an hour",
-		Formula:     "COUNT(purchases without approval, idle > 1h)",
-		Expr:        `COUNT(*) FILTER (WHERE NOT ck.approved AND ` + purchaseSettled + `)`,
-		Dims:        purchaseDims},
-	{Name: "purchase_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "failed_purchases", Den: "settled_purchases",
-		Description: "failed / settled purchases: the new-card failure rate per buyer rather than per attempt",
-		Formula:     "failed_purchases / (approved + failed purchases)",
-		Dims:        purchaseDims},
-	{Name: "order_attempts", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Internal: true,
-		Expr: `COALESCE(SUM(ck.attempts), 0)::bigint`,
-		Dims: purchaseDims},
-	{Name: "attempts_per_purchase", Class: ClassRatio, Unit: "ratio", Num: "order_attempts", Den: "purchases",
-		Description: "average authorizations per purchase",
-		Formula:     "SUM(attempts per purchase) / purchases",
-		Dims:        purchaseDims},
-	{Name: "troubled_purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE ck.had_failure AND ` + purchaseSettled + `)`,
-		Dims: purchaseDims},
-	{Name: "recovered_purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE ck.had_failure AND ck.approved)`,
-		Dims: purchaseDims},
-	{Name: "purchase_recovery_rate", Class: ClassRatio, Unit: "ratio", Num: "recovered_purchases", Den: "troubled_purchases",
-		Description: "purchases with a failure that still ended approved / settled purchases with a failure",
-		Formula:     "recovered purchases / settled purchases with a failure",
-		Dims:        purchaseDims},
-	// --- rebill cycles (#1116): cohort by the period that came due ---------------
-	{Name: "rebills_due", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
-		Description: "rebill cycles: paid periods that came due in the bucket and were attempted or missed",
+		Agg:         count(""),
+		Dims:        with(purchaseDims, "outcome")},
+	{Name: "purchase_failure_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
+		Num: "purchases", NumSlice: Slice{"outcome": {"failed"}}, Den: "purchases", DenSlice: Slice{"outcome": {"approved", "recovered", "failed"}},
+		Description: "failed / settled purchases: the failure rate per buyer rather than per attempt",
+		Formula:     "purchases(failed) / purchases(approved, recovered, failed)"},
+	{Name: "rebills", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Direction: Neutral,
+		Description: "rebill cycles by the period that came due, attempted or missed; by outcome as of the range end: approved (the first try collected), recovered (collected after a failed or missed first try), lost (closed uncollected), open (in dunning)",
 		Formula:     "COUNT(rebill cycles)",
-		Expr:        `COUNT(*)`,
+		Agg:         count(""),
+		Dims:        with(cycleDims, "outcome")},
+	{Name: "rebill_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "rebills", NumSlice: Slice{"outcome": {"approved", "recovered"}}, Den: "rebills", DenSlice: Slice{"outcome": {"approved", "recovered", "lost"}},
+		Description: "collected / closed rebill cycles: the share of renewals that came due and were paid",
+		Formula:     "rebills(approved, recovered) / rebills(approved, recovered, lost)"},
+	{Name: "dunning_recovery_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "rebills", NumSlice: Slice{"outcome": {"recovered"}},
+		Den: "rebills", DenSlice: Slice{"outcome": {"recovered", "lost"}, "first_outcome": {"declined", "error", "missed"}},
+		Description: "collected / closed cycles whose first rebill failed or was missed",
+		Formula:     "rebills(recovered) / rebills(recovered, lost with first_outcome declined, error or missed)",
 		Dims:        cycleDims},
-	{Name: "rebills_open", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
-		Description: "cycles neither collected nor closed (subscription ended, a later period paid, or the dunning window passed)",
-		Formula:     "COUNT(open cycles)",
-		Expr:        `COUNT(*) FILTER (WHERE NOT ` + cycleClosed + `)`,
-		Dims:        cycleDims},
-	{Name: "rebills_attempted", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
-		Description: "cycles with a first outcome: attempted, or missed (the rebill failure rate's denominator)",
-		Formula:     "COUNT(cycles attempted or missed)",
-		Expr:        `COUNT(*) FILTER (WHERE cy.missed_at IS NOT NULL OR cy.first_category IS NOT NULL)`,
-		Dims:        cycleDims},
-	{Name: "rebill_first_failures", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
-		Description: "cycles whose rebill failed: the first attempt declined or errored, or no attempt happened (missed)",
-		Formula:     "COUNT(cycles whose first_outcome is declined, error or missed)",
-		Expr:        `COUNT(*) FILTER (WHERE cy.first_failed)`,
-		Dims:        cycleDims},
-	{Name: "rebill_first_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "rebill_first_failures", Den: "rebills_attempted",
-		Description: "failed first rebills / cycles with a first outcome",
-		Formula:     "rebill_first_failures / (cycles attempted or missed)",
-		Dims:        cycleDims},
-	{Name: "rebills_missed", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
-		Description: "cycles whose rebill never happened by its owner's deadline, by miss_reason",
-		Formula:     "COUNT(missed cycles)",
-		Expr:        `COUNT(*) FILTER (WHERE cy.missed_at IS NOT NULL)`,
-		Dims:        cycleDims},
-	{Name: "rebill_missed_rate", Class: ClassRatio, Unit: "ratio", Num: "rebills_missed", Den: "rebills_due",
-		Description: "missed / due rebills",
-		Formula:     "rebills_missed / rebills_due",
-		Dims:        cycleDims},
-	{Name: "rebills_closed", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE ` + cycleClosed + `)`,
-		Dims: cycleDims},
-	{Name: "rebills_collected", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE cy.won_at IS NOT NULL)`,
-		Dims: cycleDims},
-	{Name: "rebills_lost", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE ` + cycleLost + `)`,
-		Dims: cycleDims},
-	{Name: "closed_first_failures", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE cy.first_failed AND ` + cycleClosed + `)`,
-		Dims: cycleDims},
-	{Name: "dunning_recovered", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
-		Description: "cycles whose first rebill failed and that were collected; group by recovery_attempt or days_to_recover for the recovery curve",
-		Formula:     "COUNT(cycles with a failed first outcome that were collected)",
-		Expr:        `COUNT(*) FILTER (WHERE cy.first_failed AND cy.won_at IS NOT NULL)`,
-		Dims:        cycleDims},
-	{Name: "dunning_recovery_rate", Class: ClassRatio, Unit: "ratio", Num: "dunning_recovered", Den: "closed_first_failures",
-		Description: "collected / closed cycles whose first rebill failed",
-		Formula:     "dunning_recovered / closed cycles with a failed first outcome",
-		Dims:        cycleDims},
-	{Name: "rebill_collection_rate", Class: ClassRatio, Unit: "ratio", Num: "rebills_collected", Den: "rebills_closed",
-		Description: "collected / closed cycles",
-		Formula:     "collected cycles / closed cycles",
-		Dims:        cycleDims},
-	{Name: "rebill_loss_rate", Class: ClassRatio, Unit: "ratio", Num: "rebills_lost", Den: "rebills_closed",
-		Description: "closed cycles never collected / closed cycles",
-		Formula:     "lost cycles / closed cycles",
-		Dims:        cycleDims},
-	// --- NMI history (#1120): NMI's own authorizations, by month ------------------
-	{Name: "nmi_history_authorizations", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count",
-		Description: "authorizations NMI answered, read daily from its transaction history: card verifications, one-off sales and NMI-scheduled rebills, whoever sent them; dated by month",
-		Formula:     "SUM(authorizations in NMI's history)",
-		Expr:        `COALESCE(SUM(h.authorizations), 0)::bigint`,
-		Dims:        nmiHistDims},
-	{Name: "nmi_history_approved", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count",
-		Description: "authorizations NMI approved",
-		Formula:     "SUM(authorizations with category='approved')",
-		Expr:        `COALESCE(SUM(h.authorizations) FILTER (WHERE h.category = 'approved'), 0)::bigint`,
-		Dims:        nmiHistDims},
-	{Name: "nmi_history_refused", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count",
-		Description: "authorizations NMI refused, by the one decline classifier's category and reason",
-		Formula:     "SUM(authorizations with category<>'approved')",
-		Expr:        `COALESCE(SUM(h.authorizations) FILTER (WHERE h.category <> 'approved'), 0)::bigint`,
-		Dims:        nmiHistDims},
-	{Name: "nmi_history_refusal_rate", Class: ClassRatio, Unit: "ratio", Num: "nmi_history_refused", Den: "nmi_history_authorizations",
-		Description: "refused / all authorizations in NMI's history; group by nmi_kind and time (month) for the decline report",
-		Formula:     "nmi_history_refused / nmi_history_authorizations",
-		Dims:        nmiHistDims},
-	// --- grants / usage-credits ---------------------------------------------------
-	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: "money",
+	{Name: "rebill_first_failure_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
+		Num: "rebills", NumSlice: Slice{"first_outcome": {"declined", "error", "missed"}},
+		Den: "rebills", DenSlice: Slice{"first_outcome": {"approved", "declined", "error", "missed"}},
+		Description: "failed or missed first rebills / cycles with a first outcome",
+		Formula:     "rebills(first_outcome declined, error, missed) / rebills(first_outcome not pending)"},
+	// --- credits and usage ---------------------------------------------------------
+	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: UnitMoney, Direction: UpIsGood,
 		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
 		Formula:     "SUM(grant lot amounts) over purchased credit grants",
-		Expr:        `COALESCE(SUM(g.amount), 0)::bigint`,
-		Dims:        []string{"currency", "product_id", "customer"}},
+		Expr:        `COALESCE(SUM(g.units), 0)::bigint`,
+		Dims:        creditDims},
 	{Name: "credit_topups", Class: ClassAdditive, Family: FamGrants, Unit: "count", Internal: true,
 		Expr: `COUNT(*)`,
-		Dims: []string{"currency", "product_id", "customer"}},
+		Dims: creditDims},
 	{Name: "repeat_topups", Class: ClassAdditive, Family: FamGrants, Unit: "count", Internal: true,
 		Expr: `COALESCE(SUM(CASE WHEN EXISTS (
-			SELECT 1 FROM billing.grants g2
+			SELECT 1 FROM billing.credit_grants g2
 			WHERE g2.merchant_id = g.merchant_id AND g2.customer_id = g.customer_id
-			  AND g2.kind = 'credit' AND g2.event = 'grant' AND g2.source_type = 'purchase'
+			  AND g2.funding_source IN ('purchase', 'recurring')
 			  AND g2.created_at < g.created_at
 		) THEN 1 ELSE 0 END), 0)::bigint`,
-		Dims: []string{"currency", "product_id", "customer"}},
-	{Name: "repeat_topup_rate", Class: ClassRatio, Unit: "ratio", Num: "repeat_topups", Den: "credit_topups",
+		Dims: creditDims},
+	{Name: "repeat_topup_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood, Num: "repeat_topups", Den: "credit_topups",
 		Description: "share of credit purchases in the bucket made by customers with an earlier credit purchase",
 		Formula:     "repeat top-ups / all top-ups",
 		Dims:        []string{"currency", "product_id"}},
-	{Name: "usage_revenue", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
-		Description: "consumed (recognized) usage spend in native currency units, from daily usage rollups; cash-in is credits_sold; failed usage counts only what was charged past grace",
-		Formula:     "SUM(amount) of daily usage rollups",
-		Expr:        `COALESCE(SUM(ud.amount), 0)::bigint`,
-		Dims:        []string{"currency", "customer", "invoker", "outcome", "rate_card"}},
-	{Name: "usage_units", Class: ClassAdditive, Family: FamUsage, Unit: "count",
+	{Name: "usage_charged", Class: ClassAdditive, Family: FamUsageCharged, Money: true, Unit: UnitMoney, Direction: UpIsGood,
+		Description: "priced usage from daily usage rollups, by charge: charged (billed to the customer) or forgiven (failed usage the customer's grace absorbed); cash-in is credits_sold",
+		Formula:     "SUM(charged amount) + SUM(forgiven amount) of daily usage rollups",
+		Agg:         sum(`uc.amount`, ""),
+		Dims:        with(usageDims, "charge")},
+	{Name: "usage_units", Class: ClassAdditive, Family: FamUsage, Unit: "count", Direction: UpIsGood,
 		Description: "count of settled usage items (raw volume; per-dimension token counts live host-side)",
 		Formula:     "SUM(requests) of the rollups' event rows",
 		Expr:        `COALESCE(SUM(ud.requests) FILTER (WHERE ud.meter_key = ''), 0)::bigint`,
-		Dims:        []string{"currency", "customer", "invoker", "outcome", "rate_card"}},
-	{Name: "forgiven_usage", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
-		Description: "failed usage the customer's grace absorbed (native currency units): what failures cost the merchant",
-		Formula:     "SUM(forgiven_amount) of failed usage",
-		Expr:        `COALESCE(SUM(ud.forgiven_amount), 0)::bigint`,
-		Dims:        []string{"currency", "customer", "invoker", "outcome", "rate_card"}},
-	{Name: "active_customers", Class: ClassDistinct, Family: FamUsage, Unit: "count",
+		Dims:        usageDims},
+	{Name: "active_customers", Class: ClassDistinct, Family: FamUsage, Unit: "count", Direction: UpIsGood,
 		Description: "distinct customers with any usage in the bucket (the API platform's WAU/MAU)",
 		Formula:     "COUNT(DISTINCT customers) over daily usage rollups",
 		Expr:        `COUNT(DISTINCT ud.customer_id)`,
 		Dims:        []string{"currency", "rate_card"}},
-	{Name: "credit_utilization", Class: ClassRatio, Unit: "ratio", Money: true, Num: "usage_revenue", Den: "credits_sold",
-		Description: "usage consumed / credits sold in the same window (per currency)",
-		Formula:     "usage_revenue / credits_sold",
-		Dims:        []string{"currency"}},
-	{Name: "limits_reached", Class: ClassAdditive, Family: FamLimitsReached, Unit: "count",
+	{Name: "limits_reached", Class: ClassAdditive, Family: FamLimitsReached, Unit: "count", Direction: Neutral,
 		Description: "limit windows that reached capacity, dated when they first did",
 		Formula:     "COUNT(limit windows by reached_at)",
 		Expr:        `COUNT(*)`,
 		Dims:        []string{"limit", "customer"}},
-	// --- snapshots ------------------------------------------------------------------
-	{Name: "subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
-		Description: "subscriptions existing at t (interval reconstruction); filter/group by status for active/past_due/pending views",
-		Formula:     "COUNT(subscriptions started at or before t and not ended)",
-		Expr:        `COUNT(s.id)`,
-		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}},
-	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: "money",
-		Description: "monthly-normalized recurring price of auto-renew subs existing at t and not canceled by t; group by status to split healthy vs in-dunning",
-		Formula:     "SUM(monthly-normalized price) over auto-renewing subscriptions at t that were not canceled by t",
-		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE (pr.billing_interval_hours IS NOT NULL OR pr.billing_interval_months IS NOT NULL) AND (s.canceled_at IS NULL OR s.canceled_at > edge.bucket)), 0)::bigint`,
-		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}},
-	{Name: "billable_subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
-		Description: "subs at t projected to keep billing: auto-renew price, non-terminal status, not canceled/scheduled for deletion",
-		Formula:     "COUNT(auto-renewing subscriptions at t that are pending, active, past_due or unknown, not canceled and not scheduled for deletion)",
-		Expr:        `COUNT(s.id) FILTER (WHERE (pr.billing_interval_hours IS NOT NULL OR pr.billing_interval_months IS NOT NULL) AND s.status IN ('pending','active','past_due','unknown') AND s.canceled_at IS NULL AND s.deletion_scheduled_at IS NULL)`,
-		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle"}},
-	{Name: "entitled_customers", Class: ClassSnapshot, Family: FamEntitlSnapshot, Unit: "count",
-		Description: "distinct customers holding a live entitlement at t: a key of a product they hold (includes timed/comped access, not just subscribers)",
-		Formula:     "COUNT(DISTINCT customers) with an entitlement at t",
-		Expr:        `COUNT(DISTINCT e.customer_id)`,
-		Dims:        []string{"entitlement", "product_id"}},
-	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
+	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: UnitMoney, Direction: Neutral,
 		Description: "unconsumed prepaid credit (deferred revenue) at t: net customer_balance across the ledger",
 		Formula:     "SUM(customer balances) at t",
 		Expr: `COALESCE(SUM(
 			CASE WHEN ca.account_type = 'customer_balance' THEN lt.amount ELSE 0 END
 			- CASE WHEN da.account_type = 'customer_balance' THEN lt.amount ELSE 0 END), 0)::bigint`,
 		Dims: []string{"currency"}},
-	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
+	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: UnitMoney, Direction: DownIsGood,
 		Description: "arrears accounts receivable at t: accrued-but-unpaid usage debt",
 		Formula:     "SUM(arrears owed) at t",
 		Expr: `COALESCE(SUM(
 			CASE WHEN da.account_type = 'arrears_liability' THEN lt.amount ELSE 0 END
 			- CASE WHEN ca.account_type = 'arrears_liability' THEN lt.amount ELSE 0 END), 0)::bigint`,
 		Dims: []string{"currency"}},
-	{Name: "customers_at_depletion_risk", Class: ClassSnapshot, Family: FamDepletion, Unit: "count",
+	{Name: "customers_at_depletion_risk", Class: ClassSnapshot, Family: FamDepletion, Unit: "count", Direction: DownIsGood,
 		Description: "customers whose prepaid balance at t covers <= 7 days of their trailing-7d burn (in any currency)",
 		Formula:     "COUNT(customers with balance / (7d burn / 7) <= 7 days)",
 		Dims:        []string{}},
-	// --- webhook health (#786) --------------------------------------------------------
-	// --- findings and verification: the operator's queue at t -----------------
-	{Name: "open_findings", Class: ClassSnapshot, Family: FamFindings, Unit: "count",
-		Description: "findings open at t: problems OpenRails found that need a person or that it is repairing (finding_status)",
+	// --- ops: operator signals, off the business overview ------------------------------
+	{Name: "open_findings", Class: ClassSnapshot, Family: FamFindings, Unit: "count", Group: GroupOps, Direction: DownIsGood,
+		Description: "findings open at t: problems OpenRails found that need a person or that it is repairing (finding_status), by finding_group: orphaned (payment without access; nonzero after a full sweep means the billing state machine is failing), freeloader (access without payment), duplicate_coverage, other",
 		Formula:     "COUNT(findings open at t)",
 		Expr:        `COUNT(f.id)`,
-		Dims:        []string{"finding_type", "severity", "finding_status"}},
-	{Name: "orphaned_members", Class: ClassSnapshot, Family: FamFindings, Unit: "count",
-		Description: "open findings of payment without access (a paid grant missing); nonzero after a full sweep means the billing state machine is failing",
-		Formula:     "COUNT(open " + typeList(reconcile.OrphanedFindingTypes) + " findings)",
-		Expr:        countFindingTypes(reconcile.OrphanedFindingTypes),
-		Dims:        []string{"severity"}},
-	{Name: "freeloaders", Class: ClassSnapshot, Family: FamFindings, Unit: "count",
-		Description: "open findings of access without payment (its source proven absent or reversed)",
-		Formula:     "COUNT(open " + typeList(reconcile.FreeloaderFindingTypes) + " findings)",
-		Expr:        countFindingTypes(reconcile.FreeloaderFindingTypes),
-		Dims:        []string{"severity"}},
-	{Name: "duplicate_coverage", Class: ClassSnapshot, Family: FamFindings, Unit: "count",
-		Description: "open findings of one customer holding the same product's paid coverage twice",
-		Formula:     "COUNT(open " + typeList(reconcile.DuplicateCoverageFindingTypes) + " findings)",
-		Expr:        countFindingTypes(reconcile.DuplicateCoverageFindingTypes),
-		Dims:        []string{"severity"}},
-	{Name: "verification_pressure", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
+		Dims:        []string{"finding_type", "finding_group", "severity", "finding_status"}},
+	{Name: "verification_pressure", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count", Group: GroupOps, Direction: DownIsGood,
 		Description: "subscriptions awaiting provider verification past their paid-through date at t; its age trending up means verification (pull, probe, converge) is down",
 		Formula:     "COUNT(unverified subscriptions past paid-through at t)",
 		Expr:        `COUNT(s.id) FILTER (WHERE ` + verificationPressure + `)`,
-		Dims:        []string{"rail", "psp"}},
-	{Name: "verification_pressure_age_seconds", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "seconds",
+		Dims:        webhookDims},
+	{Name: "verification_pressure_age_seconds", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "seconds", Group: GroupOps, Direction: DownIsGood,
 		Description: "seconds the oldest unverified subscription is past its paid-through date at t (0 when none)",
 		Formula:     "MAX(t - paid-through) over unverified subscriptions past it",
 		Expr:        `COALESCE(MAX(EXTRACT(EPOCH FROM (edge.bucket - s.current_period_ends_at))) FILTER (WHERE ` + verificationPressure + `), 0)::float8`,
-		Dims:        []string{"rail", "psp"}},
-	{Name: "webhook_silence_age_seconds", Class: ClassSnapshot, Family: FamWebhookHealth, Unit: "seconds",
+		Dims:        webhookDims},
+	{Name: "webhook_silence_age_seconds", Class: ClassSnapshot, Family: FamWebhookHealth, Unit: "seconds", Group: GroupOps, Direction: DownIsGood,
 		Description: "seconds since the last signature-VERIFIED inbound webhook per PSP at t (since tracking began when none was ever accepted); rejects never advance it",
 		Formula:     "t - the last accepted webhook (or the PSP's creation), per PSP",
 		Expr:        `MAX(GREATEST(EXTRACT(EPOCH FROM (edge.bucket - COALESCE(wh.last_accepted_at, wh.created_at))), 0))::float8`,
-		Dims:        []string{"rail", "psp"}},
-	{Name: "webhook_rejects", Class: ClassAdditive, Family: FamWebhookDaily, Unit: "count",
+		Dims:        webhookDims},
+	{Name: "webhook_rejects", Class: ClassAdditive, Family: FamWebhookDaily, Unit: "count", Group: GroupOps, Direction: DownIsGood,
 		Description: "inbound webhooks that FAILED verification (bad signature / disallowed source), UTC-day buckets — a spike means webhooks arrive but the signing secret is wrong",
 		Formula:     "SUM(daily rejected counters)",
 		Expr:        `COALESCE(SUM(whd.rejected), 0)::bigint`,
-		Dims:        []string{"rail", "psp"}},
-	{Name: "webhook_drift_events", Class: ClassAdditive, Family: FamWebhookDaily, Unit: "count",
+		Dims:        webhookDims},
+	{Name: "webhook_drift_events", Class: ClassAdditive, Family: FamWebhookDaily, Unit: "count", Group: GroupOps, Direction: DownIsGood,
 		Description: "provider-state corrections that arrived by PULL with no webhook accepted since the previous pull (partial webhook breakage), UTC-day buckets",
 		Formula:     "SUM(daily drift counters)",
 		Expr:        `COALESCE(SUM(whd.drift), 0)::bigint`,
-		Dims:        []string{"rail", "psp"}},
+		Dims:        webhookDims},
+	{Name: "nmi_history_authorizations", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count", Group: GroupOps, Direction: Neutral,
+		Description: "authorizations NMI answered, read daily from its transaction history (card verifications, one-off sales and NMI-scheduled rebills, whoever sent them), by outcome: approved or declined; dated by month",
+		Formula:     "SUM(authorizations in NMI's history)",
+		Agg:         sum(`h.authorizations`, ""),
+		Dims:        with(nmiHistDims, "outcome")},
+	{Name: "entitled_customers", Class: ClassSnapshot, Family: FamEntitlSnapshot, Unit: "count", Group: GroupOps, Direction: UpIsGood,
+		Description: "distinct customers holding a live entitlement at t: a key of a product they hold (includes timed/comped access, not just subscribers)",
+		Formula:     "COUNT(DISTINCT customers) with an entitlement at t",
+		Expr:        `COUNT(DISTINCT e.customer_id)`,
+		Dims:        []string{"entitlement", "product_id"}},
 }
 
-// Deferred names measures deliberately NOT built yet (so they are not
-// relitigated); add when a dashboard proves the need.
+// Retired is what replaces a removed measure: Measure to request instead
+// (empty when only a planned one does) and How to ask it.
+type Retired struct{ Measure, How string }
+
+// Removed names each retired measure's replacement; a query naming one is
+// refused with it. Pre-launch there are no aliases.
+var Removed = map[string]Retired{
+	"gross_revenue":                 {"cash", "with by cash_kind: payment"},
+	"net_revenue":                   {"cash", "its total"},
+	"refunds":                       {"cash", "with by cash_kind: refund, signed negative"},
+	"chargebacks":                   {"cash", "with by cash_kind: chargeback and dispute_won, signed"},
+	"payment_count":                 {"payments", "with by payment_kind: sale"},
+	"refund_count":                  {"payments", "with by payment_kind: refund"},
+	"chargeback_count":              {"payments", "with by payment_kind: chargeback"},
+	"unique_rebilled_customers":     {"rebills", "renewal cycles by outcome"},
+	"realized_revenue_per_customer": {"", "arpa and ltv replace it (planned)"},
+	"avg_membership_duration_days":  {"", "cohort_retention and ltv replace it (planned)"},
+	"approved_attempts":             {"attempts", "with filters outcome: approved"},
+	"failed_attempts":               {"attempts", "with filters outcome: declined"},
+	"failed_purchases":              {"purchases", "with filters outcome: failed"},
+	"purchase_recovery_rate":        {"purchases", "by outcome: recovered against approved, recovered and failed"},
+	"attempts_per_purchase":         {"attempts", "divided by purchases"},
+	"rebills_due":                   {"rebills", "its total"},
+	"rebills_open":                  {"rebills", "with filters outcome: open"},
+	"rebills_attempted":             {"rebills", "with filters first_outcome: approved, declined, error, missed"},
+	"rebill_first_failures":         {"rebills", "with filters first_outcome: declined, error, missed"},
+	"rebills_missed":                {"rebills", "with filters first_outcome: missed, by miss_reason"},
+	"dunning_recovered":             {"rebills", "with filters outcome: recovered"},
+	"rebill_collection_rate":        {"rebill_rate", "renamed"},
+	"rebill_missed_rate":            {"rebills", "with filters first_outcome: missed, by miss_reason (the ops view)"},
+	"rebill_loss_rate":              {"rebill_rate", "1 - rebill_rate"},
+	"nmi_history_approved":          {"nmi_history_authorizations", "with filters outcome: approved"},
+	"nmi_history_refused":           {"nmi_history_authorizations", "with filters outcome: declined"},
+	"nmi_history_refusal_rate":      {"nmi_history_authorizations", "by outcome"},
+	"usage_revenue":                 {"usage_charged", "with filters charge: charged"},
+	"forgiven_usage":                {"usage_charged", "with filters charge: forgiven"},
+	"credit_utilization":            {"usage_charged", "beside credits_sold"},
+	"billable_subscriptions":        {"subscriptions", "subscribers less scheduled churn replaces it (planned)"},
+	"orphaned_members":              {"open_findings", "with filters finding_group: orphaned"},
+	"freeloaders":                   {"open_findings", "with filters finding_group: freeloader"},
+	"duplicate_coverage":            {"open_findings", "with filters finding_group: duplicate_coverage"},
+}
+
+// RemovedDimensions names each retired dimension's replacement.
+var RemovedDimensions = map[string]string{"attempt_kind": "kind"}
+
+// Deferred names the measures later phases build (MRR movements, retention,
+// authorization health, the books, trials); naming one is refused as planned.
 var Deferred = []string{
-	"new_mrr", "churned_mrr", "reactivated_mrr", "expansion_mrr", "contraction_mrr",
-	"breakage", "avg_days_to_recover", "payment_methods_expiring", "entitlement_grants", "unique_purchasers",
+	"mrr_movements", "subscriber_movements", "subscribers", "scheduled_mrr", "subscriber_churn_rate",
+	"nrr", "grr", "cohort_retention", "arpa", "ltv", "mrr_at_risk", "at_risk_recovery_rate",
+	"authorization_rate", "first_try_rebill_approval_rate", "issuer_discretion_decline_rate",
+	"recognized_revenue", "balance", "trials", "trial_conversion_rate", "revenue_nrr",
 }
 
 // Caveats are documented limitations surfaced verbatim in /schema.
 var Caveats = []string{
-	"all revenue is GROSS OF PROCESSOR FEES (fees are not captured per-charge); dashboard totals differ from bank deposits by fee amounts",
+	"all money is GROSS OF PROCESSOR FEES (fees are not captured per-charge); cash differs from bank deposits by fee amounts",
 	"money never sums across currencies; when a money measure is grouped without a single-currency filter, 'currency' is added as an implicit group-by dimension",
+	"cash is signed: refunds and chargebacks are negative, a won dispute's return positive; its total is net cash",
 	"snapshot measures reconstruct state from interval columns; the 'status' dimension reflects each subscription's CURRENT status, not its status at historical t",
 	"snapshot series evaluate at each bucket's START instant (UTC); without a time grouping they evaluate at the range end (balance measures: strictly-before semantics)",
-	"token_type exists from its instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; attempt_kind exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them (#1111b)",
-	"attempts, purchases and rebill cycles begin at their instrumentation: earlier history lives in payments and the provider. Purchases and cycles are dated by their first attempt and due date; a purchase quiet for an hour, and a cycle past its 15-day dunning window, count as settled as of the range end",
+	"token_type exists from its instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; kind on payments exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them",
+	"attempts, purchases and rebill cycles begin at their instrumentation: earlier history lives in payments and the provider. Purchases and cycles are dated by their first attempt and due date; their outcome is as of the range end: a purchase quiet for an hour has failed, a cycle past its 15-day dunning window is lost",
 	"nmi_history measures are NMI's own transaction history, read daily per NMI PSP and kept 25 months: they include what OpenRails sent and what came before it. Rows are dated by their month's first instant, so use month-aligned ranges. one_off_sale cannot separate initial sales from retries of declined rebills",
 	"limits_reached counts each window of a declared limit once, when settled and held usage first took it to capacity; a rate or lifetime limit's one window counts its first time only",
-	"avg_membership_duration_days only counts subscriptions that ENDED in the bucket (right-censored: long-lived survivors are not included until they end)",
 	"time buckets zero-fill: a bucket present with zeros means genuinely zero activity, not missing data",
+}
+
+// registry completes the declared measures: a funnel measure's Expr from its
+// Agg, each sliced ratio's components as internal measures, every measure's
+// dimension values. It checks the whole registry, so a bad entry fails at
+// start, never in a query.
+func registry(declared []Measure) []Measure {
+	out := slices.Clone(declared)
+	index := map[string]int{}
+	for i := range out {
+		m := &out[i]
+		if _, dup := index[m.Name]; dup {
+			panic("metrics: measure " + m.Name + " declared twice")
+		}
+		index[m.Name] = i
+		if m.Agg != nil {
+			m.Expr = m.Agg("")
+		}
+		if m.Group == "" {
+			m.Group = GroupBusiness
+		}
+		if !m.Internal && m.Direction == "" {
+			panic("metrics: measure " + m.Name + " declares no direction")
+		}
+		if _, gone := Removed[m.Name]; gone {
+			panic("metrics: measure " + m.Name + " is both live and removed")
+		}
+	}
+	var parts []Measure
+	for i := range out {
+		m := &out[i]
+		if !m.composite() {
+			continue
+		}
+		num, okNum := index[m.Num]
+		den, okDen := index[m.Den]
+		if !okNum || !okDen {
+			panic("metrics: measure " + m.Name + " names a missing component")
+		}
+		base := slices.Clone(out[num].Dims)
+		base = slices.DeleteFunc(base, func(d string) bool { return !out[den].allowsDim(d) })
+		if m.NumSlice != nil {
+			parts = append(parts, slicePart(m.Name+"__num", out[num], m.NumSlice))
+			m.Num = m.Name + "__num"
+		}
+		if m.DenSlice != nil {
+			parts = append(parts, slicePart(m.Name+"__den", out[den], m.DenSlice))
+			m.Den = m.Name + "__den"
+		}
+		if m.Dims == nil {
+			m.Dims = slices.DeleteFunc(base, func(d string) bool { return m.NumSlice[d] != nil || m.DenSlice[d] != nil })
+		}
+		for _, d := range m.Dims {
+			if !slices.Contains(base, d) {
+				panic("metrics: measure " + m.Name + " allows " + d + ", which a component lacks")
+			}
+		}
+	}
+	out = append(out, parts...)
+	byName := map[string]*Measure{}
+	for i := range out {
+		byName[out[i].Name] = &out[i]
+	}
+	for i := range out {
+		m := &out[i]
+		fam := m.Family
+		for leaf := m; leaf.composite(); leaf = byName[leaf.Num] {
+			fam = byName[leaf.Num].Family
+		}
+		spec := families[fam]
+		m.values = map[string][]string{}
+		for _, d := range m.Dims {
+			dim, ok := dimensionByName[d]
+			if !ok {
+				panic("metrics: measure " + m.Name + " allows unknown dimension " + d)
+			}
+			if v, ok := spec.DimValues[d]; ok {
+				m.values[d] = v
+			} else {
+				m.values[d] = dim.Values
+			}
+		}
+	}
+	return out
+}
+
+// slicePart is the internal measure counting base over one slice.
+func slicePart(name string, base Measure, s Slice) Measure {
+	if base.Agg == nil {
+		panic("metrics: " + name + " slices " + base.Name + ", which declares no Agg")
+	}
+	spec := families[base.Family]
+	dims := make([]string, 0, len(s))
+	for d := range s {
+		dims = append(dims, d)
+	}
+	slices.Sort(dims)
+	preds := make([]string, 0, len(dims))
+	for _, d := range dims {
+		expr, ok := spec.DimExprs[d]
+		if !ok || !base.allowsDim(d) {
+			panic("metrics: " + name + " slices " + base.Name + " by " + d + ", which it lacks")
+		}
+		if _, joined := spec.DimJoins[d]; joined {
+			panic("metrics: " + name + " slices by " + d + ", which needs a join")
+		}
+		vocabulary, ok := spec.DimValues[d]
+		if !ok {
+			vocabulary = dimensionByName[d].Values
+		}
+		for _, v := range s[d] {
+			if vocabulary != nil && !slices.Contains(vocabulary, v) {
+				panic(fmt.Sprintf("metrics: %s slices %s by %s=%q, not one of its values", name, base.Name, d, v))
+			}
+		}
+		preds = append(preds, "("+expr+") IN ("+quoted(s[d])+")")
+	}
+	return Measure{Name: name, Class: ClassAdditive, Family: base.Family, Group: base.Group, Unit: base.Unit, Money: base.Money,
+		Expr: base.Agg(strings.Join(preds, " AND ")), Dims: base.Dims, Internal: true}
 }
 
 // --- lookups -----------------------------------------------------------------
@@ -1007,12 +1135,12 @@ func DimensionNames() []string {
 }
 
 func (m *Measure) allowsDim(dim string) bool {
-	for _, d := range m.Dims {
-		if d == dim {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.Dims, dim)
+}
+
+// valuesOf is dim's closed vocabulary on m; nil is open.
+func (m *Measure) valuesOf(dim string) []string {
+	return m.values[dim]
 }
 
 // composite reports whether the measure is computed from two others.

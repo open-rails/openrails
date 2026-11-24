@@ -275,8 +275,10 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 type gated struct {
 	trustLevel string
 	request    spendgate.Request
+	// resolved is the policy with its amounts in the request's currency.
 	resolved   ResolvedPolicy
 	policy     spendgate.Policy
+	moneyTerms string
 }
 
 // gates resolves the request's trust level and policy and makes the checks
@@ -336,7 +338,11 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 	// KIND decides whether prior debt reduces this payer's headroom at all. The
 	// merchant chose which policy binds to this payer; OpenRails measures and
 	// enforces it from the transaction's locked merchant settings snapshot.
-	resolved, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
+	declared, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
+	if err != nil {
+		return gated{}, nil, err
+	}
+	resolved, err := a.loader.InCurrency(ctx, declared, req.Currency)
 	if err != nil {
 		return gated{}, nil, err
 	}
@@ -374,7 +380,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 		}
 	}
 
-	return gated{trustLevel: trustLevel, request: sgReq, resolved: resolved, policy: policy}, nil, nil
+	return gated{trustLevel: trustLevel, request: sgReq, resolved: resolved, policy: policy, moneyTerms: moneyTerms(declared)}, nil, nil
 }
 
 func ceilSeconds(d time.Duration) int64 {

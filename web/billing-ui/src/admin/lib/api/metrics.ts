@@ -1,5 +1,16 @@
 // Metrics and dashboard API; types mirror the Go handlers.
+import type {
+  DashboardProfile,
+  MetricsSchema,
+} from "#orck/client/generated/wire"
 import type { AdminClient } from "./client"
+
+export type {
+  DashboardProfile,
+  MetricsMeasure,
+  MetricsSchema,
+  MetricsThreshold,
+} from "#orck/client/generated/wire"
 
 export interface MetricsRange {
   from?: string
@@ -23,8 +34,11 @@ export interface QueryMetricsParams {
   filters?: Record<string, string[]>
   order?: OrderTerm[]
   limit?: number
-  compare?: "previous_period"
+  compare?: Compare
 }
+
+// Compare is the window a change is measured against.
+export type Compare = "previous_period" | "previous_year"
 
 export interface MetricsColumn {
   name: string
@@ -43,9 +57,14 @@ export interface MetricsResult {
   compare_rows?: MetricsCell[][]
 }
 
-export type WidgetViz = "stat" | "line" | "area" | "bar" | "donut" | "table"
+// A kpi is a tile's value, its change and a sparkline; a heading is a
+// section title with no query.
+export type WidgetViz =
+  "kpi" | "stat" | "line" | "area" | "bar" | "donut" | "table" | "heading"
 
-export const WIDGET_VIZ: WidgetViz[] = [
+// CHART_VIZ are the vizzes a widget with a query may take.
+export const CHART_VIZ: WidgetViz[] = [
+  "kpi",
   "stat",
   "line",
   "area",
@@ -75,6 +94,8 @@ export interface Widget {
 export interface Dashboard {
   widgets: Widget[]
   is_default: boolean
+  // profile is what the default layout was built for; null on a saved one.
+  profile?: DashboardProfile | null
   updated_at?: string
   updated_by?: string
 }
@@ -91,8 +112,11 @@ export function createMetrics(client: AdminClient) {
   const getDashboard = (signal?: AbortSignal) =>
     api<Dashboard>("/metrics/dashboard", { signal })
 
+  const getMetricsSchema = (signal?: AbortSignal) =>
+    api<MetricsSchema>("/metrics/schema", { signal })
+
   const putDashboard = (widgets: Widget[]) =>
     api<Dashboard>("/merchant/dashboard", { method: "PUT", body: { widgets } })
 
-  return { metricsQuery, getDashboard, putDashboard }
+  return { metricsQuery, getDashboard, getMetricsSchema, putDashboard }
 }

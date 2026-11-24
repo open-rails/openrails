@@ -115,6 +115,11 @@ const (
 	CodeUsageOutOfOrder ErrorCode = "usage_out_of_order"
 )
 
+// CodePSPProbeLimited: the provider refused this login twice within the hour,
+// or it is being checked, and the provider locks out repeated failed logins;
+// it is not asked again before Retry-After.
+const CodePSPProbeLimited ErrorCode = "psp_probe_limited"
+
 // CodeProductInUse: a record refers to the product or one of its prices (a
 // purchase, subscription, grant, access, pay URL, migration, provider write,
 // PSP link or rate card), so it is never deleted; archive it instead.
@@ -222,6 +227,7 @@ const (
 	CodeAdmissionCaptured              ErrorCode = "admission_captured"
 	CodeHoldNotFound                   ErrorCode = "hold_not_found"
 	CodeCurrencyUnsupported            ErrorCode = "currency_unsupported"
+	CodeMerchantUnitUnsupported        ErrorCode = "merchant_unit_unsupported"
 	CodeRunningChargeNotFound          ErrorCode = "running_charge_not_found"
 	CodeInvalidSettlementStatusRequest ErrorCode = "invalid_settlement_status_request"
 	CodeCustomerNotFound               ErrorCode = "customer_not_found"
@@ -275,6 +281,9 @@ const (
 	CodeWebhookAccountMismatch   ErrorCode = "webhook_account_mismatch"
 	CodeMetricsQueryInvalid      ErrorCode = "metrics_query_invalid"
 	CodeDashboardInvalid         ErrorCode = "dashboard_invalid"
+	CodeMessageTemplateInvalid   ErrorCode = "message_template_invalid"
+	CodeAlertEmailRequired       ErrorCode = "alert_email_required"
+	CodeMessageSendFailed        ErrorCode = "message_send_failed"
 )
 
 // Billing import and archive codes.
@@ -454,6 +463,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeAdmissionCaptured, 409, invalid, "The admission was captured; it can no longer be released."},
 	{CodeHoldNotFound, 404, invalid, "The admission holds nothing open: it was captured, released or lapsed."},
 	{CodeCurrencyUnsupported, 400, invalid, "The currency is not in OpenRails' registry."},
+	{CodeMerchantUnitUnsupported, 400, invalid, "The currency is one of the merchant's own units, which the operation does not take: it takes a currency from OpenRails' registry."},
 	{CodeRunningChargeNotFound, 404, invalid, "No running charge was started under this reference."},
 	{CodeInvalidSettlementStatusRequest, 400, invalid, "A settlement status read needs a customer and a price."},
 
@@ -506,6 +516,7 @@ var errorCodes = []ErrorCodeInfo{
 	{CodePSPEnvironmentRefused, 409, invalid, "A live PSP is refused where the deployment wires fake providers."},
 	{CodePSPLastActive, 409, invalid, "The PSP is the last active one on its rail; pass allow_last to archive it."},
 	{CodePSPClaimRequiresProof, 403, authz, "Claiming a provider account needs credentials that prove control of it."},
+	{CodePSPProbeLimited, 429, limit, "The provider refused this login twice within the hour, or it is being checked, and it locks out repeated failed logins; Retry-After says when it may be checked again."},
 	{CodeInvalidPSPReference, 400, invalid, "The PSP reference is invalid."},
 	{CodeMerchantConfigReadOnly, 409, invalid, "The merchant's configuration is read from a file; change the file."},
 	{CodePlatformVaultUnavailable, 409, invalid, "The deployment has no platform vault for its posture, or its identity for this merchant names another vault tenant; save cards at a PSP's vault."},
@@ -518,6 +529,9 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeWebhookAccountMismatch, 400, invalid, "The webhook's account does not match its payload."},
 	{CodeMetricsQueryInvalid, 400, invalid, "The metrics query is invalid; metadata.errors lists why."},
 	{CodeDashboardInvalid, 400, invalid, "The dashboard is invalid; metadata.errors lists why."},
+	{CodeMessageTemplateInvalid, 400, invalid, "The message template does not render against its event type's sample data; the message says why."},
+	{CodeAlertEmailRequired, 409, invalid, "The merchant has no alert_email to send a test message to."},
+	{CodeMessageSendFailed, 502, fault, "The email sender did not accept the message."},
 
 	// Billing import and archive.
 	{CodeAsOfRequired, 400, invalid, "The import needs as_of, its RFC 3339 evidence horizon."},

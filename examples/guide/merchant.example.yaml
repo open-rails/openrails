@@ -35,3 +35,21 @@ psps:
     environment: devnet # mainnet | devnet | testnet
     treasury: 9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu # where every payment lands
 # guide:end
+# guide:messages
+messages:
+  default_language: en
+  events:
+    premium_renewed:
+      enabled: true # on, with its built-in message
+    one_off_purchase_completed:
+      templates:
+        en:
+          subject: "Your {{.Merchant.Name}} receipt"
+          text: "You paid {{.Event.Amount}} for {{.Event.ProductName}}."
+          html: "<p>You paid <strong>{{.Event.Amount}}</strong> for {{.Event.ProductName}}.</p>"
+  layouts:
+    en:
+      text: |
+        {{template "body" .}}
+        -- {{.Merchant.Name}}
+# guide:end

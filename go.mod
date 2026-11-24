@@ -2,6 +2,8 @@ module github.com/open-rails/openrails
 
 go 1.26.10
 
+toolchain go1.26.11
+
 // Frontend dependencies can contain Go files; they are not Go packages.
 ignore ./web/billing-ui/node_modules
 
@@ -123,8 +125,8 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/mostynb/zstdpool-freelist v0.0.0-20201229113212-927304c0c3b1 // indirect
-	github.com/open-rails/authkit v1.43.0
-	github.com/open-rails/helpers v1.18.0
+	github.com/open-rails/authkit v1.53.0
+	github.com/open-rails/helpers v1.19.0
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/riverqueue/river/riverdriver v0.49.0 // indirect
 	github.com/riverqueue/river/rivershared v0.49.0 // indirect

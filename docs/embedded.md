@@ -150,7 +150,8 @@ and closes none.
 | `PostgresSession` | A direct-connection `*pgxpool.Config` when `Postgres` goes through a transaction pooler ([PgBouncer](#pgbouncer)). |
 | `Redis` | Abuse state (rate limits, lockouts, captcha, card-testing declines, spent DPoP proofs) shared across instances. Without it each process counts alone: right for one instance. No money path needs Redis. |
 | `Vault` | A logged-in `*vaultapi.Client` (`helpers/vault`'s session); you keep it logged in, and `Config.Vault` names its mounts. |
-| `Email` | Your `EmailSender` for billing receipts and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Receipts go to the customer's address from `UserInfo` or SCIM. |
+| `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo` or SCIM. |
+| `MessageRenderer` | Renders customer messages in your code: content it returns true for is sent instead of the merchant's templates, and an error is retried. Nil renders every message from the templates. |
 | `Logger` | A `*slog.Logger`; nil is `slog.Default()`, read once in `New`. OpenRails never changes your logger or the default, and never logs secrets, card data or SQL arguments. |
 | `UserInfo` | Your directory, for customer contacts and staff search: `ak.UserInfo()`, or your own `Get` and `Search`. Without it the SCIM routes mount instead ([customers](client.md#customers)). |
 | `Notifications` | An account-inbox channel for selected customer notices ([account inbox](#account-inbox)). |
@@ -348,8 +349,7 @@ runs no AuthKit ([`examples/own-auth`](../examples/own-auth/auth.go)):
 
 - `Authenticate(r)` reads the credential live: `auth.ErrUnauthenticated` for none
   or unknown, `auth.ErrUnavailable` when your store is down.
-- `Identity()` names your issuer, the user's UUID as subject (the customer id),
-  the user as its own invoker, and the credential.
+- `Identity()` names your issuer, the user's UUID as subject (the customer id), the user as its own invoker, and the credential. Only a `session`, `device_key` or `access_token` credential is the person in person, who pays and takes `Person` actions; any other kind (an API key, a personal access token) is refused there.
 - `RootScope` is your all-merchants staff scope; a merchant's scope is the same
   authority with the merchant's id. `BoundScope` is the merchant the credential
   acts at, zero for none (and for a single merchant that declares your issuer).

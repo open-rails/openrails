@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/messages"
 )
 
 const DefaultMerchantConfigManifestPath = "/etc/openrails/merchants.yaml"
@@ -333,12 +334,18 @@ func PutDeclaration(ctx context.Context, req ProvisionMerchantParams, id billing
 
 // ScopeDeclaration is mt without what it cannot serve, and each document it
 // refused, with why: a PSP whose declaration does not check refuses that PSP
-// alone. Settings that do not normalize, or a card custody the deployment
+// alone, and so does a messages document whose templates do not render. Settings that do not normalize, or a card custody the deployment
 // cannot serve, refuse the merchant document and with it every PSP and
 // custodian, which never serve without their merchant's settings.
 func ScopeDeclaration(cfg *config.Config, mt billing.MerchantDocument) (billing.MerchantDocument, map[string]string) {
 	refused := map[string]string{}
 	mt.PSPs, mt.Custodians = maps.Clone(mt.PSPs), maps.Clone(mt.Custodians)
+	if mt.Messages != nil {
+		if err := messages.Check(*mt.Messages); err != nil {
+			refused[merchantdocs.MessagesDoc] = err.Error()
+			mt.Messages = nil
+		}
+	}
 	if err := validateMerchantDocument(cfg, mt); err != nil {
 		refused[merchantdocs.MerchantDoc] = err.Error()
 		for key := range mt.PSPs {

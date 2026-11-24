@@ -95,7 +95,7 @@ FROM (
       WHERE (sqlc.narg(after)::uuid IS NULL OR pi.merchant_id > sqlc.narg(after)::uuid)
         AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
         AND pi.destructive_run_id IS NULL
-        AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
+        AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'stripe_resume_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
         AND pi.updated_at < sqlc.arg(provider_write_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
@@ -139,6 +139,12 @@ FROM (
        FROM billing.usage_minutes um
       WHERE (sqlc.narg(after)::uuid IS NULL OR um.merchant_id > sqlc.narg(after)::uuid)
         AND um.minute_at < sqlc.arg(usage_minute_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT cm.merchant_id AS mid
+       FROM billing.customer_messages cm
+      WHERE (sqlc.narg(after)::uuid IS NULL OR cm.merchant_id > sqlc.narg(after)::uuid)
+        AND cm.created_at < sqlc.arg(message_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
@@ -232,7 +238,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid
       AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
       AND pi.destructive_run_id IS NULL
-      AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
+      AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'stripe_resume_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'account_updater')
       AND pi.updated_at < sqlc.arg(cutoff)::timestamptz
     ORDER BY pi.updated_at
     LIMIT sqlc.arg(row_limit)::int
@@ -348,6 +354,17 @@ DELETE FROM billing.limit_adjustments a
 WHERE (a.merchant_id, a.customer_id, a.source_id) IN (
     SELECT e.merchant_id, e.customer_id, e.source_id
     FROM billing.limit_adjustments e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.created_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY e.created_at
+    LIMIT sqlc.arg(row_limit)::int
+    FOR UPDATE SKIP LOCKED
+);
+
+-- name: DeleteCustomerMessagesBefore :execrows
+DELETE FROM billing.customer_messages m
+WHERE (m.merchant_id, m.id) IN (
+    SELECT e.merchant_id, e.id
+    FROM billing.customer_messages e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.created_at < sqlc.arg(cutoff)::timestamptz
     ORDER BY e.created_at
     LIMIT sqlc.arg(row_limit)::int

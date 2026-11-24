@@ -29,8 +29,9 @@ type staged struct {
 type source interface {
 	// roster reads the PSP's customers and live subscriptions now.
 	roster(ctx context.Context) ([]staged, error)
-	// history reads the transactions in [since, until).
-	history(ctx context.Context, since, until time.Time) ([]staged, error)
+	// history reads the transactions in [since, until). The last window ends
+	// at the pull: a provider that selects by last change reads through now.
+	history(ctx context.Context, since, until time.Time, last bool) ([]staged, error)
 }
 
 // customerData is a provider customer's saved cards. Remote is the vault as

@@ -31,7 +31,7 @@ var catalogRoutes = []Route{
 			"document that applied whole is remembered by its canonical content hash: applying it again returns " +
 			"the original receipt even after later catalog edits. It is an operator action, never a side effect " +
 			"of starting: run it from a command (openrails catalog apply, or the host's own) or the console.",
-		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
+		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "merchant_unit_unsupported", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 
 	{Method: GET, Path: "/v1/catalog/meters", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListMeters", Level: LevelRead,
 		Cache: config.ReadMeters,
@@ -77,12 +77,13 @@ var catalogRoutes = []Route{
 		Doc: "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and " +
 			"creating its key again revives it. A product a purchase, subscription, grant, access, purchase, " +
 			"migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code " +
-			"product_in_use): archive it with UpdateProduct instead.",
-		Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeProductInUse, "product_not_found"), Handler: h(handlers.DeleteProduct)},
+			"product_in_use): archive it with UpdateProduct instead. A stale ExpectedRevision is refused with " +
+			"revision_mismatch.",
+		Query: billing.DeleteProductParams{}, Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeProductInUse, "product_not_found", "revision_mismatch"), Handler: h(handlers.DeleteProduct)},
 	{Method: POST, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreatePrice", Level: LevelUpdate,
 		Doc: "CreatePrice creates a price on the product named by exactly one of ProductID, ProductKey and " +
 			"ProductData. A price's terms never change; selling on other terms means another price.",
-		Request: billing.CreatePriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.CreatePrice)},
+		Request: billing.CreatePriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(append([]billing.ErrorCode{"merchant_unit_unsupported"}, priceErrors...)...), Handler: h(handlers.CreatePrice)},
 	{Method: POST, Path: "/v1/catalog/provider-prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreateProviderPrice", Level: LevelUpdate,
 		Doc: "CreateProviderPrice links a price a provider owns and runs to a product (a legacy NMI plan, a Stripe " +
 			"price, a CCBill FlexForm). Its terms are read from the provider, declared for CCBill; nothing is " +

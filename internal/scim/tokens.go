@@ -101,8 +101,15 @@ func (t Tokens) Delete(ctx context.Context, mid billing.MerchantID, id billing.P
 // ErrTokenTooShort refuses a declared token shorter than MinDeclaredToken.
 var ErrTokenTooShort = fmt.Errorf("secrets.scim_token must be at least %d characters", MinDeclaredToken)
 
+// ErrTokenInUse refuses a declared token another merchant holds: a token
+// resolves to one merchant whichever directory presents it.
+var ErrTokenInUse = errors.New("another merchant holds this provisioning token")
+
 // Declare makes token the merchant's declared token, replacing the one
-// declared before; an empty token removes it.
+// declared before; an empty token removes it. Declaring it again is a no-op;
+// a token another merchant holds is ErrTokenInUse and changes nothing. Run it
+// in a transaction: a concurrent declaration elsewhere is found after the
+// insert and rolls the replacement back.
 func Declare(ctx context.Context, q *gen.Queries, mid billing.MerchantID, token string) error {
 	token = strings.TrimSpace(token)
 	var keep []byte
@@ -111,6 +118,9 @@ func Declare(ctx context.Context, q *gen.Queries, mid billing.MerchantID, token 
 			return ErrTokenTooShort
 		}
 		keep = tokenHash(token)
+		if err := heldElsewhere(ctx, q, mid, keep); err != nil {
+			return err
+		}
 	}
 	if err := q.DeleteDeclaredProvisioningTokens(ctx, gen.DeleteDeclaredProvisioningTokensParams{MerchantID: mid.UUID(), KeepSha256: keep}); err != nil {
 		return err
@@ -118,7 +128,23 @@ func Declare(ctx context.Context, q *gen.Queries, mid billing.MerchantID, token 
 	if keep == nil {
 		return nil
 	}
-	return q.DeclareProvisioningToken(ctx, gen.DeclareProvisioningTokenParams{MerchantID: mid.UUID(), TokenSha256: keep})
+	if err := q.DeclareProvisioningToken(ctx, gen.DeclareProvisioningTokenParams{MerchantID: mid.UUID(), TokenSha256: keep}); err != nil {
+		return err
+	}
+	return heldElsewhere(ctx, q, mid, keep)
+}
+
+func heldElsewhere(ctx context.Context, q *gen.Queries, mid billing.MerchantID, hash []byte) error {
+	row, err := q.ResolveProvisioningToken(ctx, hash)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	case row.MerchantID != mid.UUID():
+		return ErrTokenInUse
+	}
+	return nil
 }
 
 // Resolve is the merchant whose token r presents as its bearer, and the

@@ -8,7 +8,8 @@ import "github.com/open-rails/openrails/catalog"
 type PublicConfig struct {
 	// Capabilities is what the mount serving the request serves.
 	Capabilities Capabilities `json:"capabilities"`
-	// Currencies is the scale registry behind every amount on the wire.
+	// Currencies is the scale registry behind every amount on the wire; a
+	// merchant's own units are in its CustomerConfig.
 	Currencies []catalog.CurrencyUnits `json:"currencies"`
 	// Rails is the rail registry: each rail a PSP can be declared on, with
 	// the credentials and settings it takes.
@@ -29,6 +30,9 @@ type CustomerConfig struct {
 	// ClientCountry is the customer's country as a trusted proxy reports it
 	// (CF-IPCountry), or "": the billing country a card form preselects.
 	ClientCountry string `json:"client_country"`
+	// Currencies are the merchant's own units, in code order, each with its
+	// symbol: the registry GET /v1/config serves holds no merchant's.
+	Currencies []MerchantCurrency `json:"currencies"`
 }
 
 // PublicMerchant is the merchant as its customers see it: its name, and its

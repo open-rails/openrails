@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -28,7 +27,8 @@ import (
 
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
 // OpenRails' own River and the host fleet's RiverJobs use this registry.
-func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *river.Workers) error {
+func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *river.Workers) error {
+	workers := &workerSet{river: registry}
 	if err := r.validateBillingWorkerRuntime(); err != nil {
 		return err
 	}
@@ -52,45 +52,17 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
-			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, Log: r.Log},
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, DataLinkPacing: r.DataLinkPacing(), Log: r.Log},
 			Log:     r.Log,
 		}
 		r.Verifier.Start()
 	}
-	// An operator request runs bounded window pulls, CCBill DataLink and
-	// reconciliation for the merchant.
-	if err := addWorker(workers, &riverjobs.ProviderRefreshWorker{
-		StripeClients: r.StripeClients,
-		DB:            r.DB,
-		Config:        r.Config,
-		Clock:         clock,
-		Merchants:     r.Merchants, // per-merchant store-armed pulls
-		DeferDelete:   r.DeferredDeletes,
-		Contacts:      r.Contacts,
-		Alerts:        r.AlertService, // requires_review findings -> operator notifications
-		NMIClients:    r.NMIClients,
-		Verifier:      r.Verifier,
-		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
-			mid, err := merchant.Require(ctx)
-			if err != nil {
-				return err
-			}
-			receipt, err := money.ReadObservedNMIUsageReceipt(ctx, r.CollectionResolver, mid.UUID(), psp, transaction)
-			if err != nil {
-				return err
-			}
-			_, err = r.MoneyService.RecoverObservedUsagePayment(ctx, receipt)
-			var owned *money.UsageRecoveryOperationOwned
-			if errors.As(err, &owned) {
-				if wakeErr := intents.NewStore(r.DB).WakeOperation(ctx, owned.OperationID, clock.Now()); wakeErr != nil {
-					return wakeErr
-				}
-			}
-			return err
-		},
-		Log: r.Log,
-	}); err != nil {
+	refresh, paced := r.refreshWorkers(clock)
+	if err := addWorker(workers, refresh); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
+	}
+	if err := addWorker(workers, paced); err != nil {
+		return fmt.Errorf("add paced provider refresh worker: %w", err)
 	}
 	cleanupConfig := riverjobs.DefaultCleanupConfig()
 	eventRetention, err := config.EventRetentionDuration(r.Config)
@@ -195,6 +167,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addWorker(workers, &riverjobs.MerchantSecretCleanupWorker{Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
 	}
+	// Customer messages: each pending one's job, queued by the dispatcher or
+	// its periodic backstop, and the job that sends it.
+	if err := addWorker(workers, &riverjobs.CustomerMessageDispatchWorker{Messages: r.Messages}); err != nil {
+		return fmt.Errorf("add customer message dispatch worker: %w", err)
+	}
+	if err := addWorker(workers, &riverjobs.CustomerMessageWorker{Messages: r.Messages}); err != nil {
+		return fmt.Errorf("add customer message worker: %w", err)
+	}
 	// Usage orders: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
 	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
@@ -240,13 +220,21 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Scans: scans, Clock: clock, Log: r.Log}); err != nil {
 		return fmt.Errorf("add billing pass worker: %w", err)
 	}
+	r.riverCompositionMu.Lock()
+	r.riverWorkers = workers.added
+	r.riverCompositionMu.Unlock()
 	return nil
 }
 
+// workerSet is a River registry and the workers added to it.
+type workerSet struct {
+	river *river.Workers
+	added []any
+}
+
 // addWorker registers an OpenRails worker. Its timeout is its kind's budget,
-// which job health reads; the client's JobTimeout is the host's. A worker
-// that reaches a nil logger is refused.
-func addWorker[T river.JobArgs](workers *river.Workers, worker river.Worker[T]) error {
+// which job health reads; the client's JobTimeout is the host's.
+func addWorker[T river.JobArgs](workers *workerSet, worker river.Worker[T]) error {
 	var args T
 	want := riverjobs.Timeout(args.Kind())
 	if want == 0 {
@@ -255,10 +243,11 @@ func addWorker[T river.JobArgs](workers *river.Workers, worker river.Worker[T]) 
 	if got := worker.Timeout(&river.Job[T]{JobRow: &rivertype.JobRow{Kind: args.Kind()}}); got != want {
 		return fmt.Errorf("%s: timeout %s is not its kind's budget %s", args.Kind(), got, want)
 	}
-	if unset := logx.Unset(worker); len(unset) > 0 {
-		return fmt.Errorf("%s: no logger at %s", args.Kind(), strings.Join(unset, ", "))
+	if err := river.AddWorkerSafely(workers.river, jobLogged[T]{worker}); err != nil {
+		return err
 	}
-	return river.AddWorkerSafely(workers, jobLogged[T]{worker})
+	workers.added = append(workers.added, worker)
+	return nil
 }
 
 // jobLogged logs its worker's job with the job's kind, id and attempt.
@@ -284,6 +273,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
 		intents.NewStripeCancelHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
+		intents.NewStripeResumeHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
 		intents.NewStripePaymentMethodDomainHandler(r.Config, r.RailConfigs, r.StripeClients),
 		rebill,
 		// Order collection rides the intent ledger like every other money
@@ -411,6 +401,9 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 	if r.RailPaymentMethodService == nil {
 		return fmt.Errorf("billing worker runtime payment method service is required")
 	}
+	if r.Messages == nil {
+		return fmt.Errorf("billing worker runtime customer messages are required")
+	}
 	return nil
 }
 
@@ -440,4 +433,44 @@ func (r *Runtime) findingNotifier() reconcile.FindingNotifier {
 		return nil
 	}
 	return r.AlertService
+}
+
+// refreshWorkers are the provider refresh's workers: an operator request runs
+// bounded window pulls, CCBill DataLink and reconciliation for the merchant,
+// and a paced PSP's refresh (a live CCBill account) reads a request per slot
+// of the runtime's DataLinkPacing.
+func (r *Runtime) refreshWorkers(clock clockwork.Clock) (*riverjobs.ProviderRefreshWorker, *riverjobs.PacedProviderRefreshWorker) {
+	refresh := &riverjobs.ProviderRefreshWorker{
+		StripeClients:  r.StripeClients,
+		DB:             r.DB,
+		Config:         r.Config,
+		Clock:          clock,
+		Merchants:      r.Merchants, // per-merchant store-armed pulls
+		DeferDelete:    r.DeferredDeletes,
+		Contacts:       r.Contacts,
+		Alerts:         r.AlertService, // requires_review findings -> operator notifications
+		NMIClients:     r.NMIClients,
+		DataLinkPacing: r.DataLinkPacing(),
+		Verifier:       r.Verifier,
+		RecoverUsagePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return err
+			}
+			receipt, err := money.ReadObservedNMIUsageReceipt(ctx, r.CollectionResolver, mid.UUID(), psp, transaction)
+			if err != nil {
+				return err
+			}
+			_, err = r.MoneyService.RecoverObservedUsagePayment(ctx, receipt)
+			var owned *money.UsageRecoveryOperationOwned
+			if errors.As(err, &owned) {
+				if wakeErr := intents.NewStore(r.DB).WakeOperation(ctx, owned.OperationID, clock.Now()); wakeErr != nil {
+					return wakeErr
+				}
+			}
+			return err
+		},
+		Log: r.Log,
+	}
+	return refresh, &riverjobs.PacedProviderRefreshWorker{Refresh: refresh}
 }

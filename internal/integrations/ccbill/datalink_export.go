@@ -15,8 +15,9 @@ import (
 // public docs omit the DataLink spec, so transactionTypes and column meanings
 // follow long-standing integrations (s2member, aMember): column 0 = type,
 // 3 = subscription id; REBILL 5 = transaction id, 6 = amount; REFUND/CHARGEBACK
-// 5 = amount. Unvalidated against a live account: the typed accessors are
-// best-effort, the verbatim Fields authoritative.
+// 5 = amount; CANCELLATION/EXPIRE 4 = expire date, 5 = cancel date (the
+// DataLink guide's default fields). Unvalidated against a live account: the
+// typed accessors are best-effort, the verbatim Fields authoritative.
 type DataLinkTxnType string
 
 const (
@@ -40,9 +41,31 @@ var AllDataLinkTxnTypes = []DataLinkTxnType{
 // dataLinkTimeFormat is the startTime/endTime layout (YYYYMMDDHHMMSS).
 const dataLinkTimeFormat = "20060102150405"
 
-// dataLinkLocation is the timezone DataLink interprets startTime/endTime in:
-// CCBill operates on US Mountain Standard Time (Arizona — no DST).
+// dataLinkLocation is the timezone DataLink's startTime/endTime are sent in:
+// US Mountain Standard Time (Arizona, no DST), where CCBill operates.
+// UNCONFIRMED: the DataLink guide names no zone; see timeZone.
 var dataLinkLocation = time.FixedZone("MST", -7*60*60)
+
+// maxDataLinkWindow is the longest range one export answers: CCBill refuses
+// a startTime to endTime range over 24 hours.
+const maxDataLinkWindow = 24 * time.Hour
+
+// dataLinkWindows splits [start, end) into export requests of whole seconds:
+// at most maxDataLinkWindow each, an inclusive endTime the second before the
+// next startTime.
+func dataLinkWindows(start, end time.Time) [][2]time.Time {
+	start, end = start.Truncate(time.Second), end.Truncate(time.Second)
+	var out [][2]time.Time
+	for from := start; from.Before(end); {
+		to := from.Add(maxDataLinkWindow)
+		if to.After(end) {
+			to = end
+		}
+		out = append(out, [2]time.Time{from, to.Add(-time.Second)})
+		from = to
+	}
+	return out
+}
 
 // DataLinkExportRow is one CSV row from a transaction-type batch export. The
 // full row is preserved in Fields (quoted columns, in order); the typed
@@ -65,6 +88,17 @@ func (r DataLinkExportRow) SubscriptionID() string { return r.field(3) }
 
 // Timestamp returns the event timestamp column (column 4) verbatim.
 func (r DataLinkExportRow) Timestamp() string { return r.field(4) }
+
+// ExpireDate is a CANCELLATION or EXPIRE row's expire date (column 4), when
+// the time paid for ends; "" for other types.
+func (r DataLinkExportRow) ExpireDate() string {
+	switch r.TransactionType {
+	case DataLinkTxnCancellation, DataLinkTxnExpire:
+		return r.field(4)
+	default:
+		return ""
+	}
+}
 
 // TransactionID returns the per-charge transaction id for REBILL rows
 // (column 5). Empty for other types, which don't carry one.
@@ -89,8 +123,9 @@ func (r DataLinkExportRow) Amount() string {
 }
 
 // FetchTransactionExport pulls the requested transaction-type batches over
-// [start, end] (converted to CCBill's MST clock) in one request. Rows of
-// unrequested types are returned too, so nothing in the export is dropped.
+// [start, end), one request per day at most (dataLinkWindows), in CCBill's
+// MST clock; a live account's range is one day at most. Rows of unrequested
+// types are returned too, so nothing in the export is dropped.
 func (c *DataLinkClient) FetchTransactionExport(ctx context.Context, start, end time.Time, types []DataLinkTxnType) ([]DataLinkExportRow, error) {
 	if len(types) == 0 {
 		return nil, fmt.Errorf("at least one transaction type is required")
@@ -107,16 +142,27 @@ func (c *DataLinkClient) FetchTransactionExport(ctx context.Context, start, end 
 		names = append(names, string(t))
 	}
 
-	formData := url.Values{}
-	formData.Set("transactionTypes", strings.Join(names, ","))
-	formData.Set("startTime", start.In(dataLinkLocation).Format(dataLinkTimeFormat))
-	formData.Set("endTime", end.In(dataLinkLocation).Format(dataLinkTimeFormat))
-
-	content, err := c.fetchDataLink(ctx, formData)
-	if err != nil {
-		return nil, err
+	windows := dataLinkWindows(start, end)
+	if c.Paced() && len(windows) > 1 {
+		return nil, fmt.Errorf("ccbill datalink: a live account answers one day an hour; read [%s, %s) a day at a time", start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
 	}
-	return parseDataLinkExportCSV(content)
+	var rows []DataLinkExportRow
+	for _, window := range windows {
+		formData := url.Values{}
+		formData.Set("transactionTypes", strings.Join(names, ","))
+		formData.Set("startTime", window[0].In(dataLinkLocation).Format(dataLinkTimeFormat))
+		formData.Set("endTime", window[1].In(dataLinkLocation).Format(dataLinkTimeFormat))
+		content, err := c.fetchDataLink(ctx, formData)
+		if err != nil {
+			return nil, err
+		}
+		parsed, err := parseDataLinkExportCSV(content)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, parsed...)
+	}
+	return rows, nil
 }
 
 // parseDataLinkExportCSV decodes a transaction-export response body. An empty

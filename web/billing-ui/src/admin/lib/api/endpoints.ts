@@ -241,6 +241,7 @@ export function createEndpoints(client: AdminClient) {
   const grantProductAccess = (customerId: string, grant: ProductGrant) =>
     api<{ items: RawProductAccessGrant[] }>(`/admin/product-access`, {
       method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
       body: {
         items: [
           {

@@ -13,12 +13,14 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 )
 
 // VaultSource keeps each merchant's configuration under
-// <prefix>/merchants/<merchant_id>/: the merchant document at merchant, a PSP
-// at psps/<key>, a custodian at custodians/<key>.
+// <prefix>/merchants/<merchant_id>/: the merchant document at merchant, the
+// messages document at messages, a PSP at psps/<key>, a custodian at
+// custodians/<key>.
 type VaultSource struct {
 	kv     *vault.KVv2Adapter
 	prefix string
@@ -67,10 +69,24 @@ func (v *VaultSource) Load(ctx context.Context, id billing.MerchantID) (Set, err
 	}
 	if doc.Found {
 		var m Merchant
-		if err := decodeStrict(doc.Data, &m); err != nil {
+		if retired, ok := retiredKey(doc.Data); ok {
+			set.Rejected[merchantDoc] = retired
+		} else if err := decodeStrict(doc.Data, &m); err != nil {
 			set.Rejected[merchantDoc] = err.Error()
 		} else {
 			set.Merchant, set.HasMerchant = Doc[Merchant]{Value: m, Revision: doc.Version, UpdatedAt: doc.Updated}, true
+		}
+	}
+	doc, err = v.kv.ReadDocument(ctx, base+messagesDoc)
+	if err != nil {
+		return Set{}, unavailable(err)
+	}
+	if doc.Found {
+		var m billing.MessageSettings
+		if err := decodeStrict(doc.Data, &m); err != nil {
+			set.Rejected[messagesDoc] = err.Error()
+		} else {
+			set.Messages, set.HasMessages = Doc[billing.MessageSettings]{Value: m, Revision: doc.Version, UpdatedAt: doc.Updated}, true
 		}
 	}
 	keys, err := v.keys(ctx, base+pspDir)
@@ -186,8 +202,10 @@ func (v *VaultSource) Delete(ctx context.Context, id billing.MerchantID) error {
 			}
 		}
 	}
-	if err := v.kv.DeleteDocument(ctx, base+merchantDoc); err != nil {
-		return unavailable(err)
+	for _, doc := range []string{messagesDoc, merchantDoc} {
+		if err := v.kv.DeleteDocument(ctx, base+doc); err != nil {
+			return unavailable(err)
+		}
 	}
 	return nil
 }
@@ -239,6 +257,16 @@ func unavailable(err error) error {
 
 // decodeStrict refuses an unknown field: a misspelled key would otherwise be
 // stored inert.
+// retiredKey names a key a merchant document no longer takes, with what
+// became of it: the strict decoder would refuse it as a typo.
+func retiredKey(data []byte) (string, bool) {
+	var probe map[string]any
+	if json.Unmarshal(data, &probe) != nil {
+		return "", false
+	}
+	return config.RetiredDeclarationKey(probe)
+}
+
 func decodeStrict(data []byte, into any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

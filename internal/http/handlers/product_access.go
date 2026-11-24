@@ -179,9 +179,11 @@ func CreateProductAccess(r *httprequest.Request) {
 		return
 	}
 	key := strings.TrimSpace(r.Header("Idempotency-Key"))
-	if key == "" {
-		key = uuidutil.NewV7().String()
-	} else if len(key) > 200 {
+	switch {
+	case key == "":
+		r.ErrorCode(billing.CodeIdempotencyKeyRequired, "")
+		return
+	case len(key) > 200:
 		r.ErrorCode(billing.CodeInvalidParam, "Idempotency-Key is at most 200 bytes")
 		return
 	}

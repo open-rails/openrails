@@ -374,9 +374,9 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:
-          # The scan runs on the patched toolchain (GO-2026-6859, net/http, fixed in 1.26.11);
-          # go.mod keeps 1.26.10 as consumers' floor.
-          go-version: '1.26.11'
+          # As in the builds, go switches to go.mod's toolchain line (GOTOOLCHAIN=auto),
+          # so the scan sees the stdlib the binaries ship; its go line is consumers' floor.
+          go-version-file: go.mod
           cache: false
       - uses: ./.github/actions/go-cache
         with:
@@ -434,10 +434,14 @@ jobs:
     uses: ./.github/workflows/docker-publish.yaml
     with:
       snapshot: true
+    # A caller grants at least what the called jobs declare; its publish job
+    # (attestations) runs only on release tags.
     permissions:
       contents: read
       packages: write
       pull-requests: write
+      id-token: write
+      attestations: write
 
   gate:
     name: ${{ (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}

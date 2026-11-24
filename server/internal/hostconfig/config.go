@@ -180,8 +180,12 @@ type DBConfig struct {
 	Database string `koanf:"database"`
 	Username string `koanf:"username"`
 	Password string `koanf:"password"`
-	// SSLMode defaults to "require".
+	// SSLMode is libpq's sslmode for the parts: verify-full by default,
+	// require for a loopback host or a Unix socket.
 	SSLMode string `koanf:"sslmode"`
+	// SSLRootCert is the PEM file of the CAs that verify the server's
+	// certificate; unset, the system roots.
+	SSLRootCert string `koanf:"sslrootcert"`
 	// SQLTrace logs every query at debug level.
 	SQLTrace bool `koanf:"sql_trace"`
 	// LeaseConns is the engine's Database.LeaseConns.
@@ -198,15 +202,30 @@ func (c DBConfig) ConnectionString() string {
 	if c.Host == "" || c.Port == "" || c.Database == "" || c.Username == "" {
 		return ""
 	}
-	sslMode := cmp.Or(c.SSLMode, "require")
+	query := url.Values{"sslmode": {cmp.Or(c.SSLMode, defaultSSLMode(c.Host))}}
+	if c.SSLRootCert != "" {
+		query.Set("sslrootcert", c.SSLRootCert)
+	}
 	u := url.URL{
 		Scheme:   "postgresql",
 		User:     url.UserPassword(c.Username, c.Password),
 		Host:     net.JoinHostPort(c.Host, c.Port),
 		Path:     "/" + c.Database,
-		RawQuery: url.Values{"sslmode": {sslMode}}.Encode(),
+		RawQuery: query.Encode(),
 	}
 	return u.String()
+}
+
+// defaultSSLMode verifies the server's certificate and name off this
+// machine; a loopback host or a Unix socket only requires TLS.
+func defaultSSLMode(host string) string {
+	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
+		return "require"
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return "require"
+	}
+	return "verify-full"
 }
 
 // RedisConfig is the redis section: Addr, or a redis:// or rediss:// URL.

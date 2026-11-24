@@ -16,9 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// CredentialKind is a pay URL's secret, as audit records it.
-const CredentialKind billingauth.CredentialKind = "pay_url"
-
 // Issuer vouches for the customer a pay URL secret acts as.
 const Issuer = "openrails:pay_url"
 
@@ -119,6 +116,6 @@ func (v verified) Identity() auth.Identity {
 	return auth.Identity{
 		Issuer: Issuer, Subject: id, SubjectKind: auth.SubjectUser,
 		Invoker:    auth.Invoker{Issuer: Issuer, ID: id},
-		Credential: auth.Credential{Kind: CredentialKind, ID: v.c.OrderID.String()},
+		Credential: auth.Credential{Kind: billingauth.CredentialPayURL, ID: v.c.OrderID.String()},
 	}
 }

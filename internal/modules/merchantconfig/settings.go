@@ -3,10 +3,12 @@ package merchantconfig
 import (
 	"encoding/json"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -34,6 +36,16 @@ func NormalizeBillingBoundary(boundary string) string {
 	}
 }
 
+// mailbox is the address of s, one mailbox, named ("Ops <ops@x.example>")
+// or bare; false for a list or anything else.
+func mailbox(s string) (string, bool) {
+	a, err := mail.ParseAddress(s)
+	if err != nil || len(a.Address) > 320 {
+		return "", false
+	}
+	return a.Address, true
+}
+
 // Settings is a merchant's settings, validated: the configuration readers
 // use, its named billing policies, which tier each binds and the default.
 type Settings struct {
@@ -44,6 +56,9 @@ type Settings struct {
 	// Default names the policy of a customer no tier or assignment binds;
 	// "" none.
 	Default string
+	// Currencies is the merchant's currency registry: OpenRails' and the
+	// merchant's own units.
+	Currencies currency.Registry
 }
 
 // Normalize validates a merchant's settings document as every writer and
@@ -51,6 +66,14 @@ type Settings struct {
 func Normalize(displayName string, in billing.MerchantSettings) (Settings, error) {
 	out := Settings{Policies: map[string]models.BillingPolicy{}, Tiers: map[string]string{}}
 	cfg := &out.Config
+	units, err := NormalizeCurrencies(in.Currencies)
+	if err != nil {
+		return Settings{}, err
+	}
+	if err := refuseUnits(in, units); err != nil {
+		return Settings{}, err
+	}
+	out.Currencies = units
 	if in.UsageBilling != nil {
 		usage, err := NormalizeUsageBilling(*in.UsageBilling)
 		if err != nil {
@@ -65,7 +88,14 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 				return Settings{}, fmt.Errorf("profile.%s must be an http or https URL", field)
 			}
 		}
-		cfg.Profile.LogoURL, cfg.Profile.FromEmail = strings.TrimSpace(p.LogoURL), strings.TrimSpace(p.FromEmail)
+		cfg.Profile.LogoURL = strings.TrimSpace(p.LogoURL)
+		if from := strings.TrimSpace(p.FromEmail); from != "" {
+			address, ok := mailbox(from)
+			if !ok {
+				return Settings{}, fmt.Errorf("profile.from_email must be one email address")
+			}
+			cfg.Profile.FromEmail = address
+		}
 		cfg.Profile.SupportURL, cfg.Profile.SubscribeURL = strings.TrimSpace(p.SupportURL), strings.TrimSpace(p.SubscribeURL)
 		cfg.Profile.BillingURL = strings.TrimSpace(p.BillingURL)
 		cfg.Profile.TermsURL, cfg.Profile.PrivacyURL = strings.TrimSpace(p.TermsURL), strings.TrimSpace(p.PrivacyURL)
@@ -74,17 +104,11 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			return Settings{}, fmt.Errorf("profile.statement_descriptor must be at most 64 characters")
 		}
 	}
-	for name, v := range map[string]*int64{"collection_threshold": in.CollectionThreshold, "monthly_floor": in.MonthlyFloor, "arrears_delinquency_floor": in.ArrearsDelinquencyFloor} {
-		if v != nil && *v < 0 {
-			return Settings{}, fmt.Errorf("%s must be >= 0", name)
-		}
-	}
 	for name, v := range map[string]*int{"reprice_notice_window_days": in.RepriceNoticeWindowDays, "arrears_grace_days": in.ArrearsGraceDays} {
 		if v != nil && *v < 0 {
 			return Settings{}, fmt.Errorf("%s must be >= 0", name)
 		}
 	}
-	cfg.CollectionThreshold, cfg.MonthlyFloor, cfg.ArrearsDelinquencyFloor = in.CollectionThreshold, in.MonthlyFloor, in.ArrearsDelinquencyFloor
 	cfg.RepriceNoticeWindowDays, cfg.ArrearsGraceDays = in.RepriceNoticeWindowDays, in.ArrearsGraceDays
 	if in.BillingPeriodBoundary != "" {
 		if NormalizeBillingBoundary(in.BillingPeriodBoundary) == "" {
@@ -93,7 +117,13 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 		cfg.BillingPeriodBoundary = in.BillingPeriodBoundary
 	}
 	if in.AlertEmail != nil {
-		cfg.AlertEmail = strings.TrimSpace(*in.AlertEmail)
+		if alert := strings.TrimSpace(*in.AlertEmail); alert != "" {
+			address, ok := mailbox(alert)
+			if !ok {
+				return Settings{}, fmt.Errorf("alert_email must be one email address")
+			}
+			cfg.AlertEmail = address
+		}
 	}
 	if in.UsageGateSafeSpend != nil {
 		cfg.UsageGateSafeSpend = *in.UsageGateSafeSpend

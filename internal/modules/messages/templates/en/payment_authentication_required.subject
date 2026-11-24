@@ -1,0 +1,1 @@
+Confirm your payment{{with .Merchant.Name}} to {{.}}{{end}}

@@ -13,7 +13,7 @@ import (
 
 func TestChainRecoversPanics(t *testing.T) {
 	passthrough := func(h http.Handler) http.Handler { return h }
-	boom := router.Entry{Method: http.MethodGet, Path: EmbeddedV1Prefix + "/boom", Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })}
+	boom := router.Entry{Method: http.MethodGet, Path: "/v1/boom", Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })}
 	h := (&Assembler{Log: slog.Default()}).chain(boom, passthrough)
 
 	rec := httptest.NewRecorder()

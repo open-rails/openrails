@@ -40,6 +40,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
@@ -129,6 +130,8 @@ type Runtime struct {
 	AdminSubscriptionService *subscriptions.AdminSubscriptionService
 	// EmailSender delivers all of OpenRails' email; nil sends none.
 	EmailSender config.EmailSender
+	// Messages sends customers their billing messages.
+	Messages *messages.Service
 
 	EntitlementService   *entitlements.EntitlementService
 	ProductAccessService *productaccess.Service
@@ -247,6 +250,8 @@ type Runtime struct {
 	riverCompositionSealed bool
 	riverClosed            atomic.Bool
 	riverContributions     []riverhelpers.Contribution
+	// riverWorkers are the workers the composition registered.
+	riverWorkers           []any
 	riverCompositionFailed bool
 	riverStarted           bool
 	workerConsumerRunning  atomic.Bool
@@ -479,15 +484,21 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		return nil, err
 	}
 	loopCtx, stopLoops := context.WithCancel(ctx)
-	var pollerDone chan struct{}
+	var pollerDone, dispatchDone chan struct{}
 	if r.SolanaPayPoller != nil {
 		pollerDone = make(chan struct{})
 		go func() { defer close(pollerDone); r.SolanaPayPoller.Start(loopCtx) }()
 	}
+	if r.Messages != nil {
+		dispatchDone = make(chan struct{})
+		go func() { defer close(dispatchDone); r.Messages.Run(loopCtx) }()
+	}
 	joinLoops := func() {
 		stopLoops()
-		if pollerDone != nil {
-			<-pollerDone
+		for _, done := range []chan struct{}{pollerDone, dispatchDone} {
+			if done != nil {
+				<-done
+			}
 		}
 	}
 	if fleet != nil {

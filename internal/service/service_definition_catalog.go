@@ -410,6 +410,9 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// is case-insensitive, so without this a caller-supplied "usd" validated
 	// fine and then failed the prices_currency_check CHECK at INSERT.
 	req.Currency = catalogwire.Currency(money.NormalizeCurrency(string(req.Currency)))
+	if err := s.unitRefusal(ctx, "currency", string(req.Currency)); err != nil {
+		return nil, err
+	}
 	defaultRecurringAccess(&req)
 	if err := validateCatalogPriceTerms(req); err != nil {
 		return nil, err

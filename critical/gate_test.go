@@ -666,19 +666,23 @@ func TestGate(t *testing.T) {
 		customer := paying(a.alpha)
 		client, wire := gateRemote(t, a)
 		g := newGate(t, client, openrails.GateDeps{})
-		require.NoError(t, gateAdmit(t, g, spend(customer, "warm", 0, 100)).Release(t.Context()))
-		require.Eventually(t, func() bool {
+		balanceHeld := func() int64 {
 			page, err := a.alpha.ListCustomerLimits(t.Context(), billing.CustomerLimitListParams{CustomerID: customer})
 			if err != nil {
-				return false
+				return -1
 			}
 			for _, line := range page.Items {
 				if line.Limit == "balance" {
-					return line.Held == 100
+					return line.Held
 				}
 			}
-			return false
-		}, 10*time.Second, 100*time.Millisecond, "an idle hold settles at one request")
+			return -1
+		}
+		require.NoError(t, gateAdmit(t, g, spend(customer, "warm", 0, 100)).Release(t.Context()))
+		// The warm request took the whole hold: its prefetch grows it, then
+		// idle syncs settle it back at one request.
+		require.Eventually(t, func() bool { return balanceHeld() > 100 }, 10*time.Second, 20*time.Millisecond, "the prefetch grows the hold")
+		require.Eventually(t, func() bool { return balanceHeld() == 100 }, 10*time.Second, 100*time.Millisecond, "an idle hold settles at one request")
 		wire.down.Store(true)
 		_, err = g.Admit(t.Context(), spend(customer, "units", 1, 0))
 		require.ErrorIs(t, err, openrails.ErrUnavailable, "safe never covers units")

@@ -7,7 +7,13 @@ sql:
       - "internal/migrate/postgres/0002_calendar_billing_intervals.up.sql"
       - "internal/migrate/postgres/0003_usage_limits.up.sql"
       - "internal/migrate/postgres/0004_drop_access_cutover_contract.up.sql"
-      - "internal/migrate/postgres/0005_contact_erasure_admission.up.sql"
+      - "internal/migrate/postgres/0005_customer_messages.up.sql"
+      - "internal/migrate/postgres/0006_change_log.up.sql"
+      - "internal/migrate/postgres/0007_dashboard_retired_measures.up.sql"
+      - "internal/migrate/postgres/0008_drop_entitlement_cache_contract.up.sql"
+      - "internal/migrate/postgres/0009_order_keys_and_cancel_kinds.up.sql"
+      - "internal/migrate/postgres/0010_credit_grants.up.sql"
+      - "internal/migrate/postgres/0018_contact_erasure_admission.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -87,7 +87,7 @@ func Propose(ctx context.Context, d *db.DB, p ProposeParams) (ProposeResult, err
 		}
 	}
 	now := p.Now.UTC()
-	findings := diffProvider(provider, snap, local, payments, now, diffOptions{EvidenceFloor: EvidenceFloorFor(ctx, d, mid.UUID()), Pull: true})
+	findings := diffProvider(provider, snap, local, payments, now, diffOptions{EvidenceFloor: EvidenceFloorFor(ctx, d, mid.UUID()), Dunning: merchantDunningPolicy(ctx, d), Pull: true})
 	bindApplyActions(findings, p.Binding.ID, p.RunID)
 
 	subs := make(map[uuid.UUID]*LocalSubscription, len(local.Subscriptions))
@@ -291,6 +291,10 @@ func cancelClass(kind string) string {
 	switch models.CancelType(kind) {
 	case models.CancelTypeUser, models.CancelTypeMerchant, models.CancelTypeUpgrade:
 		return string(models.CancelTypeUser)
+	case models.CancelTypeProvider:
+		// A provider's own end, whatever it says caused it, is never moved to
+		// a lapse a later payment would revive.
+		return string(models.CancelTypeExpired)
 	}
 	return kind
 }

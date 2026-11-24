@@ -1,8 +1,9 @@
 import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 import { useAdminServices } from "#orck/admin/context"
-// One dashboard tile: runs its saved query (POST /v1/metrics/query),
-// renders the viz, and offers refresh / edit / delete. Count widgets deep-link
-// to the matching admin list.
+// One dashboard tile: runs its saved query (POST /v1/metrics/query) under
+// the page's view, renders the viz, and offers refresh / edit / delete. A kpi
+// also runs its sparkline; a heading is a section title. Count widgets
+// deep-link to the matching admin list.
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   ArrowUpRight01Icon,
@@ -25,109 +26,103 @@ import {
 import { Skeleton } from "#orck/admin/components/ui/skeleton"
 import { ApiError } from "#orck/admin/lib/api/client"
 import { errorText } from "#orck/admin/lib/error-text"
-import { type MetricsResult, type Widget } from "#orck/admin/lib/api/metrics"
+import {
+  type MetricsResult,
+  type QueryMetricsParams,
+  type Widget,
+} from "#orck/admin/lib/api/metrics"
 
 import { cn } from "#orck/admin/lib/utils"
 
 import { deepLinkFor } from "./lib"
-import { widgetQuery, type DashboardRange } from "./range"
+import { sparkQuery, widgetQuery, type DashboardView } from "./range"
+import type { Registry } from "./registry"
 import { WidgetVizView } from "./widget-viz"
 
-export function WidgetTile({
-  widget,
-  range,
-  editable = true,
-  onEdit,
-  onDelete,
-}: {
+interface TileProps {
   widget: Widget
-  range: DashboardRange
+  view: DashboardView
+  registry: Registry
+  // empty: the merchant has no activity yet; tiles read "—" and run nothing.
+  empty?: boolean
   // editable shows the drag handle and the edit and remove menu.
   editable?: boolean
   onEdit: () => void
   onDelete: () => void
-}) {
-  const { text: adminText } = useAdminUI()
+}
 
+export function WidgetTile(props: TileProps) {
+  return props.widget.viz === "heading" ? (
+    <HeadingTile {...props} />
+  ) : (
+    <QueryTile {...props} />
+  )
+}
+
+// isTile: a widget drawn as one figure (a kpi or a stat).
+export const isTile = (widget: Widget) =>
+  widget.viz === "kpi" || widget.viz === "stat"
+
+function HeadingTile({ widget, editable = true, onEdit, onDelete }: TileProps) {
+  return (
+    <div
+      className="group/tile relative flex h-full items-end border-b pb-1"
+      data-widget={widget.id}
+    >
+      <h2 className="text-base font-semibold tracking-tight">{widget.title}</h2>
+      {editable ? (
+        <Toolbar editable onEdit={onEdit} onDelete={onDelete} />
+      ) : null}
+    </div>
+  )
+}
+
+function QueryTile({
+  widget,
+  view,
+  registry,
+  empty = false,
+  editable = true,
+  onEdit,
+  onDelete,
+}: TileProps) {
   const { adminQueries } = useAdminServices()
 
-  const query = widgetQuery(widget, range)
+  const query = widgetQuery(widget, view, registry.takesCurrency)
   const {
     data,
     isPending: loading,
     isFetching,
     error,
     refetch,
-  } = useQuery(adminQueries.widgetMetrics(query))
+  } = useQuery({ ...adminQueries.widgetMetrics(query), enabled: !empty })
+  const spark = useQuery({
+    ...adminQueries.widgetMetrics(sparkQuery(query)),
+    enabled: !empty && widget.viz === "kpi",
+  })
   const link = deepLinkFor(widget.query, widget.viz)
 
-  const isStat = widget.viz === "stat"
-
   return (
-    <Card className="group/tile @container/tile relative h-full gap-2">
-      <div className="absolute top-2 right-2 z-10 flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-card opacity-0 shadow-sm transition-opacity group-hover/tile:opacity-100 focus-within:opacity-100">
-        {editable && (
-          <HugeiconsIcon
-            icon={DragDropVerticalIcon}
-            aria-hidden
-            className="widget-drag-handle size-6 shrink-0 cursor-grab p-1.5 text-muted-foreground active:cursor-grabbing"
-          />
-        )}
-        {link ? (
-          <Link
-            to={link}
-            className="flex size-6 items-center justify-center text-muted-foreground hover:text-foreground"
-            title={adminText("Open matching list")}
-            aria-label={adminText("Open matching list")}
-          >
-            <HugeiconsIcon icon={ArrowUpRight01Icon} className="size-3.5" />
-          </Link>
-        ) : null}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-6"
-          onClick={() => void refetch()}
-          title={adminText("Refresh")}
-          aria-label={adminText("Refresh widget")}
-        >
-          <HugeiconsIcon
-            icon={Refresh01Icon}
-            className={cn("size-3.5", isFetching && "animate-spin")}
-          />
-        </Button>
-        {editable && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-6"
-                  aria-label={adminText("Widget menu")}
-                >
-                  <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={onEdit}>
-                <HugeiconsIcon icon={PencilIcon} className="size-3.5" />
-                <AdminMessage id={" Edit widget"} />
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onDelete} variant="destructive">
-                <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />{" "}
-                <AdminMessage id={"Remove"} />
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
+    <Card
+      className="group/tile @container/tile relative h-full gap-2"
+      data-widget={widget.id}
+    >
+      <Toolbar
+        editable={editable}
+        link={link}
+        fetching={isFetching}
+        onRefresh={() => {
+          void refetch()
+          if (widget.viz === "kpi") void spark.refetch()
+        }}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
       <CardContent className="flex min-h-0 flex-1 flex-col gap-2">
         <span
           className={cn(
             "line-clamp-2",
-            isStat
+            isTile(widget)
               ? "text-xs font-medium tracking-wider text-muted-foreground uppercase"
               : "text-sm font-medium"
           )}
@@ -136,15 +131,102 @@ export function WidgetTile({
           {widget.title}
         </span>
         <div className="min-h-0 flex-1">
-          <TileBody
-            loading={loading && !data}
-            error={error}
-            widget={widget}
-            data={data ?? null}
-          />
+          {empty ? (
+            <div className="text-2xl font-semibold tabular-nums">—</div>
+          ) : (
+            <TileBody
+              loading={loading && !data}
+              error={error}
+              widget={widget}
+              data={data ?? null}
+              spark={spark.data}
+              registry={registry}
+              query={query}
+            />
+          )}
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function Toolbar({
+  editable,
+  link,
+  fetching,
+  onRefresh,
+  onEdit,
+  onDelete,
+}: {
+  editable: boolean
+  link?: string | null
+  fetching?: boolean
+  onRefresh?: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const { text: adminText } = useAdminUI()
+  return (
+    <div className="absolute top-2 right-2 z-10 flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-card opacity-0 shadow-sm transition-opacity group-hover/tile:opacity-100 focus-within:opacity-100">
+      {editable && (
+        <HugeiconsIcon
+          icon={DragDropVerticalIcon}
+          aria-hidden
+          className="widget-drag-handle size-6 shrink-0 cursor-grab p-1.5 text-muted-foreground active:cursor-grabbing"
+        />
+      )}
+      {link ? (
+        <Link
+          to={link}
+          className="flex size-6 items-center justify-center text-muted-foreground hover:text-foreground"
+          title={adminText("Open matching list")}
+          aria-label={adminText("Open matching list")}
+        >
+          <HugeiconsIcon icon={ArrowUpRight01Icon} className="size-3.5" />
+        </Link>
+      ) : null}
+      {onRefresh ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-6"
+          onClick={onRefresh}
+          title={adminText("Refresh")}
+          aria-label={adminText("Refresh widget")}
+        >
+          <HugeiconsIcon
+            icon={Refresh01Icon}
+            className={cn("size-3.5", fetching && "animate-spin")}
+          />
+        </Button>
+      ) : null}
+      {editable && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6"
+                aria-label={adminText("Widget menu")}
+              >
+                <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onEdit}>
+              <HugeiconsIcon icon={PencilIcon} className="size-3.5" />
+              <AdminMessage id={" Edit widget"} />
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onDelete} variant="destructive">
+              <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />{" "}
+              <AdminMessage id={"Remove"} />
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
   )
 }
 
@@ -153,11 +235,17 @@ function TileBody({
   error,
   widget,
   data,
+  spark,
+  registry,
+  query,
 }: {
   loading: boolean
   error: unknown
   widget: Widget
   data: MetricsResult | null
+  spark?: MetricsResult
+  registry: Registry
+  query: QueryMetricsParams
 }) {
   if (loading) {
     return (
@@ -182,5 +270,13 @@ function TileBody({
     )
   }
   if (!data) return null
-  return <WidgetVizView viz={widget.viz} result={data} query={widget.query} />
+  return (
+    <WidgetVizView
+      viz={widget.viz}
+      result={data}
+      query={query}
+      spark={spark}
+      registry={registry}
+    />
+  )
 }

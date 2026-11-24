@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/history"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -36,10 +37,13 @@ func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Applica
 // which carries no verified identity. Its substantive changes are admitted on
 // the merchant's autonomous budget.
 func (s *Service) ApplyOperatorCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
-	return s.applyCatalog(ctx, document, params.Force, "operator_catalog")
+	return s.applyCatalog(history.WithSource(ctx, billing.LogSourceCLI), document, params.Force, "operator_catalog")
 }
 
 func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, origin string) (*billing.CatalogApplicationReceipt, error) {
+	if err := s.refuseCatalogUnits(ctx, params); err != nil {
+		return nil, err
+	}
 	if err := params.Validate(); err != nil {
 		return nil, apperr.Invalidf("%s", err)
 	}
@@ -155,6 +159,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		receipt := &billing.CatalogApplicationReceipt{ApplicationID: fmt.Sprintf("sha256:%x", digest), BaseRevision: revision,
 			EntitlementChanges: []billing.EntitlementChange{}, Changes: []billing.CatalogChange{}, Conflicts: plan.conflicts, Warnings: prepared.warnings}
 		scoped.catalogKeyActor = receipt.ApplicationID
+		scoped.catalogApplicationID = receipt.ApplicationID
 		scoped.catalogKeyChanges = &receipt.EntitlementChanges
 		if err := scoped.replaceEntitlements(ctx, plan.document.EntitlementReplacements, receipt); err != nil {
 			return nil, err

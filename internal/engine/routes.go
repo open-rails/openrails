@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -111,7 +110,7 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 		return nil, err
 	}
 	for i := range table.Entries {
-		table.Entries[i].Path = sel.Prefix + strings.TrimPrefix(table.Entries[i].Path, "/billing")
+		table.Entries[i].Path = sel.Prefix + table.Entries[i].Path
 	}
 	if err := embedhttp.ValidateRouteTable(table); err != nil {
 		return nil, err

@@ -22,20 +22,30 @@ var ErrProductInUse = apperr.New(http.StatusConflict, billing.CodeProductInUse, 
 // A product a purchase, subscription, grant, access, purchase, migration,
 // provider write, PSP link or rate card refers to is refused (ErrProductInUse):
 // archive it instead.
-func (s *Service) DeleteProduct(ctx context.Context, id billing.ProductID) error {
+// A stale params.ExpectedRevision is refused with revision_mismatch.
+func (s *Service) DeleteProduct(ctx context.Context, id billing.ProductID, params billing.DeleteProductParams) error {
 	_, err := catalogCommand(ctx, s, "product/"+id.String(), struct {
 		Operation string
 		ID        billing.ProductID
-	}{"delete", id}, "", deleteProductPlan(id), func(ctx context.Context, s *Service) (struct{}, error) {
-		return struct{}{}, s.deleteProductCommand(ctx, id)
+	}{"delete", id}, "", deleteProductPlan(id, params.ExpectedRevision), func(ctx context.Context, s *Service) (struct{}, error) {
+		return struct{}{}, s.deleteProductCommand(ctx, id, params.ExpectedRevision)
 	})
 	return err
 }
 
-func (s *Service) deleteProductCommand(ctx context.Context, id billing.ProductID) error {
+func (s *Service) deleteProductCommand(ctx context.Context, id billing.ProductID, expected *int64) error {
 	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
 		if id.IsZero() {
 			return struct{}{}, apperr.Invalidf("product_id required")
+		}
+		if expected != nil {
+			obj, _, err := catalogObjectWithProductID(scoped.catalogBefore, id)
+			if err != nil {
+				return struct{}{}, err
+			}
+			if err := scoped.expectCatalogRevision(obj, expected); err != nil {
+				return struct{}{}, err
+			}
 		}
 		return struct{}{}, scoped.deleteProduct(ctx, id.UUID())
 	})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -71,10 +72,22 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 			DataLinkPassword: password,
 			Sandbox:          p.Environment == config.EnvironmentSandbox,
 		})
+		if s.dataLinkURL != "" {
+			client.BaseURL, client.LoopbackFixture = s.dataLinkURL, true
+		}
+		client.Pacing = s.dataLinkPacing
 		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
 		defer cancel()
 		if err := client.ProbeCredentials(probeCtx); err != nil {
-			return false, fmt.Errorf("merchants: validate ccbill credentials: %w", err)
+			var limited *ccbill.ProbeLimitedError
+			if errors.As(err, &limited) {
+				return false, &ProbeLimitedError{RetryAfter: max(limited.Wait, time.Second)}
+			}
+			if errors.Is(err, ccbill.ErrDataLinkIndeterminate) {
+				return false, apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable,
+					"CCBill could not complete the credential check (results=-7); try again")
+			}
+			return false, providerCredentialError(fmt.Errorf("merchants: validate ccbill credentials: %w", err))
 		}
 		return true, nil
 	}

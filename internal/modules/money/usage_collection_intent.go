@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -54,6 +55,10 @@ const (
 	collectionEvidenceDeclined      = "declined"
 	collectionEvidenceFailureCode   = "failure_code"
 	collectionEvidenceFailureMsg    = "failure_message"
+	// The decline's advice, as decline.Evidence names it.
+	collectionEvidenceAdvice        = "advice_code"
+	collectionEvidenceNetworkAdvice = "network_advice_code"
+	collectionEvidenceIssuerCode    = "network_decline_code"
 	collectionEvidenceNotExecuted   = "not_executed"
 	// collectionEvidenceFailureCodeNotExecuted says why a never-charged
 	// operation ended: not_executed (provider-confirmed) or
@@ -222,7 +227,8 @@ func (h *OrderCollectionHandler) classify(ctx context.Context, intent gen.Billin
 		rail = p.Rail
 	}
 	if res.Declined {
-		return h.finalizeRefusal(ctx, intent, p, rail, derefStr(res.FailureCode), derefStr(res.FailureMessage), res.TransactionID)
+		answer := decline.Evidence{Rail: rail, Code: derefStr(res.FailureCode), Text: derefStr(res.FailureMessage), Advice: res.Advice, NetworkAdvice: res.NetworkAdvice, IssuerCode: res.IssuerCode}
+		return h.finalizeRefusal(ctx, intent, p, answer, res.TransactionID)
 	}
 	if strings.TrimSpace(res.TransactionID) == "" {
 		return intents.Ambiguous("successful collection response has no transaction receipt")
@@ -426,7 +432,9 @@ func (h *OrderCollectionHandler) finalizeFromEvidence(ctx context.Context, inten
 		return h.finalizeNotExecuted(ctx, intent, p, code, intents.EvidenceString(intent, collectionEvidenceFailureMsg)), true
 	}
 	if code := intents.EvidenceString(intent, collectionEvidenceFailureCode); code != "" {
-		return h.finalizeRefusal(ctx, intent, p, rail, code, intents.EvidenceString(intent, collectionEvidenceFailureMsg), ""), true
+		answer := decline.Evidence{Rail: rail, Code: code, Text: intents.EvidenceString(intent, collectionEvidenceFailureMsg), Advice: intents.EvidenceString(intent, collectionEvidenceAdvice),
+			NetworkAdvice: intents.EvidenceString(intent, collectionEvidenceNetworkAdvice), IssuerCode: intents.EvidenceString(intent, collectionEvidenceIssuerCode)}
+		return h.finalizeRefusal(ctx, intent, p, answer, ""), true
 	}
 	return intents.Outcome{}, false
 }
@@ -510,9 +518,10 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			payer := identity.CustomerIDFromString(p.CustomerID.String())
 			key := "invoice-rounding:" + intent.ID.String()
 			reason := "Rounding credit from order " + billing.OrderID(p.OrderID).String()
+			// Change the card paid beyond the order is credit bought at face.
 			_, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
-				CustomerID: &payer, Currency: currency, Amount: excess,
-				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason,
+				CustomerID: &payer, Invoker: payer.String(), Currency: currency, Amount: excess,
+				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason, Funding: credits.Purchase,
 			})
 			if err != nil {
 				return fmt.Errorf("credit collection rounding surplus: %w", err)
@@ -561,16 +570,19 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 }
 
 // finalizeRefusal records a definitive provider refusal: attempt failed, the
-// usage order dunned on its own billing cycle and open again (or
-// uncollectible), with why. A local failure retains the refusal for the
-// verifier.
-func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload, rail, failureCode, failureMessage, transactionID string) intents.Outcome {
-	if strings.TrimSpace(failureCode) == "" {
-		failureCode = "declined"
+// usage order dunned on its own billing cycle under the merchant's
+// dunning_policy and the networks' advice, and open again (or uncollectible),
+// with why. A local failure retains the refusal for the verifier.
+func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload, answer decline.Evidence, transactionID string) intents.Outcome {
+	if strings.TrimSpace(answer.Code) == "" {
+		answer.Code = "declined"
 	}
+	rail, failureCode := answer.Rail, answer.Code
 	evidence := map[string]any{collectionEvidenceDeclined: true, collectionEvidenceFailureCode: failureCode, collectionEvidenceRail: rail}
-	if failureMessage != "" {
-		evidence[collectionEvidenceFailureMsg] = failureMessage
+	for key, value := range map[string]string{collectionEvidenceFailureMsg: answer.Text, collectionEvidenceAdvice: answer.Advice, collectionEvidenceNetworkAdvice: answer.NetworkAdvice, collectionEvidenceIssuerCode: answer.IssuerCode} {
+		if value != "" {
+			evidence[key] = value
+		}
 	}
 	now := h.now()
 	var action collection.Action
@@ -596,19 +608,23 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 			return complete()
 		}
 		order = &row
-		code := failureCode
-		action, err = collection.FailureAction(usageCycleHours(row), rail, &code, int(derefInt32(row.CollectionFailureCount)), row.CollectionFailedAt, now)
+		policy, err := subscriptions.DunningPolicy(ctx, h.DB.NewWithPgxTx(tx))
 		if err != nil {
 			return err
 		}
-		if err := recordCollectionAttempt(ctx, q, intent, p, rail, attempts.Attempt{Answer: decline.Evidence{Code: failureCode, Text: failureMessage}, TransactionID: transactionID}, now); err != nil {
+		action, err = collection.FailureAction(policy, usageCycleHours(row), answer, int(derefInt32(row.CollectionFailureCount)), row.CollectionFailedAt, now)
+		if err != nil {
 			return err
 		}
-		failure := billing.DeclineReason(decline.ReasonFor(rail, failureCode)).Failure()
+		if err := recordCollectionAttempt(ctx, q, intent, p, rail, attempts.Attempt{Answer: answer, TransactionID: transactionID}, now); err != nil {
+			return err
+		}
+		failure := action.Decline.Reason.Failure()
 		if err := usage.DeclineCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, failure, action.Terminal, action.NextAttemptAt, now); err != nil {
 			return err
 		}
-		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), row, action, failureCode, now); err != nil {
+		// The collection attempt names its outcome: a replay records it once.
+		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), uuid.NewSHA1(intent.ID, []byte("collection_outcome")), row, action, failureCode, now); err != nil {
 			return err
 		}
 		return complete()
@@ -705,9 +721,9 @@ func logCollectionDecline(ctx context.Context, logger *slog.Logger, orderID uuid
 	}
 }
 
-// queueCollectionOutcome records the customer's notice in the same domain
-// transaction; no external message is sent here.
-func queueCollectionOutcome(ctx context.Context, database *db.DB, order gen.BillingOrder, action collection.Action, failureCode string, now time.Time) error {
+// queueCollectionOutcome records the customer's notice, id, in the same
+// domain transaction; no external message is sent here.
+func queueCollectionOutcome(ctx context.Context, database *db.DB, id uuid.UUID, order gen.BillingOrder, action collection.Action, failureCode string, now time.Time) error {
 	amountDue := usage.Due(order)
 	data := billing.NotificationData{
 		OrderID: billing.OrderID(order.ID), Currency: catalog.Currency(order.Currency), AmountDue: &amountDue,
@@ -732,8 +748,8 @@ func queueCollectionOutcome(ctx context.Context, database *db.DB, order gen.Bill
 		data.NextAttemptAt = &next
 		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryScheduled, billing.NotificationRecoveryUpdatePaymentMethod
 	}
-	notification := &models.NotificationEvent{ID: uuidutil.NewV7(), CustomerID: order.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
-	return subscriptions.NewNotificationService(database).Create(ctx, notification)
+	notification := &models.NotificationEvent{ID: id, CustomerID: order.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
+	return subscriptions.NewNotificationService(database).CreateIfAbsent(ctx, notification)
 }
 
 func (h *OrderCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.BillingProviderIntent, reference string) intents.Outcome {

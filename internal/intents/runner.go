@@ -144,6 +144,10 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 		r.supersede(ctx, logEntry, stats, intent.ID, rel.Reason)
 		return
 	}
+	if !rel.Until.IsZero() {
+		r.park(ctx, logEntry, stats, intent.ID, now, Deferred(rel.Reason, rel.Until))
+		return
+	}
 
 	if blocked, reason := GateExecution(ctx, r.Config, intent.MerchantID, Origin(intent.Origin)); blocked {
 		r.holdForWritePosture(ctx, logEntry, stats, intent, now, reason)

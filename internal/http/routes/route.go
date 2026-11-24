@@ -351,7 +351,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 	for _, resource := range [][]Route{
 		metaRoutes, configRoutes, ordersRoutes, cartsRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, limitsRoutes, paymentsRoutes, paymentMethodsRoutes, agreementsRoutes, pspsRoutes,
-		merchantRoutes, opsRoutes, provisioningRoutes,
+		merchantRoutes, messagesRoutes, opsRoutes, provisioningRoutes,
 	} {
 		all = append(all, resource...)
 	}

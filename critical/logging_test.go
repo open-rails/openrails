@@ -38,10 +38,9 @@ func TestLogging(t *testing.T) {
 		a := newAuthorityWorld(t, func(w *world) {
 			w.deps.Logger = slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		})
-		// Composing the fleet registers every worker through addWorker,
-		// which refuses one that reaches a nil logger.
+		// The fleet's composition registers every worker; the engine keeps
+		// them. The fleet never starts.
 		hostFleet(t, a.world)
-		require.Empty(t, logx.Unset(a.engine))
 		require.Same(t, before, slog.Default(), "the engine never changes the host's default logger")
 
 		status, raw := a.request(t, http.MethodGet, "/v1/admin/customers/"+uuid.NewString(), a.alphaKey.Secret, nil)
@@ -56,14 +55,20 @@ func TestLogging(t *testing.T) {
 		require.Equal(t, "/v1/admin/customers/{customer_id}", refusal["route"])
 		require.Equal(t, a.alpha.MerchantID().String(), refusal["merchant_id"])
 		require.NotEmpty(t, refusal["request_id"])
+
+		// Closed, the engine runs nothing, so walking it cannot race.
+		require.NoError(t, a.engine.Close(t.Context()))
+		require.Empty(t, logx.Unset(a.engine))
 	})
 	t.Run("OR-J04-S76/the-standalone-server-boots-with-every-logger-set", func(t *testing.T) {
 		// server.New, its meta routes included, with the real wiring.
 		w := newStandaloneWorld(t)
-		require.Empty(t, w.UnsetLoggers)
 		for _, path := range []string{"/health/live", "/v1/config"} {
 			status, raw := w.request(t, http.MethodGet, path, "", nil)
 			require.Equal(t, http.StatusOK, status, "%s: %s", path, raw)
 		}
+		var unset []string
+		w.command(t, map[string]string{"Op": "close"}, &unset)
+		require.Empty(t, unset)
 	})
 }

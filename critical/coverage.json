@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 415,
+  "scenario_count": 508,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -132,6 +132,26 @@
       "id": "OR-J05-S05",
       "journey": "J05",
       "name": "Accepted payment terms survive subsequent price and PSP edits"
+    },
+    {
+      "id": "OR-J05-S06",
+      "journey": "J05",
+      "name": "A merchant's own units declared in its configuration are served to its customers and staff with their scale, and never in the deployment registry"
+    },
+    {
+      "id": "OR-J05-S07",
+      "journey": "J05",
+      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing"
+    },
+    {
+      "id": "OR-J05-S08",
+      "journey": "J05",
+      "name": "A merchant unit is refused merchant_unit_unsupported by credit grants, balances, prices and catalog credit grants and rate cards, and a catalog cannot price in one; nothing is written"
+    },
+    {
+      "id": "OR-J05-S09",
+      "journey": "J05",
+      "name": "Another merchant does not see a merchant's units: the same code is its own unit at its own scale, and another merchant's code is an unknown currency"
     },
     {
       "id": "OR-J06-S01",
@@ -429,6 +449,36 @@
       "name": "Cancel, resume and cancel again inside the paid period never extends access past it"
     },
     {
+      "id": "OR-J17-S07",
+      "journey": "J17",
+      "name": "A Stripe resume is a provider operation: the local resume and the Stripe write commit together, run once, logged"
+    },
+    {
+      "id": "OR-J17-S08",
+      "journey": "J17",
+      "name": "A Stripe resume Stripe cannot be told of (provider writes off) is refused, and nothing commits"
+    },
+    {
+      "id": "OR-J17-S09",
+      "journey": "J17",
+      "name": "A Stripe resume committed while its cancel is in flight waits for it: Stripe ends as the member last asked"
+    },
+    {
+      "id": "OR-J17-S10",
+      "journey": "J17",
+      "name": "A Stripe cancel or resume undoes the opposite one that never reached Stripe: a cancel after a waiting resume supersedes it, and Stripe ends set to cancel"
+    },
+    {
+      "id": "OR-J17-S11",
+      "journey": "J17",
+      "name": "A member's Stripe cancel survives a converge before Stripe hears it: a renewing Stripe subscription is not read as a portal resume while the cancel waits"
+    },
+    {
+      "id": "OR-J17-S12",
+      "journey": "J17",
+      "name": "Stripe cancels and resumes are ordered by commit, not transaction start: a resume whose transaction began before the cancel it resumes waits for that cancel and reaches Stripe last"
+    },
+    {
       "id": "OR-J18-S01",
       "journey": "J18",
       "name": "Known price or seat change preview and confirmation agree"
@@ -502,6 +552,11 @@
       "id": "OR-J20-S05",
       "journey": "J20",
       "name": "Two partial CCBill refunds naming one sale are booked as two reversals, an exact replay of either books nothing, and a refund beyond what remains of the sale books nothing and raises a ledger finding naming it"
+    },
+    {
+      "id": "OR-J20-S06",
+      "journey": "J20",
+      "name": "A won dispute gives back what its chargeback took: the charge reads refunded only by its net reversals, in its detail and in the merchant's list"
     },
     {
       "id": "OR-J21-S01",
@@ -744,6 +799,11 @@
       "name": "A sync waits for a busy customer whose hold another lease waits for, so the contended hold shrinks and its capacity goes to the waiting lease, though no item of the sync names the customer"
     },
     {
+      "id": "OR-J24-S36",
+      "journey": "J24",
+      "name": "A meter correction fences only its own merchant's usage of the meter's event types: it takes no table lock, its own merchant's settlement waits for its transaction, and another merchant's usage settles while it is open"
+    },
+    {
       "id": "OR-J25-S01",
       "journey": "J25",
       "name": "Start and stop charge account for the exact known elapsed segment"
@@ -939,6 +999,11 @@
       "name": "A merchant's notification adoption export holds back no other merchant and its own producers commit after its snapshot"
     },
     {
+      "id": "OR-J31-S15",
+      "journey": "J31",
+      "name": "Credit lots move out of grants with their ids and the remainders and pending-refund shares the old formulas gave (the reservation net of reversals already settled), old data the move cannot place refuses it with nothing moved, and a migrated purchase deposit replays"
+    },
+    {
       "id": "OR-J31-S09",
       "journey": "J31",
       "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
@@ -1054,6 +1119,11 @@
       "name": "Merchant customer reads retain billing state without hosted account-link storage"
     },
     {
+      "id": "OR-J07-S06",
+      "journey": "J07",
+      "name": "A provisioning token declared by a second merchant is refused and provisions only its holder"
+    },
+    {
       "id": "OR-J07-S07",
       "journey": "J07",
       "name": "An application without the provisioning permission neither reads nor writes the directory"
@@ -1089,6 +1159,21 @@
       "name": "Host customer admission policy preserves original proof and fixed billing scope ceilings"
     },
     {
+      "id": "OR-J01-S17",
+      "journey": "J01",
+      "name": "Personal access token reads as its customer and holds its permissions but never pays or takes a person-only action"
+    },
+    {
+      "id": "OR-J01-S18",
+      "journey": "J01",
+      "name": "Merchant tenant binding adopts with its group in one transaction, replays as a no-op, refuses another tenant and never changes"
+    },
+    {
+      "id": "OR-J01-S19",
+      "journey": "J01",
+      "name": "A customer route refuses a signed-in account of another tenant than its merchant's binding"
+    },
+    {
       "id": "OR-J01-S20",
       "journey": "J01",
       "name": "Every catalog route refuses a bound credential without its permission and admits its root twin"
@@ -1107,6 +1192,16 @@
       "id": "OR-J10-S05",
       "journey": "J10",
       "name": "Exact payment key reads its own retained outcome without attributing another payment"
+    },
+    {
+      "id": "OR-J10-S06",
+      "journey": "J10",
+      "name": "A card save retried with its Idempotency-Key answers the first saved card; other terms under the key are refused"
+    },
+    {
+      "id": "OR-J10-S07",
+      "journey": "J10",
+      "name": "A merchant order's Idempotency-Key names one order per merchant: the same key for another customer is idempotency_key_reused and creates nothing"
     },
     {
       "id": "OR-J12-S06",
@@ -1252,6 +1347,16 @@
       "id": "OR-J23-S32",
       "journey": "J23",
       "name": "A Redis gate names a window to the microsecond: a ticket open across a subscription-anchored window's rollover keeps its take held in its own window and its capture settles there"
+    },
+    {
+      "id": "OR-J23-S33",
+      "journey": "J23",
+      "name": "A spend window that names no currency is in its policy's policy_currency, converted to the request's"
+    },
+    {
+      "id": "OR-J23-S34",
+      "journey": "J23",
+      "name": "A billing policy's amounts are in its policy_currency: an accrual-rate cap in yen gates USD usage at its converted rate"
     },
     {
       "id": "OR-J29-S07",
@@ -1559,6 +1664,26 @@
       "name": "The dashboard keeps every stat label within two lines at any column width, legends a one-rail donut and names PSPs by key; staff lists name the customer and plan, and still list by id with the directory down; customer controls find a customer by name and offer its currencies; a membership with no other plan offers Change subscription disabled, saying why; ending a membership from the console says the customer loses access now once End access now is ticked; an ended membership offers no plan or card change; clearing a hold confirms it and drops it from Ops; at 1440 the findings table shows Resolve unscrolled; a missing customer, subscription or payment is reported once, by its page"
     },
     {
+      "id": "OR-J38-S75",
+      "journey": "J38",
+      "name": "A subscription end the provider confirmed is stored as the provider's: read back, a later renewal is kept for refund review and does not reopen it"
+    },
+    {
+      "id": "OR-J38-S79",
+      "journey": "J38",
+      "name": "A CCBill cancel the pull lands is a lapse, and the member's reactivation and rebill restore access"
+    },
+    {
+      "id": "OR-J38-S80",
+      "journey": "J38",
+      "name": "A CCBill Cancellation is a lapse: a reactivation inside the paid period resumes it, and a late rebill past it restores it"
+    },
+    {
+      "id": "OR-J38-S81",
+      "journey": "J38",
+      "name": "A failed-rebill cancel on a provider's or a chargeback's end tightens it and keeps its kind: a later rebill does not reopen it"
+    },
+    {
       "id": "OR-J22-S06",
       "journey": "J22",
       "name": "Lapsed credit stops being available at its lapse and its balance watch, arrears included, expires it"
@@ -1754,6 +1879,26 @@
       "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage order"
     },
     {
+      "id": "OR-J26-S59",
+      "journey": "J26",
+      "name": "A declined usage-order collection retries on the merchant's dunning_policy, not the built-in schedule"
+    },
+    {
+      "id": "OR-J26-S60",
+      "journey": "J26",
+      "name": "A billing policy's delinquency floor is in its policy_currency and holds only debt in it; other debt meets its own currency's floor"
+    },
+    {
+      "id": "OR-J26-S61",
+      "journey": "J26",
+      "name": "A billing policy's outstanding cap and collection threshold bind only money in its policy_currency: a yen policy neither refuses dollar admission nor withholds dollar collection, which follows the dollar collection_threshold"
+    },
+    {
+      "id": "OR-J26-S62",
+      "journey": "J26",
+      "name": "A usage order whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
+    },
+    {
       "id": "OR-J37-S60",
       "journey": "J37",
       "name": "A due Solana pull runs as the operation its period scheduled, a margin after the period end"
@@ -1804,6 +1949,11 @@
       "name": "An import queues, with its own commit, the one read of the charges it attributed"
     },
     {
+      "id": "OR-J21-S61",
+      "journey": "J21",
+      "name": "An imported purchase line whose list total leaves int64 is refused without a payment"
+    },
+    {
       "id": "OR-J06-S60",
       "journey": "J06",
       "name": "A boot reconciles a Stripe webhook endpoint only when its configuration changed"
@@ -1847,6 +1997,16 @@
       "id": "OR-J16-S71",
       "journey": "J16",
       "name": "An overdue provider-billed renewal is asked by id from the due pass before the rebill watch reads NMI"
+    },
+    {
+      "id": "OR-J16-S54",
+      "journey": "J16",
+      "name": "A provider-declared failure inside the merchant's longer dunning schedule stays in dunning: converge reads the subscription's case policy, not the built-in window"
+    },
+    {
+      "id": "OR-J16-S55",
+      "journey": "J16",
+      "name": "A provider-declared failure is judged by its own cycle's window: past a weekly schedule's, it is not dunned however long the monthly window is"
     },
     {
       "id": "OR-J15-S70",
@@ -1917,6 +2077,16 @@
       "id": "OR-J27-S14",
       "journey": "J27",
       "name": "A purchase after a cached entitlement check is visible on the next check"
+    },
+    {
+      "id": "OR-J27-S15",
+      "journey": "J27",
+      "name": "A product-access grant requires an Idempotency-Key and a retry under it grants once"
+    },
+    {
+      "id": "OR-J27-S16",
+      "journey": "J27",
+      "name": "Exact checks and prefix pages stay on their indexes for a customer holding 10,000 of 40,000 products"
     },
     {
       "id": "OR-J04-S42",
@@ -2039,9 +2209,19 @@
       "name": "Every logger the engine and the standalone server reach is set, the default logger is untouched, and a refusal is logged with its route, request and merchant"
     },
     {
+      "id": "OR-J04-S77",
+      "journey": "J04",
+      "name": "A Vault merchant document naming a retired key is refused with what replaced it, as a manifest is"
+    },
+    {
       "id": "OR-J25-S37",
       "journey": "J25",
       "name": "A billing pass that waited behind a balance's look leaves the watch that look moved on"
+    },
+    {
+      "id": "OR-J25-S05",
+      "journey": "J25",
+      "name": "A customer's running charges count toward its accrual_rate_cap at their rates while they run"
     },
     {
       "id": "OR-J29-S37",
@@ -2052,6 +2232,11 @@
       "id": "OR-J18-S06",
       "journey": "J18",
       "name": "A Stripe downgrade schedules the new price for the subscription's seats"
+    },
+    {
+      "id": "OR-J18-S07",
+      "journey": "J18",
+      "name": "An upgrade in the microsecond its membership started ends the superseded period after it starts"
     },
     {
       "id": "OR-J19-S07",
@@ -2077,6 +2262,286 @@
       "id": "OR-J22-S09",
       "journey": "J22",
       "name": "Credit a won dispute restores goes at once to an earlier refund that found the mixed order's credit line already returned"
+    },
+    {
+      "id": "OR-J22-S10",
+      "journey": "J22",
+      "name": "A credit lot's view equals its ledger counters after spend, expiry, revocation, refund and restore, and the ledger audit names a lot whose counters drift"
+    },
+    {
+      "id": "OR-J22-S11",
+      "journey": "J22",
+      "name": "A refunded credit pack's lot reads refunded and raises no refunded-source grant finding"
+    },
+    {
+      "id": "OR-J22-S13",
+      "journey": "J22",
+      "name": "Two credit lots that lapsed before their expiry ran expire only what each still holds after the usage settled at the first lapse"
+    },
+    {
+      "id": "OR-J40-S04",
+      "journey": "J40",
+      "name": "A credit lot whose deposit did not post is not spendable until convergence posts it once"
+    },
+    {
+      "id": "OR-J28-S09",
+      "journey": "J28",
+      "name": "An NMI delivery signed under any nonce is accepted, with no replay window; a replay or retry of its event applies nothing"
+    },
+    {
+      "id": "OR-J15-S73",
+      "journey": "J15",
+      "name": "An NMI window read reaches a sale settled, refunded or voided after it: prune keeps its receipt, and still finds a receipt NMI does not list"
+    },
+    {
+      "id": "OR-J38-S44",
+      "journey": "J38",
+      "name": "A CCBill provider refresh reads DataLink in exports of at most 24 hours, which CCBill requires, and records every rebill of its eight-day windows"
+    },
+    {
+      "id": "OR-J38-S45",
+      "journey": "J38",
+      "name": "A live CCBill PSP refreshes in a job of its own, one DataLink request an hour: a day of transactions each, then the roster; a request CCBill refuses within the hour waits, and every rebill is recorded"
+    },
+    {
+      "id": "OR-J38-S46",
+      "journey": "J38",
+      "name": "A live CCBill PSP import reads its roster, then a day of history an hour, waiting between requests and resuming where it stopped until it is pulled"
+    },
+    {
+      "id": "OR-J38-S47",
+      "journey": "J38",
+      "name": "A CCBill cancellation whose webhook was missed, read from a paced day of transactions with no roster, cancels at the period end and keeps the time paid for"
+    },
+    {
+      "id": "OR-J28-S11",
+      "journey": "J28",
+      "name": "A CCBill account another merchant's current PSP holds in the same money class, in any subaccount, is refused as psp_exists before its credentials are probed"
+    },
+    {
+      "id": "OR-J28-S10",
+      "journey": "J28",
+      "name": "A signed NMI transaction event dated before its event_id record would be kept is acknowledged, applies nothing and raises life.webhook.replay_refused; one of its own time applies"
+    },
+    {
+      "id": "OR-J28-S12",
+      "journey": "J28",
+      "name": "An NMI chargeback batch is booked whatever its sales' dates: a chargeback of a sale 120 days old reverses it and cancels its membership, refused as no replay"
+    },
+    {
+      "id": "OR-J38-S73",
+      "journey": "J38",
+      "name": "A CCBill status read answering 1 for an unverified row whose paid period lapsed cancels it and keeps access through CCBill's expiration date"
+    },
+    {
+      "id": "OR-J38-S74",
+      "journey": "J38",
+      "name": "A CCBill rebill and the member's cancellation read in one export book the rebill, cancel, and keep access through the rebilled period's end"
+    },
+    {
+      "id": "OR-J15-S74",
+      "journey": "J15",
+      "name": "An NMI refresh backlog is read a link a run by last change, each ending at its end and advancing the applied watermark, the last through now; a sale settled in it is read in the link of its last change and booked once"
+    },
+    {
+      "id": "OR-J28-S13",
+      "journey": "J28",
+      "name": "A CCBill account another merchant archived, or holds only in the other money class, is declarable: only a current PSP of an unretired merchant in the same class holds it"
+    },
+    {
+      "id": "OR-J28-S14",
+      "journey": "J28",
+      "name": "A CCBill DataLink login CCBill refuses is psp_credentials_rejected and declares nothing; the probe is a subscription-management status read, which takes no DataLink hour"
+    },
+    {
+      "id": "OR-J28-S15",
+      "journey": "J28",
+      "name": "Two refused CCBill credential probes hold that login (account and username) an hour, across merchants and money classes: a third is psp_probe_limited with Retry-After and reaches no CCBill, and the account's owner on its own login is not held"
+    },
+    {
+      "id": "OR-J22-S12",
+      "journey": "J22",
+      "name": "A staff member grants a full batch of credit at once, one batch a minute; the merchant's own application is not metered"
+    },
+    {
+      "id": "OR-J39-S01",
+      "journey": "J39",
+      "name": "A paid one-off order sends one receipt: a replayed settlement queues no second message and a refused send is retried once"
+    },
+    {
+      "id": "OR-J39-S02",
+      "journey": "J39",
+      "name": "A fact written inside a billing restore queues no customer message; the same fact outside one queues one"
+    },
+    {
+      "id": "OR-J39-S03",
+      "journey": "J39",
+      "name": "A customer without an address is logged no_contact and the fact is still emitted"
+    },
+    {
+      "id": "OR-J39-S04",
+      "journey": "J39",
+      "name": "A fact on a test PSP is logged test_environment, sends nothing and is still emitted"
+    },
+    {
+      "id": "OR-J39-S05",
+      "journey": "J39",
+      "name": "Past ten messages an hour a customer's message is rate_limited and the merchant has a finding"
+    },
+    {
+      "id": "OR-J39-S06",
+      "journey": "J39",
+      "name": "Erasing a customer over SCIM deletes its message log"
+    },
+    {
+      "id": "OR-J39-S07",
+      "journey": "J39",
+      "name": "A merchant's template in its messages document replaces the built-in message, inside the built-in layout"
+    },
+    {
+      "id": "OR-J39-S08",
+      "journey": "J39",
+      "name": "A messages document whose template does not render is refused on load, naming the event type and the error, and the built-in messages send"
+    },
+    {
+      "id": "OR-J39-S09",
+      "journey": "J39",
+      "name": "Each cancellation cause sends one confirmation in its own words: the customer canceled, staff canceled, or collection stopped after failed payments"
+    },
+    {
+      "id": "OR-J39-S10",
+      "journey": "J39",
+      "name": "A scheduled price change sends its notice: the old and new amounts, the date and how to cancel"
+    },
+    {
+      "id": "OR-J39-S11",
+      "journey": "J39",
+      "name": "A refund sends one refund receipt, whether staff refunded it or the provider reported it, however often it is replayed"
+    },
+    {
+      "id": "OR-J39-S12",
+      "journey": "J39",
+      "name": "The host's message renderer takes precedence over the merchant's templates for the messages it renders"
+    },
+    {
+      "id": "OR-J39-S13",
+      "journey": "J39",
+      "name": "A subscription ended by failed payments sends one confirmation, its ending's, and not the final failure's notice"
+    },
+    {
+      "id": "OR-J39-S14",
+      "journey": "J39",
+      "name": "A staff cancel that ends access now sends one confirmation in staff's words"
+    },
+    {
+      "id": "OR-J39-S15",
+      "journey": "J39",
+      "name": "An access end a refund caused sends no confirmation by default; the refund receipt is sent"
+    },
+    {
+      "id": "OR-J39-S16",
+      "journey": "J39",
+      "name": "The customer messages route lists a customer's messages newest first, paged, with their statuses, attempts, recipients and facts, for the bound merchant only"
+    },
+    {
+      "id": "OR-J39-S17",
+      "journey": "J39",
+      "name": "A preview renders a candidate template against sample data without saving it, and refuses an invalid one with its error"
+    },
+    {
+      "id": "OR-J39-S18",
+      "journey": "J39",
+      "name": "A test message goes to the merchant's alert address only, ten an hour: the request cannot name one, and a merchant without one is refused"
+    },
+    {
+      "id": "OR-J39-S19",
+      "journey": "J39",
+      "name": "Only a mail server's refusal of the recipient is final: a refused sender is retried and opens the merchant's finding, which its next send resolves"
+    },
+    {
+      "id": "OR-J39-S20",
+      "journey": "J39",
+      "name": "A message whose last attempt's job ends while the sender holds it settles failed, not sending"
+    },
+    {
+      "id": "OR-J39-S21",
+      "journey": "J39",
+      "name": "A declined checkout sends no message by default, and turned on it sends none from a sandbox PSP: the decline names its PSP"
+    },
+    {
+      "id": "OR-J39-S22",
+      "journey": "J39",
+      "name": "A refund the refresh finds more than a week after the provider made it, reading on from its last pass, records no receipt; one found minutes late sends one"
+    },
+    {
+      "id": "OR-J39-S23",
+      "journey": "J39",
+      "name": "A void sends one receipt worded as a canceled charge: the customer was not charged"
+    },
+    {
+      "id": "OR-J39-S24",
+      "journey": "J39",
+      "name": "A subscription's first payment sends its receipt: the amount paid and the billing period"
+    },
+    {
+      "id": "OR-J39-S25",
+      "journey": "J39",
+      "name": "A staff refund OpenRails completes more than a week after it was asked sends its receipt"
+    },
+    {
+      "id": "OR-J28-S16",
+      "journey": "J28",
+      "name": "A replayed NMI chargeback batch, its reversal already booked, reverses and revokes nothing again: access the merchant restored after the dispute survives it"
+    },
+    {
+      "id": "OR-J53-S01",
+      "journey": "J53",
+      "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a removed measure is refused naming its replacement"
+    },
+    {
+      "id": "OR-J53-S02",
+      "journey": "J53",
+      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure are dropped"
+    },
+    {
+      "id": "OR-J53-S03",
+      "journey": "J53",
+      "name": "Every money measure splits by currency unless one currency is named, by PSP and by time too, and money beside a measure with no currency is refused rather than summed"
+    },
+    {
+      "id": "OR-J43-S01",
+      "journey": "J43",
+      "name": "A catalog edit and its history entry commit together, and a refused edit rolls both back"
+    },
+    {
+      "id": "OR-J43-S02",
+      "journey": "J43",
+      "name": "A catalog document records one entry for each object it changes, with its revision and application; a replay records nothing and a removed key is recorded"
+    },
+    {
+      "id": "OR-J43-S03",
+      "journey": "J43",
+      "name": "A configuration change through the API is recorded with its actor, and a credential only as changed, never its value"
+    },
+    {
+      "id": "OR-J43-S04",
+      "journey": "J43",
+      "name": "A Vault document written outside OpenRails is recorded once as Vault's when several replicas load it, and an edited file once as the file's however many processes start on it"
+    },
+    {
+      "id": "OR-J43-S05",
+      "journey": "J43",
+      "name": "The configuration history lists one merchant's entries newest first, by object and time, a page at a time, to merchant configuration readers only"
+    },
+    {
+      "id": "OR-J43-S06",
+      "journey": "J43",
+      "name": "A product's revision shows on its reads, advances on a key change and never on a price change, and its entries carry it"
+    },
+    {
+      "id": "OR-J43-S07",
+      "journey": "J43",
+      "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
     }
   ]
 }

@@ -23,6 +23,10 @@ type MerchantDocument struct {
 	MerchantSettings `yaml:",inline"`
 	// AlertWebhooks are where the merchant's operational alerts are posted.
 	AlertWebhooks []AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
+	// Messages is the merchant's messages document: which event types send
+	// its customers a message, and its own templates. A document whose
+	// templates do not render is refused alone. Nil sends the defaults.
+	Messages *MessageSettings `yaml:"messages,omitempty"`
 	// Secrets are the merchant's own credentials.
 	Secrets MerchantSecrets `yaml:"secrets,omitempty"`
 }
@@ -64,7 +68,8 @@ type MerchantSecrets struct {
 	// SCIMToken is a provisioning token (at least 32 characters) the
 	// merchant's directory presents at /scim/v2. OpenRails keeps its hash as
 	// the merchant's declared token, replaced when this changes and removed
-	// when it is removed.
+	// when it is removed. A token another merchant holds refuses this
+	// merchant's document.
 	SCIMToken string `yaml:"scim_token,omitempty"`
 }
 

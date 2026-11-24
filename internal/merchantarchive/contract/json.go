@@ -46,6 +46,33 @@ var frozenInstrumentJSON = object(map[string]jsonRule{"psp_id": uuidValue, "cust
 
 type jsonRule func(any) bool
 
+// historyValue is any JSON whose every string is safe text.
+func historyValue(v any) bool {
+	switch x := v.(type) {
+	case nil, bool:
+		return true
+	case string:
+		return safeText(x)
+	case json.Number:
+		return numberValue(x)
+	case []any:
+		for _, item := range x {
+			if !historyValue(item) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		for k, item := range x {
+			if !safeText(k) || !historyValue(item) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // Accepted payloads retain their old map representation as historical evidence.
 // New catalog and stored snapshot contracts accept only lists.
 func acceptedEntitlementsJSON(v any) bool {
@@ -246,6 +273,7 @@ var jsonRules = map[string]jsonRule{
 
 		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,
 		"declined": booleanValue, "failure_code": textValue, "failure_message": textValue, "not_executed": booleanValue,
+		"advice_code": textValue, "network_advice_code": textValue, "network_decline_code": textValue,
 		"not_executed_code": textValue, "submitted_at": textValue, "provider_contradiction": textValue, "verified_existing": booleanValue,
 		"operator_resolution":               operatorResolutionJSON,
 		"qualified_collection_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
@@ -345,6 +373,13 @@ var jsonRules = map[string]jsonRule{
 		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue, "provider_subscription_id": textValue,
 	})),
 
+	// A configuration history entry: its fields' values as the catalog and
+	// configuration documents hold them, credentials only as "changed".
+	"change_log.changes": object(map[string]jsonRule{"version": integerValue, "revision": integerValue, "application_id": textValue,
+		"fields": dictionary(func(v any) bool {
+			return v == "changed" || object(map[string]jsonRule{"before": historyValue, "after": historyValue})(v)
+		}),
+		"keys": array(textValue), "from": textValue, "to": textValue}),
 	"catalog_applications.result": object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.
 	"subscriptions.gateway_response":   metadataJSON,
@@ -360,7 +395,7 @@ var jsonRules = map[string]jsonRule{
 	// An order line's credit benefit per unit, frozen when the order was made.
 	"order_lines.credit_grant":      nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
-	"grants.spec_snapshot":       nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue, "paid_amount": moneyStringValue})})),
+	"grants.spec_snapshot":       nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
 	"usage_accruals.lines":       array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "requests": integerValue, "quantity": integerValue, "amount": integerValue, "posted_amount": integerValue})),
 	"order_attempts.metadata":    metadataJSON,
 	"order_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),

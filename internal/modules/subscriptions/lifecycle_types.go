@@ -1,11 +1,13 @@
 package subscriptions
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
@@ -45,6 +47,15 @@ type CreateMembershipParams struct {
 	// records now() (no provider timestamp).
 	PurchasedAt     *time.Time
 	PaymentMetadata map[string]any
+	// Paid is what an order's charge took for this membership, for its
+	// premium_started receipt only: the order records the payment.
+	Paid *Paid
+}
+
+// Paid is an amount a charge took, in micros of Currency.
+type Paid struct {
+	Amount   int64
+	Currency string
 }
 
 type RenewMembershipParams struct {
@@ -91,6 +102,10 @@ type ReactivateMembershipParams struct {
 
 type ResumeMembershipParams struct {
 	SubscriptionID uuid.UUID
+	// Within runs in the resume's transaction, after the row is resumed: the
+	// provider write the resume needs commits with it. canceledAt is when the
+	// locked row was canceled.
+	Within func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription, canceledAt time.Time) error
 }
 
 var ErrTerminalTransitionBlocked = errors.New("terminal-to-active transition blocked by lifecycle policy")
@@ -132,6 +147,8 @@ type CancelMembershipParams struct {
 	CancelType         models.CancelType
 	CancelFeedback     *string
 	RevokeAccess       bool
+	// EndedReason is the premium_ended fact's reason; empty is CancelType's.
+	EndedReason PremiumEndReason
 	// RefuseOwnedRenewal refuses a customer or merchant cancel of an engine
 	// membership while an accepted renewal payment is unresolved.
 	RefuseOwnedRenewal bool
@@ -139,6 +156,16 @@ type CancelMembershipParams struct {
 	// their decision, not one drawn from provider evidence, so neither
 	// provider recovery nor a readonly posture holds it.
 	Requested bool
+}
+
+// RenewalFailureID is the FailureID of a renewal that failed for cause
+// before any provider attempt: one per subscription, cause and period.
+func RenewalFailureID(sub *models.Subscription, cause string) uuid.UUID {
+	key := "renewal_failure:" + cause
+	if sub.CurrentPeriodEndsAt != nil {
+		key += ":" + sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339Nano)
+	}
+	return uuid.NewSHA1(sub.ID, []byte(key))
 }
 
 type FailMembershipParams struct {
@@ -151,8 +178,9 @@ type FailMembershipParams struct {
 	SubscriptionID    *uuid.UUID
 	FailureReason     *string
 	FailureCode       *string
-	// FailureID is the durable identity of the provider attempt or intent. A
-	// replay keeps the same notification; distinct retries use distinct IDs.
+	// FailureID is the durable identity of the provider attempt, intent or
+	// decline, required: a replay keeps the same notification; distinct
+	// retries use distinct IDs.
 	FailureID uuid.UUID
 	// DeclinedAt is when the decline happened; zero means now. The retry
 	// schedule runs from it, so a decline seen late keeps the same retry days.
@@ -204,11 +232,8 @@ func TerminalCancelReason(subscription *models.Subscription) (string, bool) {
 	if subscription.Status != models.StatusCanceled {
 		return "", false
 	}
-	if subscription.CancelType != nil {
-		switch *subscription.CancelType {
-		case models.CancelTypeChargeback, models.CancelTypeUser, models.CancelTypeMerchant:
-			return fmt.Sprintf("cancel_type=%s", *subscription.CancelType), true
-		}
+	if subscription.CancelType != nil && subscription.CancelType.Terminal() {
+		return fmt.Sprintf("cancel_type=%s", *subscription.CancelType), true
 	}
 	return "", false
 }

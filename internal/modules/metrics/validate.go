@@ -50,7 +50,8 @@ type Plan struct {
 	Filters  map[string][]string
 	Order    []OrderTerm
 	Limit    int
-	Compare  bool
+	// Compare is the comparison window: "", previous_period or previous_year.
+	Compare string
 	// ImplicitCurrency: currency was added as a group-by because a money measure
 	// is present without a single-currency filter.
 	ImplicitCurrency bool
@@ -70,13 +71,7 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	for i, name := range q.Measures {
 		m, ok := measureByName[name]
 		if !ok || m.Internal {
-			fe := FieldError{Code: "unknown_measure", Param: fmt.Sprintf("measures[%d]", i),
-				Message: fmt.Sprintf("unknown measure %q", name), Valid: PublicMeasureNames()}
-			if s, ok := suggest(name, fe.Valid); ok {
-				fe.DidYouMean = s
-				fe.Message = fmt.Sprintf("unknown measure %q: did you mean %q?", name, s)
-			}
-			add(fe)
+			add(unknownMeasure(fmt.Sprintf("measures[%d]", i), name))
 			continue
 		}
 		if seenMeasure[name] {
@@ -101,13 +96,7 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 		d, ok := dimensionByName[name]
 		if !ok {
-			fe := FieldError{Code: "unknown_dimension", Param: fmt.Sprintf("by[%d]", i),
-				Message: fmt.Sprintf("unknown dimension %q", name), Valid: DimensionNames()}
-			if s, ok := suggest(name, fe.Valid); ok {
-				fe.DidYouMean = s
-				fe.Message = fmt.Sprintf("unknown dimension %q: did you mean %q?", name, s)
-			}
-			add(fe)
+			add(unknownDimension("unknown_dimension", fmt.Sprintf("by[%d]", i), name, DimensionNames()))
 			continue
 		}
 		if seenDim[d.Name] {
@@ -133,12 +122,7 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	if grain == "" {
 		grain = "day"
 	}
-	validGrain := false
-	for _, g := range Grains {
-		if grain == g {
-			validGrain = true
-		}
-	}
+	validGrain := contains(Grains, grain)
 	if !validGrain {
 		fe := FieldError{Code: "invalid_grain", Param: "grain",
 			Message: fmt.Sprintf("unknown grain %q", q.Grain), Valid: Grains}
@@ -183,8 +167,11 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 	}
 
+	if grain == "auto" && !from.IsZero() && from.Before(to) {
+		grain = autoGrain(from, to)
+	}
 	var buckets []time.Time
-	if hasTime && validGrain && !from.IsZero() && from.Before(to) {
+	if hasTime && validGrain && grain != "auto" && !from.IsZero() && from.Before(to) {
 		buckets = bucketLabels(from, to, grain)
 		if len(buckets) > MaxBuckets {
 			add(FieldError{Code: "range_too_many_buckets", Param: "range",
@@ -202,13 +189,7 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		vals := q.Filters[name]
 		d, ok := dimensionByName[name]
 		if !ok || name == "time" {
-			fe := FieldError{Code: "unknown_filter_dimension", Param: "filters." + name,
-				Message: fmt.Sprintf("unknown filter dimension %q (time is filtered via range)", name), Valid: filterableDimNames()}
-			if s, ok := suggest(name, fe.Valid); ok {
-				fe.DidYouMean = s
-				fe.Message = fmt.Sprintf("unknown filter dimension %q: did you mean %q?", name, s)
-			}
-			add(fe)
+			add(unknownDimension("unknown_filter_dimension", "filters."+name, name, filterableDimNames()))
 			continue
 		}
 		if len(vals) == 0 {
@@ -216,17 +197,25 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 				Message: fmt.Sprintf("filter %q needs at least one value", name)})
 			continue
 		}
-		if d.Values != nil {
+		// A dimension's vocabulary may depend on the measure (outcome).
+		refused := map[string]bool{}
+		for _, m := range measures {
+			valid := m.valuesOf(name)
+			if valid == nil {
+				continue
+			}
 			for _, v := range vals {
-				if !contains(d.Values, v) {
-					fe := FieldError{Code: "invalid_filter_value", Param: "filters." + name,
-						Message: fmt.Sprintf("invalid value %q for %q", v, name), Valid: d.Values}
-					if s, ok := suggest(v, d.Values); ok {
-						fe.DidYouMean = s
-						fe.Message = fmt.Sprintf("invalid value %q for %q: did you mean %q?", v, name, s)
-					}
-					add(fe)
+				if contains(valid, v) || refused[v] {
+					continue
 				}
+				refused[v] = true
+				fe := FieldError{Code: "invalid_filter_value", Param: "filters." + name,
+					Message: fmt.Sprintf("invalid value %q for %q on %q", v, name, m.Name), Valid: valid}
+				if s, ok := suggest(v, valid); ok {
+					fe.DidYouMean = s
+					fe.Message = fmt.Sprintf("invalid value %q for %q on %q: did you mean %q?", v, name, m.Name, s)
+				}
+				add(fe)
 			}
 		}
 		if d.Parse != nil {
@@ -292,14 +281,9 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 	}
 
-	compare := false
-	switch q.Compare {
-	case "":
-	case "previous_period":
-		compare = true
-	default:
+	if q.Compare != "" && !contains(Compares, q.Compare) {
 		fe := FieldError{Code: "invalid_compare", Param: "compare",
-			Message: fmt.Sprintf("unknown compare %q", q.Compare), Valid: []string{"previous_period"}}
+			Message: fmt.Sprintf("unknown compare %q", q.Compare), Valid: Compares}
 		if s, ok := suggest(q.Compare, fe.Valid); ok {
 			fe.DidYouMean = s
 			fe.Message = fmt.Sprintf("unknown compare %q: did you mean %q?", q.Compare, s)
@@ -334,7 +318,7 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	return &Plan{
 		Measures: measures, Dims: dims, HasTime: hasTime, Grain: grain,
 		From: from, To: to, Buckets: buckets, Filters: filters,
-		Order: q.Order, Limit: limit, Compare: compare,
+		Order: q.Order, Limit: limit, Compare: q.Compare,
 		ImplicitCurrency: implicitCurrency,
 	}, nil
 }
@@ -368,6 +352,61 @@ func resolveLast(last string, now time.Time) (from, to time.Time, ok bool) {
 		from = to.AddDate(-n, 0, 0)
 	}
 	return from, to, true
+}
+
+// autoGrain is the grain a range reads best at: days up to 45, weeks up to
+// 26, then months.
+func autoGrain(from, to time.Time) string {
+	switch days := to.Sub(from).Hours() / 24; {
+	case days <= 45:
+		return "day"
+	case days <= 26*7:
+		return "week"
+	}
+	return "month"
+}
+
+// unknownMeasure refuses a name the registry does not serve: a removed one
+// names its replacement, a planned one says so, any other gets a
+// did-you-mean.
+func unknownMeasure(param, name string) FieldError {
+	fe := FieldError{Code: "unknown_measure", Param: param, Valid: PublicMeasureNames()}
+	if r, ok := Removed[name]; ok {
+		fe.DidYouMean = r.Measure
+		fe.Message = fmt.Sprintf("measure %q was removed: use %q, %s", name, r.Measure, r.How)
+		if r.Measure == "" {
+			fe.Message = fmt.Sprintf("measure %q was removed: %s", name, r.How)
+		}
+		return fe
+	}
+	if contains(Deferred, name) {
+		fe.Message = fmt.Sprintf("measure %q is planned and not available yet", name)
+		return fe
+	}
+	fe.Message = fmt.Sprintf("unknown measure %q", name)
+	if s, ok := suggest(name, fe.Valid); ok {
+		fe.DidYouMean = s
+		fe.Message = fmt.Sprintf("unknown measure %q: did you mean %q?", name, s)
+	}
+	return fe
+}
+
+func unknownDimension(code, param, name string, valid []string) FieldError {
+	fe := FieldError{Code: code, Param: param, Valid: valid}
+	if r, ok := RemovedDimensions[name]; ok {
+		fe.DidYouMean = r
+		fe.Message = fmt.Sprintf("dimension %q was renamed %q", name, r)
+		return fe
+	}
+	fe.Message = fmt.Sprintf("unknown dimension %q", name)
+	if code == "unknown_filter_dimension" {
+		fe.Message = fmt.Sprintf("unknown filter dimension %q (time is filtered via range)", name)
+	}
+	if s, ok := suggest(name, valid); ok {
+		fe.DidYouMean = s
+		fe.Message += fmt.Sprintf(": did you mean %q?", s)
+	}
+	return fe
 }
 
 func filterableDimNames() []string {

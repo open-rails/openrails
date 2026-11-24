@@ -73,10 +73,12 @@ func compactJSON(v any) string {
 	return string(b)
 }
 
-// paramAmountMicros parses an `amount` param as exact int64 micros: a
+// paramAmount parses an `amount` param as an exact positive int64 in native
+// units at the payment currency's scale (RefundPaymentParams.Amount): a
 // json.Number integer (params decode with UseNumber) or a decimal string. A
 // float64 is refused, never truncated.
-func paramAmountMicros(raw any) (int64, error) {
+func paramAmount(raw any) (int64, error) {
+	const want = "recommendation param \"amount\" must be a positive integer in native units at the payment currency's scale"
 	var text string
 	switch v := raw.(type) {
 	case json.Number:
@@ -84,19 +86,18 @@ func paramAmountMicros(raw any) (int64, error) {
 	case string:
 		text = strings.TrimSpace(v)
 	case float64, float32:
-		return 0, paramErrorf("recommendation param \"amount\" arrived as a floating-point value; " +
-			"an amount in micros must be an exact integer (MONEY-3)")
+		return 0, paramErrorf(want + ", not a floating-point value")
 	default:
-		return 0, paramErrorf("recommendation param \"amount\" must be a positive integer number of micros")
+		return 0, paramErrorf(want)
 	}
-	micros, err := strconv.ParseInt(text, 10, 64)
+	amount, err := strconv.ParseInt(text, 10, 64)
 	if err != nil {
-		return 0, paramErrorf("recommendation param \"amount\" must be a positive integer number of micros (got %q)", text)
+		return 0, paramErrorf(want+" (got %q)", text)
 	}
-	if micros <= 0 {
-		return 0, paramErrorf("recommendation param \"amount\" must be a positive integer number of micros")
+	if amount <= 0 {
+		return 0, paramErrorf(want)
 	}
-	return micros, nil
+	return amount, nil
 }
 
 func paramString(params map[string]any, key string) string {
@@ -401,7 +402,7 @@ func findingRefundKey(finding, payment uuid.UUID) string {
 func findingRefundRequest(params map[string]any, reason string) (RefundRequest, error) {
 	request := RefundRequest{Full: true, Reason: reason}
 	if raw, ok := params["amount"]; ok && raw != nil {
-		amount, err := paramAmountMicros(raw)
+		amount, err := paramAmount(raw)
 		if err != nil {
 			return request, err
 		}

@@ -239,7 +239,9 @@ the deployment does not serve answers `404 route_not_found`.
 | Key | Default | Meaning |
 |---|---|---|
 | `db.url` | — | the connection string (`DB_URL`); overrides the parts below |
-| `db.host`, `db.port`, `db.database`, `db.username`, `db.password`, `db.sslmode` | — | the parts, when `db.url` is unset; all four of host, port, database and username or boot refuses |
+| `db.host`, `db.port`, `db.database`, `db.username`, `db.password` | — | the parts, when `db.url` is unset; all four of host, port, database and username or boot refuses |
+| `db.sslmode` | `verify-full`; `require` for a loopback host or Unix socket | libpq's `sslmode` for the parts |
+| `db.sslrootcert` | the system roots | PEM file of the CAs that verify the database's certificate, for the parts |
 | `db.sql_trace` | `false` | log every query at debug level |
 | `db.lease_conns` | `4` | the separate pool for idempotency lease renewals; count it in `max_connections` |
 | `database.schema` | `billing` | every OpenRails table, function and type; a plain identifier |
@@ -254,7 +256,7 @@ own schema (`auth.database.schema`, default `profiles`).
 
 | Key | Meaning |
 |---|---|
-| `redis.addr` | `host:port` |
+| `redis.addr` | `host:port`. While a declared Redis does not answer, a DPoP proof or a JWT-bearer or client assertion is refused (503): another replica could not see it spent |
 | `redis.url` | instead of `addr`: `redis://` or `rediss://` with user, password and database |
 | `redis.username`, `redis.password`, `redis.db` | ACL user, password, database number |
 | `redis.tls`, `redis.ca_cert` | TLS against the system roots, or this PEM bundle (which implies TLS) |
@@ -271,9 +273,10 @@ boot. The ones a deployment sets:
 | Key | Meaning |
 |---|---|
 | `auth.default_tenant_id` | the server's operator account directory: a UUID generated once for the deployment and never changed ([the account directory](#the-account-directory)) |
-| `auth.token.issuer` | required; the server's own issuer. No billing URL stands in for it |
+| `auth.token.issuer` | required; the server's own issuer, https (http only on a loopback host). No billing URL stands in for it |
+| `auth.token.refresh_token_duration` | how long a session lasts from its sign-in: 30 days when unset; negative lasts until revoked |
 | `auth.token.allow_private_network_jwks` | fetch a trusted issuer's keys from a private address (local federation only) |
-| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`); file-watched |
+| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
 | `auth.keys.allow_ephemeral_dev_keys` | generate keys under `auth.keys.path`; one instance, local only |
 | `auth.keys.verify_only` | verify tokens, mint none |
 | `auth.resource.id` | the resource trusted issuers mint tokens for: their `aud` (RFC 8707). Turns trusted-issuer tokens on |
@@ -281,7 +284,7 @@ boot. The ones a deployment sets:
 | `auth.registration.native_user_mode` | local enrollment: `invite_only` by default, `closed` turns it off; `open` is refused unless a hosted product supplies `server.Config.MerchantCreation` |
 | `auth.registration.allow_missing_senders` | run without an email or SMS sender |
 | `auth.sign_in.dpop` | `optional` or `required` for the server's own users |
-| `auth.http.direct_peer_ip` | clients connect directly; behind a proxy set `trusted_proxies` instead (mutually exclusive) |
+| `auth.http.direct_peer_ip` | optional: AuthKit's client IP follows `trusted_proxies` and `cloudflare_proxies`, the socket peer when both are empty; `true` beside either refuses boot |
 | `auth.http.rate_limits` | AuthKit's own buckets |
 | `auth.database.schema` | AuthKit's tables, default `profiles` |
 | `signing_key.active_key_id`, `signing_key.active_private_key_pem`, `signing_key.public_keys` | an inline signing key from `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` (a JSON object of further PEM keys by kid); fixed until restart, where `auth.keys.path` rotates live |
@@ -482,6 +485,7 @@ startup, naming what it declares; it names the merchant only (its slug and
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/merchant
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/psps/<key>
 <kv_mount>/<scope_prefix>/merchants/<merchant-id>/custodians/<key>
+<kv_mount>/<scope_prefix>/merchants/<merchant-id>/messages
 <kv_mount>/<scope_prefix>/credential_fingerprint_key
 <card_vault.kv_mount>/<scope_prefix>/platform_vault/<tenant_id>
 ```
@@ -669,9 +673,7 @@ refused on `/v1/app` (`403 application_required`).
 `local_sign_in`, with the server's own accounts. The console exchanges the
 person's token for one bound to the chosen merchant (RFC 8693 through the
 server's `openrails-console` client), refused where they hold no role. Its
-session keeps the access token in memory and a rotating HttpOnly refresh cookie
-(`__Host-authkit_rt` on HTTPS); a revoked session answers
-`401 credential_revoked` at once. `admin_console.disabled` omits it.
+session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once. `admin_console.disabled` omits it.
 
 ### Customer contacts
 
@@ -710,12 +712,7 @@ console at `/admin`, `/v1/webhooks/{rail}/{account_id}` for provider webhooks an
 the checkout origin. Give one public origin to `public_billing_base_url`,
 `auth.token.issuer` and `auth.resource.id`, and another to `checkout_origin`.
 
-- **Client IP.** The client is the socket peer unless `trusted_proxies` lists
-  the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted
-  hops. Without it rate limits, abuse tracking, request logs and webhook source
-  addresses all see the proxy. Use `auth.http.direct_peer_ip: true` only when
-  clients connect directly. Behind Cloudflare, list its ranges in
-  `cloudflare_proxies` and lock the origin to Cloudflare's ingress.
+- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies; `auth.http` declares none of its own. Behind Cloudflare, list its ranges in `cloudflare_proxies` and lock the origin to Cloudflare's ingress.
 - **Body size.** Requests are capped at 1 MiB (`413 request_body_too_large`),
   but a billing archive import (`POST /v1/merchant/billing-archive`) streams up
   to 1 GiB: raise the proxy's limit if you import over HTTP.
@@ -1078,12 +1075,24 @@ It answers `job_id`, `merchant_id`, `river_schema` and `queue`; `already_queued`
 is true when a refresh for that merchant is outstanding. Track the job with
 `openrails workers` or in `river_job` ([River jobs](river-jobs.md#inspect-a-running-deployment)).
 The job reads each PSP in bounded windows from its watermark
-(`billing.psp_refresh_watermarks`) to five minutes ago, NMI and Stripe with a
+(`billing.psp_refresh_watermarks`) to five minutes ago (NMI's by last change,
+the last reading through now), NMI and Stripe with a
 24-hour overlap for late indexing, and retries incomplete reads up to five
 attempts; a later request resumes from the saved watermarks. A watermark
 advances only after a complete read. Before each Stripe window a separate read
 records refunds and disputes that match existing payments, up to eight days
 back, even when the full read fails.
+
+CCBill's DataLink answers a live account once every 60 minutes. A live CCBill
+PSP's refresh is its own job, `openrails.paced_provider_refresh`, which the
+merchant's queues and which makes one DataLink request per hour: a day of transactions, advancing the watermark day by day,
+then the roster once the days are read to within two hours. A backlog catches
+up a day an hour; 90 days take about four days. A PSP import of a live account
+reads its history a day an hour the same way, its `history_through` showing how
+far it got. A request waiting for its hour, or one CCBill refuses for coming
+within it, waits and resumes; it never fails the job. The hour is kept per
+CCBill account in the abuse state (Redis), so every instance shares it; a
+sandbox account is not paced.
 
 Refresh reads run in every write mode. Overwrites and lifecycle repairs need an
 armed merchant, the kill switch on and a posture above `readonly`. Unverified
@@ -1170,6 +1179,7 @@ destructive runs), **partitioned** (monthly partitions dropped whole), **rows**
 | `carts` | 30 days after `last_changed_at` |
 | `notification_events`, `host_outbox`, the event log | 90 days, never before `event_retention` |
 | `webhook_events` | 90 days after completion |
+| `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
 | `user_destructive_reservations` | 24 hours |
 | `failed_usage_windows` | when the window ends |
@@ -1277,7 +1287,7 @@ the merchant the token is bound to.
 | `openrails destructive-holds list`, `openrails destructive-holds clear` | destructive-action incidents |
 | `openrails admin-lockouts unlock <user-id>` | end an administrator's lockout |
 | `openrails workers [--json]` | job health from River's tables |
-| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation and counters; non-zero on a finding. Nothing schedules it |
+| `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters and credit lot counters; non-zero on a finding. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
 | `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |
@@ -1330,7 +1340,7 @@ ingress:
 | Value | Meaning |
 |---|---|
 | `replicaCount` | 1. More need Redis (`config.redis`) and `secrets.authKeys`: an ephemeral signing key is per pod |
-| `image` | `repository`, `tag` (default the chart's `vX.Y.Z`), `digest` (pins over the tag), `pullPolicy` |
+| `image` | `repository`, `tag` (default the chart's `vX.Y.Z`; required to render a checkout, whose appVersion is `latest`), `digest` (pins over the tag), `pullPolicy` |
 | `imagePullSecrets` | for a private registry |
 | `args` | the command, `[run-server]`; the chart appends `--config=/etc/openrails/config.yaml` |
 | `config` | `config.yaml`, rendered as written; no secrets. `host`, `port` and `private_port` are the chart's and refused here |
@@ -1338,7 +1348,7 @@ ingress:
 | `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantOverlays` (`{name, key}` overlays added to `merchant_manifest_overlays`) |
 | `env`, `envFrom` | further environment |
 | `ports` | `http`, default 3053 |
-| `metrics` | the private `/metrics` listener (`enabled`, `port` 9090), its Service port `metrics` and an optional Prometheus Operator `serviceMonitor` |
+| `metrics` | the private `/metrics` listener (`enabled`, `port` 9090), served by its own ClusterIP Service `<fullname>-metrics` whatever `service.type` is, and an optional Prometheus Operator `serviceMonitor` |
 | `service` | `type`, `port` (80), `annotations` |
 | `ingress` | `enabled`, `className`, `annotations`, `hosts` (every path to the server), `tls` |
 | `resources` | requests 100m and 256Mi, limits one CPU and 768Mi |
@@ -1353,6 +1363,12 @@ ingress:
 | `nameOverride`, `fullnameOverride` | resource names |
 
 A change to `config` or `files` rolls the pods.
+
+**Verifying the image.** Each release image carries a signed build-provenance attestation of its digest in both registries. Check it before pinning that digest in `image.digest`:
+
+```sh
+gh attestation verify oci://docker.io/openrails/openrails:vX.Y.Z --repo open-rails/openrails
+```
 
 **Secrets.** `secrets.env` takes CloudNativePG's app Secret directly
 (`DB_URL: {name: openrails-db-app, key: uri}`). With External Secrets Operator,

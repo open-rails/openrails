@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
@@ -206,8 +207,13 @@ func (p *providerLedger) interruptPaymentResponses() {
 
 func newPaymentWorld(t *testing.T, configure ...func(*world)) (*authorityWorld, *providerLedger) {
 	t.Helper()
+	return newPaymentWorldWithAuth(t, nil, configure...)
+}
+
+func newPaymentWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config), configure ...func(*world)) (*authorityWorld, *providerLedger) {
+	t.Helper()
 	var provider *providerLedger
-	a := newAuthorityWorld(t, func(w *world) {
+	a := newAuthorityWorldWithAuth(t, configureAuth, func(w *world) {
 		provider = newProviderLedger(t, w)
 		target, err := url.Parse(provider.server.URL)
 		require.NoError(t, err)

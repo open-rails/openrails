@@ -58,6 +58,8 @@ func (d *DB) Notifications() *config.NotificationChannel {
 // code holding only a database handle reads it through.
 type MerchantConfig interface {
 	MerchantSettings(ctx context.Context, id billing.MerchantID) (displayName string, settings billing.MerchantSettings, err error)
+	// MerchantMessages is the messages document the merchant serves.
+	MerchantMessages(ctx context.Context, id billing.MerchantID) (billing.MessageSettings, error)
 }
 
 // SetMerchantConfig binds the merchant configuration every handle derived

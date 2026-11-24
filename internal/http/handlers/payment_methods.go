@@ -1,7 +1,11 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -23,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payment"
@@ -102,7 +107,8 @@ func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID, en
 
 // CreatePaymentMethod (POST /me/payment-methods) saves a card with a PSP in
 // one call. A Stripe card the bank wants authenticated answers requires_action
-// with its next_action.
+// with its next_action. With an Idempotency-Key, a retry answers the first
+// saved card on every rail.
 func CreatePaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
@@ -114,6 +120,93 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 	defer req.Card.Zero()
+	key := strings.TrimSpace(r.Header("Idempotency-Key"))
+	if key == "" {
+		savePaymentMethod(r, user, req)
+		return
+	}
+	if len(key) > 255 || cardguard.ContainsPAN(key) {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "Idempotency-Key is 1 to 255 bytes, without card data").WithParam("Idempotency-Key"))
+		return
+	}
+	if r.State.Idempotency == nil {
+		r.ErrorCode(billing.CodeServiceUnavailable, "card save unavailable")
+		return
+	}
+	savedOnce(r, user, req, key)
+}
+
+// createPaymentMethodOperation names card saves in the idempotency store.
+const createPaymentMethodOperation = "payment_methods.create"
+
+// savedCardReplay is what a card save's key answers again: the first saved
+// card, as it was answered. The digest leaves card data out.
+type savedCardReplay struct {
+	Digest string          `json:"digest"`
+	Status int             `json:"status"`
+	Body   json.RawMessage `json:"body"`
+}
+
+// savedOnce saves the card under its customer's key: a saved card is
+// answered again; a refusal, or a card still awaiting the bank, runs again.
+func savedOnce(r *httprequest.Request, user *payment.UserIdentity, req billing.CreatePaymentMethodParams, key string) {
+	terms, err := json.Marshal(struct {
+		PSPID          billing.PSPID           `json:"psp_id"`
+		Token          string                  `json:"token"`
+		Card           bool                    `json:"card"`
+		BillingDetails *billing.BillingDetails `json:"billing_details"`
+	}{req.PSPID, strings.TrimSpace(req.Token), req.Card != nil, req.BillingDetails})
+	if err != nil {
+		r.InternalError("encode card save", err)
+		return
+	}
+	sum := sha256.Sum256(terms)
+	digest := hex.EncodeToString(sum[:])
+	ctx := r.Request.Context()
+	claim, rec, err := r.State.Idempotency.Begin(ctx, createPaymentMethodOperation, user.ID+":"+key)
+	if err != nil {
+		r.InternalError("claim idempotency key", err)
+		return
+	}
+	if claim == nil {
+		var first savedCardReplay
+		switch {
+		case rec == nil || rec.Status != idempotency.StatusSucceeded:
+			r.ErrorCode(billing.CodeIdempotencyKeyInUse, "")
+		case json.Unmarshal(rec.Result, &first) != nil:
+			r.InternalError("read idempotency key", errors.New("unreadable card save replay"))
+		case first.Digest != digest:
+			r.ErrorCode(billing.CodeIdempotencyKeyReused, "the Idempotency-Key was first sent with another card save")
+		default:
+			r.SetHeader("Cache-Control", "no-store")
+			r.JSON(first.Status, first.Body)
+		}
+		return
+	}
+	work, stop := claim.Hold(ctx)
+	r.Request = r.Request.WithContext(work)
+	recorded := r.Record()
+	savePaymentMethod(r, user, req)
+	stop()
+	r.Request = r.Request.WithContext(ctx)
+	status, body := recorded()
+	var answered struct {
+		Status billing.PaymentMethodStatus `json:"status"`
+	}
+	if status != http.StatusCreated || json.Unmarshal(body, &answered) != nil || answered.Status == billing.PaymentMethodRequiresAction {
+		_ = claim.Fail(ctx, fmt.Errorf("card save answered %d", status))
+		return
+	}
+	stored, err := json.Marshal(savedCardReplay{Digest: digest, Status: status, Body: body})
+	if err == nil {
+		err = claim.Complete(ctx, stored)
+	}
+	if err != nil && !errors.Is(err, idempotency.ErrClaimLost) {
+		r.Log.ErrorContext(ctx, "card save: idempotency key not settled", logx.Err(err))
+	}
+}
+
+func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req billing.CreatePaymentMethodParams) {
 	if req.PSPID.IsZero() {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "psp_id must name a PSP").WithParam("psp_id"))
 		return

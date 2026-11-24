@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (182), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (186), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -120,6 +120,7 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | GET | `/v1/admin/renewals/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Renewal` |  |
 | GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<PaymentMethod>` |  |
 | DELETE | `/v1/admin/customers/{customer_id}/payment-methods/{id}` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 204 — |  |
+| GET | `/v1/admin/customers/{customer_id}/messages` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CustomerMessage>` |  |
 
 ## Catalog
 
@@ -168,6 +169,7 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:config:read`<br>`root:config:read` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
 | GET | `/v1/merchant/configuration` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `MerchantConfigurationState` |  |
 | PATCH | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits` |
+| GET | `/v1/merchant/changes` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<LogEntry>` |  |
 | GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<AlertWebhook>` |  |
 | POST | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits` |
 | DELETE | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `merchant_config_edits` |
@@ -186,6 +188,8 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | POST | `/v1/merchant/psp-import-mappings` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetPSPImportMappingsParams` | 200 `PSPImportMappingsResult` |  |
 | GET | `/v1/merchant/provider-catalog` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<ProviderCatalogObject>` |  |
 | GET | `/v1/merchant/parked-subscriptions` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<ParkedSubscription>` |  |
+| POST | `/v1/merchant/messages/preview` | merchant | `merchant:config:read`<br>`root:config:read` | `PreviewMessageParams` | 200 `MessagePreview` |  |
+| POST | `/v1/merchant/messages/test` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateTestMessageParams` | 200 `TestMessage` |  |
 | GET | `/v1/merchant/destructive-holds` | merchant | `merchant:config:read`<br>`root:config:read` | — | 200 `ListPage<DestructiveHold>` |  |
 | POST | `/v1/merchant/destructive-holds/{id}/clear` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ClearDestructiveHoldParams` | 200 `DestructiveHold` |  |
 | PUT | `/v1/merchant/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |

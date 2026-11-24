@@ -14,12 +14,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -573,11 +575,24 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	if params.InitialPaymentReversal == "" {
+		// The first period and, when it was charged, what was paid: the
+		// customer's receipt.
+		start, end := periodStartsAt.UTC(), periodEndsAt.UTC()
+		data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID), PeriodStartsAt: &start, PeriodEndsAt: &end}
+		amount, currency := membershipCharge(params, price)
+		if params.Paid != nil {
+			amount, currency = params.Paid.Amount, params.Paid.Currency
+		} else if params.TransactionID == "" {
+			amount = 0
+		}
+		if amount > 0 {
+			data.Amount, data.Currency = &amount, catalogwire.Currency(currency)
+		}
 		notification := &models.NotificationEvent{
 			ID:         uuid.NewSHA1(subscription.ID, []byte("premium_started")),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumStarted,
-			Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID)},
+			Data:       data,
 		}
 		if err := notificationRepo.CreateIfAbsent(ctx, notification); err != nil {
 			return nil, nil, fmt.Errorf("record membership started notification: %w", err)
@@ -588,17 +603,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	// Create Payment record if payment info is provided
 	if params.TransactionID != "" && paymentService != nil && !paymentRecorded {
-		// Use provided amount/currency or fall back to price defaults
-		amount := params.Amount
-		if !params.AmountProvided && amount == 0 {
+		amount, currency := membershipCharge(params, price)
+		if !params.AmountProvided && params.Amount == 0 {
 			// The caller supplied no charged amount: record the catalog list
 			// price, with a warning (expected, not confirmed).
 			s.Log.WarnContext(ctx, "no charged amount supplied for membership payment; recording catalog list price", "price_id", price.ID, "transaction_id", params.TransactionID, "user_id", subscription.CustomerID.String())
-			amount = price.Amount
-		}
-		currency := params.Currency
-		if currency == "" {
-			currency = price.Currency
 		}
 
 		// The provider's transaction time when supplied; now() only as a last
@@ -643,6 +652,20 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	return subscription, notifications, nil
+}
+
+// membershipCharge is what a membership's first payment charged: the
+// caller's amount and currency, else the price's.
+func membershipCharge(params *CreateMembershipParams, price *models.Price) (int64, string) {
+	amount := params.Amount
+	if !params.AmountProvided && amount == 0 {
+		amount = price.Amount
+	}
+	currency := params.Currency
+	if currency == "" {
+		currency = price.Currency
+	}
+	return amount, currency
 }
 
 // RecordConfirmedChargeWithoutRenewal records a provider-confirmed renewal
@@ -1065,6 +1088,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	return nil
 }
 
+// ResumeFailpointKind names a resume's transaction (failpoint.BeforeLock).
+const ResumeFailpointKind = "subscription_resume"
+
 // ResumeMembership restores a reversibly-canceled subscription and its
 // standing entitlement projection in one transaction.
 func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, params *ResumeMembershipParams) (*models.Subscription, error) {
@@ -1080,6 +1106,9 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 	var resumed *models.Subscription
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := s.DB.NewWithPgxTx(tx)
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeLock, Kind: ResumeFailpointKind, Subscription: params.SubscriptionID}); err != nil {
+			return err
+		}
 		if observed.CollectionPolicy == models.CollectionPolicyEngine {
 			if _, err := txdb.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
 				return err
@@ -1139,6 +1168,15 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 				return fmt.Errorf("resume engine: %w", err)
 			}
 		}
+		var canceledAt time.Time
+		switch {
+		case subscription.CanceledAt != nil:
+			canceledAt = *subscription.CanceledAt
+		case subscription.EndedAt != nil:
+			canceledAt = *subscription.EndedAt
+		default:
+			return fmt.Errorf("resume membership: canceled subscription %s records no cancel", subscription.ID)
+		}
 		if _, err := Transition(subscription, lifecycle.Resume{At: now}, now); err != nil {
 			return fmt.Errorf("resume membership %s: %w", subscription.ID, err)
 		}
@@ -1154,6 +1192,11 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		entSvc := s.newLifecycleEntitlementService(txdb)
 		if subscription.CurrentPeriodStartsAt != nil && subscription.CurrentPeriodEndsAt != nil {
 			if err := pushRenewalGrace(ctx, txdb, entSvc, subscription, *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
+				return fmt.Errorf("resume membership: %w", err)
+			}
+		}
+		if params.Within != nil {
+			if err := params.Within(ctx, tx, subscription, canceledAt); err != nil {
 				return fmt.Errorf("resume membership: %w", err)
 			}
 		}
@@ -1352,8 +1395,10 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 
 	// An immediate revoke truncates the paid period to now; a period-end
 	// cancel keeps paid access until the term ends and forfeits only renewal
-	// grace. ApplyLocalCancellation owns the shared local-state core.
-	now := s.now()
+	// grace. ApplyLocalCancellation owns the shared local-state core. now is
+	// at the microsecond the row stores: compared at nanoseconds, a cancel in
+	// the microsecond the period starts saved a period that ends as it starts.
+	now := s.now().Truncate(time.Microsecond)
 	endAt := now
 	if params.RevokeAccess {
 		if subscription.CurrentPeriodEndsAt == nil || subscription.CurrentPeriodEndsAt.After(now) {
@@ -1395,14 +1440,20 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	}
 	s.Log.InfoContext(ctx, "Updated subscription record during cancellation", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "status", subscription.Status, "ended_at", subscription.EndedAt, "period_end", subscription.CurrentPeriodEndsAt)
 
-	reason := PremiumEndReasonAdmin
-	switch params.CancelType {
-	case models.CancelTypeUser:
-		reason = PremiumEndReasonUserCancel
-	case models.CancelTypeExpired:
-		reason = PremiumEndReasonExpired
-	case models.CancelTypeMerchant:
-		reason = PremiumEndReasonRail
+	reason := params.EndedReason
+	if reason == "" {
+		switch params.CancelType {
+		case models.CancelTypeUser:
+			reason = PremiumEndReasonUserCancel
+		case models.CancelTypeExpired:
+			reason = PremiumEndReasonExpired
+		case models.CancelTypeChargeback:
+			reason = PremiumEndReasonChargeback
+		case models.CancelTypeMerchant:
+			reason = PremiumEndReasonRail
+		default:
+			reason = PremiumEndReasonUnknown
+		}
 	}
 	// The committed revision identifies this cancellation, including retries
 	// after rollback and a later revoke of a period-end cancellation.
@@ -1815,6 +1866,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
 		return fmt.Errorf("subscription_id is required")
 	}
+	if params.FailureID == uuid.Nil {
+		return fmt.Errorf("failure_id is required")
+	}
 
 	notifications := make([]*models.NotificationEvent, 0, 1)
 
@@ -2109,6 +2163,19 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				}
 			}
 		}
+		// The ending is its own fact, naming its cause: failed payments. It
+		// is the customer's confirmation.
+		if subscription.Status == models.StatusCanceled {
+			reason := PremiumEndReasonExpired
+			if params.Decline == decline.NonRecoverable {
+				reason = PremiumEndReasonNonRecoverable
+			}
+			ended, err := s.queueNotice(ctx, db, subscription, lifecycle.NoticeEnded, nil, EffectOptions{EndedReason: reason}, s.now())
+			if err != nil {
+				return err
+			}
+			notifications = append(notifications, ended)
+		}
 
 		// A collection failure is a payment fact even when retries stop. The
 		// access ledger independently publishes the actual membership expiry.
@@ -2145,12 +2212,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			data.RetryStatus, data.RecoveryAction = billing.NotificationRetryUnknown, billing.NotificationRecoveryUpdatePaymentMethod
 			data.NextAttemptAt = nil
 		}
-		noticeID := uuidutil.NewV7()
-		if params.FailureID != uuid.Nil {
-			noticeID = uuid.NewSHA1(params.FailureID, []byte("payment_failure"))
-		}
 		notification := &models.NotificationEvent{
-			ID:         noticeID,
+			ID:         uuid.NewSHA1(params.FailureID, []byte("payment_failure")),
 			CustomerID: subscription.CustomerID,
 			EventType:  eventType,
 			Data:       data,

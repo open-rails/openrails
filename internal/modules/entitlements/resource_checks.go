@@ -97,10 +97,18 @@ func (q Query) validate() error {
 	return nil
 }
 
+// customPlans plans each derived read for its own customer. A generic plan
+// prices a customer holding three products and one holding fifty thousand
+// alike, and its key-range scan per held product is O(held x catalog) for
+// the latter.
+func customPlans(ctx context.Context, q *gen.Queries) error {
+	_, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: "plan_cache_mode", Value: "force_custom_plan", IsLocal: true})
+	return err
+}
+
 // List answers which keys customers hold at q.At, in (customer, key) byte
 // order: one page after q.After, and whether another follows. It reads one
-// snapshot. A heavy buyer's keys come from their cache while it is valid at
-// q.At; a read at the current instant that derived them live rebuilds it.
+// snapshot.
 func (s *EntitlementService) List(ctx context.Context, q Query) ([]Held, bool, error) {
 	if err := q.validate(); err != nil {
 		return nil, false, err
@@ -109,9 +117,8 @@ func (s *EntitlementService) List(ctx context.Context, q Query) ([]Held, bool, e
 	if err != nil {
 		return nil, false, err
 	}
-	current := q.At.IsZero()
 	at := q.At
-	if current {
+	if at.IsZero() {
 		at = s.now()
 	}
 	if len(q.Customers) == 0 {
@@ -137,82 +144,31 @@ func (s *EntitlementService) List(ctx context.Context, q Query) ([]Held, bool, e
 	}
 	limit := int32(q.Limit + 1) // #nosec G115 -- limit is bounded above
 	var rows []Held
-	var heavy []uuid.UUID
 	err = s.db.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		gq := s.db.NewWithPgxTx(tx).Gen(ctx)
-		valid, err := gq.ListValidEntitlementCaches(ctx, gen.ListValidEntitlementCachesParams{MerchantID: mid.UUID(), CustomerIds: customers, AtTime: at})
-		if err != nil {
-			return err
-		}
-		cached := slices.DeleteFunc(slices.Clone(customers), func(c uuid.UUID) bool { return !slices.Contains(valid, c) })
-		derived := slices.DeleteFunc(slices.Clone(customers), func(c uuid.UUID) bool { return slices.Contains(valid, c) })
-		if len(derived) > 0 {
-			if err := customPlans(ctx, gq); err != nil {
-				return err
-			}
-			if keys != nil {
-				found, err := gq.CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{
-					MerchantID: mid.UUID(), CustomerIds: derived, Entitlements: keys, AtTime: at, RowLimit: int32(len(derived) * len(keys)), // #nosec G115 -- both are bounded by MaxBatchItems
-				})
-				if err != nil {
-					return err
-				}
-				for _, f := range found {
-					rows = append(rows, Held{f.CustomerID, f.Entitlement, models.SeatsOf(f.Quantity)})
-				}
-			} else {
-				found, err := gq.ListDerivedEntitlementsPage(ctx, gen.ListDerivedEntitlementsPageParams{
-					MerchantID: mid.UUID(), CustomerIds: derived, AfterCustomer: q.After.Customer, AfterKey: q.After.Key,
-					LowKey: q.Prefix, BeforeKey: before, AtTime: at, RowLimit: limit,
-				})
-				if err != nil {
-					return err
-				}
-				for _, f := range found {
-					rows = append(rows, Held{f.CustomerID, f.Entitlement, models.SeatsOf(f.Quantity)})
-				}
-			}
-			if current {
-				if heavy, err = gq.ListHeavyBuyers(ctx, gen.ListHeavyBuyersParams{MerchantID: mid.UUID(), CustomerIds: derived, AtTime: at, UpTo: HeavyBuyerProducts}); err != nil {
-					return err
-				}
-			}
-		}
-		if len(cached) == 0 {
-			return nil
-		}
-		if err := cachedReads(ctx, gq); err != nil {
+		if err := customPlans(ctx, gq); err != nil {
 			return err
 		}
 		if keys != nil {
-			found, err := gq.CheckCachedEntitlements(ctx, gen.CheckCachedEntitlementsParams{
-				MerchantID: mid.UUID(), CustomerIds: cached, Entitlements: keys, RowLimit: int32(len(cached) * len(keys)), // #nosec G115 -- both are bounded by MaxBatchItems
+			found, err := gq.CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{
+				MerchantID: mid.UUID(), CustomerIds: customers, Entitlements: keys, AtTime: at, RowLimit: int32(len(customers) * len(keys)), // #nosec G115 -- both are bounded by MaxBatchItems
 			})
 			for _, f := range found {
 				rows = append(rows, Held{f.CustomerID, f.Entitlement, models.SeatsOf(f.Quantity)})
 			}
-			if err != nil {
-				return err
-			}
-		} else {
-			found, err := gq.ListCachedEntitlementsPage(ctx, gen.ListCachedEntitlementsPageParams{
-				MerchantID: mid.UUID(), CustomerIds: cached, AfterCustomer: q.After.Customer, AfterKey: q.After.Key,
-				LowKey: q.Prefix, BeforeKey: before, RowLimit: limit,
-			})
-			for _, f := range found {
-				rows = append(rows, Held{f.CustomerID, f.Entitlement, models.SeatsOf(f.Quantity)})
-			}
-			if err != nil {
-				return err
-			}
+			return err
 		}
-		return nil
+		found, err := gq.ListDerivedEntitlementsPage(ctx, gen.ListDerivedEntitlementsPageParams{
+			MerchantID: mid.UUID(), CustomerIds: customers, AfterCustomer: q.After.Customer, AfterKey: q.After.Key,
+			LowKey: q.Prefix, BeforeKey: before, AtTime: at, RowLimit: limit,
+		})
+		for _, f := range found {
+			rows = append(rows, Held{f.CustomerID, f.Entitlement, models.SeatsOf(f.Quantity)})
+		}
+		return err
 	})
 	if err != nil {
 		return nil, false, err
-	}
-	for _, customer := range heavy {
-		s.rebuildAfterMiss(mid, customer)
 	}
 	rows = slices.DeleteFunc(rows, func(h Held) bool { return !q.After.less(h) })
 	slices.SortFunc(rows, func(a, b Held) int {

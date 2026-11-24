@@ -203,10 +203,7 @@ func (h NMIWebhookHandler) Verify(msg *WebhookMessage) error {
 	if secret == "" {
 		return fmt.Errorf("nmi webhook secret not configured")
 	}
-	// Delegate to the canonical verifier with tolerance 0: the queued re-verify
-	// authenticates the HMAC but does not re-impose the replay window, since a
-	// job may be processed well after the original delivery.
-	return sigverify.VerifyNMI(secret, msg.Signature, msg.Payload, 0)
+	return sigverify.VerifyNMI(secret, msg.Signature, msg.Payload)
 }
 
 func (h NMIWebhookHandler) Normalize(msg *WebhookMessage) (WebhookEvent, error) {

@@ -1,0 +1,9 @@
+{{if .Customer.Name}}Hi {{.Customer.Name}},{{else}}Hello,{{end}}
+
+{{template "body" .}}
+
+{{with .Merchant.SupportURL}}Questions? {{.}}
+{{end}}{{with .Merchant.Name}}{{.}}
+{{end}}{{with .Merchant.TermsURL}}Terms: {{.}}
+{{end}}{{with .Merchant.PrivacyURL}}Privacy: {{.}}
+{{end}}

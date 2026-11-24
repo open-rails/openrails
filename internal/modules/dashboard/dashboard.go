@@ -14,8 +14,13 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
-// VizTypes are the supported widget visualizations.
-var VizTypes = []string{"stat", "line", "area", "bar", "donut", "table"}
+// VizTypes are the supported widget visualizations. A kpi is a tile's value,
+// its change and a sparkline of the same query by time; a heading is a
+// section title with an empty query.
+var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "heading"}
+
+// Heading is the viz of a section title.
+const Heading = "heading"
 
 // Grid is a widget's react-grid-layout position ({i,x,y,w,h} minus the id,
 // which lives on the widget).
@@ -105,6 +110,13 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 			errs = append(errs, metrics.FieldError{Code: "invalid_grid", Param: at("grid"),
 				Message: "grid needs x>=0, y>=0, w>=1, h>=1"})
 		}
+		if w.Viz == Heading {
+			if !emptyQuery(w.Query) {
+				errs = append(errs, metrics.FieldError{Code: "heading_has_query", Param: at("query"),
+					Message: "a heading widget is a section title: its query must be empty"})
+			}
+			continue
+		}
 		if _, verr := metrics.ValidateAt(&w.Query, now); verr != nil {
 			for _, fe := range verr.Errors {
 				fe.Param = at("query." + fe.Param)
@@ -116,6 +128,11 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 		return &metrics.ValidationError{Errors: errs}
 	}
 	return nil
+}
+
+func emptyQuery(q billing.QueryMetricsParams) bool {
+	return len(q.Measures) == 0 && len(q.By) == 0 && q.Grain == "" && q.Range == nil &&
+		len(q.Filters) == 0 && len(q.Order) == 0 && q.Limit == nil && q.Compare == ""
 }
 
 func validateViz(viz string) (metrics.FieldError, bool) {

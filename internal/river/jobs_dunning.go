@@ -416,7 +416,8 @@ func (w *DunningWorker) processSubscription(
 			if errors.Is(err, charge.ErrAgreementRequired) {
 				code = charge.AgreementRequiredCode
 			}
-			if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureReason: &reason, FailureCode: &code, Decline: decline.FixPaymentMethod}); err != nil {
+			if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureID: subscriptions.RenewalFailureID(sub, reason),
+				FailureReason: &reason, FailureCode: &code, Decline: decline.FixPaymentMethod}); err != nil {
 				return dunningOutcomeFailed, fmt.Errorf("await a payment method: %w", err)
 			}
 			if opened != nil {
@@ -503,7 +504,8 @@ func (w *DunningWorker) processSubscription(
 	if errors.Is(err, charge.ErrAgreementRequired) {
 		// Only the member can fix this: wait for a card they agree to.
 		reason, code := "payment_method_unusable", charge.AgreementRequiredCode
-		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureReason: &reason, FailureCode: &code, Decline: decline.FixPaymentMethod}); err != nil {
+		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureID: subscriptions.RenewalFailureID(sub, reason),
+			FailureReason: &reason, FailureCode: &code, Decline: decline.FixPaymentMethod}); err != nil {
 			return dunningOutcomeFailed, fmt.Errorf("await a payment method: %w", err)
 		}
 		return dunningOutcomeFailed, nil

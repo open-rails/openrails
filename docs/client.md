@@ -218,6 +218,9 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `ListCustodians`, `SetCustodian` | card custodians (Basis Theory) a PSP charges through (`SetCustodianParams`) |
 | `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha |
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
+| `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
+
+Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when.
 
 A merchant document, as `Config.Merchants` reads it and the server's manifest
 nests under `merchants.<slug>`, with one PSP on each rail:
@@ -341,20 +344,14 @@ Solana prices are refused. `rpc_url`, a secret, is tried before the network's
 public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
 at purchase; devnet and testnet price at $1.00 parity.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile`
-(`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`,
-`terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault`
-and `charge_psps` (where new cards are saved and which PSPs take new charges),
-`psp_routing`, `dunning_policy`, `usage_billing`, `billing_policies` and their
-bindings, arrears (`arrears_grace_days`, `arrears_delinquency_floor`,
-`monthly_floor`, `collection_threshold`, `billing_period_boundary`),
-`reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`,
-`provider_refund_access` and `usage_gate_safe_spend`.
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `usage_gate_safe_spend` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
 Without rules: stripe, nmi, ccbill, solana, the first that can serve the price.
 Fallback is pre-charge only: a decline never moves to a second processor.
+
+`currencies` declares the merchant's own units (`billing.MerchantCurrency`: credits, API tokens, an in-game currency), at most 32: a `code` of 4 to 12 upper-case letters or digits starting with a letter that is not in OpenRails' registry (three-letter codes are ISO 4217's), a `name`, a `symbol` without a currency sign (the code when omitted) and a `scale` from 0 (whole units, the default) to 6, so `{code: GOLD, name: Gold coins, symbol: 🪙}` counts whole coins. A unit joins the registry for that merchant alone; `GET /v1/me/config` lists it beside `GET /v1/config`'s registry. It is never money: `CreatePrice`, a catalog's credit grants and rate cards, credit grants, balances, admissions and the money settings above refuse it with `merchant_unit_unsupported`, a catalog document cannot price in it, so nothing is charged or paid in it, and a declaration that names a registry currency or breaks these rules is refused like any other invalid settings.
 
 ## Catalog
 
@@ -437,7 +434,7 @@ return nil
 |---|---|
 | `ApplyCatalog` | apply a document (`catalog.ReadFile`, `catalog.ParseApplicationYAML`); `Force` overrides conflicts |
 | `ListProducts`, `GetProduct` | products with their current prices; filter by `Keys`, `Entitlements`, `ForSale`, `Archived` |
-| `CreateProduct`, `UpdateProduct`, `DeleteProduct` | edit products; delete only one nothing ever referred to (else `409 product_in_use`: archive it) |
+| `CreateProduct`, `UpdateProduct`, `DeleteProduct` | edit products; `ExpectedRevision` refuses an edit or delete of a product changed since it was read (`409 revision_mismatch`); delete only one nothing ever referred to (else `409 product_in_use`: archive it) |
 | `ListPrices`, `GetPrice`, `ListPriceHistory` | prices and the movements of a price key |
 | `VerifyPrice` | a price with each linked PSP's copy read and drift reported (`GET /v1/catalog/prices/{id}/verification`) |
 | `CreatePrice`, `UpdatePrice` | edit prices; `ProductData` creates the product in the same call |
@@ -565,6 +562,22 @@ open again for another card.
 | `WaiveOrderBalance` | void a usage order and write off what it owes |
 | `MarkOrderUncollectible` | stop collecting and keep the debt |
 | `ListRenewals`, `GetRenewal` | renewal bills OpenRails runs |
+
+### Content-Security-Policy
+
+The payment page sends its own policy: its scripts, the PSPs' field origins, the captcha provider's, and `frame-ancestors` naming only the merchant's `checkout.embed_origins` (`'none'` without them). It needs nothing from you.
+
+A page of yours that renders billing-ui runs the same PSP scripts in your origin. Beside your own sources, its policy allows the PSPs your merchants use:
+
+| Directive | Sources |
+|---|---|
+| `script-src` | Stripe `https://js.stripe.com https://*.js.stripe.com`; NMI Collect.js `https://secure.nmi.com https://secure.networkmerchants.com`; the Basis Theory card vault `https://*.basistheory.com` |
+| `frame-src` | the same, Stripe's `https://hooks.stripe.com` (a bank's challenge), and the checkout origin when the page frames a pay URL (`<EmbeddedPayment>`) |
+| `connect-src` | the billing client's `baseUrl` origin, `https://api.stripe.com`, the NMI origins, `https://*.basistheory.com` |
+| `style-src`, `font-src` | the NMI origins: Collect.js styles its fields |
+| `frame-ancestors` | `'self'`: no other site frames a page that takes cards |
+
+A page that frames a pay URL and sends `Permissions-Policy` lists the checkout origin under `payment`, so Apple Pay and Google Pay work in the frame.
 
 ## Subscriptions
 
@@ -697,8 +710,8 @@ each paid renewal. A voluntary refund needs the lot unused and unheld.
 
 | Method | Use it to |
 |---|---|
-| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID` |
-| `ListCreditGrants`, `GetCreditGrant` | the lots, with what remains |
+| `CreateCreditGrants` | fund balances directly, idempotent on `Source` and `SourceID`; `FundingSource` marks a grant, a promotion or an import |
+| `ListCreditGrants`, `GetCreditGrant` | the lots: what remains, what was spent, expired, revoked or refunded, and what was paid for each |
 | `RevokeCreditGrant` | take back what remains of a lot |
 
 ```go guide:credit-grant
@@ -875,14 +888,7 @@ own row.
 | `AdjustCustomerLimit` | add to the current window only, idempotent on `SourceID`; a rate limit takes none |
 | `UpdateCustomer` (`Limits`) | replace a customer's capacity; `Inherit` restores its products' |
 
-**Spend limits.** A billing policy (merchant settings) caps unpaid arrears
-(`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate
-(`accrual_rate_cap`, admission takes your `AccrualRateDeltaPerHour`); bindings
-choose the merchant default or a trust tier, and a customer's own
-`billing_policy` wins. **Delinquency**: an unpaid usage order past
-`arrears_grace_days` and above the floor refuses admissions; OpenRails never
-revokes access or cancels for it. Act on the `delinquency.grace`,
-`delinquency.entered` and `delinquency.cleared` events.
+**Spend limits.** A billing policy (merchant settings) caps unpaid arrears (`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate (`accrual_rate_cap`, your usage and running charges; admission takes your `AccrualRateDeltaPerHour`). Its amounts, and a window without a currency, are in its `policy_currency`. Its outstanding cap and `collection_threshold_amount` bind only money in that currency, in admission and in usage billing alike; other currencies keep the account's own limits. Its windows and accrual-rate cap are converted to the request's currency; bindings choose the merchant default or a trust tier, and a customer's own `billing_policy` wins. **Delinquency**: an unpaid usage order past `arrears_grace_days` and above its currency's `delinquency_floor` (a policy's `delinquency_amount_floor` in its `policy_currency`) refuses admissions; OpenRails never revokes access or cancels for it. Act on the `delinquency.grace`, `delinquency.entered` and `delinquency.cleared` events.
 
 ## Usage and running charges
 
@@ -943,8 +949,9 @@ stop := func(ctx context.Context) error {
 
 ## Events
 
-OpenRails records billing facts in a retained, ordered log. Your app reads it and
-owns everything after: receipts, inboxes, email, preferences. `ListEvents` (or
+OpenRails records billing facts in a retained, ordered log. It emails customers
+the facts the merchant turns on ([customer messages](#customer-messages)); your
+app reads the log for everything else: inboxes, other email, preferences. `ListEvents` (or
 `GET /v1/app/events` with `merchant:events:read`) pages it by cursor; OpenRails
 keeps no readers or acknowledgments.
 
@@ -1009,6 +1016,42 @@ and `destructive.hold_cleared`, among others. Customer notices
 - `MerchantProfile.NotificationURL(type)` picks the profile URL for a notice.
 - Embedded, `Deps.Notifications` publishes selected notices to an AuthKit
   account inbox in the billing transaction ([embedded.md](embedded.md)).
+
+## Customer messages
+
+OpenRails emails customers their receipts, payment problems, cancellation
+confirmations and price-change notices; the merchant's `messages` document turns
+each event type on or off and replaces its template
+([guide](guide.md#customer-messages)).
+
+| Method | Use it to |
+|---|---|
+| `PreviewMessage` | render an event type's message, or a candidate template, over sample data and the merchant's profile; nothing is saved (`merchant:config:read`) |
+| `CreateTestMessage` | send that rendering to the merchant's `alert_email`, the only address a test goes to, ten an hour (`merchant:config:manage`) |
+| `ListCustomerMessages` | read a customer's delivery log, newest first: event, status, attempts, last error, recipient; no body (`merchant:customer:read`) |
+
+```go guide:messages-check
+candidate := &billing.MessageTemplate{
+	Subject: "Your {{.Merchant.Name}} receipt",
+	Text:    "You paid {{.Event.Amount}} for {{.Event.ProductName}}.",
+}
+preview, err := shop.PreviewMessage(ctx, billing.PreviewMessageParams{EventType: "one_off_purchase_completed", Template: candidate})
+if err != nil {
+	return err // 400 message_template_invalid names what does not render
+}
+_ = preview.Subject
+if _, err := shop.CreateTestMessage(ctx, billing.CreateTestMessageParams{EventType: "one_off_purchase_completed", Template: candidate}); err != nil {
+	return err // sent to alert_email only, ten an hour
+}
+log, err := shop.ListCustomerMessages(ctx, customer, billing.CustomerMessageListParams{})
+if err != nil {
+	return err
+}
+for _, m := range log.Items { // newest first; no body
+	_, _, _ = m.EventType, m.Status, m.LastError
+}
+return nil
+```
 
 ## Imports and archives
 
@@ -1086,21 +1129,22 @@ destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-swit
 
 | Method | Use it to |
 |---|---|
-| `GetMetricsSchema` | the measures, dimensions and grains a query may name |
-| `QueryMetrics` | revenue, sales, usage and payment measures, grouped and bucketed |
-| `GetDashboard`, `SetDashboard` | the console dashboard's saved layout |
+| `GetMetricsSchema` | the measures, dimensions and grains a query may name, with each measure's group (`business` or `ops`), direction and thresholds |
+| `QueryMetrics` | cash, payment, subscription, renewal, usage and ops measures, grouped and bucketed |
+| `GetDashboard`, `SetDashboard` | the console dashboard's saved layout, or the health overview built for the merchant's profile |
 
 ```go guide:metrics
 return shop.QueryMetrics(ctx, billing.QueryMetricsParams{
-	Measures: []string{"net_revenue", "mrr"},
+	Measures: []string{"cash", "mrr"},
 	By:       []string{"time"},
 	Grain:    "month",
 	Range:    &billing.MetricsRange{Last: "12m"},
 })
 ```
 
-An unknown measure or a bad combination is a `400` naming what is wrong and what
-is allowed, so a caller (an agent included) can correct itself.
+A fact is one measure split by its outcome or kind: `cash` by `cash_kind`, `payments` by `payment_kind`, `attempts`, `purchases` and `rebills` by `outcome`; rates such as `refund_rate` and `rebill_rate` divide its slices. `grain: "auto"` picks day, week or month from the range, and `compare` is `previous_period` or `previous_year`. Money is split by currency unless one is named.
+
+An unknown measure or a bad combination is a `400` naming what is wrong and what is allowed, so a caller (an agent included) can correct itself; a removed measure's error names its replacement.
 
 ## Alerts
 
@@ -1291,7 +1335,7 @@ curl --fail-with-body -X POST "$OPENRAILS_API_URL/v1/app/entitlements/check" \
 - **Money** is a decimal string of the currency's native units named `amount`
   beside a `currency` (`{"amount": "9990000", "currency": "USD"}`); a numeric
   amount is refused. Parse with `BigInt` or an exact decimal. `GET /v1/config`'s
-  `currencies` gives each scale.
+  `currencies` gives each scale; a merchant's own units are in `GET /v1/me/config`'s `currencies`.
 - **Ids** are prefixed text accepted only in their own spelling (`prod_`, `sub_`,
   `pay_`, `pm_`, `ord_`, `psp_`, `oat_`, `lse_`, …); customers and merchants are
   UUIDs; a price id is URL-encoded as a path segment.

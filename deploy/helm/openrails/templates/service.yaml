@@ -16,8 +16,22 @@ spec:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
-    {{- if .Values.metrics.enabled }}
+{{- if .Values.metrics.enabled }}
+---
+# /metrics has no auth: its own ClusterIP Service, whatever service.type is.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openrails.metricsName" . }}
+  labels:
+    {{- include "openrails.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "openrails.selectorLabels" . | nindent 4 }}
+  ports:
     - name: metrics
       port: {{ .Values.metrics.port }}
       targetPort: metrics
-    {{- end }}
+{{- end }}

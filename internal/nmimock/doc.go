@@ -28,8 +28,9 @@
 //     amount gateway-wide; dup_seconds the same within one vault.
 //   - Query API filters: order_id, transaction_id, customer_vault_id,
 //     subscription_id (comma list), action_type, start_date, end_date,
-//     result_limit, page_number; others are ignored. cc_bin defaults by brand;
-//     processor_response_code is "00" on approval, "51" behind 202 and "05"
+//     result_limit, page_number; others are ignored. start_date and end_date
+//     select by last change: a sale's Changed (Settle, a refund or a void).
+//     cc_bin defaults by brand; processor_response_code is "00" on approval, "51" behind 202 and "05"
 //     behind other declines, unless the sale names its IssuerCode. The recurring report carries subscription id,
 //     order, next charge date and plan id only. A refund is its own
 //     transaction.
@@ -42,7 +43,8 @@
 //     the schedule's next billing time (so a forced early charge can postdate
 //     the clock); a failed charge advances without retrying.
 //     rebill_subscription charges the schedule amount without moving it.
-//   - No webhooks, settlement, batching or chargebacks. Currency is whatever
-//     the request names (USD for schedule charges). Authentication is not
-//     checked.
+//   - No webhooks, batching or chargebacks; Settle settles one sale. A
+//     settled or voided sale's report lists its settle or void action.
+//     Currency is whatever the request names (USD for schedule charges).
+//     Authentication is not checked.
 package nmimock

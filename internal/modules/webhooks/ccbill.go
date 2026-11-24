@@ -37,7 +37,6 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 type CCBillWebhookService struct {
@@ -66,22 +65,18 @@ func (s *CCBillWebhookService) now() time.Time {
 	return time.Now()
 }
 
-func parseCCBillDate(dateStr string) (time.Time, error) {
-	return timeutil.ParseDateUTC(dateStr)
-}
-
 // parseCCBillDateUsingTimestamp parses a date-only field (nextRenewalDate,
-// nextRetryDate) as the END of that UTC day, so no access gap opens.
+// nextRetryDate) as the END of that day, so no access gap opens.
 func parseCCBillDateUsingTimestamp(dateStr string) (*time.Time, error) {
 	if strings.TrimSpace(dateStr) == "" {
 		return nil, nil
 	}
-	d, err := parseCCBillDate(dateStr)
+	d, err := ccbill.ParseDate(dateStr)
 	if err != nil {
 		return nil, err
 	}
-	combined := time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, time.UTC)
-	return &combined, nil
+	end := ccbill.DayEnd(d)
+	return &end, nil
 }
 
 // ccbillGraceCap bounds how far past the paid term end a CCBill-announced
@@ -552,20 +547,15 @@ func (s *CCBillWebhookService) settleOrderSale(ctx context.Context, attemptID uu
 	return s.OrderAttemptService.SettleOrderCCBill(ctx, attemptID, sale)
 }
 
-// ccbillEventPurchasedAt parses a CCBill event `timestamp` ("YYYY-MM-DD HH:MM:SS",
-// no tz → UTC) into the provider's transaction time; nil when absent or
-// unparseable so the payment row records now() rather than a guessed time.
+// ccbillEventPurchasedAt parses a CCBill event `timestamp` ("YYYY-MM-DD
+// HH:MM:SS") into the provider's transaction time; nil when absent or not an
+// instant, so the payment row records now() rather than a guessed time.
 func ccbillEventPurchasedAt(ts string) *time.Time {
-	ts = strings.TrimSpace(ts)
-	if ts == "" {
-		return nil
-	}
-	parsed, err := time.ParseInLocation("2006-01-02 15:04:05", ts, time.UTC)
+	parsed, err := ccbill.ParseInstant(ts)
 	if err != nil {
 		return nil
 	}
-	p := parsed.UTC()
-	return &p
+	return &parsed
 }
 
 func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
@@ -618,6 +608,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 				Data: billing.NotificationData{Source: "customer_checkout", FailureCode: failureCode, FailureReason: failureReason,
+					PSPID: billing.PSPID(db.PSPIDFromContext(ctx)), Rail: billing.RailCCBill,
 					RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod},
 			}
 			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {
@@ -975,6 +966,7 @@ func (s *CCBillWebhookService) handleUpgradeFailure(ctx context.Context) error {
 				CustomerID: identity.CustomerIDFromString(userID).UUID(),
 				EventType:  models.NotificationPaymentMethodFailed,
 				Data: billing.NotificationData{Source: "customer_subscription_change", FailureCode: failureCode, FailureReason: failureReason,
+					PSPID: billing.PSPID(db.PSPIDFromContext(ctx)), Rail: billing.RailCCBill,
 					RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod},
 			}
 			if err := s.recordNotices(ctx, db.NewWithPgxTx(s.Log, tx), notification); err != nil {
@@ -1214,7 +1206,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
 		}
 		if originalPayment != nil {
-			reversalID := "void:" + voidTransactionID
+			reversalID := payments.VoidTransactionID(voidTransactionID)
 			if existingVoid, lookupErr := paymentService.GetByPSPTransactionID(ctx, models.RailCCBill, reversalID); lookupErr == nil && existingVoid != nil {
 				s.Log.InfoContext(ctx, "Void reversal already recorded", "void_transaction_id", reversalID)
 			} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
@@ -1613,11 +1605,13 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 		return fmt.Errorf("missing required field: subscriptionId")
 	}
 	now := s.now().UTC()
-	var ev lifecycle.Event = lifecycle.ProviderCanceled{At: now}
-	notice := ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonRail}
+	// CCBill's own cancel is a lapse, not a confirmed death: CCBill can
+	// reactivate it (UserReactivation) or bill it again (RenewalSuccess).
+	var ev lifecycle.Event = lifecycle.Cancel{Kind: lifecycle.CancelExpired, At: now}
+	notice := ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonRail, providerStopped: true}
 	if data.Source == "failedRB" {
 		ev = lifecycle.Cancel{Kind: lifecycle.CancelExpired, Immediate: true, At: now}
-		notice.ended, notice.providerStopped = subscriptions.PremiumEndReasonExpired, true
+		notice.ended = subscriptions.PremiumEndReasonExpired
 	}
 	return s.ccbillMirrorEvent(ctx, data.SubscriptionID, func(sub *models.Subscription) lifecycle.Event {
 		if sub.Status != models.StatusCanceled && data.Reason != "" {
@@ -1630,7 +1624,8 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 
 // handleExpiration mirrors CCBill expiring a membership. Under the row lock, a
 // period a renewal already extended cannot expire; a renewal that lands after
-// the expiry restores it through RenewalSuccess.
+// the expiry restores it through RenewalSuccess. An expiry names no cause, so
+// its notice is access_ended: a failed rebill is the earlier failedRB cancel.
 func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 	var data CCBillExpirationEvent
 	if err := json.Unmarshal(s.Data.EventBody, &data); err != nil {
@@ -1642,6 +1637,6 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			s.Log.WarnContext(ctx, "Ignoring CCBill expiration inside a paid period", "subscription_id", sub.ID, "current_period_ends_at", sub.CurrentPeriodEndsAt)
 			return nil
 		}
-		return lifecycle.ProviderCanceled{At: now}
-	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonExpired})
+		return lifecycle.Cancel{Kind: lifecycle.CancelExpired, At: now}
+	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonAccessEnded, providerStopped: true})
 }

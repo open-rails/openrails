@@ -1,0 +1,8 @@
+We charged {{.Event.Amount}} for your usage.
+
+{{with .Event.OrderNumber}}Order: {{.}}
+{{end}}Amount paid: {{.Event.Amount}}
+Date: {{.Event.OccurredAt}}
+{{with .Merchant.StatementDescriptor}}
+The charge appears on your statement as {{.}}.
+{{end}}

@@ -81,6 +81,9 @@ const (
 	ResolvedFindings = 366 * Day
 	// ReleasedParks keeps a released park 90 days past its release.
 	ReleasedParks = 90 * Day
+	// CustomerMessages keeps a customer message's delivery record two years,
+	// the evidence a dispute response cites.
+	CustomerMessages = 731 * Day
 )
 
 // Days is a period as the whole days the sweep statements take.
@@ -153,6 +156,7 @@ func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time
 var OutboxIntentTypes = []string{
 	"nmi_delete_subscription",
 	"stripe_cancel_subscription",
+	"stripe_resume_subscription",
 	"ccbill_cancel_subscription",
 	"nmi_payment_method_update",
 	"nmi_payment_source_update",

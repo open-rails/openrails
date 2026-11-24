@@ -2,6 +2,8 @@ module github.com/open-rails/openrails/server
 
 go 1.26.10
 
+toolchain go1.26.11
+
 // The root module at the same release; scripts/release pins it.
 require github.com/open-rails/openrails v0.282.0
 
@@ -18,7 +20,7 @@ require (
 	github.com/knadh/koanf/providers/env v1.1.0
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.2
-	github.com/open-rails/authkit v1.43.0
+	github.com/open-rails/authkit v1.53.0
 	github.com/open-rails/helpers v1.21.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/riverqueue/river v0.49.0

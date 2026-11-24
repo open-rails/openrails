@@ -59,7 +59,7 @@ and updates go through `write` (`UpdateCustomerContact`).
 - Newest wins: `directory_updated_at` holds the directory's date
   (`meta.lastModified`, else arrival). A POST or PUT older than it keeps the stored
   values (`newer`). A PATCH is dated by its arrival.
-- `DELETE /Users/{id}` clears the values and `provisioned_at`, keeps the row and dates it by its arrival, so an older report cannot restore them. It also erases the customer's notification events (`EraseCustomerNotificationEvents`); billing stays. It is a destructive command (`destructive.EraseContact`, see guarantee 9).
+- `DELETE /Users/{id}` clears the values and `provisioned_at`, keeps the row and dates it by its arrival, so an older report cannot restore them. It also erases the customer's notification events (`EraseCustomerNotificationEvents`) and message log (`EraseCustomerMessages`); billing stays. It is a destructive command (`destructive.EraseContact`, see guarantee 9).
 - `userName` is unique per merchant, ignoring case, among provisioned rows
   (`customer_contacts_user_name_key`); a clash is `409 uniqueness`.
 - Bulk applies each operation alone, in order, up to `MaxOperations` (1000) and
@@ -178,10 +178,10 @@ Checks:
 - `SearchCustomerContacts` receives a LIKE pattern escaped by `likeEscaper`.
 
 ### 9. Destructive-action safeguards
-A `DELETE` erases only contact values and notification events; the customer, its ledger and subscriptions stay. Each erasure is a destructive command (`destructive.EraseContact`, run by `destructive.RunLocal`): it names the token or application that made it, spends that actor's, the merchant's and the deployment's budget (`destructive_action_limits`), and is refused `429` while a hold covers any of them. A Bulk request admits its erasures together before any operation runs (`admitErasures`): over a budget it applies nothing and opens a hold. The command key carries the User's `provisioned_at`, so erasing a User provisioned again is a new command. Erasures do not read the convergence kill switch, which governs automated cancels and provider deletes and is off on a fresh deployment.
+A `DELETE` erases only contact values, notification events and the message log; the customer, its ledger and subscriptions stay. Each erasure is a destructive command (`destructive.EraseContact`, run by `destructive.RunLocal`): it names the token or application that made it, spends that actor's, the merchant's and the deployment's budget (`destructive_action_limits`), and is refused `429` while a hold covers any of them. A Bulk request admits its erasures together before any operation runs (`admitErasures`): over a budget it applies nothing and opens a hold. The command key carries the User's `provisioned_at`, so erasing a User provisioned again is a new command. Erasures do not read the convergence kill switch, which governs automated cancels and provider deletes and is off on a fresh deployment.
 
 Checks:
-- `deleteUser` writes only `customer_contacts` and `notification_events`, inside `destructive.RunLocal`.
+- `deleteUser` writes only `customer_contacts`, `notification_events` and `customer_messages`, inside `destructive.RunLocal`.
 - OR-J07-S08: an erasure records `erase_contact` with the token as its actor; a Bulk over the actor's budget erases nothing and opens an actor hold; the held token's next erasure is `429`; another application's erasure runs and names it.
 
 ## Tests

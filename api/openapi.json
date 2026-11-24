@@ -1611,6 +1611,7 @@
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "catalog_revision_conflict",
+          "merchant_unit_unsupported",
           "price_not_sellable",
           "product_not_found",
           "product_tier_group_conflict",
@@ -2256,7 +2257,7 @@
           "catalog"
         ],
         "operationId": "DeleteProduct",
-        "description": "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and creating its key again revives it. A product a purchase, subscription, grant, access, purchase, migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code product_in_use): archive it with UpdateProduct instead.",
+        "description": "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and creating its key again revives it. A product a purchase, subscription, grant, access, purchase, migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code product_in_use): archive it with UpdateProduct instead. A stale ExpectedRevision is refused with revision_mismatch.",
         "parameters": [
           {
             "name": "id",
@@ -2264,6 +2265,13 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "expected_revision",
+            "in": "query",
+            "schema": {
+              "type": "integer"
             }
           },
           {
@@ -2297,10 +2305,12 @@
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "product_in_use",
-          "product_not_found"
+          "product_not_found",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -2359,6 +2369,7 @@
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
+          "merchant_unit_unsupported",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -3369,6 +3380,7 @@
           "default_payment_method_required",
           "invalid_param",
           "payment_method_stale",
+          "provider_writes_disabled",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
@@ -4225,6 +4237,7 @@
           "default_payment_method_required",
           "invalid_param",
           "payment_method_stale",
+          "provider_writes_disabled",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
@@ -5287,7 +5300,7 @@
           "admin"
         ],
         "operationId": "CreateProductAccess",
-        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. A retry with idempotencyKey replays the first answer; with none, OpenRails names the batch itself.",
+        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. idempotencyKey is required: a retry with it replays the first answer and grants nothing again.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5343,6 +5356,7 @@
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "authentication_required",
+          "idempotency_key_required",
           "idempotency_key_reused",
           "invalid_param",
           "resource_not_found",
@@ -5813,6 +5827,7 @@
           "currency_unsupported",
           "idempotency_key_reused",
           "invalid_param",
+          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6180,6 +6195,7 @@
           "currency_unsupported",
           "invalid_cursor",
           "invalid_customer_id",
+          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6249,6 +6265,7 @@
         "x-openrails-errors": [
           "currency_unsupported",
           "invalid_customer_id",
+          "merchant_unit_unsupported",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -6413,7 +6430,8 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "currency_unsupported",
-          "invalid_cursor"
+          "invalid_cursor",
+          "merchant_unit_unsupported"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -9203,6 +9221,8 @@
           "card_declined",
           "card_not_saved",
           "card_requires_https",
+          "idempotency_key_in_use",
+          "idempotency_key_reused",
           "invalid_param",
           "payment_duplicate_refused",
           "payment_method_stale",
@@ -9858,6 +9878,7 @@
           "psp_environment_refused",
           "psp_exists",
           "psp_key_taken",
+          "psp_probe_limited",
           "revision_mismatch",
           "service_unavailable"
         ],
@@ -9992,6 +10013,7 @@
           "psp_credentials_rejected",
           "psp_last_active",
           "psp_not_found",
+          "psp_probe_limited",
           "revision_mismatch",
           "service_unavailable"
         ],
@@ -10236,11 +10258,139 @@
           "charge_psp_incompatible",
           "charge_psp_unknown",
           "invalid_param",
+          "merchant_unit_unsupported",
           "platform_vault_mixed_class",
           "platform_vault_unavailable",
           "platform_vault_unreachable",
           "resource_conflict",
           "revision_mismatch",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/changes": {
+      "get": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "ListChanges",
+        "description": "ListChanges lists the merchant's configuration history, newest first: each change to a product, price, meter or limit and to the merchant, messages, PSP and custodian documents, with who made it and how. A credential reads \"changed\", never its value. ObjectType and ObjectID narrow it to one object, Since and Until to a time range.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "object_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "object_type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "custodian",
+                "limit",
+                "merchant",
+                "messages",
+                "meter",
+                "price",
+                "product",
+                "psp"
+              ]
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LogEntry"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -11628,6 +11778,229 @@
           "invalid_param",
           "invalid_query",
           "psp_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/admin/customers/{customer_id}/messages": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "ListCustomerMessages",
+        "description": "ListCustomerMessages lists the messages OpenRails sent a customer about its billing facts, newest first, and those it did not send and why: each one's event, status, attempts and recipient. It keeps no body.",
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomerMessage"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:customer:read",
+          "root": "root:customer:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/messages/preview": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "PreviewMessage",
+        "description": "PreviewMessage renders an event type's message from the merchant's templates over a sample customer and fact, in params.Language or the default language. params.Template, when set, is rendered in place of that language's template and not saved: a template is checked before it is saved.",
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewMessageParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "invalid_param",
+          "message_template_invalid",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/messages/test": {
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "CreateTestMessage",
+        "description": "CreateTestMessage sends one sample message, as PreviewMessage renders it, to the merchant's alert email address. It is sent to no other address, at most ten an hour.",
+        "parameters": [
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTestMessageParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestMessage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:manage",
+          "root": "root:config:manage"
+        },
+        "x-openrails-errors": [
+          "alert_email_required",
+          "invalid_param",
+          "message_send_failed",
+          "message_template_invalid",
+          "rate_limit_exceeded",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -15594,6 +15967,14 @@
           "source": {
             "type": "string"
           },
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "import",
+              "promotion"
+            ]
+          },
           "invoker": {
             "type": "string"
           },
@@ -16064,6 +16445,27 @@
           }
         }
       },
+      "CreateTestMessageParams": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "template": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageTemplate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "CreatedProvisioningToken": {
         "type": "object",
         "properties": {
@@ -16136,19 +16538,52 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "refunded_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "state": {
             "type": "string",
             "enum": [
               "active",
               "expired",
+              "pending",
+              "refunded",
               "revoked",
               "scheduled",
-              "spent",
-              "terminated"
+              "spent"
             ]
           },
-          "source_type": {
-            "type": "string"
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "import",
+              "promotion",
+              "purchase",
+              "recurring"
+            ]
+          },
+          "paid_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paid_currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_id": {
             "oneOf": [
@@ -16189,7 +16624,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "terminated_at": {
+          "revoked_at": {
             "oneOf": [
               {
                 "type": "string",
@@ -16200,7 +16635,7 @@
               }
             ]
           },
-          "termination_reason": {
+          "revoke_reason": {
             "oneOf": [
               {
                 "type": "string"
@@ -16223,15 +16658,18 @@
           "remaining_amount",
           "revoked_amount",
           "expired_amount",
+          "refunded_amount",
           "state",
-          "source_type",
+          "funding_source",
+          "paid_amount",
+          "paid_currency",
           "source_id",
           "description",
           "starts_at",
           "expires_at",
           "created_at",
-          "terminated_at",
-          "termination_reason",
+          "revoked_at",
+          "revoke_reason",
           "replayed"
         ]
       },
@@ -16529,12 +16967,19 @@
           },
           "client_country": {
             "type": "string"
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantCurrency"
+            }
           }
         },
         "required": [
           "payment",
           "merchant",
-          "client_country"
+          "client_country",
+          "currencies"
         ]
       },
       "CustomerContact": {
@@ -16689,6 +17134,109 @@
           "resets_at"
         ]
       },
+      "CustomerMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "email"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "failed",
+              "no_contact",
+              "pending",
+              "queued",
+              "rate_limited",
+              "sending",
+              "sent",
+              "test_environment"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "last_error": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "event_missing",
+                  "event_unreadable",
+                  "invalid_recipient",
+                  "no_sender",
+                  "refused",
+                  "render_failed",
+                  "send_failed",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipient": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sent_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "event_id",
+          "event_type",
+          "channel",
+          "status",
+          "attempts",
+          "last_error",
+          "recipient",
+          "sent_at",
+          "created_at",
+          "updated_at"
+        ]
+      },
       "CustomerSettings": {
         "type": "object",
         "properties": {
@@ -16779,6 +17327,16 @@
           "is_default": {
             "type": "boolean"
           },
+          "profile": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DashboardProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "oneOf": [
               {
@@ -16804,6 +17362,7 @@
         "required": [
           "widgets",
           "is_default",
+          "profile",
           "updated_at",
           "updated_by"
         ]
@@ -16829,6 +17388,29 @@
           "y",
           "w",
           "h"
+        ]
+      },
+      "DashboardProfile": {
+        "type": "object",
+        "properties": {
+          "subscriptions": {
+            "type": "boolean"
+          },
+          "card_payments": {
+            "type": "boolean"
+          },
+          "usage": {
+            "type": "boolean"
+          },
+          "credits": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "subscriptions",
+          "card_payments",
+          "usage",
+          "credits"
         ]
       },
       "DashboardWidget": {
@@ -17748,6 +18330,7 @@
             "enum": [
               "admission_captured",
               "admission_not_found",
+              "alert_email_required",
               "already_owned",
               "application_required",
               "as_of_required",
@@ -17824,7 +18407,10 @@
               "limit_not_found",
               "merchant_config_read_only",
               "merchant_mismatch",
+              "merchant_unit_unsupported",
               "merchant_unresolved",
+              "message_send_failed",
+              "message_template_invalid",
               "meter_in_use",
               "meter_rate_card_conflict",
               "method_not_allowed",
@@ -17893,6 +18479,7 @@
               "psp_key_taken",
               "psp_last_active",
               "psp_not_found",
+              "psp_probe_limited",
               "purchase_review_resolved",
               "quantity_not_allowed",
               "rate_card_product_not_found",
@@ -19200,6 +19787,121 @@
           }
         }
       },
+      "LogEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "string",
+            "enum": [
+              "file",
+              "system",
+              "vault"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "api",
+              "catalog_apply",
+              "cli",
+              "console",
+              "customer",
+              "intent",
+              "job",
+              "provider_read",
+              "reload",
+              "webhook"
+            ]
+          },
+          "object_type": {
+            "type": "string",
+            "enum": [
+              "custodian",
+              "limit",
+              "merchant",
+              "messages",
+              "meter",
+              "price",
+              "product",
+              "psp"
+            ]
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "archive",
+              "create",
+              "delete",
+              "key_add",
+              "key_remove",
+              "key_rename",
+              "unarchive",
+              "update"
+            ]
+          },
+          "changes": {
+            "oneOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "actor",
+          "source",
+          "object_type",
+          "object_id",
+          "action",
+          "changes",
+          "reason",
+          "request_id",
+          "operation_id"
+        ]
+      },
       "LowBalanceLine": {
         "type": "object",
         "properties": {
@@ -19468,14 +20170,6 @@
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
           },
-          "collection_threshold": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "monthly_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "billing_period_boundary": {
             "type": "string"
           },
@@ -19495,10 +20189,6 @@
           },
           "arrears_grace_days": {
             "type": "integer"
-          },
-          "arrears_delinquency_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
           },
           "psp_routing": {
             "type": "array",
@@ -19545,6 +20235,12 @@
               "$ref": "#/components/schemas/BudgetWindow"
             }
           },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantCurrency"
+            }
+          },
           "platform_vault": {
             "$ref": "#/components/schemas/PlatformVaultState"
           }
@@ -19553,6 +20249,28 @@
           "revision",
           "display_name",
           "platform_vault"
+        ]
+      },
+      "MerchantCurrency": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "scale": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "scale"
         ]
       },
       "MerchantProfile": {
@@ -19580,6 +20298,61 @@
             "type": "string"
           },
           "statement_descriptor": {
+            "type": "string"
+          }
+        }
+      },
+      "MessagePreview": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "text": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "html": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "event_type",
+          "language",
+          "subject",
+          "text",
+          "html"
+        ]
+      },
+      "MessageTemplate": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "text": {
             "type": "string"
           }
         }
@@ -19839,6 +20612,18 @@
           "unit": {
             "type": "string"
           },
+          "group": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "thresholds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsThreshold"
+            }
+          },
           "description": {
             "type": "string"
           },
@@ -19851,6 +20636,15 @@
               "type": "string"
             }
           },
+          "dim_values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
           "money": {
             "type": "boolean"
           }
@@ -19859,6 +20653,9 @@
           "name",
           "class",
           "unit",
+          "group",
+          "direction",
+          "thresholds",
           "description",
           "formula",
           "dims"
@@ -20003,6 +20800,21 @@
           "examples",
           "limits",
           "query_shape"
+        ]
+      },
+      "MetricsThreshold": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
         ]
       },
       "MyOrderPayURLParams": {
@@ -22788,6 +23600,27 @@
           "available"
         ]
       },
+      "PreviewMessageParams": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "template": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageTemplate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "PreviewMyOrderParams": {
         "type": "object",
         "properties": {
@@ -23730,6 +24563,7 @@
             "enum": [
               "admission_captured",
               "admission_not_found",
+              "alert_email_required",
               "already_owned",
               "application_required",
               "as_of_required",
@@ -23806,7 +24640,10 @@
               "limit_not_found",
               "merchant_config_read_only",
               "merchant_mismatch",
+              "merchant_unit_unsupported",
               "merchant_unresolved",
+              "message_send_failed",
+              "message_template_invalid",
               "meter_in_use",
               "meter_rate_card_conflict",
               "method_not_allowed",
@@ -23875,6 +24712,7 @@
               "psp_key_taken",
               "psp_last_active",
               "psp_not_found",
+              "psp_probe_limited",
               "purchase_review_resolved",
               "quantity_not_allowed",
               "rate_card_product_not_found",
@@ -26302,6 +27140,21 @@
           "limits"
         ]
       },
+      "TestMessage": {
+        "type": "object",
+        "properties": {
+          "recipient": {
+            "type": "string"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessagePreview"
+          }
+        },
+        "required": [
+          "recipient",
+          "message"
+        ]
+      },
       "TieredPrice": {
         "type": "object",
         "properties": {
@@ -26462,14 +27315,6 @@
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
           },
-          "collection_threshold": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "monthly_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "billing_period_boundary": {
             "type": "string"
           },
@@ -26489,10 +27334,6 @@
           },
           "arrears_grace_days": {
             "type": "integer"
-          },
-          "arrears_delinquency_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
           },
           "psp_routing": {
             "type": "array",
@@ -26537,6 +27378,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BudgetWindow"
+            }
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantCurrency"
             }
           }
         }
@@ -26886,12 +27733,36 @@
           "minimum_invoice_amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "collection_threshold": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delinquency_floor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "currency",
           "credit_limit",
-          "minimum_invoice_amount"
+          "minimum_invoice_amount",
+          "collection_threshold",
+          "delinquency_floor"
         ]
       },
       "UsageBillingSettings": {
@@ -27268,6 +28139,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No admission was made under this request id."
+    },
+    "alert_email_required": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The merchant has no alert_email to send a test message to."
     },
     "already_owned": {
       "status": 409,
@@ -27649,10 +28525,25 @@
       "type": "invalid_request_error",
       "meaning": "The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed."
     },
+    "merchant_unit_unsupported": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The currency is one of the merchant's own units, which the operation does not take: it takes a currency from OpenRails' registry."
+    },
     "merchant_unresolved": {
       "status": 403,
       "type": "authorization_error",
       "meaning": "The credential is bound to no merchant here."
+    },
+    "message_send_failed": {
+      "status": 502,
+      "type": "api_error",
+      "meaning": "The email sender did not accept the message."
+    },
+    "message_template_invalid": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The message template does not render against its event type's sample data; the message says why."
     },
     "meter_in_use": {
       "status": 409,
@@ -27993,6 +28884,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "The PSP does not exist."
+    },
+    "psp_probe_limited": {
+      "status": 429,
+      "type": "rate_limit_error",
+      "meaning": "The provider refused this login twice within the hour, or it is being checked, and it locks out repeated failed logins; Retry-After says when it may be checked again."
     },
     "purchase_review_resolved": {
       "status": 409,

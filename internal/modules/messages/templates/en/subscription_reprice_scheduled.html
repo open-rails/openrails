@@ -1,0 +1,4 @@
+<p style="margin:0 0 16px;">The price of your {{with .Event.ProductName}}<strong>{{.}}</strong> {{end}}subscription is changing{{if and .Event.OldAmount .Event.NewAmount}} from <strong>{{.Event.OldAmount}}</strong> to <strong>{{.Event.NewAmount}}</strong>{{end}}{{with .Event.EffectiveAt}}, starting <strong>{{.}}</strong>{{end}}.</p>
+<p style="margin:0 0 16px;">Nothing else changes, and you don't need to do anything to keep your subscription.</p>
+<p style="margin:0 0 16px;">If you'd rather not continue, you can cancel{{if not .Links.ManageBilling}} in your account{{end}} before then.</p>
+{{with .Links.ManageBilling}}<p style="margin:0 0 16px;"><a href="{{.}}" style="display:inline-block;padding:10px 18px;background:#1f2933;color:#ffffff;text-decoration:none;border-radius:6px;">Manage your subscription</a></p>{{end}}

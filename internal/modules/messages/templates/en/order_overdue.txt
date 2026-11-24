@@ -1,0 +1,3 @@
+Your payment{{with .Event.AmountDue}} of {{.}}{{end}}{{with .Event.DueAt}} was due on {{.}} and{{end}} is now overdue.
+
+{{with .Links.Pay}}Pay it here: {{.}}{{else}}You can pay it in your account.{{end}}

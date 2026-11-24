@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/history"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/logx"
@@ -567,7 +568,7 @@ func customerIssuer(ctx context.Context, a any, v billingauth.Verified, c billin
 // customer scope is made.
 func bindCustomer(r *httprequest.Request, c billingauth.Identity, id billing.CustomerID, target billingauth.Target) {
 	pin(r, target)
-	ctx := billingauth.BindIdentity(r.Request.Context(), c)
+	ctx := history.WithRequestID(billingauth.BindIdentity(r.Request.Context(), c), httprequest.EnsureRequestID(r.Request))
 	r.Request = r.Request.WithContext(customerscope.Bind(ctx, target.MerchantID, id, billingauth.InvokerKey(c), billingauth.Interactive(c)))
 }
 
@@ -589,7 +590,8 @@ func (e *Env) staffGates(route Route) []router.Middleware {
 // bindStaff binds the admitted staff member or application at target: the
 // only place a staff identity is bound.
 func bindStaff(r *httprequest.Request, c billingauth.Identity, route Route, target billingauth.Target) {
-	r.Request = r.Request.WithContext(billingauth.BindStaff(r.Request.Context(), billingauth.Staff{Identity: c, Route: route.Key(), Merchant: target.MerchantID}))
+	ctx := billingauth.BindStaff(r.Request.Context(), billingauth.Staff{Identity: c, Route: route.Key(), Merchant: target.MerchantID})
+	r.Request = r.Request.WithContext(history.WithRequestID(ctx, httprequest.EnsureRequestID(r.Request)))
 }
 
 func (e *Env) staffCheck(route Route, a billingauth.Authenticator, pair Pair) router.Middleware {

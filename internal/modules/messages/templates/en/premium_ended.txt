@@ -1,0 +1,8 @@
+{{if eq .Event.Reason "user_cancel"}}This confirms that you canceled your subscription{{with .Event.ProductName}} to {{.}}{{end}}.{{else if eq .Event.Reason "admin"}}Your subscription{{with .Event.ProductName}} to {{.}}{{end}} was canceled by {{default "us" .Merchant.Name}}.{{else if eq .Event.Reason "expired"}}We couldn't take your renewal payment, so your subscription{{with .Event.ProductName}} to {{.}}{{end}} has ended.{{else if eq .Event.Reason "non_recoverable"}}Your bank told us your card can no longer be charged, so your subscription{{with .Event.ProductName}} to {{.}}{{end}} has ended.{{else}}Your subscription{{with .Event.ProductName}} to {{.}}{{end}} has ended.{{end}}
+
+{{with .Event.EndedAt}}Your access ended on {{.}}. {{end}}{{if or (eq .Event.Reason "user_cancel") (eq .Event.Reason "admin") (eq .Event.Reason "expired") (eq .Event.Reason "non_recoverable")}}You won't be charged again.{{end}}
+{{if eq .Event.Reason "admin"}}{{with .Merchant.SupportURL}}
+If you didn't expect this, please contact us: {{.}}
+{{end}}{{else}}{{with .Links.Resubscribe}}
+We'd love to have you back. Subscribe again any time: {{.}}
+{{end}}{{end}}

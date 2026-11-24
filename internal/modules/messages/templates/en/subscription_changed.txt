@@ -1,0 +1,4 @@
+As you asked, your subscription has changed{{with .Event.ToProductName}} to {{.}}{{end}}{{with .Event.Quantity}}, with {{.}} seats{{end}}{{with .Event.EffectiveAt}}, from {{.}}{{end}}.{{with .Event.Amount}} You were charged {{.}} for the change.{{end}}
+{{with .Links.ManageBilling}}
+Manage your subscription: {{.}}
+{{end}}
