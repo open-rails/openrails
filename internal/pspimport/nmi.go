@@ -163,13 +163,23 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	return staged{kind: billing.PSPImportSubscription, ref: ref, customerRef: vault, occurredAt: data.StartedAt, facts: f, data: data, stated: stated}, nil
 }
 
-func (s *nmiSource) history(ctx context.Context, since, until time.Time) ([]staged, error) {
-	txns, err := reconcile.NMITransactions(ctx, s.client, since, until)
+// history reads the transactions NMI last changed in the window, as NMI
+// selects them: one settled, refunded or voided later is read in a later
+// window, and the last reads through now, keeping what predates the pull.
+func (s *nmiSource) history(ctx context.Context, since, until time.Time, last bool) ([]staged, error) {
+	through := until
+	if last {
+		through = time.Time{}
+	}
+	txns, err := reconcile.NMIChangedTransactions(ctx, s.client, since, through, until)
 	if err != nil {
 		return nil, fmt.Errorf("nmi transactions: %w", err)
 	}
 	var out []staged
 	for _, t := range txns {
+		if t.OccurredAt.After(until) {
+			continue
+		}
 		var typ string
 		switch t.Type {
 		case reconcile.TransactionTypeSale:

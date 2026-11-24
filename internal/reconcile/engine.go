@@ -117,6 +117,11 @@ type RunParams struct {
 	// disputes are diffed. It proves no coverage and resolves only reversal
 	// findings it read again.
 	Reversals bool
+	// TransactionsOnly reads the window's transactions without the roster
+	// (FetchParams.TransactionsOnly).
+	TransactionsOnly bool
+	// Chain places the window in a refresh's chain of windows to its horizon.
+	Chain Chain
 }
 
 // LocalMutationPolicy limits a pull's local mirror writes by mutation class.
@@ -305,7 +310,7 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	runID := uuid.Must(uuid.NewV7())
 	summary := &RunSummary{Mode: params.Mode, Providers: map[string]*ProviderReport{}}
 	result := &RunResult{RunID: runID, Mode: params.Mode, Summary: summary}
-	var providerErrs []string
+	var providerErrs []error
 
 	for _, p := range providers {
 		rep, records, planned, applied, perr := e.runProvider(ctx, runID, p, params)
@@ -315,7 +320,7 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		result.AppliedChanges = append(result.AppliedChanges, applied...)
 		if perr != nil {
 			rep.Error = perr.Error()
-			providerErrs = append(providerErrs, fmt.Sprintf("%s: %v", p, perr))
+			providerErrs = append(providerErrs, fmt.Errorf("%s: %w", p, perr))
 			e.Log.ErrorContext(ctx, "reconcile: provider run failed", logx.Err(perr), "provider", p)
 		}
 		summary.Totals.Findings += rep.NewFindings + rep.UpdatedFindings
@@ -325,15 +330,10 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 		summary.Totals.AutoFixed += rep.AutoFixed
 	}
 
-	status := "completed"
-	runErr := ""
+	result.Status = "completed"
 	if len(providerErrs) > 0 {
-		status = "failed"
-		runErr = strings.Join(providerErrs, "; ")
-	}
-	result.Status = status
-	if runErr != "" {
-		return result, fmt.Errorf("reconcile run %s finished with provider errors: %s", runID, runErr)
+		result.Status = "failed"
+		return result, fmt.Errorf("reconcile run %s finished with provider errors: %w", runID, errors.Join(providerErrs...))
 	}
 	return result, nil
 }
@@ -437,6 +437,8 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		AccountID:               binding.AccountID,
 		Reversals:               params.Reversals,
 		SkipSolanaPlanDiscovery: params.SkipSolanaPlanDiscovery,
+		TransactionsOnly:        params.TransactionsOnly,
+		Chain:                   params.Chain,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)

@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
@@ -48,7 +49,11 @@ type Importer struct {
 	Objects *providerobjects.Observer
 	// CCBillDataLinkURL points DataLink at a loopback fake (sandbox runs).
 	CCBillDataLinkURL string
-	Directory         identity.Directory
+	// DataLinkPacing paces live CCBill accounts' DataLink requests.
+	DataLinkPacing ccbill.Pacing
+	// WireDataLink adjusts each DataLink client a pull builds (test seam).
+	WireDataLink func(*ccbill.DataLinkClient)
+	Directory    identity.Directory
 	// Proposals approves an applied import's corrections.
 	Proposals *proposals.Executor
 	Clock     clockwork.Clock
@@ -94,6 +99,11 @@ const JobQueue = "psp_import"
 func Transient(err error) bool {
 	return transient.Is(err) || errors.Is(err, merchantdocs.ErrUnavailable)
 }
+
+// Paced reports how long a step waits for its PSP's next request slot (a live
+// CCBill account's DataLink answers once an hour): not a failure, and the
+// step resumes where it stopped.
+func Paced(err error) (time.Duration, bool) { return ccbill.PacedFor(err) }
 
 // RetryCap is the longest wait between two attempts of a step.
 const RetryCap = time.Hour

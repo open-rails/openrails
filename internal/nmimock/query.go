@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -65,8 +67,8 @@ type xmlTransaction struct {
 	Email      string `xml:"email"`
 	Currency   string `xml:"currency"`
 	// MDF is merchant-defined field 20, present when the transaction carries one.
-	MDF    []xmlMDF  `xml:"merchant_defined_field"`
-	Action xmlAction `xml:"action"`
+	MDF     []xmlMDF    `xml:"merchant_defined_field"`
+	Actions []xmlAction `xml:"action"`
 }
 
 type xmlMDF struct {
@@ -97,7 +99,7 @@ func cardTransaction(id, condition, order, vault, currency string, c Card, a xml
 		a.NetworkTokenUsed = "1"
 	}
 	return xmlTransaction{TransactionID: id, TransactionType: "cc", Condition: condition, OrderID: order, CCNumber: maskedNumber(c), CCBin: binFor(c), CCType: c.Brand,
-		AVSResponse: c.AVS, CSCResponse: c.CVV, CustomerVaultID: vault, CustomerID: vault, Currency: currency, Action: a}
+		AVSResponse: c.AVS, CSCResponse: c.CVV, CustomerVaultID: vault, CustomerID: vault, Currency: currency, Actions: []xmlAction{a}}
 }
 
 func binFor(c Card) string {
@@ -116,8 +118,10 @@ func binFor(c Card) string {
 }
 
 // search is the transaction report: every sale, validation and refund in
-// arrival order, filtered as NMI filters and paged by result_limit and
-// zero-based page_number. Like NMI's, it names no schedule.
+// arrival order (by last change with OrderByChange), filtered as NMI filters
+// and paged by result_limit and zero-based page_number. Like NMI's, it names
+// no schedule, and start_date and end_date select a transaction by its last
+// change.
 func (m *Mock) search(form url.Values) string {
 	match := func(field string, value string) bool {
 		want := form.Get(field)
@@ -139,12 +143,13 @@ func (m *Mock) search(form url.Values) string {
 	schedules := form.Get("subscription_id") != ""
 	now := m.now()
 	var rows []xmlTransaction
+	var changed []time.Time
 	add := func(t xmlTransaction, at time.Time, schedule string) {
 		if !match("order_id", t.OrderID) || !match("order_description", t.OrderDescription) || !match("transaction_id", t.TransactionID) || !match("customer_vault_id", t.CustomerVaultID) ||
-			!match("action_type", t.Action.ActionType) || !match("subscription_id", schedule) || !inRange(at) {
+			!slices.ContainsFunc(t.Actions, func(a xmlAction) bool { return match("action_type", a.ActionType) }) || !match("subscription_id", schedule) || !inRange(at) {
 			return
 		}
-		rows = append(rows, t)
+		rows, changed = append(rows, t), append(changed, at)
 	}
 	for _, s := range m.sales {
 		if s.Hidden || now.Sub(s.At) < m.opts.IndexLag {
@@ -170,12 +175,19 @@ func (m *Mock) search(form url.Values) string {
 		txn.PartialPaymentBalance = s.PartialBalance
 		txn.MDF = bookField(s.Book)
 		if s.Declined != "" && s.IssuerCode != "" {
-			txn.Action.ProcessorResponseCode, txn.Action.ProcessorResponseText = s.IssuerCode, "DECLINE"
+			txn.Actions[0].ProcessorResponseCode, txn.Actions[0].ProcessorResponseText = s.IssuerCode, "DECLINE"
+		}
+		// Later actions are NMI's own lines after the sale's.
+		if !s.SettledAt.IsZero() {
+			txn.Actions = append(txn.Actions, xmlAction{Amount: s.Amount, ActionType: "settle", Date: s.SettledAt.UTC().Format(queryTime), Success: "1", Source: "internal", ResponseText: "ACCEPTED", ResponseCode: "100"})
+		}
+		if !s.VoidedAt.IsZero() {
+			txn.Actions = append(txn.Actions, xmlAction{Amount: s.Amount, ActionType: "void", Date: s.VoidedAt.UTC().Format(queryTime), Success: "1", Source: "api", ResponseText: "Transaction Void Successful", ResponseCode: "100"})
 		}
 		if v := m.vaults[s.Vault]; v != nil {
 			txn.Email = v.Email
 		}
-		add(txn, s.At, s.ScheduleID)
+		add(txn, s.changed(), s.ScheduleID)
 	}
 	for _, r := range m.refunds {
 		s := r.Sale
@@ -194,6 +206,18 @@ func (m *Mock) search(form url.Values) string {
 			add(cardTransaction(v.TransactionID, condition, v.Form.Get("orderid"), v.Vault, "USD", v.Card, xmlAction{Amount: "0.00", ActionType: "validate", Date: v.At.UTC().Format(queryTime),
 				Success: success, Source: "api", ResponseText: text, ResponseCode: code}), v.At, "")
 		}
+	}
+	if m.opts.OrderByChange {
+		order := make([]int, len(rows))
+		for i := range order {
+			order[i] = i
+		}
+		sort.SliceStable(order, func(a, b int) bool { return changed[order[a]].Before(changed[order[b]]) })
+		sorted := make([]xmlTransaction, len(rows))
+		for i, j := range order {
+			sorted[i] = rows[j]
+		}
+		rows = sorted
 	}
 	limit, _ := strconv.Atoi(form.Get("result_limit"))
 	page, _ := strconv.Atoi(form.Get("page_number"))

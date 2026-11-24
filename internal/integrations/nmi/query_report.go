@@ -102,6 +102,106 @@ func ParseTransactionReport(raw string) (TransactionReport, error) {
 	return report, nil
 }
 
+// PageTransactions reads every page of filter's transaction report, oldest
+// first (result_order=standard), handing each to page as it arrives; a
+// transaction may be handed twice. NMI selects by last change, which only
+// moves later. A report with an end_date only loses transactions while it is
+// read, and those after a lost one shift a place toward the first page: its
+// pages are read last to first, the ones still to read below, so a
+// transaction that stays is never skipped at a page boundary. One with no end
+// is read so through asOf, the read's own start on NMI's clock, then the
+// short tail after it first to last, which only gains transactions, each at
+// its own place. UNCONFIRMED: NMI's guide orders a report "oldest to newest"
+// without naming the date; for the tail, the transaction's own, which a
+// change does not move, is assumed. A zero asOf reads all of an open report
+// first to last.
+func (c *NMIClient) PageTransactions(ctx context.Context, filter QueryFilter, asOf time.Time, page func([]QueryTransaction) error) error {
+	if filter.EndDate == "" && !asOf.IsZero() {
+		end := asOf.UTC().Truncate(time.Second)
+		bounded, tail := filter, filter
+		bounded.EndDate = end.Format(QueryTimeFormat)
+		tail.StartDate = end.Add(time.Second).Format(QueryTimeFormat)
+		if start, err := time.Parse(QueryTimeFormat, filter.StartDate); err != nil || !start.After(end) {
+			if err := c.PageTransactions(ctx, bounded, time.Time{}, page); err != nil {
+				return err
+			}
+		}
+		return c.PageTransactions(ctx, tail, time.Time{}, page)
+	}
+	filter.ResultLimit, filter.ResultOrder = QueryPageLimit, "standard"
+	firsts := map[string]int{}
+	read := func(n int) (int, error) {
+		filter.PageNumber = n
+		report, err := c.TransactionReport(ctx, filter)
+		if err != nil {
+			return 0, fmt.Errorf("nmi transactions, page %d: %w", n, err)
+		}
+		if len(report.Transactions) > 0 {
+			first := strings.TrimSpace(report.Transactions[0].TransactionID)
+			if at, seen := firsts[first]; seen && at != n {
+				return 0, fmt.Errorf("nmi transaction pagination repeated page starting at transaction_id=%s; refusing incomplete snapshot", first)
+			}
+			firsts[first] = n
+		}
+		return len(report.Transactions), page(report.Transactions)
+	}
+	got, err := read(0)
+	if err != nil || got < QueryPageLimit {
+		return err
+	}
+	if filter.EndDate == "" {
+		for n := 1; ; n++ {
+			if got, err = read(n); err != nil || got < QueryPageLimit {
+				return err
+			}
+		}
+	}
+	last, err := lastPage(read)
+	if err != nil {
+		return err
+	}
+	for n := last; n >= 0; n-- {
+		if _, err := read(n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// lastPage finds the last page holding a transaction, page 0 being full:
+// doubling to a page that is not, then halving back to the last.
+func lastPage(read func(int) (int, error)) (int, error) {
+	full, probe := 0, 1
+	for {
+		got, err := read(probe)
+		switch {
+		case err != nil:
+			return 0, err
+		case got == QueryPageLimit:
+			full, probe = probe, 2*probe
+			continue
+		case got > 0:
+			return probe, nil
+		}
+		break
+	}
+	for empty := probe; empty-full > 1; {
+		mid := full + (empty-full)/2
+		got, err := read(mid)
+		switch {
+		case err != nil:
+			return 0, err
+		case got == 0:
+			empty = mid
+		case got < QueryPageLimit:
+			return mid, nil
+		default:
+			full = mid
+		}
+	}
+	return full, nil
+}
+
 // TransactionReport reads one page of the transaction report.
 func (c *NMIClient) TransactionReport(ctx context.Context, filter QueryFilter) (TransactionReport, error) {
 	raw, err := c.SearchTransactions(ctx, filter)

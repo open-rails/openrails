@@ -32,6 +32,8 @@ type QueryFilter struct {
 	TransactionID string
 	PageNumber    int
 	ResultLimit   int
+	// ResultOrder is standard (oldest first, NMI's default) or reverse.
+	ResultOrder string
 }
 
 type ManualRebillParams struct {
@@ -375,6 +377,9 @@ func (c *NMIClient) SearchTransactions(ctx context.Context, filter QueryFilter) 
 	}
 	if filter.ResultLimit > 0 {
 		values.Set("result_limit", fmt.Sprintf("%d", filter.ResultLimit))
+	}
+	if filter.ResultOrder != "" {
+		values.Set("result_order", filter.ResultOrder)
 	}
 
 	return c.sendQueryRequest(ctx, values)

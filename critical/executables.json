@@ -1351,6 +1351,51 @@
     "OR-J31-S11": [
       "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
     ],
+    "OR-J28-S09": [
+      "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
+    ],
+    "OR-J15-S73": [
+      "TestProviderTime/OR-J15-S73/prune-keeps-an-nmi-sale-settled-refunded-or-voided-after-its-window"
+    ],
+    "OR-J38-S44": [
+      "TestProviderTime/OR-J38-S44/a-ccbill-refresh-reads-datalink-a-day-at-a-time-and-loses-nothing"
+    ],
+    "OR-J38-S45": [
+      "TestProviderTime/OR-J38-S45/a-live-ccbill-refresh-reads-a-day-an-hour-and-records-every-rebill"
+    ],
+    "OR-J38-S46": [
+      "TestProviderTime/OR-J38-S46/a-live-ccbill-import-reads-a-day-an-hour-and-resumes-each-time"
+    ],
+    "OR-J38-S47": [
+      "TestProviderTime/OR-J38-S47/a-missed-ccbill-cancellation-read-on-a-paced-day-keeps-the-paid-period"
+    ],
+    "OR-J28-S11": [
+      "TestProviderTime/OR-J28-S11/a-ccbill-account-another-merchant-declares-is-refused-before-a-probe"
+    ],
+    "OR-J28-S10": [
+      "TestProviderTime/OR-J28-S10/an-nmi-delivery-dated-before-its-replay-record-is-kept-applies-nothing"
+    ],
+    "OR-J28-S12": [
+      "TestProviderTime/OR-J28-S12/an-nmi-chargeback-of-a-sale-120-days-old-is-applied"
+    ],
+    "OR-J38-S73": [
+      "TestProviderTime/OR-J38-S73/a-ccbill-status-read-answering-1-keeps-access-to-ccbills-expiry"
+    ],
+    "OR-J38-S74": [
+      "TestProviderTime/OR-J38-S74/a-ccbill-rebill-and-cancellation-read-together-keep-the-rebilled-period"
+    ],
+    "OR-J15-S74": [
+      "TestProviderTime/OR-J15-S74/an-nmi-refresh-backlog-is-read-a-link-at-a-time-by-last-change"
+    ],
+    "OR-J28-S13": [
+      "TestProviderTime/OR-J28-S13/a-ccbill-account-archived-or-in-the-other-money-class-is-declarable-by-another-merchant"
+    ],
+    "OR-J28-S14": [
+      "TestProviderTime/OR-J28-S14/a-ccbill-datalink-login-ccbill-refuses-is-not-declared"
+    ],
+    "OR-J28-S15": [
+      "TestProviderTime/OR-J28-S15/a-strangers-refused-ccbill-logins-hold-only-their-own-login"
+    ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
     ],
@@ -1436,6 +1481,9 @@
     ],
     "OR-J39-S25": [
       "TestCustomerMessages/OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt"
+    ],
+    "OR-J28-S16": [
+      "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
     ],
     "OR-J53-S01": [
       "TestReporting/OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement"

@@ -9876,6 +9876,7 @@
           "psp_environment_refused",
           "psp_exists",
           "psp_key_taken",
+          "psp_probe_limited",
           "revision_mismatch",
           "service_unavailable"
         ],
@@ -10010,6 +10011,7 @@
           "psp_credentials_rejected",
           "psp_last_active",
           "psp_not_found",
+          "psp_probe_limited",
           "revision_mismatch",
           "service_unavailable"
         ],
@@ -18431,6 +18433,7 @@
               "psp_key_taken",
               "psp_last_active",
               "psp_not_found",
+              "psp_probe_limited",
               "purchase_review_resolved",
               "quantity_not_allowed",
               "rate_card_product_not_found",
@@ -24675,6 +24678,7 @@
               "psp_key_taken",
               "psp_last_active",
               "psp_not_found",
+              "psp_probe_limited",
               "purchase_review_resolved",
               "quantity_not_allowed",
               "rate_card_product_not_found",
@@ -28834,6 +28838,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "The PSP does not exist."
+    },
+    "psp_probe_limited": {
+      "status": 429,
+      "type": "rate_limit_error",
+      "meaning": "The provider refused this login twice within the hour, or it is being checked, and it locks out repeated failed logins; Retry-After says when it may be checked again."
     },
     "purchase_review_resolved": {
       "status": 409,

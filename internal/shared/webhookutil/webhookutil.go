@@ -200,22 +200,9 @@ func VerifyStripeSignature(secret, header string, body []byte, tolerance time.Du
 	return sigverify.VerifyStripe(secret, header, body, tolerance)
 }
 
-// NMISignatureTolerance is the replay window the public ingestion path enforces
-// on NMI webhook timestamps.
-const NMISignatureTolerance = 5 * time.Minute
-
-// VerifyNMISignature authenticates an NMI webhook and rejects timestamps outside
-// NMISignatureTolerance (replay protection for the public ingestion endpoint).
+// VerifyNMISignature authenticates an NMI webhook's HMAC.
 func VerifyNMISignature(secret, header string, body []byte) error {
-	return VerifyNMISignatureWithTolerance(secret, header, body, NMISignatureTolerance)
-}
-
-// VerifyNMISignatureWithTolerance authenticates an NMI webhook's HMAC and, when
-// tolerance > 0, rejects timestamps outside that window. A non-positive
-// tolerance skips the window (queued re-verify may run long after delivery)
-// but still checks the HMAC.
-func VerifyNMISignatureWithTolerance(secret, header string, body []byte, tolerance time.Duration) error {
-	return sigverify.VerifyNMI(secret, header, body, tolerance)
+	return sigverify.VerifyNMI(secret, header, body)
 }
 
 func ValidateNMISignature(secret string, body []byte, phpHeader string) (string, error) {

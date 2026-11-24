@@ -364,6 +364,7 @@
       "const CodeEventCursorExpired ErrorCode = \"event_cursor_expired\"",
       "const CodeLimitNotFound ErrorCode = \"limit_not_found\"",
       "const CodePSPImportInProgress ErrorCode = \"psp_import_in_progress\"",
+      "const CodePSPProbeLimited ErrorCode = \"psp_probe_limited\"",
       "const CodePaymentMethodPSPMismatch ErrorCode = \"payment_method_psp_mismatch\"",
       "const CodeProductInUse ErrorCode = \"product_in_use\"",
       "const CodeRevisionMismatch ErrorCode = \"revision_mismatch\"",
@@ -1953,6 +1954,7 @@
     ],
     "internal/river": [
       "type CleanupExpiredDataArgs struct {\n\tAfter *uuid.UUID `json:\"after,omitempty\"`\n}",
+      "type PacedProviderRefreshArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tPSPID      uuid.UUID `json:\"psp_id\" river:\"unique\"`\n}",
       "type PassReport struct {\n\tOverdue []string `json:\"overdue\"`\n}",
       "type ProviderRefreshRequestArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
       "type StripeWebhookReconcileArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id,omitempty\"`\n\tAccountID  string    `json:\"account_id,omitempty\"`\n}",
@@ -4380,7 +4382,6 @@
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
-      "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
@@ -4509,6 +4510,7 @@
     "internal/pspimport/importer.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
+      "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -4823,6 +4825,7 @@
     "internal/river/jobs_provider_refresh.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
       "billing": "github.com/open-rails/openrails/billing",
+      "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",

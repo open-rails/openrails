@@ -38,13 +38,29 @@
 // Server card entry (settings.card_entry: server) vaults the card with
 // customer_vault=add_customer and keeps only brand, last four and expiry; it
 // puts the receiving servers in SAQ D scope and is refused on other rails and
-// on custodian-held cards. Webhooks verify HMAC-SHA256 over "<t>.<body>" from
-// Webhook-Signature with a 5-minute window; subscription events only wake
+// on custodian-held cards. Webhooks verify HMAC-SHA256 over "<nonce>.<body>"
+// from Webhook-Signature "t=<nonce>,s=<hex>". The nonce is not a time, so no
+// replay window applies: a replay or retry carries its event_id, which is
+// applied once while its record is kept (90 days); a transaction event dated
+// before that is refused as a replay and raises life.webhook.replay_refused.
+// A chargeback batch is not dated (its entries carry their sales' dates); each
+// chargeback is booked once, by its id. Subscription events only wake
 // convergence, which re-reads NMI. An unknown live schedule is adopted
 // through the billing import or parked (price_unmapped, customer_unlinked,
 // product_held, import_owned). Unverified schedules are read in batches of 50,
 // or in bulk above 200. nmi_history_months holds a daily read of 25 months of
 // transaction reports, the source of `openrails nmi decline-report`.
+//
+// The Query API's start_date and end_date select a transaction by its last
+// change, which a settlement, refund or void moves, not by when it was made.
+// A read of one window (`openrails prune`, a bulk verification) has no end
+// and keeps the actions dated in the window; reads of consecutive windows (a
+// refresh's backlog, an import's history, the decline history) read each by
+// last change, the last through now, and a refresh's watermark advances as
+// each completes. A read with an end loses transactions as they change, so
+// its pages are read last to first; one with none is read so through its own
+// start, then the short tail after it first to last (PageTransactions): none
+// that stays in a window is skipped at a page boundary.
 //
 // Tests use openrailstest/nmimock. Its package comment has the wiring.
 package nmi

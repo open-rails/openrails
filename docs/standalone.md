@@ -1075,12 +1075,24 @@ It answers `job_id`, `merchant_id`, `river_schema` and `queue`; `already_queued`
 is true when a refresh for that merchant is outstanding. Track the job with
 `openrails workers` or in `river_job` ([River jobs](river-jobs.md#inspect-a-running-deployment)).
 The job reads each PSP in bounded windows from its watermark
-(`billing.psp_refresh_watermarks`) to five minutes ago, NMI and Stripe with a
+(`billing.psp_refresh_watermarks`) to five minutes ago (NMI's by last change,
+the last reading through now), NMI and Stripe with a
 24-hour overlap for late indexing, and retries incomplete reads up to five
 attempts; a later request resumes from the saved watermarks. A watermark
 advances only after a complete read. Before each Stripe window a separate read
 records refunds and disputes that match existing payments, up to eight days
 back, even when the full read fails.
+
+CCBill's DataLink answers a live account once every 60 minutes. A live CCBill
+PSP's refresh is its own job, `openrails.paced_provider_refresh`, which the
+merchant's queues and which makes one DataLink request per hour: a day of transactions, advancing the watermark day by day,
+then the roster once the days are read to within two hours. A backlog catches
+up a day an hour; 90 days take about four days. A PSP import of a live account
+reads its history a day an hour the same way, its `history_through` showing how
+far it got. A request waiting for its hour, or one CCBill refuses for coming
+within it, waits and resumes; it never fails the job. The hour is kept per
+CCBill account in the abuse state (Redis), so every instance shares it; a
+sandbox account is not paced.
 
 Refresh reads run in every write mode. Overwrites and lifecycle repairs need an
 armed merchant, the kill switch on and a posture above `readonly`. Unverified
