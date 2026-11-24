@@ -20,7 +20,6 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
@@ -174,6 +173,17 @@ func disputeInquiry(t *testing.T) {
 		iw.stripe.Dispute("dp_pulled", sub, "needs_response", "chargeback", "fraudulent")
 		require.Equal(t, 1, chargebackProposals(iw.manual(t, "stripe").ID), "the escalated inquiry is")
 		require.True(t, iw.entitled(t, customerOf(iw.alice), "member:paid"), "a pull lands nothing")
+		responded := func() bool {
+			var at *time.Time
+			require.NoError(t, iw.pool.QueryRow(t.Context(), "SELECT responded_at FROM "+pgx.Identifier{iw.schema, "disputes"}.Sanitize()+
+				" WHERE merchant_id = $1 AND provider_ref = 'dp_pulled'", iw.alpha.MerchantID().UUID()).Scan(&at))
+			return at != nil
+		}
+		require.Eventually(t, func() bool { return waiting(t, iw.authorityWorld) != nil }, 20*time.Second, 50*time.Millisecond,
+			"an advisory pull's chargeback waits for the merchant to be armed")
+		require.False(t, responded())
+		armMerchant(t, iw.authorityWorld)
+		require.Eventually(t, responded, 20*time.Second, 50*time.Millisecond, "arming wakes it")
 	})
 }
 
@@ -216,6 +226,7 @@ func standing(t *testing.T, a *authorityWorld, program billing.DisputeProgram, a
 // the card and asks staff to review the customer. Replays change nothing.
 func disputeChargeback(t *testing.T) {
 	m := newDisputedMembership(t)
+	startFleet(t, m.a.world)
 	due := time.Now().Add(7 * 24 * time.Hour).UTC().Truncate(time.Second)
 	d := m.dispute("dp_chargeback", "needs_response", "chargeback", "fraudulent")
 	d["evidence_details"] = map[string]any{"due_by": due.Unix()}
@@ -243,6 +254,7 @@ func disputeChargeback(t *testing.T) {
 	canceled := subscriptionState(t, m.a, m.sub.ID, "canceled")
 	require.Equal(t, "chargeback", *canceled.CancelType)
 	require.False(t, m.entitled(t), "a chargeback ends access")
+	waitDisputeJobs(t, m.a)
 	require.Contains(t, cardStatuses(t, m.a, m.sub.CustomerID), "disputed", "the charged-back card is never charged again")
 	reviews, err := m.a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.disputes.customer_review"})
 	require.NoError(t, err)
@@ -268,6 +280,39 @@ func disputePrevented(t *testing.T) {
 		require.Equal(t, billing.DisputeClosed, dispute.Status)
 		require.Nil(t, dispute.ChargebackAt)
 		require.Zero(t, standing(t, m.a, billing.ProgramStripe, m.a.clock.Now()).Count)
+		m.notice(t, "evt_rdr_stale", "charge.dispute.updated", m.dispute("dp_rdr", "warning_needs_response", "inquiry", "subscription_canceled"))
+		dispute = disputeOf(t, m.a, m.payment)
+		require.Equal(t, billing.DisputePrevented, dispute.Kind, "a stale inquiry notice reopens nothing")
+		require.Equal(t, billing.DisputeClosed, dispute.Status)
+		require.Len(t, m.reversals(t), 1)
+	})
+	t.Run("refund-first-is-the-resolution", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		d := m.dispute("dp_rdr_late", "lost", "resolution", "subscription_canceled")
+		ch := m.charge
+		body := stripeNotice(t, "evt_rdr_refund", "refund.created", stripemock.Object{"id": "re_rdr", "object": "refund", "amount": int64(1000), "currency": "usd",
+			"charge": ch, "payment_intent": m.intent, "status": "succeeded", "reason": "fraudulent", "created": m.a.clock.Now().Unix(), "metadata": map[string]string{}})
+		status, raw := callback(t, m.a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
+		require.Equal(t, http.StatusOK, status, raw)
+		m.notice(t, "evt_rdr_after", "charge.dispute.created", d)
+		reversals := m.reversals(t)
+		require.Len(t, reversals, 1, "Stripe's refund is the resolution's")
+		require.Equal(t, "re_rdr", reversals[0].TransactionID)
+		dispute := disputeOf(t, m.a, m.payment)
+		require.Equal(t, reversals[0].ID, *dispute.ReversalPaymentID)
+		require.Equal(t, "re_rdr", absorbedRefund(t, m.a, "dp_rdr_late"))
+	})
+	t.Run("resolution-first-absorbs-the-refund", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		m.notice(t, "evt_rdr_first", "charge.dispute.created", m.dispute("dp_rdr_first", "lost", "resolution", "subscription_canceled"))
+		body := stripeNotice(t, "evt_rdr_refund_after", "refund.created", stripemock.Object{"id": "re_rdr_after", "object": "refund", "amount": int64(1000), "currency": "usd",
+			"charge": m.charge, "payment_intent": m.intent, "status": "succeeded", "reason": "fraudulent", "created": m.a.clock.Now().Unix(), "metadata": map[string]string{}})
+		for range 2 {
+			status, raw := callback(t, m.a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
+			require.Equal(t, http.StatusOK, status, raw)
+		}
+		require.Len(t, m.reversals(t), 1, "one refund, whichever arrives first")
+		require.Equal(t, "re_rdr_after", absorbedRefund(t, m.a, "dp_rdr_first"))
 	})
 	t.Run("ce3-block-books-nothing", func(t *testing.T) {
 		m := newDisputedMembership(t)
@@ -373,14 +418,15 @@ func waitDisputeJobs(t *testing.T, a *authorityWorld, keep ...rivertype.JobState
 // An actionable early fraud warning is a fraud report Visa counts; it refunds
 // the charge in full once (fraud_warning, sent to Stripe as fraudulent), ends
 // what it paid for and blocks the card, however often and in whatever events
-// the report arrives; one any event calls unactionable is not acted on. A
-// charge already in dispute is not refunded. A merchant that records reports
-// only refunds nothing; in limited mode nothing happens until provider writes
-// resume.
+// the report arrives, without waiting for the destructive switch; one any
+// event calls unactionable is not acted on. A charge already in dispute is
+// not refunded; a charge with nothing left to refund is still ended. A merchant
+// that records reports only refunds nothing. Below a full write posture the
+// response waits, raises one alerting finding, and runs when the posture is
+// raised.
 func disputeFraudWarning(t *testing.T) {
 	t.Run("refunds-by-default", func(t *testing.T) {
 		m := newDisputedMembership(t)
-		enableLifecycleMaintenance(t, m.a)
 		startFleet(t, m.a.world)
 		m.fraudWarning(t, "evt_efw_created", "radar.early_fraud_warning.created", "issfr_refund", true)
 		m.fraudWarning(t, "evt_efw_created", "radar.early_fraud_warning.created", "issfr_refund", true)
@@ -407,7 +453,6 @@ func disputeFraudWarning(t *testing.T) {
 	})
 	t.Run("a-disputed-charge-is-not-refunded", func(t *testing.T) {
 		m := newDisputedMembership(t)
-		enableLifecycleMaintenance(t, m.a)
 		startFleet(t, m.a.world)
 		m.notice(t, "evt_open_inquiry", "charge.dispute.created", m.dispute("dp_open_inquiry", "warning_needs_response", "inquiry", "fraudulent"))
 		m.fraudWarning(t, "evt_efw_disputed", "radar.early_fraud_warning.created", "issfr_disputed", true)
@@ -417,7 +462,6 @@ func disputeFraudWarning(t *testing.T) {
 	})
 	t.Run("unactionable-stays-so", func(t *testing.T) {
 		m := newDisputedMembership(t)
-		enableLifecycleMaintenance(t, m.a)
 		startFleet(t, m.a.world)
 		m.fraudWarning(t, "evt_efw_unactionable", "radar.early_fraud_warning.created", "issfr_unactionable", false)
 		m.fraudWarning(t, "evt_efw_actionable", "radar.early_fraud_warning.updated", "issfr_unactionable", true)
@@ -431,7 +475,6 @@ func disputeFraudWarning(t *testing.T) {
 			declaration.FraudWarningRefund = ptr(billing.FraudWarningRecord)
 			setCfgMerchant(&w.cfg, "alpha", declaration)
 		})
-		enableLifecycleMaintenance(t, m.a)
 		startFleet(t, m.a.world)
 		m.fraudWarning(t, "evt_efw_record", "radar.early_fraud_warning.created", "issfr_record", true)
 		waitDisputeJobs(t, m.a)
@@ -439,15 +482,41 @@ func disputeFraudWarning(t *testing.T) {
 		require.True(t, m.entitled(t))
 		require.EqualValues(t, 1, standing(t, m.a, billing.ProgramVisaVAMP, m.a.clock.Now()).Count)
 	})
-	t.Run("limited-mode-waits", func(t *testing.T) {
-		m := newDisputedMembership(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesLimited })
-		enableLifecycleMaintenance(t, m.a)
+	t.Run("a-held-response-waits-and-wakes", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		setPosture(t, m.a, "limited")
 		startFleet(t, m.a.world)
 		m.fraudWarning(t, "evt_efw_limited", "radar.early_fraud_warning.created", "issfr_limited", true)
-		waitDisputeJobs(t, m.a, rivertype.JobStateScheduled)
+		var held *billing.Finding
+		require.Eventually(t, func() bool { held = waiting(t, m.a); return held != nil }, 20*time.Second, 50*time.Millisecond,
+			"a held response is a finding")
+		require.Equal(t, "high", notifiedAt(t, m.a, held.ID), "and alerts once")
+		waitDisputeJobs(t, m.a)
 		require.Empty(t, m.reversals(t), "the refund waits with everything else")
 		require.True(t, m.entitled(t), "access stays while the refund cannot be sent")
 		require.NotContains(t, cardStatuses(t, m.a, m.sub.CustomerID), "disputed")
+		setPosture(t, m.a, "full")
+		require.Eventually(t, func() bool {
+			reversals := m.reversals(t)
+			return len(reversals) == 1 && reversals[0].Status == billing.PaymentSucceeded
+		}, 20*time.Second, 50*time.Millisecond, "a full posture wakes it")
+		require.False(t, m.entitled(t))
+		require.Eventually(t, func() bool { return waiting(t, m.a) == nil }, 20*time.Second, 50*time.Millisecond, "and resolves the finding")
+	})
+	t.Run("nothing-to-refund-still-ends", func(t *testing.T) {
+		m := newDisputedMembership(t)
+		startFleet(t, m.a.world)
+		_, err := m.a.alpha.RefundPayment(t.Context(), "efw-prior-refund", m.payment, billing.RefundPaymentParams{Full: true})
+		require.NoError(t, err)
+		m.fraudWarning(t, "evt_efw_refunded", "radar.early_fraud_warning.created", "issfr_refunded", true)
+		waitDisputeJobs(t, m.a)
+		var action string
+		require.NoError(t, m.a.pool.QueryRow(t.Context(), "SELECT action FROM "+pgx.Identifier{m.a.schema, "fraud_reports"}.Sanitize()+
+			" WHERE merchant_id = $1 AND provider_ref = 'issfr_refunded'", m.a.alpha.MerchantID().UUID()).Scan(&action))
+		require.Equal(t, "nothing_to_refund", action)
+		require.Len(t, m.reversals(t), 1, "the earlier refund only")
+		subscriptionState(t, m.a, m.sub.ID, "canceled")
+		require.Contains(t, cardStatuses(t, m.a, m.sub.CustomerID), "disputed")
 	})
 }
 
@@ -546,13 +615,17 @@ func disputeMetrics(t *testing.T) {
 	require.Equal(t, "visa", rates[0]["network"])
 	require.InDelta(t, 0.5, fraction(t, rates[0]["chargeback_rate"]), 1e-12, "two chargebacks of four visa sales")
 
+	vamp := only(t, metricTable(t, s.a.alpha, billing.QueryMetricsParams{Measures: []string{"vamp_ratio"}, Range: window}))
+	require.InDelta(t, 0.75, fraction(t, vamp["vamp_ratio"]), 1e-12, "two chargebacks and a fraud report of four visa sales")
 	schema, err := s.a.alpha.GetMetricsSchema(t.Context())
 	require.NoError(t, err)
+	lines := map[string]int{}
 	for _, m := range schema.Measures {
-		if m.Name == "chargeback_rate" {
-			require.Len(t, m.Thresholds, 5, "each network's levels")
-		}
+		lines[m.Name] = len(m.Thresholds)
 	}
+	require.Zero(t, lines["chargeback_rate"], "a chargeback rate is no program's ratio")
+	require.Equal(t, 2, lines["vamp_ratio"], "Visa's warning and excessive levels")
+	require.Equal(t, 3, lines["ecm_ratio"], "Mastercard's warning, excessive and high excessive levels")
 	board, err := s.a.alpha.GetDashboard(t.Context())
 	require.NoError(t, err)
 	programs := 0
@@ -747,7 +820,9 @@ func disputeBlockedCard(t *testing.T) {
 	onA, onB := subscribe("on-card-a", cardA), subscribe("on-card-b", cardB)
 	charges := len(m.p.effects(t))
 
+	fleet := startFleet(t, m.a.world)
 	m.notice(t, "evt_blocked_card", "charge.dispute.created", m.dispute("dp_blocked_card", "needs_response", "chargeback", "fraudulent"))
+	waitDisputeJobs(t, m.a)
 	statuses := map[billing.PaymentMethodID]billing.PaymentMethodStatus{}
 	read, err := m.a.alpha.ListPaymentMethods(t.Context(), m.sub.CustomerID, billing.PaymentMethodListParams{})
 	require.NoError(t, err)
@@ -760,7 +835,6 @@ func disputeBlockedCard(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "active", string(current.Status), "its paid period stands")
 	m.a.clock.Advance(current.CurrentPeriodEndsAt.Sub(m.a.clock.Now()))
-	fleet := startFleet(t, m.a.world)
 	runRegistered(t, fleet, "openrails.billing_pass", 2)
 	subscriptionState(t, m.a, onA, "awaiting_method")
 	renewed := subscriptionState(t, m.a, onB, "active")
@@ -779,7 +853,9 @@ func disputeChargedCardOnly(t *testing.T) {
 	cardB := saveMethod(t, m.a, m.p, m.a.aliceToken, "1111").ID
 	_, err = m.a.alpha.SetSubscriptionPaymentMethod(t.Context(), m.sub.ID, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &cardB})
 	require.NoError(t, err)
+	startFleet(t, m.a.world)
 	m.notice(t, "evt_switched_card", "charge.dispute.created", m.dispute("dp_switched_card", "needs_response", "chargeback", "fraudulent"))
+	waitDisputeJobs(t, m.a)
 	statuses := map[billing.PaymentMethodID]string{}
 	rows, err := m.a.pool.Query(t.Context(), "SELECT id, status FROM "+pgx.Identifier{m.a.schema, "payment_methods"}.Sanitize()+" WHERE merchant_id = $1 AND customer_id = $2",
 		m.a.alpha.MerchantID().UUID(), m.sub.CustomerID.UUID())
@@ -900,4 +976,47 @@ func disputeRollupRestore(t *testing.T) {
 			require.EqualValues(t, 2, st.Denominator)
 		}
 	}
+}
+
+// waiting is the open finding that a dispute response waits, if any.
+func waiting(t *testing.T, a *authorityWorld) *billing.Finding {
+	t.Helper()
+	page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.disputes.response_waiting"})
+	require.NoError(t, err)
+	for _, f := range page.Items {
+		if f.ResolvedAt == nil {
+			return &f
+		}
+	}
+	return nil
+}
+
+// setPosture stores the merchant's write posture as an operator would.
+func setPosture(t *testing.T, a *authorityWorld, mode string) {
+	t.Helper()
+	_, err := a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_write_posture"}.Sanitize()+
+		" (merchant_id, mode, reason, set_by) VALUES ($1, $2, 'operator', 'critical fixture operator') ON CONFLICT (merchant_id) DO UPDATE SET mode = EXCLUDED.mode, set_at = now()",
+		a.alpha.MerchantID().UUID(), mode)
+	require.NoError(t, err)
+}
+
+// armMerchant arms the merchant for enforcing pulls as an operator would.
+func armMerchant(t *testing.T, a *authorityWorld) {
+	t.Helper()
+	_, err := a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_destructive_policy"}.Sanitize()+
+		" (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason) VALUES ($1, true, now(), 'critical fixture operator', 'reviewed')"+
+		" ON CONFLICT (merchant_id) DO UPDATE SET enforce_armed_at = now(), destructive_actions_enabled = true", a.alpha.MerchantID().UUID())
+	require.NoError(t, err)
+}
+
+// absorbedRefund is the provider refund a prevented dispute took as its own.
+func absorbedRefund(t *testing.T, a *authorityWorld, dispute string) string {
+	t.Helper()
+	var ref *string
+	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT absorbed_refund_ref FROM "+pgx.Identifier{a.schema, "disputes"}.Sanitize()+
+		" WHERE merchant_id = $1 AND provider_ref = $2", a.alpha.MerchantID().UUID(), dispute).Scan(&ref))
+	if ref == nil {
+		return ""
+	}
+	return *ref
 }

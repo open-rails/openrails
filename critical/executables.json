@@ -1479,6 +1479,8 @@
     ],
     "OR-J46-S03": [
       "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/rdr-resolution-is-a-refund",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/refund-first-is-the-resolution",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/resolution-first-absorbs-the-refund",
       "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/ce3-block-books-nothing",
       "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback"
     ],
@@ -1495,7 +1497,8 @@
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-disputed-charge-is-not-refunded",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/unactionable-stays-so",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
-      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/limited-mode-waits",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-held-response-waits-and-wakes",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/nothing-to-refund-still-ends",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
     ],
     "OR-J46-S08": [

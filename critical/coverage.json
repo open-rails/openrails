@@ -2304,11 +2304,6 @@
       "name": "A Stripe chargeback records one dispute with its network, reason family, code and due date, books one reversal, ends the subscription and its access, blocks the card and asks staff to review the customer; replays change nothing"
     },
     {
-      "id": "OR-J46-S03",
-      "journey": "J46",
-      "name": "An RDR resolution books one refund (dispute_prevention) and no chargeback, a Compelling Evidence 3.0 block books nothing, and neither counts in a dispute ratio"
-    },
-    {
       "id": "OR-J46-S06",
       "journey": "J46",
       "name": "A CCBill chargeback is recorded with its reason, card network and reversal, its outcome unreported"
@@ -2354,21 +2349,6 @@
       "name": "A dispute update or an early fraud warning on a charge OpenRails does not know is answered with a finding, never retried"
     },
     {
-      "id": "OR-J46-S02",
-      "journey": "J46",
-      "name": "A Stripe inquiry books, cancels and revokes nothing, its closing undoes nothing, its escalation books the chargeback once, and the reconcile pull records it without proposing it"
-    },
-    {
-      "id": "OR-J46-S07",
-      "journey": "J46",
-      "name": "An actionable early fraud warning is a fraud report Visa counts once; it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; one an event calls unactionable is not acted on; a charge already in dispute is not refunded; recording reports only refunds nothing; limited mode does none of it"
-    },
-    {
-      "id": "OR-J46-S12",
-      "journey": "J46",
-      "name": "The dispute metrics equal the records: disputes by kind, reason, outcome and the disputed charge's kind, the win rate, the chargeback rate by network against the networks' levels, fraud reports by outcome and refunds by reason; a card merchant's overview carries the dispute programs widget, whose read answers"
-    },
-    {
       "id": "OR-J46-S05",
       "journey": "J46",
       "name": "An NMI chargeback batch records every entry with its code: a matched entry is its charge's, reversed, linked and its subscription canceled; an unmatched one takes the masked number's network, books nothing and still counts in the monitor"
@@ -2377,6 +2357,26 @@
       "id": "OR-J46-S13",
       "journey": "J46",
       "name": "The network rollup is derived and leaves no row in an archive: a restored book rebuilds it from its payments, disputes and fraud reports, equal to the source's, and its program standings with it"
+    },
+    {
+      "id": "OR-J46-S03",
+      "journey": "J46",
+      "name": "An RDR resolution books one refund (dispute_prevention), whichever of it and Stripe's own refund arrives first, and records the refund it absorbed; a stale inquiry notice reopens nothing; a CE 3.0 block books nothing; neither counts in a ratio"
+    },
+    {
+      "id": "OR-J46-S07",
+      "journey": "J46",
+      "name": "An actionable early fraud warning is a fraud report Visa counts once; without waiting for the destructive switch it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; one an event calls unactionable is not acted on; a charge in dispute is not refunded; a charge with nothing left to refund is still ended; recording reports only refunds nothing; below a full posture the response waits with one alerting finding and runs when the posture is raised"
+    },
+    {
+      "id": "OR-J46-S02",
+      "journey": "J46",
+      "name": "A Stripe inquiry books, cancels and revokes nothing, its closing undoes nothing, its escalation books the chargeback once, and the reconcile pull records it without proposing it; a chargeback an advisory pull found waits for the merchant to be armed"
+    },
+    {
+      "id": "OR-J46-S12",
+      "journey": "J46",
+      "name": "The dispute metrics equal the records: disputes by kind, reason, outcome and the disputed charge's kind, the win rate, the chargeback rate by network, the VAMP ratio with Visa's lines and ECM's with Mastercard's, fraud reports by outcome and refunds by reason; a card merchant's overview carries the dispute programs widget, whose read answers"
     }
   ]
 }
