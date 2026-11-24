@@ -92,7 +92,7 @@ func TestPSPImportSafeguards(t *testing.T) {
 		// picked price keeps no PSP link.
 		price("current", "ccbill-23", false)
 
-		status, code := refusalCode(t, iw.alphaRemote.DeleteProduct(t.Context(), picked.ProductID))
+		status, code := refusalCode(t, iw.alphaRemote.DeleteProduct(t.Context(), picked.ProductID, billing.DeleteProductParams{}))
 		require.Equal(t, http.StatusConflict, status)
 		require.Equal(t, billing.CodeProductInUse, code)
 		kept, err := iw.alphaRemote.GetPrice(t.Context(), picked.ID)
