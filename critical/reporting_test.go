@@ -321,7 +321,9 @@ func healthOverview(t *testing.T) {
 		Query: billing.QueryMetricsParams{Measures: []string{"churn_rate"}, By: []string{"time"}, Grain: "month", Range: &billing.MetricsRange{Last: "6m"}}}
 	byStatus := billing.DashboardWidget{ID: "by-status", Title: "Subscriptions by status", Viz: "bar", Grid: billing.DashboardGrid{W: 6, H: 4},
 		Query: billing.QueryMetricsParams{Measures: []string{"mrr"}, By: []string{"time", "status"}, Grain: "day", Range: &billing.MetricsRange{Last: "30d"}}}
-	storeLayout(t, a, a.alpha.MerchantID(), stale, kept, byKind, churn, byStatus)
+	mrrByPSP := billing.DashboardWidget{ID: "mrr-by-psp", Title: "MRR by PSP", Viz: "bar", Grid: billing.DashboardGrid{W: 6, H: 4},
+		Query: billing.QueryMetricsParams{Measures: []string{"mrr"}, By: []string{"time", "psp"}, Grain: "day", Range: &billing.MetricsRange{Last: "30d"}}}
+	storeLayout(t, a, a.alpha.MerchantID(), stale, kept, byKind, churn, byStatus, mrrByPSP)
 	storeLayout(t, a, a.beta.MerchantID(), stale, churn)
 	names, err := fs.Glob(postgresmigrations.FS, "*_dashboard_retired_*measures.up.sql")
 	require.NoError(t, err)

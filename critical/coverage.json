@@ -2726,7 +2726,7 @@
     {
       "id": "OR-J42-S30",
       "journey": "J42",
-      "name": "Every MRR measure, by each of its cuts, plans on the rollups: with sequential scans off no plan reads mrr_movements and none scans subscriptions"
+      "name": "Every MRR measure, by itself and by each dimension it declares, over time and not, in UTC and in a non-UTC zone, plans on indexes with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time"
     },
     {
       "id": "OR-J28-S09",
@@ -2946,7 +2946,7 @@
     {
       "id": "OR-J53-S02",
       "journey": "J53",
-      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure are dropped"
+      "name": "The health overview is built from what the merchant sells, every profile's overview saves and answers, an empty merchant's tiles answer with no error, the currency switch keeps each currency's money apart, and saved widgets naming a removed measure, or mrr by a dimension it no longer takes, are dropped"
     },
     {
       "id": "OR-J53-S03",
@@ -2966,12 +2966,12 @@
     {
       "id": "OR-J53-S06",
       "journey": "J53",
-      "name": "Two customers over four months: monthly MRR movements and subscriber movements equal the movements recorded; MRR, subscribers, ARPA, LTV, subscriber churn by type, NRR and GRR as each month began; the cohort's retention by subscribers and MRR; MRR by product; scheduled churn and its reversal; cancellations by type and reversal; the overview's MRR tiles"
+      "name": "Two customers over four months: monthly MRR movements and subscriber movements equal the movements recorded; MRR, subscribers, ARPA, LTV, subscriber churn of the opening base by type, NRR and GRR as each month began; churn read monthly by day and over 90 days; the cohort's retention of the members it acquired, by subscribers and MRR; MRR by product at a past date; subscribers counted once across currencies; scheduled churn and its reversal; cancel decisions by the month they were made, type and reversal; the overview's MRR tiles"
     },
     {
       "id": "OR-J53-S07",
       "journey": "J53",
-      "name": "A card merchant's chargeback ratio tile is Visa's VAMP ratio and Payment health charts the VAMP and ECM ratios, each measure's thresholds being its dispute program's levels"
+      "name": "A card merchant's chargeback ratio tile is Visa's VAMP ratio, naming its program, and Payment health charts the VAMP and ECM ratios against their levels in force each month (VAMP's excessive level 2.2% before April 2026, 1.5% from); one chargeback under VAMP's minimum count reaches no level whatever its ratio"
     },
     {
       "id": "OR-J43-S01",
