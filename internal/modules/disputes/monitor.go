@@ -172,15 +172,12 @@ func (s *Service) ListPrograms(ctx context.Context, params billing.DisputeProgra
 	return s.standings(ctx, mid, psp, at)
 }
 
-// standings evaluates the month containing at: as it stands at at, or
-// whole once the month has ended.
+// standings evaluates the month containing at as it stands now: projected
+// while it runs, whole once it has ended.
 func (s *Service) standings(ctx context.Context, mid billing.MerchantID, only *uuid.UUID, at time.Time) ([]billing.DisputeStanding, error) {
 	q := s.DB.Gen(ctx)
 	month := time.Date(at.Year(), at.Month(), 1, 0, 0, 0, 0, time.UTC)
-	evaluatedAt := at
-	if now := s.now(); evaluatedAt.After(now) {
-		evaluatedAt = now
-	}
+	evaluatedAt := s.now()
 	psps, err := q.ListPSPsForMerchant(ctx, mid.UUID())
 	if err != nil {
 		return nil, fmt.Errorf("list PSPs: %w", err)

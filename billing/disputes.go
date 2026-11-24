@@ -242,8 +242,8 @@ type DisputeStanding struct {
 	DisputesReported bool `json:"disputes_reported"`
 }
 
-// DisputeProgramListParams selects the month containing At (default now) and
-// optionally one PSP.
+// DisputeProgramListParams selects the month containing At (default now), as
+// it stands now, and optionally one PSP.
 type DisputeProgramListParams struct {
 	At    *time.Time `form:"at"`
 	PSPID PSPID      `form:"psp_id"`

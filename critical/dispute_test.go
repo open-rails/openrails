@@ -41,9 +41,9 @@ type disputedMembership struct {
 	charge, intent string
 }
 
-func newDisputedMembership(t *testing.T) *disputedMembership {
+func newDisputedMembership(t *testing.T, configure ...func(*world)) *disputedMembership {
 	t.Helper()
-	a, p, sub := purchasedMembership(t)
+	a, p, sub := purchasedMembershipWith(t, 24, configure...)
 	effects := p.effects(t)
 	require.Len(t, effects, 1)
 	paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
@@ -266,6 +266,7 @@ func disputePrevented(t *testing.T) {
 func disputeWon(t *testing.T) {
 	m := newDisputedMembership(t)
 	d := m.dispute("dp_won", "needs_response", "chargeback", "product_not_received")
+	d["payment_method_details"] = map[string]any{"type": "card", "card": map[string]any{"brand": "visa", "case_type": "chargeback", "network_reason_code": "13.1"}}
 	m.notice(t, "evt_won_created", "charge.dispute.created", d)
 	d["status"] = "won"
 	m.notice(t, "evt_won_closed", "charge.dispute.closed", d)
@@ -336,9 +337,11 @@ func disputeFraudWarning(t *testing.T) {
 		}, 20*time.Second, 50*time.Millisecond, "the refund settles at the provider")
 	})
 	t.Run("record-only", func(t *testing.T) {
-		m := newDisputedMembership(t)
-		_, err := m.a.alpha.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{FraudWarningRefund: ptr(billing.FraudWarningRecord)}})
-		require.NoError(t, err)
+		m := newDisputedMembership(t, func(w *world) {
+			declaration := cfgMerchant(w.cfg, "alpha")
+			declaration.FraudWarningRefund = ptr(billing.FraudWarningRecord)
+			setCfgMerchant(&w.cfg, "alpha", declaration)
+		})
 		m.fraudWarning(t, "issfr_record")
 		require.Empty(t, m.reversals(t))
 		require.True(t, m.entitled(t))
