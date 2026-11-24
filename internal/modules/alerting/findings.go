@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -24,6 +25,12 @@ var _ reconcile.FindingNotifier = (*Service)(nil)
 // A set NotifiedAt blocks re-firing unless severity strictly escalates; every
 // resolution clears it, so a reopened finding notifies again.
 func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord) error {
+	return notifyFinding(ctx, s.db, rec, s.now())
+}
+
+// notifyFinding claims rec's notification episode at now and queues its alert
+// in one transaction.
+func notifyFinding(ctx context.Context, database *db.DB, rec reconcile.FindingRecord, now time.Time) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -37,15 +44,15 @@ func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord
 	// The episode claim and its alert's job commit together: concurrent or
 	// stale callers claim nothing, and a claimed episode is delivered with
 	// retries. The episode is the stored instant, so it is microseconds.
-	notifiedAt := s.now().Truncate(time.Microsecond)
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		n, err := s.db.NewWithPgxTx(tx).Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{
+	notifiedAt := now.Truncate(time.Microsecond)
+	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		n, err := database.NewWithPgxTx(tx).Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{
 			MerchantID: mid.UUID(), ID: rec.ID, NotifiedAt: notifiedAt, Severity: string(rec.Severity),
 		})
 		if err != nil || n == 0 {
 			return err
 		}
-		return s.queueFindingAlert(ctx, tx, mid.UUID(), rec.ID, rec.Severity, notifiedAt)
+		return queueFindingAlert(ctx, database, tx, mid.UUID(), rec.ID, rec.Severity, notifiedAt)
 	})
 	if err != nil {
 		return fmt.Errorf("claim finding notification: %w", err)

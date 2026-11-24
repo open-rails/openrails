@@ -133,9 +133,8 @@ channel after an archive restore.
 
 **Merchant alerts.** A finding's engine calls `alerting.Service.NotifyFinding` after
 persisting it (reconcile and converge engines, configuration evaluation, webhook
-parks, pay URL failures). Findings raised through `reconcile.PGStore.RaiseFinding`
-(`alerting.RecordLedgerRepair`, `alerting.RecordCrankerGas`) are not passed to it
-and reach only the console. Only `requires_review` findings notify. In one
+parks, pay URL failures), and `alerting.RecordLedgerRepair` and
+`alerting.RecordCrankerGas` notify the findings they raise. Only `requires_review` findings notify. In one
 transaction `ClaimReconciliationFindingNotification` stamps `notified_at` and
 `notified_severity` (first time, or a strict escalation) and an
 `openrails.operator_alert` job (`DeliveryArgs`) is queued; a low finding stays in

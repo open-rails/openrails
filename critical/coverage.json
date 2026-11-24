@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 467,
+  "scenario_count": 469,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1897,6 +1897,16 @@
       "id": "OR-J06-S65",
       "journey": "J06",
       "name": "A PSP whose webhooks went silent while pulls find its charges raises a finding; one with no charges or no webhooks does not, and it clears when webhooks resume"
+    },
+    {
+      "id": "OR-J06-S66",
+      "journey": "J06",
+      "name": "A refund the ledger cannot book alerts the operator once"
+    },
+    {
+      "id": "OR-J06-S67",
+      "journey": "J06",
+      "name": "A low Solana cranker alerts the operator once"
     },
     {
       "id": "OR-J14-S70",

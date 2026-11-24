@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
@@ -98,13 +99,23 @@ func RecordLedgerRepair(ctx context.Context, database *db.DB, now time.Time, rep
 	if repair.Err != nil {
 		action += " " + repair.Err.Error()
 	}
-	if _, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
+	rec, err := (&reconcile.PGStore{DB: database}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingLedgerUnbooked, SubjectKey: subject, Severity: reconcile.SeverityCritical,
 		RecommendedAction: action, Evidence: evidence,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("ledger repair: %w", err)
 	}
+	alertRaised(ctx, database, rec, now)
 	return nil
+}
+
+// alertRaised tells the merchant's operator of a finding a person must look
+// at. The finding stays in the console whatever happens to its alert.
+func alertRaised(ctx context.Context, database *db.DB, rec reconcile.FindingRecord, now time.Time) {
+	if err := notifyFinding(ctx, database, rec, now); err != nil && ctx.Err() == nil && database.Log != nil {
+		database.Log.WarnContext(ctx, "alerting the operator failed; the finding stays in the console", logx.Err(err), "finding_id", rec.ID, "finding_type", rec.Type)
+	}
 }
 
 // CrankerGas is one Solana cranker wallet's SOL balance on a merchant's PSP.
@@ -128,7 +139,7 @@ func RecordCrankerGas(ctx context.Context, database *db.DB, now time.Time, gas C
 	if gas.Lamports >= gas.Threshold {
 		return store.ResolveRaisedFinding(ctx, FindingSolanaCrankerLowGas, gas.subject())
 	}
-	_, err := store.RaiseFinding(ctx, reconcile.RaisedFinding{
+	rec, err := store.RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingSolanaCrankerLowGas, SubjectKey: gas.subject(), Severity: reconcile.SeverityHigh,
 		RecommendedAction: fmt.Sprintf("Solana cranker %s on %s has %d lamports, below %d: top it up with SOL or its pulls fail. It resolves itself once a pull pass finds it funded.",
 			gas.Wallet, gas.Network, gas.Lamports, gas.Threshold),
@@ -138,6 +149,7 @@ func RecordCrankerGas(ctx context.Context, database *db.DB, now time.Time, gas C
 	if err != nil {
 		return fmt.Errorf("cranker gas: %w", err)
 	}
+	alertRaised(ctx, database, rec, now)
 	return nil
 }
 

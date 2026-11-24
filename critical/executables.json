@@ -1159,6 +1159,12 @@
     "OR-J06-S65": [
       "TestDueWork/OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding"
     ],
+    "OR-J06-S66": [
+      "TestFindingAlerts/OR-J06-S66/a-refund-the-ledger-cannot-book-alerts-the-operator"
+    ],
+    "OR-J06-S67": [
+      "TestFindingAlerts/OR-J06-S67/a-low-cranker-alerts-the-operator"
+    ],
     "OR-J14-S70": [
       "TestDueWork/OR-J14-S70/an-engine-renewal-nothing-attempted-reads-as-missed"
     ],

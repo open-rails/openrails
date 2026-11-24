@@ -13,6 +13,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -69,11 +70,11 @@ func (a DeliveryArgs) Valid() bool {
 
 // queueFindingAlert commits the alert of a finding's notification episode in
 // tx, the transaction that claimed it. A low finding stays in the console.
-func (s *Service) queueFindingAlert(ctx context.Context, tx pgx.Tx, merchantID, findingID uuid.UUID, severity reconcile.Severity, notifiedAt time.Time) error {
+func queueFindingAlert(ctx context.Context, database *db.DB, tx pgx.Tx, merchantID, findingID uuid.UUID, severity reconcile.Severity, notifiedAt time.Time) error {
 	if severity == reconcile.SeverityLow {
 		return nil
 	}
-	_, err := s.db.InsertRiverJobTx(ctx, tx, DeliveryArgs{MerchantID: merchantID, Finding: &FindingAlert{ID: findingID, NotifiedAt: notifiedAt}}, nil)
+	_, err := database.InsertRiverJobTx(ctx, tx, DeliveryArgs{MerchantID: merchantID, Finding: &FindingAlert{ID: findingID, NotifiedAt: notifiedAt}}, nil)
 	if err != nil {
 		return fmt.Errorf("queue finding alert: %w", err)
 	}
@@ -87,7 +88,7 @@ func (s *Service) QueueRealerts(ctx context.Context, tx pgx.Tx, claimed []gen.Bi
 		if f.NotifiedAt == nil {
 			return fmt.Errorf("re-alert of finding %s claimed no episode", f.ID)
 		}
-		if err := s.queueFindingAlert(ctx, tx, f.MerchantID, f.ID, reconcile.Severity(f.Severity), *f.NotifiedAt); err != nil {
+		if err := queueFindingAlert(ctx, s.db, tx, f.MerchantID, f.ID, reconcile.Severity(f.Severity), *f.NotifiedAt); err != nil {
 			return err
 		}
 	}
