@@ -206,8 +206,6 @@ type BillingCustomer struct {
 	Issuer     *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
-	// Steps with every statement that changes the customer's product access: a cached key set from an older version is stale.
-	AccessVersion int64
 	// The billing policy staff assigned this customer, by its name in the merchant's settings; NULL follows the tier, then the default.
 	BillingPolicy *string
 }
@@ -248,31 +246,6 @@ type BillingCustomerDelinquency struct {
 	UpdatedAt     time.Time
 	// The next instant time alone changes this payer's delinquency in the currency: a usage order falling due or its grace window running out. Null: only a change to its usage orders or policy does.
 	NextEvaluationAt *time.Time
-}
-
-// A heavy buyer's keys as of their stamps row: the keys of the products they hold. Derived; rebuilt on read.
-type BillingCustomerEntitlementCache struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Entitlement string
-	// The most seats of the key a held per-seat product gives; NULL when none is per seat.
-	Quantity *int32
-}
-
-// When a heavy buyer's cached keys are valid: built at entitlement_generation and access_version, for instants in [valid_from, valid_until), the next start or end of one of their windows. Derived; rebuilt on read.
-type BillingCustomerEntitlementCacheStamp struct {
-	ID                    uuid.UUID
-	MerchantID            uuid.UUID
-	CustomerID            uuid.UUID
-	EntitlementGeneration int64
-	AccessVersion         int64
-	ValidFrom             time.Time
-	ValidUntil            *time.Time
-	Keys                  int32
-	HeldProducts          int32
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
 }
 
 // Per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
@@ -807,8 +780,6 @@ type BillingMerchant struct {
 	CatalogRevision         int64
 	// When the merchant was last renamed; NULL if never. The rename interval counts from here.
 	SlugChangedAt *time.Time
-	// Steps with every statement that changes a product's keys: a cached key set from an older generation is stale.
-	EntitlementGeneration int64
 	// Explicit immutable business tenant associated one-to-one with this billing identity. NULL is the legacy unbound mode; never inferred from an issuer, name, default account tenant or request. The matching permission group has this merchant ID.
 	TenantID *uuid.UUID
 }

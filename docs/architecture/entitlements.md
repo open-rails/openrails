@@ -24,8 +24,6 @@ usage costs is [usage billing](usage-billing.md).
 - **Seats**: a per-seat window's `quantity`; a check answers the most seats held.
 - **`valid_until`**: the next scheduled change that could alter a requested
   answer, null when none.
-- **Heavy buyer**: a customer holding at least 500 products
-  (`entitlements.HeavyBuyerProducts`), whose keys OpenRails caches.
 - **Limit**: a declared cap in a named unit or a currency, with a reset and an
   overrun, `require_estimate` or `admit_while_positive` (`catalog_limits`).
   Products give it capacity (`catalog_product_limits`); a customer override
@@ -72,15 +70,6 @@ past `at` reads the keys a product had then. A current exact-key check with
 `include_validity` runs `CheckDerivedEntitlementsWithBoundary`, which adds
 `evaluated_at` and `valid_until`, the earliest start or end among the spans that
 grant a requested key.
-
-**Heavy-buyer cache.** For a heavy buyer, `List` reads `customer_entitlement_cache`
-while its stamps row (`customer_entitlement_cache_stamps`) still matches the
-merchant's `entitlement_generation` and the customer's `access_version`, and the
-instant falls in `[valid_from, valid_until)`. Statement triggers step those
-counters on any change to `product_entitlements` or `product_access`. A current
-read that derived a heavy buyer's keys live rebuilds the cache in the background
-(`RebuildEntitlementCache`), from one snapshot; a concurrent write fails the
-rebuild, which starts over or leaves keys derived live.
 
 **SDK cache.** A remote handle with a static `APIKey` caches `CheckEntitlements`
 by default (`entitlementCheckCache`): a bounded 8 MiB in-process LRU, or Redis
@@ -211,9 +200,7 @@ Checks:
 - `syncRun.usageItem` and `syncRun.lockCustomers` apply `Syncer.Allows`.
 - `entitlementCacheScopeOf` (`entitlement_check_cache.go`) and `newRemoteHandle`
   (`remote.go`), which enables the cache only for an `APIKey`.
-- Every query in `internal/db/queries/entitlement_checks.sql`,
-  `entitlement_cache.sql`, `product_access.sql`, `limits.sql`, `leases.sql` and
-  `limit_holds.sql`, advisory locks aside, filters on `merchant_id`.
+- Every query in `internal/db/queries/entitlement_checks.sql`, `product_access.sql`, `limits.sql`, `leases.sql` and `limit_holds.sql`, advisory locks aside, filters on `merchant_id`.
 - OR-J27-S13: a key without `merchant:entitlements:read` is refused, and another
   merchant's key never sees a cached answer. OR-J23-S11 and OR-J24-S03 keep limit
   reads, adjustments and refusals in their merchant.
@@ -241,18 +228,9 @@ Checks:
   above.
 
 ### 6. Data lifecycle
-`product_entitlements` and `grants` are permanent; `product_access` is state and
-keeps revoked and removed windows; the two cache tables are derived state, left
-out of merchant archives. `limit_holds` (`created_at`) and `limit_hold_parts`
-(`hold_created_at`) are monthly partitions, dropped past the 61-day replay
-horizon, parts first since they have no foreign key to holds; `limit_windows`,
-`leases` and `limit_adjustments` are rows (61 days); the limit catalog and
-override tables are state. Every partitioned read bounds its key by the hold
-lifetime (`limits.HeldSince`), the replay horizon or the range a list asks for.
-An archive refuses open request holds and live leases.
+`product_entitlements` and `grants` are permanent; `product_access` is state and keeps revoked and removed windows. `limit_holds` (`created_at`) and `limit_hold_parts` (`hold_created_at`) are monthly partitions, dropped past the 61-day replay horizon, parts first since they have no foreign key to holds; `limit_windows`, `leases` and `limit_adjustments` are rows (61 days); the limit catalog and override tables are state. Every partitioned read bounds its key by the hold lifetime (`limits.HeldSince`), the replay horizon or the range a list asks for. An archive refuses open request holds and live leases.
 Checks:
 - The table comments and `internal/retention/tables.go` agree on each class.
-- `internal/merchantarchive/checks.go` lists both cache tables as derived.
 - Outside the gated merchant purge (`PurgeMerchantRowsProductAccess`), no query
   deletes `product_access` rows: revocation sets `revoked_at` or `deleted_at`.
 - Each query on `limit_holds` or `limit_hold_parts` in `limit_holds.sql`,
@@ -262,24 +240,13 @@ Checks:
 - OR-J31-S14 moves windows and adjustments in archives; OR-J29-S08 ages out leases.
 
 ### 7. Work scales with activity
-No job projects or expires keys or holds: keys are derived at read time from
-indexes (`product_entitlements_entitlement_idx`, `product_access_customer_idx`,
-`product_access_product_idx`), a window ends by its own `ends_at`, and holds
-expire by time (`LeaseLiveSince`, `HeldSince`, `expires_at`). Derived reads use
-custom plans (`plan_cache_mode`), so a customer with three products and one with
-thousands are each planned for their size. The heavy-buyer cache is rebuilt only
-after a read misses and goes stale by counters that triggers step. A staff grant
-or revocation queues one customer's convergence; a sync's 64 renewals spread a
-window that closes for every customer over syncs.
+No job projects or expires keys or holds, and no table caches keys: they are derived on every read from indexes (`product_entitlements_entitlement_idx`, `product_access_customer_idx`, `product_access_product_idx`), a window ends by its own `ends_at`, and holds expire by time (`LeaseLiveSince`, `HeldSince`, `expires_at`). An exact check probes the products granting each key, then the customer's windows of each; a prefix read walks the customer's live windows once, seats included (`product_access_customer_idx`), then each held product's keys (`product_entitlements_product_idx`). Derived reads use custom plans (`plan_cache_mode`), so a customer with three products and one with thousands are each planned for their size. A staff grant or revocation queues one customer's convergence; a sync's 64 renewals spread a window that closes for every customer over syncs.
 Checks:
 - `internal/river` has no job that reads `product_access` or
   `product_entitlements` for expiry, and none but retention scans `limit_windows`,
   `limit_holds` or `leases` across customers; a balance look reads one
   customer's holds.
-- `rebuildAfterMiss` (`internal/modules/entitlements/cache.go`) runs one rebuild
-  per customer and process.
-- `step_entitlement_generation` and `step_access_version` are statement
-  triggers on `product_entitlements` and `product_access`.
+- OR-J27-S16: for a customer holding 10,000 of 40,000 products, exact checks start from `product_entitlements_entitlement_idx`, a prefix page touches at most 4 blocks per held product, and no read scans a table.
 - OR-J24-S30 and OR-J24-S34 bound a sync's renewals and settlement.
 
 ### 8. Abuse protection
@@ -317,10 +284,7 @@ Checks:
 ## Tests
 
 Critical journeys, over real PostgreSQL, Redis and Vault:
-- **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries,
-  archive and refund), S05 to S09 (subscription closure and repair), S10 to S12
-  (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff,
-  Redis sharing, live denial, a purchase seen at once).
+- **J27**, entitlements: OR-J27-S01 to S04 (window union, revocation, boundaries, archive and refund), S05 to S09 (subscription closure and repair), S10 to S12 (imported grants), S13 and S14 (the SDK cache: scoped allowed keys, cutoff, Redis sharing, live denial, a purchase seen at once), S16 (read plans at 10,000 held products).
 - **J23**, admissions, limits and the gate: OR-J23-S01 to S05 (admissions), S07 to S18 (declarations, capacity, windows, overruns, spend caps, racing replicas), S19 to S31 (the gate in process and over Redis, lost replies, outbox, closing), S33, S34 (a window and an accrual-rate cap in the policy's `policy_currency`); OR-J25-S05 (running charges under `accrual_rate_cap`).
 - **J24**, leases and holds: OR-J24-S03, S12 to S20, S23 to S35 (lease lifetime,
   hold versions, sizing, bounded syncs).
@@ -332,8 +296,7 @@ after a live denial, relative lifetime, Redis budgets); `gate_test.go` drives th
 gate against a scripted server.
 
 Gaps:
-- No scenario covers the heavy-buyer cache, or a product key edit and
-  `entitlement_replacements` reaching current holders.
+- No scenario covers a product key edit or `entitlement_replacements` reaching current holders.
 - No scenario reads keys through `ListEntitlements` or `GET /v1/me/entitlements`;
   OR-J01-S02 only checks that they refuse a missing credential.
 - `CheckEntitlementsLive` with `at` or prefixes leaves cached entries as they were.

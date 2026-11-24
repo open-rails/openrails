@@ -1281,6 +1281,9 @@
     "OR-J27-S14": [
       "TestRemoteEntitlementCache/OR-J27-S14/a-purchase-after-a-cached-check-is-visible-on-the-next-check"
     ],
+    "OR-J27-S16": [
+      "TestEntitlementReadPlans/OR-J27-S16/exact-checks-and-prefix-pages-stay-on-their-indexes"
+    ],
     "OR-J04-S42": [
       "TestBillingPass/OR-J04-S42/an-engine-renewal-waits-for-the-hourly-pass-with-access-unbroken"
     ],
