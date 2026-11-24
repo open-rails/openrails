@@ -1,10 +1,12 @@
 package money
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -167,15 +169,32 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, params billing.Capt
 	return receipt, err
 }
 
+// CaptureHoldTx captures a gate's request hold with a usage item of its
+// lease, in the caller's transaction under the customer's spend lock, as
+// CaptureAdmission would. A hold already captured is a conflict: the item's
+// own number answers a resend.
+func (s *MoneyService) CaptureHoldTx(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, u billing.CaptureUsage, stated *int64) (*billing.CaptureReceipt, error) {
+	if row.State == "captured" {
+		return nil, apperr.New(http.StatusConflict, billing.CodeResourceConflict, "the request hold was already captured").WithParam("request_id")
+	}
+	u.EventType, u.Resource = strings.TrimSpace(u.EventType), strings.TrimSpace(u.Resource)
+	u.Source, u.SourceID = cmp.Or(strings.TrimSpace(u.Source), "admit"), cmp.Or(strings.TrimSpace(u.SourceID), row.RequestID)
+	terms, err := json.Marshal(captureTerms{CaptureUsage: u, Amount: stated})
+	if err != nil {
+		return nil, fmt.Errorf("capture terms: %w", err)
+	}
+	return s.captureOnce(ctx, q, row, terms, u, stated)
+}
+
 func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, terms []byte, u billing.CaptureUsage, stated *int64) (*billing.CaptureReceipt, error) {
 	original, err := spendgate.OriginalTerms(row)
 	if err != nil {
 		return nil, err
 	}
 	now := s.now()
-	requestID := deref(row.RequestID)
+	requestID := row.RequestID
 	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Currency),
-		EstimatedAmount: derefInt(row.EstimatedAmount), Charges: []billing.UsageCharge{}}
+		EstimatedAmount: row.EstimatedAmount, Charges: []billing.UsageCharge{}}
 
 	// The admitted event type remains binding even when the host states money.
 	if len(row.EstimateUsage) > 0 {
@@ -239,13 +258,13 @@ func (s *MoneyService) captureReplay(ctx context.Context, q *gen.Queries, row ge
 	if err != nil {
 		return nil, err
 	}
-	requestID := deref(row.RequestID)
+	requestID := row.RequestID
 	if !matches {
 		return nil, &IdempotencyConflict{Operation: string(OpCapture), Source: "admit", SourceID: requestID,
 			Field: "usage", Committed: "original capture terms", Retried: "different capture terms"}
 	}
 	receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: catalog.Currency(row.Currency),
-		EstimatedAmount: derefInt(row.EstimatedAmount), Amount: derefInt(row.CapturedAmount), Charges: []billing.UsageCharge{}, Replayed: true}
+		EstimatedAmount: row.EstimatedAmount, Amount: derefInt(row.CapturedAmount), Charges: []billing.UsageCharge{}, Replayed: true}
 	if len(row.CapturedCharges) > 0 {
 		if err := json.Unmarshal(row.CapturedCharges, &receipt.Charges); err != nil {
 			return nil, fmt.Errorf("decode captured charges: %w", err)

@@ -121,10 +121,7 @@ type Decision struct {
 	BlockedBalance  bool
 	BlockedWindow   *Window
 	// BlockedLimit is the declared limit that refused, and when it resets.
-	BlockedLimit *LimitBlock
-	// CapacityHeld: the request would fit were gates' lease holds returned;
-	// they shrink at their next sync.
-	CapacityHeld    bool
+	BlockedLimit    *LimitBlock
 	RetryAfter      time.Duration
 	Replayed        bool
 	ExpiresAt       *time.Time
@@ -149,6 +146,9 @@ type AdmitInput struct {
 	RateCards     []byte
 	// Limits are the declared limits the request counts toward.
 	Limits []limits.Claim
+	// LeaseID owns a gate's hold: it has no deadline and counts while the
+	// lease is live.
+	LeaseID *uuid.UUID
 }
 
 // LimitBlock is a declared limit's refusal.
@@ -185,11 +185,14 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 		return Decision{}, err
 	}
 	expiry := deadline(in.ExpiresAt)
+	if in.LeaseID != nil {
+		expiry = nil
+	}
 	holds := in.Cost > 0
 	for _, c := range in.Limits {
 		holds = holds || c.Cost > 0
 	}
-	if holds && expiry == nil {
+	if holds && expiry == nil && in.LeaseID == nil {
 		return Decision{}, ErrDeadlineRequired
 	}
 	if expiry != nil && !expiry.After(now) {
@@ -214,32 +217,21 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	claims = append(claims, in.Limits...)
 	holder := limits.Holder{Q: q, MerchantID: mid.UUID(), CustomerID: in.Customer, Now: now}
 	if in.Cost > capacity {
-		returned, err := holder.LeaseHeld(ctx, limits.BalanceReturnable(in.Currency, uuid.Nil))
-		if err != nil {
-			return Decision{}, err
-		}
-		if returned <= 0 || in.Cost-capacity > returned {
-			return Decision{BlockedBalance: true, EstimatedAmount: in.Cost}, nil
-		}
-		locked, err := holder.Lock(ctx, claims)
-		if err != nil {
-			return Decision{}, err
-		}
-		return refuse(ctx, holder, in, windows, claims, locked.Standings, true)
+		return Decision{BlockedBalance: true, EstimatedAmount: in.Cost}, nil
 	}
 	taken, err := holder.Take(ctx, claims)
 	if err != nil {
 		return Decision{}, err
 	}
 	if taken.Refused >= 0 {
-		return refuse(ctx, holder, in, windows, claims, taken.Standings, false)
+		return refuse(holder, in, windows, claims, taken), nil
 	}
 	body, err := json.Marshal(in.Terms)
 	if err != nil {
 		return Decision{}, err
 	}
 	row, err := q.InsertRequestHold(ctx, gen.InsertRequestHoldParams{
-		MerchantID: mid.UUID(), CreatedAt: now, CustomerID: in.Customer, Currency: in.Currency, RequestID: in.RequestID,
+		MerchantID: mid.UUID(), CreatedAt: now, CustomerID: in.Customer, Currency: in.Currency, LeaseID: in.LeaseID, RequestID: in.RequestID,
 		EstimatedAmount: in.Cost, AvailableAmount: capacity - in.Cost, Terms: body,
 		EstimateUsage: in.EstimateUsage, RateCards: in.RateCards, RequestedExpiresAt: expiry,
 	})
@@ -270,41 +262,14 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	return Decision{Allowed: true, EstimatedAmount: in.Cost, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: capacity - in.Cost}, nil
 }
 
-// refuse answers a request that does not fit: the first claim that would not
-// fit even were every gate's lease hold returned refuses it with its own
-// code; when every short claim (and balance, when balanceShort) would, it is
-// capacity_held and those holds shrink at their next sync, as for a
-// competing want.
-func refuse(ctx context.Context, holder limits.Holder, in AdmitInput, windows []resolvedWindow, claims []limits.Claim, standings []limits.Standing, balanceShort bool) (Decision, error) {
-	var short []limits.Returnable
-	if balanceShort {
-		short = append(short, limits.BalanceReturnable(in.Currency, uuid.Nil))
+// refuse answers the first claim that did not fit with its own code.
+func refuse(holder limits.Holder, in AdmitInput, windows []resolvedWindow, claims []limits.Claim, taken limits.Taken) Decision {
+	i, c := taken.Refused, claims[taken.Refused]
+	if i < len(windows) {
+		blocked := windows[i].Window
+		return Decision{BlockedWindow: &blocked, RetryAfter: c.Window.EndsAt.Sub(holder.Now), EstimatedAmount: in.Cost}
 	}
-	for i, c := range claims {
-		if limits.Fits(c, standings[i], 0) {
-			continue
-		}
-		r := limits.ReturnableOf(c, holder.Now, uuid.Nil)
-		returned, err := holder.LeaseHeld(ctx, r)
-		if err != nil {
-			return Decision{}, err
-		}
-		if limits.Fits(c, standings[i], returned) {
-			short = append(short, r)
-			continue
-		}
-		if i < len(windows) {
-			blocked := windows[i].Window
-			return Decision{BlockedWindow: &blocked, RetryAfter: c.Window.EndsAt.Sub(holder.Now), EstimatedAmount: in.Cost}, nil
-		}
-		return Decision{BlockedLimit: &LimitBlock{Key: c.Key, ResetsAt: holder.ResetsAt(ctx, c, standings[i])}, EstimatedAmount: in.Cost}, nil
-	}
-	for _, r := range short {
-		if err := holder.TakeBack(ctx, r); err != nil {
-			return Decision{}, err
-		}
-	}
-	return Decision{CapacityHeld: true, RetryAfter: limits.SyncInterval, EstimatedAmount: in.Cost}, nil
+	return Decision{BlockedLimit: &LimitBlock{Key: c.Key, ResetsAt: taken.ResetsAt}, EstimatedAmount: in.Cost}
 }
 
 // CheckIdentity refuses key reuse before current policy evaluation can mask a conflict.
@@ -335,9 +300,11 @@ func (g *Gate) replay(row gen.BillingLimitHold, in AdmitInput) (Decision, error)
 	// A usage estimate is the term: its price is what admitting it answered.
 	case estimated && !sameUsageEstimate(row.EstimateUsage, in.EstimateUsage):
 		field = "usage"
-	case !estimated && amount(row.EstimatedAmount) != in.Cost:
+	case !estimated && row.EstimatedAmount != in.Cost:
 		field = "estimated_amount"
-	case !sameDeadline(row.RequestedExpiresAt, deadline(in.ExpiresAt)):
+	case (row.LeaseID == nil) != (in.LeaseID == nil) || row.LeaseID != nil && *row.LeaseID != *in.LeaseID:
+		field = "lease_id"
+	case in.LeaseID == nil && !sameDeadline(row.RequestedExpiresAt, deadline(in.ExpiresAt)):
 		field = "expires_at"
 	default:
 		original, err := OriginalTerms(row)
@@ -363,14 +330,7 @@ func (g *Gate) replay(row gen.BillingLimitHold, in AdmitInput) (Decision, error)
 	if state == "open" && row.ExpiresAt != nil && !row.ExpiresAt.After(g.Now()) {
 		state = "expired"
 	}
-	return Decision{Allowed: true, Replayed: true, EstimatedAmount: amount(row.EstimatedAmount), ExpiresAt: row.ExpiresAt, State: state, AvailableAmount: amount(row.AvailableAmount)}, nil
-}
-
-func amount(v *int64) int64 {
-	if v == nil {
-		return 0
-	}
-	return *v
+	return Decision{Allowed: true, Replayed: true, EstimatedAmount: row.EstimatedAmount, ExpiresAt: row.ExpiresAt, State: state, AvailableAmount: row.AvailableAmount}, nil
 }
 
 // sameUsageEstimate compares stored jsonb by value while keeping dimensions

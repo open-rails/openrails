@@ -19,7 +19,7 @@ SET state = 'captured', capture_terms = $1::jsonb, captured_amount = $2::bigint,
 WHERE merchant_id = $5::uuid AND id = $6::uuid
   AND created_at = $7::timestamptz AND request_id IS NOT NULL
   AND state <> 'captured'
-RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version
+RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges
 `
 
 type CaptureRequestHoldParams struct {
@@ -50,7 +50,6 @@ func (q *Queries) CaptureRequestHold(ctx context.Context, arg CaptureRequestHold
 		&i.CustomerID,
 		&i.Currency,
 		&i.LeaseID,
-		&i.LimitSet,
 		&i.RequestID,
 		&i.EstimatedAmount,
 		&i.AvailableAmount,
@@ -66,8 +65,6 @@ func (q *Queries) CaptureRequestHold(ctx context.Context, arg CaptureRequestHold
 		&i.ReleasedAt,
 		&i.UpdatedAt,
 		&i.CapturedCharges,
-		&i.Version,
-		&i.AppliedVersion,
 	)
 	return i, err
 }
@@ -110,9 +107,16 @@ FROM (SELECT (COALESCE((SELECT SUM(hp.held)
              WHERE hp.merchant_id = $1::uuid AND hp.customer_id = $2::uuid AND hp.limit_key = 'balance'
                AND lh.currency = $3::text AND lh.state = 'open'
                AND hp.hold_created_at >= $4::timestamptz AND lh.created_at >= $4::timestamptz
-               AND CASE WHEN lh.request_id IS NOT NULL THEN lh.expires_at > $5::timestamptz
+               AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > $5::timestamptz
                    ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
                        AND l.closed_at IS NULL AND l.last_sync_at > $6::timestamptz) END), 0)
+     -- What live gates report in flight of the balance.
+     + COALESCE((SELECT SUM(f.amount)
+              FROM billing.lease_in_flight f
+              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+             WHERE f.merchant_id = $1::uuid AND f.customer_id = $2::uuid
+               AND f.limit_key = 'balance' AND f.unit = $3::text
+               AND l.closed_at IS NULL AND l.last_sync_at > $6::timestamptz), 0)
      -- What pending refunds reserve of a purchased lot, up to its units left.
      -- Retired credit funds its refund from the retired account; an unswept
      -- lapsed lot is entirely unavailable.
@@ -146,7 +150,8 @@ type GetFinancialHeldAmountRow struct {
 	Accrued int64
 }
 
-// The one financial hold total: live holds' balance parts, pending refunds,
+// The one financial hold total: live holds' balance parts, what gates have
+// in flight, pending refunds,
 // unposted usage accruals, and what the customer's running charges have
 // accrued and not posted
 // (accrued, also answered apart). GetAdmissionCapacity computes the same sum.
@@ -169,7 +174,7 @@ func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHe
 }
 
 const getRequestHold = `-- name: GetRequestHold :one
-SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version FROM billing.limit_holds
+SELECT merchant_id, id, created_at, customer_id, currency, lease_id, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges FROM billing.limit_holds
 WHERE merchant_id = $1::uuid AND request_id = $2::text
   AND created_at >= $3::timestamptz
 ORDER BY created_at DESC
@@ -192,7 +197,6 @@ func (q *Queries) GetRequestHold(ctx context.Context, arg GetRequestHoldParams) 
 		&i.CustomerID,
 		&i.Currency,
 		&i.LeaseID,
-		&i.LimitSet,
 		&i.RequestID,
 		&i.EstimatedAmount,
 		&i.AvailableAmount,
@@ -208,8 +212,6 @@ func (q *Queries) GetRequestHold(ctx context.Context, arg GetRequestHoldParams) 
 		&i.ReleasedAt,
 		&i.UpdatedAt,
 		&i.CapturedCharges,
-		&i.Version,
-		&i.AppliedVersion,
 	)
 	return i, err
 }
@@ -252,15 +254,15 @@ func (q *Queries) InsertHoldPart(ctx context.Context, arg InsertHoldPartParams) 
 
 const insertRequestHold = `-- name: InsertRequestHold :one
 INSERT INTO billing.limit_holds (
-    merchant_id, created_at, customer_id, currency, request_id, estimated_amount, available_amount, terms,
+    merchant_id, created_at, customer_id, currency, lease_id, request_id, estimated_amount, available_amount, terms,
     estimate_usage, rate_cards, requested_expires_at, expires_at, state, updated_at
 ) VALUES (
     $1::uuid, $2::timestamptz, $3::uuid,
-    $4::text, $5::text, $6::bigint, $7::bigint,
-    $8::jsonb, $9::jsonb, $10::jsonb,
-    $11::timestamptz, $11::timestamptz, 'open', $2::timestamptz
+    $4::text, $5::uuid, $6::text, $7::bigint, $8::bigint,
+    $9::jsonb, $10::jsonb, $11::jsonb,
+    $12::timestamptz, $12::timestamptz, 'open', $2::timestamptz
 )
-RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version
+RETURNING merchant_id, id, created_at, customer_id, currency, lease_id, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges
 `
 
 type InsertRequestHoldParams struct {
@@ -268,6 +270,7 @@ type InsertRequestHoldParams struct {
 	CreatedAt          time.Time
 	CustomerID         uuid.UUID
 	Currency           string
+	LeaseID            *uuid.UUID
 	RequestID          string
 	EstimatedAmount    int64
 	AvailableAmount    int64
@@ -283,6 +286,7 @@ func (q *Queries) InsertRequestHold(ctx context.Context, arg InsertRequestHoldPa
 		arg.CreatedAt,
 		arg.CustomerID,
 		arg.Currency,
+		arg.LeaseID,
 		arg.RequestID,
 		arg.EstimatedAmount,
 		arg.AvailableAmount,
@@ -299,7 +303,6 @@ func (q *Queries) InsertRequestHold(ctx context.Context, arg InsertRequestHoldPa
 		&i.CustomerID,
 		&i.Currency,
 		&i.LeaseID,
-		&i.LimitSet,
 		&i.RequestID,
 		&i.EstimatedAmount,
 		&i.AvailableAmount,
@@ -315,8 +318,6 @@ func (q *Queries) InsertRequestHold(ctx context.Context, arg InsertRequestHoldPa
 		&i.ReleasedAt,
 		&i.UpdatedAt,
 		&i.CapturedCharges,
-		&i.Version,
-		&i.AppliedVersion,
 	)
 	return i, err
 }
@@ -371,7 +372,7 @@ func (q *Queries) ListHoldParts(ctx context.Context, arg ListHoldPartsParams) ([
 }
 
 const lockHold = `-- name: LockHold :one
-SELECT merchant_id, id, created_at, customer_id, currency, lease_id, limit_set, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges, version, applied_version FROM billing.limit_holds
+SELECT merchant_id, id, created_at, customer_id, currency, lease_id, request_id, estimated_amount, available_amount, terms, estimate_usage, rate_cards, requested_expires_at, expires_at, state, capture_terms, captured_amount, captured_at, released_at, updated_at, captured_charges FROM billing.limit_holds
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND created_at = $3::timestamptz
 FOR UPDATE
@@ -393,7 +394,6 @@ func (q *Queries) LockHold(ctx context.Context, arg LockHoldParams) (BillingLimi
 		&i.CustomerID,
 		&i.Currency,
 		&i.LeaseID,
-		&i.LimitSet,
 		&i.RequestID,
 		&i.EstimatedAmount,
 		&i.AvailableAmount,
@@ -409,8 +409,6 @@ func (q *Queries) LockHold(ctx context.Context, arg LockHoldParams) (BillingLimi
 		&i.ReleasedAt,
 		&i.UpdatedAt,
 		&i.CapturedCharges,
-		&i.Version,
-		&i.AppliedVersion,
 	)
 	return i, err
 }
@@ -489,18 +487,25 @@ func (q *Queries) RequestHoldCaptureTermsMatch(ctx context.Context, arg RequestH
 }
 
 const sumWindowHeld = `-- name: SumWindowHeld :one
-SELECT COALESCE(SUM(p.held), 0)::bigint AS held
-FROM billing.limit_hold_parts p
-JOIN billing.limit_holds h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
-WHERE p.merchant_id = $1::uuid AND p.customer_id = $2::uuid
-  AND p.limit_key = $3::text
-  AND p.window_starts_at >= $4::timestamptz AND p.window_starts_at <= $5::timestamptz
-  AND p.hold_created_at >= $6::timestamptz AND h.created_at >= $6::timestamptz
-  AND h.state = 'open'
-  AND CASE WHEN h.request_id IS NOT NULL
-      THEN $7::boolean OR h.expires_at > $8::timestamptz
-      ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = h.merchant_id AND l.id = h.lease_id
-          AND l.closed_at IS NULL AND l.last_sync_at > $9::timestamptz) END
+SELECT (COALESCE((SELECT SUM(p.held)
+    FROM billing.limit_hold_parts p
+    JOIN billing.limit_holds h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
+    WHERE p.merchant_id = $1::uuid AND p.customer_id = $2::uuid
+      AND p.limit_key = $3::text
+      AND p.window_starts_at >= $4::timestamptz AND p.window_starts_at <= $5::timestamptz
+      AND p.hold_created_at >= $6::timestamptz AND h.created_at >= $6::timestamptz
+      AND h.state = 'open'
+      AND CASE WHEN h.lease_id IS NULL
+          THEN $7::boolean OR h.expires_at > $8::timestamptz
+          ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = h.merchant_id AND l.id = h.lease_id
+              AND l.closed_at IS NULL AND l.last_sync_at > $9::timestamptz) END), 0)
+  + CASE WHEN $10::boolean THEN COALESCE((SELECT SUM(f.amount)
+    FROM billing.lease_in_flight f
+    JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+    WHERE f.merchant_id = $1::uuid AND f.customer_id = $2::uuid
+      AND f.limit_key = $3::text
+      AND l.closed_at IS NULL AND l.last_sync_at > $9::timestamptz
+      AND ($11::uuid IS NULL OR f.lease_id <> $11::uuid)), 0) ELSE 0 END)::bigint AS held
 `
 
 type SumWindowHeldParams struct {
@@ -513,13 +518,16 @@ type SumWindowHeldParams struct {
 	CountsExpired  bool
 	AsOf           time.Time
 	LeaseLiveSince time.Time
+	InFlight       bool
+	ExceptLease    *uuid.UUID
 }
 
 // The units live holds set aside in a limit's windows from from_window
-// through to_window (one window, or a rolling limit's buckets). A request's
-// hold is live until its deadline; past it, it still counts where
-// counts_expired (a window with an end) until it is captured or released. A
-// lease's hold is live while its lease is.
+// through to_window (one window, or a rolling limit's buckets), and, for the
+// current window (in_flight), what live leases other than except_lease
+// report in flight. A request's hold is live until its deadline; past it, it
+// still counts where counts_expired (a window with an end) until it is
+// captured or released. A gate's hold is live while its lease is.
 func (q *Queries) SumWindowHeld(ctx context.Context, arg SumWindowHeldParams) (int64, error) {
 	row := q.db.QueryRow(ctx, sumWindowHeld,
 		arg.MerchantID,
@@ -531,6 +539,8 @@ func (q *Queries) SumWindowHeld(ctx context.Context, arg SumWindowHeldParams) (i
 		arg.CountsExpired,
 		arg.AsOf,
 		arg.LeaseLiveSince,
+		arg.InFlight,
+		arg.ExceptLease,
 	)
 	var held int64
 	err := row.Scan(&held)

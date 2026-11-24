@@ -91,6 +91,7 @@ var Tables = map[string]Table{
 	"usage_minutes":                   {Rows, "rows are deleted 25 hours after their minute, past the longest accrual-rate window."},
 	"limit_windows":                   {Rows, "rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does."},
 	"leases":                          {Rows, "rows are deleted 61 days after last_sync_at."},
+	"lease_in_flight":                 {Rows, "each sync replaces its lease's rows and close clears them; they go with the lease."},
 	"limit_adjustments":               {Rows, "rows are deleted 61 days after created_at."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
 	"webhook_health_daily":            {Rows, "rows are deleted 13 months (397 days) after day_at."},
