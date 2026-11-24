@@ -139,9 +139,8 @@ type DeleteFinishedOutboxIntentsBeforeParams struct {
 
 // Finished intents that only carried an instruction to a provider. An intent
 // that moved or refused money, enrolled a membership or erased a card is the
-// record of that: it is not one of these types and is never deleted here. A
-// mutation log entry that names a deleted intent keeps its own row and loses
-// the link.
+// record of that: it is not one of these types and is never deleted here. An
+// operation log entry of a deleted intent keeps its row and its operation id.
 func (q *Queries) DeleteFinishedOutboxIntentsBefore(ctx context.Context, arg DeleteFinishedOutboxIntentsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteFinishedOutboxIntentsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {

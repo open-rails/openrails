@@ -222,8 +222,8 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 			" WHERE merchant_id = $1 AND subscription_id = $2 AND intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&operation, &state))
 		require.Equal(t, "succeeded", state)
 		var logged int
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_mutation_logs"}.Sanitize()+
-			" WHERE merchant_id = $1 AND provider_intent_id = $2::uuid", a.alpha.MerchantID().UUID(), operation).Scan(&logged))
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+
+			" WHERE merchant_id = $1 AND operation_id = $2::uuid", a.alpha.MerchantID().UUID(), operation).Scan(&logged))
 		require.Positive(t, logged)
 		// Finished, the resume was only an instruction to Stripe, as a cancel
 		// is: retention deletes it once it is older than its period.
@@ -278,12 +278,12 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		// Waiting is no attempt: the resume is pending, unattempted and unlogged.
 		var state string
 		var attempts, logged int
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT i.status, i.attempts, (SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_mutation_logs"}.Sanitize()+
-			" l WHERE l.merchant_id = i.merchant_id AND l.provider_intent_id = i.id) FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT i.status, i.attempts, (SELECT count(*) FROM "+pgx.Identifier{a.schema, "operation_log"}.Sanitize()+
+			" l WHERE l.merchant_id = i.merchant_id AND l.operation_id = i.id) FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
 			" i WHERE i.merchant_id = $1 AND i.subscription_id = $2 AND i.intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&state, &attempts, &logged))
 		require.Equal(t, "pending", state)
 		require.Zero(t, attempts)
-		require.Zero(t, logged, "a waiting resume writes no mutation log")
+		require.Zero(t, logged, "a waiting resume writes no operation entry")
 		held.Release()
 		require.Eventually(t, func() bool { return stripe.Subscription(remote)["cancel_at_period_end"] == true }, 20*time.Second, 20*time.Millisecond, "the cancel lands")
 		a.clock.Advance(2 * time.Minute)
