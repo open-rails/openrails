@@ -1,12 +1,6 @@
 # Customer directory (SCIM)
 
-Who a merchant's customers are: their email, name and username. OpenRails bills
-a customer by id, the subject UUID the host's auth reports, and reads contacts
-only to show customers to staff, to match them in reconciliation and imports, and
-to name the buyer to a provider's own page. Contacts come from the host's
-directory, read in process on every use, or from a copy the merchant's directory
-pushes over SCIM 2.0 (RFC 7643, RFC 7644). Integration guide:
-[customer contacts](../client.md#customers).
+Who a merchant's customers are: their email, name and username. OpenRails bills a customer by id, the subject UUID the host's auth reports, and reads contacts to email customers their billing messages, to show customers to staff, to match them in reconciliation and imports, and to name the buyer to a provider's own page. Contacts come from the host's directory, read in process on every use, or from a copy OpenRails keeps of what the merchant's directory pushes over SCIM 2.0 (RFC 7643, RFC 7644). Integration guide: [customer contacts](../client.md#customers).
 
 ## Concepts
 
@@ -74,6 +68,7 @@ minute.
 
 | Reader | Use | Directory down |
 |---|---|---|
+| `messages.Service` (`internal/modules/messages/send.go`) | the recipient of a customer message; none is `no_contact` | the send is retried |
 | `Service.GetCustomer`, `Service.ListCustomers` | `GET /v1/admin/customers/{customer_id}` and `?search=` | `503 service_unavailable` |
 | `customerContacts` (`GetAdminSubscriptions`, `ListOrders`, `writePaymentPage`) | contacts beside staff lists | the list loads without them |
 | `adminChangeCustomer` | email for `POST /v1/admin/subscriptions/{id}/change` | `503 service_unavailable` |

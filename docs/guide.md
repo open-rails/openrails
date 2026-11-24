@@ -1,9 +1,6 @@
 # OpenRails integration guide
 
-OpenRails is a billing engine you add to an existing application. It holds a
-merchant's catalog, orders, subscriptions, prepaid balances and metered usage,
-collects through NMI, Stripe, CCBill or Solana, and answers what each customer
-may access. Your app keeps its users and sign-in; a customer is your user's id.
+OpenRails is a billing engine you add to an existing application. It holds a merchant's catalog, orders, subscriptions, prepaid balances and metered usage, collects through NMI, Stripe, CCBill or Solana, emails customers their receipts and billing notices ([customer messages](#customer-messages)), and answers what each customer may access. Your app keeps its users and sign-in; a customer is your user's id.
 
 ## Choose a path
 
