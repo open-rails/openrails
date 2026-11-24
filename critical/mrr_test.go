@@ -187,7 +187,8 @@ func ccbillBook(price billing.PriceID, asOf time.Time, from, n int) billing.Decl
 	book := billing.DeclaredBilling{AsOf: asOf, DefaultPSP: billing.PSPRef{Key: "ccbill"}}
 	for i := from; i < from+n; i++ {
 		customer := billing.CustomerID(uuid.New())
-		sub, sale := legacyCCBillMember(customer, price, fmt.Sprintf("4%017d", i), fmt.Sprintf("08%017d", i), asOf.Add(5*24*time.Hour))
+		// No issuer's range starts with 9 or 0: no id reads as a card number.
+		sub, sale := legacyCCBillMember(customer, price, fmt.Sprintf("9%017d", i), fmt.Sprintf("08%017d", i), asOf.Add(5*24*time.Hour))
 		book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customer})
 		book.Subscriptions = append(book.Subscriptions, sub)
 		book.Transactions = append(book.Transactions, sale)
@@ -481,8 +482,10 @@ func TestMRR(t *testing.T) {
 			" WHERE merchant_id = $1 AND customer_id = $2 AND currency = 'USD'", a.alpha.MerchantID().UUID(), bob.UUID()).Scan(&cohort))
 		require.True(t, cohort.Equal(started), "the adopted cohort is when it started, %s", cohort)
 
-		// CCBill replaces its subscription with the upgrade's; OpenRails
-		// keeps the row and moves it onto the new price in one transaction.
+		// A minute later CCBill replaces its subscription with the upgrade's;
+		// OpenRails keeps the row and moves it onto the new price in one
+		// transaction. (The import's row is dated by the database's clock.)
+		a.clock.Advance(time.Minute)
 		next := a.clock.Now().UTC().Add(720 * time.Hour)
 		status, body := ccbillNotice(t, a, "UpgradeSuccess", map[string]any{"originalSubscriptionId": "0223344556677889900", "subscriptionId": "0667788990011223344",
 			"transactionId": "0812233445566778810", "flexId": "critical-plus-flex", "billedInitialPrice": "20.00", "billedRecurringPrice": "20.00", "recurringPeriod": "30",

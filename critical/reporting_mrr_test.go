@@ -123,10 +123,22 @@ func rollupsRebuiltOnRestore(t *testing.T) {
 	waitDisputeJobs(t, a)
 
 	mid := a.alpha.MerchantID().UUID()
+	// A row whose measures are all zero carries nothing: a settle leaves one
+	// where a fall met a rise or a product's MRR ended, a rebuild writes none.
+	carries := map[string]string{"mrr_streak_flows": "amount <> 0 OR logos <> 0", "mrr_product_totals": "mrr <> 0 OR subscribers <> 0",
+		"mrr_customer_totals": "customers <> 0", "mrr_customer_flows": "logos <> 0", "mrr_flows": "amount <> 0 OR entries <> 0 OR logos <> 0"}
+	rollup := func(w *world, table string) []string {
+		t.Helper()
+		rows, err := w.pool.Query(t.Context(), "SELECT r::text FROM "+booksTable(w, table)+" r WHERE merchant_id = $1 AND ("+carries[table]+") ORDER BY 1", mid)
+		require.NoError(t, err)
+		out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		return out
+	}
 	rollups := []string{"mrr_streak_flows", "mrr_product_totals", "mrr_customer_totals", "mrr_customer_flows", "mrr_flows"}
 	kept := map[string][]string{}
 	for _, table := range rollups {
-		kept[table] = booksRollup(t, a.world, table, mid)
+		kept[table] = rollup(a.world, table)
 		require.NotEmpty(t, kept[table], table)
 	}
 	decisions := func(w *world) []string {
@@ -145,7 +157,7 @@ func rollupsRebuiltOnRestore(t *testing.T) {
 	_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 	require.NoError(t, err, "the restore check passes on the rebuilt rollups")
 	for _, table := range rollups {
-		require.Equal(t, kept[table], booksRollup(t, target, table, mid), table)
+		require.Equal(t, kept[table], rollup(target, table), table)
 	}
 	require.Equal(t, decisions(a.world), decisions(target))
 }

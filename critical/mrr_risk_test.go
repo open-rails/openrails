@@ -342,7 +342,10 @@ func TestMRRRisk(t *testing.T) {
 		var claimed, holder int
 		require.NoError(t, drain.QueryRow(t.Context(), "SELECT "+pgx.Identifier{a.schema, "effect_due_mrr_risk"}.Sanitize()+"($1, 100, NULL), pg_backend_pid()", merchant).Scan(&claimed, &holder))
 		require.Positive(t, claimed)
-		require.Zero(t, riskQueued(t, a.world, a.alpha, sub.CustomerID), "the claim took the customer's changes")
+		var left int
+		require.NoError(t, drain.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "mrr_risk_due"}.Sanitize()+
+			" WHERE merchant_id = $1 AND customer_id = $2", merchant, sub.CustomerID.UUID()).Scan(&left))
+		require.Zero(t, left, "the claim took the customer's changes")
 
 		// NMI declines the renewal for a card it must not charge again; the
 		// decline's writer queues the customer and waits for the drain's locks.
@@ -455,7 +458,7 @@ func TestMRRRisk(t *testing.T) {
 		// is never at risk on the default, though it renews after the default
 		// expires. (A default held outside NMI cannot be set while an NMI
 		// schedule follows it, so the schedule comes after the default.)
-		schedule := nmiMembershipDeclared(t, v.authorityWorld, v.journal, catalog.Field[int]{}, func(book *billing.DeclaredBilling) {
+		schedule, _ := importNMISchedule(t, v.authorityWorld, v.journal, catalog.Field[int]{}, func(book *billing.DeclaredBilling) {
 			book.Subscriptions[0].PaymentMethod = nil
 		})
 		require.Nil(t, schedule.PaymentMethodID)

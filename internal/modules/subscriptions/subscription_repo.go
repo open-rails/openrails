@@ -130,10 +130,6 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	return convergejob.Queue(ctx, r.db, tid, s.CustomerID)
 }
 
-func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) error {
-	return r.UpdateAt(ctx, s, time.Now())
-}
-
 // ReplaceForTierChange writes oldSub (pre-mutated by the caller to its
 // canceled state) and inserts newSub in one transaction, the cancel first:
 // subscriptions_customer_id_tier_group_key allows one live subscription per

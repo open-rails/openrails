@@ -45,7 +45,7 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			sub.ClearRetrySchedule()
 		}
 	}
-	if err := NewSubscriptionRepo(d).Update(ctx, sub); err != nil {
+	if err := NewSubscriptionRepo(d).UpdateAt(ctx, sub, s.now()); err != nil {
 		return nil, fmt.Errorf("update renewed subscription: %w", err)
 	}
 	entitlementsService := s.newLifecycleEntitlementService(d)
