@@ -273,6 +273,7 @@ var jsonRules = map[string]jsonRule{
 
 		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,
 		"declined": booleanValue, "failure_code": textValue, "failure_message": textValue, "not_executed": booleanValue,
+		"advice_code": textValue, "network_advice_code": textValue, "network_decline_code": textValue,
 		"not_executed_code": textValue, "submitted_at": textValue, "provider_contradiction": textValue, "verified_existing": booleanValue,
 		"operator_resolution":               operatorResolutionJSON,
 		"qualified_collection_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
@@ -394,7 +395,7 @@ var jsonRules = map[string]jsonRule{
 	// An order line's credit benefit per unit, frozen when the order was made.
 	"order_lines.credit_grant":      nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
-	"grants.spec_snapshot":       nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue, "paid_amount": moneyStringValue})})),
+	"grants.spec_snapshot":       nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
 	"usage_accruals.lines":       array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "requests": integerValue, "quantity": integerValue, "amount": integerValue, "posted_amount": integerValue})),
 	"order_attempts.metadata":    metadataJSON,
 	"order_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),

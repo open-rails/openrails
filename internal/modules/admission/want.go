@@ -122,8 +122,12 @@ func (w Want) SpendAt(merchantID, customer uuid.UUID, currency string, at time.T
 // MoneyTerms names the resolved policy and what it makes of the balance:
 // invokers whose policies differ (a trust level's outstanding_cap, or its
 // spend window of the same key with another cap) hold apart.
-func (w Want) MoneyTerms() string {
-	return fmt.Sprintf("%q:%s:%d", w.resolved.Name, w.resolved.Kind, w.resolved.OutstandingCapAmount)
+func (w Want) MoneyTerms() string { return w.gated.moneyTerms }
+
+// moneyTerms names a policy as declared, so an exchange rate's move never
+// sets two holds of one policy apart.
+func moneyTerms(p ResolvedPolicy) string {
+	return fmt.Sprintf("%q:%s:%d:%s", p.Name, p.Kind, p.OutstandingCapAmount, p.PolicyCurrency)
 }
 
 // BalanceRefusal is the deny code a want that does not fit the balance gets,

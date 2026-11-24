@@ -116,12 +116,21 @@ func Deferred(reason string, until time.Time) Outcome {
 // was deferred has been resumed)?
 type Relevance struct {
 	Applicable bool
-	// Reason explains why the intent is superseded when Applicable is false.
+	// Reason explains why the intent is superseded when Applicable is false,
+	// or why it waits.
 	Reason string
+	// Until, when set, is when an applicable intent may be attempted: it waits
+	// without an attempt or a mutation-log row.
+	Until time.Time
 }
 
 func StillRelevant() Relevance             { return Relevance{Applicable: true} }
 func SupersededBy(reason string) Relevance { return Relevance{Applicable: false, Reason: reason} }
+
+// WaitUntil keeps an applicable intent unattempted until until.
+func WaitUntil(reason string, until time.Time) Relevance {
+	return Relevance{Applicable: true, Reason: reason, Until: until}
+}
 
 // Handler implements one intent type's semantics. Implementations must be
 // safe for concurrent use.

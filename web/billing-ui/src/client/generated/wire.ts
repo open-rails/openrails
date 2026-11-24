@@ -538,6 +538,7 @@ export type CreateCreditGrantParams = {
   amount?: string
   source_id?: string
   source?: string
+  funding_source?: "grant" | "import" | "promotion"
   invoker?: string
   expires_at?: string
   description?: string
@@ -700,15 +701,18 @@ export type CreditGrant = {
   remaining_amount: string
   revoked_amount: string
   expired_amount: string
-  state: "active" | "expired" | "revoked" | "scheduled" | "spent" | "terminated"
-  source_type: string
+  refunded_amount: string
+  state: "active" | "expired" | "pending" | "refunded" | "revoked" | "scheduled" | "spent"
+  funding_source: "grant" | "import" | "promotion" | "purchase" | "recurring"
+  paid_amount: string | null
+  paid_currency: string | null
   source_id: string | null
   description: string | null
   starts_at: string
   expires_at: string | null
   created_at: string
-  terminated_at: string | null
-  termination_reason: string | null
+  revoked_at: string | null
+  revoke_reason: string | null
   replayed: boolean
 }
 
@@ -1448,14 +1452,11 @@ export type MerchantConfigurationState = {
   display_name: string
   usage_billing?: UsageBillingSettings
   profile?: MerchantProfile
-  collection_threshold?: string
-  monthly_floor?: string
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
   arrears_grace_days?: number
-  arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
@@ -2842,14 +2843,11 @@ export type UpdateMerchantConfigurationParams = {
   display_name?: string
   usage_billing?: UsageBillingSettings
   profile?: MerchantProfile
-  collection_threshold?: string
-  monthly_floor?: string
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
   arrears_grace_days?: number
-  arrears_delinquency_floor?: string
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
@@ -2931,6 +2929,8 @@ export type UsageBillingCurrency = {
   currency: string
   credit_limit: string
   minimum_invoice_amount: string
+  collection_threshold: string | null
+  delinquency_floor: string | null
 }
 
 export type UsageBillingSettings = {

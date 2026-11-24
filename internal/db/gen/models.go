@@ -183,6 +183,57 @@ type BillingChangeLog struct {
 	OperationID *uuid.UUID
 }
 
+// Credit lots: units of a currency or merchant unit credited to a customer's balance, spent soonest expiry first. Every movement of a lot's units is a ledger transfer naming it; units_credited and units_debited count the legs on its balance account. Retention: permanent, never pruned.
+type BillingCreditGrant struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	// The customer's balance account the lot's units sit in; only legs on it move the lot's counters.
+	AccountID uuid.UUID
+	// What the lot counts: a registry currency, or a merchant-defined unit.
+	Unit  string
+	Units int64
+	// purchase and recurring were paid (a one-off order line, or a recurring price's cycle); grant and promotion were given; import came from another system and may declare what was paid.
+	FundingSource string
+	// What was paid for the lot, in paid_currency (a registry currency); NULL for a gift.
+	PaidAmount   *int64
+	PaidCurrency *string
+	// The label the funding named, part of its once-only key.
+	Source string
+	// The funding's own id: the caller's key, or the payment that bought the lot. Unique per customer.
+	SourceID *string
+	// Who funded the lot: the customer, or the staff or host that granted it.
+	Invoker     string
+	ProductID   *uuid.UUID
+	OrderLineID *uuid.UUID
+	PaymentID   *uuid.UUID
+	Description *string
+	StartsAt    time.Time
+	ExpiresAt   *time.Time
+	// When the lot's live revocation took effect; kept by its credit_grant_events.
+	RevokedAt *time.Time
+	// Units the ledger credited to the lot on its balance account: deposits, bonuses, restores and reinstatements. Kept by ledger_transfers_apply_lot_counters.
+	UnitsCredited int64
+	// Units the ledger debited from the lot on its balance account: spends, repayments, expiries, revocations and refunds. Remaining is units_credited - units_debited.
+	UnitsDebited int64
+	// Units pending refunds of the lot's payment will withdraw: its share of the refunds' cash, rounded up. Available is remaining - units_reserved.
+	UnitsReserved int64
+	CreatedAt     time.Time
+}
+
+// Append-only revocations and reinstatements of credit lots; each sets or clears its lot's revoked_at. The units they move are ledger transfers. Retention: permanent, never pruned.
+type BillingCreditGrantEvent struct {
+	MerchantID    uuid.UUID
+	ID            uuid.UUID
+	CreditGrantID uuid.UUID
+	Event         string
+	// When the event takes effect (valid time); created_at is when it was recorded.
+	EffectiveAt time.Time
+	Reason      *string
+	Actor       *string
+	CreatedAt   time.Time
+}
+
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID
@@ -478,13 +529,13 @@ type BillingFailedUsageWindow struct {
 	Amount      int64
 }
 
-// Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant. Retention: permanent, never pruned.
+// Append-only grant ledger. Immutable events (grant/revoke/expire/supersede); the live product access windows and ownership are DERIVED projections folded from this log. Credit lots are credit_grants. Retention: permanent, never pruned.
 type BillingGrant struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	ProductID  *uuid.UUID
-	// access: a product for a window, whose keys are read from the product at check time; credit: a credit lot. entitlement and ownership are history from before product access.
+	// access: a product for a window, whose keys are read from the product at check time. entitlement and ownership are history from before product access.
 	Kind       string
 	SourceType string
 	SourceID   *string
@@ -492,12 +543,10 @@ type BillingGrant struct {
 	// Grant roots a grant; revoke/expire/supersede are new rows referencing it via supersedes_id. The grant row is never updated.
 	Event        string
 	SupersedesID *uuid.UUID
-	// Product entitlements/credits spec captured at issuance so derive-2 (grant->projection) is a pure function and replay is exact + historical.
+	// The keys a historical entitlement grant carried; NULL on access grants.
 	SpecSnapshot []byte
 	StartsAt     time.Time
 	EndsAt       *time.Time
-	Amount       *int64
-	Currency     *string
 	Reason       *string
 	CreatedAt    time.Time
 	// Who granted a free product: the operator or credential. Required on grant-sourced access grants.
@@ -596,13 +645,13 @@ type BillingLedgerTransfer struct {
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.
 	Source   string
 	SourceID string
-	// Credit-lot attribution. grant_id/order_id/customer_id deliberately carry no FKs (ledger purity): the append-only ledger never blocks or cascades on business rows.
-	GrantID    *uuid.UUID
-	CustomerID *uuid.UUID
-	InvokerID  *string
-	Resource   *string
-	OrderID    *uuid.UUID
-	CreatedAt  time.Time
+	// The credit lot the leg moves units of, or attributes money to. order_id and customer_id carry no foreign keys: the append-only ledger never blocks or cascades on business rows.
+	CreditGrantID *uuid.UUID
+	CustomerID    *uuid.UUID
+	InvokerID     *string
+	Resource      *string
+	OrderID       *uuid.UUID
+	CreatedAt     time.Time
 	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
 }

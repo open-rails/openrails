@@ -28,25 +28,14 @@ SELECT
                AND CASE WHEN lh.request_id IS NOT NULL THEN lh.expires_at > sqlc.arg(as_of)::timestamptz
                    ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
                        AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END), 0)
-     -- Retired credit funds its refund from the retired account. Only value
-     -- still in customer_balance remains reserved here; an unswept expired
-     -- source is entirely unavailable, including its unrefunded remainder.
-     -- A refund returns the credit line's money first, so a pending refund
-     -- holds its share of the line's paid amount, not of the whole payment.
-     + COALESCE((SELECT sum(CASE WHEN g.ends_at <= sqlc.arg(as_of)::timestamptz
-         THEN lot.remaining ELSE LEAST(ceil(g.amount::numeric * LEAST(r.pending,(g.spec_snapshot->'deposit'->>'paid_amount')::numeric) / (g.spec_snapshot->'deposit'->>'paid_amount')::numeric),lot.remaining) END)
-       FROM (SELECT refunded_payment_id, sum(-refund.amount)::numeric AS pending
-         FROM billing.payments refund WHERE refund.merchant_id=a.merchant_id
-           AND refund.customer_id=a.customer_id AND refund.currency=a.currency
-           AND refund.status='pending' AND refund.amount<0 AND refund.deleted_at IS NULL
-         GROUP BY refunded_payment_id) r
-       JOIN billing.payments p ON p.merchant_id=a.merchant_id AND p.id=r.refunded_payment_id AND p.amount>0 AND p.deleted_at IS NULL
-       JOIN billing.grants g ON g.merchant_id=a.merchant_id AND g.payment_id=p.id
-         AND g.kind='credit' AND g.event='grant'
-         AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
-       JOIN LATERAL (SELECT GREATEST(g.amount-COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END),0),0)::numeric AS remaining
-         FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
-           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)
+     -- What pending refunds reserve of a purchased lot, up to its units left.
+     -- Retired credit funds its refund from the retired account; an unswept
+     -- lapsed lot is entirely unavailable.
+     + COALESCE((SELECT sum(CASE WHEN g.expires_at <= sqlc.arg(as_of)::timestamptz
+         THEN g.units_credited - g.units_debited ELSE LEAST(g.units_reserved, g.units_credited - g.units_debited) END)
+       FROM billing.credit_grants g
+       WHERE g.merchant_id = a.merchant_id AND g.customer_id = a.customer_id AND g.unit = a.currency
+         AND g.units_reserved > 0 AND g.units_credited > g.units_debited), 0)
      -- What the customer's usage accrued and the ledger has not taken.
      + COALESCE((SELECT SUM(ua.amount - ua.posted_amount)
               FROM billing.usage_accruals ua

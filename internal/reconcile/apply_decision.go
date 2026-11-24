@@ -131,6 +131,10 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 			at = now
 		}
 		switch {
+		case d.RemoteGone && !d.KeepsPaidTime && cur.Rail == models.RailCCBill:
+			// CCBill's own end is a lapse, as its cancel and expiration
+			// webhooks read it: its reactivation or next rebill restores it.
+			return lifecycle.Cancel{Kind: lifecycle.CancelExpired, At: at}
 		case d.RemoteGone && !d.KeepsPaidTime && subscriptions.OwnerOf(cur) == lifecycle.Provider:
 			// A provider that owns the schedule decides its access: its
 			// confirmed end is immediate.
@@ -138,8 +142,8 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 		case d.RemoteGone:
 			// The schedule ended (NMI), or only its rebilling (a CCBill
 			// cancellation): paid time is kept, through the provider's own
-			// paid-through when it states one.
-			ev := lifecycle.ProviderCanceled{At: at}
+			// paid-through when it states one. A stopped rebill is a lapse.
+			ev := lifecycle.ProviderCanceled{At: at, Lapse: d.KeepsPaidTime}
 			if d.KeepsPaidTime && d.PaidThrough != nil {
 				ev.PaidThrough = d.PaidThrough.UTC()
 			}

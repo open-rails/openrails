@@ -60,7 +60,7 @@ The widget kinds are general, so adding a tile or chart is adding a widget to `D
 5. `Schema()` renders the registry for `GET /v1/metrics/schema`: measures with formulas, groups, directions, thresholds, dimensions and their values, grains, examples, `Caveats`, `Deferred` names and the limits.
 
 The engine owns no table and runs no job. It reads `payments`, `order_lines`,
-`prices`, `subscriptions`, `subscription_status_transitions`, `grants`,
+`prices`, `subscriptions`, `subscription_status_transitions`, `credit_grants`,
 `usage_daily`, `limit_windows`, `product_access`, `product_entitlements`,
 `ledger_transfers`, `ledger_accounts`, `webhook_health`, `webhook_health_daily`,
 `psps`, `custodians`, `payment_attempts`, `payment_method_versions`,

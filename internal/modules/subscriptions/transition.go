@@ -116,18 +116,18 @@ func cancelKindOf(t models.CancelType) lifecycle.CancelKind {
 		return lifecycle.CancelChargeback
 	case models.CancelTypeExpired:
 		return lifecycle.CancelExpired
+	case models.CancelTypeProvider:
+		return lifecycle.CancelProvider
+	case models.CancelTypeAbandoned:
+		return lifecycle.CancelAbandoned
 	default:
 		return lifecycle.CancelKind(t)
 	}
 }
 
-// modelCancelType stores a provider-confirmed or abandoned end as expired,
-// the stored vocabulary's terminal non-customer reason.
+// modelCancelType stores a cancel kind as itself: a provider-confirmed or
+// abandoned end read back as a lapse (expired) would be revived by a later
+// payment or a resume the machine refuses.
 func modelCancelType(k lifecycle.CancelKind) models.CancelType {
-	switch k {
-	case lifecycle.CancelProvider, lifecycle.CancelAbandoned:
-		return models.CancelTypeExpired
-	default:
-		return models.CancelType(k)
-	}
+	return models.CancelType(k)
 }

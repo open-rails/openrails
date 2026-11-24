@@ -60,16 +60,7 @@ The due pass moves a provider-billed renewal still unpaid 48 hours
 (`AskProviderOverdueRenewal`). Solana renewals are the cranker's pulls
 ([payment providers](payment-providers.md)).
 
-**Cancel and resume.** Customers cancel at period end with a 4–500 character
-reason (`Service.CancelSubscriptionForCustomer`); staff use
-`AdminSubscriptionService.CancelSubscription` (`revoke_access`,
-`account_deletion`). Access runs to the boundary unless immediate or a
-chargeback; any provider stop is an operation. An NMI delete waits until 48
-hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours, never
-later than 48 hours before the rebill (`SystemDeleteCoolingOff`); one during an
-unresolved renewal is refused (`payment_in_progress`). `Resumable` allows
-undoing a non-merchant cancel (engine, Solana: the customer's own) on a
-reversible rail in the paid period.
+**Cancel and resume.** Customers cancel at period end with a 4–500 character reason (`Service.CancelSubscriptionForCustomer`); staff use `AdminSubscriptionService.CancelSubscription` (`revoke_access`, `account_deletion`). Access runs to the boundary unless immediate or a chargeback; any provider stop is an operation. An NMI delete waits until 48 hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours, never later than 48 hours before the rebill (`SystemDeleteCoolingOff`); one during an unresolved renewal is refused (`payment_in_progress`). `Resumable` allows undoing a non-merchant cancel (engine, Solana: the customer's own; never a provider's or an abandoned start) on a reversible rail in the paid period; a Stripe resume is a `stripe_resume_subscription` operation committed with it, refused before anything commits when Stripe cannot be told now (provider writes off, Stripe not configured, or a key that cannot write). A Stripe cancel or resume supersedes the opposite one not yet sent, and waits, unattempted, while an earlier one of its subscription is in flight or unresolved; each is ordered by when it was inserted under the subscription's row lock, so Stripe ends as the last one committed. A pending resume keeps a pull from reading Stripe's standing `cancel_at_period_end` as a new portal cancel, and a pending cancel keeps one from reading its absence as a portal resume.
 
 **Plan and seat changes.** `PurchaseService.ChangeSubscription` routes by owner:
 
@@ -109,7 +100,7 @@ reversible rail in the paid period.
 
 ### 1. Exactly-once provider calls
 
-Each provider write is a `provider_intents` row committed with its job before it is sent: `subscription_collection`, `initial_membership`, `nmi_upgrade`, `stripe_tier_change`, a cancel's NMI delete or Stripe or CCBill cancel; a migration's push is the [catalog's](catalog.md#1-exactly-once-provider-calls). Keys are deterministic; an ambiguous outcome is verified, never resent. Exception: the Stripe resume is a direct, idempotent write.
+Each provider write is a `provider_intents` row committed with its job before it is sent: `subscription_collection`, `initial_membership`, `nmi_upgrade`, `stripe_tier_change`, a cancel's NMI delete or Stripe or CCBill cancel, and a Stripe resume (`stripe_resume_subscription`, committed with the local resume); a migration's push is the [catalog's](catalog.md#1-exactly-once-provider-calls). Keys are deterministic; an ambiguous outcome is verified, never resent.
 
 Checks:
 - `provider_intents_open_subscription_collection_key` and
@@ -119,17 +110,13 @@ Checks:
 
 ### 2. Agreement with providers
 
-Webhooks only wake a converge that reads the provider. A decline for a paid or
-canceled period is ignored, a payment on a row canceled by decision goes to
-refund review (`lifecycle.ErrTerminal`), one on a lapsed (`expired`) row restores
-it, and missing facts lead only to `unverified`. A Stripe
-price move settles from Stripe's record (`ProviderMovedPrice`).
+Webhooks only wake a converge that reads the provider. A decline for a paid or canceled period is ignored, a payment on a row canceled by decision goes to refund review (`lifecycle.ErrTerminal`), one on a lapsed (`expired`) row restores it, and missing facts lead only to `unverified`. An end the provider confirmed is stored as `provider` and one whose first payment never completed as `abandoned`, so read back they stay decided: neither a payment nor a resume reopens them. CCBill's own cancel and expiration are lapses, whether its webhook or a pull reports them; its reactivation or next renewal restores them. An immediate end reported later on an already canceled row ends its access then, and keeps the kind it was canceled with. A charge on a row ended by decision is raised as `pull.charge.after_cancellation` for refund review. A Stripe price move settles from Stripe's record (`ProviderMovedPrice`).
 
 Checks:
 - `lifecycle.Apply` gives no effects for a stale `RenewalPaid` or for
   `RenewalDeclined` on a canceled row.
 - `RenewalOverdue` and `DunningStale` reach only `unverified`.
-- OR-J17-S04 (late callbacks); OR-J15-S18, OR-J15-S19 (ends only on not-found).
+- OR-J17-S04 (late callbacks); OR-J15-S18, OR-J15-S19 (ends only on not-found); OR-J38-S75 (a provider-confirmed end is not reopened by a later renewal); OR-J38-S79, S80 (CCBill's cancels are lapses); OR-J38-S81 (a later failed-rebill cancel keeps a decided end decided).
 
 ### 3. Exact money
 
@@ -203,7 +190,7 @@ Journeys:
 - OR-J13-S01–S04: enrollment, concurrent signup, imported terms, trials.
 - OR-J14-S01–S07, OR-J14-S70: boundary, concurrency, restart, frozen terms,
   process death, one agreement, calendar anchor, missed renewal.
-- OR-J17-S01–S06: cancel and resume, renewal custody, held delete, callbacks.
+- OR-J17-S01–S12: cancel and resume (a Stripe resume a `stripe_resume_subscription` operation, refused with provider writes off, sent after the cancel before it, ordered by commit, and superseded by a later cancel; a cancel Stripe has not heard survives a converge), renewal custody, held delete, callbacks.
 - OR-J18-S01–S06: preview, stale preview, customer action, fences, seats.
 - OR-J19-S01, OR-J19-S04: a move applies at the paid boundary, never before; an admitted renewal keeps its terms (the rest of J19 is the [catalog's](catalog.md#tests)).
 - Related: OR-J04-S42, OR-J04-S70, OR-J34-S05/S06, OR-J27-S08, OR-J37-S64–S68.
@@ -215,4 +202,3 @@ Gaps:
 - No table test of `lifecycle.Apply`; rare transitions run only in scenarios.
 - Nothing checks the `Retention:` table comments against `internal/retention/tables.go`.
 - OR-J18-S03 checks a seat increase's payment and card, not its amount.
-- No scenario covers a local failure after Stripe accepted a resume.

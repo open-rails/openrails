@@ -94,11 +94,12 @@ FOR UPDATE;
 
 -- name: ProductHoldsReferences :one
 -- Whether a record refers to the product itself: a subscription, a grant,
--- product access, a price migration or a meter's rate card. Its prices'
+-- a credit lot, product access, a price migration or a meter's rate card. Its prices'
 -- references, purchase lines among them, are PricesHoldReferences'.
 SELECT (
     EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)
     OR EXISTS (SELECT 1 FROM billing.grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)
+    OR EXISTS (SELECT 1 FROM billing.credit_grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)
     OR EXISTS (SELECT 1 FROM billing.product_access WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND from_product_id = sqlc.arg(product_id)::uuid)
     OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid)

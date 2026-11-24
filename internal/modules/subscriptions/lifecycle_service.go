@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -1087,6 +1088,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 	return nil
 }
 
+// ResumeFailpointKind names a resume's transaction (failpoint.BeforeLock).
+const ResumeFailpointKind = "subscription_resume"
+
 // ResumeMembership restores a reversibly-canceled subscription and its
 // standing entitlement projection in one transaction.
 func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, params *ResumeMembershipParams) (*models.Subscription, error) {
@@ -1102,6 +1106,9 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 	var resumed *models.Subscription
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := s.DB.NewWithPgxTx(tx)
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeLock, Kind: ResumeFailpointKind, Subscription: params.SubscriptionID}); err != nil {
+			return err
+		}
 		if observed.CollectionPolicy == models.CollectionPolicyEngine {
 			if _, err := txdb.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
 				return err
@@ -1161,6 +1168,15 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 				return fmt.Errorf("resume engine: %w", err)
 			}
 		}
+		var canceledAt time.Time
+		switch {
+		case subscription.CanceledAt != nil:
+			canceledAt = *subscription.CanceledAt
+		case subscription.EndedAt != nil:
+			canceledAt = *subscription.EndedAt
+		default:
+			return fmt.Errorf("resume membership: canceled subscription %s records no cancel", subscription.ID)
+		}
 		if _, err := Transition(subscription, lifecycle.Resume{At: now}, now); err != nil {
 			return fmt.Errorf("resume membership %s: %w", subscription.ID, err)
 		}
@@ -1176,6 +1192,11 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		entSvc := s.newLifecycleEntitlementService(txdb)
 		if subscription.CurrentPeriodStartsAt != nil && subscription.CurrentPeriodEndsAt != nil {
 			if err := pushRenewalGrace(ctx, txdb, entSvc, subscription, *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
+				return fmt.Errorf("resume membership: %w", err)
+			}
+		}
+		if params.Within != nil {
+			if err := params.Within(ctx, tx, subscription, canceledAt); err != nil {
 				return fmt.Errorf("resume membership: %w", err)
 			}
 		}

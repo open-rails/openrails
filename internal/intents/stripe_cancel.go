@@ -92,7 +92,7 @@ func (h *StripeCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 	if sub.Status != models.StatusCanceled {
 		return SupersededBy(fmt.Sprintf("subscription no longer canceled (status=%s)", sub.Status)), nil
 	}
-	return StillRelevant(), nil
+	return awaitEarlierStripeWrite(ctx, h.DB, intent, h.Clock)
 }
 
 func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {

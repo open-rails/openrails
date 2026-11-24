@@ -107,12 +107,7 @@ never refundable through OpenRails.
 
 ## Interfaces
 
-- Go: `Client.RefundPayment` (`billing.RefundPaymentParams`), `Client.GetPayment`,
-  `Client.ListPayments`, `Client.RecordExternalPayment`
-  (`billing.RecordExternalPaymentParams`). `billing.PaymentKind` is `charge`,
-  `refund`, `chargeback` or `dispute_reversal`; a charge with reversals reads
-  `refunded` or `partially_refunded`. Sentinels: `billing.ErrRefundUnsupported`,
-  `billing.ErrRefundRailUnavailable`.
+- Go: `Client.RefundPayment` (`billing.RefundPaymentParams`), `Client.GetPayment`, `Client.ListPayments`, `Client.RecordExternalPayment` (`billing.RecordExternalPaymentParams`). `billing.PaymentKind` is `charge`, `refund`, `chargeback` or `dispute_reversal`; a charge with reversals reads `refunded` or `partially_refunded` by their net, so a won dispute gives back what its chargeback took. Sentinels: `billing.ErrRefundUnsupported`, `billing.ErrRefundRailUnavailable`.
 - HTTP: `POST /v1/admin/payments/{id}/refunds` and `POST /v1/admin/payments`
   (`merchant:customer:manage`); `GET /v1/admin/payments` and
   `GET /v1/admin/payments/{id}` (`merchant:customer:read`); `GET /v1/me/payments`.
@@ -247,11 +242,7 @@ Checks:
 
 ## Tests
 
-- J20: OR-J20-S01 partial then full refund (`TestRefunds`); OR-J20-S02 concurrent
-  refunds, OR-J20-S03 lost response, OR-J20-S70 dashboard refund under a failing
-  read (`TestRefundRecovery`); OR-J20-S04 foreign and off-rail refunds
-  (`TestRefundBoundaryContract`); OR-J20-S05 CCBill partial refunds
-  (`TestCCBillRefunds`).
+- J20: OR-J20-S01 partial then full refund (`TestRefunds`); OR-J20-S02 concurrent refunds, OR-J20-S03 lost response, OR-J20-S70 dashboard refund under a failing read (`TestRefundRecovery`); OR-J20-S04 foreign and off-rail refunds (`TestRefundBoundaryContract`); OR-J20-S05 CCBill partial refunds (`TestCCBillRefunds`); OR-J20-S06 a won dispute nets against its chargeback (`TestRefunds`).
 - J21: OR-J21-S01 to S03 external payments (`TestExternalPayments`); OR-J21-S04
   imported refund allowance (`TestImportedReceipt`).
 - Credit-line reversals (`TestMixedOrderCreditRefunds`): OR-J22-S07 (a pending
@@ -266,4 +257,3 @@ Gaps:
   execute, verify and resolve paths are untested end to end.
 - No scenario ingests an NMI chargeback.
 - No scenario sets `provider_refund_access`: `ApplyRefundAccessPolicy` is untested.
-- No scenario reads `AmountRefunded` or the charge's status after a won dispute.

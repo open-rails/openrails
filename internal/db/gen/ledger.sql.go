@@ -54,11 +54,11 @@ func (q *Queries) GetLedgerAccount(ctx context.Context, arg GetLedgerAccountPara
 }
 
 const getLedgerSpendByCoords = `-- name: GetLedgerSpendByCoords :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
-  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND transfer_type IN ('credit_spend', 'owed_accrual')
   AND operation = $4::text
   AND source = $5::text
   AND source_id = $6::text
@@ -98,7 +98,7 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 		&i.AllowDebitNegativeUpTo,
 		&i.Source,
 		&i.SourceID,
-		&i.GrantID,
+		&i.CreditGrantID,
 		&i.CustomerID,
 		&i.InvokerID,
 		&i.Resource,
@@ -110,7 +110,7 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 }
 
 const getLedgerTransferAtCoordinate = `-- name: GetLedgerTransferAtCoordinate :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id IS NOT DISTINCT FROM $2::uuid
   AND currency = $3::text
@@ -118,18 +118,18 @@ WHERE merchant_id = $1::uuid
   AND operation = $5::text
   AND source = $6::text
   AND source_id = $7::text
-  AND grant_id IS NOT DISTINCT FROM $8::uuid
+  AND credit_grant_id IS NOT DISTINCT FROM $8::uuid
 `
 
 type GetLedgerTransferAtCoordinateParams struct {
-	MerchantID   uuid.UUID
-	CustomerID   *uuid.UUID
-	Currency     string
-	TransferType string
-	Operation    string
-	Source       string
-	SourceID     string
-	GrantID      *uuid.UUID
+	MerchantID    uuid.UUID
+	CustomerID    *uuid.UUID
+	Currency      string
+	TransferType  string
+	Operation     string
+	Source        string
+	SourceID      string
+	CreditGrantID *uuid.UUID
 }
 
 // GetLedgerTransferAtCoordinate reads the row a conflicting insert lost to —
@@ -144,7 +144,7 @@ func (q *Queries) GetLedgerTransferAtCoordinate(ctx context.Context, arg GetLedg
 		arg.Operation,
 		arg.Source,
 		arg.SourceID,
-		arg.GrantID,
+		arg.CreditGrantID,
 	)
 	var i BillingLedgerTransfer
 	err := row.Scan(
@@ -158,7 +158,7 @@ func (q *Queries) GetLedgerTransferAtCoordinate(ctx context.Context, arg GetLedg
 		&i.AllowDebitNegativeUpTo,
 		&i.Source,
 		&i.SourceID,
-		&i.GrantID,
+		&i.CreditGrantID,
 		&i.CustomerID,
 		&i.InvokerID,
 		&i.Resource,
@@ -170,7 +170,7 @@ func (q *Queries) GetLedgerTransferAtCoordinate(ctx context.Context, arg GetLedg
 }
 
 const getLedgerTransferByCoords = `-- name: GetLedgerTransferByCoords :one
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
@@ -217,7 +217,7 @@ func (q *Queries) GetLedgerTransferByCoords(ctx context.Context, arg GetLedgerTr
 		&i.AllowDebitNegativeUpTo,
 		&i.Source,
 		&i.SourceID,
-		&i.GrantID,
+		&i.CreditGrantID,
 		&i.CustomerID,
 		&i.InvokerID,
 		&i.Resource,
@@ -278,35 +278,34 @@ const insertLedgerTransfer = `-- name: InsertLedgerTransfer :one
 INSERT INTO billing.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to, operation,
-    source, source_id, grant_id, customer_id, invoker_id, resource, order_id
+    source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     $4::bigint, $5::text, $6::text,
-    $7::bigint, $8::text,
-    $9::text, $10::text, $11::uuid, $12::uuid,
-    $13::text, $14::text, $15::uuid
+    0, $7::text,
+    $8::text, $9::text, $10::uuid, $11::uuid,
+    $12::text, $13::text, $14::uuid
 )
-ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id)
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id)
 DO NOTHING
-RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, order_id, created_at, operation
+RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation
 `
 
 type InsertLedgerTransferParams struct {
-	MerchantID             uuid.UUID
-	DebitAccountID         uuid.UUID
-	CreditAccountID        uuid.UUID
-	Amount                 int64
-	Currency               string
-	TransferType           string
-	AllowDebitNegativeUpTo int64
-	Operation              string
-	Source                 string
-	SourceID               string
-	GrantID                *uuid.UUID
-	CustomerID             *uuid.UUID
-	InvokerID              *string
-	Resource               *string
-	OrderID                *uuid.UUID
+	MerchantID      uuid.UUID
+	DebitAccountID  uuid.UUID
+	CreditAccountID uuid.UUID
+	Amount          int64
+	Currency        string
+	TransferType    string
+	Operation       string
+	Source          string
+	SourceID        string
+	CreditGrantID   *uuid.UUID
+	CustomerID      *uuid.UUID
+	InvokerID       *string
+	Resource        *string
+	OrderID         *uuid.UUID
 }
 
 // InsertLedgerTransfer is the one durable money write. ON CONFLICT DO NOTHING
@@ -322,11 +321,10 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		arg.Amount,
 		arg.Currency,
 		arg.TransferType,
-		arg.AllowDebitNegativeUpTo,
 		arg.Operation,
 		arg.Source,
 		arg.SourceID,
-		arg.GrantID,
+		arg.CreditGrantID,
 		arg.CustomerID,
 		arg.InvokerID,
 		arg.Resource,
@@ -344,7 +342,7 @@ func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTran
 		&i.AllowDebitNegativeUpTo,
 		&i.Source,
 		&i.SourceID,
-		&i.GrantID,
+		&i.CreditGrantID,
 		&i.CustomerID,
 		&i.InvokerID,
 		&i.Resource,
@@ -496,7 +494,7 @@ func (q *Queries) ListLedgerCounterDrifts(ctx context.Context, merchantID uuid.U
 }
 
 const listLedgerTransfersByCustomer = `-- name: ListLedgerTransfersByCustomer :many
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
@@ -543,7 +541,7 @@ func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLed
 			&i.AllowDebitNegativeUpTo,
 			&i.Source,
 			&i.SourceID,
-			&i.GrantID,
+			&i.CreditGrantID,
 			&i.CustomerID,
 			&i.InvokerID,
 			&i.Resource,
@@ -562,7 +560,7 @@ func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLed
 }
 
 const listLedgerTransfersByIDs = `-- name: ListLedgerTransfersByIDs :many
-SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
   AND customer_id = $3::uuid
 ORDER BY created_at DESC, id DESC
@@ -595,7 +593,7 @@ func (q *Queries) ListLedgerTransfersByIDs(ctx context.Context, arg ListLedgerTr
 			&i.AllowDebitNegativeUpTo,
 			&i.Source,
 			&i.SourceID,
-			&i.GrantID,
+			&i.CreditGrantID,
 			&i.CustomerID,
 			&i.InvokerID,
 			&i.Resource,
@@ -619,7 +617,7 @@ FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
-  AND transfer_type IN ('credit_spend', 'spend', 'owed_accrual')
+  AND transfer_type IN ('credit_spend', 'owed_accrual')
   AND operation = $4::text
   AND source = $5::text
   AND source_id = $6::text

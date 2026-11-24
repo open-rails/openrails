@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
@@ -52,8 +53,8 @@ func (*derivePass) Plane() string { return "DERIVE" }
 func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error) {
 	customer := scope.Customer
 	// derive.grant_effect.missing — every live grant has its derived effect
-	// (entitlement windows / credit deposit). Repair = MaterializeGrant
-	// (idempotent).
+	// (an access window, a credit lot's deposit). Repair = MaterializeGrant
+	// or the lot's Materialize (idempotent).
 	gl := grants.New(p.e.DB.Gen(ctx), scope.Merchant.UUID())
 	gl.SetClock(p.e.Now)
 	missing, err := gl.MissingEffects(ctx, customer, convergeScanCap)
@@ -75,10 +76,21 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			Repair:     func(ctx context.Context) error { return p.lockedMaterialize(ctx, scope, g) },
 		})
 	}
+	lots := credits.New(p.e.DB.Gen(ctx), scope.Merchant.UUID(), p.e.Now)
+	unposted, err := lots.MissingDeposits(ctx, customer, convergeScanCap)
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan unposted credit lots: %w", err)
+	}
+	markTruncated(ctx, len(unposted), "derive.grant_effect.missing")
+	for i := range unposted {
+		lot := unposted[i]
+		out = append(out, creditLotFinding("derive.grant_effect.missing", ShapeMissing, lot, "",
+			func(ctx context.Context) error { return p.lockedMaterializeLot(ctx, scope, lot) }))
+	}
 
 	// derive.grant_effect.excess — a terminated grant whose effect was never
 	// retracted (a recorded revoke/expire that didn't propagate). Repair =
-	// MaterializeGrant (entitlement revoke / credit clawback). Grant and
+	// MaterializeGrant (access revoke) or the lot's clawback. Grant and
 	// termination are both present, so this is AUTO propagation of a recorded
 	// decision, not the confirmed-absence case.
 	unretracted, err := gl.UnretractedTerminations(ctx, customer, convergeScanCap)
@@ -98,6 +110,29 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			Evidence:   map[string]any{"grant_id": g.ID.String(), "kind": g.Kind, "customer_id": g.CustomerID.String(), "cause": "terminated_grant"},
 			Repair:     func(ctx context.Context) error { return p.lockedMaterialize(ctx, scope, g) },
 		})
+	}
+	revoked, err := lots.UnretractedRevocations(ctx, customer, convergeScanCap)
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan revoked credit lots: %w", err)
+	}
+	markTruncated(ctx, len(revoked), "derive.grant_effect.excess")
+	for i := range revoked {
+		lot := revoked[i]
+		out = append(out, creditLotFinding("derive.grant_effect.excess", ShapeExcess, lot, "terminated_grant",
+			func(ctx context.Context) error { return p.lockedMaterializeLot(ctx, scope, lot) }))
+	}
+	// derive.credit_reservation.mismatch — a purchased lot whose reservation
+	// disagrees with its payment's pending refunds (a refund row changed
+	// without its writer). Repair = writing the reservation again.
+	drifted, err := lots.ReservationDrifts(ctx, customer, convergeScanCap)
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan credit reservations: %w", err)
+	}
+	markTruncated(ctx, len(drifted), findingCreditReservation)
+	for i := range drifted {
+		lot := drifted[i]
+		out = append(out, creditLotFinding(findingCreditReservation, ShapeMismatch, lot, "pending_refunds",
+			func(ctx context.Context) error { return p.lockedSyncReservation(ctx, scope, lot) }))
 	}
 
 	// derive.grant.excess (grant tier) — a live grant whose backing payment
@@ -342,10 +377,8 @@ func unjustifiedAccessFinding(o *gen.ListUnjustifiedAccessWindowsRow) ConvergeFi
 }
 
 // lockedMaterialize runs a MaterializeGrant repair inside a merchant tx under
-// the per-customer spend lock: the credit legs (deposit / clawback) are
-// check-then-write, so overlapping converge runs must serialize with each
-// other and with spends. Entitlement/ownership legs are cheap no-ops when
-// already projected.
+// the per-customer lock, so overlapping converge runs serialize with each
+// other and with the customer's refunds. Projected windows are cheap no-ops.
 func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.BillingGrant) error {
 	ctx = merchant.WithID(ctx, scope.Merchant)
 	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -367,6 +400,45 @@ func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.B
 			}
 		}
 		return gl.MaterializeGrant(ctx, g)
+	})
+}
+
+// creditLotFinding is a credit lot's derive finding: the subject and
+// evidence a grant's carries, kind credit.
+func creditLotFinding(kind string, shape Shape, lot gen.BillingCreditGrant, cause string, repair func(context.Context) error) ConvergeFinding {
+	evidence := map[string]any{"grant_id": lot.ID.String(), "kind": "credit", "customer_id": lot.CustomerID.String()}
+	if cause != "" {
+		evidence["cause"] = cause
+	}
+	return ConvergeFinding{
+		Type: kind, Shape: shape, Class: ClassAuto, Severity: "high",
+		SubjectKey: "grant_effect:" + lot.ID.String(), Provider: "self", Evidence: evidence, Repair: repair,
+	}
+}
+
+// lockedMaterializeLot posts a lot's missing deposit or clawback under the
+// customer's spend lock, so it serializes with spends and other repairs.
+func (p *derivePass) lockedMaterializeLot(ctx context.Context, scope Scope, lot gen.BillingCreditGrant) error {
+	ctx = merchant.WithID(ctx, scope.Merchant)
+	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		lots := credits.New(gen.New(tx), scope.Merchant.UUID(), p.e.Now)
+		if err := lots.LockCustomer(ctx, lot.CustomerID); err != nil {
+			return err
+		}
+		return lots.Materialize(ctx, lot.ID)
+	})
+}
+
+// lockedSyncReservation writes a lot's reservation again under the customer's
+// lock, which every refund of its payment takes.
+func (p *derivePass) lockedSyncReservation(ctx context.Context, scope Scope, lot gen.BillingCreditGrant) error {
+	ctx = merchant.WithID(ctx, scope.Merchant)
+	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		lots := credits.New(gen.New(tx), scope.Merchant.UUID(), p.e.Now)
+		if err := lots.LockCustomer(ctx, lot.CustomerID); err != nil {
+			return err
+		}
+		return lots.SyncReservation(ctx, *lot.PaymentID)
 	})
 }
 
@@ -939,11 +1011,12 @@ const (
 	findingDunningFunnel        = "life.dunning.funnel"
 	findingRenewalHeld          = "life.renewal.held"
 	findingDuplicateCharge      = "consistency.duplicate.provider_charge"
+	findingCreditReservation    = "derive.credit_reservation.mismatch"
 )
 
 func (*derivePass) Standing() []string {
 	return []string{"derive.grant_effect.missing", "derive.grant_effect.excess", "derive.grant.missing", "derive.grant.excess",
-		"derive.subscription.missing", "derive.wallet.missing", "derive.grant_effect.mismatch", reconcile.FindingAccessUnjustified}
+		"derive.subscription.missing", "derive.wallet.missing", "derive.grant_effect.mismatch", findingCreditReservation, reconcile.FindingAccessUnjustified}
 }
 
 // Standing leaves out the stuck and abandoned provider operations, which

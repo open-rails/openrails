@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
@@ -199,5 +200,29 @@ func TestRunningChargeContracts(t *testing.T) {
 		events, err = w.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"balance.depleted"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, events.Events, 1)
+	})
+	t.Run("OR-J25-S05/running-charges-count-toward-the-accrual-rate-cap", func(t *testing.T) {
+		w := newWorld(t, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.BillingPolicies = []billing.BillingPolicy{{Name: "rate", Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000}}
+			m.BillingPolicyBindings = []billing.BillingPolicyBinding{{PolicyName: "rate"}}
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
+		customer := billing.CustomerID(uuid.New())
+		fund(t, w.alpha, customer, "funded", 100_000_000)
+		admit := func(id string, delta int64) billing.AdmissionVerdict {
+			t.Helper()
+			p := reservation(w, customer, id, 1000)
+			p.AccrualRateDeltaPerHour = delta
+			return admitOne(t, w.alpha, p)
+		}
+		require.True(t, admit("before", 4_000_000).Allowed(), "nothing accrues yet")
+		_, err := w.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "gpu/1", CustomerID: customer, Currency: "USD", RatePerHour: 8_000_000})
+		require.NoError(t, err)
+		requireDenied(t, admit("past-the-cap", 4_000_000), billing.DenyAccrualRateCapReached)
+		require.True(t, admit("to-the-cap", 2_000_000).Allowed(), "$8 an hour running and $2 more is the cap")
+		_, err = w.alpha.StopRunningCharge(t.Context(), "gpu/1", billing.StopRunningChargeParams{})
+		require.NoError(t, err)
+		require.True(t, admit("after-the-stop", 4_000_000).Allowed(), "a stopped charge accrues nothing")
 	})
 }

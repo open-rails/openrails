@@ -338,9 +338,11 @@ export function SubscriptionDetailPage() {
 const cancelledBy: Record<string, string> = {
   user: "By the customer",
   merchant: "By staff",
-  expired: "Renewal payment failed",
+  expired: "Not renewed",
   chargeback: "After a chargeback",
   upgrade: "Replaced by an upgrade",
+  provider: "Ended by the provider",
+  abandoned: "First payment never completed",
 }
 
 function CancelDialog({

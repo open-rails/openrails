@@ -3380,6 +3380,7 @@
           "default_payment_method_required",
           "invalid_param",
           "payment_method_stale",
+          "provider_writes_disabled",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
@@ -4236,6 +4237,7 @@
           "default_payment_method_required",
           "invalid_param",
           "payment_method_stale",
+          "provider_writes_disabled",
           "service_unavailable",
           "solana_rpc_unavailable",
           "subscription_not_found"
@@ -15992,6 +15994,14 @@
           "source": {
             "type": "string"
           },
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "import",
+              "promotion"
+            ]
+          },
           "invoker": {
             "type": "string"
           },
@@ -16555,19 +16565,52 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "refunded_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "state": {
             "type": "string",
             "enum": [
               "active",
               "expired",
+              "pending",
+              "refunded",
               "revoked",
               "scheduled",
-              "spent",
-              "terminated"
+              "spent"
             ]
           },
-          "source_type": {
-            "type": "string"
+          "funding_source": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "import",
+              "promotion",
+              "purchase",
+              "recurring"
+            ]
+          },
+          "paid_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paid_currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_id": {
             "oneOf": [
@@ -16608,7 +16651,7 @@
             "type": "string",
             "format": "date-time"
           },
-          "terminated_at": {
+          "revoked_at": {
             "oneOf": [
               {
                 "type": "string",
@@ -16619,7 +16662,7 @@
               }
             ]
           },
-          "termination_reason": {
+          "revoke_reason": {
             "oneOf": [
               {
                 "type": "string"
@@ -16642,15 +16685,18 @@
           "remaining_amount",
           "revoked_amount",
           "expired_amount",
+          "refunded_amount",
           "state",
-          "source_type",
+          "funding_source",
+          "paid_amount",
+          "paid_currency",
           "source_id",
           "description",
           "starts_at",
           "expires_at",
           "created_at",
-          "terminated_at",
-          "termination_reason",
+          "revoked_at",
+          "revoke_reason",
           "replayed"
         ]
       },
@@ -20151,14 +20197,6 @@
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
           },
-          "collection_threshold": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "monthly_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "billing_period_boundary": {
             "type": "string"
           },
@@ -20178,10 +20216,6 @@
           },
           "arrears_grace_days": {
             "type": "integer"
-          },
-          "arrears_delinquency_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
           },
           "psp_routing": {
             "type": "array",
@@ -27359,14 +27393,6 @@
           "profile": {
             "$ref": "#/components/schemas/MerchantProfile"
           },
-          "collection_threshold": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "monthly_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
           "billing_period_boundary": {
             "type": "string"
           },
@@ -27386,10 +27412,6 @@
           },
           "arrears_grace_days": {
             "type": "integer"
-          },
-          "arrears_delinquency_floor": {
-            "type": "string",
-            "description": "A number as a decimal string."
           },
           "psp_routing": {
             "type": "array",
@@ -27789,12 +27811,36 @@
           "minimum_invoice_amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "collection_threshold": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delinquency_floor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "currency",
           "credit_limit",
-          "minimum_invoice_amount"
+          "minimum_invoice_amount",
+          "collection_threshold",
+          "delinquency_floor"
         ]
       },
       "UsageBillingSettings": {

@@ -248,7 +248,7 @@ func (s *MoneyService) StopRunningChargeInTx(ctx context.Context, txDB *db.DB, r
 	}
 	// A lot that lapsed before the stop funds what accrued until it lapsed:
 	// it is settled and expired first, as the expiry sweep would.
-	if _, err := txSvc.grantLedger(q, merchantID.UUID()).ExpireLapsedBy(ctx, customer.UUID(), row.Currency, earlier(stoppedAt, now)); err != nil {
+	if _, err := txSvc.creditLots(q, merchantID.UUID()).ExpireLapsedBy(ctx, customer.UUID(), row.Currency, earlier(stoppedAt, now)); err != nil {
 		return nil, err
 	}
 	if row, err = q.GetRunningChargeByReference(ctx, byReference); err != nil {
@@ -434,7 +434,7 @@ func (s *MoneyService) capacityFloor(ctx context.Context, q *gen.Queries, mercha
 
 // lapsedUnspent is what bal's lots that lapsed and were not yet expired will
 // expire with: each first funds what the running charges accrued until it
-// lapsed, as its expiry posts it (grants.ExpireLapsedBy).
+// lapsed, as its expiry posts it (credits.Lots.ExpireLapsedBy).
 func lapsedUnspent(ctx context.Context, q *gen.Queries, bal *models.MoneyBalance, charges []gen.BillingRunningCharge) (int64, error) {
 	lapsed, err := q.ListLapsedCreditLots(ctx, gen.ListLapsedCreditLotsParams{
 		MerchantID: bal.MerchantID, CustomerID: bal.CustomerID, Currency: bal.Currency, AsOf: bal.AsOf,
@@ -453,7 +453,7 @@ func lapsedUnspent(ctx context.Context, q *gen.Queries, bal *models.MoneyBalance
 		}
 		var accrued int64
 		for i, c := range charges {
-			total, err := RunningChargeTotal(c.RatePerHour, c.StartedAt, lot.EndsAt)
+			total, err := RunningChargeTotal(c.RatePerHour, c.StartedAt, lot.ExpiresAt)
 			if err != nil {
 				return 0, err
 			}

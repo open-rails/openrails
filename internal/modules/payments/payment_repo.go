@@ -325,9 +325,9 @@ func (s *PaymentService) GetRefundTotalByPaymentID(ctx context.Context, paymentI
 	return effectiveRefundTotalFromLinkedRows(refunds), nil
 }
 
-// RefundTotals reports the completed refunds against each listed charge,
-// including refunds outside the page the charges came from. Reservation totals
-// have a different contract.
+// RefundTotals reports the completed reversals against each listed charge,
+// net of won disputes, including those outside the page the charges came
+// from. Reservation totals have a different contract.
 func (s *PaymentService) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

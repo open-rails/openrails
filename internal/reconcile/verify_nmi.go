@@ -133,7 +133,11 @@ func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 	cancels := 0
 	for _, sub := range subs {
 		if snap := snaps[sub.ID]; snap != nil {
-			if Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, 0).Kind == TransitionCancel {
+			window, err := dunningWindowOf(ctx, database, sub)
+			if err != nil {
+				return fmt.Errorf("verify %s: %w", sub.ID, err)
+			}
+			if Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, window).Kind == TransitionCancel {
 				cancels++
 			}
 		}
