@@ -73,14 +73,6 @@ type usageReport struct {
 	after    *usageCursor
 }
 
-// days are the rollup days the report's window overlaps: from the day from
-// falls in to the day after the one before to.
-func (r usageReport) days() (time.Time, time.Time) {
-	from := r.from.UTC().Truncate(24 * time.Hour)
-	to := r.to.UTC().Add(-time.Microsecond).Truncate(24 * time.Hour).Add(24 * time.Hour)
-	return from, to
-}
-
 // readUsageParams reads a usage report request. A cursor reads the rest of
 // its own report: a window the request leaves out is the cursor's, and
 // without a cursor it ends now and starts a month before.
@@ -125,11 +117,11 @@ func readUsageParams(params billing.GetUsageParams, now func() time.Time) (usage
 	return out, nil
 }
 
-// GetUsage reads a page of a customer's usage in one currency on the UTC days
-// overlapping [From, To), from its history in the event store, grouped by
-// GroupBy (event_type when empty): by total amount, largest first, then by
-// key in byte order. A day's amount is its share of the period's price, so
-// the days sum to what posts.
+// GetUsage reads a page of a customer's usage in one currency on the days of
+// the merchant's accounting zone overlapping [From, To), from its history in
+// the event store, grouped by GroupBy (event_type when empty): by total
+// amount, largest first, then by key in byte order. A day's amount is its
+// buckets' share of the period's price, so the days sum to what posts.
 func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, params billing.GetUsageParams) (*billing.Usage, error) {
 	if customer.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
@@ -143,8 +135,11 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 	}
 	out := &billing.Usage{CustomerID: customer, Currency: catalog.Currency(report.currency), From: report.from, To: report.to, GroupBy: report.groupBy, Rows: []billing.UsageRow{}}
 	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		from, to := report.days()
-		rows, err := s.moneyService().UsageHistory(ctx, eventstore.DayFilter{CustomerID: billing.CustomerID(customer.UUID()), Currency: report.currency, From: from, To: to})
+		from, to, err := s.moneyService().UsageDays(ctx, report.from, report.to)
+		if err != nil {
+			return err
+		}
+		rows, err := s.moneyService().UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: billing.CustomerID(customer.UUID()), Currency: report.currency, From: from, To: to})
 		if err != nil {
 			return err
 		}

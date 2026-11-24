@@ -16,7 +16,8 @@ enforce it, are [entitlements and limits](entitlements.md).
   also holds flat, unmetered fees).
 - **Usage event**: one usage item in the event store's `usage_events`, with its
   priced meter cells (card print and pricing period) and the limit windows that
-  count it; rollups keep limit windows, period quantities, minutes and days.
+  count it; rollups keep limit windows, period quantities, minutes and
+  15-minute UTC history buckets (`usage_history`).
 - **Posting**: what the ledger took of a period's usage (`usage_postings`);
   `usage_unposted` names who has usage it has not taken.
 - **Usage order** (`origin: usage`): bills a period's owed usage.
@@ -79,7 +80,7 @@ movements (`postRunningChargesThrough`).
 - **Catalog**: `ListMeters`, `GetMeter`, `SetMeter`, or a catalog document.
 - **Staff**: `UpdateCustomer` (`usage_billing`); `WaiveOrderBalance`,
   `MarkOrderUncollectible`, `RecordExternalPayment`.
-- **Customer**: `GET /v1/me/usage` (priced per day, `UsageHistory`), `/v1/me/balance/transactions`.
+- **Customer**: `GET /v1/me/usage` (priced per 15-minute UTC bucket and folded into the merchant's days, `UsageHistory`), `/v1/me/balance/transactions`.
 - **Metrics and events**: `usage_units` and `usage_charged` by `charge` (charged, forgiven) (`POST /v1/metrics/query`); `delinquency.*`; customer facts `order_due`, `order_overdue`, `order_collection_stopped`.
 - **Configuration**: `usage_billing_enabled` (`Config.UsageBillingEnabled`);
   merchant `usage_billing`, `billing_period_boundary`
@@ -105,7 +106,8 @@ Does not apply: usage comes from the merchant's backend, not a provider; a usage
 ### 3. Exact money
 Amounts are `int64` native units of their currency end to end. A period is
 priced on its total, so its postings sum to R of its quantity however the usage
-arrived, and history's days sum to what posts. Each item is one event (UUIDv5 of
+arrived, and history's 15-minute buckets, so any zone's days, sum to what posts.
+Each item is one event (UUIDv5 of
 merchant, lease and number, or of the request id); a resend inserts nothing, and
 postings read `FINAL`, so a duplicate copy never counts. Each posting has its own
 ledger key (`OpUsagePosting`, `usage_posting:<id>`, `1`). Postings are per
@@ -113,7 +115,8 @@ currency; the one FX use, a spend window's cap, is in
 [entitlements and limits](entitlements.md).
 Checks:
 - `usage_price_test.go` prices a period's total, a card revision and a volume
-  crossing, and history by day; OR-J24-S49 posts them.
+  crossing, and history by bucket folded into two zones' days; OR-J24-S49
+  posts them and OR-J24-S57 reads them by local day.
 - `postPeriod` fails if the ledger already holds the posting.
 - No `fx` import in `internal/modules/money/usage_intake.go`, `usage_price.go` or
   `usage_posting.go`.
@@ -147,7 +150,7 @@ Classes, in each table comment and `internal/retention/tables.go`: permanent
 `usage_postings`, `usage_card_prints` and `running_charges`; state
 `usage_unposted` and the meter and rate-card tables. The event store's tables
 expire by TTL (`retention.EventStoreTTLs`): raw events 100 days, period
-quantities 100 days, minutes 2 days, days 25 months, limit windows 61 days
+quantities 100 days, minutes 2 days, history buckets 25 months, limit windows 61 days
 after they end. A SCIM deletion clears a customer's invoker and metadata there
 (`EraseCustomer`, OR-J24-S53).
 Checks:
@@ -184,7 +187,7 @@ Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J25**, running charges and balance looks: OR-J25-S01 to S05, S37, S40 to S42.
 - **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58.
 
-Other tests: `internal/modules/money/rating_test.go` prices every accepted model; `usage_price_test.go` a period's total and history by day; `internal/modules/limits/window_test.go` a rate level from buckets.
+Other tests: `internal/modules/money/rating_test.go` prices every accepted model; `usage_price_test.go` a period's total and history by bucket and zone; `internal/modules/limits/window_test.go` a rate level from buckets.
 
 Gaps:
 - Nothing checks that `retention.Tables` matches the schema; it is review-only.

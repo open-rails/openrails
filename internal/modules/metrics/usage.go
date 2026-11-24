@@ -11,9 +11,9 @@ import (
 )
 
 // Usage measures read the event store's usage history, priced as a
-// customer's usage reports price it: a day's share of its period's price, so
-// days sum to what posts. They compile to no SQL; their groups are folded
-// here.
+// customer's usage reports price it: each 15-minute bucket's share of its
+// period's price, so the days and months it folds into sum to what posts.
+// They compile to no SQL; their groups are folded here.
 
 func storeFamily(f Family) bool { return f == FamUsage || f == FamUsageCharged }
 
@@ -35,18 +35,15 @@ func (s *Service) runUsage(ctx context.Context, plan *Plan, groups map[string]*g
 	if len(leaves) == 0 {
 		return nil
 	}
-	rows, err := money.NewMoneyService(s.db).UsageHistory(ctx, eventstore.DayFilter{From: plan.From, To: plan.To.Add(24 * time.Hour)})
+	rows, err := money.NewMoneyService(s.db).UsageHistory(ctx, eventstore.HistoryFilter{From: plan.From, To: plan.To})
 	if err != nil {
 		return err
 	}
 	distinct := map[string]map[uuid.UUID]bool{}
 	for _, r := range rows {
-		if r.Day.Before(plan.From) || !r.Day.Before(plan.To) {
-			continue
-		}
 		var bucket time.Time
 		if plan.HasTime {
-			bucket = truncGrain(r.Day, plan.Grain)
+			bucket = truncGrain(r.BucketAt, plan.Grain)
 		}
 		values := map[string]string{"currency": r.Currency, "customer": r.CustomerID.String(), "invoker": r.Invoker,
 			"outcome": string(r.Outcome), "rate_card": r.EventType}
@@ -147,7 +144,7 @@ func (s *Service) depletionBurns(ctx context.Context, plan *Plan) ([]burn, error
 	for _, e := range edges {
 		from, to = earliest(from, e), latest(to, e)
 	}
-	rows, err := money.NewMoneyService(s.db).UsageHistory(ctx, eventstore.DayFilter{From: from.AddDate(0, 0, -depletionBurnDays), To: to})
+	rows, err := money.NewMoneyService(s.db).UsageHistory(ctx, eventstore.HistoryFilter{From: from.AddDate(0, 0, -depletionBurnDays), To: to})
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +157,7 @@ func (s *Service) depletionBurns(ctx context.Context, plan *Plan) ([]burn, error
 	var order []key
 	for _, e := range edges {
 		for _, r := range rows {
-			if r.Day.Before(e.AddDate(0, 0, -depletionBurnDays)) || !r.Day.Before(e) {
+			if r.BucketAt.Before(e.AddDate(0, 0, -depletionBurnDays)) || !r.BucketAt.Before(e) {
 				continue
 			}
 			k := key{e, r.CustomerID.UUID(), r.Currency}

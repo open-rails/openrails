@@ -5,8 +5,10 @@ package critical_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -134,7 +136,7 @@ func TestUsageStore(t *testing.T) {
 		require.EqualValues(t, 3, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "raw holds each item once")
 		require.EqualValues(t, 3, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
 		require.EqualValues(t, 3, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_quantities WHERE merchant_id = {m}"), "the rollups agree")
-		require.EqualValues(t, 3, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_days WHERE merchant_id = {m} AND meter = ''"))
+		require.EqualValues(t, 3, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"))
 	})
 
 	t.Run("OR-J24-S48/while-clickhouse-is-out-of-reach-usage-settles-nothing-and-other-money-moves", func(t *testing.T) {
@@ -261,6 +263,54 @@ func TestUsageStore(t *testing.T) {
 		require.True(t, end.Equal(deductions[0].Usage.Through), "cut at New York's month end, not UTC's: %s", deductions[0].Usage.Through)
 	})
 
+	t.Run("OR-J24-S57/usage-history-folds-into-the-merchants-days-and-regroups-when-its-zone-changes", func(t *testing.T) {
+		a, _ := newPSPWorld(t)
+		zone := func(name string) {
+			t.Helper()
+			_, err := a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
+				MerchantSettings: &billing.MerchantSettings{Accounting: &billing.AccountingSettings{Timezone: name}}})
+			require.NoError(t, err)
+		}
+		zone("Asia/Kolkata")
+		kolkata, err := time.LoadLocation("Asia/Kolkata")
+		require.NoError(t, err)
+		pricedMeter(t, a.alphaRemote, tiers(catalog.TierModeGraduated, 100, 50, 3))
+		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		// 23:30 on the 10th in Kolkata is 18:00 UTC; 00:30 on the 11th is
+		// 19:00 UTC, the same UTC day.
+		now := a.clock.Now().In(kolkata)
+		evening := time.Date(now.Year(), now.Month()+1, 10, 23, 30, 0, 0, kolkata)
+		a.clock.Advance(evening.Sub(a.clock.Now()))
+		lease := newLease()
+		settleUsage(t, a.alphaRemote, lease, numbered(1, usageInput(alice, "late-evening", 2))...)
+		a.clock.Advance(time.Hour)
+		settleUsage(t, a.alphaRemote, lease, numbered(2, usageInput(alice, "after-midnight", 4))...)
+		report := func(day time.Time) billing.UsageRow {
+			t.Helper()
+			q := url.Values{"currency": {"USD"}, "from": {day.Format(time.RFC3339)}, "to": {day.Add(time.Minute).Format(time.RFC3339)}}
+			status, raw := a.request(t, http.MethodGet, "/v1/me/usage?"+q.Encode(), a.aliceToken, nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var page billing.Usage
+			require.NoError(t, json.Unmarshal(raw, &page))
+			require.Len(t, page.Rows, 1)
+			return page.Rows[0]
+		}
+		// 2 units at 100; then 1 more at 100 and 3 at 50.
+		first, second := report(evening), report(evening.Add(time.Hour))
+		require.Equal(t, [2]int64{1, 200}, [2]int64{first.EventCount, first.Amount}, "23:30 is the 10th in Kolkata")
+		require.Equal(t, [2]int64{1, 250}, [2]int64{second.EventCount, second.Amount}, "00:30 is the 11th")
+
+		// The same history read in UTC is one day.
+		zone("UTC")
+		utc := report(evening)
+		require.Equal(t, [2]int64{2, 450}, [2]int64{utc.EventCount, utc.Amount}, "a zone change regroups the past")
+
+		fleet := startFleet(t, a.world)
+		nextMonth(a.world)
+		closeMonths(t, fleet)
+		require.EqualValues(t, first.Amount+second.Amount, owed(t, a.alphaRemote, alice), "the days sum to what posts")
+	})
+
 	t.Run("OR-J24-S50/late-usage-after-its-month-posted-posts-the-difference", func(t *testing.T) {
 		w := newWorld(t, earlyInMonth)
 		usageMeter(t, w.alpha, 100)
@@ -374,8 +424,8 @@ products:
 		status, raw = a.request(t, "DELETE", "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND (invoker != '' OR metadata != '')"))
-		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_days WHERE merchant_id = {m} AND invoker != ''"))
-		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_days WHERE merchant_id = {m}"), "quantities stay")
+		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker != ''"))
+		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m}"), "quantities stay")
 		balance(t, a.alpha, customer, 800, 200, 1000)
 	})
 

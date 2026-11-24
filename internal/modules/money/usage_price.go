@@ -23,7 +23,7 @@ import (
 // order usage arrived in changes nothing, so late usage and concurrent gates
 // price exactly and per-unit rounding happens once per total. A posting takes
 // the price less what earlier postings took, and history shares it across
-// days the same way, so days sum to what posts.
+// 15-minute buckets the same way, so any zone's days sum to what posts.
 
 // printCard is a card print's terms and when it was first written.
 type printCard struct {
@@ -164,17 +164,19 @@ func decodePostingLines(raw []byte) ([]PostingLine, error) {
 	return lines, nil
 }
 
-// dayQuantity is a day's quantity of a meter cell under one print.
-type dayQuantity struct {
-	day time.Time
+// bucketQuantity is a history bucket's quantity of a meter cell under one
+// print.
+type bucketQuantity struct {
+	bucket time.Time
 	printQuantity
 }
 
-// dayPrices shares the price of one meter cell's period across the days its
-// usage occurred: a day's amount is the price of the period through the day
-// less the price through the day before, from the quantities before the
-// first day (prior). The days therefore sum to the period's price.
-func (p usagePrints) dayPrices(cell string, prior []printQuantity, days []dayQuantity) (map[time.Time]int64, error) {
+// bucketPrices shares the price of one meter cell's period across the
+// buckets its usage occurred in: a bucket's amount is the price of the period
+// through the bucket less the price through the bucket before, from the
+// quantities before the first bucket (prior). The buckets therefore sum to
+// the period's price, and so do any days they fold into.
+func (p usagePrints) bucketPrices(cell string, prior []printQuantity, buckets []bucketQuantity) (map[time.Time]int64, error) {
 	cumulative := map[string]printQuantity{}
 	for _, q := range prior {
 		c := cumulative[q.print]
@@ -197,20 +199,20 @@ func (p usagePrints) dayPrices(cell string, prior []printQuantity, days []dayQua
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(days, func(a, b dayQuantity) int { return a.day.Compare(b.day) })
+	slices.SortFunc(buckets, func(a, b bucketQuantity) int { return a.bucket.Compare(b.bucket) })
 	out := map[time.Time]int64{}
-	for i := 0; i < len(days); {
-		day := days[i].day
-		for ; i < len(days) && days[i].day.Equal(day); i++ {
-			c := cumulative[days[i].print]
-			c.print, c.quantity, c.stated = days[i].print, addSat(c.quantity, days[i].quantity), addSat(c.stated, days[i].stated)
-			cumulative[days[i].print] = c
+	for i := 0; i < len(buckets); {
+		bucket := buckets[i].bucket
+		for ; i < len(buckets) && buckets[i].bucket.Equal(bucket); i++ {
+			c := cumulative[buckets[i].print]
+			c.print, c.quantity, c.stated = buckets[i].print, addSat(c.quantity, buckets[i].quantity), addSat(c.stated, buckets[i].stated)
+			cumulative[buckets[i].print] = c
 		}
 		through, err := price()
 		if err != nil {
 			return nil, err
 		}
-		out[day] = through - before
+		out[bucket] = through - before
 		before = through
 	}
 	return out, nil

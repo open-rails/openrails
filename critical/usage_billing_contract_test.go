@@ -73,9 +73,9 @@ func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*
 	return a, p, customer
 }
 
-// postUsageDay ends the month the usage occurred: it posts, and what it
+// postUsageMonth ends the month the usage occurred: it posts, and what it
 // leaves owed is billed as usage billing bills owed.
-func postUsageDay(t *testing.T, w *world, fleet *river.Client[pgx.Tx]) {
+func postUsageMonth(t *testing.T, w *world, fleet *river.Client[pgx.Tx]) {
 	t.Helper()
 	nextMonth(w)
 	closeMonths(t, fleet)
@@ -163,7 +163,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				a, p, customer := usageBillingWorld(t, true, true)
 				oneUsage(t, a.alpha, usageInput(customer, "finished-work", 3))
 				fleet := startFleet(t, a.world)
-				postUsageDay(t, a.world, fleet)
+				postUsageMonth(t, a.world, fleet)
 				runUsageDue(t, fleet)
 				order := oneUsageOrder(t, a, customer)
 				require.Equal(t, billing.OrderOpen, order.Status)
@@ -215,7 +215,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				a, p, customer := usageBillingWorld(t, true, true)
 				oneUsage(t, a.alpha, usageInput(customer, "overdue-work", 3))
 				fleet := startFleet(t, a.world)
-				postUsageDay(t, a.world, fleet)
+				postUsageMonth(t, a.world, fleet)
 				runUsageDue(t, fleet)
 				a.clock.Advance(24 * time.Hour)
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
@@ -262,7 +262,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				a, p, customer := usageBillingWorld(t, true, true)
 				oneUsage(t, a.alpha, usageInput(customer, "settled-at-once", 3))
 				fleet := startFleet(t, a.world)
-				postUsageDay(t, a.world, fleet)
+				postUsageMonth(t, a.world, fleet)
 				runUsageDue(t, fleet)
 				a.clock.Advance(24 * time.Hour)
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
@@ -295,7 +295,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		oneUsage(t, a.alpha, usageInput(customer, "billed-on-revocation", 3))
 		// What the revocation bills is owed once the month's usage posts.
 		fleet := startFleet(t, a.world)
-		postUsageDay(t, a.world, fleet)
+		postUsageMonth(t, a.world, fleet)
 		// Revoking the collection agreement bills what is owed so far.
 		status, raw := a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduledAgreement(t, a).ID.String()+"/revoke", a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
@@ -322,7 +322,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.NoError(t, err)
 		oneUsage(t, a.alpha, usageInput(customer, "past-the-first-page", 3))
 		fleet := startFleet(t, a.world)
-		postUsageDay(t, a.world, fleet)
+		postUsageMonth(t, a.world, fleet)
 		require.Eventually(t, func() bool {
 			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
 			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
@@ -371,7 +371,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		defer hold.Release()
 		oneUsage(t, a.alpha, usageInput(customer, "queued-collection", 3))
 		fleet := startFleet(t, a.world)
-		postUsageDay(t, a.world, fleet)
+		postUsageMonth(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		select {
 		case <-hold.Arrived():
@@ -508,7 +508,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.NoError(t, err)
 		oneUsage(t, a.alpha, usageInput(customer, "overdue-in-dollars", 3))
 		fleet := startFleet(t, a.world)
-		postUsageDay(t, a.world, fleet)
+		postUsageMonth(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
@@ -554,7 +554,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.NoError(t, err)
 		oneUsage(t, a.alpha, usageInput(customer, "overdue-under-strict-policy", 3))
 		fleet := startFleet(t, a.world)
-		postUsageDay(t, a.world, fleet)
+		postUsageMonth(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)

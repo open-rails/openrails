@@ -20,15 +20,15 @@ import (
 
 // Archive tables.
 const (
-	ArchiveEvents = "usage_events"
-	ArchiveDays   = "usage_days"
-	ArchiveLimits = "limit_usage"
+	ArchiveEvents  = "usage_events"
+	ArchiveHistory = "usage_history"
+	ArchiveLimits  = "limit_usage"
 )
 
 // ArchiveColumns are each archive table's columns.
 var ArchiveColumns = map[string][]string{
 	ArchiveEvents: {"event"},
-	ArchiveDays: {"customer_id", "day", "currency", "event_type", "meter", "cell", "print", "period_starts_at", "invoker", "outcome",
+	ArchiveHistory: {"customer_id", "bucket_at", "currency", "event_type", "meter", "cell", "print", "period_starts_at", "invoker", "outcome",
 		"requests", "quantity", "stated", "charged", "forgiven"},
 	ArchiveLimits: {"customer_id", "limit_key", "window_starts_at", "window_ends_at", "units"},
 }
@@ -37,16 +37,16 @@ var ArchiveColumns = map[string][]string{
 // carries every instant.
 const archiveTime = "2006-01-02 15:04:05.999999-07"
 
-type dayKey struct {
+type bucketKey struct {
 	customer                                billing.CustomerID
-	day                                     time.Time
+	bucket                                  time.Time
 	currency, eventType, meter, cell, print string
 	period                                  time.Time
 	invoker                                 string
 	outcome                                 UsageOutcome
 }
 
-type dayTotal struct{ requests, quantity, stated, charged, forgiven int64 }
+type bucketTotal struct{ requests, quantity, stated, charged, forgiven int64 }
 
 type limitKey struct {
 	customer billing.CustomerID
@@ -66,7 +66,7 @@ func (s *Store) ExportUsage(ctx context.Context, emit func(table string, values 
 	if err != nil {
 		return err
 	}
-	days := map[dayKey]dayTotal{}
+	buckets := map[bucketKey]bucketTotal{}
 	limits := map[limitKey]limitTotal{}
 	rows, err := s.conn.Query(ctx, s.resolve(`SELECT event_id, customer_id, currency, event_type, invoker, invoker_type, toString(outcome), source, source_id,
        lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, dimensions, metadata, amount, stated, charged, forgiven,
@@ -97,7 +97,7 @@ FROM {database}.usage_events FINAL WHERE merchant_id = `+mid+` ORDER BY customer
 		for i := range keys {
 			e.Limits = append(e.Limits, UsageLimit{Key: keys[i], WindowStartsAt: starts[i].UTC(), WindowEndsAt: ends[i], Units: units[i]})
 		}
-		rebuilt(e, days, limits)
+		rebuilt(e, buckets, limits)
 		raw, err := json.Marshal(e)
 		if err != nil {
 			rows.Close()
@@ -113,21 +113,21 @@ FROM {database}.usage_events FINAL WHERE merchant_id = `+mid+` ORDER BY customer
 	if err := fail("export usage", rows.Err()); err != nil {
 		return err
 	}
-	history, err := s.UsageDays(ctx, DayFilter{From: time.Unix(0, 0).UTC(), To: time.Now().UTC().AddDate(1, 0, 0)})
+	history, err := s.UsageHistory(ctx, HistoryFilter{From: time.Unix(0, 0).UTC(), To: time.Now().UTC().AddDate(1, 0, 0)})
 	if err != nil {
 		return err
 	}
 	for _, d := range history {
-		k := dayKey{d.CustomerID, d.Day, d.Currency, d.EventType, d.Meter, d.Cell, d.Print, d.PeriodStartsAt, d.Invoker, d.Outcome}
-		have := days[k]
-		left := dayTotal{d.Requests - have.requests, d.Quantity - have.quantity, d.Stated - have.stated, d.Charged - have.charged, d.Forgiven - have.forgiven}
-		if left == (dayTotal{}) {
+		k := bucketKey{d.CustomerID, d.BucketAt, d.Currency, d.EventType, d.Meter, d.Cell, d.Print, d.PeriodStartsAt, d.Invoker, d.Outcome}
+		have := buckets[k]
+		left := bucketTotal{d.Requests - have.requests, d.Quantity - have.quantity, d.Stated - have.stated, d.Charged - have.charged, d.Forgiven - have.forgiven}
+		if left == (bucketTotal{}) {
 			continue
 		}
-		values := []string{d.CustomerID.String(), d.Day.Format(time.DateOnly), d.Currency, d.EventType, d.Meter, d.Cell, d.Print,
+		values := []string{d.CustomerID.String(), d.BucketAt.UTC().Format(archiveTime), d.Currency, d.EventType, d.Meter, d.Cell, d.Print,
 			d.PeriodStartsAt.UTC().Format(archiveTime), d.Invoker, string(d.Outcome), strconv.FormatInt(left.requests, 10),
 			strconv.FormatInt(left.quantity, 10), strconv.FormatInt(left.stated, 10), strconv.FormatInt(left.charged, 10), strconv.FormatInt(left.forgiven, 10)}
-		if err := emit(ArchiveDays, texts(values)); err != nil {
+		if err := emit(ArchiveHistory, texts(values)); err != nil {
 			return err
 		}
 	}
@@ -174,25 +174,24 @@ WHERE merchant_id = `+mid+` GROUP BY customer_id, limit_key, window_starts_at OR
 }
 
 // rebuilt adds what an event's views write to the rollups.
-func rebuilt(e UsageEvent, days map[dayKey]dayTotal, limits map[limitKey]limitTotal) {
-	day := time.Date(e.OccurredAt.UTC().Year(), e.OccurredAt.UTC().Month(), e.OccurredAt.UTC().Day(), 0, 0, 0, 0, time.UTC)
-	base := dayKey{e.CustomerID, day, e.Currency, e.EventType, "", "", "", e.PeriodStartsAt.UTC(), e.Invoker, e.Outcome}
-	t := days[base]
+func rebuilt(e UsageEvent, buckets map[bucketKey]bucketTotal, limits map[limitKey]limitTotal) {
+	base := bucketKey{e.CustomerID, e.OccurredAt.UTC().Truncate(HistoryBucket), e.Currency, e.EventType, "", "", "", e.PeriodStartsAt.UTC(), e.Invoker, e.Outcome}
+	t := buckets[base]
 	t.requests++
 	if e.Stated != nil {
 		t.stated += *e.Stated
 	}
 	t.charged += e.Charged
 	t.forgiven += e.Forgiven
-	days[base] = t
+	buckets[base] = t
 	for _, c := range e.Charges {
 		k := base
 		k.meter, k.cell, k.print = c.Meter, c.Cell, c.Print
-		t := days[k]
+		t := buckets[k]
 		t.requests++
 		t.quantity += c.Quantity
 		t.stated += c.Stated
-		days[k] = t
+		buckets[k] = t
 	}
 	for _, l := range e.Limits {
 		k := limitKey{e.CustomerID, l.Key, l.WindowStartsAt.UTC()}
@@ -231,8 +230,8 @@ func (s *Store) ImportUsage(ctx context.Context, table string, rows [][]*string)
 			events = append(events, e)
 		}
 		return s.InsertUsage(ctx, events)
-	case ArchiveDays:
-		batch, err := s.conn.PrepareBatch(ctx, s.resolve(`INSERT INTO {database}.usage_days (merchant_id, customer_id, day, currency, event_type, meter, cell,
+	case ArchiveHistory:
+		batch, err := s.conn.PrepareBatch(ctx, s.resolve(`INSERT INTO {database}.usage_history (merchant_id, customer_id, bucket_at, currency, event_type, meter, cell,
     print, period_starts_at, invoker, outcome, requests, quantity, stated, charged, forgiven)`))
 		if err != nil {
 			return fail("restore usage history", err)
@@ -247,7 +246,7 @@ func (s *Store) ImportUsage(ctx context.Context, table string, rows [][]*string)
 			if err != nil {
 				return err
 			}
-			day, err := time.Parse(time.DateOnly, v[1])
+			bucket, err := time.Parse(archiveTime, v[1])
 			if err != nil {
 				return err
 			}
@@ -261,7 +260,7 @@ func (s *Store) ImportUsage(ctx context.Context, table string, rows [][]*string)
 					return err
 				}
 			}
-			if err := batch.Append(merchant, customer, day, v[2], v[3], v[4], v[5], v[6], period.UTC(), v[8], v[9], uint64(max(n[0], 0)), n[1], n[2], n[3], n[4]); err != nil {
+			if err := batch.Append(merchant, customer, bucket.UTC(), v[2], v[3], v[4], v[5], v[6], period.UTC(), v[8], v[9], uint64(max(n[0], 0)), n[1], n[2], n[3], n[4]); err != nil {
 				return fail("restore usage history", err)
 			}
 		}

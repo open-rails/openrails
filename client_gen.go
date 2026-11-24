@@ -719,7 +719,9 @@ func (c *Client) ListCustomerLimits(ctx context.Context, params billing.Customer
 // each invoker's attributes, the pricing a gate costs requests with, and how
 // many of the merchant's leases are live. The first sync under a new LeaseID
 // creates the lease; a lease answers resends for 61 days after its last
-// sync, and settled usage posts as one deduction per customer and UTC day.
+// sync. Settled usage posts to the ledger at each month's end in the
+// merchant's accounting zone and before any other movement of the customer's
+// balance.
 func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
 	var out billing.SyncLeasesResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/leases/sync", body: params}, &out); err != nil {

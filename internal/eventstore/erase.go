@@ -10,7 +10,7 @@ import (
 )
 
 // usageTables are the usage family's tables: raw events, then the rollups.
-var usageTables = []string{"usage_events", "limit_usage", "usage_quantities", "usage_minutes", "usage_days"}
+var usageTables = []string{"usage_events", "limit_usage", "usage_quantities", "usage_minutes", "usage_history"}
 
 // exec runs a statement that names the context's merchant, waiting for a
 // mutation to finish.
@@ -32,17 +32,17 @@ func (s *Store) EraseCustomer(ctx context.Context, customer billing.CustomerID) 
 		return err
 	}
 	var named bool
-	if err := s.query(ctx, "read usage history", "SELECT count() > 0 FROM {database}.usage_days WHERE "+who+" AND invoker != ''",
+	if err := s.query(ctx, "read usage history", "SELECT count() > 0 FROM {database}.usage_history WHERE "+who+" AND invoker != ''",
 		func(rows interface{ Scan(...any) error }) error { return rows.Scan(&named) }); err != nil || !named {
 		return err
 	}
-	keys := "merchant_id, customer_id, day, currency, event_type, meter, cell, print, period_starts_at"
-	if err := fail("erase usage history", s.conn.Exec(ctx, s.resolve(`INSERT INTO {database}.usage_days (`+keys+`, invoker, outcome, requests, quantity, stated, charged, forgiven)
+	keys := "merchant_id, customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at"
+	if err := fail("erase usage history", s.conn.Exec(ctx, s.resolve(`INSERT INTO {database}.usage_history (`+keys+`, invoker, outcome, requests, quantity, stated, charged, forgiven)
 SELECT `+keys+`, '', outcome, sum(requests), sum(quantity), sum(stated), sum(charged), sum(forgiven)
-FROM {database}.usage_days WHERE `+who+` AND invoker != '' GROUP BY `+keys+`, outcome`))); err != nil {
+FROM {database}.usage_history WHERE `+who+` AND invoker != '' GROUP BY `+keys+`, outcome`))); err != nil {
 		return err
 	}
-	return s.mutate(ctx, "erase usage history", "ALTER TABLE {database}.usage_days DELETE WHERE "+who+" AND invoker != ''")
+	return s.mutate(ctx, "erase usage history", "ALTER TABLE {database}.usage_history DELETE WHERE "+who+" AND invoker != ''")
 }
 
 // DeleteMerchant deletes every usage row of the context's merchant.
@@ -67,7 +67,7 @@ func (s *Store) HasUsage(ctx context.Context) (bool, error) {
 	}
 	var found bool
 	err = s.query(ctx, "read usage", "SELECT count() > 0 FROM (SELECT 1 FROM {database}.usage_events WHERE merchant_id = "+mid+
-		" LIMIT 1 UNION ALL SELECT 1 FROM {database}.usage_days WHERE merchant_id = "+mid+" LIMIT 1)",
+		" LIMIT 1 UNION ALL SELECT 1 FROM {database}.usage_history WHERE merchant_id = "+mid+" LIMIT 1)",
 		func(rows interface{ Scan(...any) error }) error { return rows.Scan(&found) })
 	return found, err
 }

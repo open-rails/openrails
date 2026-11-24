@@ -242,7 +242,7 @@ func TestLeaseVersions(t *testing.T) {
 		// The month's close posts it, before the usage-billing check: what it
 		// leaves owed is dated before its pricing period ended, so the bill
 		// of that period bills it.
-		postUsageDay(t, a.world, fleet)
+		postUsageMonth(t, a.world, fleet)
 		runUsageDue(t, fleet)
 		order := oneUsageOrder(t, a, customer)
 		require.EqualValues(t, 30_000_000, order.Total)

@@ -220,12 +220,16 @@ WHERE merchant_id = %s AND customer_id = %s AND currency = %s AND minute >= toSt
 	return total, err
 }
 
-// UsageDay is one row of usage history: a day's events of one type, invoker
-// and outcome (Meter ""), or what they took of one meter cell under one card
-// print in one pricing period.
-type UsageDay struct {
+// HistoryBucket is the length of a usage history bucket: every zone's
+// offset is a multiple of it, so buckets fold into any zone's days.
+const HistoryBucket = 15 * time.Minute
+
+// UsageBucket is one row of usage history: a 15-minute UTC bucket's events of
+// one type, invoker and outcome (Meter ""), or what they took of one meter
+// cell under one card print in one pricing period.
+type UsageBucket struct {
 	CustomerID         billing.CustomerID
-	Day                time.Time
+	BucketAt           time.Time
 	Currency           string
 	EventType          string
 	Meter, Cell, Print string
@@ -237,18 +241,18 @@ type UsageDay struct {
 	Charged, Forgiven  int64
 }
 
-// DayFilter selects usage history: one customer (all when zero), one
-// currency (all when empty), the days in [From, To), and with PeriodsFrom
-// only charge rows of periods that start then or later.
-type DayFilter struct {
+// HistoryFilter selects usage history: one customer (all when zero), one
+// currency (all when empty), the buckets that start in [From, To), and with
+// PeriodsFrom only charge rows of periods that start then or later.
+type HistoryFilter struct {
 	CustomerID  billing.CustomerID
 	Currency    string
 	From, To    time.Time
 	PeriodsFrom *time.Time
 }
 
-func (f DayFilter) where(mid string) string {
-	w := []string{"merchant_id = " + mid, "day >= toDate(" + timeLiteral(f.From) + ", 'UTC')", "day < toDate(" + timeLiteral(f.To) + ", 'UTC')"}
+func (f HistoryFilter) where(mid string) string {
+	w := []string{"merchant_id = " + mid, "bucket_at >= " + timeLiteral(f.From), "bucket_at < " + timeLiteral(f.To)}
 	if !f.CustomerID.IsZero() {
 		w = append(w, "customer_id = "+uuidLiteral(uuid.UUID(f.CustomerID)))
 	}
@@ -261,28 +265,28 @@ func (f DayFilter) where(mid string) string {
 	return strings.Join(w, " AND ")
 }
 
-// UsageDays are the history rows a filter selects, summed by key.
-func (s *Store) UsageDays(ctx context.Context, f DayFilter) ([]UsageDay, error) {
+// UsageHistory are the history rows a filter selects, summed by key.
+func (s *Store) UsageHistory(ctx context.Context, f HistoryFilter) ([]UsageBucket, error) {
 	mid, err := s.merchant(ctx)
 	if err != nil {
 		return nil, err
 	}
-	sql := `SELECT customer_id, day, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
+	sql := `SELECT customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
        toInt64(sum(requests)), sum(quantity), sum(stated), sum(charged), sum(forgiven)
-FROM {database}.usage_days WHERE ` + f.where(mid) + `
-GROUP BY customer_id, day, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`
-	var out []UsageDay
+FROM {database}.usage_history WHERE ` + f.where(mid) + `
+GROUP BY customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`
+	var out []UsageBucket
 	err = s.query(ctx, "read usage history", sql, func(rows interface{ Scan(...any) error }) error {
-		var d UsageDay
+		var b UsageBucket
 		var customer uuid.UUID
 		var outcome string
-		if err := rows.Scan(&customer, &d.Day, &d.Currency, &d.EventType, &d.Meter, &d.Cell, &d.Print, &d.PeriodStartsAt, &d.Invoker, &outcome,
-			&d.Requests, &d.Quantity, &d.Stated, &d.Charged, &d.Forgiven); err != nil {
+		if err := rows.Scan(&customer, &b.BucketAt, &b.Currency, &b.EventType, &b.Meter, &b.Cell, &b.Print, &b.PeriodStartsAt, &b.Invoker, &outcome,
+			&b.Requests, &b.Quantity, &b.Stated, &b.Charged, &b.Forgiven); err != nil {
 			return err
 		}
-		d.CustomerID, d.Outcome = billing.CustomerID(customer), UsageOutcome(outcome)
-		d.Day, d.PeriodStartsAt = time.Date(d.Day.Year(), d.Day.Month(), d.Day.Day(), 0, 0, 0, 0, time.UTC), d.PeriodStartsAt.UTC()
-		out = append(out, d)
+		b.CustomerID, b.Outcome = billing.CustomerID(customer), UsageOutcome(outcome)
+		b.BucketAt, b.PeriodStartsAt = b.BucketAt.UTC(), b.PeriodStartsAt.UTC()
+		out = append(out, b)
 		return nil
 	})
 	return out, err
@@ -302,7 +306,7 @@ func (s *Store) UsageExists(ctx context.Context, eventTypes []string) (bool, err
 	if len(types) == 0 {
 		return false, nil
 	}
-	sql := fmt.Sprintf(`SELECT count() > 0 FROM (SELECT 1 FROM {database}.usage_days WHERE merchant_id = %s AND event_type IN (%s) LIMIT 1)`,
+	sql := fmt.Sprintf(`SELECT count() > 0 FROM (SELECT 1 FROM {database}.usage_history WHERE merchant_id = %s AND event_type IN (%s) LIMIT 1)`,
 		mid, strings.Join(types, ", "))
 	var found bool
 	err = s.query(ctx, "read usage activity", sql, func(rows interface{ Scan(...any) error }) error { return rows.Scan(&found) })
@@ -314,8 +318,8 @@ func stringLiteral(s string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
 }
 
-// LastUsageDays is the day of each event type's latest usage.
-func (s *Store) LastUsageDays(ctx context.Context, eventTypes []string) (map[string]time.Time, error) {
+// LastUsage is the start of the bucket of each event type's latest usage.
+func (s *Store) LastUsage(ctx context.Context, eventTypes []string) (map[string]time.Time, error) {
 	out := map[string]time.Time{}
 	if len(eventTypes) == 0 {
 		return out, nil
@@ -328,15 +332,15 @@ func (s *Store) LastUsageDays(ctx context.Context, eventTypes []string) (map[str
 	for _, t := range eventTypes {
 		types = append(types, stringLiteral(t))
 	}
-	sql := fmt.Sprintf(`SELECT event_type, max(day) FROM {database}.usage_days WHERE merchant_id = %s AND event_type IN (%s) GROUP BY event_type`,
+	sql := fmt.Sprintf(`SELECT event_type, max(bucket_at) FROM {database}.usage_history WHERE merchant_id = %s AND event_type IN (%s) GROUP BY event_type`,
 		mid, strings.Join(types, ", "))
 	err = s.query(ctx, "read usage activity", sql, func(rows interface{ Scan(...any) error }) error {
 		var t string
-		var day time.Time
-		if err := rows.Scan(&t, &day); err != nil {
+		var at time.Time
+		if err := rows.Scan(&t, &at); err != nil {
 			return err
 		}
-		out[t] = time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)
+		out[t] = at.UTC()
 		return nil
 	})
 	return out, err

@@ -30,7 +30,7 @@
 // The event store's ClickHouse tables expire by their TTLs (EventStoreTTLs):
 // usage_events 100 days after occurred_at (late usage's 35 days, the longest
 // pricing period and its posting), usage_quantities 100 days after the
-// period start, usage_minutes 2 days, usage_days 25 months, limit_usage 61
+// period start, usage_minutes 2 days, usage_history 25 months, limit_usage 61
 // days after its window ends (a window without an end stays). What posted is
 // in PostgreSQL, permanently.
 //

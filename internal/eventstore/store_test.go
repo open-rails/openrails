@@ -31,7 +31,7 @@ func TestMigrationsSplitIntoDatabaseQualifiedStatements(t *testing.T) {
 			created[fields[5]] = true
 		}
 	}
-	for _, name := range []string{"{database}.usage_events", "{database}.limit_usage", "{database}.usage_quantities", "{database}.usage_minutes", "{database}.usage_days"} {
+	for _, name := range []string{"{database}.usage_events", "{database}.limit_usage", "{database}.usage_quantities", "{database}.usage_minutes", "{database}.usage_history"} {
 		if !created[name] {
 			t.Errorf("no CREATE TABLE %s in %v", name, created)
 		}

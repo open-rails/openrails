@@ -94,34 +94,56 @@ func TestPostingDeltaTakesWhatIsLeft(t *testing.T) {
 	require.Equal(t, []PostingLine{{MeterKey: "work", Print: "a", Requests: 1, Quantity: 20, Amount: -350}}, reversal)
 }
 
-// A day's amount is the price through the day less the price through the
-// day before, so the days of a period sum to what it posts; a day's rows
-// share it by quantity.
-func TestHistoryDaysSumToThePeriodsPrice(t *testing.T) {
+// A bucket's amount is the price through the bucket less the price through
+// the bucket before, so the buckets of a period sum to what it posts, and so
+// do the days of any zone they fold into; a bucket's rows share it by
+// quantity.
+func TestHistoryBucketsFoldIntoAnyZonesDays(t *testing.T) {
 	period := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	day := func(d int) time.Time { return period.AddDate(0, 0, d) }
+	at := func(day, hour, minute int) time.Time { return time.Date(2026, 11, day, hour, minute, 0, 0, time.UTC) }
 	customer := billing.CustomerID{1}
-	row := func(d int, invoker string, quantity int64) eventstore.UsageDay {
-		return eventstore.UsageDay{CustomerID: customer, Day: day(d), Currency: "USD", EventType: "work", Meter: "work", Print: "a",
+	row := func(bucket time.Time, invoker string, quantity int64) eventstore.UsageBucket {
+		return eventstore.UsageBucket{CustomerID: customer, BucketAt: bucket, Currency: "USD", EventType: "work", Meter: "work", Print: "a",
 			PeriodStartsAt: period, Invoker: invoker, Outcome: eventstore.UsageSucceeded, Requests: 1, Quantity: quantity}
 	}
 	p := prints(graduated(10, 5, 100))
-	prior := []eventstore.UsageDay{row(0, "x", 80)}
-	days := []eventstore.UsageDay{row(1, "x", 10), row(1, "y", 30), row(2, "x", 40),
-		{CustomerID: customer, Day: day(2), Currency: "USD", EventType: "work", PeriodStartsAt: period, Invoker: "x", Outcome: eventstore.UsageFailed, Requests: 1, Charged: 7}}
-	priced, err := p.priceHistory(days, prior)
+	prior := []eventstore.UsageBucket{row(at(1, 6, 0), "x", 80)}
+	buckets := []eventstore.UsageBucket{row(at(1, 18, 15), "x", 10), row(at(1, 18, 30), "x", 10), row(at(1, 18, 30), "y", 20), row(at(2, 3, 0), "x", 40),
+		{CustomerID: customer, BucketAt: at(2, 3, 0), Currency: "USD", EventType: "work", PeriodStartsAt: period, Invoker: "x", Outcome: eventstore.UsageFailed, Requests: 1, Charged: 7}}
+	priced, err := p.priceHistory(buckets, prior)
 	require.NoError(t, err)
-	amounts := map[string]int64{}
-	var total int64
+	byBucket := map[string]int64{}
 	for _, r := range priced {
-		amounts[r.Day.Format("02")+"/"+r.Invoker+"/"+string(r.Outcome)] += r.Amount
-		total += r.Amount
+		byBucket[r.BucketAt.Format("02T15:04")+"/"+r.Invoker+"/"+string(r.Outcome)] += r.Amount
 	}
-	// Through November 1: 80 units, 800. November 2 takes the period to 120
-	// units (1100), November 3 to 160 (1300).
-	require.EqualValues(t, 75, amounts["02/x/succeeded"], "November 2's 300, shared 10:30")
-	require.EqualValues(t, 225, amounts["02/y/succeeded"])
-	require.EqualValues(t, 200, amounts["03/x/succeeded"], "40 units at the second tier")
-	require.EqualValues(t, 7, amounts["03/x/failed"], "a failure is what it charged")
-	require.EqualValues(t, 1300-800+7, total, "the days sum to what the period adds")
+	// Before the first bucket: 80 units, 800. 18:15 takes the period to 90
+	// units (900), 18:30 to 120 (1100), 03:00 to 160 (1300).
+	require.EqualValues(t, 100, byBucket["01T18:15/x/succeeded"])
+	require.EqualValues(t, 66, byBucket["01T18:30/x/succeeded"], "18:30's 200, shared 10:20")
+	require.EqualValues(t, 134, byBucket["01T18:30/y/succeeded"])
+	require.EqualValues(t, 200, byBucket["02T03:00/x/succeeded"], "40 units at the second tier")
+	require.EqualValues(t, 7, byBucket["02T03:00/x/failed"], "a failure is what it charged")
+
+	kolkata, err := time.LoadLocation("Asia/Kolkata")
+	require.NoError(t, err)
+	for _, c := range []struct {
+		zone *time.Location
+		days map[string]int64
+	}{
+		// 18:15 UTC is 23:45 in Kolkata, 18:30 UTC its next midnight.
+		{kolkata, map[string]int64{"01": 100, "02": 407}},
+		{time.UTC, map[string]int64{"01": 300, "02": 207}},
+	} {
+		days := map[string]int64{}
+		var total int64
+		for _, r := range priced {
+			days[r.BucketAt.In(c.zone).Format("02")] += r.Amount
+			total += r.Amount
+		}
+		require.Equal(t, c.days, days, c.zone.String())
+		require.EqualValues(t, 1300-800+7, total, "the days sum to what the period adds")
+	}
+	from, to := LocalDays(kolkata, at(1, 20, 0), at(1, 20, 1))
+	require.Equal(t, at(1, 18, 30), from, "the Kolkata day 20:00 UTC falls in starts at 18:30 UTC")
+	require.Equal(t, at(2, 18, 30), to)
 }

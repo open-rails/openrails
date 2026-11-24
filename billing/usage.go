@@ -81,8 +81,8 @@ const (
 	MaxUsagePageLimit     = 1000
 )
 
-// GetUsageParams selects a usage report: one currency over the UTC days
-// overlapping [From, To), grouped by GroupBy (event_type when empty), a page
+// GetUsageParams selects a usage report: one currency over the days of the
+// merchant's accounting zone overlapping [From, To), grouped by GroupBy (event_type when empty), a page
 // of at most Limit groups (DefaultUsagePageLimit when zero) after Cursor. A
 // zero From or To is the cursor's, or without a cursor the month before now.
 // A cursor reads only the report it came from: the same currency, window and

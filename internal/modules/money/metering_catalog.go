@@ -240,7 +240,7 @@ func usageMeterSemanticsEqual(left, right catalogrules.Meter) bool {
 }
 
 // meterActivity sets each meter's latest usage, by its event type, from the
-// event store: the day it last had usage.
+// event store: the start of the 15-minute bucket it last had usage in.
 func (s *MoneyService) meterActivity(ctx context.Context, meters []billing.Meter) error {
 	store := s.db.EventStore()
 	if store == nil || len(meters) == 0 {
@@ -250,13 +250,13 @@ func (s *MoneyService) meterActivity(ctx context.Context, meters []billing.Meter
 	for _, m := range meters {
 		types = append(types, m.EventType)
 	}
-	last, err := store.LastUsageDays(ctx, types)
+	last, err := store.LastUsage(ctx, types)
 	if err != nil {
 		return err
 	}
 	for i := range meters {
-		if day, ok := last[meters[i].EventType]; ok {
-			meters[i].HasActivity, meters[i].LastEventAt = true, &day
+		if at, ok := last[meters[i].EventType]; ok {
+			meters[i].HasActivity, meters[i].LastEventAt = true, &at
 		}
 	}
 	return nil

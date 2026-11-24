@@ -162,5 +162,5 @@ var EventStoreTTLs = map[string]string{
 	"limit_usage":      "61 days after the window ends; a window without an end is kept",
 	"usage_quantities": "100 days after the pricing period starts",
 	"usage_minutes":    "2 days after the minute",
-	"usage_days":       "25 months after the day",
+	"usage_history":    "25 months after the 15-minute bucket",
 }

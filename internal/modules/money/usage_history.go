@@ -9,19 +9,21 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// UsageHistoryRow is a row of usage history with what it cost: a charge
-// row's share of its day's price, a failed event row what it charged.
+// UsageHistoryRow is a 15-minute bucket of usage history with what it cost:
+// a charge row's share of its bucket's price, a failed event row what it
+// charged. Readers fold buckets into the days and months of their zone.
 type UsageHistoryRow struct {
-	eventstore.UsageDay
+	eventstore.UsageBucket
 	Amount int64
 }
 
 // UsageHistory reads the usage history a filter selects and prices it from
-// the event store. A day's price of a meter cell is the price of its period
-// through the day less the price through the day before, so the days sum to
-// what the period posts; it is shared across the day's rows by quantity. A
-// row priced under a card print not yet recorded is left out.
-func (s *MoneyService) UsageHistory(ctx context.Context, f eventstore.DayFilter) ([]UsageHistoryRow, error) {
+// the event store. A bucket's price of a meter cell is the price of its period
+// through the bucket less the price through the bucket before, so any days
+// the buckets fold into sum to what the period posts; it is shared across the
+// bucket's rows by quantity. A row priced under a card print not yet recorded
+// is left out.
+func (s *MoneyService) UsageHistory(ctx context.Context, f eventstore.HistoryFilter) ([]UsageHistoryRow, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -30,36 +32,58 @@ func (s *MoneyService) UsageHistory(ctx context.Context, f eventstore.DayFilter)
 	if store == nil {
 		return nil, eventstore.Required("usage history")
 	}
-	days, err := store.UsageDays(ctx, f)
+	buckets, err := store.UsageHistory(ctx, f)
 	if err != nil {
 		return nil, err
 	}
 	var periods *time.Time
 	var prints []string
-	for _, d := range days {
-		if d.Meter == "" {
+	for _, b := range buckets {
+		if b.Meter == "" {
 			continue
 		}
-		prints = append(prints, d.Print)
-		if periods == nil || d.PeriodStartsAt.Before(*periods) {
-			p := d.PeriodStartsAt
+		prints = append(prints, b.Print)
+		if periods == nil || b.PeriodStartsAt.Before(*periods) {
+			p := b.PeriodStartsAt
 			periods = &p
 		}
 	}
-	var prior []eventstore.UsageDay
+	var prior []eventstore.UsageBucket
 	if periods != nil && periods.Before(f.From) {
-		if prior, err = store.UsageDays(ctx, eventstore.DayFilter{CustomerID: f.CustomerID, Currency: f.Currency, From: *periods, To: f.From, PeriodsFrom: periods}); err != nil {
+		if prior, err = store.UsageHistory(ctx, eventstore.HistoryFilter{CustomerID: f.CustomerID, Currency: f.Currency, From: periods.Truncate(eventstore.HistoryBucket), To: f.From, PeriodsFrom: periods}); err != nil {
 			return nil, err
 		}
-		for _, d := range prior {
-			prints = append(prints, d.Print)
+		for _, b := range prior {
+			prints = append(prints, b.Print)
 		}
 	}
 	cards, err := loadPrints(ctx, s.db.Gen(ctx), mid.UUID(), prints)
 	if err != nil {
 		return nil, err
 	}
-	return cards.priceHistory(days, prior)
+	return cards.priceHistory(buckets, prior)
+}
+
+// UsageDays are the instants that bound the days of the merchant's
+// accounting zone overlapping [from, to): history read between them folds
+// into whole local days, since every zone's offset is a whole number of
+// buckets.
+func (s *MoneyService) UsageDays(ctx context.Context, from, to time.Time) (time.Time, time.Time, error) {
+	zone, err := s.accountingZone(ctx)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	start, end := LocalDays(zone, from, to)
+	return start, end, nil
+}
+
+// LocalDays are the instants that bound zone's days overlapping [from, to).
+func LocalDays(zone *time.Location, from, to time.Time) (time.Time, time.Time) {
+	f := from.In(zone)
+	start := time.Date(f.Year(), f.Month(), f.Day(), 0, 0, 0, 0, zone)
+	l := to.Add(-time.Microsecond).In(zone)
+	end := time.Date(l.Year(), l.Month(), l.Day()+1, 0, 0, 0, 0, zone)
+	return start.UTC(), end.UTC()
 }
 
 // historyCell names one customer's meter cell in a pricing period.
@@ -69,51 +93,51 @@ type historyCell struct {
 	cellKey
 }
 
-// priceHistory prices history rows (days) given the rows of the same
-// periods' earlier days (prior).
-func (p usagePrints) priceHistory(days, prior []eventstore.UsageDay) ([]UsageHistoryRow, error) {
-	cellOf := func(d eventstore.UsageDay) historyCell {
-		return historyCell{d.CustomerID, d.Currency, cellKey{d.PeriodStartsAt, d.Meter, d.Cell}}
+// priceHistory prices history rows (buckets) given the rows of the same
+// periods' earlier buckets (prior).
+func (p usagePrints) priceHistory(buckets, prior []eventstore.UsageBucket) ([]UsageHistoryRow, error) {
+	cellOf := func(b eventstore.UsageBucket) historyCell {
+		return historyCell{b.CustomerID, b.Currency, cellKey{b.PeriodStartsAt, b.Meter, b.Cell}}
 	}
 	before := map[historyCell][]printQuantity{}
-	for _, d := range prior {
-		if _, ok := p[d.Print]; ok && d.Meter != "" {
-			before[cellOf(d)] = append(before[cellOf(d)], printQuantity{print: d.Print, quantity: d.Quantity, stated: d.Stated})
+	for _, b := range prior {
+		if _, ok := p[b.Print]; ok && b.Meter != "" {
+			before[cellOf(b)] = append(before[cellOf(b)], printQuantity{print: b.Print, quantity: b.Quantity, stated: b.Stated})
 		}
 	}
-	out := make([]UsageHistoryRow, 0, len(days))
+	out := make([]UsageHistoryRow, 0, len(buckets))
 	byCell := map[historyCell][]int{}
-	for _, d := range days {
-		if d.Meter == "" {
-			out = append(out, UsageHistoryRow{UsageDay: d, Amount: d.Charged})
+	for _, b := range buckets {
+		if b.Meter == "" {
+			out = append(out, UsageHistoryRow{UsageBucket: b, Amount: b.Charged})
 			continue
 		}
-		if _, ok := p[d.Print]; !ok {
+		if _, ok := p[b.Print]; !ok {
 			continue
 		}
-		byCell[cellOf(d)] = append(byCell[cellOf(d)], len(out))
-		out = append(out, UsageHistoryRow{UsageDay: d})
+		byCell[cellOf(b)] = append(byCell[cellOf(b)], len(out))
+		out = append(out, UsageHistoryRow{UsageBucket: b})
 	}
 	for cell, rows := range byCell {
-		quantities := make([]dayQuantity, 0, len(rows))
+		quantities := make([]bucketQuantity, 0, len(rows))
 		for _, i := range rows {
-			d := out[i]
-			quantities = append(quantities, dayQuantity{day: d.Day, printQuantity: printQuantity{print: d.Print, quantity: d.Quantity, stated: d.Stated}})
+			b := out[i]
+			quantities = append(quantities, bucketQuantity{bucket: b.BucketAt, printQuantity: printQuantity{print: b.Print, quantity: b.Quantity, stated: b.Stated}})
 		}
-		prices, err := p.dayPrices(cell.cell, before[cell], quantities)
+		prices, err := p.bucketPrices(cell.cell, before[cell], quantities)
 		if err != nil {
 			return nil, err
 		}
-		onDay := map[time.Time][]int{}
+		inBucket := map[time.Time][]int{}
 		for _, i := range rows {
-			onDay[out[i].Day] = append(onDay[out[i].Day], i)
+			inBucket[out[i].BucketAt] = append(inBucket[out[i].BucketAt], i)
 		}
-		for day, idx := range onDay {
+		for bucket, idx := range inBucket {
 			weights := make([]int64, len(idx))
 			for j, i := range idx {
 				weights[j] = out[i].Quantity
 			}
-			for j, amount := range shareSigned(prices[day], weights) {
+			for j, amount := range shareSigned(prices[bucket], weights) {
 				out[idx[j]].Amount = amount
 			}
 		}

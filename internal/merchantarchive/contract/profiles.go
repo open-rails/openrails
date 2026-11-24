@@ -96,6 +96,6 @@ var PriceKeyMovements = Profile{Name: "price_key_movements", Columns: []Column{{
 // and restored to ClickHouse.
 var EventStoreProfiles = []Profile{
 	{Name: "event_store.usage_events", Columns: []Column{{"event", "jsonb"}}},
-	{Name: "event_store.usage_days", Columns: []Column{{"customer_id", "uuid"}, {"day", "text"}, {"currency", "text"}, {"event_type", "text"}, {"meter", "text"}, {"cell", "text"}, {"print", "text"}, {"period_starts_at", "timestamp with time zone"}, {"invoker", "text"}, {"outcome", "text"}, {"requests", "bigint"}, {"quantity", "bigint"}, {"stated", "bigint"}, {"charged", "bigint"}, {"forgiven", "bigint"}}},
+	{Name: "event_store.usage_history", Columns: []Column{{"customer_id", "uuid"}, {"bucket_at", "timestamp with time zone"}, {"currency", "text"}, {"event_type", "text"}, {"meter", "text"}, {"cell", "text"}, {"print", "text"}, {"period_starts_at", "timestamp with time zone"}, {"invoker", "text"}, {"outcome", "text"}, {"requests", "bigint"}, {"quantity", "bigint"}, {"stated", "bigint"}, {"charged", "bigint"}, {"forgiven", "bigint"}}},
 	{Name: "event_store.limit_usage", Columns: []Column{{"customer_id", "uuid"}, {"limit_key", "text"}, {"window_starts_at", "timestamp with time zone"}, {"window_ends_at", "timestamp with time zone"}, {"units", "bigint"}}},
 }

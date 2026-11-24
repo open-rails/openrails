@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 601,
+  "scenario_count": 602,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -872,6 +872,11 @@
       "id": "OR-J24-S56",
       "journey": "J24",
       "name": "A month's usage posts at the month's end in the merchant's accounting zone, not UTC's"
+    },
+    {
+      "id": "OR-J24-S57",
+      "journey": "J24",
+      "name": "Usage history folds into the days of the merchant's accounting zone (23:30 in Kolkata is that day), a zone change regroups the past, and the days sum to what posts"
     },
     {
       "id": "OR-J25-S01",

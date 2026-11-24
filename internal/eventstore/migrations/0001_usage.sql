@@ -99,13 +99,14 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_minutes_mv TO {database}
 SELECT merchant_id, customer_id, currency, toStartOfMinute(toDateTime(occurred_at, 'UTC')) AS minute, amount
 FROM {database}.usage_events;
 
--- Usage history per day: each event once with meter '', and each of its
--- charges under its meter, cell and card print in its pricing period, which
--- price the day's share of the period's total at read.
-CREATE TABLE IF NOT EXISTS {database}.usage_days (
+-- Usage history per 15-minute UTC bucket, which every zone's days and
+-- months are made of: each event once with meter '', and each of its charges
+-- under its meter, cell and card print in its pricing period, which price
+-- the bucket's share of the period's total at read.
+CREATE TABLE IF NOT EXISTS {database}.usage_history (
     merchant_id UUID,
     customer_id UUID,
-    day Date,
+    bucket_at DateTime('UTC'),
     currency LowCardinality(String),
     event_type LowCardinality(String),
     meter LowCardinality(String),
@@ -120,18 +121,18 @@ CREATE TABLE IF NOT EXISTS {database}.usage_days (
     charged Int64,
     forgiven Int64
 ) ENGINE = SummingMergeTree((requests, quantity, stated, charged, forgiven))
-ORDER BY (merchant_id, customer_id, day, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome)
-TTL day + INTERVAL 25 MONTH
+ORDER BY (merchant_id, customer_id, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome)
+TTL bucket_at + INTERVAL 25 MONTH
 SETTINGS index_granularity = 1024;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_days_events_mv TO {database}.usage_days AS
-SELECT merchant_id, customer_id, toDate(occurred_at, 'UTC') AS day, currency, event_type, '' AS meter, '' AS cell,
+CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_history_events_mv TO {database}.usage_history AS
+SELECT merchant_id, customer_id, toStartOfFifteenMinutes(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, '' AS meter, '' AS cell,
        '' AS print, period_starts_at, invoker, outcome, toUInt64(1) AS requests, toInt64(0) AS quantity,
        ifNull(stated, 0) AS stated, charged, forgiven
 FROM {database}.usage_events;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_days_charges_mv TO {database}.usage_days AS
-SELECT merchant_id, customer_id, toDate(occurred_at, 'UTC') AS day, currency, event_type, charges.meter AS meter,
+CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.usage_history_charges_mv TO {database}.usage_history AS
+SELECT merchant_id, customer_id, toStartOfFifteenMinutes(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, charges.meter AS meter,
        charges.cell AS cell, charges.print AS print, period_starts_at, invoker, outcome, toUInt64(1) AS requests,
        charges.quantity AS quantity, charges.stated AS stated, toInt64(0) AS charged, toInt64(0) AS forgiven
 FROM {database}.usage_events
