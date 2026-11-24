@@ -1,10 +1,6 @@
 # Usage billing
 
-Usage billing decides what usage costs and bills it in arrears. OpenRails prices
-reported usage on totals and posts each customer's day to the ledger once; with
-automatic usage billing, usage orders bill what is owed, and running charges
-bill a rate per hour. How much a customer may use, and the holds and gate that
-enforce it, are [entitlements and limits](entitlements.md).
+Usage billing decides what usage costs and bills it in arrears. OpenRails prices reported usage on totals and posts each customer's day to [Books](books.md) once; with automatic usage billing, usage orders bill what is owed, and running charges bill a rate per hour. How much a customer may use, and the holds and gate that enforce it, are [entitlements and limits](entitlements.md).
 
 ## Concepts
 

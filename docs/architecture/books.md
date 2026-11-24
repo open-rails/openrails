@@ -1,12 +1,6 @@
-# Ledger
+# Books
 
-The ledger is the double-entry record of a customer's money at a merchant:
-prepaid balances, credit lots drawn by usage, usage owed in arrears and how that
-debt was settled. Each (merchant, currency) pair is its own ledger, every amount
-is an integer at the currency's registered scale, and no transfer crosses
-currencies. Prepaid credits, metering, usage orders and purchased-credit
-reversals post to it; card charges for products and their refunds are
-`payments` rows, not transfers.
+Books is the double-entry record of a customer's money at a merchant: prepaid balances, credit lots drawn by usage, usage owed in arrears and how that debt was settled. Each (merchant, currency) pair is its own ledger, every amount is an integer at the currency's registered scale, and no transfer crosses currencies. Credits, metering, usage orders and purchased-credit reversals post to it; card charges for products and their refunds are `payments` rows, not transfers.
 
 ## Concepts
 
@@ -49,9 +43,7 @@ Every movement funnels through `Ledger.ApplyIdempotent`
    (`debits_must_not_exceed_credits` on `customer_balance`, relaxed per transfer by
    `allow_debit_negative_up_to`) and bumps the counters. `ledger_insufficient_funds`
    surfaces as `ledger.ErrInsufficientFunds`.
-4. A transfer that names a customer calls `WatchChange` in the same transaction,
-   which queues a balance look when the change crosses a line or the watch looks
-   at every change (see [prepaid credits](credits.md)).
+4. A transfer that names a customer calls `WatchChange` in the same transaction, which queues a balance look when the change crosses a line or the watch looks at every change (see [Credits](credits.md)).
 
 Facts never change. `immutable_ledger_transfers` refuses UPDATE, DELETE and
 TRUNCATE; `guard_ledger_account_facts` lets only the nested counter trigger touch
@@ -95,10 +87,7 @@ conservation, currencies and customer agreement before the restore commits.
 
 ## Interfaces
 
-- Go: `Client.GetBalance` (`billing.Balance`: balance, held, accrued, available,
-  owed) and `Client.ListBalanceTransactions` (`billing.BalanceTransaction`; a usage
-  deduction carries `Usage`). `billing.Currencies` and `billing.LookupCurrency`
-  read the registry.
+- Go: `Client.GetBalance` (`billing.Balance`: balance, held, accrued, available, owed) and `Client.ListBalanceTransactions` (`billing.BalanceTransaction`; a usage deduction carries `Usage`). `catalog.Currencies`, `catalog.ParseCurrency` and `Currency.Units` read the registry.
 - HTTP: `GET /v1/admin/customers/{customer_id}/balance` and
   `GET /v1/admin/customers/{customer_id}/balance/transactions`
   (`merchant:customer:read`); the customer's `GET /v1/me` and
@@ -111,10 +100,10 @@ conservation, currencies and customer agreement before the restore commits.
 ## Guarantees
 
 ### 1. Exactly-once provider calls
-Does not apply: the ledger calls no provider; it records what other systems commit, inside their transaction.
+Does not apply: Books calls no provider; it records what other systems commit, inside their transaction.
 
 ### 2. Agreement with providers
-Does not apply: the ledger holds no provider state; the systems that talk to providers post here only after they have reconciled.
+Does not apply: Books holds no provider state; the systems that talk to providers post here only after they have reconciled.
 
 ### 3. Exact money
 Amounts are `int64` native units with `ledger_transfers_amount_positive_check`.
@@ -193,10 +182,7 @@ Checks:
   only `openrails ledger-audit` runs.
 
 ### 8. Abuse protection
-The ledger has no write route; it moves only through the systems above, which
-carry their own limits. Its customer reads (`GET /v1/me`,
-`GET /v1/me/balance/transactions`) are in no rate-limit bucket: [limits](../standalone.md#abuse-limits)
-leaves a per-address ceiling to the proxy. Pages are capped by `pagination.Limit`.
+Books has no write route; it moves only through the systems above, which carry their own limits. Its customer reads (`GET /v1/me`, `GET /v1/me/balance/transactions`) are in no rate-limit bucket: [limits](../standalone.md#abuse-limits) leaves a per-address ceiling to the proxy. Pages are capped by `pagination.Limit`.
 
 Checks:
 - No package under `internal/http` imports `internal/modules/money/ledger`.
@@ -234,7 +220,7 @@ Journeys J05 (money arithmetic) and J22 (credits), plus restore in J31.
 - OR-J31-S01, OR-J31-S02: a restore preserves the ledger, and a corrupt one is
   refused at commit (`TestBillingArchive`, `TestLedgerMaintenance`).
 - OR-J23-S05: a host transaction rollback leaves no charge (`TestHostTransactions`).
-- No Go package test covers the ledger; `sqlc vet` prepares its queries.
+- No Go package test covers Books; `sqlc vet` prepares its queries.
 
 Gaps:
 - No test inserts a cross-currency transfer or an UPDATE/DELETE on

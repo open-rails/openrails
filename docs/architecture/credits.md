@@ -1,12 +1,6 @@
-# Prepaid credits
+# Credits
 
-A customer's prepaid balance in a currency is a set of credit lots: staff grants,
-credit packs and deposits a customer buys, and the credit a recurring plan
-delivers each paid cycle. Usage, admissions and running charges spend the lots
-soonest expiry first; a lot can lapse, be revoked, or be reversed by a
-refund or chargeback of the payment that bought it. Each lot is a `grants` row;
-every movement of its value is a [ledger](books.md) transfer carrying its
-`grant_id`.
+A customer's prepaid balance in a currency is a set of credit lots: staff grants, credit packs and deposits a customer buys, and the credit a recurring plan delivers each paid cycle. Usage, admissions and running charges spend the lots soonest expiry first; a lot can lapse, be revoked, or be reversed by a refund or chargeback of the payment that bought it. Each lot is a `grants` row; every movement of its value is a transfer in [Books](books.md) carrying its `grant_id`.
 
 ## Concepts
 

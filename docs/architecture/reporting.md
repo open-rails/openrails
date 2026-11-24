@@ -14,7 +14,7 @@ Reporting is the metrics engine and the merchant dashboard. The engine answers a
 - **Plan**: a validated, compilable query (`metrics.Plan`).
 - **Compare**: `previous_period` runs the same plan over the preceding window of equal length, `previous_year` over the same window a year before.
 - **Removed**: `metrics.Removed` names each retired measure's replacement and `RemovedDimensions` each renamed dimension; a query naming one is refused with it. There are no aliases. `Deferred` lists the measures later work builds; naming one is refused as planned.
-- **Widget** (`billing.DashboardWidget`): `id`, `title`, `viz`, `query` (a `billing.MetricsQuery`), `grid` and `fixed_range`.
+- **Widget** (`billing.DashboardWidget`): `id`, `title`, `viz`, `query` (a `billing.QueryMetricsParams`), `grid` and `fixed_range`.
 - **Viz**: one of `dashboard.VizTypes`: `kpi`, `stat`, `line`, `area`, `bar`, `donut`, `table`, `heading`.
 - **Grid** (`billing.DashboardGrid`): `x`, `y`, `w`, `h` on the console's react-grid-layout grid.
 - **Fixed range**: the widget keeps its query's own range; other widgets follow the console's range picker, their saved range the default.
@@ -92,11 +92,7 @@ There is no revision check: the last save wins. Validation uses the wall clock
 
 ## Interfaces
 
-- Go: `Client.QueryMetrics(ctx, billing.MetricsQuery)`, `Client.GetMetricsSchema`,
-  `Client.GetDashboard(ctx)` and `Client.SetDashboard(ctx, billing.SetDashboardParams)`;
-  types `billing.MetricsQuery`, `MetricsRange`, `MetricsOrder`, `MetricsResult`,
-  `MetricsColumn`, `MetricsSchema`, `Dashboard`, `DashboardWidget`, `DashboardGrid`,
-  `SetDashboardParams`.
+- Go: `Client.QueryMetrics(ctx, billing.QueryMetricsParams)`, `Client.GetMetricsSchema`, `Client.GetDashboard(ctx)` and `Client.SetDashboard(ctx, billing.SetDashboardParams)`; types `billing.QueryMetricsParams`, `MetricsRange`, `MetricsOrder`, `MetricsResult`, `MetricsColumn`, `MetricsSchema`, `Dashboard`, `DashboardWidget`, `DashboardGrid`, `SetDashboardParams`.
 - HTTP: `POST /v1/metrics/query`, `GET /v1/metrics/schema` and
   `GET /v1/metrics/dashboard`, in the `Metrics` route group (`merchant:metrics:read`
   or `root:metrics:read`), mounted only when the host turns on
@@ -153,7 +149,7 @@ Checks:
 The vocabulary itself (measure and dimension names) is in no generated snapshot, yet a widget is a metrics query, so it is part of the dashboard's contract: a removed measure is refused naming its replacement, and its removal ships a migration that drops saved widgets naming it.
 
 Checks:
-- `api/openapi.json` and `wire.ts` carry `MetricsQuery`, `MetricsResult` and `MetricsSchema`; `wire.ts` carries `Dashboard`, `DashboardProfile`, `DashboardWidget` and `SetDashboardParams`.
+- `api/openapi.json` and `wire.ts` carry `QueryMetricsParams`, `MetricsResult` and `MetricsSchema`; `wire.ts` carries `Dashboard`, `DashboardProfile`, `DashboardWidget` and `SetDashboardParams`.
 - `Schema().Limits` reports `MaxBuckets` and `MaxLimit`, the same constants validation uses.
 - `DecodePut` decodes into `billing.DashboardWidget` with unknown fields refused, like the metrics API.
 - `registry` panics at start on a measure without a direction, one both live and removed, a slice of a measure without `Agg`, or a slice value outside its dimension's values.
