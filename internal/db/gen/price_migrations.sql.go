@@ -57,8 +57,9 @@ type CreatePriceMigrationParams struct {
 }
 
 // billing.price_migrations: one move of subscribers to another price.
-// Matched and skipped are facts of creation; the per-status counts come from
-// the migration's scheduled changes on read.
+// Matched is counted at creation and skipped once every subscriber was
+// reached; the per-status counts come from the migration's scheduled changes
+// on read, and preparing from its admission, started until then.
 func (q *Queries) CreatePriceMigration(ctx context.Context, arg CreatePriceMigrationParams) (BillingPriceMigration, error) {
 	row := q.db.QueryRow(ctx, createPriceMigration,
 		arg.MerchantID,
