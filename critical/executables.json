@@ -1462,6 +1462,21 @@
     "OR-J42-S10": [
       "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"
     ],
+    "OR-J42-S11": [
+      "TestMRRRisk/OR-J42-S11/a-decline-puts-mrr-at-risk-as-past-due-payment-recovers-it-exhaustion-churns-it"
+    ],
+    "OR-J42-S12": [
+      "TestMRRRisk/OR-J42-S12/a-non-retryable-decline-needs-a-payment-method-a-card-update-moves-it-to-past-due-then-paid"
+    ],
+    "OR-J42-S13": [
+      "TestMRRRisk/OR-J42-S13/a-card-expiring-before-renewal-enters-on-the-period-change-and-leaves-on-an-account-updater-refresh"
+    ],
+    "OR-J42-S14": [
+      "TestMRRRisk/OR-J42-S14/unverified-enters-and-leaves"
+    ],
+    "OR-J42-S15": [
+      "TestMRRRisk/OR-J42-S15/usage-delinquency-puts-the-customers-mrr-at-risk-and-clears-it"
+    ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
     ],

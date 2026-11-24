@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 553,
+  "scenario_count": 558,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2397,6 +2397,31 @@
       "id": "OR-J42-S10",
       "journey": "J42",
       "name": "The migration's backfill adopts a book written before MRR as backfilled openings in one settlement, its reads growing with the book"
+    },
+    {
+      "id": "OR-J42-S11",
+      "journey": "J42",
+      "name": "A declined renewal puts the subscription's MRR at risk as past due, listed and in mrr_at_risk; a paid retry closes the case recovered; dunning exhausted on a later renewal closes the next case churned, involuntary; the recovery rate is a half"
+    },
+    {
+      "id": "OR-J42-S12",
+      "journey": "J42",
+      "name": "A non-retryable decline puts MRR at risk as needing a payment method; a new card moves the same case to past due, and the paid retry recovers it"
+    },
+    {
+      "id": "OR-J42-S13",
+      "journey": "J42",
+      "name": "A card that expires before the renewal it pays for enters at risk on the period change that passes its expiry and leaves when the account updater refreshes it"
+    },
+    {
+      "id": "OR-J42-S14",
+      "journey": "J42",
+      "name": "A provider subscription OpenRails could not confirm is at risk while unverified and recovered when a read verifies its renewal"
+    },
+    {
+      "id": "OR-J42-S15",
+      "journey": "J42",
+      "name": "Usage delinquency puts the customer's subscription MRR in the currency at risk with the overdue amount beside it; paying the debt recovers it"
     },
     {
       "id": "OR-J28-S09",
