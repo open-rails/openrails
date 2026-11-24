@@ -56,6 +56,8 @@ type Claim struct {
 	Cost      int64
 	Overrun   catalog.Overrun
 	Ungranted bool
+	// Stored: the window has its row (Windows sets it).
+	Stored bool
 }
 
 // Standing is where a limit stands in a claim's window: its capacity with
