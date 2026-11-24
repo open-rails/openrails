@@ -124,7 +124,10 @@ func TestPriceMigrationScale(t *testing.T) {
 		customers := ccbillMembers(t, a, source, members)
 		params := billing.CreatePriceMigrationParams{FromPriceID: source, ToPriceID: target.ID, AcknowledgeShortNotice: true,
 			FallbackPolicy: billing.MigrationCancelAtPeriodEnd, ArchiveSource: ptr(false)}
-		preview, err := a.alpha.PreviewPriceMigration(t.Context(), params)
+		// Staff, whose destructive ceilings count it (the in-process host's own
+		// work is never counted).
+		staff := a.alphaRemote
+		preview, err := staff.PreviewPriceMigration(t.Context(), params)
 		require.NoError(t, err)
 		require.Equal(t, members, preview.Matched)
 		require.Equal(t, members, preview.Classified)
@@ -132,7 +135,7 @@ func TestPriceMigrationScale(t *testing.T) {
 		require.Equal(t, members, preview.ByRail["ccbill"].RequiresAction)
 
 		// Creation reaches the first page with the migration itself.
-		migration, err := a.alpha.CreatePriceMigration(t.Context(), params)
+		migration, err := staff.CreatePriceMigration(t.Context(), params)
 		require.NoError(t, err)
 		require.Equal(t, members, migration.Matched)
 		require.True(t, migration.Preparing, "the rest are reached after the call")
@@ -164,7 +167,7 @@ func TestPriceMigrationScale(t *testing.T) {
 		// Another migration of the same cohort is refused whole past the
 		// actor's ceiling: nothing is recorded.
 		params.FallbackPolicy = billing.MigrationKeepGrandfathered
-		_, err = a.alpha.CreatePriceMigration(t.Context(), params)
+		_, err = staff.CreatePriceMigration(t.Context(), params)
 		var refused *billing.StatusError
 		require.ErrorAs(t, err, &refused)
 		require.Equal(t, http.StatusTooManyRequests, refused.Status)

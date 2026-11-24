@@ -170,7 +170,7 @@ func (s *PriceMigrationService) raiseMigrationBlocked(ctx context.Context, d *db
 	}
 	action := "The provider cannot move these subscriptions to the migration's price, and nothing retries it: they keep billing their old price. " + blockedRemedy(refused.Reason)
 	row, err := d.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
-		MerchantID: change.MerchantID, FindingType: MigrationBlockedFindingType, SubjectKey: change.PriceMigrationID.String() + "/" + refused.Reason,
+		MerchantID: change.MerchantID, FindingType: MigrationBlockedFindingType, SubjectKey: billing.PriceMigrationID(*change.PriceMigrationID).String() + "/" + refused.Reason,
 		Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence, PspID: &sub.PspID,
 	})
 	if err != nil {
