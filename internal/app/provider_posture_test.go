@@ -17,8 +17,17 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/providerposture"
 )
+
+// A live Stripe key is proven at load like a test one: its mode and its
+// declared account (OR-J06-S09 drives the check itself).
+func TestEveryStripeKeyIsProvenAtLoad(t *testing.T) {
+	for _, environment := range []string{config.EnvironmentLive, config.EnvironmentTest} {
+		require.True(t, verifiesPosture(merchants.PSPScope{Rail: "stripe", Environment: environment}), environment)
+	}
+}
 
 func TestPosturePassRechecksOnlyUnansweredPSPs(t *testing.T) {
 	armed, ccbill, silent := uuid.New(), uuid.New(), uuid.New()

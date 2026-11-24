@@ -11,7 +11,8 @@
 // # Known differences from real Stripe
 //
 //   - Authentication is not checked. GET /v1/account answers acct_<name> for
-//     a key sk_test_acct_<name>, else acct_e2e.
+//     a key sk_test_acct_<name> or sk_live_acct_<name>, else acct_e2e; GET
+//     /v1/balance's livemode is the key's mode.
 //   - A payment method's Card.Decline decides every charge: "" succeeds,
 //     "auth" requires_action until Authenticate, anything else is that
 //     decline_code (402). No 3DS redirects, radar or captures: a

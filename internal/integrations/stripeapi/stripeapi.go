@@ -3,7 +3,6 @@ package stripeapi
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/providerposture"
 )
 
 // ErrProviderReadOnly is returned for every mutating Stripe request in
@@ -33,8 +31,8 @@ const VersionHeader = "Stripe-Version"
 const APIVersion = "2026-06-24.dahlia"
 
 // guardTransport is the one transport every Stripe call flows through: it
-// rejects mutating methods before the network when readOnly and pins the API
-// version on every request.
+// rejects mutating methods before the network when readOnly or when their
+// key's posture is not proven, and pins the API version on every request.
 type guardTransport struct {
 	base     http.RoundTripper
 	readOnly bool
@@ -48,17 +46,8 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, ErrProviderReadOnly
 	}
 	if mutating {
-		live := liveSecretKey(requestSecret(req))
-		switch {
-		case live && (t.fixture || loopbackDestination(req)):
-			// A live key never reaches a fake provider.
-			return nil, fmt.Errorf("%w: stripe live key to a fake provider", providerposture.ErrDisarmed)
-		case !live && !t.fixture:
-			// A test key's mutation holds a verified test-mode posture; a
-			// live key's PSP was checked live when it loaded.
-			if err := requirePosture(req, t.transport()); err != nil {
-				return nil, err
-			}
+		if err := t.requirePosture(req); err != nil {
+			return nil, err
 		}
 	}
 	// Pin the API version on a clone (RoundTripper contract); a caller-set

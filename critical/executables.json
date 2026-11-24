@@ -914,6 +914,9 @@
       "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write/test-account-leaves-test-mode",
       "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write/live-account-enters-test-mode"
     ],
+    "OR-J06-S09": [
+      "TestPSPControls/OR-J06-S09/a-live-stripe-key-of-another-account-is-mismatched-and-never-armed"
+    ],
     "OR-J06-S30": [
       "TestPSPControls/OR-J06-S30/a-declared-stripe-psp-registers-its-webhook-endpoint"
     ],

@@ -9,10 +9,23 @@ import (
 // accountOf is the account a request's key belongs to: sk_test_acct_<name>
 // is acct_<name>'s, any other acct_e2e's.
 func accountOf(r *http.Request) string {
-	if name, ok := strings.CutPrefix(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), "sk_test_acct_"); ok {
-		return "acct_" + name
+	key := secretOf(r)
+	for _, prefix := range []string{"sk_test_acct_", "sk_live_acct_"} {
+		if name, ok := strings.CutPrefix(key, prefix); ok {
+			return "acct_" + name
+		}
 	}
 	return "acct_e2e"
+}
+
+func secretOf(r *http.Request) string {
+	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+}
+
+// liveKey reports a request made with a live secret or restricted key.
+func liveKey(r *http.Request) bool {
+	key := secretOf(r)
+	return strings.HasPrefix(key, "sk_live_") || strings.HasPrefix(key, "rk_live_")
 }
 
 // paymentMethodDomain serves /v1/payment_method_domains: register, list (by

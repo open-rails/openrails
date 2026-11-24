@@ -299,7 +299,7 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 	case p == "/v1/account":
 		return 200, Object{"object": "account", "id": accountOf(r), "charges_enabled": true}
 	case p == "/v1/balance":
-		return 200, Object{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
+		return 200, Object{"object": "balance", "livemode": liveKey(r), "available": []any{}, "pending": []any{}}
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "/v2/core/events/"):
 		if event, ok := m.thinEvents[strings.TrimPrefix(p, "/v2/core/events/")]; ok {
 			return 200, event

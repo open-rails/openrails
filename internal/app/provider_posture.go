@@ -158,10 +158,10 @@ func (r *Runtime) refuseCredentials(mid billing.MerchantID, scope merchants.PSPS
 }
 
 // verifiesPosture reports whether the PSP's environment is proven with its
-// provider at load: every NMI account and Solana network, and every non-live
-// PSP.
+// provider at load: every NMI account, Stripe key (and its declared account)
+// and Solana network, and every non-live PSP.
 func verifiesPosture(scope merchants.PSPScope) bool {
-	return scope.Rail == string(models.RailNMI) || scope.Rail == string(models.RailSolana) || !config.LiveEnvironment(scope.Rail, scope.Environment)
+	return scope.Rail == string(models.RailNMI) || scope.Rail == string(models.RailStripe) || scope.Rail == string(models.RailSolana) || !config.LiveEnvironment(scope.Rail, scope.Environment)
 }
 
 // verifyPSPPosture reports whether the PSP's verdict is now known.
