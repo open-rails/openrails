@@ -2,6 +2,9 @@ package ccbill
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,22 +13,29 @@ import (
 // probeSubscriptionID is a well-formed subscription id no account holds.
 const probeSubscriptionID = "0100000000000000001"
 
-// ProbeInterval is how long a failed credential probe holds the account's
-// probes. CCBill locks a DataLink login out for an hour after three failed
-// ones (-12): at most one failed probe an hour, whichever merchant or money
-// class declares the account, leaves its owner's own logins their room.
-const ProbeInterval = time.Hour
+// CCBill locks a DataLink login out for an hour after three failed ones
+// (-12). A login, the client account and the username, is probed at most
+// ProbeFailures times an hour that CCBill refuses, whichever merchant or
+// money class declares it, so a probe never makes the third; a stranger's
+// refused probes hold only the username they named.
+const (
+	ProbeInterval = time.Hour
+	ProbeFailures = 2
+	// ProbeTimeout bounds one probe, and the lease its in-flight slot holds:
+	// a probe killed in flight frees it this soon.
+	ProbeTimeout = 15 * time.Second
+)
 
-// ProbeLimitedError is a probe not sent: one sent within ProbeInterval
-// failed, or is still in flight. Until is when the account may be probed,
-// Wait how long that was from the refusal.
+// ProbeLimitedError is a probe not sent: the login's refused probes within
+// ProbeInterval reached ProbeFailures, or another probe of it is in flight.
+// Until is when it may be probed, Wait how long that was from the refusal.
 type ProbeLimitedError struct {
 	Until time.Time
 	Wait  time.Duration
 }
 
 func (e *ProbeLimitedError) Error() string {
-	return fmt.Sprintf("ccbill credential probe: a probe of the account failed within the hour; probe again after %s", e.Until.UTC().Format(time.RFC3339))
+	return fmt.Sprintf("ccbill credential probe: CCBill refused this login within the hour, or it is being probed; probe again after %s", e.Until.UTC().Format(time.RFC3339))
 }
 
 // probeRefusals are the subscription-management answers that refuse the
@@ -42,25 +52,60 @@ var probeRefusals = map[string]string{
 // subscription no account holds. CCBill's API Guide answers -3 (no record)
 // or -4 (another account's) only to an authenticated login, -1 to one it
 // refuses. Subscription management is no DataLink export, so the probe takes
-// no hourly slot, and it changes nothing. It takes the account's probe slot
-// (Pacing) before it is sent and keeps it ProbeInterval unless the login is
-// proven: a failed one, or no answer, holds the account's probes.
+// no hourly slot, and it changes nothing. UNCONFIRMED: the guide does not say
+// that -3 or -4 binds the login to clientAccnum; a login of another account
+// might answer them. The cross-merchant ownership check (one current PSP
+// holds an account) bounds what such a probe can claim.
+//
+// The login's probe is leased for ProbeTimeout while in flight (Pacing), one
+// at a time; a definite refusal (ErrDataLinkAuth: -1, -8, -9, -10, -12, an
+// HTTP 401 or 403) is counted for ProbeInterval. No answer, a 5xx, a -7 or a
+// canceled probe counts nothing.
 func (c *DataLinkClient) ProbeCredentials(ctx context.Context) error {
 	if err := c.ValidateConfig(); err != nil {
 		return err
 	}
-	now, key := c.now(), "ccbill:probe:"+c.ClientAccNum
-	if until, open := c.slots().Claim(ctx, key, now, now.Add(ProbeInterval)); !open {
+	slots, now, login := c.slots(), c.now(), c.probeLogin()
+	refused := make([]string, ProbeFailures)
+	held, first := 0, time.Time{}
+	for i := range refused {
+		refused[i] = fmt.Sprintf("%s:refused:%d", login, i)
+		if until, ok := slots.Opens(ctx, refused[i], now); ok {
+			if held++; first.IsZero() || until.Before(first) {
+				first = until
+			}
+		}
+	}
+	if held == ProbeFailures {
+		return &ProbeLimitedError{Until: first, Wait: first.Sub(now)}
+	}
+	lease := login + ":lease"
+	if until, open := slots.Claim(ctx, lease, now, now.Add(ProbeTimeout)); !open {
 		return &ProbeLimitedError{Until: until, Wait: until.Sub(now)}
 	}
-	err := c.probeLogin(ctx)
-	if err == nil {
-		c.slots().Reopen(ctx, key)
+	defer slots.Reopen(context.WithoutCancel(ctx), lease)
+	probeCtx, cancel := context.WithTimeout(ctx, ProbeTimeout)
+	defer cancel()
+	err := c.authenticate(probeCtx)
+	if errors.Is(err, ErrDataLinkAuth) {
+		at, record := c.now(), context.WithoutCancel(ctx)
+		for _, key := range refused {
+			if _, taken := slots.Claim(record, key, at, at.Add(ProbeInterval)); taken {
+				break
+			}
+		}
 	}
 	return err
 }
 
-func (c *DataLinkClient) probeLogin(ctx context.Context) error {
+// probeLogin is the slot key of the client's login: its account and a digest
+// of its username, which is a credential.
+func (c *DataLinkClient) probeLogin() string {
+	sum := sha256.Sum256([]byte(c.Username))
+	return "ccbill:probe:" + c.ClientAccNum + ":" + hex.EncodeToString(sum[:8])
+}
+
+func (c *DataLinkClient) authenticate(ctx context.Context) error {
 	body, err := c.postSubscriptionManagement(ctx, actionViewSubscriptionStatus, probeSubscriptionID)
 	if err != nil {
 		return fmt.Errorf("ccbill credential probe: %w", err)

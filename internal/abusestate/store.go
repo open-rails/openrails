@@ -153,6 +153,25 @@ func (s *Store) Claim(ctx context.Context, key string, now, next time.Time) (tim
 	return next, true
 }
 
+// Opens answers when key's slot opens; ok=false when it is open at now, the
+// caller's clock. A slot memory took while Redis was down still holds.
+func (s *Store) Opens(ctx context.Context, key string, now time.Time) (time.Time, bool) {
+	held, ok := s.slots.held(key, now.UnixMilli(), s.now())
+	if s.redis() {
+		v, err := s.rdb.Get(ctx, key).Int64()
+		switch {
+		case err == nil && v > now.UnixMilli() && v > held:
+			held, ok = v, true
+		case err != nil && !errors.Is(err, redis.Nil):
+			s.fail(ctx, err)
+		}
+	}
+	if !ok {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(held).UTC(), true
+}
+
 // Reopen opens key's slot at once. Memory opens it whatever Redis answers.
 func (s *Store) Reopen(ctx context.Context, key string) {
 	_ = s.release(ctx, s.slots, []string{key})

@@ -28842,7 +28842,7 @@
     "psp_probe_limited": {
       "status": 429,
       "type": "rate_limit_error",
-      "meaning": "A credential check of the account failed within the hour, and the provider locks out repeated failed logins; Retry-After says when it may be checked again."
+      "meaning": "The provider refused this login twice within the hour, or it is being checked, and it locks out repeated failed logins; Retry-After says when it may be checked again."
     },
     "purchase_review_resolved": {
       "status": 409,

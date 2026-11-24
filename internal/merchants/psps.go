@@ -67,7 +67,7 @@ type ProbeLimitedError struct {
 }
 
 func (e *ProbeLimitedError) Error() string {
-	return fmt.Sprintf("merchants: a credential check of this account failed within the hour; check again in %s", e.RetryAfter.Round(time.Second))
+	return fmt.Sprintf("merchants: the provider refused this login within the hour, or it is being checked; check again in %s", e.RetryAfter.Round(time.Second))
 }
 
 // LastActivePSPError refuses to archive the only active PSP on a rail without

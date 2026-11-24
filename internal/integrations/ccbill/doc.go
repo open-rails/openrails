@@ -12,8 +12,11 @@
 // probe is a status read of a subscription no account holds, which CCBill
 // answers -3 or -4 only to a login it authenticated and -1 to one it refused,
 // so it never takes the slot. CCBill locks a login out for an hour after
-// three failed ones (-12), so a failed probe holds the account's probes an
-// hour, across merchants and money classes (psp_probe_limited).
+// three failed ones (-12), so two refused probes of a login (account and
+// username) hold its probes an hour, across merchants and money classes
+// (psp_probe_limited); no answer, a 5xx or a -7 counts nothing. Whether -3 or
+// -4 binds the login to the account is unconfirmed; one current PSP holding
+// an account bounds what a probe can claim.
 //
 // CCBill documents the shape of its times but not their zone. DataLink rows,
 // webhook timestamps and subscription-management dates are read as UTC

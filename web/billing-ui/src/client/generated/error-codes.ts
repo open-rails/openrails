@@ -363,7 +363,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   psp_key_taken: { status: 409, type: "invalid_request_error", meaning: "Another live PSP holds the key." },
   psp_last_active: { status: 409, type: "invalid_request_error", meaning: "The PSP is the last active one on its rail; pass allow_last to archive it." },
   psp_not_found: { status: 404, type: "invalid_request_error", meaning: "The PSP does not exist." },
-  psp_probe_limited: { status: 429, type: "rate_limit_error", meaning: "A credential check of the account failed within the hour, and the provider locks out repeated failed logins; Retry-After says when it may be checked again." },
+  psp_probe_limited: { status: 429, type: "rate_limit_error", meaning: "The provider refused this login twice within the hour, or it is being checked, and it locks out repeated failed logins; Retry-After says when it may be checked again." },
   purchase_review_resolved: { status: 409, type: "invalid_request_error", meaning: "The purchase review was already resolved." },
   quantity_not_allowed: { status: 422, type: "invalid_request_error", meaning: "A quantity was sent for a price that is not sold per seat." },
   rate_card_product_not_found: { status: 404, type: "invalid_request_error", meaning: "The rate card names a product that does not exist." },

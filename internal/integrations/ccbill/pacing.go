@@ -18,6 +18,8 @@ type Slots interface {
 	// Claim takes key's slot when it is open at now and keeps it until
 	// next; otherwise it answers when the slot opens.
 	Claim(ctx context.Context, key string, now, next time.Time) (time.Time, bool)
+	// Opens answers when key's slot opens; ok=false when it is open at now.
+	Opens(ctx context.Context, key string, now time.Time) (time.Time, bool)
 	// Reopen opens key's slot at once.
 	Reopen(ctx context.Context, key string)
 }
@@ -104,6 +106,15 @@ func (m *memorySlots) Claim(_ context.Context, key string, now, next time.Time) 
 	}
 	m.next[key] = next
 	return next, true
+}
+
+func (m *memorySlots) Opens(_ context.Context, key string, now time.Time) (time.Time, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if held := m.next[key]; held.After(now) {
+		return held, true
+	}
+	return time.Time{}, false
 }
 
 func (m *memorySlots) Reopen(_ context.Context, key string) {

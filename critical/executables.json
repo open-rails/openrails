@@ -1394,7 +1394,7 @@
       "TestProviderTime/OR-J28-S14/a-ccbill-datalink-login-ccbill-refuses-is-not-declared"
     ],
     "OR-J28-S15": [
-      "TestProviderTime/OR-J28-S15/a-second-failed-ccbill-probe-of-an-account-within-the-hour-reaches-no-ccbill"
+      "TestProviderTime/OR-J28-S15/a-strangers-refused-ccbill-logins-hold-only-their-own-login"
     ],
     "OR-J39-S01": [
       "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"

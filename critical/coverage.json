@@ -2196,7 +2196,7 @@
     {
       "id": "OR-J28-S15",
       "journey": "J28",
-      "name": "A failed CCBill credential probe holds the client account's probes an hour, across merchants and money classes: a second declaration within the hour is psp_probe_limited with Retry-After and reaches no CCBill"
+      "name": "Two refused CCBill credential probes hold that login (account and username) an hour, across merchants and money classes: a third is psp_probe_limited with Retry-After and reaches no CCBill, and the account's owner on its own login is not held"
     },
     {
       "id": "OR-J39-S01",
