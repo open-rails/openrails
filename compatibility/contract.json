@@ -1630,6 +1630,7 @@
       "type RefundPayload struct {\n\tOriginalPaymentID uuid.UUID `json:\"original_payment_id\"`\n\n\tReservationID uuid.UUID `json:\"reservation_id\"`\n\n\tAmountCents  moneyutil.Cents `json:\"amount_cents\"`\n\tCurrency     string          `json:\"currency\"`\n\tReason       string          `json:\"reason,omitempty\"`\n\tRevokeAccess bool            `json:\"revoke_access\"`\n\n\tProviderTarget string `json:\"provider_target\"`\n\n\tProviderTransactionID string `json:\"provider_transaction_id,omitempty\"`\n}",
       "type StripeCancelPayload struct {\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
       "type StripePaymentMethodDomainPayload struct {\n\tDomainName string `json:\"domain_name\"`\n}",
+      "type StripeResumePayload struct {\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
       "type collectedReceipt struct {\n\tVersion      int                                    `json:\"version\"`\n\tFamily       string                                 `json:\"family\"`\n\tBinding      receiptBinding                         `json:\"binding\"`\n\tNMI          *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe       *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n\tStripeEngine *subscriptions.StripeEngineReceipt     `json:\"stripe_engine,omitempty\"`\n}",
       "type collectionNonexecution struct {\n\tBinding     receiptBinding `json:\"binding\"`\n\tSubmittedAt string         `json:\"submitted_at\"`\n\tCode        string         `json:\"code\"`\n\tReason      string         `json:\"reason\"`\n}",
       "type confirmationTerms struct {\n\tSubscriptionID  uuid.UUID               `json:\"subscription_id\"`\n\tCustomerID      uuid.UUID               `json:\"customer_id\"`\n\tPaymentMethodID uuid.UUID               `json:\"payment_method_id\"`\n\tFollowsDefault  bool                    `json:\"follows_default\"`\n\tVersionID       uuid.UUID               `json:\"version_id\"`\n\tMandateID       uuid.UUID               `json:\"mandate_id\"`\n\tInstrument      charge.FrozenInstrument `json:\"instrument\"`\n\tRail            string                  `json:\"rail\"`\n\tSchedule        string                  `json:\"schedule\"`\n\tPeriodEnd       time.Time               `json:\"period_end\"`\n}",
@@ -2818,7 +2819,8 @@
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "utf8": "unicode/utf8",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/http/handlers/webhook.go": {
       "api": "github.com/open-rails/openrails/internal/api",
@@ -3343,6 +3345,25 @@
       "json": "encoding/json",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
+    },
+    "internal/intents/stripe_resume.go": {
+      "clockwork": "github.com/jonboulle/clockwork",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "providerposture": "github.com/open-rails/openrails/internal/providerposture",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "strings": "strings",
+      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
     },
     "internal/intents/wake/wake.go": {
       "context": "context",

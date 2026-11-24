@@ -1179,6 +1179,11 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 				return fmt.Errorf("resume membership: %w", err)
 			}
 		}
+		if params.Within != nil {
+			if err := params.Within(ctx, tx, subscription); err != nil {
+				return fmt.Errorf("resume membership: %w", err)
+			}
+		}
 		resumed = subscription
 		return nil
 	})

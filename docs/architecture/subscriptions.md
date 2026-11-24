@@ -60,16 +60,7 @@ The due pass moves a provider-billed renewal still unpaid 48 hours
 (`AskProviderOverdueRenewal`). Solana renewals are the cranker's pulls
 ([payment providers](payment-providers.md)).
 
-**Cancel and resume.** Customers cancel at period end with a 4–500 character
-reason (`Service.CancelSubscriptionForCustomer`); staff use
-`AdminSubscriptionService.CancelSubscription` (`revoke_access`,
-`account_deletion`). Access runs to the boundary unless immediate or a
-chargeback; any provider stop is an operation. An NMI delete waits until 48
-hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours, never
-later than 48 hours before the rebill (`SystemDeleteCoolingOff`); one during an
-unresolved renewal is refused (`payment_in_progress`). `Resumable` allows
-undoing a non-merchant cancel (engine, Solana: the customer's own) on a
-reversible rail in the paid period.
+**Cancel and resume.** Customers cancel at period end with a 4–500 character reason (`Service.CancelSubscriptionForCustomer`); staff use `AdminSubscriptionService.CancelSubscription` (`revoke_access`, `account_deletion`). Access runs to the boundary unless immediate or a chargeback; any provider stop is an operation. An NMI delete waits until 48 hours before the rebill (`NMIDeferredDeleteAt`), a system cancel 24 hours, never later than 48 hours before the rebill (`SystemDeleteCoolingOff`); one during an unresolved renewal is refused (`payment_in_progress`). `Resumable` allows undoing a non-merchant cancel (engine, Solana: the customer's own; never a provider's or an abandoned start) on a reversible rail in the paid period; a Stripe resume is a `stripe_resume_subscription` operation committed with it.
 
 **Plan and seat changes.** `PurchaseService.ChangeSubscription` routes by owner:
 
@@ -109,7 +100,7 @@ reversible rail in the paid period.
 
 ### 1. Exactly-once provider calls
 
-Each provider write is a `provider_intents` row committed with its job before it is sent: `subscription_collection`, `initial_membership`, `nmi_upgrade`, `stripe_tier_change`, a cancel's NMI delete or Stripe or CCBill cancel; a migration's push is the [catalog's](catalog.md#1-exactly-once-provider-calls). Keys are deterministic; an ambiguous outcome is verified, never resent. Exception: the Stripe resume is a direct, idempotent write.
+Each provider write is a `provider_intents` row committed with its job before it is sent: `subscription_collection`, `initial_membership`, `nmi_upgrade`, `stripe_tier_change`, a cancel's NMI delete or Stripe or CCBill cancel, and a Stripe resume (`stripe_resume_subscription`, committed with the local resume); a migration's push is the [catalog's](catalog.md#1-exactly-once-provider-calls). Keys are deterministic; an ambiguous outcome is verified, never resent.
 
 Checks:
 - `provider_intents_open_subscription_collection_key` and
@@ -199,7 +190,7 @@ Journeys:
 - OR-J13-S01–S04: enrollment, concurrent signup, imported terms, trials.
 - OR-J14-S01–S07, OR-J14-S70: boundary, concurrency, restart, frozen terms,
   process death, one agreement, calendar anchor, missed renewal.
-- OR-J17-S01–S06: cancel and resume, renewal custody, held delete, callbacks.
+- OR-J17-S01–S07: cancel and resume (a Stripe resume a `stripe_resume_subscription` operation), renewal custody, held delete, callbacks.
 - OR-J18-S01–S06: preview, stale preview, customer action, fences, seats.
 - OR-J19-S01, OR-J19-S04: a move applies at the paid boundary, never before; an admitted renewal keeps its terms (the rest of J19 is the [catalog's](catalog.md#tests)).
 - Related: OR-J04-S42, OR-J04-S70, OR-J34-S05/S06, OR-J27-S08, OR-J37-S64–S68.
@@ -211,4 +202,3 @@ Gaps:
 - No table test of `lifecycle.Apply`; rare transitions run only in scenarios.
 - Nothing checks the `Retention:` table comments against `internal/retention/tables.go`.
 - OR-J18-S03 checks a seat increase's payment and card, not its amount.
-- No scenario covers a local failure after Stripe accepted a resume.

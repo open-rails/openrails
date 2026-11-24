@@ -319,6 +319,9 @@
     "OR-J17-S06": [
       "TestCancellationRecoveryContracts/OR-J17-S06/resume-inside-the-paid-period-never-extends-access-past-it"
     ],
+    "OR-J17-S07": [
+      "TestCancellationRecoveryContracts/OR-J17-S07/a-stripe-resume-is-a-provider-operation"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],

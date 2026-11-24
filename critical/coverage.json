@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 452,
+  "scenario_count": 453,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -447,6 +447,11 @@
       "id": "OR-J17-S06",
       "journey": "J17",
       "name": "Cancel, resume and cancel again inside the paid period never extends access past it"
+    },
+    {
+      "id": "OR-J17-S07",
+      "journey": "J17",
+      "name": "A Stripe resume is a provider operation: the local resume and the Stripe write commit together, run once, logged"
     },
     {
       "id": "OR-J18-S01",

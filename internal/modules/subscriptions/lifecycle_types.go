@@ -1,11 +1,13 @@
 package subscriptions
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
@@ -100,6 +102,9 @@ type ReactivateMembershipParams struct {
 
 type ResumeMembershipParams struct {
 	SubscriptionID uuid.UUID
+	// Within runs in the resume's transaction, after the row is resumed: the
+	// provider write the resume needs commits with it.
+	Within func(ctx context.Context, tx pgx.Tx, resumed *models.Subscription) error
 }
 
 var ErrTerminalTransitionBlocked = errors.New("terminal-to-active transition blocked by lifecycle policy")

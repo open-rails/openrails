@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -193,5 +194,30 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 			require.Equal(t, sample.allowed, access.Entitlements["nmi:member"], sample.at.String())
 		}
 		p.money(t, 1, 1000)
+	})
+	t.Run("OR-J17-S07/a-stripe-resume-is-a-provider-operation", func(t *testing.T) {
+		a, accounts, sub := stripeMembership(t)
+		stripe := accounts.accounts["sk_test_old"].core
+		remote := *sub.RailSubscriptionID
+		armDestructive(t, a, true)
+		startFleet(t, a.world)
+		path := "/v1/me/subscriptions/" + sub.ID.String()
+		status, raw := a.request(t, http.MethodPost, path+"/cancel", a.aliceToken, map[string]any{"reason": "Taking a break from it"})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Eventually(t, func() bool { return stripe.Subscription(remote)["cancel_at_period_end"] == true }, 20*time.Second, 20*time.Millisecond,
+			"the cancel reaches Stripe")
+		status, raw = a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Equal(t, false, stripe.Subscription(remote)["cancel_at_period_end"], "the resume reaches Stripe with the request")
+		subscriptionState(t, a, sub.ID, "active")
+		// The write is an operation of record, logged as every provider write is.
+		var operation, state string
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id::text, status FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+			" WHERE merchant_id = $1 AND subscription_id = $2 AND intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&operation, &state))
+		require.Equal(t, "succeeded", state)
+		var logged int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_mutation_logs"}.Sanitize()+
+			" WHERE merchant_id = $1 AND provider_intent_id = $2::uuid", a.alpha.MerchantID().UUID(), operation).Scan(&logged))
+		require.Positive(t, logged)
 	})
 }
