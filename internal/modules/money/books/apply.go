@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	unit "github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -55,8 +56,14 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 	if err != nil {
 		return err
 	}
-	if order.Status != "complete" || order.CompletedAt == nil || order.Origin == "usage" || order.Total <= 0 || CheckCurrency(order.Currency) != nil {
+	if order.Status != "complete" || order.CompletedAt == nil || order.Origin == "usage" || order.Total <= 0 {
 		return nil
+	}
+	if CheckCurrency(order.Currency) != nil {
+		if !unit.IsUnitCode(order.Currency) {
+			return nil
+		}
+		return applyUnitOrder(ctx, d, q, order, services, final)
 	}
 	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{orderID}})
 	if err != nil {
@@ -220,6 +227,79 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 	for _, m := range schedules {
 		if err := b.recognize(ctx, m.row, m.steps); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// applyUnitOrder schedules the revenue of an order priced in a merchant's own
+// unit, which the customer's balance paid: each line's spends released its
+// lots' money into deferred_revenue, in each lot's paid currency, naming the
+// schedule CreditLineSchedule(line, currency). One schedule per currency
+// recognises it over the line's service, funded with exactly what the spends
+// released; the units book's spends were the order's payment.
+func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.BillingOrder, services map[uuid.UUID]Service, final bool) error {
+	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: order.MerchantID, OrderIds: []uuid.UUID{order.ID}})
+	if err != nil {
+		return err
+	}
+	ids := make([]string, len(lines))
+	for i, l := range lines {
+		ids[i] = l.ID.String()
+	}
+	released, err := q.ListCreditLineReleases(ctx, gen.ListCreditLineReleasesParams{MerchantID: order.MerchantID, OrderLineIds: ids})
+	if err != nil {
+		return err
+	}
+	at := order.CompletedAt.UTC().Truncate(time.Microsecond)
+	b := New(q, order.MerchantID)
+	var loc *time.Location
+	for _, line := range lines {
+		for _, r := range released {
+			if r.OrderLineID != line.ID || r.Amount <= 0 {
+				continue
+			}
+			if r.RevenueScheduleID != CreditLineSchedule(line.ID, r.Currency) {
+				return fmt.Errorf("books: order line %s released %s under schedule %s", line.ID, r.Currency, r.RevenueScheduleID)
+			}
+			plan, ready, err := planLine(ctx, q, order, line, services, at)
+			if err != nil {
+				return fmt.Errorf("books: order line %s: %w", line.ID, err)
+			}
+			if !ready {
+				if final {
+					if err := unappliedLine(ctx, q, order, line); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if plan.method == Ratable && loc == nil {
+				if loc, err = AccountingZone(ctx, d); err != nil {
+					return err
+				}
+			}
+			s := schedule{service: plan.service, funded: r.Amount, through: plan.service.Starts, ended: plan.ended}
+			steps, next := s.catchUp(at, loc)
+			params := gen.CreateRevenueScheduleParams{
+				MerchantID: order.MerchantID, ID: r.RevenueScheduleID, CustomerID: order.CustomerID, Currency: r.Currency, OrderID: order.ID, OrderLineID: line.ID,
+				ProductAccessID: plan.access, ProductID: line.ProductID, PriceID: line.PriceID,
+				Method: string(plan.method), RevenueAccount: string(plan.account), Funded: s.funded, RecognizedNet: s.recognized,
+				ServiceStartsAt: plan.service.Starts, ServiceEndsAt: plan.service.Ends, EndedAt: s.ended, RecognizedThroughAt: s.through, NextRecognitionAt: next,
+			}
+			row, err := q.CreateRevenueSchedule(ctx, params)
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if _, err := q.ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: order.MerchantID, FindingType: findingUnappliedLine, SubjectKey: "order_line:" + line.ID.String()}); err != nil {
+				return err
+			}
+			if err := b.recognize(ctx, row, steps); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

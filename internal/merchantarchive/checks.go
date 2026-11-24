@@ -407,8 +407,9 @@ var referenceChecks = []rowCheck{
                AND m.rail_customer_ref=provider_intents.payload->'instrument'->>'rail_customer_ref'
                AND m.status IN ('removed','closed','replaced')
                AND m.park_reason IS NOT DISTINCT FROM ('removed:' || provider_intents.id::text))))`},
-	// A general-ledger leg of an order in a merchant's unit is in the money of
-	// the lots that paid it.
+	// A general-ledger leg of an order in a merchant's unit (a spend of its
+	// lots, a recognition of its revenue) is in the money of the lots that paid
+	// it.
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
 	 OR (credit_grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.credit_grants g
    WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND (
@@ -419,7 +420,7 @@ var referenceChecks = []rowCheck{
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
 	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id
 	   AND (o.currency=ledger_transfers.currency
-	     OR ledger_transfers.book='general' AND ledger_transfers.credit_grant_id IS NOT NULL AND o.currency <> ALL(` + registryCurrencies + `))))
+	     OR ledger_transfers.book='general' AND o.currency <> ALL(` + registryCurrencies + `))))
 	 OR (order_line_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.id=ledger_transfers.order_line_id AND l.order_id=ledger_transfers.order_id))
 	 OR (product_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=ledger_transfers.product_id))
 	 OR (revenue_schedule_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id=$1 AND s.id=ledger_transfers.revenue_schedule_id

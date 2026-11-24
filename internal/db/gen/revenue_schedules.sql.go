@@ -25,7 +25,7 @@ INSERT INTO billing.revenue_schedules (
     $15::timestamptz, $16::timestamptz, $17::int,
     $18::timestamptz, $19::timestamptz, $20::timestamptz, 0
 )
-ON CONFLICT (merchant_id, order_line_id) DO NOTHING
+ON CONFLICT (merchant_id, order_line_id, currency) DO NOTHING
 RETURNING merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at
 `
 
@@ -53,7 +53,8 @@ type CreateRevenueScheduleParams struct {
 }
 
 // A paid line's schedule, at its application, as its first recognition left
-// it. Once per line: a replay inserts nothing and returns no row.
+// it. Once per line and currency: a replay inserts nothing and returns no
+// row.
 func (q *Queries) CreateRevenueSchedule(ctx context.Context, arg CreateRevenueScheduleParams) (BillingRevenueSchedule, error) {
 	row := q.db.QueryRow(ctx, createRevenueSchedule,
 		arg.MerchantID,
@@ -165,6 +166,57 @@ func (q *Queries) GetPurchaseAccessByPayment(ctx context.Context, arg GetPurchas
 		&i.Quantity,
 	)
 	return i, err
+}
+
+const listCreditLineReleases = `-- name: ListCreditLineReleases :many
+SELECT t.order_line_id::uuid AS order_line_id, t.currency, t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(t.amount)::bigint AS amount
+FROM billing.ledger_transfers t
+JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+WHERE t.merchant_id = $1::uuid AND t.source = 'order_line' AND t.source_id = ANY($2::text[])
+  AND t.book = 'general' AND t.credit_grant_id IS NOT NULL AND t.revenue_schedule_id IS NOT NULL
+  AND c.account_type = 'deferred_revenue'
+GROUP BY t.order_line_id, t.currency, t.revenue_schedule_id
+ORDER BY t.order_line_id, t.currency
+`
+
+type ListCreditLineReleasesParams struct {
+	MerchantID   uuid.UUID
+	OrderLineIds []string
+}
+
+type ListCreditLineReleasesRow struct {
+	OrderLineID       uuid.UUID
+	Currency          string
+	RevenueScheduleID uuid.UUID
+	Amount            int64
+}
+
+// What spends of credit released into an order's lines priced in a merchant's
+// own unit: per line and paid currency, the lots' money credited to
+// deferred_revenue under the schedule the spends named.
+func (q *Queries) ListCreditLineReleases(ctx context.Context, arg ListCreditLineReleasesParams) ([]ListCreditLineReleasesRow, error) {
+	rows, err := q.db.Query(ctx, listCreditLineReleases, arg.MerchantID, arg.OrderLineIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCreditLineReleasesRow
+	for rows.Next() {
+		var i ListCreditLineReleasesRow
+		if err := rows.Scan(
+			&i.OrderLineID,
+			&i.Currency,
+			&i.RevenueScheduleID,
+			&i.Amount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDueRevenueSchedules = `-- name: ListDueRevenueSchedules :many

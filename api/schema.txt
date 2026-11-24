@@ -29,6 +29,7 @@ migration 0030_stripe_fees.up.sql sha256:9eaf00b0f211b60fe71ab2d91e59e5303c3cb04
 migration 0031_credit_books.up.sql sha256:43b97e4cf3684cce22e027d3264dfb68739a8eb421167cc98ba2244c96b97ba4
 migration 0032_run_leases.up.sql sha256:dffb969002908c162478fb3e9a3e0ceafa0072e528a70b48719c70d8b52427a3
 migration 0033_merchant_unit_spending.up.sql sha256:dd34eca4ad7958bbf2a0a3e51086d800637e7edccacbf7b416ffe37b1f1dcd93
+migration 0034_unit_order_revenue.up.sql sha256:5c5569cedec95ee75775645cea9ab575745c51fa5505d0c35f4bcaa5ca7c2769
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3124,7 +3125,7 @@ table billing.revenue_schedules
   constraint revenue_schedules_method_check CHECK ((method = ANY (ARRAY['ratable'::text, 'point_in_time'::text])))
   constraint revenue_schedules_order_id_fkey FOREIGN KEY (merchant_id, customer_id, order_id) REFERENCES billing.orders(merchant_id, customer_id, id)
   constraint revenue_schedules_order_line_id_fkey FOREIGN KEY (merchant_id, order_line_id) REFERENCES billing.order_lines(merchant_id, id)
-  constraint revenue_schedules_order_line_id_key UNIQUE (merchant_id, order_line_id)
+  constraint revenue_schedules_order_line_id_key UNIQUE (merchant_id, order_line_id, currency)
   constraint revenue_schedules_pkey PRIMARY KEY (merchant_id, id)
   constraint revenue_schedules_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id)
   constraint revenue_schedules_product_access_id_fkey FOREIGN KEY (merchant_id, product_access_id) REFERENCES billing.product_access(merchant_id, id)
@@ -3136,7 +3137,7 @@ table billing.revenue_schedules
   constraint revenue_schedules_service_months_check CHECK (((service_months >= 1) AND (service_months <= 1200)))
   constraint revenue_schedules_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id)
   index CREATE INDEX revenue_schedules_due_idx ON billing.revenue_schedules USING btree (next_recognition_at, merchant_id, id) WHERE (next_recognition_at IS NOT NULL)
-  index CREATE UNIQUE INDEX revenue_schedules_order_line_id_key ON billing.revenue_schedules USING btree (merchant_id, order_line_id)
+  index CREATE UNIQUE INDEX revenue_schedules_order_line_id_key ON billing.revenue_schedules USING btree (merchant_id, order_line_id, currency)
   index CREATE UNIQUE INDEX revenue_schedules_pkey ON billing.revenue_schedules USING btree (merchant_id, id)
   index CREATE INDEX revenue_schedules_product_access_id_idx ON billing.revenue_schedules USING btree (merchant_id, product_access_id) WHERE (product_access_id IS NOT NULL)
   index CREATE INDEX revenue_schedules_subscription_id_idx ON billing.revenue_schedules USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)

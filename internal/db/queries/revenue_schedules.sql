@@ -1,6 +1,7 @@
 -- name: CreateRevenueSchedule :one
 -- A paid line's schedule, at its application, as its first recognition left
--- it. Once per line: a replay inserts nothing and returns no row.
+-- it. Once per line and currency: a replay inserts nothing and returns no
+-- row.
 INSERT INTO billing.revenue_schedules (
     merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id,
     product_id, price_id, method, revenue_account, funded, recognized_net,
@@ -13,7 +14,7 @@ INSERT INTO billing.revenue_schedules (
     sqlc.arg(service_starts_at)::timestamptz, sqlc.arg(service_ends_at)::timestamptz, sqlc.narg(service_months)::int,
     sqlc.narg(ended_at)::timestamptz, sqlc.arg(recognized_through_at)::timestamptz, sqlc.narg(next_recognition_at)::timestamptz, 0
 )
-ON CONFLICT (merchant_id, order_line_id) DO NOTHING
+ON CONFLICT (merchant_id, order_line_id, currency) DO NOTHING
 RETURNING *;
 
 -- name: LockDueRevenueSchedule :one
@@ -31,6 +32,19 @@ SET recognized_net = sqlc.arg(recognized_net)::bigint,
     reinstatements = sqlc.arg(reinstatements)::int,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: ListCreditLineReleases :many
+-- What spends of credit released into an order's lines priced in a merchant's
+-- own unit: per line and paid currency, the lots' money credited to
+-- deferred_revenue under the schedule the spends named.
+SELECT t.order_line_id::uuid AS order_line_id, t.currency, t.revenue_schedule_id::uuid AS revenue_schedule_id, sum(t.amount)::bigint AS amount
+FROM billing.ledger_transfers t
+JOIN billing.ledger_accounts c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id
+WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.source = 'order_line' AND t.source_id = ANY(sqlc.arg(order_line_ids)::text[])
+  AND t.book = 'general' AND t.credit_grant_id IS NOT NULL AND t.revenue_schedule_id IS NOT NULL
+  AND c.account_type = 'deferred_revenue'
+GROUP BY t.order_line_id, t.currency, t.revenue_schedule_id
+ORDER BY t.order_line_id, t.currency;
 
 -- name: ListDueRevenueSchedules :many
 -- CROSS-MERCHANT: the schedules due, in key order, by the due index alone: an

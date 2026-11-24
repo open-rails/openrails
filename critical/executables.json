@@ -2223,6 +2223,9 @@
     ],
     "OR-J48-S12": [
       "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"
+    ],
+    "OR-J48-S13": [
+      "TestMerchantUnits/OR-J48-S13/a-unit-priced-orders-revenue-is-its-lots-money-scheduled-per-currency"
     ]
   }
 }

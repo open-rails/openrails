@@ -37,6 +37,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // OpCreditIssue is the operation a paid lot's price is deferred at.
@@ -225,6 +226,13 @@ type CreditMove struct {
 	Into *Line
 }
 
+// CreditLineSchedule is the revenue schedule of an order line priced in a
+// merchant's unit, in one currency its lots were paid in: the spends name it
+// as they release the lots' money, before the order's application makes it.
+func CreditLineSchedule(line uuid.UUID, currency string) uuid.UUID {
+	return uuidutil.DeterministicID(line, "revenue_schedule", currency)
+}
+
 // Line is an order line a spend of credit pays, and its order, which the
 // spend's legs in both books name.
 type Line struct {
@@ -279,9 +287,10 @@ func (b *Books) postInto(ctx context.Context, l CreditLot, debit Ref, amount int
 	if m.Into.Order != uuid.Nil {
 		order = &m.Into.Order
 	}
+	schedule := CreditLineSchedule(line, currency)
 	_, _, err := b.Post(ctx, Posting{
 		Debit: debit, Credit: Ref{Type: DeferredRevenue}, Amount: amount, Currency: currency, Type: typ, Coord: m.Coord,
-		EffectiveAt: m.At, Customer: &customer, CreditGrant: &lot, Order: order, OrderLine: &line, Product: product,
+		EffectiveAt: m.At, Customer: &customer, CreditGrant: &lot, Order: order, OrderLine: &line, Product: product, RevenueSchedule: &schedule,
 	})
 	if err != nil {
 		return fmt.Errorf("books: credit lot %s %s into line %s: %w", l.ID, typ, line, err)

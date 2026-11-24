@@ -41,6 +41,7 @@ func TestMerchantUnits(t *testing.T) {
 	t.Run("OR-J48-S10/a-period-whose-price-falls-takes-back-forgiveness-first", unitPriceFalls)
 	t.Run("OR-J48-S11/a-lease-sync-takes-no-usage-in-a-unit", unitLeaseUsage)
 	t.Run("OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock", unitFirstBalance)
+	t.Run("OR-J48-S13/a-unit-priced-orders-revenue-is-its-lots-money-scheduled-per-currency", unitOrderRevenue)
 }
 
 // unitPaymentWorld declares GOLD and CREDITS on alpha, whose card PSP is
@@ -1018,4 +1019,78 @@ func forgivenShares(t *testing.T, a *authorityWorld, customer billing.CustomerID
 	}
 	require.NoError(t, rows.Err())
 	return out
+}
+
+func unitOrderRevenue(t *testing.T) {
+	s, _ := unitPaymentWorld(t, 0)
+	a := s.a
+	// $20 for 400 GOLD that lapse in 30 days, and €18 for 400 that last a
+	// year: the dollars are drawn first.
+	dollars := s.pack(t, "gold-month", "GOLD", 400, 30, unitPrice{"usd", 20_000_000, "USD"})
+	euros := s.pack(t, "gold-year", "GOLD", 400, 365, unitPrice{"eur", 18_000_000, "EUR"})
+	s.buy(t, dollars["usd"], 20_000_000, "buy-dollars")
+	s.buy(t, euros["eur"], 18_000_000, "buy-euros")
+	statue := s.item(t, "statue", catalog.OwnershipConsumable, 600, "GOLD", "statue:owned")
+	passProduct, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pass", DisplayName: "Pass", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"pass:active"}})
+	require.NoError(t, err)
+	pass, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: passProduct.ID, Key: "price", UnitAmount: 100, Currency: "GOLD", AccessDurationHours: ptr(720)})
+	require.NoError(t, err)
+
+	type schedule struct {
+		Currency, Method, Account string
+		Funded, Recognized        int64
+	}
+	schedules := func(order billing.OrderID) map[string]schedule {
+		t.Helper()
+		rows, err := a.pool.Query(t.Context(), "SELECT id, currency, method, revenue_account, funded, recognized_net FROM "+pgx.Identifier{a.schema, "revenue_schedules"}.Sanitize()+
+			" WHERE merchant_id = $1 AND order_id = $2", a.alpha.MerchantID().UUID(), order.UUID())
+		require.NoError(t, err)
+		defer rows.Close()
+		out := map[string]schedule{}
+		for rows.Next() {
+			var id uuid.UUID
+			var r schedule
+			require.NoError(t, rows.Scan(&id, &r.Currency, &r.Method, &r.Account, &r.Funded, &r.Recognized))
+			out[r.Currency] = r
+			// What funded it is the lots' money its spends released into it.
+			var released int64
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(t.amount), 0)::bigint FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+" t JOIN "+
+				pgx.Identifier{a.schema, "ledger_accounts"}.Sanitize()+" c ON c.merchant_id = t.merchant_id AND c.id = t.credit_account_id"+
+				" WHERE t.merchant_id = $1 AND t.revenue_schedule_id = $2 AND c.account_type = 'deferred_revenue' AND t.credit_grant_id IS NOT NULL", a.alpha.MerchantID().UUID(), id).Scan(&released))
+			require.Equal(t, r.Funded, released, "schedule %s in %s", id, r.Currency)
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+	order := func(price billing.PriceID, key string) billing.Order {
+		t.Helper()
+		status, raw := s.spend(t, price, key)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var o billing.Order
+		require.NoError(t, json.Unmarshal(raw, &o))
+		require.Equal(t, billing.OrderComplete, o.Status)
+		return o
+	}
+
+	// 600 GOLD: the 400 bought for $20, then 200 of the 400 bought for €18.
+	// One schedule per currency, each funded with what its lots released,
+	// recognised at once.
+	bought := order(statue, "statue")
+	require.Equal(t, map[string]schedule{
+		"USD": {"USD", "point_in_time", "one_time_revenue", 20_000_000, 20_000_000},
+		"EUR": {"EUR", "point_in_time", "one_time_revenue", 9_000_000, 9_000_000},
+	}, schedules(bought.ID))
+
+	// A 30-day pass of 100 GOLD is €4.50 of the euro lot, recognised over
+	// its 30 days.
+	timed := order(pass.ID, "pass")
+	got := schedules(timed.ID)
+	require.Len(t, got, 1)
+	require.Equal(t, "ratable", got["EUR"].Method)
+	require.EqualValues(t, 4_500_000, got["EUR"].Funded)
+	require.Less(t, got["EUR"].Recognized, got["EUR"].Funded, "recognised as the pass runs")
+	fleet := startFleet(t, a.world)
+	a.clock.Advance(31 * 24 * time.Hour)
+	runRegistered(t, fleet, "openrails.billing_pass", 1)
+	require.EqualValues(t, 4_500_000, schedules(timed.ID)["EUR"].Recognized, "all of it once the pass ends")
 }
