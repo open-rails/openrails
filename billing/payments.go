@@ -70,6 +70,8 @@ type Payment struct {
 	// Reason is the merchant's stated reason for a refund, or for a change
 	// staff charged at the customer's request.
 	Reason *string `json:"reason"`
+	// RefundReason is why a refund was made; null on every other payment.
+	RefundReason *RefundReason `json:"refund_reason"`
 	// Refunds are the reversals of a charge: read with a single payment, null
 	// in lists.
 	Refunds []Payment `json:"refunds"`

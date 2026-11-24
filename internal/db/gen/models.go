@@ -439,6 +439,51 @@ type BillingDestructiveRunBeforeImage struct {
 	AfterLifecycleRev *int64
 }
 
+// One provider dispute case: an issuer's inquiry, a chargeback, or a dispute resolved before it was filed. Its money is the payments mirror rows it names. Retention: permanent, never pruned.
+type BillingDispute struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	PspID      uuid.UUID
+	Rail       string
+	// The case as its rail names it: a Stripe dispute id, an NMI chargeback id (else the charge's transaction id) or a CCBill transaction id (else the subscription id); its reversal's transaction id is chargeback:<provider_ref> on NMI and CCBill.
+	ProviderRef string
+	CustomerID  *uuid.UUID
+	// The disputed charge; NULL when the rail's report matched no single charge (customer_id is NULL with it).
+	PaymentID *uuid.UUID
+	// inquiry (the issuer asked; nothing was withdrawn), chargeback, prevented (resolved before it was filed: an RDR refund or a Compelling Evidence 3.0 block), or unknown (a status the rail had not reported before: nothing is booked). Only a chargeback counts in a network ratio.
+	Kind string
+	// The card network, as billing.card_network names it.
+	Network string
+	// The reason family the network code or the provider's reason belongs to.
+	Reason string
+	// The network's reason code (Visa 10.4, Mastercard 4853), verbatim.
+	ReasonCode *string
+	// The provider's reason, verbatim.
+	ProviderReason *string
+	// The disputed amount in native units of currency; both are NULL when the report named no currency it could be matched in.
+	Amount   *int64
+	Currency *string
+	// open (awaiting the decision), won, lost, closed (an inquiry or prevention that never became a chargeback), or unreported (the rail reports chargebacks but never their outcome).
+	Status     string
+	DisputedAt time.Time
+	// When the case became a chargeback: when it opened, or when the issuer escalated its inquiry. It dates the chargeback in the network ratios.
+	ChargebackAt  *time.Time
+	EvidenceDueAt *time.Time
+	ClosedAt      *time.Time
+	// The negative payments row that reversed the charge.
+	ReversalPaymentID *uuid.UUID
+	// The positive payments row that returned the money of a won dispute.
+	RecoveryPaymentID *uuid.UUID
+	// The provider refund an RDR resolution took as its own (Stripe's re_ id), so each refund is booked once.
+	AbsorbedRefundRef *string
+	// How OpenRails first learned of the case: notice (a provider's notice) or pull (a reconcile pull); a case a pull found is acted on only once the merchant is armed.
+	ObservedVia string
+	// When the chargeback's automatic response finished: the charged card blocked and the customer's other provider-billed subscriptions on it canceled at period end. NULL while it waits.
+	RespondedAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type BillingEventLog struct {
 	MerchantID  *uuid.UUID
 	Position    int64
@@ -527,6 +572,36 @@ type BillingFailedUsageWindow struct {
 	WindowStart time.Time
 	WindowEnd   time.Time
 	Amount      int64
+}
+
+// An issuer's report that a charge was fraud (Visa TC40, Mastercard SAFE) as its rail passes it on: a Stripe early fraud warning. Visa counts each in its monitoring ratio, refunded or not. Retention: permanent, never pruned.
+type BillingFraudReport struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	PspID      uuid.UUID
+	Rail       string
+	// The report as its rail names it: a Stripe early fraud warning id.
+	ProviderRef string
+	CustomerID  uuid.UUID
+	PaymentID   uuid.UUID
+	Network     string
+	// The kind of fraud the issuer reported, as Stripe names it.
+	FraudType string
+	// Whether the charge could still be refunded to head off a dispute when the report arrived.
+	Actionable bool
+	// The reported charge's amount, in native units of currency.
+	Amount     int64
+	Currency   string
+	ReportedAt time.Time
+	// What OpenRails decided: pending (an actionable report the merchant refunds, not yet answered), recorded (the report only: unactionable, or received while the merchant recorded reports only), refunded (the charge in full, refund_payment_id), nothing_to_refund (no refund remained possible) or disputed (an open dispute or an unbooked chargeback decides the charge).
+	Action          string
+	RefundPaymentID *uuid.UUID
+	// When the charge was refunded, what it paid for ended and its card blocked; NULL until then.
+	EndedAt *time.Time
+	// When the response finished: with the end, the customer's other provider-billed subscriptions on the card canceled at period end. NULL while it waits.
+	RespondedAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Append-only grant ledger. Immutable events (grant/revoke/expire/supersede); the live product access windows and ownership are DERIVED projections folded from this log. Credit lots are credit_grants. Retention: permanent, never pruned.
@@ -794,7 +869,7 @@ type BillingMandate struct {
 	Currency *string
 	// active; requires_reconsent (merchant-initiated charges wait for fresh consent); revoked (the customer withdrew); ended.
 	Status string
-	// Why a revoked or ended mandate stopped: replaced, brand_changed, closed, customer_revoked, subscription_ended or payment_method_removed.
+	// Why a revoked or ended mandate stopped: replaced, brand_changed, closed, customer_revoked, subscription_ended, payment_method_removed or disputed (a charge on the card was charged back).
 	EndReason *string
 	EndedAt   *time.Time
 	// The card brand the agreement was established on.
@@ -903,6 +978,26 @@ type BillingMoneySetting struct {
 	UsageCollectionDue        bool
 	// When the usage account is next checked: its next bill date, or now once spending crossed its threshold, an admission asked to collect or the merchant's usage terms changed. Null: nothing is pending.
 	UsageDueAt *time.Time
+}
+
+// Per card PSP, network, currency and UTC day: settled sales, refunds, chargebacks, fraud chargebacks (reason fraud or unrecognized) and fraud reports, each counted and summed. Triggers on payments, disputes and fraud_reports keep it for every writer, a restore included. currency is empty for a chargeback that named none.
+type BillingNetworkActivityDaily struct {
+	MerchantID            uuid.UUID
+	PspID                 uuid.UUID
+	Rail                  string
+	Network               string
+	Currency              string
+	DayAt                 time.Time
+	Sales                 int64
+	SalesAmount           int64
+	Refunds               int64
+	RefundAmount          int64
+	Chargebacks           int64
+	ChargebackAmount      int64
+	FraudChargebacks      int64
+	FraudChargebackAmount int64
+	FraudReports          int64
+	FraudReportAmount     int64
 }
 
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
@@ -1191,6 +1286,10 @@ type BillingPayment struct {
 	LedgerTransferID *uuid.UUID
 	// Seats a per-seat subscription payment billed: a period at that many seats, or the seats a mid-period increase added. NULL otherwise.
 	Quantity *int32
+	// Why a refund was made: requested_by_customer, duplicate, fraudulent, fraud_warning (an issuer's fraud report), dispute_prevention (resolved before a dispute was filed), charged_after_cancel, other or unknown (a provider dashboard refund that names none). Set exactly on refund rows.
+	RefundReason *string
+	// The saved card a charge was taken from, when its writer knows it; NULL on reversals, off-rail payments and charges no saved card names.
+	PaymentMethodID *uuid.UUID
 }
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. purchase_id groups one buyer's attempts on one target (purchase_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
@@ -1284,7 +1383,7 @@ type BillingPaymentMethod struct {
 	AccountUpdaterCheckedAt *time.Time
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
-	// requires_action (being saved: the customer completes the bank's authentication, setup_ref); active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed. The last three are final.
+	// requires_action (being saved: the customer completes the bank's authentication, setup_ref); active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed; disputed (a charge to it was charged back: it is never charged again). The last four are final.
 	Status string
 	// The method that replaced this one, when status is replaced.
 	ReplacedByID *uuid.UUID

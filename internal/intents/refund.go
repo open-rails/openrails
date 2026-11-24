@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
@@ -47,10 +48,12 @@ type RefundPayload struct {
 	ReservationID uuid.UUID `json:"reservation_id"`
 	// AmountCents is provider minor units (typed Cents), converted exactly
 	// from the payment-currency native amount at the admin boundary.
-	AmountCents  moneyutil.Cents `json:"amount_cents"`
-	Currency     string          `json:"currency"`
-	Reason       string          `json:"reason,omitempty"`
-	RevokeAccess bool            `json:"revoke_access"`
+	AmountCents moneyutil.Cents `json:"amount_cents"`
+	Currency    string          `json:"currency"`
+	Reason      string          `json:"reason,omitempty"`
+	// RefundReason is why OpenRails refunds; it names the provider's reason.
+	RefundReason billing.RefundReason `json:"refund_reason,omitempty"`
+	RevokeAccess bool                 `json:"revoke_access"`
 	// ProviderTarget is what the provider refunds against: the Stripe charge /
 	// payment-intent id (ch_/pi_), the NMI transaction id of the original
 	// payment. Existing CCBill payloads retain their subscriptionId for review.
@@ -484,7 +487,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingPro
 	result, err := h.Stripe.CreateRefund(ctx, subscriptions.RefundParams{
 		ChargeID: p.ProviderTarget,
 		Amount:   p.AmountCents,
-		Reason:   p.Reason,
+		Reason:   stripeRefundReason(p),
 		// The Stripe Idempotency-Key IS the intent's identity: any replay of
 		// this intent (lease reclaim, verified-not-executed retry) returns the
 		// original refund.
@@ -573,4 +576,18 @@ func RefundIntentFor(payment *models.Payment, clientKey string) (intentType, pro
 		intentType = TypeNMIRefund
 	}
 	return intentType, provider, RefundIdempotencyKey(payment.ID, clientKey), nil
+}
+
+// stripeRefundReason is the reason Stripe is told: a refund answering an
+// issuer's fraud report is fraudulent there, which Radar learns from.
+func stripeRefundReason(p RefundPayload) string {
+	switch p.RefundReason {
+	case billing.RefundFraudWarning, billing.RefundFraudulent:
+		return "fraudulent"
+	case billing.RefundDuplicate:
+		return "duplicate"
+	case billing.RefundRequestedByCustomer:
+		return "requested_by_customer"
+	}
+	return p.Reason
 }

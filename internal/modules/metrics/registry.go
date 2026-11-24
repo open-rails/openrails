@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/disputerules"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -73,6 +74,10 @@ const (
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
 	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at)
 	FamFindings       Family = "findings"        // snapshot over reconciliation_findings: open at t
+	FamDisputes       Family = "disputes"        // flow over disputes (a chargeback when it became one, else disputed_at)
+	FamFraudReports   Family = "fraud_reports"   // flow over fraud_reports (reported_at)
+	FamNetwork        Family = "network"         // flow over network_activity_daily (day_at)
+	FamNetworkPrior   Family = "network_prior"   // flow over network_activity_daily, each day counted a month later
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -193,7 +198,7 @@ var Dimensions = []Dimension{
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
 	{Name: "customer", Description: "the customer id (usage and limit measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures)"},
-	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts and nmi_history_authorizations approved | declined; purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; usage succeeded | failed"},
+	{Name: "outcome", Description: "how a funnel's row ended; its values depend on the measure (dim_values): attempts and nmi_history_authorizations approved | declined; purchases approved | recovered | failed | open; rebills approved | recovered | lost | open; usage succeeded | failed; disputes open | won | lost | closed | unreported; fraud_reports recorded | refunded | nothing_to_refund | disputed"},
 	{Name: "cash_kind", Description: "what moved the cash: payment | refund | chargeback | dispute_won (a won dispute's return)", Values: []string{"payment", "refund", "chargeback", "dispute_won"}},
 	{Name: "payment_kind", Description: "sale | refund | chargeback | dispute_won", Values: []string{"sale", "refund", "chargeback", "dispute_won"}},
 	{Name: "charge", Description: "priced usage: charged (billed to the customer) | forgiven (failed usage the customer's grace absorbed)", Values: []string{"charged", "forgiven"}},
@@ -205,7 +210,11 @@ var Dimensions = []Dimension{
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
 	{Name: "limit", Description: "a declared usage limit's key (limit measures)"},
 	{Name: "owner", Description: "who collects the subscription: engine (OpenRails) | nmi_schedule (NMI charges, OpenRails duns) | provider (Stripe Billing, CCBill) | none (no subscription)", Values: []string{"engine", "nmi_schedule", "provider", "none"}},
-	{Name: "kind", Description: "what was charged; on attempts verify ($0 card verification) | initial | upgrade | rebill (a cycle's first try) | dunning_retry | customer_retry | collection (a usage order's); on cash and payments initial | renewal | unknown (imported or pre-instrumentation rows)"},
+	{Name: "kind", Description: "what was charged; on attempts verify ($0 card verification) | initial | upgrade | rebill (a cycle's first try) | dunning_retry | customer_retry | collection (a usage order's); on cash, payments and disputes (the disputed charge) initial | renewal | unknown (imported or pre-instrumentation rows)"},
+	{Name: "network", Description: "card network: visa | mastercard | amex | discover | jcb | diners | unionpay | other | unknown", Values: networkValues},
+	{Name: "refund_reason", Description: "why a refund was made (empty on other rows): requested_by_customer | duplicate | fraudulent | fraud_warning (an issuer's fraud report) | dispute_prevention (an RDR resolution) | charged_after_cancel | other | unknown", Values: refundReasonValues},
+	{Name: "dispute_kind", Description: "what a dispute case is: inquiry (nothing withdrawn) | chargeback | prevented (resolved before it was filed) | unknown", Values: []string{"inquiry", "chargeback", "prevented", "unknown"}},
+	{Name: "dispute_reason", Description: "the reason family of a dispute's network code or provider reason", Values: disputeReasonValues},
 	{Name: "card_entry", Description: "new (card entered in this checkout or card add) | saved", Values: []string{"new", "saved"}},
 	{Name: "source", Description: "who sent the attempt: openrails | provider_schedule (the PSP's own schedule) | external", Values: []string{"openrails", "provider_schedule", "external"}},
 	{Name: "observed_via", Description: "how OpenRails learned the answer: response | webhook | pull", Values: []string{"response", "webhook", "pull"}},
@@ -244,6 +253,10 @@ LEFT JOIN billing.prices pr ON pr.merchant_id=p.merchant_id AND pr.id=paid_line.
 var (
 	approvedDeclined = []string{"approved", "declined"}
 	usageOutcomes    = []string{"succeeded", "failed"}
+	networkValues    = []string{"visa", "mastercard", "amex", "discover", "jcb", "diners", "unionpay", "other", "unknown"}
+	// Sales and other reversals have no reason: "".
+	refundReasonValues  = []string{"", "requested_by_customer", "duplicate", "fraudulent", "fraud_warning", "dispute_prevention", "charged_after_cancel", "other", "unknown"}
+	disputeReasonValues = []string{"fraud", "unrecognized", "not_received", "canceled_recurring", "not_as_described", "credit_not_processed", "duplicate", "processing_error", "authorization", "other", "unknown"}
 )
 
 // families declares each family's SQL skeleton inputs.
@@ -271,8 +284,62 @@ var families = map[Family]familySpec{
 			"discount_code": `COALESCE(p.discount_code, '')`,
 			"cash_kind":     fmt.Sprintf(reversalKindOf, "payment"),
 			"payment_kind":  fmt.Sprintf(reversalKindOf, "sale"),
+			"network":       `billing.card_network(p.card_brand)`,
+			"refund_reason": `COALESCE(p.refund_reason, '')`,
 		},
 		DimValues: map[string][]string{"kind": {"initial", "renewal", "unknown"}},
+	},
+	FamDisputes: {
+		Kind:     "flow",
+		From:     `billing.disputes d`,
+		TimeExpr: `COALESCE(d.chargeback_at, d.disputed_at)`,
+		DimJoins: map[string]string{
+			"kind": `LEFT JOIN billing.payments dp ON dp.merchant_id = d.merchant_id AND dp.id = d.payment_id`,
+		},
+		DimExprs: map[string]string{
+			"currency":       `COALESCE(d.currency, '')`,
+			"rail":           `d.rail`,
+			"psp":            `'psp_' || d.psp_id::text`,
+			"network":        `d.network`,
+			"kind":           `COALESCE(dp.attempt_kind, 'unknown')`,
+			"dispute_kind":   `d.kind`,
+			"dispute_reason": `d.reason`,
+			"outcome":        `d.status`,
+		},
+		DimValues: map[string][]string{"kind": {"initial", "renewal", "unknown"}, "outcome": {"open", "won", "lost", "closed", "unreported"}},
+	},
+	FamFraudReports: {
+		Kind:     "flow",
+		From:     `billing.fraud_reports fr`,
+		TimeExpr: `fr.reported_at`,
+		DimExprs: map[string]string{
+			"currency": `fr.currency`,
+			"rail":     `fr.rail`,
+			"psp":      `'psp_' || fr.psp_id::text`,
+			"network":  `fr.network`,
+			"outcome":  `fr.action`,
+		},
+		DimValues: map[string][]string{"outcome": {"pending", "recorded", "refunded", "nothing_to_refund", "disputed"}},
+	},
+	// What the monitoring programs divide, per card PSP, network and day.
+	FamNetwork: {
+		Kind:     "flow",
+		From:     `billing.network_activity_daily na`,
+		TimeExpr: `na.day_at`,
+		DimExprs: map[string]string{
+			"rail": `na.rail`,
+			"psp":  `'psp_' || na.psp_id::text`,
+		},
+	},
+	// The month before's, for a ratio over the previous month's sales.
+	FamNetworkPrior: {
+		Kind:     "flow",
+		From:     `billing.network_activity_daily nap`,
+		TimeExpr: `(((nap.day_at AT TIME ZONE 'UTC') + interval '1 month') AT TIME ZONE 'UTC')`,
+		DimExprs: map[string]string{
+			"rail": `nap.rail`,
+			"psp":  `'psp_' || nap.psp_id::text`,
+		},
 	},
 	FamSubsNew: {
 		Kind:     "flow",
@@ -650,13 +717,15 @@ var (
 	purchaseDims    = []string{"currency", "rail", "psp", "owner", "card_entry"}
 	cycleDims       = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
 	nmiHistDims     = []string{"psp", "nmi_kind", "category", "reason"}
-	cashDims        = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "kind", "discount_code"}
+	cashDims        = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network", "kind", "discount_code"}
+	disputeDims     = []string{"currency", "rail", "psp", "network", "kind", "dispute_kind", "dispute_reason", "outcome"}
+	networkDims     = []string{"rail", "psp"}
 	usageDims       = []string{"currency", "customer", "invoker", "outcome", "rate_card"}
 	creditDims      = []string{"currency", "product_id", "customer"}
 	webhookDims     = []string{"rail", "psp"}
 	subscriptionDim = []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}
 	// What a sale and its reversals both carry.
-	reversalRateDims = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand"}
+	reversalRateDims = []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "network"}
 )
 
 // with is dims and more, copied.
@@ -716,12 +785,12 @@ var declared = []Measure{
 		Description: "money received less money returned, signed by cash_kind: payment and dispute_won add, refund and chargeback subtract; the total is net cash, gross of processor fees",
 		Formula:     "SUM(signed amount) over settled payments and their reversals",
 		Agg:         sum(`p.amount`, settledRow),
-		Dims:        with(cashDims, "cash_kind")},
+		Dims:        with(cashDims, "cash_kind", "refund_reason")},
 	{Name: "payments", Class: ClassAdditive, Family: FamPayments, Unit: "count", Direction: Neutral,
 		Description: "settled payments and reversals, by payment_kind: sale, refund, chargeback, dispute_won",
 		Formula:     "COUNT(settled payments and reversals)",
 		Agg:         count(settledRow),
-		Dims:        with(cashDims, "token_type", "payment_kind")},
+		Dims:        with(cashDims, "token_type", "payment_kind", "refund_reason")},
 	{Name: "refund_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
 		Num: "payments", NumSlice: Slice{"payment_kind": {"refund"}}, Den: "payments", DenSlice: Slice{"payment_kind": {"sale"}},
 		Description: "refunds / settled sales, by count, in the same bucket",
@@ -729,9 +798,41 @@ var declared = []Measure{
 		Dims:        reversalRateDims},
 	{Name: "chargeback_rate", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood,
 		Num: "payments", NumSlice: Slice{"payment_kind": {"chargeback"}}, Den: "payments", DenSlice: Slice{"payment_kind": {"sale"}},
-		Description: "chargebacks / settled sales, by count, in the same bucket; group by psp for each PSP's",
+		Description: "chargebacks / settled sales, by count, in the same bucket; group by psp and network for each PSP's on each network. The networks' programs divide otherwise: vamp_ratio and ecm_ratio",
 		Formula:     "payments(chargeback) / payments(sale)",
 		Dims:        reversalRateDims},
+	{Name: "vamp_count", Class: ClassAdditive, Family: FamNetwork, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(na.chargebacks + na.fraud_reports) FILTER (WHERE na.network = 'visa'), 0)::bigint`, Dims: networkDims},
+	{Name: "vamp_sales", Class: ClassAdditive, Family: FamNetwork, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(na.sales) FILTER (WHERE na.network = 'visa'), 0)::bigint`, Dims: networkDims},
+	{Name: "vamp_ratio", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "vamp_count", Den: "vamp_sales",
+		Description: "Visa's VAMP ratio as the dispute monitor counts it: Visa chargebacks and fraud reports / settled Visa sales, in the same bucket (use grain month); its lines are VAMP's levels",
+		Formula:     "(visa chargebacks + visa fraud reports) / visa sales",
+		Thresholds:  disputerules.ProgramLines(billing.ProgramVisaVAMP),
+		Dims:        networkDims},
+	{Name: "ecm_count", Class: ClassAdditive, Family: FamNetwork, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(na.chargebacks) FILTER (WHERE na.network = 'mastercard'), 0)::bigint`, Dims: networkDims},
+	{Name: "ecm_prior_sales", Class: ClassAdditive, Family: FamNetworkPrior, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(nap.sales) FILTER (WHERE nap.network = 'mastercard'), 0)::bigint`, Dims: networkDims},
+	{Name: "ecm_ratio", Class: ClassRatio, Unit: "ratio", Direction: DownIsGood, Num: "ecm_count", Den: "ecm_prior_sales",
+		Description: "Mastercard's excessive chargeback ratio as the dispute monitor counts it: Mastercard chargebacks / settled Mastercard sales of the month before (use grain month); its lines are its levels",
+		Formula:     "mastercard chargebacks / mastercard sales a month earlier",
+		Thresholds:  disputerules.ProgramLines(billing.ProgramMastercardECP),
+		Dims:        networkDims},
+	{Name: "disputes", Class: ClassAdditive, Family: FamDisputes, Unit: "count", Direction: DownIsGood,
+		Description: "provider dispute cases opened in the bucket, by dispute_kind (inquiry, chargeback, prevented), dispute_reason, outcome and kind (the disputed charge: initial or renewal)",
+		Formula:     "COUNT(disputes opened in the bucket)",
+		Agg:         count(""),
+		Dims:        disputeDims},
+	{Name: "dispute_win_rate", Class: ClassRatio, Unit: "ratio", Direction: UpIsGood,
+		Num: "disputes", NumSlice: Slice{"outcome": {"won"}}, Den: "disputes", DenSlice: Slice{"outcome": {"won", "lost"}},
+		Description: "disputes won / disputes decided (won or lost), by when they opened; NMI and CCBill report no outcome",
+		Formula:     "disputes(won) / disputes(won, lost)"},
+	{Name: "fraud_reports", Class: ClassAdditive, Family: FamFraudReports, Unit: "count", Direction: DownIsGood,
+		Description: "issuer fraud reports (Visa TC40, Mastercard SAFE) a rail passed on, by outcome: what OpenRails did (recorded, refunded, nothing_to_refund, disputed); Stripe passes them on as early fraud warnings",
+		Formula:     "COUNT(fraud reports in the bucket)",
+		Agg:         count(""),
+		Dims:        []string{"currency", "rail", "psp", "network", "outcome"}},
 	// --- subscriptions ------------------------------------------------------------
 	{Name: "new_subscriptions", Class: ClassAdditive, Family: FamSubsNew, Unit: "count", Direction: UpIsGood,
 		Description: "subscriptions started in the bucket (excludes never-activated pending)",

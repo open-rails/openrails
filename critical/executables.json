@@ -1613,6 +1613,70 @@
     ],
     "OR-J43-S07": [
       "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
+    ],
+    "OR-J46-S02": [
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/webhooks",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/reconcile-pull",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/a-notice-releases-a-pulled-case",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing"
+    ],
+    "OR-J46-S01": [
+      "TestDisputes/OR-J46-S01/a-chargeback-is-recorded-reversed-and-ends-its-charge"
+    ],
+    "OR-J46-S03": [
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/rdr-resolution-is-a-refund",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/refund-first-is-the-resolution",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/resolution-first-absorbs-the-refund",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/ce3-block-books-nothing",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback"
+    ],
+    "OR-J46-S04": [
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won/won",
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won/lost",
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won"
+    ],
+    "OR-J46-S06": [
+      "TestDisputes/OR-J46-S06/a-ccbill-chargeback-is-recorded"
+    ],
+    "OR-J46-S07": [
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/refunds-by-default",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-disputed-charge-is-not-refunded",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/unactionable-stays-so",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-held-response-waits-and-wakes",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/the-merchant-stop-holds-it",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/nothing-to-refund-still-ends",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
+    ],
+    "OR-J46-S08": [
+      "TestDisputes/OR-J46-S08/the-monitor-raises-and-escalates-alerting-findings"
+    ],
+    "OR-J46-S09": [
+      "TestDisputes/OR-J46-S09/mastercard-divides-by-the-previous-months-sales"
+    ],
+    "OR-J46-S10": [
+      "TestDisputes/OR-J46-S10/the-program-in-force-is-the-months"
+    ],
+    "OR-J46-S14": [
+      "TestDisputes/OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio"
+    ],
+    "OR-J46-S11": [
+      "TestDisputes/OR-J46-S11/a-charged-back-card-is-never-charged-again"
+    ],
+    "OR-J46-S15": [
+      "TestDisputes/OR-J46-S15/a-chargeback-blocks-the-charged-card-only"
+    ],
+    "OR-J46-S16": [
+      "TestDisputes/OR-J46-S16/a-report-on-an-unknown-charge-is-answered"
+    ],
+    "OR-J46-S12": [
+      "TestDisputes/OR-J46-S12/the-dispute-metrics-equal-the-records"
+    ],
+    "OR-J46-S05": [
+      "TestDisputes/OR-J46-S05/an-nmi-batch-records-every-entry"
+    ],
+    "OR-J46-S13": [
+      "TestDisputes/OR-J46-S13/the-rollup-equals-its-records-after-a-restore"
     ]
   }
 }

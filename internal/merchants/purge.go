@@ -39,7 +39,7 @@ var merchantOwnedTables = []string{
 	"payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
 	"provider_mutation_logs", "provider_intents",
-	"order_attempts", "product_access", "payments", "subscriptions",
+	"order_attempts", "product_access", "disputes", "fraud_reports", "payments", "network_activity_daily", "subscriptions",
 	"money_settings", "payment_methods", "psp_customers",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
 	// tables are gone. The append-only ledger_transfers/grants/credit_grants are immutable
@@ -65,6 +65,12 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsProductAccess(ctx, id)
 	case "payments":
 		return q.CountMerchantRowsPayments(ctx, id)
+	case "disputes":
+		return q.CountMerchantRowsDisputes(ctx, id)
+	case "fraud_reports":
+		return q.CountMerchantRowsFraudReports(ctx, id)
+	case "network_activity_daily":
+		return q.CountMerchantRowsNetworkActivity(ctx, id)
 	case "payment_attempts":
 		return q.CountMerchantRowsPaymentAttempts(ctx, id)
 	case "rebill_cycles":
@@ -109,6 +115,12 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsProductAccess(ctx, id)
 	case "payments":
 		return q.PurgeMerchantRowsPayments(ctx, id)
+	case "disputes":
+		return q.PurgeMerchantRowsDisputes(ctx, id)
+	case "fraud_reports":
+		return q.PurgeMerchantRowsFraudReports(ctx, id)
+	case "network_activity_daily":
+		return q.PurgeMerchantRowsNetworkActivity(ctx, id)
 	case "payment_attempts":
 		return q.PurgeMerchantRowsPaymentAttempts(ctx, id)
 	case "rebill_cycles":

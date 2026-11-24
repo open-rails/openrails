@@ -64,6 +64,7 @@ var excludedTables = map[string]string{
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 
 	"price_keys":                    "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
+	"network_activity_daily":        "derived: the payments, disputes and fraud_reports triggers rebuild it as they are restored",
 	"balance_watches":               "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
 	"psp_imports":                   "import working state: the destination pulls its PSPs again",
 	"psp_import_records":            "import working state: copies of provider objects, pulled again",
@@ -120,8 +121,9 @@ var excludedColumns = map[string]string{
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
-	"price_keys":      "merchant_id product_id key revision created_at updated_at",
-	"balance_watches": "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
+	"price_keys":             "merchant_id product_id key revision created_at updated_at",
+	"network_activity_daily": "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
+	"balance_watches":        "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment

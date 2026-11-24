@@ -805,6 +805,25 @@ func (c *Client) GetPaymentAttempt(ctx context.Context, id billing.PaymentAttemp
 	return &out, nil
 }
 
+// ListDisputes is one page of the merchant's disputes (inquiries,
+// chargebacks and prevented disputes), newest first.
+func (c *Client) ListDisputes(ctx context.Context, params billing.DisputeListParams) (*billing.ListPage[billing.Dispute], error) {
+	var out billing.ListPage[billing.Dispute]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/disputes", query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetDispute reads one dispute.
+func (c *Client) GetDispute(ctx context.Context, id billing.DisputeID) (*billing.Dispute, error) {
+	var out billing.Dispute
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/disputes/{id}", args: []string{id.String()}}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ListRenewals is one page of the merchant's renewals, latest due first.
 func (c *Client) ListRenewals(ctx context.Context, params billing.RenewalListParams) (*billing.ListPage[billing.Renewal], error) {
 	var out billing.ListPage[billing.Renewal]
@@ -1201,6 +1220,18 @@ func (c *Client) QueryMetrics(ctx context.Context, params billing.QueryMetricsPa
 func (c *Client) GetMetricsSchema(ctx context.Context) (*billing.MetricsSchema, error) {
 	var out billing.MetricsSchema
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/metrics/schema"}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListDisputePrograms is each card PSP's standing in the dispute monitoring
+// programs for the month containing params.At (now when unset): the counts,
+// the ratio so far and projected over the month, the level reached and the
+// thresholds in force.
+func (c *Client) ListDisputePrograms(ctx context.Context, params billing.DisputeProgramListParams) (*billing.ListPage[billing.DisputeStanding], error) {
+	var out billing.ListPage[billing.DisputeStanding]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/metrics/dispute-programs", query: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

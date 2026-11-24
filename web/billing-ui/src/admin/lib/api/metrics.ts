@@ -1,12 +1,15 @@
 // Metrics and dashboard API; types mirror the Go handlers.
 import type {
   DashboardProfile,
+  DisputeStanding,
+  ListPage,
   MetricsSchema,
 } from "#orck/client/generated/wire"
 import type { AdminClient } from "./client"
 
 export type {
   DashboardProfile,
+  DisputeStanding,
   MetricsMeasure,
   MetricsSchema,
   MetricsThreshold,
@@ -58,9 +61,22 @@ export interface MetricsResult {
 }
 
 // A kpi is a tile's value, its change and a sparkline; a heading is a
-// section title with no query.
+// section title and programs the dispute program standings, both with no
+// query.
 export type WidgetViz =
-  "kpi" | "stat" | "line" | "area" | "bar" | "donut" | "table" | "heading"
+  | "kpi"
+  | "stat"
+  | "line"
+  | "area"
+  | "bar"
+  | "donut"
+  | "table"
+  | "heading"
+  | "programs"
+
+// queryless: a viz that draws no metrics query.
+export const queryless = (viz: WidgetViz) =>
+  viz === "heading" || viz === "programs"
 
 // CHART_VIZ are the vizzes a widget with a query may take.
 export const CHART_VIZ: WidgetViz[] = [
@@ -118,5 +134,19 @@ export function createMetrics(client: AdminClient) {
   const putDashboard = (widgets: Widget[]) =>
     api<Dashboard>("/merchant/dashboard", { method: "PUT", body: { widgets } })
 
-  return { metricsQuery, getDashboard, getMetricsSchema, putDashboard }
+  // Each card PSP's standing in the dispute programs for the month holding
+  // at (now when absent).
+  const listDisputePrograms = (at?: string, signal?: AbortSignal) =>
+    api<ListPage<DisputeStanding>>(
+      `/metrics/dispute-programs${at ? `?at=${encodeURIComponent(at)}` : ""}`,
+      { signal }
+    )
+
+  return {
+    metricsQuery,
+    getDashboard,
+    getMetricsSchema,
+    putDashboard,
+    listDisputePrograms,
+  }
 }
