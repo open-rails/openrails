@@ -610,10 +610,7 @@ func TestLeaseVersions(t *testing.T) {
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Empty(t, out.Usage.Refused)
 		require.EqualValues(t, len(items), out.Usage.ThroughN)
-		var charged int64
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(amount), 0)::bigint FROM "+pgx.Identifier{w.schema, "usage_accruals"}.Sanitize()+" WHERE merchant_id = $1",
-			w.alpha.MerchantID().UUID()).Scan(&charged))
-		require.EqualValues(t, len(items), charged, "every item settled exactly once")
+		require.EqualValues(t, len(items), storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "every item settled exactly once")
 	})
 
 }

@@ -207,7 +207,7 @@ func (c Customer) read(ctx context.Context, defs []Definition, subject bool) ([]
 		if s, ok := latest[def.Key]; ok {
 			newest = &s
 		}
-		line, err := c.standing(ctx, def, capacity, newest)
+		line, err := c.standing(ctx, def, capacity, granted, newest)
 		if err != nil {
 			return nil, err
 		}
@@ -259,8 +259,9 @@ func (c Customer) stored(ctx context.Context, key string, w Window, newest *Stor
 }
 
 // standing is the customer's line for one limit: base capacity plus the
-// window's adjustments, the units usage took and what is held.
-func (c Customer) standing(ctx context.Context, def Definition, base int64, newest *Stored) (billing.CustomerLimit, error) {
+// window's adjustments, the units usage took and what is held. A granted
+// limit found at capacity records reached_at.
+func (c Customer) standing(ctx context.Context, def Definition, base int64, granted bool, newest *Stored) (billing.CustomerLimit, error) {
 	line := billing.CustomerLimit{CustomerID: billing.CustomerID(c.CustomerID), Limit: def.Key, Unit: def.Unit, Capacity: base}
 	w, err := c.window(ctx, def, newest)
 	if err != nil {
@@ -281,6 +282,11 @@ func (c Customer) standing(ctx context.Context, def Definition, base int64, newe
 	s, err := h.standing(ctx, claim, row)
 	if err != nil {
 		return line, err
+	}
+	if granted {
+		if err := h.Reach(ctx, claim, s, row); err != nil {
+			return line, err
+		}
 	}
 	line.Capacity, line.Used, line.Held = s.Capacity, s.Settled, s.Held
 	switch def.Reset.Kind {
