@@ -110,13 +110,13 @@ Checks:
 
 ### 2. Agreement with providers
 
-Webhooks only wake a converge that reads the provider. A decline for a paid or canceled period is ignored, a payment on a row canceled by decision goes to refund review (`lifecycle.ErrTerminal`), one on a lapsed (`expired`) row restores it, and missing facts lead only to `unverified`. An end the provider confirmed is stored as `provider` and one whose first payment never completed as `abandoned`, so read back they stay decided: neither a payment nor a resume reopens them. CCBill's own cancel and expiration are lapses, whether its webhook or a pull reports them; its reactivation or next renewal restores them. A Stripe price move settles from Stripe's record (`ProviderMovedPrice`).
+Webhooks only wake a converge that reads the provider. A decline for a paid or canceled period is ignored, a payment on a row canceled by decision goes to refund review (`lifecycle.ErrTerminal`), one on a lapsed (`expired`) row restores it, and missing facts lead only to `unverified`. An end the provider confirmed is stored as `provider` and one whose first payment never completed as `abandoned`, so read back they stay decided: neither a payment nor a resume reopens them. CCBill's own cancel and expiration are lapses, whether its webhook or a pull reports them; its reactivation or next renewal restores them. An immediate end reported later on an already canceled row ends its access then, and keeps the kind it was canceled with. A charge on a row ended by decision is raised as `pull.charge.after_cancellation` for refund review. A Stripe price move settles from Stripe's record (`ProviderMovedPrice`).
 
 Checks:
 - `lifecycle.Apply` gives no effects for a stale `RenewalPaid` or for
   `RenewalDeclined` on a canceled row.
 - `RenewalOverdue` and `DunningStale` reach only `unverified`.
-- OR-J17-S04 (late callbacks); OR-J15-S18, OR-J15-S19 (ends only on not-found); OR-J38-S75 (a provider-confirmed end is not reopened by a later renewal); OR-J38-S76, S77 (CCBill's cancels are lapses).
+- OR-J17-S04 (late callbacks); OR-J15-S18, OR-J15-S19 (ends only on not-found); OR-J38-S75 (a provider-confirmed end is not reopened by a later renewal); OR-J38-S76, S77 (CCBill's cancels are lapses); OR-J38-S78 (a later failed-rebill cancel keeps a decided end decided).
 
 ### 3. Exact money
 
@@ -190,7 +190,7 @@ Journeys:
 - OR-J13-S01–S04: enrollment, concurrent signup, imported terms, trials.
 - OR-J14-S01–S07, OR-J14-S70: boundary, concurrency, restart, frozen terms,
   process death, one agreement, calendar anchor, missed renewal.
-- OR-J17-S01–S07: cancel and resume (a Stripe resume a `stripe_resume_subscription` operation), renewal custody, held delete, callbacks.
+- OR-J17-S01–S09: cancel and resume (a Stripe resume a `stripe_resume_subscription` operation, refused with provider writes off, and sent after the cancel before it), renewal custody, held delete, callbacks.
 - OR-J18-S01–S06: preview, stale preview, customer action, fences, seats.
 - OR-J19-S01, OR-J19-S04: a move applies at the paid boundary, never before; an admitted renewal keeps its terms (the rest of J19 is the [catalog's](catalog.md#tests)).
 - Related: OR-J04-S42, OR-J04-S70, OR-J34-S05/S06, OR-J27-S08, OR-J37-S64–S68.
