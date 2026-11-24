@@ -1,13 +1,13 @@
 // Command gate is an API whose requests count toward usage limits: each
-// request is admitted in process by an openrails.Gate against holds of the
-// customer's capacity, its work runs, and the units it actually used are
-// captured and sent on the gate's next sync. A warm decision makes no
+// request is admitted in process by an openrails.Gate against its view of
+// where the customer stands, its work runs, and the units it actually used
+// are captured and sent on the gate's next sync. A warm decision makes no
 // network call, so the API keeps deciding while OpenRails is briefly
 // unreachable.
 //
 // Run it with OPENRAILS_URL, the merchant's API URL, OPENRAILS_MERCHANT_ID,
 // its ID, and OPENRAILS_API_KEY, a merchant API key holding
-// merchant:usage:manage and merchant:usage:read (README.md). REDIS_URL makes the API's replicas one gate. ADDR is the
+// merchant:usage:manage and merchant:usage:read (README.md). ADDR is the
 // listen address (default :8080). The catalog declares the limits
 // (catalog.yaml).
 package main
@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -51,17 +50,7 @@ func main() {
 		log.Fatal(err)
 	}
 	// guide:gate-new
-	var deps openrails.GateDeps
-	if url := os.Getenv("REDIS_URL"); url != "" {
-		opts, err := redis.ParseURL(url)
-		if err != nil {
-			log.Fatal(err)
-		}
-		rdb := redis.NewClient(opts)
-		defer rdb.Close()
-		deps.Redis = rdb
-	}
-	gate, err := openrails.NewGate(client, deps)
+	gate, err := openrails.NewGate(client, openrails.GateDeps{})
 	if err != nil {
 		log.Fatal(err)
 	}

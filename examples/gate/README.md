@@ -9,8 +9,8 @@ An API whose requests count toward usage limits, admitted in process by
   `OPENRAILS_API_KEY`, a key holding `merchant:usage:manage` and `merchant:usage:read`.
 - A customer is admitted while it holds `starter` (the limits) and `usage` (the
   price per unit) and has a balance: grant both and sell it `credits-10`.
-- `REDIS_URL` makes every replica one gate. Without Redis or an outbox, usage
-  captured but not yet sent is lost if the process crashes.
+- Each replica is its own gate. Without an outbox, usage captured but not yet
+  sent is lost if the process crashes, and never billed.
 
 ```sh
 openrails catalog apply catalog.yaml   # or Client.ApplyCatalog

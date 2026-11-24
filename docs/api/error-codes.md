@@ -81,7 +81,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
 | `lease_not_found` | 404 | `invalid_request_error` | No lease of the merchant has this id, which is older than the replay horizon; start a new lease. |
-| `lease_not_held` | 409 | `invalid_request_error` | The lease is closed or stopped syncing: it holds nothing and takes no hold; start a new lease. |
+| `lease_not_held` | 409 | `invalid_request_error` | The admission names a lease that is closed or never synced, so it cannot own the hold. |
 | `limit_not_found` | 404 | `invalid_request_error` | The catalog declares no limit under this key. |
 | `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
 | `merchant_mismatch` | 412 | `invalid_request_error` | The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed. |

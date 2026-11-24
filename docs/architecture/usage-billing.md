@@ -32,7 +32,8 @@ pricing period, meter cell and rate card (`cardPrint`). With Q the period's
 quantity so far (`meter_period_quantities`), a group of q is charged
 `R(Q+q) − R(Q)` (`marginalPrice`), and `share` splits it to the items exactly; a
 `dynamic` card charges each item its stated amount.
-Usage decided against a hold is priced by the cards the hold pinned. A failed
+A capture of a request hold is priced by the cards it pinned; other usage by the
+cards in force when it settles. A failed
 item is never rated: its grace windows (`failed_usage_windows`) forgive it or
 charge it with its own ledger legs. Then `SettleUsageTx`: `settleLimitsTx` adds
 units to their limit windows; `accrueTx` adds amounts to `usage_accruals`;
