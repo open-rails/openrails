@@ -43,7 +43,7 @@ INSERT INTO billing.ledger_transfers (
     sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(order_id)::uuid,
     now()
 )
-ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id)
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
 DO NOTHING
 RETURNING *;
 
@@ -64,16 +64,17 @@ INSERT INTO billing.ledger_transfers (
     sqlc.narg(order_line_id)::uuid, sqlc.narg(product_id)::uuid,
     sqlc.arg(effective_at)::timestamptz
 )
-ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id)
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
 DO NOTHING
 RETURNING *;
 
 -- GetLedgerTransferAtCoordinate reads the row a conflicting insert lost to —
--- the full physical identity, lot and order line included, so a multi-lot
--- spend resolves the right leg.
+-- the full physical identity, lot, order line and book included, so a
+-- multi-lot spend resolves the right leg.
 -- name: GetLedgerTransferAtCoordinate :one
 SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND book = sqlc.arg(book)::text
   AND customer_id IS NOT DISTINCT FROM sqlc.narg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
   AND transfer_type = sqlc.arg(transfer_type)::text
@@ -139,22 +140,36 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at ASC
 LIMIT 1;
 
--- ListLedgerConservationBreaches: every (book, currency) whose balances do
--- not sum to zero.
+-- ListLedgerConservationBreaches sums every balance per book and currency:
+-- an account's counters, or the type total of a merchant-wide general-ledger
+-- account, which keeps none.
 -- name: ListLedgerConservationBreaches :many
-SELECT merchant_id,
-       book,
-       currency,
-       SUM(credits_posted - debits_posted)::bigint AS net,
+SELECT sqlc.arg(merchant_id)::uuid AS merchant_id,
+       book::text AS book,
+       currency::text AS currency,
+       SUM(net)::bigint AS net,
        COUNT(*)::bigint AS accounts
-FROM billing.ledger_accounts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-GROUP BY merchant_id, book, currency
-HAVING SUM(credits_posted - debits_posted) <> 0
-ORDER BY merchant_id, book, currency;
+FROM (
+    SELECT book, currency, credits_posted - debits_posted AS net
+    FROM billing.ledger_accounts
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+      AND (book = 'units' OR customer_id IS NOT NULL)
+    UNION ALL
+    SELECT a.book, a.currency, COALESCE(t.credits_posted - t.debits_posted, 0)
+    FROM billing.ledger_accounts a
+    LEFT JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
+        AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+    WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND a.book = 'general' AND a.customer_id IS NULL
+) balances
+GROUP BY book, currency
+HAVING SUM(net) <> 0
+ORDER BY book, currency;
 
 -- ListLedgerCounterDrifts rebuilds account counters from the immutable
 -- transfer log and returns every account whose maintained projection differs.
+-- A merchant-wide general-ledger account keeps none: its counters stay 0, and
+-- its balance is checked as rollup drift.
 -- name: ListLedgerCounterDrifts :many
 WITH logged AS (
     SELECT account_id, SUM(credit)::bigint AS credits, SUM(debit)::bigint AS debits
@@ -180,7 +195,7 @@ SELECT a.id AS account_id,
        a.debits_posted AS stored_debits,
        COALESCE(l.debits, 0)::bigint AS logged_debits
 FROM billing.ledger_accounts a
-LEFT JOIN logged l ON l.account_id = a.id
+LEFT JOIN logged l ON l.account_id = a.id AND (a.book = 'units' OR a.customer_id IS NOT NULL)
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (a.credits_posted <> COALESCE(l.credits, 0)
     OR a.debits_posted <> COALESCE(l.debits, 0))

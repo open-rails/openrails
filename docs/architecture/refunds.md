@@ -3,7 +3,7 @@
 This system reverses charges: a staff refund OpenRails sends to the provider, a
 refund made at the provider, a chargeback, and a won dispute that returns the
 money. Each reversal is a `payments` row linked to its charge; reversing a payment
-that bought credit also posts its share to the [ledger](ledger.md). It also
+that bought credit also posts its share to the [books](books.md). It also
 records external payments: money a merchant received outside OpenRails, booked
 against an order with no provider call.
 

@@ -1979,6 +1979,12 @@
     ],
     "OR-J40-S07": [
       "TestBooks/OR-J40-S07/an-archive-written-before-the-books-restores-as-the-units-book"
+    ],
+    "OR-J40-S08": [
+      "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-order-both-commit"
+    ],
+    "OR-J40-S09": [
+      "TestBooks/OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-orders-all-commit"
     ]
   }
 }

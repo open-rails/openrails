@@ -20,8 +20,8 @@ var (
 	// ErrNotMoney refuses a general-ledger posting in a currency outside the
 	// registry, a merchant's own unit included.
 	ErrNotMoney = errors.New("books: the general ledger holds registry currencies only")
-	// ErrSignRule is a general-ledger posting that would breach an account's
-	// sign rule.
+	// ErrSignRule is a general-ledger posting that would breach a customer
+	// account's sign rule; a merchant-wide account has none.
 	ErrSignRule = errors.New("books: transfer breaches an account's sign rule")
 	// ErrCoordinateReused is a posting at a coordinate that already posted
 	// another transfer.
@@ -139,7 +139,7 @@ func (b *Books) Post(ctx context.Context, p Posting) (tr gen.BillingLedgerTransf
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		tr, err = b.q.GetLedgerTransferAtCoordinate(ctx, gen.GetLedgerTransferAtCoordinateParams{
-			MerchantID: b.merchant, CustomerID: p.Customer, Currency: p.Currency, TransferType: string(p.Type),
+			MerchantID: b.merchant, Book: string(General), CustomerID: p.Customer, Currency: p.Currency, TransferType: string(p.Type),
 			Operation: string(p.Coord.Operation), Source: p.Coord.Source, SourceID: p.Coord.SourceID,
 			CreditGrantID: p.CreditGrant, OrderLineID: p.OrderLine,
 		})

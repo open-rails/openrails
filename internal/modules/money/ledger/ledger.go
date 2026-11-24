@@ -69,9 +69,9 @@ const (
 	// -> customer_owed), naming that lot.
 	OwedRepayment TransferType = "owed_repayment"
 	// UsageReversed credits a lot with what a period's usage posted beyond
-	// its price, once a volume tier's price fell (platform revenue ->
-	// customer balance).
-	UsageReversed TransferType = "usage_reversed"
+	// its price, once a volume tier's price fell (units_redeemed ->
+	// customer_units). The general ledger shares the type.
+	UsageReversed = books.UsageReversed
 )
 
 // AllTransferTypes is the units book's whole vocabulary (OR-J40-S01 checks it
@@ -331,11 +331,12 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 	return gen.BillingLedgerTransfer{}, false, err
 }
 
-// transferAt resolves the row already committed at a transfer's full physical
-// identity (coordinate + lot), if any.
+// transferAt resolves the units-book row already committed at a transfer's
+// full physical identity (coordinate + lot), if any.
 func (l *Ledger) transferAt(ctx context.Context, t Transfer) (gen.BillingLedgerTransfer, bool, error) {
 	row, err := l.q.GetLedgerTransferAtCoordinate(ctx, gen.GetLedgerTransferAtCoordinateParams{
 		MerchantID:    l.merchant,
+		Book:          string(books.Units),
 		CustomerID:    t.Customer,
 		Currency:      t.Currency,
 		TransferType:  string(t.Type),

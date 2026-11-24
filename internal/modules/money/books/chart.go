@@ -109,7 +109,9 @@ const (
 )
 
 // Account is one account type in the chart: its book, class, scope and the
-// sign rules its accounts' counters enforce.
+// sign rules its accounts' counters enforce. A merchant-wide general-ledger
+// account keeps no counters and so no sign rule: its balance is its type
+// total, kept at commit.
 type Account struct {
 	Type  AccountType
 	Book  Book
@@ -138,9 +140,9 @@ var chart = []Account{
 	{Type: CashClearing, Book: General, Class: Asset, Scope: PSP},
 	{Type: ExternalReceipts, Book: General, Class: Asset, Scope: System},
 	{Type: UsageReceivable, Book: General, Class: Asset, Scope: Customer, CreditsMustNotExceedDebits: true},
-	{Type: AllowanceDoubtful, Book: General, Class: ContraAsset, Scope: System, DebitsMustNotExceedCredits: true},
-	{Type: UnappliedCash, Book: General, Class: Liability, Scope: System, DebitsMustNotExceedCredits: true},
-	{Type: DeferredRevenue, Book: General, Class: Liability, Scope: System, DebitsMustNotExceedCredits: true},
+	{Type: AllowanceDoubtful, Book: General, Class: ContraAsset, Scope: System},
+	{Type: UnappliedCash, Book: General, Class: Liability, Scope: System},
+	{Type: DeferredRevenue, Book: General, Class: Liability, Scope: System},
 	{Type: DeferredRevenueCredit, Book: General, Class: Liability, Scope: Customer, DebitsMustNotExceedCredits: true},
 	{Type: TaxPayable, Book: General, Class: Liability, Scope: System},
 	{Type: SubscriptionRevenue, Book: General, Class: Revenue, Scope: System},
@@ -171,8 +173,14 @@ func Lookup(t AccountType) (Account, bool) {
 
 // TransferType is ledger_transfers.transfer_type. The units book's types are
 // package ledger's; the general ledger's are here. Each belongs to one book
-// (ledger_transfers_type_check).
+// (ledger_transfers_type_check), except UsageReversed.
 type TransferType string
+
+// UsageReversed is the one type in both books: a period whose usage came to
+// less than was posted returns units to the balance or reduces owed, and the
+// general ledger reverses the receivable or the credit it drew. book is part
+// of the once key, so its two legs share a coordinate.
+const UsageReversed TransferType = "usage_reversed"
 
 // The general ledger's transfer types.
 const (
@@ -210,6 +218,6 @@ var GeneralTransferTypes = []TransferType{
 	CashReceived, CashApplied, CashReturned, RevenueAdjusted, RevenueRecognized,
 	RefundDeferred, RefundRecognized, ChargebackDeferred, ChargebackRecognized, DisputeWon,
 	CreditReleased, CreditBreakage, CreditForfeited, CreditForfeitReversed, PromotionalCreditApplied,
-	UsageAccrued, UsageCollected, UsageRepaid, UsageWaived, UsageReopened,
+	UsageAccrued, UsageCollected, UsageRepaid, UsageWaived, UsageReopened, UsageReversed,
 	BadDebtWrittenOff, BadDebtRecovered, ProcessorFee, ChargebackFee, OpeningBalance,
 }

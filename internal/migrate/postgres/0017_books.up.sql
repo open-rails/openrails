@@ -58,23 +58,24 @@ ALTER TABLE billing.ledger_accounts
         ELSE customer_id IS NULL AND psp_id IS NULL
     END),
     ADD CONSTRAINT ledger_accounts_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps (merchant_id, id),
-    -- The general ledger's sign rules are the chart's, and it holds only the
-    -- registry's currencies (internal/currency), never a merchant's own unit.
+    -- The general ledger's sign rules are the chart's, on its customer
+    -- accounts only, and it holds only the registry's currencies
+    -- (internal/currency), never a merchant's own unit.
     ADD CONSTRAINT ledger_accounts_general_sign_check CHECK (book = 'units'
-        OR debits_must_not_exceed_credits = (account_type IN ('allowance_doubtful', 'unapplied_cash', 'deferred_revenue', 'deferred_revenue_credit'))
+        OR debits_must_not_exceed_credits = (account_type = 'deferred_revenue_credit')
         AND credits_must_not_exceed_debits = (account_type = 'usage_receivable')),
     ADD CONSTRAINT ledger_accounts_general_currency_check CHECK (book = 'units'
         OR currency IN ('AED', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD', 'ILS', 'INR', 'JPY', 'KRW', 'MXN', 'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'PYUSD', 'SAR', 'SEK', 'SGD', 'SOL', 'THB', 'TRY', 'USD', 'USD1', 'USDC', 'USDG', 'USDT', 'ZAR'));
 DROP INDEX billing.ledger_accounts_account_type_currency_key;
 CREATE UNIQUE INDEX ledger_accounts_account_type_currency_psp_id_key ON billing.ledger_accounts (merchant_id, account_type, currency, psp_id) NULLS NOT DISTINCT
     WHERE customer_id IS NULL;
-COMMENT ON TABLE billing.ledger_accounts IS 'Double-entry accounts of two books: the units book (a customer''s units held and owed, at face) and the general ledger (money, registry currencies only). One account belongs to one (merchant, book, currency); its counters are maintained from immutable ledger_transfers. Retention: permanent, never pruned.';
+COMMENT ON TABLE billing.ledger_accounts IS 'Double-entry accounts of two books: the units book (a customer''s units held and owed, at face) and the general ledger (money, registry currencies only). One account belongs to one (merchant, book, currency); its counters are maintained from immutable ledger_transfers, except a merchant-wide general-ledger account''s, which stay 0: its balance is its ledger_type_totals row. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.ledger_accounts.customer_id IS 'Set for customer-scoped accounts (customer_units, customer_owed, usage_receivable, deferred_revenue_credit); NULL for system accounts, one per merchant, currency and PSP.';
 COMMENT ON COLUMN billing.ledger_accounts.account_type IS 'The account''s role in its book (books.Chart). customer_owed is per customer: its negated balance is what the customer owes, read O(1) on the admission path.';
 COMMENT ON COLUMN billing.ledger_accounts.book IS 'units or general. A transfer never crosses books.';
 COMMENT ON COLUMN billing.ledger_accounts.class IS 'The account type''s class, which sets its normal side: units book held, owed, issued, retired or clearing; general ledger asset, contra_asset, liability, revenue, contra_revenue, expense or equity.';
 COMMENT ON COLUMN billing.ledger_accounts.psp_id IS 'The PSP of a cash_clearing account, one per PSP and currency; NULL for every other account.';
-COMMENT ON COLUMN billing.ledger_accounts.debits_must_not_exceed_credits IS 'Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart.';
+COMMENT ON COLUMN billing.ledger_accounts.debits_must_not_exceed_credits IS 'Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart; a merchant-wide general-ledger account has none.';
 
 -- Transfers carry their book, the instant they take effect and the order line
 -- and product they belong to. Existing transfers are the units book's,
@@ -94,18 +95,19 @@ ALTER TABLE billing.ledger_transfers
     -- No floor relaxes a general-ledger sign rule.
     ADD CONSTRAINT ledger_transfers_general_floor_check CHECK (book = 'units' OR allow_debit_negative_up_to = 0),
     ADD CONSTRAINT ledger_transfers_type_check CHECK (
-        book = 'units' AND transfer_type IN ('deposit', 'deposit_bonus', 'credit_purchase_revenue', 'credit_spend', 'credit_expire', 'credit_revoke', 'credit_reinstate', 'owed_accrual', 'owed_payment', 'owed_writeoff', 'owed_repayment', 'credit_refund', 'credit_refund_restore', 'credit_refund_cash', 'credit_refund_cash_restore', 'credit_refund_funding')
-        OR book = 'general' AND transfer_type IN ('cash_received', 'cash_applied', 'cash_returned', 'revenue_adjusted', 'revenue_recognized', 'refund_deferred', 'refund_recognized', 'chargeback_deferred', 'chargeback_recognized', 'dispute_won', 'credit_released', 'credit_breakage', 'credit_forfeited', 'credit_forfeit_reversed', 'promotional_credit_applied', 'usage_accrued', 'usage_collected', 'usage_repaid', 'usage_waived', 'usage_reopened', 'bad_debt', 'bad_debt_recovery', 'processor_fee', 'chargeback_fee', 'opening_balance'));
+        book = 'units' AND transfer_type IN ('deposit', 'deposit_bonus', 'credit_purchase_revenue', 'credit_spend', 'credit_expire', 'credit_revoke', 'credit_reinstate', 'owed_accrual', 'owed_payment', 'owed_writeoff', 'owed_repayment', 'credit_refund', 'credit_refund_restore', 'credit_refund_cash', 'credit_refund_cash_restore', 'credit_refund_funding', 'usage_reversed')
+        OR book = 'general' AND transfer_type IN ('cash_received', 'cash_applied', 'cash_returned', 'revenue_adjusted', 'revenue_recognized', 'refund_deferred', 'refund_recognized', 'chargeback_deferred', 'chargeback_recognized', 'dispute_won', 'credit_released', 'credit_breakage', 'credit_forfeited', 'credit_forfeit_reversed', 'promotional_credit_applied', 'usage_accrued', 'usage_collected', 'usage_repaid', 'usage_waived', 'usage_reopened', 'bad_debt', 'bad_debt_recovery', 'processor_fee', 'chargeback_fee', 'opening_balance', 'usage_reversed'));
 COMMENT ON TABLE billing.ledger_transfers IS 'Immutable double-entry transfers. Append-only. A transfer moves amount debit->credit within ONE (merchant, book, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters and the ledger_daily and ledger_type_totals rollups are maintained projections of this table. Retention: permanent, never pruned.';
-COMMENT ON COLUMN billing.ledger_transfers.book IS 'The book of both accounts: units or general. transfer_type belongs to it.';
+COMMENT ON COLUMN billing.ledger_transfers.book IS 'The book of both accounts: units or general. transfer_type belongs to it; usage_reversed alone is in both.';
 COMMENT ON COLUMN billing.ledger_transfers.effective_at IS 'When the transfer takes effect, its business date: when it posted, for the units book; the event''s own instant, for the general ledger. ledger_daily counts it in its 15-minute UTC bucket.';
 COMMENT ON COLUMN billing.ledger_transfers.order_line_id IS 'The order line a general-ledger transfer belongs to. No foreign key (ledger purity).';
 COMMENT ON COLUMN billing.ledger_transfers.product_id IS 'The product a general-ledger transfer belongs to. No foreign key (ledger purity).';
 
--- A posting per order line at one coordinate: the line is part of its identity.
+-- A posting per order line at one coordinate, and usage_reversed's leg in each
+-- book: the line and the book are part of its identity.
 DROP INDEX billing.ledger_transfers_operation_once_key;
-CREATE UNIQUE INDEX ledger_transfers_operation_once_key ON billing.ledger_transfers (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id) NULLS NOT DISTINCT;
-COMMENT ON INDEX billing.ledger_transfers_operation_once_key IS 'The structural once-only key for EVERY transfer type. ledger.ApplyIdempotent and books.Post insert ON CONFLICT DO NOTHING against this index, so a replay is refused by the database rather than by a check-then-insert in Go. credit_grant_id and order_line_id are part of the identity (one debit per operation per FIFO lot; one posting per order line); NULLS NOT DISTINCT because the owed/payment legs carry no lot and system transfers carry no customer.';
+CREATE UNIQUE INDEX ledger_transfers_operation_once_key ON billing.ledger_transfers (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book) NULLS NOT DISTINCT;
+COMMENT ON INDEX billing.ledger_transfers_operation_once_key IS 'The structural once-only key for EVERY transfer type. ledger.ApplyIdempotent and books.Post insert ON CONFLICT DO NOTHING against this index, so a replay is refused by the database rather than by a check-then-insert in Go. credit_grant_id, order_line_id and book are part of the identity (one debit per operation per FIFO lot; one posting per order line; usage_reversed''s leg in each book); NULLS NOT DISTINCT because the owed/payment legs carry no lot and system transfers carry no customer.';
 
 -- A transfer stays in one book and currency, and a customer's account moves
 -- only in that customer's transfers.
@@ -137,6 +139,46 @@ $$;
 CREATE TRIGGER trg_ledger_transfers_book_rules BEFORE INSERT ON billing.ledger_transfers
     FOR EACH ROW EXECUTE FUNCTION billing.ledger_transfers_book_rules();
 
+-- A merchant-wide general-ledger account keeps no counters and no sign rule,
+-- so no transaction holds it from its insert to commit: its balance is its
+-- ledger_type_totals row, kept at commit. The accounts that keep counters are
+-- locked in id order; the book rules refused a missing account and a
+-- cross-currency transfer.
+CREATE OR REPLACE FUNCTION billing.ledger_transfers_apply_counters() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'billing', 'pg_catalog' AS $$
+DECLARE
+    acc billing.ledger_accounts%ROWTYPE;
+BEGIN
+    IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
+    FOR acc IN
+        SELECT *
+        FROM billing.ledger_accounts
+        WHERE merchant_id = NEW.merchant_id
+          AND id IN (NEW.debit_account_id, NEW.credit_account_id)
+          AND (book = 'units' OR customer_id IS NOT NULL)
+        ORDER BY id
+        -- Counters do not change account keys. FK checks may already hold
+        -- KEY SHARE locks; upgrading those to FOR UPDATE can deadlock peers.
+        FOR NO KEY UPDATE
+    LOOP
+        IF acc.id = NEW.debit_account_id THEN
+            IF acc.debits_must_not_exceed_credits AND acc.credits_posted - acc.debits_posted - NEW.amount < -NEW.allow_debit_negative_up_to THEN
+                RAISE EXCEPTION 'ledger_insufficient_funds: balance %, amount %, floor %', acc.credits_posted - acc.debits_posted, NEW.amount, NEW.allow_debit_negative_up_to;
+            END IF;
+            UPDATE billing.ledger_accounts SET debits_posted = debits_posted + NEW.amount
+             WHERE merchant_id = NEW.merchant_id AND id = acc.id;
+        ELSE
+            IF acc.credits_must_not_exceed_debits AND acc.debits_posted - acc.credits_posted - NEW.amount < 0 THEN
+                RAISE EXCEPTION 'ledger_credit_constraint: credit account % would exceed debits', acc.id;
+            END IF;
+            UPDATE billing.ledger_accounts SET credits_posted = credits_posted + NEW.amount
+             WHERE merchant_id = NEW.merchant_id AND id = acc.id;
+        END IF;
+    END LOOP;
+    RETURN NEW;
+END;
+$$;
+
 -- Rollups: what every account type holds, and what moved through it in each
 -- 15-minute UTC bucket, so a book is read by types and buckets, never by
 -- transfers. Every zone's offset is a whole number of quarter hours: a reader
@@ -152,7 +194,7 @@ CREATE TABLE billing.ledger_type_totals (
     CONSTRAINT ledger_type_totals_account_type_key UNIQUE NULLS NOT DISTINCT (merchant_id, book, currency, account_type, psp_id),
     CONSTRAINT ledger_type_totals_posted_check CHECK (credits_posted >= 0 AND debits_posted >= 0)
 );
-COMMENT ON TABLE billing.ledger_type_totals IS 'The counters of every account of one type, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.';
+COMMENT ON TABLE billing.ledger_type_totals IS 'What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account''s balance, since that account keeps no counters. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.';
 
 CREATE TABLE billing.ledger_daily (
     merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
@@ -264,19 +306,33 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION billing.ledger_rollup_pending_settle() RETURNS trigger
+-- One settler keeps what a transaction defers to its commit, after every
+-- statement-time lock: the ledger rollups, then MRR (billing.settle_mrr). Both
+-- queues fire it, so whichever event comes first, every transaction takes the
+-- commit-time rows in that one order. A later event finds its row settled.
+CREATE FUNCTION billing.settle_at_commit() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
-    -- The first firing settled every queued transfer, this one's included.
-    IF EXISTS (SELECT 1 FROM billing.ledger_rollup_pending WHERE merchant_id = NEW.merchant_id AND transfer_id = NEW.transfer_id) THEN
-        PERFORM billing.settle_ledger_rollups(NEW.merchant_id);
+    IF TG_TABLE_NAME = 'ledger_rollup_pending' THEN
+        IF NOT EXISTS (SELECT 1 FROM billing.ledger_rollup_pending WHERE merchant_id = NEW.merchant_id AND transfer_id = NEW.transfer_id) THEN
+            RETURN NULL;
+        END IF;
+    ELSIF NOT EXISTS (SELECT 1 FROM billing.subscription_mrr
+                       WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.subscription_id AND dirty) THEN
+        RETURN NULL;
     END IF;
+    PERFORM billing.settle_ledger_rollups(NEW.merchant_id);
+    PERFORM billing.settle_mrr(NEW.merchant_id);
     RETURN NULL;
 END;
 $$;
 
 CREATE CONSTRAINT TRIGGER ledger_rollups_settle AFTER INSERT ON billing.ledger_rollup_pending DEFERRABLE INITIALLY DEFERRED
-    FOR EACH ROW EXECUTE FUNCTION billing.ledger_rollup_pending_settle();
+    FOR EACH ROW EXECUTE FUNCTION billing.settle_at_commit();
+DROP TRIGGER subscription_mrr_settle ON billing.subscription_mrr;
+DROP FUNCTION billing.settle_subscription_mrr();
+CREATE CONSTRAINT TRIGGER subscription_mrr_settle AFTER INSERT OR UPDATE ON billing.subscription_mrr DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION billing.settle_at_commit();
 
 -- A restore settles its rollups before the receipt's commit check reads them.
 CREATE OR REPLACE FUNCTION billing.finish_billing_restore(p_merchant uuid, p_digest text, p_rows bigint) RETURNS void
@@ -291,8 +347,10 @@ BEGIN
 END;
 $_$;
 
--- A restored ledger proves its counters, its conservation per book and
--- currency, each transfer's agreement with its accounts and its rollups.
+-- A restored ledger proves its counters (0 on a merchant-wide general-ledger
+-- account), its conservation per book and currency (such an account's balance
+-- is its type total), each transfer's agreement with its accounts and its
+-- rollups.
 CREATE OR REPLACE FUNCTION billing.check_billing_restore_ledger(p_merchant uuid) RETURNS void
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
 BEGIN
@@ -300,10 +358,15 @@ BEGIN
         RAISE EXCEPTION 'billing restore merchant mismatch' USING ERRCODE='42501';
     END IF;
     IF EXISTS (SELECT 1 FROM billing.ledger_accounts a
-        LEFT JOIN (SELECT credit_account_id id,sum(amount) amount FROM billing.ledger_transfers WHERE merchant_id=p_merchant GROUP BY credit_account_id) c ON c.id=a.id
-        LEFT JOIN (SELECT debit_account_id id,sum(amount) amount FROM billing.ledger_transfers WHERE merchant_id=p_merchant GROUP BY debit_account_id) d ON d.id=a.id
+        LEFT JOIN (SELECT credit_account_id id,sum(amount) amount FROM billing.ledger_transfers WHERE merchant_id=p_merchant GROUP BY credit_account_id) c ON c.id=a.id AND (a.book='units' OR a.customer_id IS NOT NULL)
+        LEFT JOIN (SELECT debit_account_id id,sum(amount) amount FROM billing.ledger_transfers WHERE merchant_id=p_merchant GROUP BY debit_account_id) d ON d.id=a.id AND (a.book='units' OR a.customer_id IS NOT NULL)
         WHERE a.merchant_id=p_merchant AND (a.credits_posted<>coalesce(c.amount,0) OR a.debits_posted<>coalesce(d.amount,0)))
-       OR EXISTS (SELECT book, currency FROM billing.ledger_accounts WHERE merchant_id=p_merchant GROUP BY book, currency HAVING sum(credits_posted::numeric-debits_posted::numeric)<>0)
+       OR EXISTS (SELECT a.book, a.currency FROM billing.ledger_accounts a
+           LEFT JOIN billing.ledger_type_totals t ON a.book='general' AND a.customer_id IS NULL AND t.merchant_id=a.merchant_id AND t.book=a.book
+                AND t.currency=a.currency AND t.account_type=a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+           WHERE a.merchant_id=p_merchant GROUP BY a.book, a.currency
+           HAVING sum(CASE WHEN a.book='general' AND a.customer_id IS NULL THEN coalesce(t.credits_posted::numeric-t.debits_posted::numeric,0)
+                           ELSE a.credits_posted::numeric-a.debits_posted::numeric END)<>0)
        OR EXISTS (SELECT 1 FROM billing.ledger_transfers t
            JOIN billing.ledger_accounts d ON d.merchant_id=t.merchant_id AND d.id=t.debit_account_id
            JOIN billing.ledger_accounts c ON c.merchant_id=t.merchant_id AND c.id=t.credit_account_id WHERE t.merchant_id=p_merchant

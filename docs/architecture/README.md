@@ -9,7 +9,7 @@ people changing or reviewing OpenRails.
 
 | System | Page |
 |---|---|
-| Books (units book and general ledger) | [ledger.md](ledger.md) |
+| Books (units book and general ledger) | [books.md](books.md) |
 | Catalog | [catalog.md](catalog.md) |
 | Orders and checkout | [orders.md](orders.md) |
 | Subscriptions | [subscriptions.md](subscriptions.md) |

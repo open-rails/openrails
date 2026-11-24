@@ -703,7 +703,7 @@ type BillingLeaseInFlight struct {
 	UpdatedAt time.Time
 }
 
-// Double-entry accounts of two books: the units book (a customer's units held and owed, at face) and the general ledger (money, registry currencies only). One account belongs to one (merchant, book, currency); its counters are maintained from immutable ledger_transfers. Retention: permanent, never pruned.
+// Double-entry accounts of two books: the units book (a customer's units held and owed, at face) and the general ledger (money, registry currencies only). One account belongs to one (merchant, book, currency); its counters are maintained from immutable ledger_transfers, except a merchant-wide general-ledger account's, which stay 0: its balance is its ledger_type_totals row. Retention: permanent, never pruned.
 type BillingLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -712,7 +712,7 @@ type BillingLedgerAccount struct {
 	// The account's role in its book (books.Chart). customer_owed is per customer: its negated balance is what the customer owes, read O(1) on the admission path.
 	AccountType string
 	Currency    string
-	// Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart.
+	// Sign rule: the balance (credits - debits) may not go below zero, less a floor the transfer supplies. Set by the chart; a merchant-wide general-ledger account has none.
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
 	// Maintained counter: posted credits, for O(1) balance reads.
@@ -772,7 +772,7 @@ type BillingLedgerTransfer struct {
 	CreatedAt     time.Time
 	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
-	// The book of both accounts: units or general. transfer_type belongs to it.
+	// The book of both accounts: units or general. transfer_type belongs to it; usage_reversed alone is in both.
 	Book string
 	// When the transfer takes effect, its business date: when it posted, for the units book; the event's own instant, for the general ledger. ledger_daily counts it in its 15-minute UTC bucket.
 	EffectiveAt time.Time
@@ -782,7 +782,7 @@ type BillingLedgerTransfer struct {
 	ProductID *uuid.UUID
 }
 
-// The counters of every account of one type, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
+// What every account of one type was credited and debited, summed: one row per merchant, book, currency, account type and (cash_clearing) PSP. It is a merchant-wide general-ledger account's balance, since that account keeps no counters. Kept at commit for the transfers a transaction posted; ledger-audit and the billing restore check recompute it from ledger_transfers.
 type BillingLedgerTypeTotal struct {
 	MerchantID    uuid.UUID
 	Book          string

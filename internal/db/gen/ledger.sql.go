@@ -123,18 +123,20 @@ func (q *Queries) GetLedgerSpendByCoords(ctx context.Context, arg GetLedgerSpend
 const getLedgerTransferAtCoordinate = `-- name: GetLedgerTransferAtCoordinate :one
 SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id FROM billing.ledger_transfers
 WHERE merchant_id = $1::uuid
-  AND customer_id IS NOT DISTINCT FROM $2::uuid
-  AND currency = $3::text
-  AND transfer_type = $4::text
-  AND operation = $5::text
-  AND source = $6::text
-  AND source_id = $7::text
-  AND credit_grant_id IS NOT DISTINCT FROM $8::uuid
-  AND order_line_id IS NOT DISTINCT FROM $9::uuid
+  AND book = $2::text
+  AND customer_id IS NOT DISTINCT FROM $3::uuid
+  AND currency = $4::text
+  AND transfer_type = $5::text
+  AND operation = $6::text
+  AND source = $7::text
+  AND source_id = $8::text
+  AND credit_grant_id IS NOT DISTINCT FROM $9::uuid
+  AND order_line_id IS NOT DISTINCT FROM $10::uuid
 `
 
 type GetLedgerTransferAtCoordinateParams struct {
 	MerchantID    uuid.UUID
+	Book          string
 	CustomerID    *uuid.UUID
 	Currency      string
 	TransferType  string
@@ -146,11 +148,12 @@ type GetLedgerTransferAtCoordinateParams struct {
 }
 
 // GetLedgerTransferAtCoordinate reads the row a conflicting insert lost to —
-// the full physical identity, lot and order line included, so a multi-lot
-// spend resolves the right leg.
+// the full physical identity, lot, order line and book included, so a
+// multi-lot spend resolves the right leg.
 func (q *Queries) GetLedgerTransferAtCoordinate(ctx context.Context, arg GetLedgerTransferAtCoordinateParams) (BillingLedgerTransfer, error) {
 	row := q.db.QueryRow(ctx, getLedgerTransferAtCoordinate,
 		arg.MerchantID,
+		arg.Book,
 		arg.CustomerID,
 		arg.Currency,
 		arg.TransferType,
@@ -264,7 +267,7 @@ INSERT INTO billing.ledger_transfers (
     $15::uuid, $16::uuid,
     $17::timestamptz
 )
-ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id)
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
 DO NOTHING
 RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id
 `
@@ -410,7 +413,7 @@ INSERT INTO billing.ledger_transfers (
     $12::text, $13::text, $14::uuid,
     now()
 )
-ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id)
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
 DO NOTHING
 RETURNING id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id, created_at, operation, book, effective_at, order_line_id, product_id
 `
@@ -504,16 +507,27 @@ func (q *Queries) LedgerAccountBalance(ctx context.Context, arg LedgerAccountBal
 }
 
 const listLedgerConservationBreaches = `-- name: ListLedgerConservationBreaches :many
-SELECT merchant_id,
-       book,
-       currency,
-       SUM(credits_posted - debits_posted)::bigint AS net,
+SELECT $1::uuid AS merchant_id,
+       book::text AS book,
+       currency::text AS currency,
+       SUM(net)::bigint AS net,
        COUNT(*)::bigint AS accounts
-FROM billing.ledger_accounts
-WHERE merchant_id = $1::uuid
-GROUP BY merchant_id, book, currency
-HAVING SUM(credits_posted - debits_posted) <> 0
-ORDER BY merchant_id, book, currency
+FROM (
+    SELECT book, currency, credits_posted - debits_posted AS net
+    FROM billing.ledger_accounts
+    WHERE merchant_id = $1::uuid
+      AND (book = 'units' OR customer_id IS NOT NULL)
+    UNION ALL
+    SELECT a.book, a.currency, COALESCE(t.credits_posted - t.debits_posted, 0)
+    FROM billing.ledger_accounts a
+    LEFT JOIN billing.ledger_type_totals t ON t.merchant_id = a.merchant_id AND t.book = a.book AND t.currency = a.currency
+        AND t.account_type = a.account_type AND t.psp_id IS NOT DISTINCT FROM a.psp_id
+    WHERE a.merchant_id = $1::uuid
+      AND a.book = 'general' AND a.customer_id IS NULL
+) balances
+GROUP BY book, currency
+HAVING SUM(net) <> 0
+ORDER BY book, currency
 `
 
 type ListLedgerConservationBreachesRow struct {
@@ -524,8 +538,9 @@ type ListLedgerConservationBreachesRow struct {
 	Accounts   int64
 }
 
-// ListLedgerConservationBreaches: every (book, currency) whose balances do
-// not sum to zero.
+// ListLedgerConservationBreaches sums every balance per book and currency:
+// an account's counters, or the type total of a merchant-wide general-ledger
+// account, which keeps none.
 func (q *Queries) ListLedgerConservationBreaches(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerConservationBreachesRow, error) {
 	rows, err := q.db.Query(ctx, listLedgerConservationBreaches, merchantID)
 	if err != nil {
@@ -577,7 +592,7 @@ SELECT a.id AS account_id,
        a.debits_posted AS stored_debits,
        COALESCE(l.debits, 0)::bigint AS logged_debits
 FROM billing.ledger_accounts a
-LEFT JOIN logged l ON l.account_id = a.id
+LEFT JOIN logged l ON l.account_id = a.id AND (a.book = 'units' OR a.customer_id IS NOT NULL)
 WHERE a.merchant_id = $1::uuid
   AND (a.credits_posted <> COALESCE(l.credits, 0)
     OR a.debits_posted <> COALESCE(l.debits, 0))
@@ -599,6 +614,8 @@ type ListLedgerCounterDriftsRow struct {
 
 // ListLedgerCounterDrifts rebuilds account counters from the immutable
 // transfer log and returns every account whose maintained projection differs.
+// A merchant-wide general-ledger account keeps none: its counters stay 0, and
+// its balance is checked as rollup drift.
 func (q *Queries) ListLedgerCounterDrifts(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerCounterDriftsRow, error) {
 	rows, err := q.db.Query(ctx, listLedgerCounterDrifts, merchantID)
 	if err != nil {
