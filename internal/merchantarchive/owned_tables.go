@@ -23,8 +23,6 @@ var ownedTables = []string{
 	"custodians",
 	"customer_contacts",
 	"customer_delinquency",
-	"customer_entitlement_cache",
-	"customer_entitlement_cache_stamps",
 	"customer_invoice_profiles",
 	"customer_limit_overrides",
 	"customer_low_balance_lines",

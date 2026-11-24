@@ -8,6 +8,7 @@ migration 0004_drop_access_cutover_contract.up.sql sha256:dd092699ba66add50f33ab
 migration 0005_customer_messages.up.sql sha256:c5c6dc66c3145613b541a161b3004804803e28e2bf224fe1044dbbb441403094
 migration 0006_change_log.up.sql sha256:87f833b05aba1e281feb20cf40ebe2df5a8149040eaaf6e5a9242625eed594a0
 migration 0007_dashboard_retired_measures.up.sql sha256:f6dd2a2187e91c2d0ae891928207bbde8d2c503d2a33242e37b68ba461af767d
+migration 0008_drop_entitlement_cache.up.sql sha256:5614790da69dcc343f221554426cf4c88ea8e126923a80a6a725f03ed005b372
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -297,37 +298,6 @@ table billing.customer_delinquency
   index CREATE INDEX customer_delinquency_due_idx ON billing.customer_delinquency USING btree (next_evaluation_at, merchant_id, customer_id, currency) WHERE (next_evaluation_at IS NOT NULL)
   index CREATE UNIQUE INDEX customer_delinquency_pkey ON billing.customer_delinquency USING btree (merchant_id, customer_id, currency)
 
-table billing.customer_entitlement_cache
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column entitlement text COLLATE "C" NOT NULL
-  column quantity integer
-  constraint customer_entitlement_cache_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint customer_entitlement_cache_pkey PRIMARY KEY (merchant_id, id)
-  constraint customer_entitlement_cache_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
-  index CREATE UNIQUE INDEX customer_entitlement_cache_key ON billing.customer_entitlement_cache USING btree (merchant_id, customer_id, entitlement)
-  index CREATE UNIQUE INDEX customer_entitlement_cache_pkey ON billing.customer_entitlement_cache USING btree (merchant_id, id)
-
-table billing.customer_entitlement_cache_stamps
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column entitlement_generation bigint NOT NULL
-  column access_version bigint NOT NULL
-  column valid_from timestamp with time zone NOT NULL
-  column valid_until timestamp with time zone
-  column keys integer NOT NULL
-  column held_products integer NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint customer_entitlement_cache_stamps_counts_check CHECK (((keys >= 0) AND (held_products >= 0)))
-  constraint customer_entitlement_cache_stamps_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint customer_entitlement_cache_stamps_pkey PRIMARY KEY (merchant_id, id)
-  constraint customer_entitlement_cache_stamps_window_check CHECK (((valid_until IS NULL) OR (valid_from < valid_until)))
-  index CREATE UNIQUE INDEX customer_entitlement_cache_stamps_customer_key ON billing.customer_entitlement_cache_stamps USING btree (merchant_id, customer_id)
-  index CREATE UNIQUE INDEX customer_entitlement_cache_stamps_pkey ON billing.customer_entitlement_cache_stamps USING btree (merchant_id, id)
-
 table billing.customer_invoice_profiles
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
@@ -415,7 +385,6 @@ table billing.customers
   column issuer text
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column last_seen_at timestamp with time zone NOT NULL DEFAULT now()
-  column access_version bigint NOT NULL DEFAULT 0
   column billing_policy text
   constraint customers_billing_policy_check CHECK ((billing_policy <> ''::text))
   constraint customers_issuer_check CHECK (((issuer IS NULL) OR ((issuer = btrim(issuer)) AND (issuer <> ''::text))))
@@ -1096,7 +1065,6 @@ table billing.merchants
   column group_release_completed_at timestamp with time zone
   column catalog_revision bigint NOT NULL DEFAULT 0
   column slug_changed_at timestamp with time zone
-  column entitlement_generation bigint NOT NULL DEFAULT 0
   column tenant_id uuid
   constraint merchants_catalog_revision_check CHECK ((catalog_revision >= 0))
   constraint merchants_pkey PRIMARY KEY (id)
@@ -1989,7 +1957,7 @@ table billing.product_access
   constraint product_access_valid_time_window_check CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
   index CREATE INDEX product_access_closed_at_idx ON billing.product_access USING btree (merchant_id, LEAST(COALESCE(ends_at, 'infinity'::timestamp with time zone), COALESCE(revoked_at, 'infinity'::timestamp with time zone))) WHERE (((ends_at IS NOT NULL) OR (revoked_at IS NOT NULL)) AND (deleted_at IS NULL))
   index CREATE INDEX product_access_customer_created_idx ON billing.product_access USING btree (merchant_id, customer_id, id)
-  index CREATE INDEX product_access_customer_idx ON billing.product_access USING btree (merchant_id, customer_id, product_id) INCLUDE (starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
+  index CREATE INDEX product_access_customer_idx ON billing.product_access USING btree (merchant_id, customer_id, product_id) INCLUDE (starts_at, ends_at, quantity) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
   index CREATE INDEX product_access_destructive_run_id_idx ON billing.product_access USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
   index CREATE UNIQUE INDEX product_access_grant_key ON billing.product_access USING btree (merchant_id, grant_id) WHERE (deleted_at IS NULL)
   index CREATE INDEX product_access_payment_idx ON billing.product_access USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL)
@@ -1997,9 +1965,6 @@ table billing.product_access
   index CREATE INDEX product_access_product_idx ON billing.product_access USING btree (merchant_id, product_id, customer_id) INCLUDE (starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
   index CREATE INDEX product_access_source_idx ON billing.product_access USING btree (merchant_id, source_type, source_id)
   trigger CREATE TRIGGER product_access_release_ownership_claims AFTER UPDATE OF revoked_at, deleted_at ON billing.product_access FOR EACH ROW EXECUTE FUNCTION billing.release_ended_ownership_claims()
-  trigger CREATE TRIGGER product_access_step_version_delete AFTER DELETE ON billing.product_access REFERENCING OLD TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.step_access_version()
-  trigger CREATE TRIGGER product_access_step_version_insert AFTER INSERT ON billing.product_access REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.step_access_version()
-  trigger CREATE TRIGGER product_access_step_version_update AFTER UPDATE ON billing.product_access REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.step_access_version()
 
 table billing.product_entitlements
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2026,8 +1991,6 @@ table billing.product_entitlements
   trigger CREATE TRIGGER catalog_authored_entitlements_update AFTER UPDATE ON billing.product_entitlements REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.catalog_authored_entitlements()
   trigger CREATE TRIGGER immutable_product_entitlement_history BEFORE DELETE OR UPDATE ON billing.product_entitlements FOR EACH ROW EXECUTE FUNCTION billing.guard_product_entitlement_history()
   trigger CREATE TRIGGER immutable_product_entitlement_history_truncate BEFORE TRUNCATE ON billing.product_entitlements FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
-  trigger CREATE TRIGGER product_entitlements_step_generation_insert AFTER INSERT ON billing.product_entitlements REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.step_entitlement_generation()
-  trigger CREATE TRIGGER product_entitlements_step_generation_update AFTER UPDATE ON billing.product_entitlements REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.step_entitlement_generation()
 
 table billing.products
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3696,8 +3659,6 @@ function billing.guard_billing_restore_receipt()
                     'catalog_restore_receipts',
                     'custodians',
                     'customer_delinquency',
-                    'customer_entitlement_cache',
-                    'customer_entitlement_cache_stamps',
                     'customer_invoice_profiles',
                     'customer_limit_overrides',
                     'customer_low_balance_lines',
@@ -4421,34 +4382,6 @@ function billing.solana_pay_references_wake()
       RETURN NULL;
   END;
   $function$
-
-function billing.step_access_version()
-  CREATE OR REPLACE FUNCTION billing.step_access_version()
-   RETURNS trigger
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-  DECLARE mid uuid; cid uuid;
-  BEGIN
-      FOR mid, cid IN SELECT DISTINCT merchant_id, customer_id FROM changed ORDER BY merchant_id, customer_id LOOP
-          UPDATE billing.customers SET access_version = access_version + 1 WHERE merchant_id = mid AND id = cid;
-      END LOOP;
-      RETURN NULL;
-  END $function$
-
-function billing.step_entitlement_generation()
-  CREATE OR REPLACE FUNCTION billing.step_entitlement_generation()
-   RETURNS trigger
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-  DECLARE mid uuid;
-  BEGIN
-      FOR mid IN SELECT DISTINCT merchant_id FROM changed LOOP
-          UPDATE billing.merchants SET entitlement_generation = entitlement_generation + 1 WHERE id = mid;
-      END LOOP;
-      RETURN NULL;
-  END $function$
 
 function billing.step_price_key()
   CREATE OR REPLACE FUNCTION billing.step_price_key()
