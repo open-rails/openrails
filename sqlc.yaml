@@ -10,6 +10,7 @@ sql:
       - "internal/migrate/postgres/0005_customer_messages.up.sql"
       - "internal/migrate/postgres/0006_change_log.up.sql"
       - "internal/migrate/postgres/0007_dashboard_retired_measures.up.sql"
+      - "internal/migrate/postgres/0008_drop_entitlement_cache_contract.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:
