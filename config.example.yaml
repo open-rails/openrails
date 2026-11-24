@@ -33,7 +33,8 @@ db:
   # Merchant isolation is per-query merchant predicates, not login flags.
   username: app
   password: app_password
-  sslmode: disable
+  sslmode: disable # local compose only; unset is verify-full, or require on loopback
+  # sslrootcert: /etc/openrails/db-ca.pem # the CAs that verify the database; unset, the system roots
 
 database:
   schema: billing # every OpenRails table lives here; defaults to 'billing' (env DATABASE_SCHEMA)

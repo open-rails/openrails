@@ -239,7 +239,9 @@ the deployment does not serve answers `404 route_not_found`.
 | Key | Default | Meaning |
 |---|---|---|
 | `db.url` | — | the connection string (`DB_URL`); overrides the parts below |
-| `db.host`, `db.port`, `db.database`, `db.username`, `db.password`, `db.sslmode` | — | the parts, when `db.url` is unset; all four of host, port, database and username or boot refuses |
+| `db.host`, `db.port`, `db.database`, `db.username`, `db.password` | — | the parts, when `db.url` is unset; all four of host, port, database and username or boot refuses |
+| `db.sslmode` | `verify-full`; `require` for a loopback host or Unix socket | libpq's `sslmode` for the parts |
+| `db.sslrootcert` | the system roots | PEM file of the CAs that verify the database's certificate, for the parts |
 | `db.sql_trace` | `false` | log every query at debug level |
 | `db.lease_conns` | `4` | the separate pool for idempotency lease renewals; count it in `max_connections` |
 | `database.schema` | `billing` | every OpenRails table, function and type; a plain identifier |
