@@ -12,6 +12,25 @@ import (
 	"github.com/google/uuid"
 )
 
+const countCustomersUpTo = `-- name: CountCustomersUpTo :one
+SELECT count(*) FROM (
+  SELECT 1 FROM billing.customers WHERE merchant_id = $1::uuid LIMIT $2::int
+) c
+`
+
+type CountCustomersUpToParams struct {
+	MerchantID uuid.UUID
+	RowLimit   int32
+}
+
+// The merchant's customers, counted no further than row_limit.
+func (q *Queries) CountCustomersUpTo(ctx context.Context, arg CountCustomersUpToParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCustomersUpTo, arg.MerchantID, arg.RowLimit)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCustomer = `-- name: CreateCustomer :exec
 INSERT INTO billing.customers (id, merchant_id, issuer)
 VALUES ($1, $2, $3)
@@ -104,6 +123,40 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 		&i.BillingPolicy,
 	)
 	return i, err
+}
+
+const listCustomerIDsAfter = `-- name: ListCustomerIDsAfter :many
+SELECT id FROM billing.customers
+WHERE merchant_id = $1::uuid AND ($2::uuid IS NULL OR id > $2::uuid)
+ORDER BY id
+LIMIT $3::int
+`
+
+type ListCustomerIDsAfterParams struct {
+	MerchantID uuid.UUID
+	AfterID    *uuid.UUID
+	RowLimit   int32
+}
+
+// One page of the merchant's customers in id order, after after_id.
+func (q *Queries) ListCustomerIDsAfter(ctx context.Context, arg ListCustomerIDsAfterParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listCustomerIDsAfter, arg.MerchantID, arg.AfterID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCustomers = `-- name: ListCustomers :many

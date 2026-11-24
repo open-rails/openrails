@@ -51,7 +51,9 @@ type CustomerAccount struct {
 
 // CustomerListParams lists customers, newest first. Search instead lists the
 // customers whose email, username or name contains it, or whose id it is: at
-// most limit, newest first, in one page. IDs instead reads 1 to
+// most limit, newest first, in one page; a search more than 1,000 people of a
+// directory match, of a merchant with more than 5,000 customers, is refused
+// (invalid_param search) unless it finds limit of them. IDs instead reads 1 to
 // MaxBatchItems named customers in one page; unknown ones are absent.
 type CustomerListParams struct {
 	Search string       `form:"search"`

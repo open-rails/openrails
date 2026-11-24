@@ -34,6 +34,19 @@ SELECT * FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY created_at DESC, id DESC;
 
+-- name: CountCustomersUpTo :one
+-- The merchant's customers, counted no further than row_limit.
+SELECT count(*) FROM (
+  SELECT 1 FROM billing.customers WHERE merchant_id = sqlc.arg(merchant_id)::uuid LIMIT sqlc.arg(row_limit)::int
+) c;
+
+-- name: ListCustomerIDsAfter :many
+-- One page of the merchant's customers in id order, after after_id.
+SELECT id FROM billing.customers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(after_id)::uuid IS NULL OR id > sqlc.narg(after_id)::uuid)
+ORDER BY id
+LIMIT sqlc.arg(row_limit)::int;
+
 -- name: ListCustomers :many
 -- Newest first.
 SELECT * FROM billing.customers c

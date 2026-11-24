@@ -4,12 +4,15 @@ package critical_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
@@ -154,6 +157,32 @@ func TestCustomerDirectory(t *testing.T) {
 		stored, err := a.alpha.GetCustomer(t.Context(), billing.CustomerID(uuid.MustParse(id)))
 		require.NoError(t, err)
 		require.Equal(t, "Preserved", *stored.Contact.Name)
+	})
+	t.Run("OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		prefix := "lookalike" + uuid.NewString()[:8]
+		user := func(name string) iam.User {
+			t.Helper()
+			u, err := a.auth.CreateUser(t.Context(), iam.NewUser{Email: name + "@example.com", Username: name, Password: authtest.Password, EmailVerified: true})
+			require.NoError(t, err)
+			return u
+		}
+		// The directory answers in creation order: a dozen people who are no
+		// customer of alpha match first.
+		for i := range 12 {
+			user(fmt.Sprintf("%sp%02d", prefix, i))
+		}
+		buyer := billing.CustomerID(uuid.MustParse(user(prefix + "buyer").ID))
+		_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: buyer, Currency: "USD", Amount: 1000, Source: "host", SourceID: "searched-customer"}})
+		require.NoError(t, err)
+		for _, client := range []*openrails.Client{a.alpha, a.alphaRemote} {
+			found, err := client.ListCustomers(t.Context(), billing.CustomerListParams{Search: prefix, PageRequest: billing.PageRequest{Limit: 10}})
+			require.NoError(t, err)
+			require.Len(t, found.Items, 1, "the one customer among the directory's matches")
+			require.Equal(t, buyer, found.Items[0].ID)
+			require.NotNil(t, found.Items[0].Contact)
+			require.Equal(t, prefix+"buyer", *found.Items[0].Contact.Username)
+		}
 	})
 	t.Run("OR-J07-S04/live-host-directory-exposes-no-copied-write-authority", func(t *testing.T) {
 		a := newAuthorityWorld(t)

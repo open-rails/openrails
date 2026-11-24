@@ -46,9 +46,25 @@ func (c Contact) Customer() *billing.CustomerContact {
 type Directory interface {
 	Contacts(ctx context.Context, merchantID billing.MerchantID, ids []uuid.UUID) (map[uuid.UUID]Contact, error)
 	// Search returns at most limit contacts whose email, username or name
-	// contains query, ignoring case.
+	// contains query, ignoring case: people the directory holds, customers
+	// of the merchant or not.
 	Search(ctx context.Context, merchantID billing.MerchantID, query string, limit int) ([]Contact, error)
+	// SearchCustomers is Search kept to the merchant's customers: at most
+	// limit, none missed for people who are not its customers. A search it
+	// cannot answer in full within its bounds is ErrSearchTooBroad.
+	SearchCustomers(ctx context.Context, merchantID billing.MerchantID, query string, limit int) ([]Contact, error)
 }
+
+// ErrSearchTooBroad is a customer search matching more people than one
+// search reads, of a merchant with more customers than one search reads.
+var ErrSearchTooBroad = errors.New("identity: the search matches too many people to search in full")
+
+// Bounds of one customer search: the merchant's customers it reads itself,
+// and the people it asks a directory for.
+const (
+	customerScan = 5000
+	searchWindow = 1000
+)
 
 // Live asks the host's directory on every read. A customer is its issuer's
 // subject (OIDC Core §5.7), so each is asked of its issuer's directory: the
@@ -173,6 +189,113 @@ func (l Live) Search(ctx context.Context, mid billing.MerchantID, query string, 
 	return out, nil
 }
 
+// SearchCustomers reads the merchant's own customers' contacts when it has
+// few enough, and matches them here; else it filters each directory's
+// matches to its customers. A directory never knows whose customer a person
+// is, so its first limit matches can all be someone else's.
+func (l Live) SearchCustomers(ctx context.Context, mid billing.MerchantID, query string, limit int) ([]Contact, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || limit < 1 {
+		return nil, nil
+	}
+	q := l.DB.Gen(ctx)
+	customers, err := q.CountCustomersUpTo(ctx, gen.CountCustomersUpToParams{MerchantID: mid.UUID(), RowLimit: customerScan + 1})
+	if err != nil {
+		return nil, err
+	}
+	if customers <= customerScan {
+		return l.scanCustomers(ctx, mid, query, limit)
+	}
+	return l.searchDirectories(ctx, mid, query, limit)
+}
+
+// scanCustomers matches every customer's contact, a page at a time.
+func (l Live) scanCustomers(ctx context.Context, mid billing.MerchantID, query string, limit int) ([]Contact, error) {
+	var out []Contact
+	var after *uuid.UUID
+	for len(out) < limit {
+		ids, err := l.DB.Gen(ctx).ListCustomerIDsAfter(ctx, gen.ListCustomerIDsAfterParams{MerchantID: mid.UUID(), AfterID: after, RowLimit: liveBatch})
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+		after = &ids[len(ids)-1]
+		found, err := l.Contacts(ctx, mid, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			if contact, ok := found[id]; ok && contact.matches(query) && len(out) < limit {
+				out = append(out, contact)
+			}
+		}
+	}
+	return out, nil
+}
+
+// searchDirectories keeps each directory's matches that are the merchant's
+// customers of its issuer.
+func (l Live) searchDirectories(ctx context.Context, mid billing.MerchantID, query string, limit int) ([]Contact, error) {
+	searched := []string{""}
+	if m, ok := l.Lookup.(IssuerLookup); ok {
+		more, err := m.Issuers(ctx, mid)
+		if err != nil {
+			return nil, err
+		}
+		searched = append(searched, more...)
+	}
+	var out []Contact
+	truncated := false
+	for _, issuer := range searched {
+		directory := l.directory(mid, issuer)
+		if directory == nil {
+			continue
+		}
+		found, err := directory.Search(ctx, query, searchWindow)
+		if err != nil {
+			return nil, err
+		}
+		truncated = truncated || len(found) >= searchWindow
+		var contacts []Contact
+		var ids []uuid.UUID
+		for _, u := range found {
+			if contact, ok := liveContact(u); ok {
+				contacts, ids = append(contacts, contact), append(ids, contact.CustomerID)
+			}
+		}
+		rows, err := l.DB.Gen(ctx).ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+		if err != nil {
+			return nil, err
+		}
+		customers := make(map[uuid.UUID]string, len(rows))
+		for _, row := range rows {
+			customers[row.ID] = deref(row.Issuer)
+		}
+		for _, contact := range contacts {
+			if of, ok := customers[contact.CustomerID]; ok && of == issuer && len(out) < limit {
+				out = append(out, contact)
+			}
+		}
+	}
+	if truncated && len(out) < limit {
+		return nil, ErrSearchTooBroad
+	}
+	return out, nil
+}
+
+// matches is the directory's search, applied to a contact it answered.
+func (c Contact) matches(query string) bool {
+	query = strings.ToLower(query)
+	for _, v := range []string{c.Email, c.Username, c.Name} {
+		if strings.Contains(strings.ToLower(v), query) {
+			return true
+		}
+	}
+	return false
+}
+
 // liveContact is a directory user whose id is a customer id: the host's
 // subject UUID.
 func liveContact(u userinfo.User) (Contact, bool) {
@@ -213,6 +336,26 @@ func (k Kept) Search(ctx context.Context, merchantID billing.MerchantID, query s
 	}
 	rows, err := k.DB.Gen(ctx).SearchCustomerContacts(ctx, gen.SearchCustomerContactsParams{
 		MerchantID: merchantID.UUID(), Pattern: "%" + likeEscaper.Replace(query) + "%", Query: query, RowLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Contact, 0, len(rows))
+	for _, row := range rows {
+		if contact, ok := KeptContact(row); ok {
+			out = append(out, contact)
+		}
+	}
+	return out, nil
+}
+
+func (k Kept) SearchCustomers(ctx context.Context, merchantID billing.MerchantID, query string, limit int) ([]Contact, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || limit < 1 {
+		return nil, nil
+	}
+	rows, err := k.DB.Gen(ctx).SearchCustomerContactsOfCustomers(ctx, gen.SearchCustomerContactsOfCustomersParams{
+		MerchantID: merchantID.UUID(), Pattern: "%" + likeEscaper.Replace(query) + "%", Query: query, RowLimit: int32(min(limit, maxSearch)), // #nosec G115 -- bounded by maxSearch
 	})
 	if err != nil {
 		return nil, err

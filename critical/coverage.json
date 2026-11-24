@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 652,
+  "scenario_count": 653,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3262,6 +3262,11 @@
       "id": "OR-J41-S17",
       "journey": "J41",
       "name": "An imported purchase is applied over the access its import grants"
+    },
+    {
+      "id": "OR-J07-S10",
+      "journey": "J07",
+      "name": "A customer search finds the merchant's customers however many people of the host's directory who are not its customers match first"
     }
   ]
 }

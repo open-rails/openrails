@@ -153,7 +153,10 @@ func (s *Service) searchCustomers(ctx context.Context, mid billing.MerchantID, s
 	if s.rt.Contacts == nil {
 		return ids, nil
 	}
-	found, err := s.rt.Contacts.Search(ctx, mid, search, limit)
+	found, err := s.rt.Contacts.SearchCustomers(ctx, mid, search, limit)
+	if errors.Is(err, directory.ErrSearchTooBroad) {
+		return nil, apperr.Invalidf("more people match %q than one search reads; search for more of the email or username", search).WithParam("search")
+	}
 	if err != nil {
 		s.Log.WarnContext(ctx, "customer search unavailable", logx.Err(err))
 		return nil, errDirectoryUnavailable
