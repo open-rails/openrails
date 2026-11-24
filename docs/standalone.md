@@ -232,7 +232,7 @@ the deployment does not serve answers `404 route_not_found`.
 | `checkout_origin` | the payment page's own origin ([the payment page](#the-payment-page)); unset issues no pay URLs |
 | `return_origins` | exact origins a purchase's success, cancel and billing-portal return URLs may name; empty allows `public_billing_base_url`'s origin only |
 | `trusted_proxies` | CIDRs whose `X-Forwarded-For` is walked; empty trusts none ([proxies](#tls-proxies-cors-and-webhooks)) |
-| `cloudflare_proxies` | Cloudflare's ranges where Cloudflare fronts the origin: trusted like `trusted_proxies`, and the only peers whose `CF-Connecting-IP` AuthKit takes |
+| `cloudflare_proxies` | Cloudflare's ranges where Cloudflare fronts the origin: trusted like `trusted_proxies`, and the only peers whose `CF-Connecting-IP` AuthKit takes and whose `CF-IPCountry` a checkout records |
 
 **Database**
 

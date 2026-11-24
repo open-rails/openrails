@@ -978,7 +978,7 @@ type BillingOrder struct {
 	LinesDigest []byte
 	// The merchant's page frames the pay URL, only on its registered origins (settings payment_page.embed_origins); otherwise the customer is sent to it.
 	Embedded *bool
-	// Set on a checkout (an order OpenRails started for its customer to pay): 1 + the customer's paid purchases before it was created. NULL on every other order and on checkouts created before it was recorded.
+	// Set on a checkout (an order OpenRails started for its customer to pay): 1 + the customer's paid purchases when it was created. Two checkouts open at once can share one. NULL on every other order and on checkouts created before it was recorded.
 	PurchaseNumber *int32
 	// When the customer first read the open checkout in person (the payment form loaded), or created it with its payment.
 	OpenedAt *time.Time
@@ -986,9 +986,9 @@ type BillingOrder struct {
 	SubmittedAt *time.Time
 	// ISO 3166-1 alpha-2 country of the billing address the latest pay request gave, or of the saved card it charged.
 	BillingCountry *string
-	// ISO 3166-1 alpha-2 issuing country of the card, as its PSP reports it.
+	// ISO 3166-1 alpha-2 issuing country of the card; not recorded yet.
 	CardCountry *string
-	// ISO 3166-1 alpha-2 country a trusted proxy reported for the customer's first request in person. The address itself is never stored.
+	// ISO 3166-1 alpha-2 country a Cloudflare proxy reported for the customer's first request in person. The address itself is never stored.
 	IpCountry *string
 	// The language the customer's first request in person preferred (Accept-Language), as language[-region].
 	Language            *string
@@ -2022,6 +2022,8 @@ type BillingSubscription struct {
 	DueRecheckAt *time.Time
 	// rail_subscription_id as an identity (billing.rail_subscription_key): every lookup by provider id matches it. A provider contact matching it spelled otherwise rewrites rail_subscription_id to the provider's spelling.
 	RailSubscriptionKey *string
+	// The checkout whose payment created the subscription; NULL for one bought before checkouts were recorded, imported or started at its provider.
+	CheckoutOrderID *uuid.UUID
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

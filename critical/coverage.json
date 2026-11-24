@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 506,
+  "scenario_count": 507,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2532,6 +2532,11 @@
       "id": "OR-J47-S09",
       "journey": "J47",
       "name": "An unpaid checkout that never started an attempt keeps its facts for 397 days, then is deleted"
+    },
+    {
+      "id": "OR-J47-S08",
+      "journey": "J47",
+      "name": "A subscription's renewals name the checkout that bought it, whose country and attribution they carry"
     }
   ]
 }

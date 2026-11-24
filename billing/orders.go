@@ -320,6 +320,10 @@ type OrderRenewal struct {
 	PeriodStartsAt time.Time      `json:"period_starts_at"`
 	PeriodEndsAt   time.Time      `json:"period_ends_at"`
 	DueAt          time.Time      `json:"due_at"`
+	// CheckoutOrderID is the checkout that bought the subscription; null
+	// when none did (imported, started at its provider, or bought before
+	// checkouts were recorded).
+	CheckoutOrderID *OrderID `json:"checkout_order_id"`
 }
 
 // OrderUsage is what a usage order bills and how it is collected: the

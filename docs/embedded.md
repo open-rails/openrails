@@ -121,6 +121,7 @@ Go. Libraries never read the environment.
 | `PublicBillingBaseURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
 | `ReturnOrigins` | Origins a buyer may return to after a redirect step (`returnUrl`). |
 | `TrustedProxies` | Load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
+| `CloudflareProxies` | Cloudflare's ranges where Cloudflare fronts the origin: trusted like `TrustedProxies`, and the only proxies whose `CF-IPCountry` a checkout records. |
 | `CheckoutOrigin` | The payment page's origin ([checkout page](#checkout-page)). |
 | `RateLimits` | Per-minute buckets on customer routes (`purchase`, `subscribe`, `payment`, `webhook`, `catalog-ask`): nil is the built-in set, empty is none. |
 | `Captcha` | `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`): challenges a subject at 3× a bucket's limit. |

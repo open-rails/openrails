@@ -71,7 +71,8 @@ export interface BillingClientOptions {
     string | null | undefined | Promise<string | null | undefined>
   /**
    * Sent as Accept-Language: the language the checkout is shown in, which
-   * an order records.
+   * an order records. Default: the `locale` of the `BillingProvider` the
+   * client is given to, else the browser's own header.
    */
   language?: () => string | null | undefined
   /**
@@ -258,7 +259,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     if (opts.body !== undefined) headers.set("Content-Type", "application/json")
     let token = opts.public ? undefined : await options.getToken?.()
     if (token) headers.set("Authorization", `Bearer ${token}`)
-    const lang = options.language?.()
+    const lang = options.language ? options.language() : uiLanguage
     if (lang) headers.set("Accept-Language", lang)
     const method = opts.method ?? "GET"
     const init = {
@@ -370,8 +371,16 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     }
   }
 
+  // The BillingProvider's locale, when the client names no language.
+  let uiLanguage: string | undefined
+
   const client = {
     baseUrl: base,
+
+    /** Sets the language sent when `language` is not given (BillingProvider's `locale`). */
+    setLanguage(locale: string | undefined) {
+      uiLanguage = locale
+    },
 
     /** One page of the customer's subscriptions, newest first. */
     listSubscriptions(

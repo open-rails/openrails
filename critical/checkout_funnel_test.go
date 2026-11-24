@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
+	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -48,13 +51,28 @@ func payCheckout(t *testing.T, a *authorityWorld, order billing.Order, payment b
 	return status, paid
 }
 
-func trustLoopback(w *world) {
-	w.cfg.TrustedProxies = []string{"127.0.0.1/32", "::1/128"}
+// cloudflareLoopback makes the test client's own address a Cloudflare proxy.
+func cloudflareLoopback(w *world) {
+	w.cfg.CloudflareProxies = []string{"127.0.0.1/32", "::1/128"}
+}
+
+// underAttack is the precondition of a card-testing attack on the world's
+// merchant: its captcha challenges every pay request until cleared.
+func underAttack(t *testing.T, a *authorityWorld) (clear func()) {
+	t.Helper()
+	store := captcha.NewChallengeStore(slog.New(slog.DiscardHandler), abusestate.New(slog.New(slog.DiscardHandler), a.deps.Redis))
+	subject := captcha.CardAttackModeSubject(a.alpha.MerchantID().UUID())
+	store.MarkChallenged(t.Context(), subject, time.Hour)
+	return func() { store.ClearChallenged(t.Context(), subject) }
 }
 
 func TestCheckoutFunnel(t *testing.T) {
 	t.Run("OR-J47-S01/steps-are-recorded-where-the-customer-takes-them", func(t *testing.T) {
-		a, p := newPaymentWorld(t)
+		a, p := newPaymentWorld(t, func(w *world) {
+			w.deps.Redis = criticalRedis(t)
+			w.cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "critical-site", SecretKey: "critical-secret"}
+			w.cfg.RateLimits = openrails.RateLimitsConfig{"purchase": {RequestsPerMinute: 1000}}
+		})
 		_, price := publicSale(t, a, "funnel-steps", 9_990_000, nil)
 		created := openCheckout(t, a, price.ID, nil, nil)
 		require.Nil(t, created.Checkout, "the customer never reads their own checkout facts")
@@ -78,14 +96,28 @@ func TestCheckoutFunnel(t *testing.T) {
 		again := checkoutOf(t, a, created.ID)
 		require.Equal(t, facts.OpenedAt, again.OpenedAt, "only the first read in person opens it")
 
+		// The attack captcha refuses the pay request ahead of its handler; the
+		// customer still asked to pay.
 		a.clock.Advance(time.Minute)
 		submitted := a.clock.Now()
+		clear := underAttack(t, a)
+		token := p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
+		status, raw = a.request(t, http.MethodPost, "/v1/me/orders/"+created.ID.String()+"/pay", a.aliceToken,
+			billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token}, ExpectedTotal: created.Total}, map[string]string{"Idempotency-Key": "funnel-challenged"})
+		require.Equal(t, http.StatusForbidden, status, string(raw))
+		require.Contains(t, string(raw), "captcha_required")
+		require.Empty(t, p.effects(t), "the challenged request charged nothing")
+		facts = checkoutOf(t, a, created.ID)
+		require.NotNil(t, facts.SubmittedAt, "a challenged pay request is still a submission")
+		require.WithinDuration(t, submitted, *facts.SubmittedAt, time.Second)
+		clear()
+
+		a.clock.Advance(time.Minute)
 		declined := p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "0002", Decline: "insufficient_funds"})
 		status, _ = payCheckout(t, a, created, billing.OrderPaymentParams{Token: declined}, "funnel-declined", nil)
 		require.Equal(t, http.StatusPaymentRequired, status)
 		facts = checkoutOf(t, a, created.ID)
-		require.NotNil(t, facts.SubmittedAt, "a declined pay request is still a submission")
-		require.WithinDuration(t, submitted, *facts.SubmittedAt, time.Second)
+		require.WithinDuration(t, submitted, *facts.SubmittedAt, time.Second, "the first submission is kept")
 		a.clock.Advance(time.Minute)
 		status, paid := payCheckout(t, a, created, billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}, "funnel-paid", nil)
 		require.Equal(t, http.StatusOK, status)
@@ -156,24 +188,40 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.NoError(t, err)
 		again := publicPurchase(t, a, p, second.ID, 1, 6_000_000, "funnel-number-2")
 		require.Equal(t, 2, checkoutOf(t, a, again.ID).PurchaseNumber, "an abandoned checkout is not a purchase")
+
+		// A refunded purchase was still bought.
+		_, err = a.alpha.RefundPayment(t.Context(), "funnel-number-refund", *again.Payment.PaymentID, billing.RefundPaymentParams{Full: true, Reason: "Refund the second purchase"})
+		require.NoError(t, err)
 		third := publicPurchase(t, a, p, first.ID, 1, 5_000_000, "funnel-number-3")
 		require.Equal(t, 3, checkoutOf(t, a, third.ID).PurchaseNumber)
+
+		// Two checkouts open at once share the number neither has paid yet.
+		left, err := a.alphaRemote.CreateOrder(t.Context(), "funnel-number-open-a", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: first.ID}}})
+		require.NoError(t, err)
+		right, err := a.alphaRemote.CreateOrder(t.Context(), "funnel-number-open-b", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: second.ID}}})
+		require.NoError(t, err)
+		require.Equal(t, 4, left.Checkout.PurchaseNumber)
+		require.Equal(t, 4, right.Checkout.PurchaseNumber)
+
 		other, err := a.alphaRemote.CreateOrder(t.Context(), "funnel-number-bob", billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.bob.ID)), Lines: []billing.OrderLineParams{{PriceID: first.ID}}})
 		require.NoError(t, err)
 		require.Equal(t, 1, other.Checkout.PurchaseNumber, "purchases are counted per customer")
 	})
 	t.Run("OR-J47-S05/the-country-is-the-billing-address-then-the-ip-never-the-address", func(t *testing.T) {
-		a, p := newPaymentWorld(t, trustLoopback)
+		a, p := newPaymentWorld(t, cloudflareLoopback)
 		_, price := publicSale(t, a, "funnel-country", 9_990_000, nil)
 		_, other := publicSale(t, a, "funnel-country-ip", 9_990_000, nil)
-		viaFrance := map[string]string{"CF-IPCountry": "FR"}
+		// The client's own address reaches OpenRails only in X-Forwarded-For.
+		const client = "203.0.113.77"
+		viaFrance := map[string]string{"CF-IPCountry": "FR", "X-Forwarded-For": client}
 		order := openCheckout(t, a, price.ID, nil, viaFrance)
 		facts := checkoutOf(t, a, order.ID)
 		require.Equal(t, "FR", *facts.IPCountry)
 		require.Equal(t, "FR", *facts.Country)
 		require.Equal(t, billing.CountrySourceIP, *facts.CountrySource)
+		require.Nil(t, facts.CardCountry, "card country is not recorded yet")
 		billingDE := &billing.BillingDetails{Address: &billing.BillingAddress{Country: ptr("de")}}
-		status, _ := payCheckout(t, a, order, billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"}), BillingDetails: billingDE}, "funnel-country-pay", map[string]string{"CF-IPCountry": "US"})
+		status, _ := payCheckout(t, a, order, billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"}), BillingDetails: billingDE}, "funnel-country-pay", map[string]string{"CF-IPCountry": "US", "X-Forwarded-For": client})
 		require.Equal(t, http.StatusOK, status)
 		facts = checkoutOf(t, a, order.ID)
 		require.Equal(t, "DE", *facts.BillingCountry)
@@ -188,8 +236,14 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Nil(t, facts.Country)
 		require.Nil(t, facts.CountrySource)
 
-		// A proxy header from a peer that is not a trusted proxy is ignored.
-		u, _ := newPaymentWorld(t)
+		// Neither the order nor the merchant's archive holds the address.
+		staff, raw := a.request(t, http.MethodGet, "/v1/admin/orders/"+order.ID.String(), a.alphaKey.Secret, nil)
+		require.Equal(t, http.StatusOK, staff, string(raw))
+		require.NotContains(t, string(raw), client)
+		require.NotContains(t, string(archiveBytes(t, a.alpha)), client)
+
+		// A trusted proxy that is not Cloudflare's is never read for a country.
+		u, _ := newPaymentWorld(t, func(w *world) { w.cfg.TrustedProxies = []string{"127.0.0.1/32", "::1/128"} })
 		_, untrusted := publicSale(t, u, "funnel-untrusted", 9_990_000, nil)
 		spoofed := openCheckout(t, u, untrusted.ID, nil, viaFrance)
 		require.Nil(t, checkoutOf(t, u, spoofed.ID).IPCountry)
@@ -214,53 +268,85 @@ func TestCheckoutFunnel(t *testing.T) {
 			require.Equal(t, want, *got, header)
 		}
 	})
-	t.Run("OR-J47-S07/attribution-is-bounded-and-the-referrer-keeps-its-host", func(t *testing.T) {
+	t.Run("OR-J47-S07/attribution-is-kept-bounded-and-never-refuses-a-sale", func(t *testing.T) {
 		a, _ := newPaymentWorld(t)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		_, price := publicSale(t, a, "funnel-attribution", 9_990_000, nil)
+		_, creator := publicSale(t, a, "funnel-attribution-creator", 9_990_000, nil)
 		_, merchantPrice := publicSale(t, a, "funnel-attribution-app", 9_990_000, nil)
-		given := &billing.OrderAttribution{Source: ptr(" newsletter "), Medium: ptr("email"), Campaign: ptr("spring-2026"),
+		given := &billing.OrderAttribution{Source: ptr(" newsletter "), Medium: ptr("email"), Campaign: ptr("spring%2D2026"),
 			Referrer: ptr("https://Blog.Example.com/post/42?email=x"), Affiliate: ptr("partner-7")}
 		order := openCheckout(t, a, price.ID, given, nil)
 		got := checkoutOf(t, a, order.ID).Attribution
 		require.Equal(t, "newsletter", *got.Source)
 		require.Equal(t, "email", *got.Medium)
-		require.Equal(t, "spring-2026", *got.Campaign)
+		require.Equal(t, "spring-2026", *got.Campaign, "percent escapes are decoded")
 		require.Equal(t, "blog.example.com", *got.Referrer, "never the path or query")
 		require.Equal(t, "partner-7", *got.Affiliate)
 		reopened := openCheckout(t, a, price.ID, &billing.OrderAttribution{Source: ptr("search")}, nil)
 		require.Equal(t, order.ID, reopened.ID)
 		require.Equal(t, "newsletter", *checkoutOf(t, a, order.ID).Attribution.Source, "the open order keeps its first attribution")
 
+		// An @creator source still makes the order, without that field.
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: creator.ID}},
+			Attribution: &billing.OrderAttribution{Source: ptr("@creator"), Campaign: ptr("launch")}})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var made billing.Order
+		require.NoError(t, json.Unmarshal(raw, &made))
+		kept := checkoutOf(t, a, made.ID).Attribution
+		require.Nil(t, kept.Source)
+		require.Equal(t, "launch", *kept.Campaign)
+
 		app, err := a.alphaRemote.CreateOrder(t.Context(), "funnel-attribution-app", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: merchantPrice.ID}},
-			Attribution: &billing.OrderAttribution{Affiliate: ptr("reseller-1"), Referrer: ptr("partner.example.org")}})
+			Attribution: &billing.OrderAttribution{Affiliate: ptr("reseller-1"), Referrer: ptr("partner_shop.example.org:8443/landing")}})
 		require.NoError(t, err)
 		require.Equal(t, "reseller-1", *app.Checkout.Attribution.Affiliate)
-		require.Equal(t, "partner.example.org", *app.Checkout.Attribution.Referrer)
+		require.Equal(t, "partner_shop.example.org", *app.Checkout.Attribution.Referrer)
 		require.Nil(t, app.Checkout.Attribution.Source)
 
-		for param, bad := range map[string]billing.OrderAttribution{
-			"attribution.source":    {Source: ptr(strings.Repeat("a", 101))},
-			"attribution.medium":    {Medium: ptr("line\nbreak")},
-			"attribution.campaign":  {Campaign: ptr("alice@example.com")},
-			"attribution.affiliate": {Affiliate: ptr("4242424242424242")},
-			"attribution.referrer":  {Referrer: ptr("not a host/path")},
+		// Each of these is left out; the rest of the order stands.
+		for i, bad := range []billing.OrderAttribution{
+			{Source: ptr(strings.Repeat("a", 101))},
+			{Medium: ptr("line\nbreak")},
+			{Medium: ptr("zero\u200bwidth")},
+			{Medium: ptr("bidi\u202eflip")},
+			{Campaign: ptr("alice@example.com")},
+			{Campaign: ptr("alice\uff20example.com")},
+			{Campaign: ptr("alice\ufe6bexample.com")},
+			{Campaign: ptr("alice%40example.com")},
+			{Campaign: ptr("alice%2540example.com")},
+			{Affiliate: ptr("4242424242424242")},
+			{Affiliate: ptr("4242.4242.4242.4242")},
+			{Affiliate: ptr("4242/4242/4242/4242")},
+			{Affiliate: ptr("\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12")},
+			{Referrer: ptr("https://[2001:db8::1]/")},
+			{Referrer: ptr("https://exa%zzmple.com/")},
+			{Referrer: ptr("not a host")},
 		} {
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: merchantPrice.ID}}, Attribution: &bad})
-			require.Equal(t, http.StatusBadRequest, status, string(raw))
-			require.Contains(t, string(raw), "invalid_param")
-			require.Contains(t, string(raw), param)
+			bad.Source = coalesce(bad.Source, ptr("kept"))
+			made, err := a.alphaRemote.CreateOrder(t.Context(), "funnel-attribution-bad-"+string(rune('a'+i)), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: merchantPrice.ID}}, Attribution: &bad})
+			require.NoError(t, err, "case %d", i)
+			got := made.Checkout.Attribution
+			for _, field := range []*string{got.Medium, got.Campaign, got.Referrer, got.Affiliate} {
+				require.Nil(t, field, "case %d is left out", i)
+			}
+			if i == 0 {
+				require.Nil(t, got.Source)
+			} else {
+				require.Equal(t, "kept", *got.Source, "case %d keeps the other fields", i)
+			}
 		}
+		require.Equal(t, "50%off", *firstCampaign(t, a, customer, merchantPrice.ID, "50%off"), "a lone % stays as written")
 	})
 	t.Run("OR-J47-S09/an-unpaid-checkout-keeps-its-facts-for-397-days", func(t *testing.T) {
-		a, _ := newPaymentWorld(t, trustLoopback)
+		a, _ := newPaymentWorld(t, cloudflareLoopback)
 		w := a.world
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 		_, price := publicSale(t, a, "funnel-retained", 9_990_000, nil)
-		order := openCheckout(t, a, price.ID, &billing.OrderAttribution{Campaign: ptr("retained")}, map[string]string{"CF-IPCountry": "JP", "Accept-Language": "ja"})
+		order := openCheckout(t, a, price.ID, &billing.OrderAttribution{Campaign: ptr("retained")}, map[string]string{"CF-IPCountry": "JP", "X-Forwarded-For": "203.0.113.81", "Accept-Language": "ja"})
 		status, raw := a.request(t, http.MethodGet, "/v1/me/orders/"+order.ID.String(), a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		w.clock.Advance(25 * time.Hour)
@@ -277,4 +363,54 @@ func TestCheckoutFunnel(t *testing.T) {
 		_, err := a.alpha.GetOrder(t.Context(), order.ID)
 		require.ErrorIs(t, err, billing.ErrNotFound, "397 days after it closed it is gone")
 	})
+	t.Run("OR-J47-S08/renewals-name-the-checkout-that-bought-their-subscription", func(t *testing.T) {
+		a, p := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) }, cloudflareLoopback)
+		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "funnel-membership", DisplayName: "Membership", Entitlements: []string{"membership:paid"}})
+		require.NoError(t, err)
+		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "funnel-membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
+		require.NoError(t, err)
+		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+			Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}, Attribution: &billing.OrderAttribution{Campaign: ptr("renewals")}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "funnel-membership", "CF-IPCountry": "SE", "X-Forwarded-For": "203.0.113.80"})
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var bought billing.Order
+		require.NoError(t, json.Unmarshal(raw, &bought))
+		require.Equal(t, billing.OrderComplete, bought.Status)
+		require.NotNil(t, bought.Lines[0].SubscriptionID)
+		sub, err := a.alpha.GetSubscription(t.Context(), *bought.Lines[0].SubscriptionID)
+		require.NoError(t, err)
+
+		due := *sub.CurrentPeriodEndsAt
+		a.clock.Advance(due.Sub(a.clock.Now()))
+		fleet := startFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		renewalSettled(t, a, p, sub, due)
+		bills, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{SubscriptionID: sub.ID})
+		require.NoError(t, err)
+		require.Len(t, bills.Items, 1)
+		renewal := bills.Items[0]
+		require.Equal(t, billing.OrderOriginSubscription, renewal.Origin)
+		require.Nil(t, renewal.Checkout, "a renewal is not a checkout")
+		require.NotNil(t, renewal.Renewal.CheckoutOrderID)
+		require.Equal(t, bought.ID, *renewal.Renewal.CheckoutOrderID)
+		checkout := checkoutOf(t, a, *renewal.Renewal.CheckoutOrderID)
+		require.Equal(t, "SE", *checkout.Country)
+		require.Equal(t, "renewals", *checkout.Attribution.Campaign)
+	})
+}
+
+func coalesce(v, fallback *string) *string {
+	if v != nil {
+		return v
+	}
+	return fallback
+}
+
+// firstCampaign is the campaign a new merchant order of price keeps.
+func firstCampaign(t *testing.T, a *authorityWorld, customer billing.CustomerID, price billing.PriceID, campaign string) *string {
+	t.Helper()
+	made, err := a.alphaRemote.CreateOrder(t.Context(), "funnel-campaign-"+campaign, billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price}},
+		Attribution: &billing.OrderAttribution{Campaign: &campaign}})
+	require.NoError(t, err)
+	return made.Checkout.Attribution.Campaign
 }

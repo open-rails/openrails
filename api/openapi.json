@@ -21877,13 +21877,24 @@
           "due_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "checkout_order_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "subscription_id",
           "period_starts_at",
           "period_ends_at",
-          "due_at"
+          "due_at",
+          "checkout_order_id"
         ]
       },
       "OrderUsage": {

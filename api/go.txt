@@ -217,6 +217,7 @@ pkg openrails, type Config struct
 pkg openrails, type Config struct, Captcha *CaptchaConfig
 pkg openrails, type Config struct, CardVault *CardVaultConfig
 pkg openrails, type Config struct, CheckoutOrigin string
+pkg openrails, type Config struct, CloudflareProxies []string
 pkg openrails, type Config struct, Database DatabaseConfig
 pkg openrails, type Config struct, DestructiveActionLimits DestructiveActionLimitsConfig
 pkg openrails, type Config struct, EngineAdmissionHold bool
@@ -3029,6 +3030,7 @@ pkg openrails/billing, type OrderProviderBill struct, Reference string `json:"re
 pkg openrails/billing, type OrderProviderBill struct, SettledAt *time.Time `json:"settled_at"`
 pkg openrails/billing, type OrderProviderBill struct, SettlementSource *string `json:"settlement_source"`
 pkg openrails/billing, type OrderRenewal struct
+pkg openrails/billing, type OrderRenewal struct, CheckoutOrderID *OrderID `json:"checkout_order_id"`
 pkg openrails/billing, type OrderRenewal struct, DueAt time.Time `json:"due_at"`
 pkg openrails/billing, type OrderRenewal struct, PeriodEndsAt time.Time `json:"period_ends_at"`
 pkg openrails/billing, type OrderRenewal struct, PeriodStartsAt time.Time `json:"period_starts_at"`

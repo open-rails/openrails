@@ -25,7 +25,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial');
 
 -- name: MarkCheckoutOpened :execrows
--- The customer's first read of the open checkout in person.
+-- The customer's first read of the open checkout in person; a later read
+-- writes nothing.
 UPDATE billing.orders
 SET opened_at = sqlc.arg(now)::timestamptz,
     ip_country = COALESCE(ip_country, sqlc.narg(ip_country)::text),
@@ -35,20 +36,33 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz);
 
 -- name: MarkCheckoutSubmitted :execrows
--- A pay request on the checkout: the first is when it was submitted; the
--- latest billing country (the request's, else the saved card's) is kept.
+-- A pay request on the open checkout: the first is when it was submitted;
+-- the latest billing country (the request's, else the saved card's) is
+-- kept. Nothing is written when nothing would change.
+WITH asked AS (
+    SELECT COALESCE(sqlc.narg(billing_country)::text, (
+        SELECT CASE WHEN upper(pm.metadata->>'billing_country') ~ '^[A-Z]{2}$' THEN upper(pm.metadata->>'billing_country') END
+        FROM billing.payment_methods pm
+        WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = sqlc.arg(customer_id)::uuid AND pm.id = sqlc.narg(payment_method_id)::uuid
+    )) AS billing_country
+)
 UPDATE billing.orders o
 SET submitted_at = COALESCE(o.submitted_at, sqlc.arg(now)::timestamptz),
     opened_at = COALESCE(o.opened_at, sqlc.arg(now)::timestamptz),
     ip_country = COALESCE(o.ip_country, sqlc.narg(ip_country)::text),
     language = COALESCE(o.language, sqlc.narg(language)::text),
-    billing_country = COALESCE(sqlc.narg(billing_country)::text, (
-        SELECT CASE WHEN upper(pm.metadata->>'billing_country') ~ '^[A-Z]{2}$' THEN upper(pm.metadata->>'billing_country') END
-        FROM billing.payment_methods pm
-        WHERE pm.merchant_id = o.merchant_id AND pm.customer_id = o.customer_id AND pm.id = sqlc.narg(payment_method_id)::uuid
-    ), o.billing_country)
+    billing_country = COALESCE(asked.billing_country, o.billing_country)
+FROM asked
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(customer_id)::uuid AND o.id = sqlc.arg(id)::uuid
-  AND o.purchase_number IS NOT NULL;
+  AND o.purchase_number IS NOT NULL AND o.status = 'open'
+  AND (o.expires_at IS NULL OR o.expires_at > sqlc.arg(now)::timestamptz)
+  AND (o.submitted_at IS NULL OR (asked.billing_country IS NOT NULL AND asked.billing_country IS DISTINCT FROM o.billing_country));
+
+-- name: SetSubscriptionCheckout :execrows
+-- The checkout whose payment created the subscription, kept from the first.
+UPDATE billing.subscriptions
+SET checkout_order_id = sqlc.arg(order_id)::uuid
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND checkout_order_id IS NULL;
 
 -- name: GetOpenOrderByLines :one
 -- The customer's open order of these lines, expired or not.
@@ -111,9 +125,11 @@ SELECT * FROM billing.orders
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: LockOrder :one
+-- No key update: a bill's deferred check of the checkout it names (KEY
+-- SHARE) never waits on it.
 SELECT * FROM billing.orders
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-FOR UPDATE;
+FOR NO KEY UPDATE;
 
 -- name: GetOrderByIdempotencyKey :one
 -- The order a scoped create key made: unique per merchant, whichever customer

@@ -18,6 +18,7 @@ func EngineConfig(c *config.Config) openrails.Config {
 		PublicBillingBaseURL:    c.PublicBillingBaseURL,
 		ReturnOrigins:           c.ReturnOrigins,
 		TrustedProxies:          c.TrustedProxies,
+		CloudflareProxies:       c.CloudflareProxies,
 		CheckoutOrigin:          c.CheckoutOrigin,
 		Captcha:                 convert(c.Captcha, func(v config.CaptchaConfig) openrails.CaptchaConfig { return openrails.CaptchaConfig(v) }),
 		UserActionRateLimit:     openrails.UserActionRateLimitConfig(c.UserActionRateLimit),

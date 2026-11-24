@@ -113,5 +113,6 @@ func Degrade(cfg *Config) []Degradation {
 		return nil
 	})
 	cfg.TrustedProxies = keep("trusted_proxies", cfg.TrustedProxies, validateSourceCIDR)
+	cfg.CloudflareProxies = keep("cloudflare_proxies", cfg.CloudflareProxies, validateSourceCIDR)
 	return out
 }

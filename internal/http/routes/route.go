@@ -236,6 +236,9 @@ type Route struct {
 	// PayURL is what a pay URL's secret opens of the route on the
 	// checkout origin; none is not served there.
 	PayURL PayURLAccess
+	// SubmitsCheckout: the customer asks to pay the {id} checkout, which is
+	// recorded before any gate may refuse the request.
+	SubmitsCheckout bool
 
 	// Query is a zero value of the query's type, its parameters the type's
 	// `form` fields (wireform), nil for none; Request is a zero value of the

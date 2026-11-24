@@ -132,6 +132,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "orders" {
 			embeddedFromUIMode(p, r.Values)
 		}
+		// Subscriptions before checkout facts named no checkout.
+		if p.Name == "subscriptions" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, nil)
+		}
 		// Order lines before usage orders named no accrual source.
 		if p.Name == "order_lines" {
 			if len(r.Values) == len(p.Columns)-3 {

@@ -41,6 +41,10 @@ type Config struct {
 	// resolving a client's address. Empty trusts none: the socket peer is the
 	// client.
 	TrustedProxies []string
+	// CloudflareProxies are Cloudflare's ranges where Cloudflare fronts the
+	// origin: trusted like TrustedProxies, and the only proxies whose
+	// CF-IPCountry header is read.
+	CloudflareProxies []string
 	// CheckoutOrigin is the origin (https://pay.example.com) of the payment
 	// page, which Engine.CheckoutPage serves from Deps.CheckoutAssets. It is
 	// an origin of its own, apart from PublicBillingBaseURL and every
@@ -297,6 +301,7 @@ func engineConfig(cfg Config) config.Config {
 		PublicBillingBaseURL:    cfg.PublicBillingBaseURL,
 		ReturnOrigins:           cfg.ReturnOrigins,
 		TrustedProxies:          cfg.TrustedProxies,
+		CloudflareProxies:       cfg.CloudflareProxies,
 		CheckoutOrigin:          cfg.CheckoutOrigin,
 		Captcha:                 convert(cfg.Captcha, func(c CaptchaConfig) config.CaptchaConfig { return config.CaptchaConfig(c) }),
 		UserActionRateLimit:     config.UserActionRateLimitConfig(cfg.UserActionRateLimit),

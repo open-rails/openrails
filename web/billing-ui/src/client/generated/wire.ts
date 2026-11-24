@@ -1796,6 +1796,7 @@ export type OrderRenewal = {
   period_starts_at: string
   period_ends_at: string
   due_at: string
+  checkout_order_id: string | null
 }
 
 export type OrderUsage = {

@@ -1389,7 +1389,7 @@ func (q *Queries) ListOwnershipClaims(ctx context.Context, arg ListOwnershipClai
 const lockOrder = `-- name: LockOrder :one
 SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded, purchase_number, opened_at, submitted_at, billing_country, card_country, ip_country, language, attribution_source, attribution_medium, attribution_campaign, attribution_referrer, attribution_affiliate, checkout_order_id FROM billing.orders
 WHERE merchant_id = $1::uuid AND id = $2::uuid
-FOR UPDATE
+FOR NO KEY UPDATE
 `
 
 type LockOrderParams struct {
@@ -1397,6 +1397,8 @@ type LockOrderParams struct {
 	ID         uuid.UUID
 }
 
+// No key update: a bill's deferred check of the checkout it names (KEY
+// SHARE) never waits on it.
 func (q *Queries) LockOrder(ctx context.Context, arg LockOrderParams) (BillingOrder, error) {
 	row := q.db.QueryRow(ctx, lockOrder, arg.MerchantID, arg.ID)
 	var i BillingOrder
@@ -1483,7 +1485,8 @@ type MarkCheckoutOpenedParams struct {
 	ID         uuid.UUID
 }
 
-// The customer's first read of the open checkout in person.
+// The customer's first read of the open checkout in person; a later read
+// writes nothing.
 func (q *Queries) MarkCheckoutOpened(ctx context.Context, arg MarkCheckoutOpenedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markCheckoutOpened,
 		arg.Now,
@@ -1500,43 +1503,50 @@ func (q *Queries) MarkCheckoutOpened(ctx context.Context, arg MarkCheckoutOpened
 }
 
 const markCheckoutSubmitted = `-- name: MarkCheckoutSubmitted :execrows
+WITH asked AS (
+    SELECT COALESCE($7::text, (
+        SELECT CASE WHEN upper(pm.metadata->>'billing_country') ~ '^[A-Z]{2}$' THEN upper(pm.metadata->>'billing_country') END
+        FROM billing.payment_methods pm
+        WHERE pm.merchant_id = $4::uuid AND pm.customer_id = $5::uuid AND pm.id = $8::uuid
+    )) AS billing_country
+)
 UPDATE billing.orders o
 SET submitted_at = COALESCE(o.submitted_at, $1::timestamptz),
     opened_at = COALESCE(o.opened_at, $1::timestamptz),
     ip_country = COALESCE(o.ip_country, $2::text),
     language = COALESCE(o.language, $3::text),
-    billing_country = COALESCE($4::text, (
-        SELECT CASE WHEN upper(pm.metadata->>'billing_country') ~ '^[A-Z]{2}$' THEN upper(pm.metadata->>'billing_country') END
-        FROM billing.payment_methods pm
-        WHERE pm.merchant_id = o.merchant_id AND pm.customer_id = o.customer_id AND pm.id = $5::uuid
-    ), o.billing_country)
-WHERE o.merchant_id = $6::uuid AND o.customer_id = $7::uuid AND o.id = $8::uuid
-  AND o.purchase_number IS NOT NULL
+    billing_country = COALESCE(asked.billing_country, o.billing_country)
+FROM asked
+WHERE o.merchant_id = $4::uuid AND o.customer_id = $5::uuid AND o.id = $6::uuid
+  AND o.purchase_number IS NOT NULL AND o.status = 'open'
+  AND (o.expires_at IS NULL OR o.expires_at > $1::timestamptz)
+  AND (o.submitted_at IS NULL OR (asked.billing_country IS NOT NULL AND asked.billing_country IS DISTINCT FROM o.billing_country))
 `
 
 type MarkCheckoutSubmittedParams struct {
 	Now             time.Time
 	IpCountry       *string
 	Language        *string
-	BillingCountry  *string
-	PaymentMethodID *uuid.UUID
 	MerchantID      uuid.UUID
 	CustomerID      uuid.UUID
 	ID              uuid.UUID
+	BillingCountry  *string
+	PaymentMethodID *uuid.UUID
 }
 
-// A pay request on the checkout: the first is when it was submitted; the
-// latest billing country (the request's, else the saved card's) is kept.
+// A pay request on the open checkout: the first is when it was submitted;
+// the latest billing country (the request's, else the saved card's) is
+// kept. Nothing is written when nothing would change.
 func (q *Queries) MarkCheckoutSubmitted(ctx context.Context, arg MarkCheckoutSubmittedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markCheckoutSubmitted,
 		arg.Now,
 		arg.IpCountry,
 		arg.Language,
-		arg.BillingCountry,
-		arg.PaymentMethodID,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.ID,
+		arg.BillingCountry,
+		arg.PaymentMethodID,
 	)
 	if err != nil {
 		return 0, err
@@ -1809,6 +1819,27 @@ func (q *Queries) SetPaymentSubscription(ctx context.Context, arg SetPaymentSubs
 		arg.ID,
 	)
 	return err
+}
+
+const setSubscriptionCheckout = `-- name: SetSubscriptionCheckout :execrows
+UPDATE billing.subscriptions
+SET checkout_order_id = $1::uuid
+WHERE merchant_id = $2::uuid AND id = $3::uuid AND checkout_order_id IS NULL
+`
+
+type SetSubscriptionCheckoutParams struct {
+	OrderID    uuid.UUID
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// The checkout whose payment created the subscription, kept from the first.
+func (q *Queries) SetSubscriptionCheckout(ctx context.Context, arg SetSubscriptionCheckoutParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setSubscriptionCheckout, arg.OrderID, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const startOrderAttempt = `-- name: StartOrderAttempt :execrows

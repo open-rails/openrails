@@ -11,24 +11,38 @@ import (
 
 func TestCheckAttribution(t *testing.T) {
 	text := func(s string) *string { return &s }
-	got, err := CheckAttribution(&billing.OrderAttribution{Source: text(" ads "), Medium: text("  "), Referrer: text("https://Shop.Example.COM./p?q=1")})
-	require.NoError(t, err)
+	got, drops := CheckAttribution(&billing.OrderAttribution{Source: text(" ads "), Medium: text("  "), Campaign: text("spring%2D2026"), Referrer: text("https://Shop.Example.COM./p?q=1")})
+	require.Empty(t, drops)
 	require.Equal(t, "ads", *got.Source)
 	require.Nil(t, got.Medium, "blank is absent")
+	require.Equal(t, "spring-2026", *got.Campaign)
 	require.Equal(t, "shop.example.com", *got.Referrer)
-	got, err = CheckAttribution(&billing.OrderAttribution{Referrer: text("news.example.org")})
-	require.NoError(t, err)
-	require.Equal(t, "news.example.org", *got.Referrer)
-	for field, bad := range map[string]billing.OrderAttribution{
-		"attribution.source":    {Source: text(strings.Repeat("x", 101))},
-		"attribution.medium":    {Medium: text("a\tb")},
-		"attribution.campaign":  {Campaign: text("someone@example.com")},
-		"attribution.affiliate": {Affiliate: text("4111111111111111")},
-		"attribution.referrer":  {Referrer: text("https://[::1]/")},
+	got, drops = CheckAttribution(&billing.OrderAttribution{Referrer: text("partner_shop.example.org:8443/landing"), Campaign: text("50%off")})
+	require.Empty(t, drops)
+	require.Equal(t, "partner_shop.example.org", *got.Referrer)
+	require.Equal(t, "50%off", *got.Campaign, "a lone % stays as written")
+	for want, bad := range map[AttributionDrop]billing.OrderAttribution{
+		{"source", "too_long"}:         {Source: text(strings.Repeat("x", 101))},
+		{"medium", "unprintable"}:      {Medium: text("a\tb")},
+		{"source", "unprintable"}:      {Source: text("zero\u200bwidth")},
+		{"campaign", "unprintable"}:    {Campaign: text("bidi\u202eflip")},
+		{"campaign", "personal_data"}:  {Campaign: text("someone\uff20example.com")},
+		{"medium", "personal_data"}:    {Medium: text("someone\ufe6bexample.com")},
+		{"source", "personal_data"}:    {Source: text("someone%2540example.com")},
+		{"affiliate", "personal_data"}: {Affiliate: text("4242.4242.4242.4242")},
 	} {
-		_, err := CheckAttribution(&bad)
-		require.Error(t, err, field)
-		require.Contains(t, err.Error(), field)
+		kept, drops := CheckAttribution(&bad)
+		require.Equal(t, []AttributionDrop{want}, drops)
+		require.Equal(t, billing.OrderAttribution{}, kept, "%v leaves nothing", want)
+	}
+	for _, digits := range []string{"4242/4242/4242/4242", "\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12\uff14\uff12"} {
+		_, drops := CheckAttribution(&billing.OrderAttribution{Affiliate: text(digits)})
+		require.Equal(t, []AttributionDrop{{"affiliate", "personal_data"}}, drops, digits)
+	}
+	for _, host := range []string{"https://[2001:db8::1]/", "https://exa%zzmple.com/", "not a host"} {
+		kept, drops := CheckAttribution(&billing.OrderAttribution{Referrer: text(host), Source: text("kept")})
+		require.Equal(t, []AttributionDrop{{"referrer", "not_a_host"}}, drops, host)
+		require.Equal(t, "kept", *kept.Source)
 	}
 }
 

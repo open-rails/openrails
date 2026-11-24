@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,8 +32,8 @@ type Config struct {
 	// mounts are the engine's Config.Vault.
 	Vault *VaultLogin
 	// Proxies are trusted_proxies and cloudflare_proxies as written. The
-	// engine's TrustedProxies is both; AuthKit takes CF-Connecting-IP from
-	// Cloudflare's alone.
+	// engine trusts both and reads CF-IPCountry from Cloudflare's alone;
+	// AuthKit takes CF-Connecting-IP from Cloudflare's alone.
 	Proxies Proxies
 	// Auth is the auth section: AuthKit's configuration, by AuthKit's keys.
 	Auth authkit.Config
@@ -389,14 +388,14 @@ func (f *fileConfig) config() (*Config, error) {
 			LLM:                     f.LLM,
 			WebhookSecretOverlap:    f.WebhookSecretOverlap,
 			ReturnOrigins:           f.ReturnOrigins,
-			// Cloudflare's egress is a proxy like any other to the engine.
-			TrustedProxies:      append(slices.Clone(f.TrustedProxies), f.CloudflareProxies...),
-			CheckoutOrigin:      strings.TrimSpace(f.CheckoutOrigin),
-			ProviderSandbox:     f.ProviderSandbox,
-			Solana:              f.Solana,
-			HyperSwitch:         f.HyperSwitch,
-			CardVault:           f.CardVault,
-			EngineAdmissionHold: f.EngineAdmissionHold,
+			TrustedProxies:          f.TrustedProxies,
+			CloudflareProxies:       f.CloudflareProxies,
+			CheckoutOrigin:          strings.TrimSpace(f.CheckoutOrigin),
+			ProviderSandbox:         f.ProviderSandbox,
+			Solana:                  f.Solana,
+			HyperSwitch:             f.HyperSwitch,
+			CardVault:               f.CardVault,
+			EngineAdmissionHold:     f.EngineAdmissionHold,
 		},
 		DB:                       db,
 		Redis:                    redisSection(f.Redis),

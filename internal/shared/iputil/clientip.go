@@ -12,37 +12,50 @@ import (
 //
 // Empty trusts nothing: every resolution returns the socket peer. When the
 // peer is trusted, ClientIP walks X-Forwarded-For right-to-left past trusted
-// hops to the first untrusted address.
+// hops to the first untrusted address. Cloudflare's proxies are trusted too,
+// and theirs is the only CF-IPCountry read.
 type TrustedProxies struct {
-	nets []*net.IPNet
+	nets       []*net.IPNet
+	cloudflare []*net.IPNet
 }
 
-// ParseTrustedProxies builds a resolver from CIDR strings. Malformed entries
-// are skipped: config.Validate rejects them at boot.
-func ParseTrustedProxies(cidrs []string) *TrustedProxies {
-	tp := &TrustedProxies{}
+// ParseTrustedProxies builds a resolver from the trusted proxies' and
+// Cloudflare's CIDR strings. Malformed entries are skipped: config.Validate
+// rejects them at boot.
+func ParseTrustedProxies(trusted, cloudflare []string) *TrustedProxies {
+	tp := &TrustedProxies{cloudflare: parseCIDRs(cloudflare)}
+	tp.nets = append(parseCIDRs(trusted), tp.cloudflare...)
+	return tp
+}
+
+func parseCIDRs(cidrs []string) []*net.IPNet {
+	var out []*net.IPNet
 	for _, raw := range cidrs {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
 		}
 		if _, ipNet, err := net.ParseCIDR(raw); err == nil {
-			tp.nets = append(tp.nets, ipNet)
+			out = append(out, ipNet)
 		}
 	}
-	return tp
+	return out
 }
 
-func (t *TrustedProxies) trusts(ip net.IP) bool {
-	if t == nil || ip == nil {
+func contains(nets []*net.IPNet, ip net.IP) bool {
+	if ip == nil {
 		return false
 	}
-	for _, n := range t.nets {
+	for _, n := range nets {
 		if n.Contains(ip) {
 			return true
 		}
 	}
 	return false
+}
+
+func (t *TrustedProxies) trusts(ip net.IP) bool {
+	return t != nil && contains(t.nets, ip)
 }
 
 // ClientIP returns r's real client IP. Every X-Forwarded-For line counts,
@@ -54,10 +67,11 @@ func (t *TrustedProxies) ClientIP(r *http.Request) string {
 	return t.resolve(r.RemoteAddr, strings.Join(r.Header.Values("X-Forwarded-For"), ","))
 }
 
-// Country is the client's ISO country code from a trusted proxy's
-// CF-IPCountry header, or "" when the peer is untrusted or the country unknown.
+// Country is the client's ISO country code from the CF-IPCountry header of
+// the Cloudflare proxy the client connected to, or "" when no Cloudflare
+// proxy received the client or the country is unknown.
 func (t *TrustedProxies) Country(r *http.Request) string {
-	if !t.trusts(net.ParseIP(hostOnly(r.RemoteAddr))) {
+	if t == nil || !contains(t.cloudflare, t.receiver(r.RemoteAddr, strings.Join(r.Header.Values("X-Forwarded-For"), ","))) {
 		return ""
 	}
 	country := strings.ToUpper(strings.TrimSpace(r.Header.Get("CF-IPCountry")))
@@ -81,6 +95,24 @@ func (t *TrustedProxies) ForwardedHTTPS(r *http.Request) bool {
 		}
 	}
 	return true
+}
+
+// receiver is the trusted proxy the client connected to, walking as resolve
+// does; nil when the peer is the client or every hop is trusted.
+func (t *TrustedProxies) receiver(remoteAddr, forwardedFor string) net.IP {
+	peer := net.ParseIP(hostOnly(remoteAddr))
+	if !t.trusts(peer) {
+		return nil
+	}
+	hops := splitForwardedFor(forwardedFor)
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop := net.ParseIP(hops[i])
+		if !t.trusts(hop) {
+			return peer
+		}
+		peer = hop
+	}
+	return nil
 }
 
 // resolve walks forwardedFor, the joined X-Forwarded-For hops, back from

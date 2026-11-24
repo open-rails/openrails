@@ -319,7 +319,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Clock:         clock,
 		// #746: one proxy-aware client-IP resolver, built once from config;
 		// empty yields a resolver that trusts nothing.
-		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies),
+		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies, cfg.CloudflareProxies),
 		RailConfigs:    railConfigs,
 
 		SubscriptionService:      serviceInstances.SubscriptionService,
