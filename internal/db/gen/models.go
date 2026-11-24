@@ -163,6 +163,26 @@ type BillingCatalogRestoreReceipt struct {
 	RestoredAt time.Time
 }
 
+// Configuration history: each change to a catalog object (product, price, meter, limit) or a configuration document (merchant, psp, custodian), who made it and how. A catalog entry commits with its change; a configuration entry is written when OpenRails writes the document, or when a load finds a change made outside it. Credentials are never recorded. Nothing on a billing path reads it. Retention: permanent, never pruned.
+type BillingChangeLog struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	OccurredAt time.Time
+	// staff:<invoker>, customer:<invoker>, provider:<rail>, or system, file or vault where no person acted.
+	Actor      string
+	Source     string
+	ObjectType string
+	// The object's key: product:price for a price, the merchant id for the merchant document.
+	ObjectID string
+	Action   string
+	// The changed fields' values before and after, versioned per action; a credential reads "changed".
+	Changes   []byte
+	Reason    *string
+	RequestID *string
+	// The operation the change belongs to, when one names it.
+	OperationID *uuid.UUID
+}
+
 // Custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds, whose configuration (settings, credentials, archived) is the custodian document in a file or Vault; or, kind platform, the merchant's partition of the deployment's platform vault, which the engine records and no document configures. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID

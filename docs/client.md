@@ -225,6 +225,9 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `ListCustodians`, `SetCustodian` | card custodians (Basis Theory) a PSP charges through (`SetCustodianParams`) |
 | `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha |
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
+| `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
+
+Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when.
 
 A merchant document, as `Config.Merchants` reads it and the server's manifest
 nests under `merchants.<slug>`, with one PSP on each rail:

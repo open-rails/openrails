@@ -930,6 +930,19 @@ func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing
 	return &out, nil
 }
 
+// ListChanges lists the merchant's configuration history, newest first: each
+// change to a product, price, meter or limit and to the merchant, PSP and
+// custodian documents, with who made it and how. A credential reads
+// "changed", never its value. ObjectType and ObjectID narrow it to one
+// object, Since and Until to a time range.
+func (c *Client) ListChanges(ctx context.Context, params billing.LogListParams) (*billing.ListPage[billing.LogEntry], error) {
+	var out billing.ListPage[billing.LogEntry]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/changes", query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ListAlertWebhooks returns where the merchant's operational alerts are
 // posted.
 func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebhookListParams) (*billing.ListPage[billing.AlertWebhook], error) {

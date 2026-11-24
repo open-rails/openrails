@@ -1381,6 +1381,20 @@ export type LinkPSPImportParams = {
   prices?: PSPImportPriceLink[]
 }
 
+export type LogEntry = {
+  id: string
+  occurred_at: string
+  actor: "file" | "system" | "vault"
+  source: "api" | "catalog_apply" | "cli" | "console" | "customer" | "intent" | "job" | "provider_read" | "reload" | "webhook"
+  object_type: "custodian" | "limit" | "merchant" | "meter" | "price" | "product" | "psp"
+  object_id: string
+  action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "unarchive" | "update"
+  changes: unknown | null
+  reason: string | null
+  request_id: string | null
+  operation_id: string | null
+}
+
 export type LowBalanceLine = {
   currency: string
   amount: string | null

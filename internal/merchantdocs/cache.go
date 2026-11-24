@@ -43,6 +43,7 @@ type Cache struct {
 
 	mu             sync.Mutex
 	reconcile      SyncFunc
+	record         RecordFunc
 	announce       func(context.Context, billing.MerchantID) error
 	entries        map[billing.MerchantID]*entry
 	admissions     *destructive.Admissions
@@ -295,17 +296,26 @@ func (c *Cache) write(ctx context.Context, id billing.MerchantID, put func() err
 
 // PutMerchant writes the merchant document at revision cas.
 func (c *Cache) PutMerchant(ctx context.Context, id billing.MerchantID, doc Merchant, cas int64) (Set, error) {
-	return c.admittedWrite(ctx, id, MerchantDoc, doc, cas, func() error { _, err := c.source.PutMerchant(ctx, id, doc, cas); return err })
+	return c.admittedWrite(ctx, id, MerchantDoc, doc, cas, func() (int64, error) {
+		written, err := c.source.PutMerchant(ctx, id, doc, cas)
+		return written.Revision, err
+	})
 }
 
 // PutPSP writes one PSP document at revision cas.
 func (c *Cache) PutPSP(ctx context.Context, id billing.MerchantID, key string, doc PSP, cas int64) (Set, error) {
-	return c.admittedWrite(ctx, id, PSPDoc(key), doc, cas, func() error { _, err := c.source.PutPSP(ctx, id, key, doc, cas); return err })
+	return c.admittedWrite(ctx, id, PSPDoc(key), doc, cas, func() (int64, error) {
+		written, err := c.source.PutPSP(ctx, id, key, doc, cas)
+		return written.Revision, err
+	})
 }
 
 // PutCustodian writes one custodian document at revision cas.
 func (c *Cache) PutCustodian(ctx context.Context, id billing.MerchantID, key string, doc Custodian, cas int64) (Set, error) {
-	return c.admittedWrite(ctx, id, CustodianDoc(key), doc, cas, func() error { _, err := c.source.PutCustodian(ctx, id, key, doc, cas); return err })
+	return c.admittedWrite(ctx, id, CustodianDoc(key), doc, cas, func() (int64, error) {
+		written, err := c.source.PutCustodian(ctx, id, key, doc, cas)
+		return written.Revision, err
+	})
 }
 
 // Delete removes every document of the merchant.

@@ -22,6 +22,14 @@ var merchantRoutes = []Route{
 			"merchant configuration held in Vault: a configuration read from a file is read-only.",
 		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("card_vault_unknown", "charge_psp_incompatible", "charge_psp_unknown", "invalid_param", "merchant_unit_unsupported", "platform_vault_mixed_class", "platform_vault_unavailable", "platform_vault_unreachable", "resource_conflict", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
 
+	// What changed in the catalog and the configuration, and who changed it.
+	{Method: GET, Path: "/v1/merchant/changes", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListChanges",
+		Doc: "ListChanges lists the merchant's configuration history, newest first: each change to a product, price, " +
+			"meter or limit and to the merchant, PSP and custodian documents, with who made it and how. A credential " +
+			"reads \"changed\", never its value. ObjectType and ObjectID narrow it to one object, Since and Until to a " +
+			"time range.",
+		Query: billing.LogListParams{}, Responses: []Reply{{200, billing.ListPage[billing.LogEntry]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListChanges)},
+
 	// Where the merchant's operational alerts are posted.
 	{Method: GET, Path: "/v1/merchant/alert-webhooks", Group: MerchantConfig, Level: LevelRead, Auth: AuthMerchant, Name: "ListAlertWebhooks",
 		Doc:   "ListAlertWebhooks returns where the merchant's operational alerts are posted.",
