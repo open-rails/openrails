@@ -340,7 +340,7 @@ func TestRoutePermissions(t *testing.T) {
 		iw.await(t, imp.ID, billing.PSPImportApplied)
 		applied, err := iw.alpha.GetFinding(t.Context(), correct.ID)
 		require.NoError(t, err)
-		require.NotNil(t, applied.Resolution, "the apply left the correction open; notes %v, evidence %v", applied.Notes, applied.Evidence)
+		require.NotNil(t, applied.Resolution, "the apply left the correction open; notes %q, evidence %v", deref(applied.Notes), applied.Evidence)
 		require.Equal(t, "approved", *applied.Resolution)
 	})
 	t.Run("OR-J01-S25/an-approval-is-one-operation-however-many-changes-it-carries", func(t *testing.T) {
