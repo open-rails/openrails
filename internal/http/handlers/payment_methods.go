@@ -316,9 +316,6 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 		Email:        details.Email,
 		Metadata:     details.metadata(),
 	}
-	if e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID")); e2eRunID != "" {
-		create.Metadata["e2e_run_id"] = e2eRunID
-	}
 
 	pm, err := r.State.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, create)
 	if err != nil {

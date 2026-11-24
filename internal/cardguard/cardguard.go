@@ -19,6 +19,7 @@ const (
 //     an identifier's digit groups always do.
 //  3. Luhn: the check digit passes.
 //  4. Range: its leading digits and length are an issued range (issuedRange).
+//  5. Not a phone: a run directly after a + (E.164) starts none.
 //
 // Rules 1 and 2 exclude UUIDs exactly; rule 4 excludes 13/16/19-digit epoch
 // keys starting with 1. An unseparated 13-19 digit run is a candidate wherever
@@ -31,6 +32,9 @@ func ContainsPAN(s string) bool {
 	digits := make([]byte, 0, maxPANDigits)
 	lens := make([]int, 0, maxPANDigits)
 	for i := range groups {
+		if groups[i].plusBefore {
+			continue
+		}
 		digits, lens = digits[:0], lens[:0]
 		for j := i; j < len(groups); j++ {
 			if j > i && !groups[j].joined {
@@ -58,12 +62,14 @@ func ContainsPAN(s string) bool {
 }
 
 // digitGroup is one run of digits, whether card formatting — and nothing else —
-// separated it from the run before it, and whether a letter butts against it.
+// separated it from the run before it, whether a letter butts against it, and
+// whether a + opens it.
 type digitGroup struct {
 	digits       []byte
 	joined       bool
 	letterBefore bool
 	letterAfter  bool
+	plusBefore   bool
 }
 
 func digitGroups(s string) []digitGroup {
@@ -85,6 +91,7 @@ func digitGroups(s string) []digitGroup {
 		group.joined = len(out) > 0 && isCardFormatting(s[gap:start])
 		group.letterBefore = start > 0 && isLetter(s[start-1])
 		group.letterAfter = i < len(s) && isLetter(s[i])
+		group.plusBefore = start > 0 && s[start-1] == '+'
 		out = append(out, group)
 		gap = i
 	}
