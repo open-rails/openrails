@@ -99,7 +99,7 @@ func (f *fakeSync) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func (f *fakeSync) client(t *testing.T) *Client {
 	t.Helper()
-	remote, err := NewRemote("http://openrails.test", RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{f.merchant: {APIKey: "test-key"}}, HTTPClient: &http.Client{Transport: f}})
+	remote, err := NewRemote("https://openrails.test", RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{f.merchant: {APIKey: "test-key"}}, HTTPClient: &http.Client{Transport: f}})
 	if err != nil {
 		t.Fatal(err)
 	}

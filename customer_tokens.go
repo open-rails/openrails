@@ -23,6 +23,7 @@ import (
 	jwt "github.com/golang-jwt/jwt/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // A customer token is minted in two steps (RFC 7523): the merchant's backend
@@ -116,6 +117,11 @@ func (c *Client) customerToken(ctx context.Context, params billing.CustomerToken
 	if err := json.Unmarshal(raw, &granted); err != nil || granted.AccessToken == "" || granted.ExpiresIn <= 0 {
 		return nil, fmt.Errorf("%w: the token endpoint answered no access token", billing.ErrUnreachable)
 	}
+	// RFC 6749 §7.1: the type is case-insensitive. A DPoP token is usable
+	// only with the proof it was bound to.
+	if !strings.EqualFold(granted.TokenType, "Bearer") && !(strings.EqualFold(granted.TokenType, "DPoP") && req.Header.Get("DPoP") != "") {
+		return nil, fmt.Errorf("%w: the token endpoint answered token_type %q, not Bearer", billing.ErrUnreachable, granted.TokenType)
+	}
 	return &billing.CustomerToken{
 		AccessToken: granted.AccessToken, TokenType: granted.TokenType,
 		ExpiresAt: requested.Add(time.Duration(granted.ExpiresIn) * time.Second),
@@ -162,9 +168,8 @@ func (k *AssertionKey) validate() error {
 	if _, err := assertionMethod(k.Signer); err != nil {
 		return err
 	}
-	u, err := url.Parse(k.TokenURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("Assertion.TokenURL %q must be the token endpoint's absolute http or https URL", k.TokenURL)
+	if err := config.ValidatePublicURL(k.TokenURL, true, false); err != nil {
+		return fmt.Errorf("Assertion.TokenURL %q must be the token endpoint's absolute https URL (http only on a loopback host)", k.TokenURL)
 	}
 	return nil
 }

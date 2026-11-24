@@ -33,7 +33,8 @@ db:
   # Merchant isolation is per-query merchant predicates, not login flags.
   username: app
   password: app_password
-  sslmode: disable
+  sslmode: disable # local compose only; unset is verify-full, or require on loopback
+  # sslrootcert: /etc/openrails/db-ca.pem # the CAs that verify the database; unset, the system roots
 
 database:
   schema: billing # every OpenRails table lives here; defaults to 'billing' (env DATABASE_SCHEMA)
@@ -68,8 +69,9 @@ auth:
   registration:
     allow_missing_senders: true # no email delivery in this local example
   http:
-    # Declare only when AuthKit receives direct client connections. Behind
-    # proxies, the top-level trusted_proxies apply.
+    # Optional: AuthKit's client IP follows the top-level trusted_proxies and
+    # cloudflare_proxies (the socket peer when both are empty); beside either,
+    # true refuses boot.
     direct_peer_ip: true
   # database:
   #   schema: profiles # the server's AuthKit tables

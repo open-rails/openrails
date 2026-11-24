@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 462,
+  "scenario_count": 476,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1104,6 +1104,11 @@
       "name": "Merchant customer reads retain billing state without hosted account-link storage"
     },
     {
+      "id": "OR-J07-S06",
+      "journey": "J07",
+      "name": "A provisioning token declared by a second merchant is refused and provisions only its holder"
+    },
+    {
       "id": "OR-J01-S12",
       "journey": "J01",
       "name": "Existing customer proof is read-only and never enrolls or requires recent sign-in"
@@ -1129,6 +1134,21 @@
       "name": "Host customer admission policy preserves original proof and fixed billing scope ceilings"
     },
     {
+      "id": "OR-J01-S17",
+      "journey": "J01",
+      "name": "Personal access token reads as its customer and holds its permissions but never pays or takes a person-only action"
+    },
+    {
+      "id": "OR-J01-S18",
+      "journey": "J01",
+      "name": "Merchant tenant binding adopts with its group in one transaction, replays as a no-op, refuses another tenant and never changes"
+    },
+    {
+      "id": "OR-J01-S19",
+      "journey": "J01",
+      "name": "A customer route refuses a signed-in account of another tenant than its merchant's binding"
+    },
+    {
       "id": "OR-J22-S05",
       "journey": "J22",
       "name": "Recurring $20 payments grant 25 service credits once per paid cycle with independent expiry and cash-limited refunds"
@@ -1142,6 +1162,11 @@
       "id": "OR-J10-S05",
       "journey": "J10",
       "name": "Exact payment key reads its own retained outcome without attributing another payment"
+    },
+    {
+      "id": "OR-J10-S06",
+      "journey": "J10",
+      "name": "A card save retried with its Idempotency-Key answers the first saved card; other terms under the key are refused"
     },
     {
       "id": "OR-J10-S07",
@@ -1884,6 +1909,11 @@
       "name": "An import queues, with its own commit, the one read of the charges it attributed"
     },
     {
+      "id": "OR-J21-S61",
+      "journey": "J21",
+      "name": "An imported purchase line whose list total leaves int64 is refused without a payment"
+    },
+    {
       "id": "OR-J06-S60",
       "journey": "J06",
       "name": "A boot reconciles a Stripe webhook endpoint only when its configuration changed"
@@ -2007,6 +2037,11 @@
       "id": "OR-J27-S14",
       "journey": "J27",
       "name": "A purchase after a cached entitlement check is visible on the next check"
+    },
+    {
+      "id": "OR-J27-S15",
+      "journey": "J27",
+      "name": "A product-access grant requires an Idempotency-Key and a retry under it grants once"
     },
     {
       "id": "OR-J04-S42",
@@ -2312,6 +2347,41 @@
       "id": "OR-J39-S25",
       "journey": "J39",
       "name": "A staff refund OpenRails completes more than a week after it was asked sends its receipt"
+    },
+    {
+      "id": "OR-J43-S01",
+      "journey": "J43",
+      "name": "A catalog edit and its history entry commit together, and a refused edit rolls both back"
+    },
+    {
+      "id": "OR-J43-S02",
+      "journey": "J43",
+      "name": "A catalog document records one entry for each object it changes, with its revision and application; a replay records nothing and a removed key is recorded"
+    },
+    {
+      "id": "OR-J43-S03",
+      "journey": "J43",
+      "name": "A configuration change through the API is recorded with its actor, and a credential only as changed, never its value"
+    },
+    {
+      "id": "OR-J43-S04",
+      "journey": "J43",
+      "name": "A Vault document written outside OpenRails is recorded once as Vault's when several replicas load it, and an edited file once as the file's however many processes start on it"
+    },
+    {
+      "id": "OR-J43-S05",
+      "journey": "J43",
+      "name": "The configuration history lists one merchant's entries newest first, by object and time, a page at a time, to merchant configuration readers only"
+    },
+    {
+      "id": "OR-J43-S06",
+      "journey": "J43",
+      "name": "A product's revision shows on its reads, advances on a key change and never on a price change, and its entries carry it"
+    },
+    {
+      "id": "OR-J43-S07",
+      "journey": "J43",
+      "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
     }
   ]
 }

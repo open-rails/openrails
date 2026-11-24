@@ -751,8 +751,9 @@ func stepUnmovedRevisions(ctx context.Context, q *gen.Queries, merchantID uuid.U
 }
 
 // recordCatalogEdit makes the edit manager the owner of every field the
-// write changed: the document no longer holds them.
-func (s *Service) recordCatalogEdit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, before, after catalogState) error {
+// write changed: the document no longer holds them. It returns each changed
+// object's revision after.
+func (s *Service) recordCatalogEdit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, before, after catalogState) (map[catalogObject]int64, error) {
 	d := diffCatalogState(before, after)
 	var w catalogOwnerWrites
 	for obj, fields := range d.changed {
@@ -761,10 +762,11 @@ func (s *Service) recordCatalogEdit(ctx context.Context, q *gen.Queries, merchan
 		}
 	}
 	w.release, w.gone = w.take, d.gone
-	if _, err := stepUnmovedRevisions(ctx, q, merchantID, before, after, d); err != nil {
-		return err
+	revisions, err := stepUnmovedRevisions(ctx, q, merchantID, before, after, d)
+	if err != nil {
+		return nil, err
 	}
-	return w.write(ctx, q, merchantID, catalogManagerEdit, editActor(ctx), s.now().UTC())
+	return revisions, w.write(ctx, q, merchantID, catalogManagerEdit, editActor(ctx), s.now().UTC())
 }
 
 // errRevisionMismatch refuses an edit whose object moved past the revision

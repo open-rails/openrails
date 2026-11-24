@@ -843,6 +843,12 @@
     },
     {
       "method": "GET",
+      "path": "/v1/merchant/changes",
+      "auth": "merchant",
+      "feature": ""
+    },
+    {
+      "method": "GET",
       "path": "/v1/merchant/configuration",
       "auth": "merchant",
       "feature": ""

@@ -159,21 +159,13 @@ Checks:
 - OR-J08-S01: cart and preview return literal line totals.
 
 ### 4. Access control and tenant isolation
-`/v1/me` routes act on the scope's customer (`orderActor`); another customer's
-order is not found (`GetForCustomer`). Paying needs the customer in person
-(`customer_action_required`); a customer's pay URL needs the merchant's own
-signed-in person (`signedInPerson`, `customer_session_required`). `/v1/app/orders`
-routes require `merchant:orders:manage` or `root:orders:manage` (`needOrders`);
-staff routes take the customer-support pair by `Level`. A pay URL secret (credential
-kind `pay_url`) works only on the checkout origin. Order queries name `merchant_id`;
-directory reads before a merchant is pinned (`ResolveOrderPayURLMerchant`,
-`GetOrderMerchant`, `ListOrderExpiryMerchants`, `DeleteExpiredCarts`) span
-merchants by design, and a lookup matching two answers nothing.
+`/v1/me` routes act on the scope's customer (`orderActor`); another customer's order is not found (`GetForCustomer`). Paying needs the customer in person (`billingauth.Interactive`: a session, device key, access token or pay URL of the customer itself; never an API key or personal access token), else `customer_action_required`; a customer's pay URL needs the merchant's own signed-in person (`signedInPerson`, `customer_session_required`). `/v1/app/orders` routes require `merchant:orders:manage` or `root:orders:manage` (`needOrders`); staff routes take the customer-support pair by `Level`. A pay URL secret (credential kind `pay_url`) works only on the checkout origin. Order queries name `merchant_id`; directory reads before a merchant is pinned (`ResolveOrderPayURLMerchant`, `GetOrderMerchant`, `ListOrderExpiryMerchants`, `DeleteExpiredCarts`) span merchants by design, and a lookup matching two answers nothing.
 
 Checks:
 - Each `/v1/app` route in `internal/http/routes/orders.go` has `Permission: needOrders`.
 - `payURLScope` refuses another order's `{id}` and saved cards the URL does not offer.
 - OR-J03-S01 to S03: a secret pays its order only; API and checkout authority stay apart.
+- OR-J01-S17: a personal access token reads the order but cannot pay it; the session pays.
 
 ### 5. Contracts match the code
 Every route is declared once in the route catalog; admin and app routes carry the

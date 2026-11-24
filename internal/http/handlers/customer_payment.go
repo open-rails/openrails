@@ -27,8 +27,8 @@ func customerActionPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 }
 
 // customerInitiatedChargeAllowed refuses a customer-initiated charge unless
-// the customer acts in person: not an invoker, an application or a key
-// automating the account.
+// the customer acts in person (billingauth.Interactive): not an invoker, an
+// application, or a key or personal access token automating the account.
 func customerInitiatedChargeAllowed(r *httprequest.Request) bool {
 	scope, ok := r.CustomerScope()
 	if !ok {

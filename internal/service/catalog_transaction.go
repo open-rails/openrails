@@ -102,14 +102,14 @@ func catalogLocked[T any](ctx context.Context, s *Service, writes bool, fn func(
 				return errCatalogSnapshotMoved
 			}
 		}
+		var revisions map[catalogObject]int64
 		if !scoped.catalogApplying {
-			after, err := readCatalogState(ctx, q, mid.UUID())
-			if err != nil {
+			if revisions, err = scoped.recordCatalogEdit(ctx, q, mid.UUID(), scoped.catalogBefore, after); err != nil {
 				return err
 			}
-			if err := scoped.recordCatalogEdit(ctx, q, mid.UUID(), scoped.catalogBefore, after); err != nil {
-				return err
-			}
+		}
+		if err := scoped.recordCatalogHistory(ctx, q, mid.UUID(), after, revisions); err != nil {
+			return err
 		}
 		if err := refuseNewBenefitOverlap(ctx, q, mid.UUID(), before); err != nil {
 			return err

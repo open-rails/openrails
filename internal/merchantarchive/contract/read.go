@@ -236,7 +236,7 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
-var addedTables = map[string]bool{"catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
+var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
 	"usage_daily": true, "usage_accruals": true}
 
 // usageRenames are the tables usage orders renamed.

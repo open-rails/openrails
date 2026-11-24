@@ -225,6 +225,9 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `ListCustodians`, `SetCustodian` | card custodians (Basis Theory) a PSP charges through (`SetCustodianParams`) |
 | `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha |
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
+| `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
+
+Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when.
 
 A merchant document, as `Config.Merchants` reads it and the server's manifest
 nests under `merchants.<slug>`, with one PSP on each rail:
@@ -438,7 +441,7 @@ return nil
 |---|---|
 | `ApplyCatalog` | apply a document (`catalog.ReadFile`, `catalog.ParseApplicationYAML`); `Force` overrides conflicts |
 | `ListProducts`, `GetProduct` | products with their current prices; filter by `Keys`, `Entitlements`, `ForSale`, `Archived` |
-| `CreateProduct`, `UpdateProduct`, `DeleteProduct` | edit products; delete only one nothing ever referred to (else `409 product_in_use`: archive it) |
+| `CreateProduct`, `UpdateProduct`, `DeleteProduct` | edit products; `ExpectedRevision` refuses an edit or delete of a product changed since it was read (`409 revision_mismatch`); delete only one nothing ever referred to (else `409 product_in_use`: archive it) |
 | `ListPrices`, `GetPrice`, `ListPriceHistory` | prices and the movements of a price key |
 | `VerifyPrice` | a price with each linked PSP's copy read and drift reported (`GET /v1/catalog/prices/{id}/verification`) |
 | `CreatePrice`, `UpdatePrice` | edit prices; `ProductData` creates the product in the same call |
@@ -566,6 +569,22 @@ open again for another card.
 | `WaiveOrderBalance` | void a usage order and write off what it owes |
 | `MarkOrderUncollectible` | stop collecting and keep the debt |
 | `ListRenewals`, `GetRenewal` | renewal bills OpenRails runs |
+
+### Content-Security-Policy
+
+The payment page sends its own policy: its scripts, the PSPs' field origins, the captcha provider's, and `frame-ancestors` naming only the merchant's `checkout.embed_origins` (`'none'` without them). It needs nothing from you.
+
+A page of yours that renders billing-ui runs the same PSP scripts in your origin. Beside your own sources, its policy allows the PSPs your merchants use:
+
+| Directive | Sources |
+|---|---|
+| `script-src` | Stripe `https://js.stripe.com https://*.js.stripe.com`; NMI Collect.js `https://secure.nmi.com https://secure.networkmerchants.com`; the Basis Theory card vault `https://*.basistheory.com` |
+| `frame-src` | the same, Stripe's `https://hooks.stripe.com` (a bank's challenge), and the checkout origin when the page frames a pay URL (`<EmbeddedPayment>`) |
+| `connect-src` | the billing client's `baseUrl` origin, `https://api.stripe.com`, the NMI origins, `https://*.basistheory.com` |
+| `style-src`, `font-src` | the NMI origins: Collect.js styles its fields |
+| `frame-ancestors` | `'self'`: no other site frames a page that takes cards |
+
+A page that frames a pay URL and sends `Permissions-Policy` lists the checkout origin under `payment`, so Apple Pay and Google Pay work in the frame.
 
 ## Subscriptions
 

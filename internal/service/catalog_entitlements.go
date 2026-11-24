@@ -89,6 +89,7 @@ func (s *Service) replaceEntitlements(ctx context.Context, pairs []catalogwire.E
 			change.Removed = append(change.Removed, pair.From)
 			if row.Opened {
 				change.Added = append(change.Added, pair.To)
+				s.catalogRenames = append(s.catalogRenames, catalogKeyRename{product: row.ProductKey, from: pair.From, to: pair.To})
 			}
 		}
 	}

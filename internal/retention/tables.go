@@ -51,6 +51,7 @@ var Tables = map[string]Table{
 	"running_charges":               {Permanent, permanent},
 	"solana_pay_receipts":           {Permanent, "permanent for credited and review receipts; an ignored receipt goes with its settled reference."},
 	"catalog_applications":          {Permanent, permanent},
+	"change_log":                    {Permanent, permanent},
 	"maintenance_runs":              {Permanent, permanent},
 	"catalog_restore_receipts":      {Permanent, permanent},
 	"destructive_run_before_images": {Permanent, permanent},

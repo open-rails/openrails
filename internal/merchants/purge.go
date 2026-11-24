@@ -46,7 +46,8 @@ var merchantOwnedTables = []string{
 	// (REVOKE DELETE) and intentionally NOT row-purged here — which is also why a
 	// merchant whose grants pin payments/products cannot be purged at all; see
 	// ErrPurgeBlockedByRetainedHistory. Products, prices and their owner bindings are retained
-	// with the tombstoned merchant; they can only be archived.
+	// with the tombstoned merchant; they can only be archived. The configuration
+	// history (change_log) is append-only too and stays with them.
 }
 
 // countMerchantRows dispatches to the table's generated count query.
@@ -154,8 +155,8 @@ func notCaptured(counts map[string]int, secrets int) []string {
 		fmt.Sprintf("CONFIGURATION. %d Vault configuration documents are listed by name; no credential is ever read or written out. "+
 			"A purge deletes them from Vault, and nothing here can recreate them; a file holding the configuration stays the operator's.", secrets),
 		"CATALOG IDENTITY. Default and creator catalog IDs and owner-subject bindings are retained with the tombstoned merchant; product/price purge does not reassign or erase this ownership metadata.",
-		"THE APPEND-ONLY SPINE. ledger_transfers, ledger_accounts, grants and " +
-			"subscription_status_transitions are not purged (the app role holds no DELETE on them) " +
+		"THE APPEND-ONLY SPINE. ledger_transfers, ledger_accounts, grants, " +
+			"subscription_status_transitions and the configuration history (change_log) are not purged (the app role holds no DELETE on them) " +
 			"and are not captured here either. After a purge they outlive the control-plane rows " +
 			"they referenced.",
 	}

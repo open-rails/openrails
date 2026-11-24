@@ -346,10 +346,13 @@ func createProductPlan(req billing.CreateProductParams) catalogClassification {
 	}
 }
 
-func deleteProductPlan(id billing.ProductID) catalogClassification {
+func deleteProductPlan(id billing.ProductID, expected *int64) catalogClassification {
 	return func(ctx context.Context, s *Service, state catalogState) ([]catalogObject, error) {
-		obj, _, err := catalogObjectWithProductID(state, id)
+		obj, old, err := catalogObjectWithProductID(state, id)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkRevision(obj.String(), expected, old.revision); err != nil {
 			return nil, err
 		}
 		mid, err := merchant.Require(ctx)

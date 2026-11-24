@@ -2257,7 +2257,7 @@
           "catalog"
         ],
         "operationId": "DeleteProduct",
-        "description": "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and creating its key again revives it. A product a purchase, subscription, grant, access, purchase, migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code product_in_use): archive it with UpdateProduct instead.",
+        "description": "DeleteProduct deletes a product nothing ever referred to, with its prices: reads leave it out, and creating its key again revives it. A product a purchase, subscription, grant, access, purchase, migration, provider write, PSP link or rate card refers to is refused (billing.ErrConflict, code product_in_use): archive it with UpdateProduct instead. A stale ExpectedRevision is refused with revision_mismatch.",
         "parameters": [
           {
             "name": "id",
@@ -2265,6 +2265,13 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "expected_revision",
+            "in": "query",
+            "schema": {
+              "type": "integer"
             }
           },
           {
@@ -2298,10 +2305,12 @@
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "product_in_use",
-          "product_not_found"
+          "product_not_found",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -5289,7 +5298,7 @@
           "admin"
         ],
         "operationId": "CreateProductAccess",
-        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. A retry with idempotencyKey replays the first answer; with none, OpenRails names the batch itself.",
+        "description": "CreateProductAccess grants 1 to billing.MaxBatchItems products free, across any customers, all or none; the answer is in request order. Each grant is a window of its product: the customer holds the product's current keys while it is live. idempotencyKey is required: a retry with it replays the first answer and grants nothing again.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -5345,6 +5354,7 @@
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "authentication_required",
+          "idempotency_key_required",
           "idempotency_key_reused",
           "invalid_param",
           "resource_not_found",
@@ -9209,6 +9219,8 @@
           "card_declined",
           "card_not_saved",
           "card_requires_https",
+          "idempotency_key_in_use",
+          "idempotency_key_reused",
           "invalid_param",
           "payment_duplicate_refused",
           "payment_method_stale",
@@ -10248,6 +10260,133 @@
           "platform_vault_unreachable",
           "resource_conflict",
           "revision_mismatch",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/changes": {
+      "get": {
+        "tags": [
+          "merchant_config"
+        ],
+        "operationId": "ListChanges",
+        "description": "ListChanges lists the merchant's configuration history, newest first: each change to a product, price, meter or limit and to the merchant, messages, PSP and custodian documents, with who made it and how. A credential reads \"changed\", never its value. ObjectType and ObjectID narrow it to one object, Since and Until to a time range.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "object_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "object_type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "custodian",
+                "limit",
+                "merchant",
+                "messages",
+                "meter",
+                "price",
+                "product",
+                "psp"
+              ]
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "OpenRails-Expected-Merchant",
+            "in": "header",
+            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LogEntry"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": {
+          "merchant": "merchant:config:read",
+          "root": "root:config:read"
+        },
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -19564,6 +19703,121 @@
             }
           }
         }
+      },
+      "LogEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "string",
+            "enum": [
+              "file",
+              "system",
+              "vault"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "api",
+              "catalog_apply",
+              "cli",
+              "console",
+              "customer",
+              "intent",
+              "job",
+              "provider_read",
+              "reload",
+              "webhook"
+            ]
+          },
+          "object_type": {
+            "type": "string",
+            "enum": [
+              "custodian",
+              "limit",
+              "merchant",
+              "messages",
+              "meter",
+              "price",
+              "product",
+              "psp"
+            ]
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "archive",
+              "create",
+              "delete",
+              "key_add",
+              "key_remove",
+              "key_rename",
+              "unarchive",
+              "update"
+            ]
+          },
+          "changes": {
+            "oneOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "actor",
+          "source",
+          "object_type",
+          "object_id",
+          "action",
+          "changes",
+          "reason",
+          "request_id",
+          "operation_id"
+        ]
       },
       "LowBalanceLine": {
         "type": "object",

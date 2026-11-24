@@ -82,6 +82,12 @@ type UpdateProductParams struct {
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 }
 
+// DeleteProductParams: ExpectedRevision refuses the delete with
+// revision_mismatch unless the product is still at this revision.
+type DeleteProductParams struct {
+	ExpectedRevision *int64 `form:"expected_revision"`
+}
+
 // ProductListParams filters ListProducts. A nil Archived lists both live and
 // archived products. Keys lists the products with those keys, Entitlements
 // those granting any of those keys now (each at most MaxBatchItems). ForSale

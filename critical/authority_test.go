@@ -143,13 +143,19 @@ func (a *authorityWorld) serve(t *testing.T) {
 // merchant instead.
 func (a *authorityWorld) bindCustomers(t *testing.T, slug string) {
 	t.Helper()
-	require.NoError(t, a.engine.Close(context.Background()))
 	for i := range a.cfg.Merchants {
 		a.cfg.Merchants[i].Issuer = ""
 		if a.cfg.Merchants[i].Slug == slug {
 			a.cfg.Merchants[i].Issuer = authtest.Issuer
 		}
 	}
+	a.restart(t)
+}
+
+// restart closes the engine and starts it again on a.cfg and a.deps.
+func (a *authorityWorld) restart(t *testing.T) {
+	t.Helper()
+	require.NoError(t, a.engine.Close(context.Background()))
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
