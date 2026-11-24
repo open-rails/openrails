@@ -711,15 +711,15 @@ func (c *Client) ListCustomerLimits(ctx context.Context, params billing.Customer
 }
 
 // SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate).
-// A sync carries the lease's captured usage, numbered within the lease, its
-// wants of customers' capacity, the holds it returns and the hold versions
-// it applied; it answers how far the usage settled (a resend is matched by
-// lease and number), a hold or a refusal per want (capacity_held when only
-// other gates' holds stand in the way) and whether the lease is live. The
-// first sync under a new LeaseID creates the lease; one not synced within
-// seconds dies and its unused capacity is released, though its usage still
-// settles. A lease answers resends for 61 days after its last sync, and
-// settled usage posts as one deduction per customer and UTC day.
+// A sync carries the lease's usage, numbered within the lease, what its gate
+// has had in flight across a sync, the request holds of the lease it
+// releases and the customers whose views it asks for; it answers how far the
+// usage settled (a resend is matched by lease and number), each view (where
+// the customer stands on its limits, reserving nothing), the limit set of
+// each invoker's attributes, the pricing a gate costs requests with, and how
+// many of the merchant's leases are live. The first sync under a new LeaseID
+// creates the lease; a lease answers resends for 61 days after its last
+// sync, and settled usage posts as one deduction per customer and UTC day.
 func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
 	var out billing.SyncLeasesResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/leases/sync", body: params}, &out); err != nil {

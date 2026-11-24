@@ -124,6 +124,7 @@ var retiredDeclarationKeys = []struct{ key, fate string }{
 	{"arrears_delinquency_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
 	{"monthly_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
 	{"collection_threshold", "was replaced by usage_billing.currencies[].collection_threshold, one per currency"},
+	{"usage_gate_safe_spend", "was removed: while OpenRails is unreachable a gate spends its share of each view's remaining"},
 }
 
 // RetiredDeclarationKey is the first retired key doc sets, with what became

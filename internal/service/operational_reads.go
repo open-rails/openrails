@@ -135,7 +135,7 @@ func (s *Service) ListAdmissions(ctx context.Context, params billing.AdmissionLi
 		return nil, err
 	}
 	cut := pagination.Cut(rows, page.limit, func(row gen.BillingLimitHold) any {
-		return page.position("admissions", row.CreatedAt, *row.RequestID)
+		return page.position("admissions", row.CreatedAt, row.RequestID)
 	})
 	out := pagination.Map(cut, func(row gen.BillingLimitHold) billing.Admission { return *admissionFromHold(row, now) })
 	return &out, nil
