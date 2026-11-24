@@ -12,31 +12,41 @@ SELECT date_bin('15 minutes', p_at, '2000-01-01 00:00:00+00'::timestamptz)
 $$;
 COMMENT ON FUNCTION billing.mrr_bucket(p_at timestamptz) IS 'The start of the 15-minute UTC bucket of p_at: the key of the MRR rollups.';
 
--- MRR per seat is the list amount over its calendar months, or scaled from
--- its hours to the average Gregorian month (730.485 hours), rounded once.
--- A provider price's cadence is the one its provider bills. A level beyond
--- 10^15 native units (a billion dollars a month) is held there, so no
--- product overflows and sums stay in bigint below nine thousand such levels.
+-- MRR per seat: a calendar-month cadence, or a named one (monthly 720,
+-- quarterly 2160, half-yearly 4320, yearly 8760 hours), divides by its
+-- months; weekly (168 hours) counts 52 weeks over 12 months; any other window
+-- scales by 730.485 hours, the average Gregorian month. Rounded once. A
+-- provider price's cadence is the one its provider bills. A level beyond 10^15
+-- native units (a billion dollars a month) is held there with a warning, so
+-- no product overflows and sums stay in bigint below nine thousand such
+-- levels.
 CREATE FUNCTION billing.price_mrr(p billing.prices, p_seats integer) RETURNS bigint
-LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-SELECT least(CASE
-    WHEN c.months > 0 THEN round(p.amount::numeric / c.months)
-    WHEN c.hours > 0 THEN round(p.amount::numeric * 730.485 / c.hours)
-    ELSE 0
-END * greatest(p_seats, 1), 1000000000000000)::bigint
-FROM (SELECT
-    CASE WHEN p.provider_snapshot ? 'provider_billing_interval_months'
+LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
+DECLARE
+    v_months integer := CASE WHEN p.provider_snapshot ? 'provider_billing_interval_months'
         THEN substring(p.provider_snapshot->>'provider_billing_interval_months' FROM '^[0-9]{1,4}$')::integer
-        ELSE p.billing_interval_months END AS months,
-    CASE WHEN p.provider_snapshot ? 'provider_billing_interval_hours'
+        ELSE p.billing_interval_months END;
+    v_hours integer := CASE WHEN p.provider_snapshot ? 'provider_billing_interval_hours'
         THEN substring(p.provider_snapshot->>'provider_billing_interval_hours' FROM '^[0-9]{1,9}$')::integer
-        ELSE p.billing_interval_hours END AS hours) c
+        ELSE p.billing_interval_hours END;
+    v_level numeric;
+BEGIN
+    IF COALESCE(v_months, 0) <= 0 THEN
+        v_months := CASE v_hours WHEN 720 THEN 1 WHEN 2160 THEN 3 WHEN 4320 THEN 6 WHEN 8760 THEN 12 END;
+    END IF;
+    v_level := COALESCE(CASE
+        WHEN v_months > 0 THEN round(p.amount::numeric / v_months)
+        WHEN v_hours = 168 THEN round(p.amount::numeric * 52 / 12)
+        WHEN v_hours > 0 THEN round(p.amount::numeric * 730.485 / v_hours)
+    END, 0) * greatest(p_seats, 1);
+    IF v_level > 1000000000000000 THEN
+        RAISE WARNING 'MRR % of price % for % seats is held at 10^15', v_level, p.id, greatest(p_seats, 1);
+        RETURN 1000000000000000;
+    END IF;
+    RETURN v_level;
+END;
 $$;
-COMMENT ON FUNCTION billing.price_mrr(p billing.prices, p_seats integer) IS 'MRR of p_seats seats of a price: per seat its list amount divided by its calendar months, or times 730.485 over its hours, rounded, then times the seats, held at 10^15; 0 for a one-time price.';
-
--- Seats are bounded as a per-seat price bounds them (catalog.MaxQuantity).
-ALTER TABLE billing.subscriptions ADD CONSTRAINT subscriptions_quantity_max_check CHECK (quantity <= 10000);
-ALTER TABLE billing.scheduled_changes ADD CONSTRAINT scheduled_changes_quantity_max_check CHECK (quantity <= 10000);
+COMMENT ON FUNCTION billing.price_mrr(p billing.prices, p_seats integer) IS 'MRR of p_seats seats of a price: per seat its list amount divided by its calendar or named months (720, 2160, 4320, 8760 hours), times 52/12 weekly, or times 730.485 over other hours, rounded, then times the seats, held at 10^15 with a warning; 0 for a one-time price.';
 
 CREATE FUNCTION billing.mrr_cancel_cause(p_cancel_type text) RETURNS text
 LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
@@ -364,10 +374,9 @@ BEGIN
     v_has_open := FOUND;
     IF v_ends IS NOT NULL AND v_level > 0 THEN
         -- Canceled with its end ahead: scheduled churn of what it adds now.
-        IF v_has_open AND v_open.kind = 'churn' AND v_open.currency = v_price.currency THEN
-            UPDATE billing.mrr_scheduled SET effective_at = v_ends, mrr_delta = -v_level
-             WHERE merchant_id = v_open.merchant_id AND id = v_open.id AND (effective_at, mrr_delta) IS DISTINCT FROM (v_ends, -v_level);
-        ELSE
+        -- An entry is never edited: any other one is superseded by a new one.
+        IF NOT (v_has_open AND v_open.kind = 'churn'
+                AND (v_open.currency, v_open.mrr_delta, v_open.effective_at) = (v_price.currency, -v_level, v_ends)) THEN
             IF v_has_open THEN
                 PERFORM billing.resolve_mrr_scheduled(v_open, 'superseded', p_at);
             END IF;
@@ -437,9 +446,6 @@ DECLARE
     v_first timestamptz;
     v_movement uuid;
     v_movements uuid[] := '{}';
-    v_customers uuid[] := '{}';
-    v_currencies text[] := '{}';
-    v_instants timestamptz[] := '{}';
 BEGIN
     FOR v_pair IN
         SELECT DISTINCT m.customer_id, c.currency
@@ -448,13 +454,10 @@ BEGIN
          WHERE m.merchant_id = p_merchant AND m.dirty
          ORDER BY m.customer_id, c.currency
     LOOP
-        -- The latest change dates the customer's movement and its products'.
+        -- The latest change dates the customer's movement.
         SELECT COALESCE(sum(l.mrr_after - l.mrr_before), 0), COALESCE(sum((l.mrr_after > 0)::integer - (l.mrr_before > 0)::integer), 0), max(l.changed_at)
           INTO v_total, v_subs, v_at
           FROM billing.pending_mrr_lines(p_merchant, v_pair.customer_id, v_pair.currency) l;
-        v_customers := array_append(v_customers, v_pair.customer_id);
-        v_currencies := array_append(v_currencies, v_pair.currency);
-        v_instants := array_append(v_instants, v_at);
         IF v_total = 0 AND v_subs = 0 THEN
             CONTINUE;
         END IF;
@@ -526,17 +529,18 @@ BEGIN
     ON CONFLICT (merchant_id, currency, cohort_at, bucket_at) DO UPDATE
     SET amount = c.amount + EXCLUDED.amount, logos = c.logos + EXCLUDED.logos;
     -- Each changed subscription moves its products' MRR and subscribers, in
-    -- the bucket of its customer's movement in each currency.
+    -- the bucket of its customer's movement in each currency: the latest
+    -- change of the customer's rows in that currency.
     INSERT INTO billing.mrr_product_flows AS p (merchant_id, currency, bucket_at, product_id, amount, subscribers)
-    SELECT p_merchant, x.currency, billing.mrr_bucket(t.at), x.product_id, sum(x.amount), sum(x.subscribers)
-      FROM billing.subscription_mrr m
-      CROSS JOIN LATERAL (VALUES (m.recorded_currency, m.recorded_product_id, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
-                                 (m.currency, m.product_id, m.mrr, (m.mrr > 0)::integer)) x(currency, product_id, amount, subscribers)
-      JOIN unnest(v_customers, v_currencies, v_instants) t(customer_id, currency, at) ON t.customer_id = m.customer_id AND t.currency = x.currency
-     WHERE m.merchant_id = p_merchant AND m.dirty
-     GROUP BY x.currency, billing.mrr_bucket(t.at), x.product_id
+    SELECT p_merchant, x.currency, billing.mrr_bucket(x.at), x.product_id, sum(x.amount), sum(x.subscribers)
+      FROM (SELECT x.currency, x.product_id, x.amount, x.subscribers, max(m.changed_at) OVER (PARTITION BY m.customer_id, x.currency) AS at
+              FROM billing.subscription_mrr m
+              CROSS JOIN LATERAL (VALUES (m.recorded_currency, m.recorded_product_id, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
+                                         (m.currency, m.product_id, m.mrr, (m.mrr > 0)::integer)) x(currency, product_id, amount, subscribers)
+             WHERE m.merchant_id = p_merchant AND m.dirty) x
+     GROUP BY x.currency, billing.mrr_bucket(x.at), x.product_id
     HAVING sum(x.amount) <> 0 OR sum(x.subscribers) <> 0
-     ORDER BY x.currency, billing.mrr_bucket(t.at), x.product_id
+     ORDER BY x.currency, billing.mrr_bucket(x.at), x.product_id
     ON CONFLICT (merchant_id, currency, bucket_at, product_id) DO UPDATE
     SET amount = p.amount + EXCLUDED.amount, subscribers = p.subscribers + EXCLUDED.subscribers;
     -- The merchant's totals, one currency at a time.
@@ -914,3 +918,9 @@ BEGIN
     END LOOP;
     RETURN NULL;
 END $$;
+
+-- Seats are bounded as a per-seat price bounds them (catalog.MaxQuantity).
+-- Last: each holds its table's exclusive lock to commit, so reads wait from
+-- here, not through the backfill.
+ALTER TABLE billing.subscriptions ADD CONSTRAINT subscriptions_quantity_max_check CHECK (quantity <= 10000);
+ALTER TABLE billing.scheduled_changes ADD CONSTRAINT scheduled_changes_quantity_max_check CHECK (quantity <= 10000);

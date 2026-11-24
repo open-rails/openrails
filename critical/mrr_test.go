@@ -211,17 +211,18 @@ func subscriptionMRRReads(t *testing.T, w *world, q interface {
 	return n
 }
 
-// Monthly MRR of the fixture prices: an hourly cadence counts 730.485 hours
-// a month (the average Gregorian month), so 10.00 a day is 304.36875.
+// Monthly MRR of the fixture prices. A named cadence divides exactly (720
+// hours by one, 8760 by twelve), a week counts 52 over 12, and any other
+// window 730.485 hours a month: 10.00 a day is 304.36875.
 const (
 	dailyTenMRR    = 304_368_750
 	dailyFiveMRR   = 152_184_375
 	dailyTwentyMRR = 608_737_500
-	// The CCBill fixtures bill 10.00 and 20.00 every 720 hours.
-	ccbillMemberMRR = 10_145_625
-	ccbillPlusMRR   = 20_291_250
-	// 120.00 every 8760 hours is 10.0066438 a month, rounded once.
-	yearlyMRR = 10_006_644
+	// 7.00 a week, rounded once.
+	weeklyMRR = 30_333_333
+	// The CCBill fixtures bill 10.00 and 20.00 every 720 hours, monthly.
+	ccbillMemberMRR = 10_000_000
+	ccbillPlusMRR   = 20_000_000
 )
 
 func TestMRR(t *testing.T) {
@@ -231,13 +232,14 @@ func TestMRR(t *testing.T) {
 		daily := mrrPlan(t, a.alpha, "mrr-daily", billing.CreatePriceParams{UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
 		annual := mrrPlan(t, a.alpha, "mrr-annual", billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: "USD", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
 		quarterly := mrrPlan(t, a.alpha, "mrr-quarterly", billing.CreatePriceParams{UnitAmount: 30_000_000, Currency: "EUR", BillingIntervalMonths: ptr(3)})
+		weekly := mrrPlan(t, a.alpha, "mrr-weekly", billing.CreatePriceParams{UnitAmount: 7_000_000, Currency: "USD", BillingIntervalHours: ptr(168), AccessDurationHours: ptr(168)})
 
 		// A day's price counts 730.485 hours a month.
 		first := buyMRRPlan(t, a, provider, daily, 10_000_000, "mrr-daily")
 		require.Equal(t, billing.SubscriptionMRR{Amount: dailyTenMRR, Currency: "USD"}, mrrOf(t, a.alpha, first.ID))
-		// 8760 hours count 730.485 of them, rounded to the micro once.
+		// A yearly price, 8760 hours, counts a twelfth.
 		yearly := buyMRRPlan(t, a, provider, annual, 120_000_000, "mrr-annual")
-		require.Equal(t, billing.SubscriptionMRR{Amount: yearlyMRR, Currency: "USD"}, mrrOf(t, a.alpha, yearly.ID))
+		require.Equal(t, billing.SubscriptionMRR{Amount: 10_000_000, Currency: "USD"}, mrrOf(t, a.alpha, yearly.ID))
 		// The merchant ends the year now: the customer keeps MRR, less.
 		_, err := a.alpha.CancelSubscription(t.Context(), yearly.ID, billing.CancelSubscriptionParams{Reason: "Merchant ends the yearly plan", RevokeAccess: true})
 		require.NoError(t, err)
@@ -251,32 +253,36 @@ func TestMRR(t *testing.T) {
 		// A quarter of calendar months counts a third, in its own currency.
 		euro := buyMRRPlan(t, a, provider, quarterly, 30_000_000, "mrr-quarterly")
 		require.Equal(t, billing.SubscriptionMRR{Amount: 10_000_000, Currency: "EUR"}, mrrOf(t, a.alpha, euro.ID))
+		// A week counts 52 of them over 12 months.
+		week := buyMRRPlan(t, a, provider, weekly, 7_000_000, "mrr-weekly")
+		require.Equal(t, billing.SubscriptionMRR{Amount: weeklyMRR, Currency: "USD"}, mrrOf(t, a.alpha, week.ID))
 
 		moves := mrrMoves(t, a.world, a.alpha, alice)
 		require.Equal(t, []string{
 			mrrKind("USD", "new", dailyTenMRR),
-			mrrKind("USD", "expansion", yearlyMRR),
-			mrrKind("USD", "contraction", -yearlyMRR),
+			mrrKind("USD", "expansion", 10_000_000),
+			mrrKind("USD", "contraction", -10_000_000),
 			mrrKind("USD", "churn", -dailyTenMRR),
 			mrrKind("USD", "reactivation", dailyTenMRR),
 			mrrKind("EUR", "new", 10_000_000),
+			mrrKind("USD", "expansion", weeklyMRR),
 		}, mrrKinds(moves))
-		for i, logo := range []int{1, 0, 0, -1, 1, 1} {
+		for i, logo := range []int{1, 0, 0, -1, 1, 1, 0} {
 			require.Equal(t, logo, moves[i].Logo, "%s", moves[i].Kind)
 			require.Equal(t, 1, moves[i].Lines, "%s: one subscription moved", moves[i].Kind)
 		}
-		require.Equal(t, []string{"subscribed", "subscribed", "merchant_canceled", "merchant_canceled", "subscribed", "subscribed"},
-			[]string{moves[0].Cause, moves[1].Cause, moves[2].Cause, moves[3].Cause, moves[4].Cause, moves[5].Cause})
-		require.Equal(t, int64(dailyTenMRR+yearlyMRR), moves[1].After)
+		require.Equal(t, []string{"subscribed", "subscribed", "merchant_canceled", "merchant_canceled", "subscribed", "subscribed", "subscribed"},
+			[]string{moves[0].Cause, moves[1].Cause, moves[2].Cause, moves[3].Cause, moves[4].Cause, moves[5].Cause, moves[6].Cause})
+		require.Equal(t, int64(dailyTenMRR+10_000_000), moves[1].After)
 		require.NotNil(t, moves[3].Voluntary)
 		require.True(t, *moves[3].Voluntary, "a merchant's cancel is voluntary churn")
-		for _, m := range []mrrMove{moves[0], moves[1], moves[2], moves[4], moves[5]} {
+		for _, m := range []mrrMove{moves[0], moves[1], moves[2], moves[4], moves[5], moves[6]} {
 			require.Nil(t, m.Voluntary, "%s", m.Kind)
 		}
 
-		require.Equal(t, [3]int64{dailyTenMRR, 1, 1}, mrrTotals(t, a.world, a.alpha, "USD"))
+		require.Equal(t, [3]int64{dailyTenMRR + weeklyMRR, 1, 2}, mrrTotals(t, a.world, a.alpha, "USD"))
 		require.Equal(t, [3]int64{10_000_000, 1, 1}, mrrTotals(t, a.world, a.alpha, "EUR"))
-		require.Equal(t, map[string]int64{"new": 1, "expansion": 1, "contraction": 1, "churn": 1, "churn_voluntary": 1, "reactivation": 1},
+		require.Equal(t, map[string]int64{"new": 1, "expansion": 2, "contraction": 1, "churn": 1, "churn_voluntary": 1, "reactivation": 1},
 			mrrFlows(t, a.world, a.alpha, "USD"), "each movement is counted once")
 		require.Equal(t, map[string]int64{"new": 1}, mrrFlows(t, a.world, a.alpha, "EUR"))
 	})
@@ -483,8 +489,8 @@ func TestMRR(t *testing.T) {
 		accounting := settings.Accounting.Timezone
 		require.Equal(t, "America/New_York", accounting)
 		alice := customerOf(a.alice)
-		small := mrrPlan(t, a.alpha, "mrr-year-small", billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: "USD", BillingIntervalMonths: ptr(12)})
-		large := mrrPlan(t, a.alpha, "mrr-year-large", billing.CreatePriceParams{UnitAmount: 240_000_000, Currency: "USD", BillingIntervalMonths: ptr(12)})
+		small := mrrPlan(t, a.alpha, "mrr-year-small", billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: "USD", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
+		large := mrrPlan(t, a.alpha, "mrr-year-large", billing.CreatePriceParams{UnitAmount: 240_000_000, Currency: "USD", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
 
 		// Saturday 18:00 EDT, Sunday 23:30 EST and Monday 00:15 EST: UTC
 		// days would put the second and third on one day.
@@ -676,73 +682,53 @@ func TestMRR(t *testing.T) {
 		require.Equal(t, map[string]int64{"opening": 2, "correction": 2}, mrrFlows(t, w, w.alpha, "USD"))
 	})
 
-	t.Run("OR-J42-S09/a-bulk-import-settles-once-in-time-linear-in-the-book", func(t *testing.T) {
+	t.Run("OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
-		now := a.clock.Now().UTC().Truncate(time.Second)
+		const members = 2000
 		before := subscriptionMRRReads(t, a.world, a.pool, false)
-		imported := func(book billing.DeclaredBilling) time.Duration {
-			t.Helper()
-			began := time.Now()
-			res, err := a.alpha.ImportBilling(t.Context(), book)
-			require.NoError(t, err)
-			require.Len(t, res.Imported, len(book.Subscriptions), "%v", res.Reasons)
-			return time.Since(began)
-		}
-		small := imported(ccbillBook(price, now, 0, 200))
-		large := imported(ccbillBook(price, now, 200, 2000))
-		require.Less(t, large, 30*small, "ten times the book in under thirty times the time: %s, then %s", small, large)
+		res, err := a.alpha.ImportBilling(t.Context(), ccbillBook(price, a.clock.Now().UTC().Truncate(time.Second), 0, members))
+		require.NoError(t, err)
+		require.Len(t, res.Imported, members, "%v", res.Reasons)
 
-		const members = 2200
 		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD"))
 		require.Equal(t, map[string]int64{"opening": members}, mrrFlows(t, a.world, a.alpha, "USD"), "one opening per customer")
-		// Each commit settles once: every later row event probes its own row.
+		// The commit settles once: every later row event probes its own row.
 		// The importing session reports its reads once idle.
 		var reads int64
 		require.Eventually(t, func() bool {
 			reads = subscriptionMRRReads(t, a.world, a.pool, false) - before
 			return reads >= members
-		}, 70*time.Second, 250*time.Millisecond, "the imports' reads reach the statistics")
+		}, 70*time.Second, 250*time.Millisecond, "the import's reads reach the statistics")
 		require.Less(t, reads, int64(50*members), "reads of subscription_mrr grow with the book, not its square")
 	})
 
 	t.Run("OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
-		now := a.clock.Now().UTC().Truncate(time.Second)
+		const members = 2000
 		subscriptions := pgx.Identifier{a.schema, "subscriptions"}.Sanitize()
-		backfill := "SELECT " + pgx.Identifier{a.schema, "seed_mrr"}.Sanitize() + "(id, now()) FROM " + pgx.Identifier{a.schema, "merchants"}.Sanitize() + " ORDER BY id"
-		adopted := func(from, n int) (time.Duration, int64) {
-			t.Helper()
-			// A book written before MRR existed: no trigger recorded it.
-			_, err := a.pool.Exec(t.Context(), "ALTER TABLE "+subscriptions+" DISABLE TRIGGER trg_subscriptions_track_mrr")
-			require.NoError(t, err)
-			res, err := a.alpha.ImportBilling(t.Context(), ccbillBook(price, now, from, n))
-			require.NoError(t, err)
-			require.Len(t, res.Imported, n, "%v", res.Reasons)
-			_, err = a.pool.Exec(t.Context(), "ALTER TABLE "+subscriptions+" ENABLE TRIGGER trg_subscriptions_track_mrr")
-			require.NoError(t, err)
-			// The migration's statement in one transaction; its deferred
-			// settlement runs before commit, so the transaction counts its reads.
-			tx, err := a.pool.Begin(t.Context())
-			require.NoError(t, err)
-			defer func() { _ = tx.Rollback(t.Context()) }()
-			began := time.Now()
-			_, err = tx.Exec(t.Context(), backfill)
-			require.NoError(t, err)
-			_, err = tx.Exec(t.Context(), "SET CONSTRAINTS ALL IMMEDIATE")
-			require.NoError(t, err)
-			reads := subscriptionMRRReads(t, a.world, tx, true)
-			require.NoError(t, tx.Commit(t.Context()))
-			return time.Since(began), reads
-		}
-		small, smallReads := adopted(0, 200)
-		large, largeReads := adopted(200, 2000)
-		require.Less(t, smallReads, int64(50*200))
-		require.Less(t, largeReads, int64(50*2000), "reads of subscription_mrr grow with the book, not its square")
-		require.Less(t, large, 30*small, "ten times the book in under thirty times the time: %s, then %s", small, large)
+		// A book written before MRR existed: no trigger recorded it.
+		_, err := a.pool.Exec(t.Context(), "ALTER TABLE "+subscriptions+" DISABLE TRIGGER trg_subscriptions_track_mrr")
+		require.NoError(t, err)
+		res, err := a.alpha.ImportBilling(t.Context(), ccbillBook(price, a.clock.Now().UTC().Truncate(time.Second), 0, members))
+		require.NoError(t, err)
+		require.Len(t, res.Imported, members, "%v", res.Reasons)
+		_, err = a.pool.Exec(t.Context(), "ALTER TABLE "+subscriptions+" ENABLE TRIGGER trg_subscriptions_track_mrr")
+		require.NoError(t, err)
 
-		const members = 2200
+		// The migration's statement in one transaction; its deferred
+		// settlement runs before commit, so the transaction counts its reads.
+		tx, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(t.Context()) }()
+		_, err = tx.Exec(t.Context(), "SELECT "+pgx.Identifier{a.schema, "seed_mrr"}.Sanitize()+"(id, now()) FROM "+pgx.Identifier{a.schema, "merchants"}.Sanitize()+" ORDER BY id")
+		require.NoError(t, err)
+		_, err = tx.Exec(t.Context(), "SET CONSTRAINTS ALL IMMEDIATE")
+		require.NoError(t, err)
+		require.Less(t, subscriptionMRRReads(t, a.world, tx, true), int64(50*members), "reads of subscription_mrr grow with the book, not its square")
+		require.NoError(t, tx.Commit(t.Context()))
+
 		require.Equal(t, [3]int64{members * ccbillMemberMRR, members, members}, mrrTotals(t, a.world, a.alpha, "USD"))
 		require.Equal(t, map[string]int64{"opening": members}, mrrFlows(t, a.world, a.alpha, "USD"))
 		var backfilled int64

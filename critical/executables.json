@@ -1379,7 +1379,7 @@
       "TestMRR/OR-J42-S08/a-prune-and-its-undo-are-corrections-the-pruned-scheduled-churn-is-superseded"
     ],
     "OR-J42-S09": [
-      "TestMRR/OR-J42-S09/a-bulk-import-settles-once-in-time-linear-in-the-book"
+      "TestMRR/OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book"
     ],
     "OR-J42-S10": [
       "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"

@@ -160,8 +160,10 @@ func typedDimValue(parse func(string) (fmt.Stringer, error)) func(string) (strin
 }
 
 const (
-	// Normalize amounts for reporting; the coarse cycle labels never set a billing boundary.
-	monthlyNormExpr  = `CASE WHEN pr.billing_interval_months IS NOT NULL THEN round(pr.amount::numeric / pr.billing_interval_months)::bigint ELSE billing.monthly_normalized_amount(pr.amount, pr.billing_interval_hours) END`
+	// A subscription's MRR is billing.price_mrr, the one MRR the subscription
+	// rows and movements count; the coarse cycle labels never set a billing
+	// boundary.
+	priceMRRExpr     = `billing.price_mrr(pr, s.quantity)`
 	billingCycleExpr = `billing.billing_cycle_label(COALESCE(pr.billing_interval_hours, pr.billing_interval_months * 730))`
 
 	// streamExpr classifies a payment's revenue stream.
@@ -763,9 +765,9 @@ var declared = []Measure{
 		Expr:        `COUNT(s.id)`,
 		Dims:        subscriptionDim},
 	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: UnitMoney, Direction: UpIsGood,
-		Description: "monthly-normalized recurring price of auto-renew subs existing at t and not canceled by t; group by status to split healthy vs in-dunning",
-		Formula:     "SUM(monthly-normalized price) over auto-renewing subscriptions at t that were not canceled by t",
-		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE (pr.billing_interval_hours IS NOT NULL OR pr.billing_interval_months IS NOT NULL) AND (s.canceled_at IS NULL OR s.canceled_at > edge.bucket)), 0)::bigint`,
+		Description: "recurring price normalised to a month, times seats (billing.price_mrr), of auto-renew subs existing at t and not canceled by t; group by status to split healthy vs in-dunning",
+		Formula:     "SUM(billing.price_mrr(price, seats)) over auto-renewing subscriptions at t that were not canceled by t",
+		Expr:        `COALESCE(SUM(` + priceMRRExpr + `) FILTER (WHERE s.canceled_at IS NULL OR s.canceled_at > edge.bucket), 0)::bigint`,
 		Dims:        subscriptionDim},
 	// --- payment health: one measure per funnel, its rates slice it ---------------
 	{Name: "attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count", Direction: Neutral,

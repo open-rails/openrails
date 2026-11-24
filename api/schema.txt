@@ -9,7 +9,7 @@ migration 0005_customer_messages.up.sql sha256:c5c6dc66c3145613b541a161b30048048
 migration 0006_change_log.up.sql sha256:87f833b05aba1e281feb20cf40ebe2df5a8149040eaaf6e5a9242625eed594a0
 migration 0007_dashboard_retired_measures.up.sql sha256:f6dd2a2187e91c2d0ae891928207bbde8d2c503d2a33242e37b68ba461af767d
 migration 0008_drop_entitlement_cache_contract.up.sql sha256:5614790da69dcc343f221554426cf4c88ea8e126923a80a6a725f03ed005b372
-migration 0009_mrr.up.sql sha256:5b51e71b8f8073ad8dfae631c552979a3f2fcbae415ba303c8f806b185983eda
+migration 0009_mrr.up.sql sha256:03819171b965684c130e5d5a7d72001e25d9c62a03dd7c2b2780a2e1cc7f7e59
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -4524,21 +4524,32 @@ function billing.preserve_subscription_collection_policy()
 function billing.price_mrr(billing.prices,integer)
   CREATE OR REPLACE FUNCTION billing.price_mrr(p billing.prices, p_seats integer)
    RETURNS bigint
-   LANGUAGE sql
+   LANGUAGE plpgsql
    IMMUTABLE PARALLEL SAFE
   AS $function$
-  SELECT least(CASE
-      WHEN c.months > 0 THEN round(p.amount::numeric / c.months)
-      WHEN c.hours > 0 THEN round(p.amount::numeric * 730.485 / c.hours)
-      ELSE 0
-  END * greatest(p_seats, 1), 1000000000000000)::bigint
-  FROM (SELECT
-      CASE WHEN p.provider_snapshot ? 'provider_billing_interval_months'
+  DECLARE
+      v_months integer := CASE WHEN p.provider_snapshot ? 'provider_billing_interval_months'
           THEN substring(p.provider_snapshot->>'provider_billing_interval_months' FROM '^[0-9]{1,4}$')::integer
-          ELSE p.billing_interval_months END AS months,
-      CASE WHEN p.provider_snapshot ? 'provider_billing_interval_hours'
+          ELSE p.billing_interval_months END;
+      v_hours integer := CASE WHEN p.provider_snapshot ? 'provider_billing_interval_hours'
           THEN substring(p.provider_snapshot->>'provider_billing_interval_hours' FROM '^[0-9]{1,9}$')::integer
-          ELSE p.billing_interval_hours END AS hours) c
+          ELSE p.billing_interval_hours END;
+      v_level numeric;
+  BEGIN
+      IF COALESCE(v_months, 0) <= 0 THEN
+          v_months := CASE v_hours WHEN 720 THEN 1 WHEN 2160 THEN 3 WHEN 4320 THEN 6 WHEN 8760 THEN 12 END;
+      END IF;
+      v_level := COALESCE(CASE
+          WHEN v_months > 0 THEN round(p.amount::numeric / v_months)
+          WHEN v_hours = 168 THEN round(p.amount::numeric * 52 / 12)
+          WHEN v_hours > 0 THEN round(p.amount::numeric * 730.485 / v_hours)
+      END, 0) * greatest(p_seats, 1);
+      IF v_level > 1000000000000000 THEN
+          RAISE WARNING 'MRR % of price % for % seats is held at 10^15', v_level, p.id, greatest(p_seats, 1);
+          RETURN 1000000000000000;
+      END IF;
+      RETURN v_level;
+  END;
   $function$
 
 function billing.products_guard_tier_group()
@@ -4695,10 +4706,9 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
       v_has_open := FOUND;
       IF v_ends IS NOT NULL AND v_level > 0 THEN
           -- Canceled with its end ahead: scheduled churn of what it adds now.
-          IF v_has_open AND v_open.kind = 'churn' AND v_open.currency = v_price.currency THEN
-              UPDATE billing.mrr_scheduled SET effective_at = v_ends, mrr_delta = -v_level
-               WHERE merchant_id = v_open.merchant_id AND id = v_open.id AND (effective_at, mrr_delta) IS DISTINCT FROM (v_ends, -v_level);
-          ELSE
+          -- An entry is never edited: any other one is superseded by a new one.
+          IF NOT (v_has_open AND v_open.kind = 'churn'
+                  AND (v_open.currency, v_open.mrr_delta, v_open.effective_at) = (v_price.currency, -v_level, v_ends)) THEN
               IF v_has_open THEN
                   PERFORM billing.resolve_mrr_scheduled(v_open, 'superseded', p_at);
               END IF;
@@ -4924,9 +4934,6 @@ function billing.settle_mrr(uuid)
       v_first timestamptz;
       v_movement uuid;
       v_movements uuid[] := '{}';
-      v_customers uuid[] := '{}';
-      v_currencies text[] := '{}';
-      v_instants timestamptz[] := '{}';
   BEGIN
       FOR v_pair IN
           SELECT DISTINCT m.customer_id, c.currency
@@ -4935,13 +4942,10 @@ function billing.settle_mrr(uuid)
            WHERE m.merchant_id = p_merchant AND m.dirty
            ORDER BY m.customer_id, c.currency
       LOOP
-          -- The latest change dates the customer's movement and its products'.
+          -- The latest change dates the customer's movement.
           SELECT COALESCE(sum(l.mrr_after - l.mrr_before), 0), COALESCE(sum((l.mrr_after > 0)::integer - (l.mrr_before > 0)::integer), 0), max(l.changed_at)
             INTO v_total, v_subs, v_at
             FROM billing.pending_mrr_lines(p_merchant, v_pair.customer_id, v_pair.currency) l;
-          v_customers := array_append(v_customers, v_pair.customer_id);
-          v_currencies := array_append(v_currencies, v_pair.currency);
-          v_instants := array_append(v_instants, v_at);
           IF v_total = 0 AND v_subs = 0 THEN
               CONTINUE;
           END IF;
@@ -5013,17 +5017,18 @@ function billing.settle_mrr(uuid)
       ON CONFLICT (merchant_id, currency, cohort_at, bucket_at) DO UPDATE
       SET amount = c.amount + EXCLUDED.amount, logos = c.logos + EXCLUDED.logos;
       -- Each changed subscription moves its products' MRR and subscribers, in
-      -- the bucket of its customer's movement in each currency.
+      -- the bucket of its customer's movement in each currency: the latest
+      -- change of the customer's rows in that currency.
       INSERT INTO billing.mrr_product_flows AS p (merchant_id, currency, bucket_at, product_id, amount, subscribers)
-      SELECT p_merchant, x.currency, billing.mrr_bucket(t.at), x.product_id, sum(x.amount), sum(x.subscribers)
-        FROM billing.subscription_mrr m
-        CROSS JOIN LATERAL (VALUES (m.recorded_currency, m.recorded_product_id, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
-                                   (m.currency, m.product_id, m.mrr, (m.mrr > 0)::integer)) x(currency, product_id, amount, subscribers)
-        JOIN unnest(v_customers, v_currencies, v_instants) t(customer_id, currency, at) ON t.customer_id = m.customer_id AND t.currency = x.currency
-       WHERE m.merchant_id = p_merchant AND m.dirty
-       GROUP BY x.currency, billing.mrr_bucket(t.at), x.product_id
+      SELECT p_merchant, x.currency, billing.mrr_bucket(x.at), x.product_id, sum(x.amount), sum(x.subscribers)
+        FROM (SELECT x.currency, x.product_id, x.amount, x.subscribers, max(m.changed_at) OVER (PARTITION BY m.customer_id, x.currency) AS at
+                FROM billing.subscription_mrr m
+                CROSS JOIN LATERAL (VALUES (m.recorded_currency, m.recorded_product_id, -m.recorded_mrr, -(m.recorded_mrr > 0)::integer),
+                                           (m.currency, m.product_id, m.mrr, (m.mrr > 0)::integer)) x(currency, product_id, amount, subscribers)
+               WHERE m.merchant_id = p_merchant AND m.dirty) x
+       GROUP BY x.currency, billing.mrr_bucket(x.at), x.product_id
       HAVING sum(x.amount) <> 0 OR sum(x.subscribers) <> 0
-       ORDER BY x.currency, billing.mrr_bucket(t.at), x.product_id
+       ORDER BY x.currency, billing.mrr_bucket(x.at), x.product_id
       ON CONFLICT (merchant_id, currency, bucket_at, product_id) DO UPDATE
       SET amount = p.amount + EXCLUDED.amount, subscribers = p.subscribers + EXCLUDED.subscribers;
       -- The merchant's totals, one currency at a time.

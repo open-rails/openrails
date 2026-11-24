@@ -508,10 +508,9 @@ type LockParkCauseParams struct {
 // Parked provider subscriptions: live provider subscriptions converge cannot
 // land yet, and the PSP-scoped findings they raise.
 // Park and Wake serialize on one cause: whichever commits first, the other
-// sees it. The merchant row's key share is taken first: a catalog write
-// holds that row for update and then wakes, so a park must wait for it
-// before holding a cause, never after (its finding's key check would
-// deadlock).
+// sees it. A catalog write holds the merchant row FOR NO KEY UPDATE and then
+// wakes; this key share, like a finding's key check, never waits on it, so
+// a park holding a cause cannot deadlock with a waking catalog write.
 func (q *Queries) LockParkCause(ctx context.Context, arg LockParkCauseParams) error {
 	_, err := q.db.Exec(ctx, lockParkCause,
 		arg.PspID,

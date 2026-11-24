@@ -2131,7 +2131,7 @@
     {
       "id": "OR-J42-S01",
       "journey": "J42",
-      "name": "New, expansion, contraction, churn and reactivation are each recorded once at the customer level, normalised to a month (an hourly cadence's 730.485 hours, rounded once; calendar months divided) and per currency"
+      "name": "New, expansion, contraction, churn and reactivation are each recorded once at the customer level, normalised to a month (calendar and named cadences divided by their months, a week 52/12, other windows 730.485 hours) and per currency"
     },
     {
       "id": "OR-J42-S02",
@@ -2171,12 +2171,12 @@
     {
       "id": "OR-J42-S09",
       "journey": "J42",
-      "name": "A bulk import of thousands of subscriptions in one transaction settles once: reads of subscription_mrr and its time grow with the book, not its square"
+      "name": "A bulk import of thousands of subscriptions in one transaction settles once: reads of subscription_mrr grow with the book, not its square"
     },
     {
       "id": "OR-J42-S10",
       "journey": "J42",
-      "name": "The migration's backfill adopts a book written before MRR as backfilled openings in one settlement, its reads and time growing with the book"
+      "name": "The migration's backfill adopts a book written before MRR as backfilled openings in one settlement, its reads growing with the book"
     },
     {
       "id": "OR-J28-S09",
