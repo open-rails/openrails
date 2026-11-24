@@ -1620,7 +1620,7 @@
       "type Subscription struct {\n\tCollectionPolicy CollectionPolicy `json:\"collection_policy\"`\n\tID               uuid.UUID        `json:\"id\"`\n\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n\n\tCustomerID uuid.UUID `json:\"customer_id,omitempty\"`\n\tProductID  uuid.UUID `json:\"product_id\"`\n\tPriceID    uuid.UUID `json:\"price_id\"`\n\n\tScheduledChange *ScheduledChange `json:\"-\"`\n\n\tQuantity *int `json:\"quantity\"`\n\n\tAccessDurationHoursSnapshot   *int `json:\"access_duration_hours_snapshot\"`\n\tProviderAccessDefaultSnapshot bool `json:\"provider_access_default_snapshot\"`\n\n\tStatus                SubscriptionStatus `json:\"status\"`\n\tStartedAt             time.Time          `json:\"started_at\"`\n\tEndedAt               *time.Time         `json:\"ended_at\"`\n\tCurrentPeriodStartsAt *time.Time         `json:\"current_period_starts_at\"`\n\tCurrentPeriodEndsAt   *time.Time         `json:\"current_period_ends_at\"`\n\n\tRail               Rail   `json:\"rail\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n\n\tPspID uuid.UUID `json:\"psp_id\"`\n\n\tPaymentMethodID *uuid.UUID `json:\"payment_method_id\"`\n\n\tLastRetryAt   *time.Time `json:\"last_retry_at\"`\n\tRetryAttempts *int       `json:\"retry_attempts\"`\n\n\tTransientRetries int        `json:\"transient_retries\"`\n\tNextRetryAt      *time.Time `json:\"next_retry_at\"`\n\tGraceEndsAt      *time.Time `json:\"grace_ends_at\"`\n\n\tRetryAdvisedAt *time.Time `json:\"retry_advised_at\"`\n\n\tCancelFeedback *string     `json:\"cancel_feedback\"`\n\tCancelType     *CancelType `json:\"cancel_type\"`\n\tCanceledAt     *time.Time  `json:\"canceled_at\"`\n\n\tDeletionScheduledAt *time.Time `json:\"deletion_scheduled_at,omitempty\"`\n\n\tLifecycleRev int64 `json:\"-\"`\n\n\tRowVersion int64 `json:\"-\"`\n\n\tDunningPolicy []byte `json:\"-\"`\n\n\tPrice         *Price         `json:\"price,omitempty\"`\n\tPaymentMethod *PaymentMethod `json:\"payment_method,omitempty\"`\n\n\tProduct *Product `json:\"product,omitempty\"`\n\n\tMetadata json.RawMessage `json:\"gateway_response,omitempty\"`\n\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}"
     ],
     "internal/destructive": [
-      "type DrainErasuresArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\"`\n}",
+      "type DrainErasuresArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tFollows int64 `json:\"follows,omitempty\" river:\"unique\"`\n\n\tRecovers string `json:\"recovers,omitempty\" river:\"unique\"`\n}",
       "type userActionRateEvidence struct {\n\tWindow                 string `json:\"window\"`\n\tHourlyCustomers        int64  `json:\"hourly_customers\"`\n\tMaximumHourlyCustomers int64  `json:\"maximum_hourly_customers\"`\n\tDailyCustomers         int64  `json:\"daily_customers\"`\n\tMaximumDailyCustomers  int64  `json:\"maximum_daily_customers\"`\n\tRetryAfterSeconds      int64  `json:\"retry_after_seconds\"`\n}"
     ],
     "internal/disputejob": [
@@ -2807,6 +2807,7 @@
     "internal/destructive/erasure.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
