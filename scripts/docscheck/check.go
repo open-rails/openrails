@@ -386,7 +386,7 @@ func checkSpan(idx *Index, file string, s span, bad func(class, format string, a
 		}
 		return
 	}
-	if strings.HasPrefix(file, "sdk/") {
+	if strings.HasPrefix(file, "web/billing-ui/") {
 		return
 	}
 	checkIdent(idx, file, text, bad, uses)

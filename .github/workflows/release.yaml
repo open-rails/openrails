@@ -57,7 +57,7 @@ jobs:
           go-version-file: go.mod
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
-          package_json_file: sdk/billing-ui/package.json
+          package_json_file: web/billing-ui/package.json
           run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -65,7 +65,7 @@ jobs:
       - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
 
       - name: Install @openrails/billing-ui dependencies
-        working-directory: sdk/billing-ui
+        working-directory: web/billing-ui
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
 

@@ -2,8 +2,6 @@ module github.com/open-rails/openrails/server
 
 go 1.26.10
 
-ignore ./web/console/node_modules
-
 // The root module at the same release; scripts/release pins it.
 require github.com/open-rails/openrails v0.282.0
 

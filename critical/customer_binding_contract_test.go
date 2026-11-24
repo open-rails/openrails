@@ -104,7 +104,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 		require.Equal(t, customer, got.CustomerID)
 		sdk := os.Getenv("OPENRAILS_CRITICAL_SDK_CLIENT")
 		if sdk == "" {
-			sdk, err = filepath.Abs("../sdk/billing-ui/dist/client.js")
+			sdk, err = filepath.Abs("../web/billing-ui/dist/client.js")
 			require.NoError(t, err)
 		}
 		sdkInput, err := json.Marshal(map[string]string{"sdk": sdk, "base": server.URL + "/account/links/" + link, "token": a.aliceToken, "order": order.ID.String(), "customer": customer.String()})

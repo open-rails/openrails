@@ -22,7 +22,7 @@ const (
 	RoutesDoc   = "docs/api/routes.md"
 	CodesDoc    = "docs/api/error-codes.md"
 
-	billingUIDir = "sdk/billing-ui/src/client/generated/"
+	billingUIDir = "web/billing-ui/src/client/generated/"
 )
 
 // Files renders every generated file from the route catalog and the

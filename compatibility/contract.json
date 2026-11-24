@@ -1348,7 +1348,7 @@
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type Server struct {\n}"
     ],
-    "server/web/console": [
+    "web/console": [
       "func FS() fs.FS"
     ],
     "web/pay": [
@@ -5143,12 +5143,12 @@
       "strings": "strings"
     },
     "server/server.go": {
-      "admin": "github.com/open-rails/openrails/server/web/console",
       "app": "github.com/open-rails/openrails/internal/app",
       "auth": "github.com/open-rails/authkit/auth",
       "authkit": "github.com/open-rails/authkit",
       "billing": "github.com/open-rails/openrails/billing",
       "config": "github.com/open-rails/openrails/internal/config",
+      "console": "github.com/open-rails/openrails/web/console",
       "context": "context",
       "controlplane": "github.com/open-rails/openrails/server/internal/controlplane",
       "embedhttp": "github.com/open-rails/openrails/internal/http/embedhttp",
@@ -5173,7 +5173,7 @@
       "time": "time",
       "userinfo": "github.com/open-rails/authkit/userinfo"
     },
-    "server/web/console/embed.go": {
+    "web/console/embed.go": {
       "embed": "embed",
       "fs": "io/fs"
     },

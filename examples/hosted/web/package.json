@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@openrails/auth-ui": "1.29.1",
-    "@openrails/billing-ui": "file:../../../sdk/billing-ui",
+    "@openrails/billing-ui": "file:../../../web/billing-ui",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.9.0"

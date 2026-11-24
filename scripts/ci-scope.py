@@ -38,19 +38,19 @@ def select(changes):
         if path == "LICENSE":
             reasons.append("license prose: " + path)
             continue
-        if path.endswith(".md") and ("/" not in path or path.startswith(("docs/", "sdk/billing-ui/", "compatibility/")) or path in (".claude/CLAUDE.md", "server/web/console/README.md")):
+        if path.endswith(".md") and ("/" not in path or path.startswith(("docs/", "web/", "compatibility/")) or path == ".claude/CLAUDE.md"):
             reasons.append("documentation-only input; behavioral suites unchanged: " + path)
             continue
-        if path.startswith(("sdk/billing-ui/src/client", "sdk/billing-ui/src/api", "sdk/billing-ui/src/types", "sdk/billing-ui/src/hooks")) or path == "sdk/billing-ui/src/index.ts":
+        if path.startswith(("web/billing-ui/src/client", "web/billing-ui/src/api", "web/billing-ui/src/types", "web/billing-ui/src/hooks")) or path == "web/billing-ui/src/index.ts":
             selected.update({key: True for key in SOURCE})
             reasons.append("shared SDK client/API: " + path)
             continue
-        frontend = path.startswith(("sdk/billing-ui/src/", "web/pay/src/", "server/web/console/src/"))
+        frontend = path.startswith(("web/billing-ui/src/", "web/pay/src/", "web/console/src/"))
         if frontend and (any(part in {"api", "client", "types", "hooks", "services", "store", "stores"} for part in Path(path).parts) or any(word in Path(path).stem.lower() for word in ("api", "client", "request", "fetch"))):
             selected.update({key: True for key in SOURCE})
             reasons.append("shared frontend API/client: " + path)
             continue
-        browser_roots = tuple(root + region for root in ("sdk/billing-ui/src/", "web/pay/src/", "server/web/console/src/") for region in ("components/", "ui/", "styles/", "locales/", "assets/")) + ("sdk/billing-ui/tests/", "web/pay/tests/", "server/web/console/tests/")
+        browser_roots = tuple(root + region for root in ("web/billing-ui/src/", "web/pay/src/", "web/console/src/") for region in ("components/", "ui/", "styles/", "locales/", "assets/")) + ("web/billing-ui/tests/", "web/pay/tests/", "web/console/tests/")
         if path.startswith(browser_roots) and Path(path).suffix in (".ts", ".tsx", ".js", ".jsx", ".css", ".svg", ".png", ".webp"):
             selected["browser"] = selected["security"] = True
             reasons.append("isolated browser source: " + path)

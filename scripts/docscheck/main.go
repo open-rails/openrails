@@ -150,7 +150,7 @@ func realIndex(ctx context.Context, root string) (*Index, error) {
 	} else {
 		fmt.Fprintln(os.Stderr, "docscheck: AuthKit's source is not in the module cache; its names count as dead")
 	}
-	idx.Go.addTSExports(readAll(filepath.Join(root, "sdk", "billing-ui", "src"), "index.ts")...)
+	idx.Go.addTSExports(readAll(filepath.Join(root, "web", "billing-ui", "src"), "index.ts")...)
 	if idx.Coverage, err = buildCoverage(root, string(goTxt)); err != nil {
 		return nil, err
 	}

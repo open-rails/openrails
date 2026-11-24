@@ -32,7 +32,7 @@ import (
 // boundaries. Every business response comes from the real OpenRails router.
 func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...string) {
 	t.Helper()
-	directory, err := filepath.Abs("../sdk/billing-ui")
+	directory, err := filepath.Abs("../web/billing-ui")
 	require.NoError(t, err)
 	app := filepath.Join(directory, "test-results/critical-app/app.js")
 	_, err = os.Stat(app)
@@ -214,7 +214,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 func TestPublicSDK(t *testing.T) {
 	t.Run("OR-J04-S01/built-client-and-real-HTTP-preserve-domain-outcomes", func(t *testing.T) {
 		values := exec.CommandContext(t.Context(), "node", "critical/values.mjs")
-		values.Dir = "../sdk/billing-ui"
+		values.Dir = "../web/billing-ui"
 		output, err := values.CombinedOutput()
 		require.NoError(t, err, string(output))
 		t.Log(string(output))

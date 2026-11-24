@@ -23,7 +23,7 @@ func TestHostedBrowser(t *testing.T) {
 			_, _ = w.Write([]byte("<!doctype html><title>Other origin</title>"))
 		}))
 		t.Cleanup(attacker.Close)
-		directory, err := filepath.Abs("../sdk/billing-ui")
+		directory, err := filepath.Abs("../web/billing-ui")
 		require.NoError(t, err)
 		app := filepath.Join(directory, "test-results", "hosted-app", "app.js")
 		_, err = os.Stat(app)

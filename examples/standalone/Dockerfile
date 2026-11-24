@@ -4,8 +4,8 @@
 
 FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS web
 RUN npm install -g --ignore-scripts pnpm@11.0.0
-WORKDIR /src/sdk/billing-ui
-COPY sdk/billing-ui/ ./
+WORKDIR /src/web/billing-ui
+COPY web/billing-ui/ ./
 RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm --config.verify-deps-before-run=false run build
 WORKDIR /src/examples/standalone/web
 COPY examples/standalone/web/ ./

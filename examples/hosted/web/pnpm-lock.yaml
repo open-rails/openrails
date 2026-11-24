@@ -12,8 +12,8 @@ importers:
         specifier: 1.29.1
         version: 1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
-        specifier: file:../../../sdk/billing-ui
-        version: file:../../../sdk/billing-ui(@openrails/auth-ui@1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
+        specifier: file:../../../web/billing-ui
+        version: file:../../../web/billing-ui(@openrails/auth-ui@1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
       react:
         specifier: ^19.2.8
         version: 19.3.0
@@ -132,8 +132,8 @@ packages:
       '@solana/wallet-adapter-react':
         optional: true
 
-  '@openrails/billing-ui@file:../../../sdk/billing-ui':
-    resolution: {directory: ../../../sdk/billing-ui, type: directory}
+  '@openrails/billing-ui@file:../../../web/billing-ui':
+    resolution: {directory: ../../../web/billing-ui, type: directory}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@openrails/auth-ui': '>=1.34.1 <2'
@@ -897,7 +897,7 @@ snapshots:
       - '@types/react'
       - date-fns
 
-  '@openrails/billing-ui@file:../../../sdk/billing-ui(@openrails/auth-ui@1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
+  '@openrails/billing-ui@file:../../../web/billing-ui(@openrails/auth-ui@1.29.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@basis-theory/web-elements': 3.2.0
