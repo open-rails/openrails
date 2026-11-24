@@ -6,6 +6,7 @@ migration 0002_calendar_billing_intervals.up.sql sha256:768d25ac275ed7183fc721bd
 migration 0003_usage_limits.up.sql sha256:08672a0999aac672d48761f90ac14fe42955e2c4dd514d0cf3699f9e8c780f92
 migration 0004_drop_access_cutover_contract.up.sql sha256:dd092699ba66add50f33ab520713dc69aaece641cd3a83d9a1314233dbf582e6
 migration 0005_customer_messages.up.sql sha256:c5c6dc66c3145613b541a161b3004804803e28e2bf224fe1044dbbb441403094
+migration 0012_order_keys_and_cancel_kinds.up.sql sha256:ba8cc61ab16e905446c488fbbcc97c6b18be757c7b4f0f5194a06e98e5344380
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1395,7 +1396,7 @@ table billing.orders
   index CREATE INDEX orders_due_at_open_idx ON billing.orders USING btree (merchant_id, due_at) WHERE ((status = 'open'::text) AND (due_at IS NOT NULL))
   index CREATE INDEX orders_expires_at_live_idx ON billing.orders USING btree (merchant_id, expires_at) WHERE (status = 'open'::text)
   index CREATE INDEX orders_id_idx ON billing.orders USING btree (id)
-  index CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders USING btree (merchant_id, customer_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
+  index CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders USING btree (merchant_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
   index CREATE UNIQUE INDEX orders_number_key ON billing.orders USING btree (merchant_id, number) WHERE (number IS NOT NULL)
   index CREATE UNIQUE INDEX orders_open_lines_key ON billing.orders USING btree (merchant_id, customer_id, lines_digest) WHERE ((status = 'open'::text) AND (lines_digest IS NOT NULL))
   index CREATE UNIQUE INDEX orders_pay_url_secret_hash_key ON billing.orders USING btree (pay_url_secret_hash) WHERE (pay_url_secret_hash IS NOT NULL)

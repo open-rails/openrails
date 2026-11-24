@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 443,
+  "scenario_count": 444,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1117,6 +1117,11 @@
       "id": "OR-J10-S05",
       "journey": "J10",
       "name": "Exact payment key reads its own retained outcome without attributing another payment"
+    },
+    {
+      "id": "OR-J10-S06",
+      "journey": "J10",
+      "name": "A merchant order's Idempotency-Key names one order per merchant: the same key for another customer is idempotency_key_reused and creates nothing"
     },
     {
       "id": "OR-J12-S06",

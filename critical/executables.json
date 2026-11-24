@@ -824,6 +824,9 @@
     "OR-J10-S05": [
       "TestOrderPaymentReceipts/OR-J10-S05/exact-payment-key-cannot-claim-another-attempt"
     ],
+    "OR-J10-S06": [
+      "TestPaymentReplay/OR-J10-S06/a-merchant-order-key-names-one-order-whichever-customer"
+    ],
     "OR-J12-S06": [
       "TestMerchantOwnedBasisTheoryCardLifecycle/OR-J12-S06/merchant-owned-vault",
       "TestMerchantOwnedBasisTheoryCardLifecycle/OR-J12-S06/hosted-isolated-vault"
