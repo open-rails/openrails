@@ -128,6 +128,15 @@ export function unitScales(
   )
 }
 
+// declaredUnits are the scales of the units a merchant declares.
+export function declaredUnits(
+  currencies: { code: string; scale: number }[] | undefined
+): UnitScales {
+  return Object.fromEntries(
+    (currencies ?? []).map((u) => [u.code.toUpperCase(), u.scale])
+  )
+}
+
 // formatScaledAmount formats an amount at its currency's scale: one of the
 // merchant's units in units, else the registry's.
 export function formatScaledAmount(

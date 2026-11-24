@@ -8,6 +8,7 @@ import { useAuth } from "#orck/admin/lib/auth"
 import type { CreditGrant } from "#orck/admin/lib/api/credit-types"
 import {
   currencyScale,
+  declaredUnits,
   formatDate,
   formatScaledAmount,
   shortId,
@@ -76,7 +77,7 @@ function CreditSupport({
   merchant,
   customer,
   initialCurrency,
-  units,
+  units: held,
 }: {
   merchant: string
   customer: string
@@ -85,7 +86,17 @@ function CreditSupport({
 }) {
   const { id: adminId, text: adminText } = useAdminUI()
 
-  const { creditQueries } = useAdminServices()
+  const { creditQueries, adminQueries } = useAdminServices()
+  // The merchant's declared units, so staff grant one the customer holds none
+  // of yet; staff who cannot read the configuration know the held ones.
+  const configuration = useQuery({
+    ...adminQueries.merchantConfiguration(),
+    retry: false,
+  })
+  const units = React.useMemo(
+    () => ({ ...declaredUnits(configuration.data?.currencies), ...held }),
+    [configuration.data, held]
+  )
 
   const canUpdate = useAdminUpdates()
   const [currency, setCurrency] = React.useState(initialCurrency)
