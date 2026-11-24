@@ -1327,7 +1327,7 @@ ingress:
 | Value | Meaning |
 |---|---|
 | `replicaCount` | 1. More need Redis (`config.redis`) and `secrets.authKeys`: an ephemeral signing key is per pod |
-| `image` | `repository`, `tag` (default the chart's `vX.Y.Z`), `digest` (pins over the tag), `pullPolicy` |
+| `image` | `repository`, `tag` (default the chart's `vX.Y.Z`; required to render a checkout, whose appVersion is `latest`), `digest` (pins over the tag), `pullPolicy` |
 | `imagePullSecrets` | for a private registry |
 | `args` | the command, `[run-server]`; the chart appends `--config=/etc/openrails/config.yaml` |
 | `config` | `config.yaml`, rendered as written; no secrets. `host`, `port` and `private_port` are the chart's and refused here |
@@ -1335,7 +1335,7 @@ ingress:
 | `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantOverlays` (`{name, key}` overlays added to `merchant_manifest_overlays`) |
 | `env`, `envFrom` | further environment |
 | `ports` | `http`, default 3053 |
-| `metrics` | the private `/metrics` listener (`enabled`, `port` 9090), its Service port `metrics` and an optional Prometheus Operator `serviceMonitor` |
+| `metrics` | the private `/metrics` listener (`enabled`, `port` 9090), served by its own ClusterIP Service `<fullname>-metrics` whatever `service.type` is, and an optional Prometheus Operator `serviceMonitor` |
 | `service` | `type`, `port` (80), `annotations` |
 | `ingress` | `enabled`, `className`, `annotations`, `hosts` (every path to the server), `tls` |
 | `resources` | requests 100m and 256Mi, limits one CPU and 768Mi |

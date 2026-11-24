@@ -35,6 +35,27 @@ fi
 "$helm" template openrails "$chart" --namespace openrails --kube-version 1.30.0 \
   --set-string "image.tag=$version" > "$rendered/release.yaml"
 
+# A checkout's appVersion is latest: rendering without a tag or digest must fail.
+if "$helm" template openrails "$chart" --namespace openrails --kube-version 1.30.0 > /dev/null 2>&1; then
+  echo "the chart rendered an unpinned latest image" >&2
+  exit 1
+fi
+# /metrics has no auth: only a ClusterIP Service may carry it, whatever
+# service.type is.
+"$helm" template openrails "$chart" --namespace openrails --kube-version 1.30.0 \
+  --set-string "image.tag=$version" --set service.type=LoadBalancer > "$rendered/exposed.yaml"
+python3 - "$rendered/exposed.yaml" <<'PY'
+import pathlib, re, sys
+
+services = [doc for doc in pathlib.Path(sys.argv[1]).read_text().split("\n---") if re.search(r"^kind: Service$", doc, re.MULTILINE)]
+metrics = [doc for doc in services if re.search(r"^\s*- name: metrics$", doc, re.MULTILINE)]
+if not metrics:
+    raise SystemExit("the chart renders no metrics Service")
+for doc in metrics:
+    if not re.search(r"^  type: ClusterIP$", doc, re.MULTILINE):
+        raise SystemExit("the metrics port is on a Service that is not ClusterIP")
+PY
+
 # Trivy's registry policy only accepts domains. Narrow those trusted domains
 # to our exact publisher repositories before using that policy.
 python3 - "$data" "$rendered/release.yaml" <<'PY'

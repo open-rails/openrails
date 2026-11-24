@@ -76,9 +76,10 @@ browser() {
 }
 chart() {
   local helm="${HELM:-helm}" dir=deploy/helm/openrails values
+  # A checkout's appVersion is latest, which renders only with a tag or digest.
   for values in "$dir/values.yaml" "$dir/ci/full-values.yaml"; do
-    "$helm" lint --strict "$dir" -f "$values"
-    "$helm" template openrails "$dir" -f "$values" >/dev/null
+    "$helm" lint --strict "$dir" -f "$values" --set-string image.tag=v0.0.0
+    "$helm" template openrails "$dir" -f "$values" --set-string image.tag=v0.0.0 >/dev/null
   done
 }
 case "${1:-all}" in
