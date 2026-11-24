@@ -19,7 +19,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | `openrails.billing_pass` | `billing` | At the top of each UTC hour | Runs the [hourly billing scans](#hourly-billing-scans) and records any critical work still overdue. [Worker](../internal/river/jobs_billing_pass.go) |
 | `openrails.cleanup_expired_data` | `billing` | Every hour, with continuation jobs for large passes | Deletes expired operational data and maintains rolling monthly partitions. [Worker](../internal/river/jobs_cleanup.go) |
 | `openrails.customer_messages_dispatch` | `billing` | Every 5 minutes | Queues the send job of each pending customer message a dispatcher's database notification missed. [Worker](../internal/river/jobs_customer_messages.go) · [Dispatch](../internal/modules/messages/dispatch.go) |
-| `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, stuck provider operations, and timed access lapses. [Worker](../internal/river/jobs_merchant_health.go) |
+| `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, the unverified backlog, stuck or abandoned provider operations, and timed access lapses, for merchants with activity. [Worker](../internal/river/jobs_merchant_health.go) |
 | `openrails.stripe_webhook_reconcile` | `billing` | Every 24 hours. Per-PSP jobs also run on configuration changes, at boot when configuration differs, and at endpoint retirement. | Queues checks for active Stripe PSPs and registers, updates, or retires their managed webhook endpoints. [Worker](../internal/river/jobs_stripe_webhooks.go) · [Configuration trigger](../internal/app/stripe_webhook_follow.go) |
 
 ## Jobs queued as work arrives
@@ -53,12 +53,12 @@ continuations. The other scan names label work inside the pass.
 | --- | --- |
 | `openrails.usage_accruals` | Posts each customer's usage from finished UTC days to the ledger: one deduction per customer, currency and day. Until then the day's usage is held, not posted. The read is indexed on the day. [Source](../internal/river/jobs_usage_accruals.go) |
 | `openrails.dunning` | Due subscription renewals and collection retries. [Source](../internal/river/jobs_dunning.go) |
+| `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions that still need a targeted provider check after a missed notification or failed read. [Source](../internal/reconcile/verify.go) |
 | `openrails.balance_watch` | Due balance checks and failed or missed balance looks. [Source](../internal/river/jobs_balance_watch.go) |
 | `openrails.delinquency` | Usage arrears due for evaluation after a payment or grace deadline. [Source](../internal/river/jobs_delinquency.go) |
 | `openrails.order_expiry` | Expired orders and attempts, including abandoned card saves. [Source](../internal/river/jobs_order_expiry.go) |
 | `openrails.usage_orders` | Due usage bills and collections when usage billing is enabled. [Source](../internal/river/jobs_usage_orders.go) |
-| `openrails.rebill_watch` | Overdue provider-billed renewals that need an evidence check. [Source](../internal/river/jobs_rebill_watch.go) |
-| `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions that still need a targeted provider check after a missed notification or failed read. [Source](../internal/reconcile/verify.go) |
+| `openrails.rebill_watch` | Overdue NMI schedule rebills with no recorded attempt, checked against NMI's Query API. [Source](../internal/river/jobs_rebill_watch.go) |
 | `openrails.nmi_history` | NMI PSPs due for a roughly daily history read to update monthly aggregates. [Source](../internal/river/jobs_nmi_history.go) |
 | `openrails.config_realerts` | Unresolved undeclared-account findings due for another operator alert. [Source](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
