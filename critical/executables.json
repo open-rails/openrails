@@ -586,6 +586,9 @@
     "OR-J24-S35": [
       "TestLeaseVersions/OR-J24-S35/a-hold-another-lease-waits-for-shrinks-while-its-customer-is-busy"
     ],
+    "OR-J24-S36": [
+      "TestUsageContracts/OR-J24-S36/a-meter-correction-holds-only-its-own-merchants-usage"
+    ],
     "OR-J25-S01": [
       "TestRunningChargeContracts/OR-J25-S01/whole-seconds-post-once-at-explicit-stop"
     ],

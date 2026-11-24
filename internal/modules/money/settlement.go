@@ -649,6 +649,15 @@ func rollUpTx(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b *Usag
 				strings.Compare(x.invoker, y.invoker), strings.Compare(x.outcome, y.outcome))
 		})
 		arg := gen.UpsertUsageDailyParams{MerchantID: merchantID, Now: b.now}
+		var eventTypes []string
+		for _, k := range keys {
+			if !slices.Contains(eventTypes, k.eventType) {
+				eventTypes = append(eventTypes, k.eventType)
+			}
+		}
+		if err := q.ShareUsageEventTypes(ctx, gen.ShareUsageEventTypesParams{MerchantID: merchantID, EventTypes: eventTypes}); err != nil {
+			return err
+		}
 		for _, k := range keys {
 			r := days[k]
 			arg.CustomerIds = append(arg.CustomerIds, k.customer)

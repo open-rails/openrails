@@ -369,12 +369,21 @@ func (q *Queries) LockUsageAccrual(ctx context.Context, arg LockUsageAccrualPara
 	return i, err
 }
 
-const lockUsageDailyForMeterCorrection = `-- name: LockUsageDailyForMeterCorrection :exec
-LOCK TABLE billing.usage_daily IN SHARE ROW EXCLUSIVE MODE
+const lockUsageEventTypes = `-- name: LockUsageEventTypes :exec
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.usage_activity:' || $1::uuid::text || ':' || e.event_type, 0))
+FROM (SELECT DISTINCT unnest($2::text[]) AS event_type ORDER BY 1) e
 `
 
-func (q *Queries) LockUsageDailyForMeterCorrection(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, lockUsageDailyForMeterCorrection)
+type LockUsageEventTypesParams struct {
+	MerchantID uuid.UUID
+	EventTypes []string
+}
+
+// A meter correction's fence on its merchant's usage of event types: held
+// exclusively against ShareUsageEventTypes, which every settlement takes
+// before it adds rollups. No other merchant or event type waits.
+func (q *Queries) LockUsageEventTypes(ctx context.Context, arg LockUsageEventTypesParams) error {
+	_, err := q.db.Exec(ctx, lockUsageEventTypes, arg.MerchantID, arg.EventTypes)
 	return err
 }
 
@@ -399,6 +408,23 @@ func (q *Queries) MarkUsageAccrualPosted(ctx context.Context, arg MarkUsageAccru
 		arg.MerchantID,
 		arg.ID,
 	)
+	return err
+}
+
+const shareUsageEventTypes = `-- name: ShareUsageEventTypes :exec
+SELECT pg_advisory_xact_lock_shared(hashtextextended('openrails.usage_activity:' || $1::uuid::text || ':' || e.event_type, 0))
+FROM (SELECT DISTINCT unnest($2::text[]) AS event_type ORDER BY 1) e
+`
+
+type ShareUsageEventTypesParams struct {
+	MerchantID uuid.UUID
+	EventTypes []string
+}
+
+// A settlement's fence on the event types it adds rollups for, in the order
+// LockUsageEventTypes takes them.
+func (q *Queries) ShareUsageEventTypes(ctx context.Context, arg ShareUsageEventTypesParams) error {
+	_, err := q.db.Exec(ctx, shareUsageEventTypes, arg.MerchantID, arg.EventTypes)
 	return err
 }
 

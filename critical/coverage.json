@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 444,
+  "scenario_count": 445,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -767,6 +767,11 @@
       "id": "OR-J24-S35",
       "journey": "J24",
       "name": "A sync waits for a busy customer whose hold another lease waits for, so the contended hold shrinks and its capacity goes to the waiting lease, though no item of the sync names the customer"
+    },
+    {
+      "id": "OR-J24-S36",
+      "journey": "J24",
+      "name": "A meter correction fences only its own merchant's usage of the meter's event types: it takes no table lock, and another merchant's usage settles while it is open"
     },
     {
       "id": "OR-J25-S01",
