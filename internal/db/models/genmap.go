@@ -123,6 +123,8 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 		FailureCode:       p.FailureCode,
 		FailureReason:     p.FailureReason,
 		ReversalKind:      p.ReversalKind,
+		RefundReason:      p.RefundReason,
+		PaymentMethodID:   p.PaymentMethodID,
 		TokenType:         p.TokenType,
 		MoneyMovement:     MoneyMovement(p.MoneyMovement),
 		Quantity:          DerefIntPtr(p.Quantity),

@@ -207,6 +207,8 @@ func thinStripeResource(event stripeThinEnvelope, eventType string) (string, str
 		kind, collection, prefix = "refund", "refunds", "re_"
 	case strings.HasPrefix(eventType, "charge.dispute."):
 		kind, collection, prefix = "dispute", "disputes", "dp_"
+	case strings.HasPrefix(eventType, "radar.early_fraud_warning."):
+		kind, collection, prefix = "radar.early_fraud_warning", "radar/early_fraud_warnings", "issfr_"
 	case strings.HasPrefix(eventType, "charge."):
 		kind, collection, prefix = "charge", "charges", "ch_"
 	case strings.HasPrefix(eventType, "payment_method."):

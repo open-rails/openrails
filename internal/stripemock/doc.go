@@ -21,7 +21,7 @@
 //     the mock clock; validation failures (400, 404) are not retained.
 //   - Charge and refund lists honor created[gte]/[lte], customer, limit and
 //     starting_after; PaymentIntent lists filter by customer only; disputes
-//     are always empty.
+//     are what Dispute seeds.
 //   - Products and prices are what AddProduct and AddPrice seed. Lists honor
 //     active (prices list only active ones unless asked) and never show
 //     inline prices; a by-id read does. Moving a subscription onto an

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
@@ -141,11 +143,22 @@ func StripeBillObservation(ctx context.Context, d *db.DB, sub *models.Subscripti
 		if at.IsZero() {
 			return bill, nil, errors.New("Stripe invoice payment has no verified payment time")
 		}
-		receipts = append(receipts, &models.Payment{ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, SubscriptionID: &sub.ID,
+		paid := &models.Payment{ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, SubscriptionID: &sub.ID,
 			PspID: &sub.PspID, Rail: models.RailStripe, TransactionID: receipt.ChargeID, Amount: amount, ListAmount: amount,
 			Currency: invoice.Currency, Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail,
 			PurchasedAt: at, CreatedAt: at, Metadata: map[string]any{"stripe_invoice_id": invoice.ID,
-				"stripe_invoice_payment_id": receipt.ID, "stripe_payment_intent_id": receipt.PaymentIntentID}})
+				"stripe_invoice_payment_id": receipt.ID, "stripe_payment_intent_id": receipt.PaymentIntentID}}
+		// The card the Charge was taken from, when the customer saved it here.
+		if ref := receipt.PaymentMethodRef; ref != "" {
+			method, err := d.Gen(ctx).GetPaymentMethodByRailMethodRefForPSP(ctx, gen.GetPaymentMethodByRailMethodRefForPSPParams{
+				MerchantID: sub.MerchantID, Rail: string(models.RailStripe), PspID: sub.PspID, RailMethodRef: ref})
+			if err == nil && method.CustomerID == sub.CustomerID {
+				paid.PaymentMethodID = &method.ID
+			} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return bill, nil, err
+			}
+		}
+		receipts = append(receipts, paid)
 	}
 	if invoice.Status == "paid" && invoice.AmountRemaining == 0 {
 		bill.Settled = true

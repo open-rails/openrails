@@ -777,8 +777,7 @@ count, primary or sticky session.
   read per request. Merchant configuration is cached per instance (see
   [Vault](#vault)). An FX rate published more than 48 hours ago is never quoted.
 - **Connections:** size PostgreSQL `max_connections` for every instance's pool,
-  its `db.lease_conns` lease pool, and one connection per instance with Vault
-  configuration (it listens for edits).
+  its `db.lease_conns` lease pool, and one connection per instance for each listener: customer messages, dispute responses and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode.
 
 A webhook takes effect once per provider event: a concurrent copy waits up to
 10 seconds, then answers 500 so the provider retries. An idempotent request runs
