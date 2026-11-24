@@ -742,6 +742,9 @@
       "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/refuses-a-card-counts-cannot-express",
       "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts"
     ],
+    "OR-J31-S17": [
+      "TestCancellationsMigration/OR-J31-S17/an-upgrade-through-the-reporting-rollups-adopts-cancel-decisions-of-every-kind"
+    ],
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
     ],
