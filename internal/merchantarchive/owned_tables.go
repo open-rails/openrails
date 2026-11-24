@@ -124,6 +124,7 @@ var ownedTables = []string{
 	"subscription_status_transitions",
 	"subscription_verifications",
 	"stored_card_checks",
+	"stripe_fee_reads",
 	"subscription_mrr",
 	"subscriptions",
 	"usage_card_prints",
