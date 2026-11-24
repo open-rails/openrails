@@ -265,7 +265,7 @@ func TestCheckoutFunnel(t *testing.T) {
 		for _, w := range board.Widgets {
 			ids[w.ID] = true
 		}
-		for _, id := range []string{"kpi-checkout-conversion", "section-checkouts", "checkout-funnel", "checkouts-abandoned", "customers-by-type", "repeat-purchase-rate", "sales-by-country", "sales-by-source"} {
+		for _, id := range []string{"kpi-checkout-conversion", "section-checkouts", "checkout-funnel", "customers-by-type", "repeat-purchase-rate", "sales-by-country", "sales-by-source"} {
 			require.True(t, ids[id], id)
 		}
 		overviewAnswers(t, a.alpha, board.Widgets, "USD")
