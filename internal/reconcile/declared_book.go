@@ -22,13 +22,16 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// A declared book is one command, and every destructive effect it lands is
-// admitted with it in its actor's name: a cancel, and the provider stop owed
-// a canceled row. A cancel of a row the book did not create also passes the
-// destructive switch and its PSP's cancel budget, all or nothing per PSP; a
-// held one parks the row unverified with access kept. A book is landed, then
-// admitted, then landed again: a landing that wants an effect it holds no
-// admission for rolls back with ErrDeclaredAdmission.
+// A declared book is one merchant-level command, and every destructive
+// effect it lands is admitted with it: a cancel, a terminal decline, and the
+// provider stop owed a canceled row. The admission spends the merchant's and
+// the deployment's budgets and records the actor. A cancel or terminal
+// decline of a row the book did not create also passes its PSP's cancel
+// budget, all or nothing per PSP; a cancel of such a row, and every terminal
+// decline, passes the destructive switch. A held cancel parks the row
+// unverified with access kept. A book is landed, admitted, then landed again:
+// a landing that wants an effect it holds no admission for rolls back with
+// ErrDeclaredAdmission.
 
 // ErrDeclaredAdmission rolls back a landing of a book that wants destructive
 // effects: Admit them, then land the book again.
@@ -39,11 +42,15 @@ type DeclaredBook struct {
 	admissions *destructive.Admissions
 	actor      *destructive.Actor
 	asOf       time.Time
+	mid        uuid.UUID
 
 	admitted bool
 	actions  map[declaredRef]destructive.Action
+	revs     map[declaredRef]int64
 	held     map[declaredRef]string
-	started  map[uuid.UUID]bool
+	// owned are the actions this book finishes: admitted for it, or replays
+	// an earlier attempt left unfinished.
+	owned map[uuid.UUID]bool
 
 	// The current landing's.
 	wanted   map[declaredRef]declaredEffect
@@ -76,9 +83,25 @@ func (r declaredRef) compare(o declaredRef) int {
 	return cmp.Or(strings.Compare(r.psp.String(), o.psp.String()), strings.Compare(r.rail, o.rail), strings.Compare(r.ref, o.ref))
 }
 
+// effectKind is what a book does to a row.
+type effectKind int
+
+const (
+	// cancelEffect: the decider's cancel.
+	cancelEffect effectKind = iota
+	// terminalEffect: a decline that ends the membership.
+	terminalEffect
+	// stopEffect: the provider stop a canceled history row is owed.
+	stopEffect
+)
+
 type declaredEffect struct {
-	// existing: a cancel of a row the book did not create.
+	// existing: it ends a row the book did not create.
 	existing bool
+	// gated: it waits for the destructive switch.
+	gated bool
+	// rev is the row's lifecycle revision when the effect was decided.
+	rev int64
 }
 
 type declaredBookKey struct{}
@@ -116,23 +139,38 @@ func (b *DeclaredBook) reset(m bookMark) { b.wanted, b.finished = m.wanted, m.fi
 // needsAdmission reports a landing that wanted effects before any admission.
 func (b *DeclaredBook) needsAdmission() bool { return !b.admitted && len(b.wanted) > 0 }
 
-// effect returns the context an admitted effect on sub runs in, or why it is
-// held. Before admission it records the effect and holds it.
-func (b *DeclaredBook) effect(ctx context.Context, database *db.DB, sub *models.Subscription, cancel bool) (context.Context, string) {
+const awaitingAdmission = "awaiting the book's admission"
+
+// want records an effect for admission.
+func (b *DeclaredBook) want(sub *models.Subscription, kind effectKind) {
 	ref := refOf(sub)
-	existing := cancel && !b.created[ref]
+	b.wanted[ref] = declaredEffect{existing: kind != stopEffect && !b.created[ref], gated: switchGated(kind, b.created[ref]), rev: sub.LifecycleRev}
+}
+
+// switchGated reports an effect that waits for the destructive switch: a
+// cancel of a row the book did not create, and any terminal decline.
+func switchGated(kind effectKind, created bool) bool {
+	return kind == terminalEffect || kind == cancelEffect && !created
+}
+
+// effect returns the context an admitted effect on sub runs in, or why it is
+// held. Before admission it holds every effect.
+func (b *DeclaredBook) effect(ctx context.Context, database *db.DB, sub *models.Subscription, kind effectKind) (context.Context, string) {
 	if !b.admitted {
-		b.wanted[ref] = declaredEffect{existing: existing}
-		return ctx, "awaiting the book's admission"
+		return ctx, awaitingAdmission
 	}
+	ref := refOf(sub)
 	if hold := b.held[ref]; hold != "" {
 		return ctx, hold
 	}
 	action, ok := b.actions[ref]
-	if !ok {
+	switch {
+	case !ok:
 		return ctx, "the book was admitted without this effect"
+	case b.revs[ref] != sub.LifecycleRev:
+		return ctx, "the subscription changed after the book was admitted"
 	}
-	if existing {
+	if switchGated(kind, b.created[ref]) {
 		if v := destructive.New(database).Check(ctx, sub.MerchantID); !v.Allowed {
 			return ctx, v.Reason
 		}
@@ -143,12 +181,14 @@ func (b *DeclaredBook) effect(ctx context.Context, database *db.DB, sub *models.
 // cancel applies a declared cancel of sub when the book's admission allows
 // it; a held one parks the live row unverified.
 func (b *DeclaredBook) cancel(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time) (bool, error) {
-	ctx, hold := b.effect(ctx, database, sub, true)
+	if !b.admitted {
+		b.want(sub, cancelEffect)
+		return false, nil
+	}
+	ctx, hold := b.effect(ctx, database, sub, cancelEffect)
 	if hold != "" {
-		if b.admitted {
-			database.Log.WarnContext(ctx, "declared cancel held; the subscription keeps its access", "subscription_id", sub.ID, "rail", sub.Rail, "reason", d.Reason, "held_by", hold)
-		}
-		if !b.admitted || sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+		database.Log.WarnContext(ctx, "declared cancel held; the subscription keeps its access", "subscription_id", sub.ID, "rail", sub.Rail, "reason", d.Reason, "held_by", hold)
+		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
 			return false, nil
 		}
 		return true, lc.ApplyLocalUnknown(ctx, database, sub)
@@ -157,49 +197,73 @@ func (b *DeclaredBook) cancel(ctx context.Context, database *db.DB, lc *subscrip
 	if err != nil || !applied || sub.Status != models.StatusCanceled {
 		return applied, err
 	}
-	return true, b.finish(ctx, database)
+	return true, b.finish(ctx, database, destructive.OutcomeSucceeded)
+}
+
+// terminal prepares a FailMembership whose terminal outcome is one of the
+// book's cancels: the context it runs in, and its hold, asked only once the
+// outcome is terminal.
+func (b *DeclaredBook) terminal(ctx context.Context, database *db.DB, sub *models.Subscription) (context.Context, func() string) {
+	if !b.admitted {
+		return ctx, func() string {
+			b.want(sub, terminalEffect)
+			return awaitingAdmission
+		}
+	}
+	bound, hold := b.effect(ctx, database, sub, terminalEffect)
+	return bound, func() string { return hold }
 }
 
 // stopProvider schedules the provider stop a canceled row is owed, once
 // admitted.
 func (b *DeclaredBook) stopProvider(ctx context.Context, database *db.DB, sub *models.Subscription, schedule func(context.Context) error) error {
-	ctx, hold := b.effect(ctx, database, sub, false)
-	switch {
-	case !b.admitted:
+	if !b.admitted {
+		b.want(sub, stopEffect)
 		return nil
-	case hold != "":
+	}
+	ctx, hold := b.effect(ctx, database, sub, stopEffect)
+	if hold != "" {
 		return fmt.Errorf("declared book: the provider stop of %s is not admitted (%s); import the book again", refOf(sub).target(), hold)
 	}
 	if err := schedule(ctx); err != nil {
 		return err
 	}
-	return b.finish(ctx, database)
+	return b.finish(ctx, database, destructive.OutcomeSucceeded)
 }
 
-// finish records the effect of the action bound to ctx in the landing.
-func (b *DeclaredBook) finish(ctx context.Context, database *db.DB) error {
+// finish records outcome for the action bound to ctx in the landing.
+func (b *DeclaredBook) finish(ctx context.Context, database *db.DB, outcome destructive.Outcome) error {
 	action, ok := destructive.ActionFromContext(ctx)
-	if !ok || !b.started[action.ID] || b.finished[action.ID] {
+	if !ok || !b.owned[action.ID] || b.finished[action.ID] {
 		return nil
 	}
 	b.finished[action.ID] = true
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return b.admissions.FinishTx(ctx, tx, action.MerchantID, action.ID, destructive.OutcomeSucceeded, action.Target)
+		return b.admissions.FinishTx(ctx, tx, action.MerchantID, action.ID, outcome, action.Target)
 	})
 }
 
-// end closes a landing: an admitted effect it did not apply had none.
+// end closes a landing. An admitted effect it did not finish succeeded when
+// it queued a provider effect, else it had none.
 func (b *DeclaredBook) end(ctx context.Context, database *db.DB) error {
 	if !b.admitted {
 		return nil
 	}
 	for _, action := range b.actions {
-		if !b.started[action.ID] || b.finished[action.ID] {
+		if !b.owned[action.ID] || b.finished[action.ID] {
 			continue
 		}
 		b.finished[action.ID] = true
 		if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return b.admissions.FinishTx(ctx, tx, action.MerchantID, action.ID, destructive.OutcomeNoEffect, "")
+			provider, err := gen.New(tx).DestructiveActionProviderState(ctx, gen.DestructiveActionProviderStateParams{MerchantID: action.MerchantID, ID: action.ID})
+			if err != nil {
+				return err
+			}
+			outcome := destructive.OutcomeNoEffect
+			if provider.Pending || provider.Succeeded {
+				outcome = destructive.OutcomeSucceeded
+			}
+			return b.admissions.FinishTx(ctx, tx, action.MerchantID, action.ID, outcome, action.Target)
 		}); err != nil {
 			return err
 		}
@@ -210,25 +274,28 @@ func (b *DeclaredBook) end(ctx context.Context, database *db.DB) error {
 // Admit admits what the last landing wanted, outside any transaction. A
 // denied admission is a destructive.HeldError and starts nothing.
 func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.MerchantID) error {
-	b.admitted, b.actions, b.held, b.started = true, map[declaredRef]destructive.Action{}, map[declaredRef]string{}, map[uuid.UUID]bool{}
+	b.admitted, b.mid = true, mid.UUID()
+	b.actions, b.revs, b.held, b.owned = map[declaredRef]destructive.Action{}, map[declaredRef]int64{}, map[declaredRef]string{}, map[uuid.UUID]bool{}
 	refs := slices.SortedFunc(maps.Keys(b.wanted), declaredRef.compare)
 	var admit []declaredRef
 	byPSP := map[uuid.UUID][]declaredRef{}
 	var gate *destructive.Verdict
 	for _, ref := range refs {
-		if !b.wanted[ref].existing {
+		if b.wanted[ref].gated {
+			if gate == nil {
+				v := destructive.New(database).CheckMerchant(ctx, mid.UUID())
+				gate = &v
+			}
+			if !gate.Allowed {
+				b.held[ref] = gate.Reason
+				continue
+			}
+		}
+		if b.wanted[ref].existing {
+			byPSP[ref.psp] = append(byPSP[ref.psp], ref)
+		} else {
 			admit = append(admit, ref)
-			continue
 		}
-		if gate == nil {
-			v := destructive.New(database).CheckMerchant(ctx, mid.UUID())
-			gate = &v
-		}
-		if !gate.Allowed {
-			b.held[ref] = gate.Reason
-			continue
-		}
-		byPSP[ref.psp] = append(byPSP[ref.psp], ref)
 	}
 	for _, psp := range slices.SortedFunc(maps.Keys(byPSP), func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) }) {
 		planned := byPSP[psp]
@@ -272,26 +339,23 @@ func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.M
 	actorKey := destructive.Digest([]string{actor.Issuer, actor.ID})
 	commands := make([]destructive.Command, len(admit))
 	for i, ref := range admit {
-		target := ref.target()
-		digest := destructive.Digest([]any{"billing_import", target, b.asOf})
+		target, rev := ref.target(), b.wanted[ref].rev
+		digest := destructive.Digest([]any{"billing_import", target, rev, b.asOf})
 		commands[i] = destructive.Command{MerchantID: mid.UUID(), Kind: destructive.CancelSubscription, Target: target,
 			Key: "billing-import:" + digest + ":actor:" + actorKey, Digest: digest, Units: 1, Actor: *actor}
 	}
 	for from := 0; from < len(commands); from += admitBatch {
 		to := min(from+admitBatch, len(commands))
-		actions, err := b.admissions.AdmitBatch(ctx, commands[from:to])
+		actions, err := b.admissions.StartMerchantOperation(ctx, commands[from:to])
 		if err != nil {
 			return err
 		}
 		for i, action := range actions {
-			started, err := b.admissions.Start(ctx, mid.UUID(), action.ID)
-			if err != nil {
-				return err
+			ref := admit[from+i]
+			b.actions[ref], b.revs[ref] = action, b.wanted[ref].rev
+			if action.State != destructive.StateSucceeded && action.State != destructive.StateNoEffect {
+				b.owned[action.ID] = true
 			}
-			if !started.Replayed {
-				b.started[started.ID] = true
-			}
-			b.actions[admit[from+i]] = started
 		}
 	}
 	return nil
@@ -300,20 +364,14 @@ func (b *DeclaredBook) Admit(ctx context.Context, database *db.DB, mid billing.M
 // admitBatch is the most commands one admission reserves.
 const admitBatch = 1000
 
-// Abandon records that the admitted effects of a landing that did not commit
-// had none, or are uncertain when its commit may have.
-func (b *DeclaredBook) Abandon(ctx context.Context, uncertain bool) error {
-	outcome := destructive.OutcomeNoEffect
-	if uncertain {
-		outcome = destructive.OutcomeUncertain
+// Abandon records, in one transaction, that the admitted effects of a
+// landing that did not commit had none. A commit still in flight is waited
+// for; what it finished stays.
+func (b *DeclaredBook) Abandon(ctx context.Context) error {
+	if b.admissions == nil || len(b.owned) == 0 {
+		return nil
 	}
-	ctx, cancel := db.DetachedWriteContext(ctx, 10*time.Second)
+	ctx, cancel := db.DetachedWriteContext(ctx, 30*time.Second)
 	defer cancel()
-	var errs []error
-	for _, action := range b.actions {
-		if b.started[action.ID] {
-			errs = append(errs, b.admissions.Finish(ctx, action.MerchantID, action.ID, outcome, ""))
-		}
-	}
-	return errors.Join(errs...)
+	return b.admissions.AbandonMerchantOperation(ctx, b.mid, slices.Collect(maps.Keys(b.owned)))
 }

@@ -510,23 +510,21 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		if err := validateReceiptSources(opts.Book, history); err != nil {
 			return res, err
 		}
-		landed := false
 		err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			if err := land(ctx, tx); err != nil {
 				return err
 			}
-			landed = true
-			return nil
+			return failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeComplete, Kind: FailpointKind})
 		})
 		if errors.Is(err, reconcile.ErrDeclaredAdmission) && !admitted {
 			admitted = true
 			if err := effects.Admit(ctx, database, merchantID); err != nil {
-				return Result{}, errors.Join(err, effects.Abandon(ctx, false))
+				return Result{}, errors.Join(err, effects.Abandon(ctx))
 			}
 			continue
 		}
 		if err != nil {
-			return res, errors.Join(err, effects.Abandon(ctx, landed && !errors.Is(err, pgx.ErrTxCommitRollback)))
+			return res, errors.Join(err, effects.Abandon(ctx))
 		}
 		break
 	}

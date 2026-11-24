@@ -83,14 +83,17 @@ func Digest(terms any) string {
 // Command is a validated logical action. Key binds its existing idempotency
 // key or target lifecycle revision; a re-cancel after resume uses a new key.
 type Command struct {
-	origin     string
-	MerchantID uuid.UUID
-	Kind       Kind
-	Target     string
-	Key        string
-	Digest     string
-	Units      int64
-	Actor      Actor
+	origin string
+	// merchantOperation: one action of a merchant-level operation, counted
+	// against the merchant and the deployment, not its actor.
+	merchantOperation bool
+	MerchantID        uuid.UUID
+	Kind              Kind
+	Target            string
+	Key               string
+	Digest            string
+	Units             int64
+	Actor             Actor
 }
 
 // originName is the audit origin: named automation, the in-process host's own
@@ -103,6 +106,15 @@ func (c Command) originName() string {
 		return "host"
 	}
 	return "staff"
+}
+
+// actorKey is whose allowance the action spends: its actor's, or for a
+// merchant operation the merchant's own.
+func (c Command) actorKey() string {
+	if c.merchantOperation {
+		return Digest([]string{"merchant-operation", c.MerchantID.String()})
+	}
+	return c.Actor.key()
 }
 
 func (c Command) validate() error {

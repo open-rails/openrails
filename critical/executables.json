@@ -787,10 +787,15 @@
       "TestDestructiveSafeguards/OR-J34-S32/a-spent-solana-schedule-waits-past-due-while-the-switch-is-off"
     ],
     "OR-J34-S33": [
-      "TestDestructiveSafeguards/OR-J34-S33/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission"
+      "TestDestructiveSafeguards/OR-J34-S33/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission",
+      "TestDestructiveSafeguards/OR-J34-S33/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission/host",
+      "TestDestructiveSafeguards/OR-J34-S33/a-billing-import-cancels-only-through-the-switch-the-cap-and-an-attributed-admission/staff"
     ],
     "OR-J34-S34": [
       "TestDestructiveSafeguards/OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget"
+    ],
+    "OR-J34-S35": [
+      "TestDestructiveSafeguards/OR-J34-S35/a-declined-charge-that-spends-dunning-in-a-book-is-an-admitted-cancel"
     ],
     "OR-J37-S01": [
       "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",

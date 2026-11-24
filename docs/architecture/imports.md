@@ -192,23 +192,12 @@ Checks:
 
 ### 9. Destructive-action safeguards
 
-Apply approves only corrections that keep access, never one a person
-dismissed. Cancels, past due, refunds and product moves wait for
-`ApproveProposals`, which admits each cancel through the destructive policy
-and spends the actor's allowance. Each Apply is one approval run in its
-requester's name, reversible by `openrails undo-run`. A billing-book import is
-one command (`reconcile.DeclaredBook`): its cancels and owed provider stops are
-admitted together as the caller's `cancel_subscription` actions, and a cancel
-of a row the book did not create also waits for the destructive switch and its
-PSP's cancellation cap, all or nothing, parking the row `unverified`. Absence
-cancels need `subscriptions_exhaustive` with a matching
-`expected_subscriptions`. A `failed` import is refused; a person creates it
-again.
+Apply approves only corrections that keep access, never one a person dismissed. Cancels, past due, refunds and product moves wait for `ApproveProposals`, which admits each cancel through the destructive policy and spends the actor's allowance. Each Apply is one approval run in its requester's name, reversible by `openrails undo-run`. A billing-book import is one merchant-level command (`reconcile.DeclaredBook`): its cancels, the terminal declines it lands and its owed provider stops are `cancel_subscription` actions in the caller's name, admitted and started together (`destructive.Admissions.StartMerchantOperation`) against the merchant's and the deployment's budgets, not the caller's. A cancel of a row the book did not create also waits for the destructive switch and its PSP's cancellation cap, all or nothing, parking the row `unverified`; a terminal decline waits for the switch, held as `life.terminal_outcome.held`. A landing that fails after its admission finishes its actions with no effect (`AbandonMerchantOperation`). Absence cancels need `subscriptions_exhaustive` with a matching `expected_subscriptions`. A `failed` import is refused; a person creates it again.
 
 Checks:
 - `ListPullCorrections` (`internal/db/queries/reconciliation.sql`) selects only access-keeping kinds; OR-J38-S21, S25, S28, S32.
 - OR-J38-S71: proposal cancels spend the allowance once per subscription; a replay spends nothing.
-- OR-J34-S33: a book's cancel waits for the switch and the cap, and records its actor.
+- OR-J34-S33: a book's cancel waits for the switch and the cap, spends the merchant's budget and records its actor, by the host or staff; OR-J34-S35: a declined charge that spends dunning is an admitted cancel.
 - OR-J38-S76: a `failed` import cannot be applied.
 - `ImportDeclaredSubscriptions` refuses an exhaustive book whose `expected_subscriptions` differs from its count.
 

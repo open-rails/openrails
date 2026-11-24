@@ -1910,6 +1910,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			if leg == "" {
 				return "no certainty leg named (collection.Certainty*): terminal cancellation requires provider truth, a non-retryable decline, or exhausted dunning attempts"
 			}
+			if params.HoldTerminal != nil {
+				return params.HoldTerminal()
+			}
 			return ""
 		}
 		// Schedule exhaustion is certainty only when every failure was a real,
@@ -2025,9 +2028,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			if !params.Terminal {
 				leg = scheduleExhaustionLeg()
 			}
-			switch {
-			case terminal && terminalRefusal(leg) != "":
+			if terminal {
 				heldTerminal = terminalRefusal(leg)
+			}
+			switch {
+			case terminal && heldTerminal != "":
 				event = lifecycle.TerminalHeld{}
 			case terminal:
 				event = lifecycle.DunningExhausted{At: now}

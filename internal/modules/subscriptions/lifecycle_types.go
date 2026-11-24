@@ -204,6 +204,10 @@ type FailMembershipParams struct {
 	// (destructive.Gate.Check). It overrides any certainty: the row parks and no
 	// provider delete is queued.
 	TerminalBlocked string
+	// HoldTerminal, when set, is asked once a certain terminal outcome is
+	// reached and TerminalBlocked is empty: a non-empty reason holds it as
+	// TerminalBlocked would.
+	HoldTerminal func() string
 	// Expect, when set, must accept the locked row, or the failure is not
 	// recorded: the row moved since the caller decided.
 	Expect func(*models.Subscription) bool

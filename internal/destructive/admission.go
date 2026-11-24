@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -100,67 +101,135 @@ func (a *Admissions) AdmitAutonomous(ctx context.Context, c Command, source stri
 // AdmitBatch atomically reserves all fresh commands of one admitted principal
 // and merchant. Existing replays cost zero; no fresh receipt survives a trip.
 func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Action, error) {
+	if err := validBatch(commands); err != nil {
+		return nil, err
+	}
+	first := commands[0]
+	var out []Action
+	var held *HeldError
+	err := a.transaction(ctx, first.MerchantID, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
+		var err error
+		out, held, err = a.admitTx(ctx, q, tx, commands)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if held != nil {
+		return nil, held
+	}
+	return out, nil
+}
+func validBatch(commands []Command) error {
 	if len(commands) < 1 || len(commands) > 1000 {
-		return nil, errors.New("admit 1 to 1000 destructive commands")
+		return errors.New("admit 1 to 1000 destructive commands")
 	}
 	first := commands[0]
 	keysSeen := map[string]bool{}
 	for _, c := range commands {
 		if err := c.validate(); err != nil {
-			return nil, err
+			return err
 		}
-		if c.MerchantID != first.MerchantID || c.Actor.Issuer != first.Actor.Issuer || c.Actor.ID != first.Actor.ID || c.origin != first.origin {
-			return nil, errors.New("destructive batch must share merchant and actor")
+		if c.MerchantID != first.MerchantID || c.Actor.Issuer != first.Actor.Issuer || c.Actor.ID != first.Actor.ID || c.origin != first.origin || c.merchantOperation != first.merchantOperation {
+			return errors.New("destructive batch must share merchant and actor")
 		}
 		if keysSeen[c.Key] {
-			return nil, errors.New("duplicate destructive command key")
+			return errors.New("duplicate destructive command key")
 		}
 		keysSeen[c.Key] = true
 	}
+	return nil
+}
+
+// admitTx reserves a validated batch in tx: replays cost nothing; a trip
+// creates no fresh receipt.
+func (a *Admissions) admitTx(ctx context.Context, q *gen.Queries, tx pgx.Tx, commands []Command) ([]Action, *HeldError, error) {
 	out := make([]Action, len(commands))
+	var fresh []int
+	var units int64
+	for i, c := range commands {
+		old, err := q.GetDestructiveActionByKey(ctx, gen.GetDestructiveActionByKeyParams{MerchantID: c.MerchantID, ActionKey: c.Key})
+		if err == nil {
+			if old.RequestDigest != c.Digest || old.Kind != string(c.Kind) || old.Target != c.Target || old.Units != c.Units || old.ActorIssuer != c.Actor.Issuer || old.ActorID != c.Actor.ID || old.ActorKey != c.actorKey() || (old.Origin == "automation") != (c.origin == "automation") {
+				return nil, nil, ErrConflict
+			}
+			if old.State != string(StateNoEffect) {
+				out[i] = actionOf(old)
+				out[i].Replayed = true
+				continue
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, err
+		}
+		fresh = append(fresh, i)
+		units += c.Units
+	}
+	if len(fresh) == 0 {
+		return out, nil, nil
+	}
+	held, err := a.admitUnits(ctx, q, tx, commands[fresh[0]], units)
+	if err != nil || held != nil {
+		return nil, held, err
+	}
+	now := a.clock.Now().UTC()
+	for _, i := range fresh {
+		c := commands[i]
+		id, err := uuid.NewV7()
+		if err != nil {
+			return nil, nil, err
+		}
+		row, err := q.CreateDestructiveAction(ctx, gen.CreateDestructiveActionParams{MerchantID: c.MerchantID, ID: id, Kind: string(c.Kind), Target: c.Target, ActionKey: c.Key, RequestDigest: c.Digest, Origin: c.originName(), ActorIssuer: c.Actor.Issuer, ActorID: c.Actor.ID, ActorKey: c.actorKey(), Credential: optional(c.Actor.Credential), Units: c.Units, AdmittedAt: now})
+		if err != nil {
+			return nil, nil, err
+		}
+		out[i] = actionOf(row)
+	}
+	return out, nil, nil
+}
+
+// StartMerchantOperation admits and starts the commands of one
+// merchant-level operation (a billing book) in one transaction. They spend
+// the merchant's and the deployment's budgets, not their actor's, though the
+// actor is recorded and its open hold stops them. A replay that is not final
+// is started again for this attempt to finish.
+func (a *Admissions) StartMerchantOperation(ctx context.Context, commands []Command) ([]Action, error) {
+	commands = slices.Clone(commands)
+	for i := range commands {
+		commands[i].merchantOperation = true
+	}
+	if err := validBatch(commands); err != nil {
+		return nil, err
+	}
+	first := commands[0]
+	var out []Action
 	var held *HeldError
 	err := a.transaction(ctx, first.MerchantID, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
-		var fresh []int
-		var units int64
-		for i, c := range commands {
-			old, err := q.GetDestructiveActionByKey(ctx, gen.GetDestructiveActionByKeyParams{MerchantID: c.MerchantID, ActionKey: c.Key})
-			if err == nil {
-				if old.RequestDigest != c.Digest || old.Kind != string(c.Kind) || old.Target != c.Target || old.Units != c.Units || old.ActorIssuer != c.Actor.Issuer || old.ActorID != c.Actor.ID || (old.Origin == "automation") != (c.origin == "automation") {
-					return ErrConflict
-				}
-				if old.State != string(StateNoEffect) {
-					out[i] = actionOf(old)
-					out[i].Replayed = true
-					continue
-				}
+		if first.originName() != "host" {
+			if h, err := q.FindOpenDestructiveHold(ctx, scopeKeys(first.Actor, first.MerchantID)); err == nil {
+				held = &HeldError{Hold: holdOf(h)}
+				return nil
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
-			fresh = append(fresh, i)
-			units += c.Units
 		}
-		if len(fresh) == 0 {
-			return nil
-		}
-		trigger := commands[fresh[0]]
-		var err error
-		held, err = a.admitUnits(ctx, q, tx, trigger, units)
-		if err != nil || held != nil {
+		actions, h, err := a.admitTx(ctx, q, tx, commands)
+		if err != nil || h != nil {
+			held = h
 			return err
 		}
 		now := a.clock.Now().UTC()
-		for _, i := range fresh {
-			c := commands[i]
-			id, err := uuid.NewV7()
+		for i, action := range actions {
+			if action.State != StateReserved {
+				continue
+			}
+			row, err := q.StartDestructiveAction(ctx, gen.StartDestructiveActionParams{MerchantID: action.MerchantID, ID: action.ID, Now: now})
 			if err != nil {
 				return err
 			}
-			row, err := q.CreateDestructiveAction(ctx, gen.CreateDestructiveActionParams{MerchantID: c.MerchantID, ID: id, Kind: string(c.Kind), Target: c.Target, ActionKey: c.Key, RequestDigest: c.Digest, Origin: c.originName(), ActorIssuer: c.Actor.Issuer, ActorID: c.Actor.ID, ActorKey: c.Actor.key(), Credential: optional(c.Actor.Credential), Units: c.Units, AdmittedAt: now})
-			if err != nil {
-				return err
-			}
-			out[i] = actionOf(row)
+			actions[i] = actionOf(row)
+			actions[i].Replayed = action.Replayed
 		}
+		out = actions
 		return nil
 	})
 	if err != nil {
@@ -171,6 +240,39 @@ func (a *Admissions) AdmitBatch(ctx context.Context, commands []Command) ([]Acti
 	}
 	return out, nil
 }
+
+// AbandonMerchantOperation records, in one transaction, that the actions of
+// an operation whose transaction did not commit had no effect. It waits for
+// a commit still in flight: an action that committed is final, or names its
+// pending provider effect, and is left as it is.
+func (a *Admissions) AbandonMerchantOperation(ctx context.Context, mid uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return a.transaction(ctx, mid, func(ctx context.Context, q *gen.Queries, tx pgx.Tx) error {
+		for _, id := range ids {
+			row, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid, ID: id})
+			if err != nil {
+				return err
+			}
+			if row.State == string(StateSucceeded) || row.State == string(StateNoEffect) {
+				continue
+			}
+			provider, err := q.DestructiveActionProviderState(ctx, gen.DestructiveActionProviderStateParams{MerchantID: mid, ID: id})
+			if err != nil {
+				return err
+			}
+			if provider.Pending || provider.Succeeded {
+				continue
+			}
+			if err := a.FinishTx(ctx, tx, mid, id, OutcomeNoEffect, ""); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, c Command, units int64) (*HeldError, error) {
 	if c.originName() == "host" {
 		// The host's own work is trusted: audited, but never counted or held.
@@ -186,6 +288,9 @@ func (a *Admissions) admitUnits(ctx context.Context, q *gen.Queries, tx pgx.Tx, 
 		return &HeldError{Hold: holdOf(h)}, nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
+	}
+	if c.merchantOperation {
+		keys, scopes = keys[1:], scopes[1:]
 	}
 	now := a.clock.Now().UTC()
 	for i, scope := range scopes {

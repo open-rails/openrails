@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 471,
+  "scenario_count": 472,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1641,12 +1641,17 @@
     {
       "id": "OR-J34-S33",
       "journey": "J34",
-      "name": "A billing import cancels only through the destructive switch, the PSP cancellation cap and an admission recording its actor"
+      "name": "A billing import, by the host or staff, cancels only through the destructive switch, the PSP cancellation cap and an admission on the merchant's budget recording its actor"
     },
     {
       "id": "OR-J34-S34",
       "journey": "J34",
       "name": "A staff card removal is a staff admission and spends no customer-action budget"
+    },
+    {
+      "id": "OR-J34-S35",
+      "journey": "J34",
+      "name": "A declined charge that spends dunning in a billing import is an admitted cancel, held while the switch is off"
     },
     {
       "id": "OR-J16-S30",
