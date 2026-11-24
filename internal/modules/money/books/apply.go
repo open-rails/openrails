@@ -304,7 +304,7 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 						return err
 					}
 				}
-				if err := b.fundMore(ctx, r.RevenueScheduleID, held[r.RevenueScheduleID], r.LastReleaseID, maxTime(at, r.ReleasedAt.UTC().Truncate(time.Microsecond)), loc); err != nil {
+				if err := b.fundMore(ctx, r.RevenueScheduleID, held[r.RevenueScheduleID], r.Amount, maxTime(at, r.ReleasedAt.UTC().Truncate(time.Microsecond)), loc); err != nil {
 					return err
 				}
 				continue

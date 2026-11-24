@@ -663,7 +663,7 @@ func unitExpiry(t *testing.T) {
 	require.Equal(t, billing.CreditGrantExpired, lot.State)
 	require.EqualValues(t, 8, lot.SpentAmount, "the lot pays the usage of its life")
 	require.EqualValues(t, 2, lot.ExpiredAmount)
-	require.Equal(t, map[string]int64{"charged": 8, "forgiven": 0}, usageByCharge(t, b, lapsing, captured))
+	require.Equal(t, map[string]int64{"charged": 8}, usageByCharge(t, b, lapsing, captured), "nothing forgiven")
 }
 
 // usageByCharge is customer's usage_charged in GOLD on day's UTC day, by
@@ -772,7 +772,9 @@ func unitRefundByLot(t *testing.T) {
 }
 
 func unitReversalsAsSettled(t *testing.T) {
-	s, p := unitPaymentWorld(t, 0)
+	// R1 settles 20 minutes on: a payment is never dated ahead of the
+	// database's clock, so the clock starts an hour back.
+	s, p := unitPaymentWorld(t, time.Hour)
 	a := s.a
 	gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
 	toolkit, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "toolkit", DisplayName: "Toolkit", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"toolkit:owned"}})
@@ -1128,7 +1130,7 @@ func unitOrderRevenue(t *testing.T) {
 			EffectiveAt: a.clock.Now(), Customer: &alice, Order: &order})
 		return err
 	}))
-	require.ErrorContains(t, a.alpha.ExportBillingArchive(t.Context(), &bytes.Buffer{}), "ledger_transfers", "pounds paid none of the GOLD order")
+	require.ErrorContains(t, a.alpha.ExportBillingArchive(t.Context(), &bytes.Buffer{}), "cannot safely be moved", "pounds paid none of the GOLD order")
 }
 
 // reapplyOrder applies a completed order to the books again.
@@ -1185,11 +1187,11 @@ func stripeEvent(t *testing.T, a *authorityWorld, id, kind string, object stripe
 	require.Equal(t, http.StatusOK, status, out)
 }
 
-// scheduleLegSums sums the general-ledger legs naming order's schedules, by
-// operation and transfer type.
+// scheduleLegSums sums the general-ledger legs naming order's schedules other
+// than recognitions, by label (the source before its colon) and transfer type.
 func scheduleLegSums(t *testing.T, a *authorityWorld, order billing.OrderID) map[string]int64 {
 	t.Helper()
-	rows, err := a.pool.Query(t.Context(), "SELECT t.operation || '/' || t.transfer_type, sum(t.amount)::bigint FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+" t JOIN "+
+	rows, err := a.pool.Query(t.Context(), "SELECT split_part(t.source, ':', 1) || '/' || t.transfer_type, sum(t.amount)::bigint FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+" t JOIN "+
 		pgx.Identifier{a.schema, "revenue_schedules"}.Sanitize()+" r ON r.merchant_id = t.merchant_id AND r.id = t.revenue_schedule_id"+
 		" WHERE t.merchant_id = $1 AND r.order_id = $2 AND t.operation NOT IN ('recognition', 'application') GROUP BY 1", a.alpha.MerchantID().UUID(), order.UUID())
 	require.NoError(t, err)
@@ -1243,12 +1245,12 @@ func unitPackChargebackSchedule(t *testing.T) {
 	require.Positive(t, reduced.Recognized)
 	require.Less(t, reduced.Recognized, reduced.Funded)
 	legs := scheduleLegSums(t, a, order)
-	require.EqualValues(t, 5_000_000, legs["purchased_credit_refund/chargeback_recognized"]+legs["purchased_credit_refund/chargeback_deferred"],
+	require.EqualValues(t, 5_000_000, legs["money_recognized/chargeback_recognized"]+legs["money_recognized/chargeback_deferred"],
 		"the $5 leaves the pass's revenue: recognised to chargebacks, the rest from deferred revenue")
 
 	// Winning the dispute five days later restores the $5: the pass's price
-	// is $10 again, recognised to then, its contra and deferred parts each at
-	// its own operation.
+	// is $10 again, recognised to then, its contra and deferred parts each
+	// under its own label.
 	a.clock.Advance(5 * 24 * time.Hour)
 	dispute["status"] = "won"
 	stripeEvent(t, a, "evt_pass_dispute_won", "charge.dispute.closed", dispute)
@@ -1257,9 +1259,9 @@ func unitPackChargebackSchedule(t *testing.T) {
 	require.Greater(t, restored.Recognized, reduced.Recognized)
 	require.Less(t, restored.Recognized, restored.Funded)
 	legs = scheduleLegSums(t, a, order)
-	require.Positive(t, legs["dispute_won/dispute_won"])
-	require.Positive(t, legs["dispute_won_deferred/dispute_won"])
-	require.EqualValues(t, 5_000_000, legs["dispute_won/dispute_won"]+legs["dispute_won_deferred/dispute_won"])
+	require.Positive(t, legs["money_recognized_restore/dispute_won"])
+	require.Positive(t, legs["money_recognized_deferred_restore/dispute_won"])
+	require.EqualValues(t, 5_000_000, legs["money_recognized_restore/dispute_won"]+legs["money_recognized_deferred_restore/dispute_won"])
 
 	// Recognition resumes at the restored price: $10 in all once the pass ends.
 	fleet := startFleet(t, a.world)
@@ -1289,8 +1291,8 @@ func unitPackRefundSchedule(t *testing.T) {
 	require.Positive(t, reduced.Recognized)
 	require.Less(t, reduced.Recognized, reduced.Funded)
 	legs := scheduleLegSums(t, a, order)
-	require.EqualValues(t, 5_000_000, legs["purchased_credit_refund/refund_recognized"]+legs["purchased_credit_refund/refund_deferred"], "against refunds, not chargebacks")
-	require.Zero(t, legs["purchased_credit_refund/chargeback_recognized"]+legs["purchased_credit_refund/chargeback_deferred"])
+	require.EqualValues(t, 5_000_000, legs["money_recognized/refund_recognized"]+legs["money_recognized/refund_deferred"], "against refunds, not chargebacks")
+	require.Zero(t, legs["money_recognized/chargeback_recognized"]+legs["money_recognized/chargeback_deferred"])
 }
 
 func unitChargebackSplit(t *testing.T) {
@@ -1318,7 +1320,7 @@ func unitChargebackSplit(t *testing.T) {
 		"charge": charge, "payment_intent": intent, "status": "needs_response", "reason": "fraudulent"})
 	require.Equal(t, unitSchedule{0, 0}, unitScheduleOf(t, a, order, "USD"), "the pass's $10 is gone")
 	legs := scheduleLegSums(t, a, order)
-	require.EqualValues(t, 10_000_000, legs["purchased_credit_refund/chargeback_recognized"]+legs["purchased_credit_refund/chargeback_deferred"])
+	require.EqualValues(t, 10_000_000, legs["money_recognized/chargeback_recognized"]+legs["money_recognized/chargeback_deferred"])
 	var usage int64
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(amount), 0)::bigint FROM "+pgx.Identifier{a.schema, "ledger_transfers"}.Sanitize()+
 		" WHERE merchant_id = $1 AND book = 'general' AND operation = 'purchased_credit_refund' AND source = 'money_recognized' AND revenue_schedule_id IS NULL",

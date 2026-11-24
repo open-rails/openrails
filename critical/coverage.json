@@ -3041,7 +3041,7 @@
     {
       "id": "OR-J48-S14",
       "journey": "J48",
-      "name": "A chargeback of a pack whose units paid for a 30-day pass takes the consumed share of its cash from the pass's schedule as a price reduction with catch-up; winning the dispute restores it, its contra and deferred parts at dispute_won and dispute_won_deferred, and recognition resumes at the restored price"
+      "name": "A chargeback of a pack whose units paid for a 30-day pass takes the consumed share of its cash from the pass's schedule as a price reduction with catch-up; winning the dispute restores it, its contra and deferred parts each under its own label, and recognition resumes at the restored price"
     },
     {
       "id": "OR-J48-S15",

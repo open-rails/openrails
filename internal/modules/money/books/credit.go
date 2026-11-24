@@ -385,6 +385,9 @@ const (
 	reversedRepaid     = "money_repaid"
 	reversedPromotion  = "money_repaid_promotion"
 	reversedRecognized = "money_recognized"
+	// reversedRecognizedDeferred is a recovery's part of what a schedule's
+	// reduction took from deferred revenue.
+	reversedRecognizedDeferred = "money_recognized_deferred"
 )
 
 // ReverseCredit posts a reversal of a booked lot's payment at
@@ -516,7 +519,8 @@ func (b *Books) RecoverCredit(ctx context.Context, l CreditLot, r CreditRecovery
 			return err
 		}
 	}
-	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, coord: coord(reversedRecognized), at: r.At, now: r.Now, loc: r.Zone}
+	legs := scheduleLegs{lot: l, cash: r.CashAccount, contra: contra, coord: coord(reversedRecognized), deferredSource: coord(reversedRecognizedDeferred).Source,
+		at: r.At, now: r.Now, loc: r.Zone}
 	for _, sh := range shares {
 		if err := b.changeSchedule(ctx, sh, false, legs); err != nil {
 			return err
