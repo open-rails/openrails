@@ -71,7 +71,7 @@ func (h *StripeResumeHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 	if sub.Status == models.StatusCanceled {
 		return SupersededBy("subscription canceled again"), nil
 	}
-	return StillRelevant(), nil
+	return awaitEarlierStripeWrite(ctx, h.DB, intent, h.Clock)
 }
 
 func (h *StripeResumeHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
@@ -86,9 +86,6 @@ func (h *StripeResumeHandler) Execute(ctx context.Context, intent gen.BillingPro
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	if psid == "" {
 		return Succeeded(map[string]any{"no_rail_subscription_id": true})
-	}
-	if outcome, wait := awaitEarlierStripeWrite(ctx, h.DB, intent, h.Clock); wait {
-		return outcome
 	}
 	rec, err := h.probe(ctx, key, psid)
 	if err != nil {
@@ -148,23 +145,23 @@ func (h *StripeResumeHandler) Verify(ctx context.Context, intent gen.BillingProv
 // one of its subscription before it looks again.
 const stripeOrderWait = time.Minute
 
-// awaitEarlierStripeWrite holds a Stripe cancel or resume while one of the
-// same subscription committed before it is in flight or unresolved, so they
-// reach Stripe in the order they were committed. The wait is no attempt.
-func awaitEarlierStripeWrite(ctx context.Context, d *db.DB, intent gen.BillingProviderIntent, clock clockwork.Clock) (Outcome, bool) {
+// awaitEarlierStripeWrite keeps a Stripe cancel or resume unattempted while
+// one of the same subscription committed before it is in flight or
+// unresolved, so they reach Stripe in the order they were committed.
+func awaitEarlierStripeWrite(ctx context.Context, d *db.DB, intent gen.BillingProviderIntent, clock clockwork.Clock) (Relevance, error) {
 	if intent.SubscriptionID == nil {
-		return Outcome{}, false
+		return StillRelevant(), nil
 	}
 	waiting, err := d.Gen(ctx).HasEarlierStripeScheduleWrite(ctx, gen.HasEarlierStripeScheduleWriteParams{
 		MerchantID: intent.MerchantID, SubscriptionID: *intent.SubscriptionID, CreatedAt: intent.CreatedAt, ID: intent.ID,
 	})
 	if err != nil {
-		return Retryable("read earlier Stripe operations of the subscription: " + err.Error()), true
+		return Relevance{}, fmt.Errorf("read earlier Stripe operations of the subscription: %w", err)
 	}
 	if waiting {
-		return Deferred("an earlier Stripe cancel or resume of the subscription is unresolved", timeutil.FirstClock(clock).Now().UTC().Add(stripeOrderWait)), true
+		return WaitUntil("an earlier Stripe cancel or resume of the subscription is unresolved", timeutil.FirstClock(clock).Now().UTC().Add(stripeOrderWait)), nil
 	}
-	return Outcome{}, false
+	return StillRelevant(), nil
 }
 
 // stripeResumeSettled is what a read alone answers: Stripe bills the

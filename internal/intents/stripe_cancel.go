@@ -92,7 +92,7 @@ func (h *StripeCancelHandler) CheckRelevance(ctx context.Context, intent gen.Bil
 	if sub.Status != models.StatusCanceled {
 		return SupersededBy(fmt.Sprintf("subscription no longer canceled (status=%s)", sub.Status)), nil
 	}
-	return StillRelevant(), nil
+	return awaitEarlierStripeWrite(ctx, h.DB, intent, h.Clock)
 }
 
 func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
@@ -107,9 +107,6 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	if psid == "" {
 		return Succeeded(map[string]any{"no_rail_subscription_id": true})
-	}
-	if outcome, wait := awaitEarlierStripeWrite(ctx, h.DB, intent, h.Clock); wait {
-		return outcome
 	}
 	rec, err := h.probe(ctx, key, psid)
 	if err != nil {

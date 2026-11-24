@@ -271,6 +271,15 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		status, raw = a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		subscriptionState(t, a, sub.ID, "active")
+		// Waiting is no attempt: the resume is pending, unattempted and unlogged.
+		var state string
+		var attempts, logged int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT i.status, i.attempts, (SELECT count(*) FROM "+pgx.Identifier{a.schema, "provider_mutation_logs"}.Sanitize()+
+			" l WHERE l.merchant_id = i.merchant_id AND l.provider_intent_id = i.id) FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+			" i WHERE i.merchant_id = $1 AND i.subscription_id = $2 AND i.intent_type = 'stripe_resume_subscription'", a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&state, &attempts, &logged))
+		require.Equal(t, "pending", state)
+		require.Zero(t, attempts)
+		require.Zero(t, logged, "a waiting resume writes no mutation log")
 		held.Release()
 		require.Eventually(t, func() bool { return stripe.Subscription(remote)["cancel_at_period_end"] == true }, 20*time.Second, 20*time.Millisecond, "the cancel lands")
 		a.clock.Advance(2 * time.Minute)
