@@ -278,7 +278,7 @@ func overviewAnswers(t *testing.T, client *openrails.Client, widgets []billing.D
 	}
 	out := map[string][]map[string]any{}
 	for _, w := range widgets {
-		if w.Viz == dashboard.Heading {
+		if dashboard.Queryless(w.Viz) {
 			require.Empty(t, w.Query.Measures, w.ID)
 			continue
 		}

@@ -3,6 +3,7 @@ package catalog
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,6 +74,12 @@ var keyedCollections = map[reflect.Type]string{
 	reflect.TypeFor[ApplyLimit]():         "limit",
 }
 
+// renamedFields are fields a catalog no longer takes, with what replaced
+// them.
+var renamedFields = map[reflect.Type]map[string]string{
+	reflect.TypeFor[ApplyLimit](): {"rate_cards": "limit rate_cards are now counts: write counts: [{meter: <meter>, weight: <n>, per: <n>, filter: {<dimension>: [<value>]}}] (weight and per default to 1); rate cards price money only"},
+}
+
 // encoding/json accepts case-insensitive aliases for struct fields. Catalog
 // declarations deliberately require exact schema names, while opaque map keys
 // (entitlement names, provider names, dimensions) retain their original case.
@@ -117,6 +124,9 @@ func applicationJSONNames(raw []byte, shape reflect.Type) error {
 			field, ok := fields[name]
 			if noun, keyed := keyedCollections[shape]; !ok && keyed && name == "key" {
 				return fmt.Errorf("field \"key\" is not allowed: a %s's map key is its key", noun)
+			}
+			if msg, renamed := renamedFields[shape][name]; !ok && renamed {
+				return errors.New(msg)
 			}
 			if !ok {
 				return fmt.Errorf("unknown field %q in catalog (schema names are case-sensitive)", name)

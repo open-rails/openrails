@@ -53,6 +53,8 @@ type AdmitInput struct {
 	// EstimatedAmount places a hold; the hold lives exactly that long unless
 	// captured, released or extended. Zero declares none.
 	ExpiresAt time.Time
+	// LeaseID makes the hold a gate's: it lives while the lease does.
+	LeaseID *uuid.UUID
 }
 
 // ErrHoldDeadlineRequired is returned by Admit when EstimatedAmount places a
@@ -107,6 +109,9 @@ func (s *Service) admit(ctx context.Context, database *db.DB, in AdmitInput) (*b
 		if in.Usage != nil && in.EstimatedAmount != 0 {
 			return nil, &spendgate.ValidationError{Param: "usage", Message: "usage and estimated_amount are exclusive: the rate cards price usage"}
 		}
+		if in.LeaseID != nil && !in.ExpiresAt.IsZero() {
+			return nil, &spendgate.ValidationError{Param: "expires_at", Message: "a lease's hold lives while the lease does and takes no expires_at"}
+		}
 	}
 	currency, err := s.registryCurrency(ctx, "currency", in.Currency)
 	if err != nil {
@@ -146,6 +151,7 @@ func (s *Service) admit(ctx context.Context, database *db.DB, in AdmitInput) (*b
 		Source:                  source,
 		SourceID:                in.SourceID,
 		ExpiresAt:               exp,
+		LeaseID:                 in.LeaseID,
 	})
 	if err != nil {
 		return nil, err
@@ -188,15 +194,7 @@ func admissionFromHold(row gen.BillingLimitHold, now time.Time) *billing.Admissi
 	out := &billing.Admission{
 		CustomerID: billing.CustomerID(row.CustomerID), Allowed: true, Currency: catalog.Currency(row.Currency),
 		State: &state, ExpiresAt: row.ExpiresAt, CapturedAmount: row.CapturedAmount,
-	}
-	if row.RequestID != nil {
-		out.RequestID = *row.RequestID
-	}
-	if row.EstimatedAmount != nil {
-		out.EstimatedAmount = *row.EstimatedAmount
-	}
-	if row.AvailableAmount != nil {
-		out.StartCapacityAmount = *row.AvailableAmount
+		RequestID: row.RequestID, EstimatedAmount: row.EstimatedAmount, StartCapacityAmount: row.AvailableAmount,
 	}
 	return out
 }

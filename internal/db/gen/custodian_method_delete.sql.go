@@ -190,7 +190,7 @@ func (q *Queries) LockCustodianDeletionAccount(ctx context.Context, arg LockCust
 }
 
 const lockCustodianMethodDelete = `-- name: LockCustodianMethodDelete :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id, sent_attempt FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND intent_type IN ('hyperswitch_method_delete','platform_method_delete')
 FOR UPDATE
@@ -234,6 +234,7 @@ func (q *Queries) LockCustodianMethodDelete(ctx context.Context, arg LockCustodi
 		&i.Subject,
 		&i.Credential,
 		&i.DestructiveActionID,
+		&i.SentAttempt,
 	)
 	return i, err
 }
@@ -249,7 +250,7 @@ func (q *Queries) LockCustodianMethodHandle(ctx context.Context, lockKey string)
 }
 
 const lockNativeMethodDelete = `-- name: LockNativeMethodDelete :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id FROM billing.provider_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id, sent_attempt FROM billing.provider_intents
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND intent_type = 'nmi_vault_delete'
 FOR UPDATE
@@ -293,6 +294,7 @@ func (q *Queries) LockNativeMethodDelete(ctx context.Context, arg LockNativeMeth
 		&i.Subject,
 		&i.Credential,
 		&i.DestructiveActionID,
+		&i.SentAttempt,
 	)
 	return i, err
 }

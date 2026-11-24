@@ -22,10 +22,10 @@ import (
 
 var ErrStripeRefundTargetMissing = errors.New("stripe refundable transaction id is missing")
 
-// stripeRefundMetadataKey tags every refund OpenRails creates with the intent
+// StripeRefundMetadataKey tags every refund OpenRails creates with the intent
 // ledger idempotency key, so the verifier can re-find the refund via reads
 // (GET /v1/refunds) when the create's outcome was ambiguous.
-const stripeRefundMetadataKey = "openrails_idempotency_key"
+const StripeRefundMetadataKey = "openrails_idempotency_key"
 
 // StripeAPICallError is a non-2xx response from the Stripe API: the request
 // definitively reached Stripe and was answered. StatusCode lets money-mover
@@ -103,7 +103,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	}
 	// Metadata mirror of the idempotency key: the Idempotency-Key header
 	// dedupes the WRITE, the metadata makes the refund re-findable via reads.
-	values.Set("metadata["+stripeRefundMetadataKey+"]", idempotencyKey)
+	values.Set("metadata["+StripeRefundMetadataKey+"]", idempotencyKey)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stripeapi.APIBase+"/v1/refunds", strings.NewReader(values.Encode()))
 	if err != nil {
@@ -236,7 +236,7 @@ func (s *StripeRefundService) FindRefundByIdempotencyKey(ctx context.Context, ch
 		return nil, false, fmt.Errorf("failed to parse stripe refund list response: %w", err)
 	}
 	for i := range list.Data {
-		if list.Data[i].Metadata[stripeRefundMetadataKey] == idempotencyKey {
+		if list.Data[i].Metadata[StripeRefundMetadataKey] == idempotencyKey {
 			return &list.Data[i], true, nil
 		}
 	}

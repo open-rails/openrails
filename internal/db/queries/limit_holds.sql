@@ -22,11 +22,11 @@ FOR UPDATE;
 
 -- name: InsertRequestHold :one
 INSERT INTO billing.limit_holds (
-    merchant_id, created_at, customer_id, currency, request_id, estimated_amount, available_amount, terms,
+    merchant_id, created_at, customer_id, currency, lease_id, request_id, estimated_amount, available_amount, terms,
     estimate_usage, rate_cards, requested_expires_at, expires_at, state, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(created_at)::timestamptz, sqlc.arg(customer_id)::uuid,
-    sqlc.arg(currency)::text, sqlc.arg(request_id)::text, sqlc.arg(estimated_amount)::bigint, sqlc.arg(available_amount)::bigint,
+    sqlc.arg(currency)::text, sqlc.narg(lease_id)::uuid, sqlc.arg(request_id)::text, sqlc.arg(estimated_amount)::bigint, sqlc.arg(available_amount)::bigint,
     sqlc.arg(terms)::jsonb, sqlc.narg(estimate_usage)::jsonb, sqlc.narg(rate_cards)::jsonb,
     sqlc.narg(requested_expires_at)::timestamptz, sqlc.narg(requested_expires_at)::timestamptz, 'open', sqlc.arg(created_at)::timestamptz
 )
@@ -49,26 +49,35 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND hold_id = sqlc.arg(hold_id):
 ORDER BY limit_key COLLATE "C";
 
 -- The units live holds set aside in a limit's windows from from_window
--- through to_window (one window, or a rolling limit's buckets). A request's
--- hold is live until its deadline; past it, it still counts where
--- counts_expired (a window with an end) until it is captured or released. A
--- lease's hold is live while its lease is.
+-- through to_window (one window, or a rolling limit's buckets), and, for the
+-- current window (in_flight), what live leases other than except_lease
+-- report in flight. A request's hold is live until its deadline; past it, it
+-- still counts where counts_expired (a window with an end) until it is
+-- captured or released. A gate's hold is live while its lease is.
 -- name: SumWindowHeld :one
-SELECT COALESCE(SUM(p.held), 0)::bigint AS held
-FROM billing.limit_hold_parts p
-JOIN billing.limit_holds h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = sqlc.arg(customer_id)::uuid
-  AND p.limit_key = sqlc.arg(limit_key)::text
-  AND p.window_starts_at >= sqlc.arg(from_window)::timestamptz AND p.window_starts_at <= sqlc.arg(to_window)::timestamptz
-  AND p.hold_created_at >= sqlc.arg(held_since)::timestamptz AND h.created_at >= sqlc.arg(held_since)::timestamptz
-  AND h.state = 'open'
-  AND CASE WHEN h.request_id IS NOT NULL
-      THEN sqlc.arg(counts_expired)::boolean OR h.expires_at > sqlc.arg(as_of)::timestamptz
-      ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = h.merchant_id AND l.id = h.lease_id
-          AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END;
+SELECT (COALESCE((SELECT SUM(p.held)
+    FROM billing.limit_hold_parts p
+    JOIN billing.limit_holds h ON h.merchant_id = p.merchant_id AND h.id = p.hold_id AND h.created_at = p.hold_created_at
+    WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.customer_id = sqlc.arg(customer_id)::uuid
+      AND p.limit_key = sqlc.arg(limit_key)::text
+      AND p.window_starts_at >= sqlc.arg(from_window)::timestamptz AND p.window_starts_at <= sqlc.arg(to_window)::timestamptz
+      AND p.hold_created_at >= sqlc.arg(held_since)::timestamptz AND h.created_at >= sqlc.arg(held_since)::timestamptz
+      AND h.state = 'open'
+      AND CASE WHEN h.lease_id IS NULL
+          THEN sqlc.arg(counts_expired)::boolean OR h.expires_at > sqlc.arg(as_of)::timestamptz
+          ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = h.merchant_id AND l.id = h.lease_id
+              AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END), 0)
+  + CASE WHEN sqlc.arg(in_flight)::boolean THEN COALESCE((SELECT SUM(f.amount)
+    FROM billing.lease_in_flight f
+    JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+    WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.customer_id = sqlc.arg(customer_id)::uuid
+      AND f.limit_key = sqlc.arg(limit_key)::text
+      AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz
+      AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)), 0) ELSE 0 END)::bigint AS held;
 
 -- name: GetFinancialHeldAmount :one
--- The one financial hold total: live holds' balance parts, pending refunds,
+-- The one financial hold total: live holds' balance parts, what gates have
+-- in flight, pending refunds,
 -- unposted usage accruals, and what the customer's running charges have
 -- accrued and not posted
 -- (accrued, also answered apart). GetAdmissionCapacity computes the same sum.
@@ -82,9 +91,16 @@ FROM (SELECT (COALESCE((SELECT SUM(hp.held)
              WHERE hp.merchant_id = sqlc.arg(merchant_id)::uuid AND hp.customer_id = sqlc.arg(customer_id)::uuid AND hp.limit_key = 'balance'
                AND lh.currency = sqlc.arg(currency)::text AND lh.state = 'open'
                AND hp.hold_created_at >= sqlc.arg(held_since)::timestamptz AND lh.created_at >= sqlc.arg(held_since)::timestamptz
-               AND CASE WHEN lh.request_id IS NOT NULL THEN lh.expires_at > sqlc.arg(as_of)::timestamptz
+               AND CASE WHEN lh.lease_id IS NULL THEN lh.expires_at > sqlc.arg(as_of)::timestamptz
                    ELSE EXISTS (SELECT 1 FROM billing.leases l WHERE l.merchant_id = lh.merchant_id AND l.id = lh.lease_id
                        AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz) END), 0)
+     -- What live gates report in flight of the balance.
+     + COALESCE((SELECT SUM(f.amount)
+              FROM billing.lease_in_flight f
+              JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+             WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.customer_id = sqlc.arg(customer_id)::uuid
+               AND f.limit_key = 'balance' AND f.unit = sqlc.arg(currency)::text
+               AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz), 0)
      -- What pending refunds reserve of a purchased lot, up to its units left.
      -- Retired credit funds its refund from the retired account; an unswept
      -- lapsed lot is entirely unavailable.

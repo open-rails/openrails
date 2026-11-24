@@ -363,8 +363,11 @@ type MerchantSettings struct {
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
 	ProviderRefundAccess *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays     *int                  `json:"arrears_grace_days,omitempty"`
-	PSPRouting           *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
+	// FraudWarningRefund decides what an actionable early fraud warning does:
+	// FraudWarningRefundCharge (default) or FraudWarningRecord.
+	FraudWarningRefund *FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
+	ArrearsGraceDays   *int                `json:"arrears_grace_days,omitempty"`
+	PSPRouting         *[]PSPRoutingRule   `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
@@ -373,11 +376,6 @@ type MerchantSettings struct {
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.
 	BalanceNotices *BalanceNoticeSettings `json:"balance_notices,omitempty"`
-	// UsageGateSafeSpend lets gates keep admitting while OpenRails is
-	// unreachable: each hold names a safe amount, its money size, that its
-	// gate may spend unreserved. Off by default. Unit limits are never spent
-	// past their holds.
-	UsageGateSafeSpend *bool `json:"usage_gate_safe_spend,omitempty"`
 	// CardVault is where new cards are saved: a card PSP's key, whose own
 	// vault (or the custodian it names) holds them, or CardVaultPlatform.
 	// Absent: each card is saved where the PSP that takes it keeps cards. It

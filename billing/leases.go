@@ -33,72 +33,60 @@ func (id *LeaseID) UnmarshalText(text []byte) error {
 // Bounds of one SyncLeases call.
 const (
 	MaxSyncUsageItems = 1000
-	MaxSyncWants      = 1000
-	MaxSyncReturns    = 1000
-	MaxSyncCommitted  = 10_000
-	MaxSyncApplied    = 10_000
+	MaxSyncViews      = 1000
+	MaxSyncReleases   = 1000
+	MaxSyncInFlight   = 10_000
 )
 
-// SyncLeasesParams is one gate's sync: the usage it settles, the holds it
-// wants and the holds it gives back. The first sync under a new LeaseID
+// SyncLeasesParams is one sync of a lease: the usage it settles, what its
+// gate has had in flight across a sync, the views it asks for and the request
+// holds of the lease it gives back. The first sync under a new LeaseID
 // creates the lease (its id must be a UUIDv7 no older than the replay
-// horizon); every later one renews it while it is live, until one with Close:
-// that sync settles its usage, returns every hold of the lease and ends it. A
-// closed or dead lease answers its wants lease_not_held; usage against it
-// still settles. A process resending an earlier lease's usage sends Close.
+// horizon); every later one renews it, until one with Close: that sync
+// settles its usage, releases the lease's request holds, clears its in-flight
+// report and ends it. Usage against a closed lease still settles. A process
+// resending an earlier lease's usage sends Close.
 type SyncLeasesParams struct {
 	LeaseID LeaseID      `json:"lease_id"`
 	Usage   []LeaseUsage `json:"usage"`
-	Wants   []LeaseWant  `json:"wants"`
-	Returns []HoldReturn `json:"returns"`
-	Close   bool         `json:"close,omitempty"`
-	// Committed is what the gate's open tickets have taken of its holds, as
-	// the sync was built: every hold with open tickets, none for the rest.
-	// A want asks for its estimate beyond its hold's commitment.
-	Committed []HoldCommitment `json:"committed"`
-	// Applied is the latest hold version the gate has applied, for each hold
-	// whose answer it received since its last answered sync. A smaller size
-	// is released only once the gate has applied the version that carried
-	// it, and never below what that sync's commitment holds, so capacity a
-	// ticket took is never given to another gate, even after a lost reply.
-	Applied []HoldApplied `json:"applied"`
+	// InFlight replaces the lease's last report; null or empty clears it.
+	InFlight []InFlight   `json:"in_flight"`
+	Views    []ViewParams `json:"views"`
+	// Releases are request ids of the lease's own request holds to release.
+	Releases []string `json:"releases"`
+	Close    bool     `json:"close,omitempty"`
 }
 
-// HoldApplied is the hold version a gate has applied.
-type HoldApplied struct {
+// InFlight is what a gate has had in flight for one customer's limit across
+// at least one sync: tickets open since before its previous sync, and usage
+// a previous sync left unsettled. Views and admissions of other leases count
+// it as held while the lease is live.
+type InFlight struct {
 	CustomerID CustomerID `json:"customer_id"`
-	LimitSet   string     `json:"limit_set"`
-	Version    int64      `json:"version"`
-}
-
-// HoldCommitment is what open tickets have taken of one hold.
-type HoldCommitment struct {
-	CustomerID CustomerID        `json:"customer_id"`
-	LimitSet   string            `json:"limit_set"`
-	Limits     []LimitCommitment `json:"limits"`
-}
-
-// LimitCommitment is what open tickets have taken of one limit of a hold,
-// in the window the hold set it aside in (null for balance and lifetime
-// limits).
-type LimitCommitment struct {
-	Limit          string     `json:"limit"`
-	WindowStartsAt *time.Time `json:"window_starts_at"`
-	Committed      int64      `json:"committed,string"`
+	// Limit is balance, a declared limit or a spend window's key; Unit is
+	// its unit (balance's currency).
+	Limit  string `json:"limit"`
+	Unit   string `json:"unit"`
+	Amount int64  `json:"amount,string"`
 }
 
 // LeaseUsage is one usage item of a lease, numbered once per lease and sent
 // in order. N decides duplicates: a resent item answers its receipt, a
 // changed payload under a settled N is ErrIdempotencyKeyReused and a gap is
-// refused usage_out_of_order. LimitSet is null for usage with no hold.
-// SourceID is the merchant's call id; Amount the stated amount a dynamic
-// card charges.
+// refused usage_out_of_order. SourceID is the merchant's call id; Amount the
+// stated amount a dynamic card charges. TrustLevel, Roles and Resource are
+// the invoker attributes billing policy resolves its spend windows from.
+// AdmittedAt places the usage in the limit windows current when its request
+// was admitted; null, in those current when it settles. RequestID captures
+// the lease's request hold of that id, by its pinned cards and windows.
 type LeaseUsage struct {
 	N           int64            `json:"n"`
 	CustomerID  CustomerID       `json:"customer_id"`
-	LimitSet    *string          `json:"limit_set"`
 	Invoker     string           `json:"invoker"`
 	InvokerType InvokerType      `json:"invoker_type"`
+	TrustLevel  *string          `json:"trust_level"`
+	Roles       []uuid.UUID      `json:"roles"`
+	Resource    *string          `json:"resource"`
 	Currency    catalog.Currency `json:"currency"`
 	Source      string           `json:"source"`
 	SourceID    string           `json:"source_id"`
@@ -108,6 +96,8 @@ type LeaseUsage struct {
 	Metadata    map[string]any   `json:"metadata"`
 	Amount      *int64           `json:"amount,string"`
 	OccurredAt  time.Time        `json:"occurred_at"`
+	AdmittedAt  *time.Time       `json:"admitted_at"`
+	RequestID   *string          `json:"request_id"`
 }
 
 // LeaseUsageRef names one usage item of a lease.
@@ -122,9 +112,10 @@ type OutboxItem struct {
 	Usage   LeaseUsage `json:"usage"`
 }
 
-// LeaseWant asks for a hold for one customer and the invoker attributes of
-// a request, as AdmitParams names them, with the request's usage estimate.
-type LeaseWant struct {
+// ViewParams names a customer and the invoker attributes of its requests, as
+// AdmitParams names them, whose view a sync answers. EventType is null for
+// requests that state an amount.
+type ViewParams struct {
 	CustomerID  CustomerID       `json:"customer_id"`
 	Invoker     string           `json:"invoker"`
 	InvokerType InvokerType      `json:"invoker_type"`
@@ -132,40 +123,28 @@ type LeaseWant struct {
 	Roles       []uuid.UUID      `json:"roles"`
 	Resource    *string          `json:"resource"`
 	Currency    catalog.Currency `json:"currency"`
-	Usage       *UsageEstimate   `json:"usage"`
-	// EstimatedAmount is a host-stated money estimate, for a want with no
-	// Usage, as AdmitParams states one.
-	EstimatedAmount *int64 `json:"estimated_amount,string"`
+	EventType   *string          `json:"event_type"`
 }
 
-// HoldReturn gives a lease's hold for a customer and limit set back.
-type HoldReturn struct {
-	CustomerID CustomerID `json:"customer_id"`
-	LimitSet   string     `json:"limit_set"`
-}
-
-// SyncLeasesResult answers a sync: the lease, what its usage settled, one
-// answer per want in order, every hold the sync created, topped up, shrank or
-// took back, and display values of the customers' limits, which never add
-// spendable capacity.
+// SyncLeasesResult answers a sync: the lease, what its usage settled, a view
+// of each customer and currency it named (read after its usage settled), the
+// limit set of each ViewParams in order (null when the sync ran out of time
+// for it: ask again), the pricing of each currency and event type named, and
+// how many of the merchant's leases are live.
 type SyncLeasesResult struct {
-	Lease  Lease             `json:"lease"`
-	Usage  LeaseUsageResult  `json:"usage"`
-	Wants  []LeaseWantResult `json:"wants"`
-	Holds  []Hold            `json:"holds"`
-	Limits []CustomerLimit   `json:"limits"`
+	Lease     Lease            `json:"lease"`
+	Usage     LeaseUsageResult `json:"usage"`
+	Views     []View           `json:"views"`
+	LimitSets []*LimitSet      `json:"limit_sets"`
+	Pricing   []ViewPricing    `json:"pricing"`
+	Gates     int              `json:"gates"`
 }
 
-// Lease is a gate's lease: it lives until ExpiresAt unless the gate syncs
-// again, and its holds live and die with it. A closed lease's ExpiresAt is
-// when it closed.
+// Lease is a gate's lease: it is live until ExpiresAt unless its gate syncs
+// again. A closed lease's ExpiresAt is when it closed.
 type Lease struct {
 	ID        LeaseID   `json:"id"`
 	ExpiresAt time.Time `json:"expires_at"`
-	// Live is false when the lease had already died or closed before this
-	// sync, which renewed nothing: the gate starts a new lease and uses the
-	// old one only to report usage.
-	Live bool `json:"live"`
 }
 
 // LeaseUsageResult is the lease's highest settled item and the items the
@@ -184,50 +163,101 @@ type LeaseUsageRefusal struct {
 	Error  *ErrorDetails `json:"error"`
 }
 
-// LeaseWantResult answers one want: its limit set, and either the hold (in
-// Holds) or a Refusal. Error is a want that could not be decided.
-type LeaseWantResult struct {
-	Status   int           `json:"status"`
-	LimitSet *string       `json:"limit_set"`
-	Error    *ErrorDetails `json:"error"`
-	Refusal  *Refusal      `json:"refusal"`
+// View is where one customer stands on every limit its requests in Currency
+// may claim, as of AsOf: balance, each declared limit it is granted in the
+// currency or a named unit, and the spend windows of the limit sets the sync
+// resolved. It reserves nothing.
+type View struct {
+	CustomerID CustomerID       `json:"customer_id"`
+	Currency   catalog.Currency `json:"currency"`
+	AsOf       time.Time        `json:"as_of"`
+	Limits     []ViewLimit      `json:"limits"`
 }
 
-// Hold is capacity set aside for one customer and limit set, in each limit's
-// window. RateCards count usage toward it and PriceBounds bound its money
-// price. Safe is money, the hold's balance size, that its gate may spend
-// unreserved while OpenRails is unreachable; null unless the merchant sets
-// usage_gate_safe_spend. It never covers unit limits.
-type Hold struct {
-	CustomerID  CustomerID       `json:"customer_id"`
-	LimitSet    string           `json:"limit_set"`
+// ViewLimit is one limit of a view in its current window. Held is what
+// request holds and other live leases' in-flight reports set aside;
+// Remaining is Capacity − Used − Held (for balance, what the customer may
+// spend before any credit line). A session not yet open has no window.
+// Settled is what this sync's own usage settled into the limit; Recent, for
+// a money limit, what the customer's usage charged in the last minute.
+type ViewLimit struct {
+	Limit          string              `json:"limit"`
+	Unit           string              `json:"unit"`
+	Reset          *catalog.LimitReset `json:"reset"`
+	Overrun        catalog.Overrun     `json:"overrun"`
+	Capacity       int64               `json:"capacity,string"`
+	Used           int64               `json:"used,string"`
+	Held           int64               `json:"held,string"`
+	Remaining      int64               `json:"remaining,string"`
+	WindowStartsAt *time.Time          `json:"window_starts_at"`
+	WindowEndsAt   *time.Time          `json:"window_ends_at"`
+	ResetsAt       *time.Time          `json:"resets_at"`
+	// Next is the window after WindowEndsAt; a null StartsAt opens at the
+	// first use after it (a session).
+	Next *ViewWindow `json:"next"`
+	// DrainPerHour is what running charges take from balance each hour.
+	DrainPerHour int64 `json:"drain_per_hour,string"`
+	Settled      int64 `json:"settled,string"`
+	Recent       int64 `json:"recent,string"`
+}
+
+// ViewWindow is a limit's next window and what it will hold.
+type ViewWindow struct {
+	StartsAt  *time.Time `json:"starts_at"`
+	EndsAt    *time.Time `json:"ends_at"`
+	Remaining int64      `json:"remaining,string"`
+}
+
+// LimitSet is what a request with a ViewParams' attributes claims after
+// policy resolution: the keys of its view's limits, in the order a refusal
+// names them (balance, spend windows, declared limits), the capacity its
+// policy gives each spend window (another policy may cap the same window
+// otherwise), the credit line it gives balance and the code balance refuses
+// with, or a Refusal whatever the request costs.
+type LimitSet struct {
+	CustomerID      CustomerID       `json:"customer_id"`
+	Currency        catalog.Currency `json:"currency"`
+	Limits          []string         `json:"limits"`
+	Capacities      []LimitCapacity  `json:"capacities"`
+	CreditLine      int64            `json:"credit_line,string"`
+	BalanceDenyCode DenyCode         `json:"balance_deny_code"`
+	Refusal         *Refusal         `json:"refusal"`
+}
+
+// LimitCapacity is the capacity a limit set's policy gives one spend window.
+type LimitCapacity struct {
+	Limit    string `json:"limit"`
+	Capacity int64  `json:"capacity,string"`
+}
+
+// ViewPricing is how a gate costs a request of EventType in Currency: how
+// each named-unit limit counts it, and the money rate cards in force with
+// their price bounds. The server prices settlement exactly.
+type ViewPricing struct {
 	Currency    catalog.Currency `json:"currency"`
-	Limits      []HoldLimit      `json:"limits"`
-	RateCards   []HoldRateCard   `json:"rate_cards"`
+	EventType   string           `json:"event_type"`
+	Counts      []ViewCount      `json:"counts"`
+	RateCards   []ViewRateCard   `json:"rate_cards"`
 	PriceBounds []PriceBound     `json:"price_bounds"`
-	Safe        *int64           `json:"safe,string"`
-	// Version increases each time the server answers this hold a new size;
-	// the gate reports the latest it applied in SyncLeasesParams.Applied.
-	Version int64 `json:"version"`
 }
 
-// HoldLimit is what a hold sets aside of one limit, in the window it was
-// issued in; balance and lifetime limits have no window.
-type HoldLimit struct {
-	Limit          string          `json:"limit"`
-	Unit           string          `json:"unit"`
-	Held           int64           `json:"held,string"`
-	Overrun        catalog.Overrun `json:"overrun"`
-	WindowStartsAt *time.Time      `json:"window_starts_at"`
-	WindowEndsAt   *time.Time      `json:"window_ends_at"`
+// ViewCount is how one named-unit limit counts a meter: each matching
+// request adds quantity × Weight ÷ Per of its unit.
+type ViewCount struct {
+	Limit         string              `json:"limit"`
+	Meter         string              `json:"meter"`
+	EventType     string              `json:"event_type"`
+	ValueProperty string              `json:"value_property"`
+	Aggregation   catalog.Aggregation `json:"aggregation"`
+	GroupBy       map[string]string   `json:"group_by"`
+	Filter        map[string][]string `json:"filter"`
+	Weight        int64               `json:"weight"`
+	Per           int64               `json:"per"`
 }
 
-// HoldRateCard is how a gate counts usage toward a hold: a meter as the
-// catalog declares it and the rate card that prices it. A card with a Limit
-// counts toward that unit limit, priced in its unit; one without prices
-// money, pinned with the hold and bounded by its PriceBounds.
-type HoldRateCard struct {
-	Limit         *string             `json:"limit"`
+// ViewRateCard is a meter as the catalog declares it and the money rate
+// card that prices it.
+type ViewRateCard struct {
 	Meter         string              `json:"meter"`
 	EventType     string              `json:"event_type"`
 	ValueProperty string              `json:"value_property"`
@@ -238,9 +268,8 @@ type HoldRateCard struct {
 	Price         catalog.RatePrice   `json:"price"`
 }
 
-// PriceBound is the highest marginal price of one meter cell while the hold
-// lives: UnitAmount native units per DivideBy units. Cell is null without a
-// matrix.
+// PriceBound is the highest marginal price of one meter cell: UnitAmount
+// native units per DivideBy units. Cell is null without a matrix.
 type PriceBound struct {
 	Meter      string  `json:"meter"`
 	Cell       *string `json:"cell"`

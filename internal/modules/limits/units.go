@@ -4,20 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Meter is a declared meter as a limit's rate cards read it.
+// Meter is a declared meter as a limit's counts read it.
 type Meter struct {
 	Key           string
 	EventType     string
@@ -52,7 +50,7 @@ func Meters(ctx context.Context, q *gen.Queries, merchantID uuid.UUID) (map[stri
 	return out, nil
 }
 
-// Usage is what a limit's rate cards read of one request or event.
+// Usage is what a limit's counts read of one request or event.
 type Usage struct {
 	EventType  string
 	Dimensions map[string]int64
@@ -61,45 +59,36 @@ type Usage struct {
 
 // Counts reports whether def counts usage of eventType: a currency limit
 // counts every request in its currency (checked by the caller), a named unit
-// the event types its rate cards' meters read.
+// the event types its counts' meters read.
 func Counts(def Definition, meters map[string]Meter, eventType string) bool {
-	for _, card := range def.RateCards {
-		if m, ok := meters[card.Meter]; ok && m.EventType == eventType {
+	for _, c := range def.Counts {
+		if m, ok := meters[c.Meter]; ok && m.EventType == eventType {
 			return true
 		}
 	}
 	return false
 }
 
-// Units is what u counts toward def, in its unit: each rate card whose
-// meter reads u's event type and whose filter admits it takes the meter's
-// quantity and prices that quantity alone. A matrix with no cell for u's
-// value refuses it, as money rating does.
+// Units is what u counts toward def, in its unit: each count whose meter
+// reads u's event type and whose filter admits it adds the meter's quantity
+// × weight ÷ per, rounded half up as a per-unit price rounds.
 func Units(def Definition, meters map[string]Meter, u Usage) (int64, error) {
 	var total int64
-	for _, card := range def.RateCards {
-		m, ok := meters[card.Meter]
-		if !ok || m.EventType != u.EventType || !admits(m, card.Filter, u) {
+	for _, c := range def.Counts {
+		m, ok := meters[c.Meter]
+		if !ok || m.EventType != u.EventType || !admits(m, c.Filter, u) {
 			continue
 		}
 		quantity, err := quantity(m, u)
-		if err != nil || quantity == 0 {
-			if err != nil {
-				return 0, err
-			}
+		if err != nil {
+			return 0, err
+		}
+		if quantity == 0 {
 			continue
 		}
-		cm := catalogrules.Of(card.Price)
-		if card.Price.PerUnit != nil && card.Price.PerUnit.Matrix != nil {
-			value, param := eventValue(u, property(m, card.Price.PerUnit.Matrix.Dimension))
-			if cm, ok = catalogrules.ForCell(card.Price, value); !ok {
-				return 0, &apperr.Error{Status: http.StatusUnprocessableEntity, Code: billing.CodeUsageNotPriced, Param: param,
-					Message: fmt.Sprintf("limit %q has no price of meter %q for %s %q", def.Key, card.Meter, card.Price.PerUnit.Matrix.Dimension, value)}
-			}
-		}
-		units, err := cm.Rate(quantity)
+		units, err := catalogrules.ChargeModel{Kind: catalog.ModelPerUnit, UnitAmount: max(c.Weight, 1), DivideBy: max(c.Per, 1), Round: catalog.RoundHalfUp}.Rate(quantity)
 		if err != nil {
-			return 0, fmt.Errorf("limit %q meter %q: %w", def.Key, card.Meter, err)
+			return 0, fmt.Errorf("limit %q meter %q: %w", def.Key, c.Meter, err)
 		}
 		if total > maxInt64-units {
 			return 0, fmt.Errorf("limit %q: units overflow int64", def.Key)

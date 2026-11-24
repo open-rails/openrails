@@ -711,15 +711,15 @@ func (c *Client) ListCustomerLimits(ctx context.Context, params billing.Customer
 }
 
 // SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate).
-// A sync carries the lease's captured usage, numbered within the lease, its
-// wants of customers' capacity, the holds it returns and the hold versions
-// it applied; it answers how far the usage settled (a resend is matched by
-// lease and number), a hold or a refusal per want (capacity_held when only
-// other gates' holds stand in the way) and whether the lease is live. The
-// first sync under a new LeaseID creates the lease; one not synced within
-// seconds dies and its unused capacity is released, though its usage still
-// settles. A lease answers resends for 61 days after its last sync, and
-// settled usage posts as one deduction per customer and UTC day.
+// A sync carries the lease's usage, numbered within the lease, what its gate
+// has had in flight across a sync, the request holds of the lease it
+// releases and the customers whose views it asks for; it answers how far the
+// usage settled (a resend is matched by lease and number), each view (where
+// the customer stands on its limits, reserving nothing), the limit set of
+// each invoker's attributes, the pricing a gate costs requests with, and how
+// many of the merchant's leases are live. The first sync under a new LeaseID
+// creates the lease; a lease answers resends for 61 days after its last
+// sync, and settled usage posts as one deduction per customer and UTC day.
 func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
 	var out billing.SyncLeasesResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/leases/sync", body: params}, &out); err != nil {
@@ -800,6 +800,25 @@ func (c *Client) ListPaymentAttempts(ctx context.Context, params billing.Payment
 func (c *Client) GetPaymentAttempt(ctx context.Context, id billing.PaymentAttemptID) (*billing.PaymentAttempt, error) {
 	var out billing.PaymentAttempt
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/payment-attempts/{id}", args: []string{id.String()}}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListDisputes is one page of the merchant's disputes (inquiries,
+// chargebacks and prevented disputes), newest first.
+func (c *Client) ListDisputes(ctx context.Context, params billing.DisputeListParams) (*billing.ListPage[billing.Dispute], error) {
+	var out billing.ListPage[billing.Dispute]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/disputes", query: params}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetDispute reads one dispute.
+func (c *Client) GetDispute(ctx context.Context, id billing.DisputeID) (*billing.Dispute, error) {
+	var out billing.Dispute
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/disputes/{id}", args: []string{id.String()}}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -1201,6 +1220,18 @@ func (c *Client) QueryMetrics(ctx context.Context, params billing.QueryMetricsPa
 func (c *Client) GetMetricsSchema(ctx context.Context) (*billing.MetricsSchema, error) {
 	var out billing.MetricsSchema
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/metrics/schema"}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListDisputePrograms is each card PSP's standing in the dispute monitoring
+// programs for the month containing params.At (now when unset): the counts,
+// the ratio so far and projected over the month, the level reached and the
+// thresholds in force.
+func (c *Client) ListDisputePrograms(ctx context.Context, params billing.DisputeProgramListParams) (*billing.ListPage[billing.DisputeStanding], error) {
+	var out billing.ListPage[billing.DisputeStanding]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/metrics/dispute-programs", query: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

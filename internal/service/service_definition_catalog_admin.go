@@ -363,15 +363,6 @@ func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*billi
 	if err != nil {
 		return nil, priceLookup(err)
 	}
-	if wasArchived {
-		tid, err := merchant.Require(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if err := prices.RecordAuthoredKeyMovement(ctx, tid.UUID(), priceID, updated.Key); err != nil {
-			return nil, fmt.Errorf("record key movement for %q -> %s: %w", updated.Key, priceID, err)
-		}
-	}
 	return priceToCatalogPrice(updated), nil
 }
 

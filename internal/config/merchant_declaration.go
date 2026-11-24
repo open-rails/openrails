@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/disputerules"
+
 	"github.com/goccy/go-yaml"
 
 	"github.com/open-rails/openrails/billing"
@@ -85,6 +87,11 @@ func ValidatePSPKeys(psp string, p billing.PSPConfig) error {
 	if len(unknown) > 0 {
 		return fmt.Errorf("psps.%s: a %s PSP has no %s (%s takes %s)", psp, d.Rail, strings.Join(unknown, ", "), d.Rail, strings.Join(PSPDocumentFields(d.Rail), ", "))
 	}
+	if limit, ok := p.Settings["dispute_ratio_limit"]; ok {
+		if _, err := disputerules.ParseRatioLimit(limit); err != nil {
+			return fmt.Errorf("psps.%s: %w", psp, err)
+		}
+	}
 	secrets := make([]string, 0, len(d.CredentialKeys))
 	for _, k := range d.CredentialKeys {
 		secrets = append(secrets, k.Name)
@@ -117,6 +124,7 @@ var retiredDeclarationKeys = []struct{ key, fate string }{
 	{"arrears_delinquency_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
 	{"monthly_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
 	{"collection_threshold", "was replaced by usage_billing.currencies[].collection_threshold, one per currency"},
+	{"usage_gate_safe_spend", "was removed: while OpenRails is unreachable a gate spends its share of each view's remaining"},
 }
 
 // RetiredDeclarationKey is the first retired key doc sets, with what became

@@ -43,6 +43,10 @@ type NMIPSP struct {
 	// CardEntry is browser (the default) or server, where the payment page
 	// posts the card to OpenRails, which vaults it.
 	CardEntry string `psp:"card_entry"`
+	// DisputeRatioLimit is the acquirer's limit on chargebacks over settled
+	// sales in a month, as a percentage ("0.9%"): monitored like a card
+	// network's program. "" declares none.
+	DisputeRatioLimit string `psp:"dispute_ratio_limit"`
 }
 
 // PSPConfig returns the declaration.
@@ -59,6 +63,7 @@ func (p NMIPSP) PSPConfig() billing.PSPConfig {
 			"tokenization_key":           p.TokenizationKey,
 			"tokenization_url":           p.TokenizationURL,
 			"card_entry":                 p.CardEntry,
+			"dispute_ratio_limit":        p.DisputeRatioLimit,
 		}),
 	}
 }
@@ -84,6 +89,10 @@ type StripePSP struct {
 	// PublishableKey (pk_…) enables embedded Elements; without it purchase
 	// redirects to Stripe Checkout.
 	PublishableKey string `psp:"publishable_key"`
+	// DisputeRatioLimit is the acquirer's limit on chargebacks over settled
+	// sales in a month, as a percentage ("0.9%"): monitored like a card
+	// network's program. "" declares none.
+	DisputeRatioLimit string `psp:"dispute_ratio_limit"`
 }
 
 // PSPConfig returns the declaration.
@@ -99,6 +108,7 @@ func (p StripePSP) PSPConfig() billing.PSPConfig {
 		Settings: settingSlots(map[string]any{
 			"webhook_overlap_expires_at": instant(p.WebhookOverlapExpiresAt),
 			"publishable_key":            p.PublishableKey,
+			"dispute_ratio_limit":        p.DisputeRatioLimit,
 		}),
 	}
 }
@@ -117,6 +127,10 @@ type CCBillPSP struct {
 	Salt             string `psp:"secrets.salt,required"`
 	DatalinkUsername string `psp:"secrets.datalink_username"`
 	DatalinkPassword string `psp:"secrets.datalink_password"`
+	// DisputeRatioLimit is the acquirer's limit on chargebacks over settled
+	// sales in a month, as a percentage ("0.9%"): monitored like a card
+	// network's program. "" declares none.
+	DisputeRatioLimit string `psp:"dispute_ratio_limit"`
 }
 
 // PSPConfig returns the declaration.
@@ -129,6 +143,7 @@ func (p CCBillPSP) PSPConfig() billing.PSPConfig {
 			"datalink_username": p.DatalinkUsername,
 			"datalink_password": p.DatalinkPassword,
 		}),
+		Settings: settingSlots(map[string]any{"dispute_ratio_limit": p.DisputeRatioLimit}),
 	}
 }
 

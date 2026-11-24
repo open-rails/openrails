@@ -38,15 +38,15 @@ var limitsRoutes = []Route{
 		Responses: []Reply{{200, billing.ListPage[billing.CustomerLimit]{}}}, Handler: h(handlers.ListMyLimits)},
 	{Method: POST, Path: "/v1/app/leases/sync", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "SyncLeases",
 		Doc: "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the " +
-			"lease's captured usage, numbered within the lease, its wants of customers' capacity, the holds it " +
-			"returns and the hold versions it applied; it answers how far the usage settled (a resend is matched " +
-			"by lease and number), a hold or a refusal per want (capacity_held when only other gates' holds stand " +
-			"in the way) and whether the lease is live. The first sync under a new LeaseID creates the lease; one " +
-			"not synced within seconds dies and its unused capacity is released, though its usage still settles. " +
-			"A lease answers resends for 61 days after its last sync, and settled usage posts as one deduction " +
-			"per customer and UTC day.",
+			"lease's usage, numbered within the lease, what its gate has had in flight across a sync, the request " +
+			"holds of the lease it releases and the customers whose views it asks for; it answers how far the " +
+			"usage settled (a resend is matched by lease and number), each view (where the customer stands on " +
+			"its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate " +
+			"costs requests with, and how many of the merchant's leases are live. The first sync under a new " +
+			"LeaseID creates the lease; a lease answers resends for 61 days after its last sync, and settled " +
+			"usage posts as one deduction per customer and UTC day.",
 		Request: billing.SyncLeasesParams{}, Responses: []Reply{{200, billing.SyncLeasesResult{}}},
-		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", billing.CodeLeaseNotFound, billing.CodeLeaseNotHeld, billing.CodeServiceUnavailable, billing.CodeUsageNotPriced, billing.CodeUsageOutOfOrder), Handler: h(handlers.SyncLeases)},
+		Errors: codes("admission_not_found", "currency_unsupported", "idempotency_key_reused", "invalid_param", "resource_conflict", billing.CodeLeaseNotFound, billing.CodeServiceUnavailable, billing.CodeUsageNotPriced, billing.CodeUsageOutOfOrder), Handler: h(handlers.SyncLeases)},
 	{Method: POST, Path: "/v1/admin/customers/{customer_id}/limit-adjustments", Group: Admin, Auth: AuthMerchant, Name: "AdjustCustomerLimit", Level: LevelUpdate, Limit: middleware.AdminOperationGrant,
 		Args: []any{billing.CustomerID{}},
 		Doc: "AdjustCustomerLimit adds params.Amount to the capacity of the customer's current window of " +

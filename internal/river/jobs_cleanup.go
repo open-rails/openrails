@@ -152,7 +152,7 @@ type CleanupResult struct {
 	WebhookHealthDays          int64
 	ReconciliationFindings     int64
 	ProviderIntents            int64
-	ProviderMutationLogs       int64
+	OperationLog               int64
 	ReleasedParks              int64
 	CustomerMessages           int64
 	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
@@ -255,7 +255,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		}
 	}
 
-	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "order_attempts", result.OrderAttempts, "unpaid_orders", result.UnpaidOrders, "failed_usage_windows", result.FailedUsageWindows, "meter_period_quantities", result.MeterPeriodQuantities, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "usage_daily", result.UsageDaily, "usage_minutes", result.UsageMinutes, "webhook_health_days", result.WebhookHealthDays, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "provider_mutation_logs", result.ProviderMutationLogs, "released_parks", result.ReleasedParks, "customer_messages", result.CustomerMessages, "partitions_created", result.PartitionsCreated, "partitions_dropped", result.PartitionsDropped})
+	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "order_attempts", result.OrderAttempts, "unpaid_orders", result.UnpaidOrders, "failed_usage_windows", result.FailedUsageWindows, "meter_period_quantities", result.MeterPeriodQuantities, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "usage_daily", result.UsageDaily, "usage_minutes", result.UsageMinutes, "webhook_health_days", result.WebhookHealthDays, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "operation_log", result.OperationLog, "released_parks", result.ReleasedParks, "customer_messages", result.CustomerMessages, "partitions_created", result.PartitionsCreated, "partitions_dropped", result.PartitionsDropped})
 
 	if cleanupErr != nil {
 		return next, fmt.Errorf("cleanup expired data: %w", cleanupErr)
@@ -517,15 +517,15 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// Finished outbox intents and the mutation log. Intents that are the
+	// Finished outbox intents and the operations history. Intents that are the
 	// record of money, a membership or an erasure are not outbox types.
 	sweep("delete finished outbox intents", &result.ProviderIntents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteFinishedOutboxIntentsBefore(ctx, gen.DeleteFinishedOutboxIntentsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ProviderWrites), RowLimit: limit,
 		})
 	})
-	sweep("delete provider mutation logs", &result.ProviderMutationLogs, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteProviderMutationLogsBefore(ctx, gen.DeleteProviderMutationLogsBeforeParams{
+	sweep("delete operation log entries", &result.OperationLog, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteOperationLogBefore(ctx, gen.DeleteOperationLogBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ProviderWrites), RowLimit: limit,
 		})
 	})

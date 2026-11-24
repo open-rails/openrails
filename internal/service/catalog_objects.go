@@ -77,7 +77,7 @@ var catalogFields = map[billing.CatalogObjectKind][]string{
 	billing.CatalogObjectProduct: {"display_name", "description", "tier_group", "tier_rank", "archived", "ownership", "entitlements", "required_entitlements", "credit_grant", "rate_cards", "limits"},
 	billing.CatalogObjectPrice:   {"currency", "unit_amount", "access_duration_hours", "billing_interval_hours", "billing_interval_months", "provider_access_default", "trial_unit_amount", "trial_duration_hours", "customer_amount", "quantity", "archived", "sell_via", "provider"},
 	billing.CatalogObjectMeter:   {"event_type", "value_property", "aggregation", "unit", "group_by"},
-	billing.CatalogObjectLimit:   {"unit", "reset", "overrun", "rate_cards"},
+	billing.CatalogObjectLimit:   {"unit", "reset", "overrun", "counts"},
 }
 
 // catalogObjectState is one object as stored: each field as the document
@@ -88,7 +88,8 @@ type catalogObjectState struct {
 	fields    map[string]json.RawMessage
 	hidden    json.RawMessage
 	productID uuid.UUID
-	priceID   uuid.UUID // a price key's current version
+	priceID   uuid.UUID       // a price key's current version
+	publicID  billing.PriceID // and its public id
 }
 
 type catalogState map[catalogObject]*catalogObjectState
@@ -243,7 +244,7 @@ func readCatalogState(ctx context.Context, q *gen.Queries, merchantID uuid.UUID)
 		if p.SellVia != nil {
 			sellVia = catalogJSON(p.SellVia)
 		}
-		state[obj] = &catalogObjectState{revision: p.KeyRevision, productID: p.ProductID, priceID: p.ID, hidden: catalogJSON(plans), fields: map[string]json.RawMessage{
+		state[obj] = &catalogObjectState{revision: p.KeyRevision, productID: p.ProductID, priceID: p.ID, publicID: billing.PriceID(p.PublicID), hidden: catalogJSON(plans), fields: map[string]json.RawMessage{
 			"currency":                catalogJSON(p.Currency),
 			"unit_amount":             catalogMoney(p.Amount),
 			"access_duration_hours":   catalogOptionalHours(p.AccessDurationHours),
@@ -290,15 +291,15 @@ func catalogProductLimitsValue(capacities map[string]catalogwire.Capacity) json.
 
 // catalogLimitValues are a limit's fields as the document writes them.
 func catalogLimitValues(d limits.Definition) map[string]json.RawMessage {
-	cards := d.RateCards
-	if cards == nil {
-		cards = []catalogwire.LimitRateCard{}
+	counts := d.Counts
+	if counts == nil {
+		counts = []catalogwire.LimitCount{}
 	}
 	return map[string]json.RawMessage{
-		"unit":       catalogJSON(d.Unit),
-		"reset":      catalogJSON(d.Reset),
-		"overrun":    catalogJSON(string(d.Overrun)),
-		"rate_cards": catalogJSON(cards),
+		"unit":    catalogJSON(d.Unit),
+		"reset":   catalogJSON(d.Reset),
+		"overrun": catalogJSON(string(d.Overrun)),
+		"counts":  catalogJSON(counts),
 	}
 }
 
@@ -540,14 +541,14 @@ func documentMeterFields(key string, d catalogwire.ApplyMeter) map[string]json.R
 // as the apply stores them.
 func documentLimitFields(key string, d catalogwire.ApplyLimit) (map[string]json.RawMessage, error) {
 	def := limits.Definition{Key: key, Unit: d.Unit.Value, Reset: d.Reset.Value, Overrun: d.Overrun.Value}
-	cards, err := normalizeLimitRateCards(key, d.RateCards.Value)
+	counts, err := normalizeLimitCounts(key, d.Counts.Value)
 	if err != nil {
 		return nil, err
 	}
-	def.RateCards = cards
+	def.Counts = counts
 	values := catalogLimitValues(def)
 	out := map[string]json.RawMessage{}
-	for field, set := range map[string]bool{"unit": d.Unit.Set, "reset": d.Reset.Set, "overrun": d.Overrun.Set, "rate_cards": d.RateCards.Set} {
+	for field, set := range map[string]bool{"unit": d.Unit.Set, "reset": d.Reset.Set, "overrun": d.Overrun.Set, "counts": d.Counts.Set} {
 		if set {
 			out[field] = values[field]
 		}

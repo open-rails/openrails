@@ -3,7 +3,6 @@ package stripeapi
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/providerposture"
 )
 
 // ErrProviderReadOnly is returned for every mutating Stripe request in
@@ -33,8 +31,8 @@ const VersionHeader = "Stripe-Version"
 const APIVersion = "2026-06-24.dahlia"
 
 // guardTransport is the one transport every Stripe call flows through: it
-// rejects mutating methods before the network when readOnly and pins the API
-// version on every request.
+// rejects mutating methods before the network when readOnly or when their
+// key's posture is not proven, and pins the API version on every request.
 type guardTransport struct {
 	base     http.RoundTripper
 	readOnly bool
@@ -48,17 +46,8 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, ErrProviderReadOnly
 	}
 	if mutating {
-		live := liveSecretKey(requestSecret(req))
-		switch {
-		case live && (t.fixture || loopbackDestination(req)):
-			// A live key never reaches a fake provider.
-			return nil, fmt.Errorf("%w: stripe live key to a fake provider", providerposture.ErrDisarmed)
-		case !live && !t.fixture:
-			// A test key's mutation holds a verified test-mode posture; a
-			// live key's PSP was checked live when it loaded.
-			if err := requirePosture(req, t.transport()); err != nil {
-				return nil, err
-			}
+		if err := t.requirePosture(req); err != nil {
+			return nil, err
 		}
 	}
 	// Pin the API version on a clone (RoundTripper contract); a caller-set
@@ -70,7 +59,13 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if mutating {
 		req = tagBook(req)
 	}
-	return t.transport().RoundTrip(req)
+	resp, err := t.transport().RoundTrip(req)
+	if err == nil && t.gated(req) {
+		if refusal := refused(req, resp); refusal != nil {
+			return nil, refusal
+		}
+	}
+	return resp, err
 }
 
 func (t *guardTransport) transport() http.RoundTripper {
@@ -106,9 +101,29 @@ func SetIdempotencyKey(req *http.Request, key string) {
 // Factory owns the immutable HTTP dependency for one runtime. The injected
 // transport is borrowed: closing a runtime never closes a host-owned transport.
 // A nil factory uses the ordinary default transport.
-type Factory struct{ base http.RoundTripper }
+type Factory struct {
+	base http.RoundTripper
+	// wired: base is a test wire that exempts nothing (NewWiredFactory).
+	wired bool
+}
 
+// NewFactory sends Stripe's requests to base when it is set: a fake provider,
+// where a test key's writes need no posture and a live key's are refused.
 func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
+
+// ConfiguredFactory is the factory cfg's deployment uses: Stripe itself, or
+// the loopback Stripe its provider_sandbox.stripe_api_url names.
+func ConfiguredFactory(cfg *config.Config) *Factory {
+	if api := config.SandboxStripeAPIURL(cfg); api != "" {
+		return NewFactory(HostRewriteTransport(api))
+	}
+	return NewFactory(nil)
+}
+
+// NewWiredFactory sends every request to wire and exempts nothing: posture is
+// checked through wire and every write is gated as against Stripe (a test
+// seam, as nmi.NMIClient.UseTransport is).
+func NewWiredFactory(wire http.RoundTripper) *Factory { return &Factory{base: wire, wired: true} }
 
 func (f *Factory) Client(cfg *config.Config, timeout time.Duration) *http.Client {
 	return f.newClient(cfg == nil || config.IsProviderReadOnly(cfg), timeout)
@@ -140,15 +155,16 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
 	var base http.RoundTripper
+	fixture := false
 	if f != nil {
-		base = f.base
+		base, fixture = f.base, f.base != nil && !f.wired
 	}
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: &guardTransport{readOnly: readOnly, fixture: base != nil, base: base},
+		Transport: &guardTransport{readOnly: readOnly, fixture: fixture, base: base},
 	}
 }
 

@@ -37,7 +37,7 @@ export type Admission = {
   customer_id: string
   allowed: boolean
   blocked_by: "abuse" | "budget" | "limit" | "money" | null
-  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "capacity_held" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached" | null
+  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached" | null
   retry_after_seconds: number | null
   limit: string | null
   resets_at: string | null
@@ -88,6 +88,7 @@ export type AdmitParams = {
   source?: string
   expires_at?: string
   roles?: string[]
+  lease_id?: string
 }
 
 export type Agreement = {
@@ -144,7 +145,7 @@ export type ApplyLimit = {
   unit?: string | null
   reset?: LimitReset | null
   overrun?: "admit_while_positive" | "require_estimate" | null
-  rate_cards?: LimitRateCard[] | null
+  counts?: LimitCount[] | null
 }
 
 export type ApplyMeter = {
@@ -1073,6 +1074,54 @@ export type DismissProposalsParams = {
   notes?: string
 }
 
+export type Dispute = {
+  id: string
+  provider_ref: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  psp_id: string
+  customer_id: string | null
+  payment_id: string | null
+  kind: "chargeback" | "inquiry" | "prevented" | "unknown"
+  status: "closed" | "lost" | "open" | "unreported" | "won"
+  network: "amex" | "diners" | "discover" | "jcb" | "mastercard" | "other" | "unionpay" | "unknown" | "visa"
+  reason: "authorization" | "canceled_recurring" | "credit_not_processed" | "duplicate" | "fraud" | "not_as_described" | "not_received" | "other" | "processing_error" | "unknown" | "unrecognized"
+  reason_code: string
+  provider_reason: string
+  amount: string | null
+  currency: string | null
+  disputed_at: string
+  chargeback_at: string | null
+  evidence_due_at: string | null
+  closed_at: string | null
+  reversal_payment_id: string | null
+  recovery_payment_id: string | null
+}
+
+export type DisputeStanding = {
+  psp_id: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  program: "acquirer" | "mastercard_ecp" | "mastercard_efm" | "stripe" | "visa_vamp"
+  month: string
+  count: string
+  denominator: string
+  ratio: number
+  projected_ratio: number
+  projected_count: string
+  level: "excessive" | "high_excessive" | "none" | "warning"
+  thresholds: DisputeThreshold[]
+  fraud_reports_visible: boolean
+  disputes_reported: boolean
+}
+
+export type DisputeThreshold = {
+  level: "excessive" | "high_excessive" | "none" | "warning"
+  ratio: number
+  min_count: string
+  min_amount: string
+  min_prior_sales: string
+  source: string
+}
+
 export type DriftField = {
   field: string
   openrails_value: string
@@ -1230,53 +1279,11 @@ export type HeldEntitlements = {
   truncated: boolean
 }
 
-export type Hold = {
-  customer_id: string
-  limit_set: string
-  currency: string
-  limits: HoldLimit[]
-  rate_cards: HoldRateCard[]
-  price_bounds: PriceBound[]
-  safe: string | null
-  version: number
-}
-
-export type HoldApplied = {
+export type InFlight = {
   customer_id?: string
-  limit_set?: string
-  version?: number
-}
-
-export type HoldCommitment = {
-  customer_id?: string
-  limit_set?: string
-  limits?: LimitCommitment[]
-}
-
-export type HoldLimit = {
-  limit: string
-  unit: string
-  held: string
-  overrun: "admit_while_positive" | "require_estimate"
-  window_starts_at: string | null
-  window_ends_at: string | null
-}
-
-export type HoldRateCard = {
-  limit: string | null
-  meter: string
-  event_type: string
-  value_property: string
-  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
-  group_by: Record<string, string> | null
-  filter: Record<string, string[]> | null
-  allowance: Allowance | null
-  price: RatePrice
-}
-
-export type HoldReturn = {
-  customer_id?: string
-  limit_set?: string
+  limit?: string
+  unit?: string
+  amount?: string
 }
 
 export type InvoiceContact = {
@@ -1296,15 +1303,16 @@ export type InvoiceProfile = {
 export type Lease = {
   id: string
   expires_at: string
-  live: boolean
 }
 
 export type LeaseUsage = {
   n?: number
   customer_id?: string
-  limit_set?: string | null
   invoker?: string
   invoker_type?: "customer" | "delegated"
+  trust_level?: string | null
+  roles?: string[]
+  resource?: string | null
   currency?: string
   source?: string
   source_id?: string
@@ -1314,6 +1322,8 @@ export type LeaseUsage = {
   metadata?: Record<string, unknown> | null
   amount?: string | null
   occurred_at?: string
+  admitted_at?: string | null
+  request_id?: string | null
 }
 
 export type LeaseUsageRefusal = {
@@ -1327,41 +1337,28 @@ export type LeaseUsageResult = {
   refused: LeaseUsageRefusal[]
 }
 
-export type LeaseWant = {
-  customer_id?: string
-  invoker?: string
-  invoker_type?: "customer" | "delegated"
-  trust_level?: string | null
-  roles?: string[]
-  resource?: string | null
-  currency?: string
-  usage?: UsageEstimate | null
-  estimated_amount?: string | null
-}
-
-export type LeaseWantResult = {
-  status: number
-  limit_set: string | null
-  error: ErrorDetails | null
-  refusal: Refusal | null
-}
-
 export type Limit = {
   key: string
   unit: string
   reset: LimitReset
   overrun: "admit_while_positive" | "require_estimate"
-  rate_cards: LimitRateCard[]
+  counts: LimitCount[]
   products: LimitProduct[]
   revision: number
   created_at: string
   updated_at: string
 }
 
-export type LimitCommitment = {
-  limit?: string
-  window_starts_at?: string | null
-  committed?: string
+export type LimitCapacity = {
+  limit: string
+  capacity: string
+}
+
+export type LimitCount = {
+  meter: string
+  weight?: number
+  per?: number
+  filter?: Record<string, string[]>
 }
 
 export type LimitOverride = {
@@ -1376,16 +1373,20 @@ export type LimitProduct = {
   capacity: string
 }
 
-export type LimitRateCard = {
-  meter: string
-  filter?: Record<string, string[]>
-  price: RatePrice
-}
-
 export type LimitReset = {
   kind: "billing_period" | "fixed" | "lifetime" | "rate" | "rolling" | "session"
   window_seconds?: number
   anchor?: "first_use" | "subscription"
+}
+
+export type LimitSet = {
+  customer_id: string
+  currency: string
+  limits: string[]
+  capacities: LimitCapacity[]
+  credit_line: string
+  balance_deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
+  refusal: Refusal | null
 }
 
 export type LinkPSPImportParams = {
@@ -1400,7 +1401,7 @@ export type LogEntry = {
   source: "api" | "catalog_apply" | "cli" | "console" | "customer" | "intent" | "job" | "provider_read" | "reload" | "webhook"
   object_type: "custodian" | "limit" | "merchant" | "messages" | "meter" | "price" | "product" | "psp"
   object_id: string
-  action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "unarchive" | "update"
+  action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "move" | "unarchive" | "update"
   changes: unknown | null
   reason: string | null
   request_id: string | null
@@ -1422,7 +1423,7 @@ export type Mandate = {
   subscription_id: string | null
   currency: string | null
   status: "active" | "ended" | "requires_reconsent" | "revoked"
-  end_reason: "brand_changed" | "closed" | "customer_revoked" | "payment_method_removed" | "replaced" | "subscription_ended" | null
+  end_reason: "brand_changed" | "closed" | "customer_revoked" | "disputed" | "payment_method_removed" | "replaced" | "subscription_ended" | null
   ended_at: string | null
   card_brand: string | null
   initial_transaction_id: string | null
@@ -1456,12 +1457,12 @@ export type MerchantConfigurationState = {
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
+  fraud_warning_refund?: "record" | "refund"
   arrears_grace_days?: number
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
-  usage_gate_safe_spend?: boolean
   card_vault?: string
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
@@ -1999,6 +2000,7 @@ export type Payment = {
   failure: PaymentFailure | null
   refunded_payment_id: string | null
   reason: string | null
+  refund_reason: "charged_after_cancel" | "dispute_prevention" | "duplicate" | "fraud_warning" | "fraudulent" | "other" | "requested_by_customer" | "unknown" | null
   refunds: Payment[]
   created_at: string
 }
@@ -2057,7 +2059,7 @@ export type PaymentMethod = {
   customer_id: string
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   psp_id: string | null
-  status: "active" | "closed" | "removed" | "replaced" | "requires_action"
+  status: "active" | "closed" | "disputed" | "removed" | "replaced" | "requires_action"
   next_action: NextAction | null
   replaced_by: string | null
   card: CardDetails | null
@@ -2420,11 +2422,12 @@ export type RefundPaymentParams = {
   amount?: string
   full?: boolean
   reason?: string
+  refund_reason?: "charged_after_cancel" | "dispute_prevention" | "duplicate" | "fraud_warning" | "fraudulent" | "other" | "requested_by_customer" | "unknown"
   revoke_access?: boolean
 }
 
 export type Refusal = {
-  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "capacity_held" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
+  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
   limit: string | null
   resets_at: string | null
   retry_after_seconds: number | null
@@ -2527,7 +2530,7 @@ export type SetLimitParams = {
   unit?: string
   reset?: LimitReset
   overrun?: "admit_while_positive" | "require_estimate"
-  rate_cards?: LimitRateCard[]
+  counts?: LimitCount[]
   expected_revision?: number
 }
 
@@ -2791,19 +2794,19 @@ export type SubscriptionRetryNowResult = {
 export type SyncLeasesParams = {
   lease_id?: string
   usage?: LeaseUsage[]
-  wants?: LeaseWant[]
-  returns?: HoldReturn[]
+  in_flight?: InFlight[]
+  views?: ViewParams[]
+  releases?: string[]
   close?: boolean
-  committed?: HoldCommitment[]
-  applied?: HoldApplied[]
 }
 
 export type SyncLeasesResult = {
   lease: Lease
   usage: LeaseUsageResult
-  wants: LeaseWantResult[]
-  holds: Hold[]
-  limits: CustomerLimit[]
+  views: View[]
+  limit_sets: LimitSet[]
+  pricing: ViewPricing[]
+  gates: number
 }
 
 export type TestMessage = {
@@ -2847,12 +2850,12 @@ export type UpdateMerchantConfigurationParams = {
   alert_email?: string
   reprice_notice_window_days?: number
   provider_refund_access?: "keep" | "revoke_on_any" | "revoke_on_full"
+  fraud_warning_refund?: "record" | "refund"
   arrears_grace_days?: number
   psp_routing?: PSPRoutingRule[]
   dunning_policy?: DunningPolicy
   checkout?: MerchantCheckoutSettings
   balance_notices?: BalanceNoticeSettings
-  usage_gate_safe_spend?: boolean
   card_vault?: string
   charge_psps?: string[]
   billing_policies?: BillingPolicy[]
@@ -2973,6 +2976,79 @@ export type UsageRow = {
   event_count: number
   amount: string
   quantity: number | null
+}
+
+export type View = {
+  customer_id: string
+  currency: string
+  as_of: string
+  limits: ViewLimit[]
+}
+
+export type ViewCount = {
+  limit: string
+  meter: string
+  event_type: string
+  value_property: string
+  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  group_by: Record<string, string> | null
+  filter: Record<string, string[]> | null
+  weight: number
+  per: number
+}
+
+export type ViewLimit = {
+  limit: string
+  unit: string
+  reset: LimitReset | null
+  overrun: "admit_while_positive" | "require_estimate"
+  capacity: string
+  used: string
+  held: string
+  remaining: string
+  window_starts_at: string | null
+  window_ends_at: string | null
+  resets_at: string | null
+  next: ViewWindow | null
+  drain_per_hour: string
+  settled: string
+  recent: string
+}
+
+export type ViewParams = {
+  customer_id?: string
+  invoker?: string
+  invoker_type?: "customer" | "delegated"
+  trust_level?: string | null
+  roles?: string[]
+  resource?: string | null
+  currency?: string
+  event_type?: string | null
+}
+
+export type ViewPricing = {
+  currency: string
+  event_type: string
+  counts: ViewCount[]
+  rate_cards: ViewRateCard[]
+  price_bounds: PriceBound[]
+}
+
+export type ViewRateCard = {
+  meter: string
+  event_type: string
+  value_property: string
+  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
+  group_by: Record<string, string> | null
+  filter: Record<string, string[]> | null
+  allowance: Allowance | null
+  price: RatePrice
+}
+
+export type ViewWindow = {
+  starts_at: string | null
+  ends_at: string | null
+  remaining: string
 }
 
 export type WebhookReceipt = {

@@ -244,6 +244,9 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	if patch.ProviderRefundAccess != nil {
 		current.ProviderRefundAccess = patch.ProviderRefundAccess
 	}
+	if patch.FraudWarningRefund != nil {
+		current.FraudWarningRefund = patch.FraudWarningRefund
+	}
 	if patch.ArrearsGraceDays != nil {
 		current.ArrearsGraceDays = patch.ArrearsGraceDays
 	}
@@ -258,9 +261,6 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 	}
 	if patch.BalanceNotices != nil {
 		current.BalanceNotices = patch.BalanceNotices
-	}
-	if patch.UsageGateSafeSpend != nil {
-		current.UsageGateSafeSpend = patch.UsageGateSafeSpend
 	}
 	if patch.BillingPolicies != nil {
 		current.BillingPolicies = patch.BillingPolicies

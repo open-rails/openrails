@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -476,33 +475,6 @@ func (s *PriceService) ListPriorVersionsByKey(ctx context.Context, merchantID, p
 	return s.pricesFromGen(ctx, rows)
 }
 
-// RecordAuthoredKeyMovement timestamps a current catalog mutation on the same
-// database clock as retirement triggers. Explicit historical timestamps use
-// RecordKeyMovement instead, so imports retain their original effective dates.
-func (s *PriceService) RecordAuthoredKeyMovement(ctx context.Context, merchantID, priceID uuid.UUID, key string) error {
-	return s.RecordKeyMovement(ctx, merchantID, priceID, key, time.Time{})
-}
-
-// RecordKeyMovement appends one entry to the pointer-movement history log:
-// key's current pointer moved to priceID at effectiveAt. Append-only — call
-// exactly once per genuine movement (new row, reactivation, or repoint), never
-// on a true no-op (same key, same already-current substance).
-func (s *PriceService) RecordKeyMovement(ctx context.Context, merchantID, priceID uuid.UUID, key string, effectiveAt time.Time) error {
-	rows, err := s.db.Gen(ctx).InsertPriceKeyMovement(ctx, gen.InsertPriceKeyMovementParams{
-		MerchantID:  merchantID,
-		Key:         key,
-		PriceID:     priceID,
-		EffectiveAt: effectiveAt,
-	})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return pgx.ErrNoRows
-	}
-	return nil
-}
-
 // CurrentByProducts returns the current (non-archived) prices of each
 // product, cheapest first.
 func (s *PriceService) CurrentByProducts(ctx context.Context, productIDs []uuid.UUID) (map[uuid.UUID][]*models.Price, error) {
@@ -525,8 +497,8 @@ func (s *PriceService) CurrentByProducts(ctx context.Context, productIDs []uuid.
 	return out, nil
 }
 
-// ListKeyMovements returns one keyset page of a key's movement history,
-// most recent first.
+// ListKeyMovements returns one keyset page of a key's moves from the
+// configuration history, most recent first.
 func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID, productID uuid.UUID, key string, page billing.PageRequest) (billing.ListPage[*models.PriceKeyMovement], error) {
 	limit, err := pagination.Limit(page)
 	if err != nil {
@@ -536,7 +508,7 @@ func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID, product
 	if err != nil {
 		return billing.ListPage[*models.PriceKeyMovement]{}, err
 	}
-	rows, err := s.db.Gen(ctx).ListPriceKeyMovements(ctx, gen.ListPriceKeyMovementsParams{
+	rows, err := s.db.Gen(ctx).ListPriceKeyMoves(ctx, gen.ListPriceKeyMovesParams{
 		MerchantID: merchantID,
 		ProductID:  productID,
 		Key:        key,
@@ -547,7 +519,11 @@ func (s *PriceService) ListKeyMovements(ctx context.Context, merchantID, product
 	if err != nil {
 		return billing.ListPage[*models.PriceKeyMovement]{}, err
 	}
-	return pagination.Cut(models.PriceKeyMovementsFromGen(rows), limit, func(m *models.PriceKeyMovement) any { return pagination.TimeID{At: m.EffectiveAt, ID: m.ID} }), nil
+	moves := make([]*models.PriceKeyMovement, 0, len(rows))
+	for _, r := range rows {
+		moves = append(moves, &models.PriceKeyMovement{ID: r.ID, PriceID: r.PriceID, EffectiveAt: r.OccurredAt, Archived: r.Archived})
+	}
+	return pagination.Cut(moves, limit, func(m *models.PriceKeyMovement) any { return pagination.TimeID{At: m.EffectiveAt, ID: m.ID} }), nil
 }
 
 // FindByTerms retains existing immutable price IDs, including imported history.

@@ -69,6 +69,7 @@ type Mock struct {
 	intents         map[string]Object
 	order           []string
 	charges         map[string]Object
+	disputes        map[string]Object
 	refunds         map[string]Object
 	refundOrder     []string
 	subs            map[string]Object
@@ -118,7 +119,7 @@ func NewUnstarted(opts Options) *Mock {
 		opts.Clock = time.Now
 	}
 	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{}, advice: map[string]Advice{}, blocks: map[string]string{},
-		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
+		intents: map[string]Object{}, charges: map[string]Object{}, disputes: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, schedules: map[string]Object{}, invoices: map[string]Object{}, sessions: map[string]Object{},
 		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}, webhookEndpoints: map[string][]Object{},
 		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{}}
 }
@@ -301,7 +302,7 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 	case p == "/v1/account":
 		return 200, Object{"object": "account", "id": accountOf(r), "charges_enabled": true}
 	case p == "/v1/balance":
-		return 200, Object{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
+		return 200, Object{"object": "balance", "livemode": liveKey(r), "available": []any{}, "pending": []any{}}
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "/v2/core/events/"):
 		if event, ok := m.thinEvents[strings.TrimPrefix(p, "/v2/core/events/")]; ok {
 			return 200, event
@@ -449,7 +450,7 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 	case r.Method == http.MethodGet && p == "/v1/charges":
 		return 200, stripeList(m.charges, q)
 	case r.Method == http.MethodGet && p == "/v1/disputes":
-		return 200, Object{"object": "list", "data": []any{}, "has_more": false}
+		return 200, stripeList(m.disputes, q)
 	case r.Method == http.MethodPost && p == "/v1/refunds":
 		return m.createRefund(form)
 	case r.Method == http.MethodGet && seg[0] == "refunds" && len(seg) == 2:

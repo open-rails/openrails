@@ -336,3 +336,28 @@ func (m *Mock) TagSubscription(id, key, value string, created time.Time) {
 	s["metadata"] = map[string]string{key: value}
 	s["created"] = created.Unix()
 }
+
+// Dispute opens or updates the dispute id on the latest charge of sub's latest
+// invoice: status and card case_type as Stripe reports them. It answers the
+// dispute; created is set once.
+func (m *Mock) Dispute(id, sub, status, caseType, reason string) Object {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.disputes[id]
+	if !ok {
+		inv := m.subs[sub]["latest_invoice"].(Object)
+		pi := inv["payments"].(Object)["data"].([]Object)[0]["payment"].(Object)["payment_intent"]
+		intent := m.intents[fmt.Sprint(pi)]
+		ch := m.charges[fmt.Sprint(intent["latest_charge"])]
+		d = Object{"object": "dispute", "id": id, "charge": ch["id"], "payment_intent": pi, "amount": ch["amount"], "currency": ch["currency"],
+			"created": m.now().Unix(), "livemode": false, "metadata": map[string]string{}}
+		m.disputes[id] = d
+	}
+	d["status"], d["reason"] = status, reason
+	d["payment_method_details"] = Object{"type": "card", "card": Object{"brand": "visa", "case_type": caseType, "network_reason_code": "10.4"}}
+	out := Object{}
+	for k, v := range d {
+		out[k] = v
+	}
+	return out
+}

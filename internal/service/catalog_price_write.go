@@ -61,7 +61,6 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 		if err := lockCatalogKey(ctx, tx, tid, "price-key", key); err != nil {
 			return err
 		}
-		var displacedID uuid.UUID
 		if !req.Archived {
 			displaced, dErr := prices.GetCurrentByKey(ctx, tid.UUID(), product.ID, key)
 			if dErr != nil && !errors.Is(dErr, pgx.ErrNoRows) {
@@ -77,13 +76,11 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 				if err := prices.SetArchived(ctx, displaced.ID, true); err != nil {
 					return fmt.Errorf("archive displaced price %s for key %q: %w", displaced.ID, key, err)
 				}
-				displacedID = displaced.ID
 			}
 		}
 
 		// The id is the terms': a deleted price of these terms revives.
-		revived, err := gen.New(tx).RevivePrice(ctx, gen.RevivePriceParams{MerchantID: tid.UUID(), ID: priceID, Archived: req.Archived})
-		if err != nil {
+		if _, err := gen.New(tx).RevivePrice(ctx, gen.RevivePriceParams{MerchantID: tid.UUID(), ID: priceID, Archived: req.Archived}); err != nil {
 			return fmt.Errorf("revive price %s: %w", priceID, err)
 		}
 		existing, existErr := prices.GetByID(ctx, priceID)
@@ -91,9 +88,6 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 			return existErr
 		}
 		reactivating := existErr == nil
-		// Same terms, same key, no archive change, nothing displaced: no movement
-		// to log.
-		trueNoOp := revived == 0 && reactivating && existing.Archived == req.Archived && existing.Key == key && displacedID == uuid.Nil
 
 		if reactivating {
 			if existing.ProviderOwned != w.providerOwned {
@@ -140,13 +134,6 @@ func (s *Service) writeCatalogPrice(ctx context.Context, w priceWrite) (*models.
 					return priceConflict(err, product.Key, key, w)
 				}
 				return err
-			}
-		}
-
-		if !req.Archived && !trueNoOp {
-			// Log the key's move to priceID.
-			if err := prices.RecordAuthoredKeyMovement(ctx, tid.UUID(), priceID, key); err != nil {
-				return fmt.Errorf("record key movement for %q -> %s: %w", key, priceID, err)
 			}
 		}
 

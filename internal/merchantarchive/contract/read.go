@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -29,6 +30,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// An archive from before usage settled in batches carries raw usage
 	// events: their money is in the ledger it carries, and they are not read.
 	events := false
+	// An archive from before configuration history carries its price keys'
+	// moves in a table of their own, which change_log holds since.
+	moves := false
 	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
 		if r.Kind == "table" {
 			invoices = r.Table == "invoices"
@@ -41,6 +45,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return nil
 			}
 			if events = r.Table == "usage_events"; events {
+				return nil
+			}
+			if moves = r.Table == PriceKeyMovements.Name; moves {
 				return nil
 			}
 			if watermarks = r.Table == "metered_rating_watermarks"; watermarks {
@@ -70,6 +77,15 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if watermarks || custody || cadence || events {
 			return nil
 		}
+		if moves {
+			if err := ValidateValues(PriceKeyMovements, r.Values); err != nil {
+				return err
+			}
+			if row != nil {
+				return row(PriceKeyMovements, r.Values)
+			}
+			return nil
+		}
 		p := Profiles[table]
 		if admissions {
 			values, err := holdFromAdmission(r.Values)
@@ -91,6 +107,12 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "money_settings" && len(r.Values) == len(p.Columns)-5 {
 			r.Values = append(r.Values, new("true"), nil, nil, nil, new("false"))
 		}
+		// Payments before refund reasons and charged cards: a refund's reason
+		// is unknown, as the migration that added them reads it, and no card
+		// is named.
+		if p.Name == "payments" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, legacyRefundReason(p, r.Values), nil)
+		}
 		if p.Name == "subscription_status_transitions" && len(r.Values) == len(p.Columns)-4 {
 			r.Values = append(r.Values, nil, nil, nil, nil)
 		}
@@ -98,11 +120,6 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			if err := normalizePreUsage(p, &r.Values); err != nil {
 				return err
 			}
-		}
-		// Holds before batch settlement kept no captured charges, and before
-		// versioned answers no versions: a request's hold has neither.
-		if p.Name == "limit_holds" && len(r.Values) < len(p.Columns) && len(r.Values) >= len(p.Columns)-3 {
-			r.Values = append(r.Values, make([]*string, len(p.Columns)-len(r.Values))...)
 		}
 		if p.Name == "catalog_rate_cards" {
 			ClearMeteredPaymentTerm(p, r.Values)
@@ -236,13 +253,13 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 			updated = t
 		}
 	}
-	return []*string{v[0], &id, v[9], v[2], v[3], nil, nil, v[1], v[4], v[5], v[6], at(16), at(17), v[7], v[8], v[11], v[12], v[13], v[14], v[15], updated, nil}, nil
+	return []*string{v[0], &id, v[9], v[2], v[3], nil, v[1], v[4], v[5], v[6], at(16), at(17), v[7], v[8], v[11], v[12], v[13], v[14], v[15], updated, nil}, nil
 }
 
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
 var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
-	"usage_daily": true, "usage_accruals": true, "credit_grants": true, "credit_grant_events": true}
+	"usage_daily": true, "usage_accruals": true, "credit_grants": true, "credit_grant_events": true, "disputes": true, "fraud_reports": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}
@@ -261,6 +278,8 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 		empty = map[int]*string{len(p.Columns): nil} // wallet_card_id
 	case p.Name == "grants" && len(*values) == len(p.Columns)+2:
 		empty = map[int]*string{13: nil, 14: nil} // amount, currency
+	case p.Name == "limit_holds" && len(*values) == len(p.Columns)+3:
+		empty = map[int]*string{6: nil, 22: nil, 23: nil} // limit_set, version, applied_version
 	default:
 		return nil
 	}
@@ -358,4 +377,33 @@ func ClearMeteredPaymentTerm(p Profile, values []*string) {
 			values[i] = nil
 		}
 	}
+}
+
+// legacyRefundReason is the reason a refund exported before reasons reads as:
+// the same reading the migration that added them gave the rows it found.
+func legacyRefundReason(p Profile, values []*string) *string {
+	at := func(name string) *string {
+		for i, c := range p.Columns[:len(values)] {
+			if c.Name == name {
+				return values[i]
+			}
+		}
+		return nil
+	}
+	if kind := at("reversal_kind"); kind == nil || *kind != "refund" {
+		return nil
+	}
+	reason := "unknown"
+	if meta := at("metadata"); meta != nil {
+		var m map[string]any
+		if json.Unmarshal([]byte(*meta), &m) == nil {
+			switch {
+			case m["charge_after_cancel"] == true:
+				reason = "charged_after_cancel"
+			case m["order_late_payment"] == true:
+				reason = "duplicate"
+			}
+		}
+	}
+	return &reason
 }

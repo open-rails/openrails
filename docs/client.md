@@ -227,7 +227,7 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
 | `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
 
-Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when.
+Every catalog and configuration change is kept in the configuration history, never pruned, and `ListChanges` reads it newest first: a `LogEntry` names the object, the action, the actor (`staff:<id>`, or `file` or `vault` for an edit made outside OpenRails, found when the configuration loads), how it arrived and the fields' values before and after. A credential reads `"changed"`, never its value. A product's entries carry its revision, so `ListChanges` with `ObjectType` `product` and its key answers which revision added a key, and when. A price key's `move` entries say which of its prices it named from when, or none once archived; `ListPriceHistory` reads them.
 
 A merchant document, as `Config.Merchants` reads it and the server's manifest
 nests under `merchants.<slug>`, with one PSP on each rail:
@@ -271,16 +271,7 @@ several documents, anchors and tags are refused, and so are the retired keys
 committed file: an overlay or Vault supplies them
 ([standalone.md](standalone.md#configuration-reference)).
 
-**Environments.** Each PSP declares whether it moves real money; omitted, it is
-the rail's real-money one, so production declares none. NMI: `live`, `test` (an
-account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key
-prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`,
-`testnet`. A merchant may mix them. OpenRails asks the provider before arming a
-PSP and again once that proof is an hour old: NMI's `test_mode_status`, Stripe's
-key prefix and `api.stripe.com/v1/account` against `account_id`, Solana's genesis hash on
-every RPC endpoint. A PSP whose answer disagrees stays disarmed: reads work,
-writes fail before any byte is sent, and the `openrails_psp_posture` probe
-reports it. CCBill's sandbox has no signal, so its writes are always refused.
+**Environments.** Each PSP declares whether it moves real money; omitted, it is the rail's real-money one, so production declares none. NMI: `live`, `test` (an account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`, `testnet`. A merchant may mix them. OpenRails asks the provider before arming a PSP: NMI's `test_mode_status` and Solana's genesis hash on every RPC endpoint, again once that proof is an hour old; Stripe's `api.stripe.com/v1/account` against `account_id`, plus `api.stripe.com/v1/balance` for a test key, once per key and account. A PSP whose answer disagrees stays disarmed: reads work, writes fail before any byte is sent, and the `openrails_psp_posture` probe reports it. CCBill's sandbox has no signal, so its writes are always refused.
 
 **Webhooks.** Each provider posts to `/v1/webhooks/{rail}/{account_id}`
 (beneath the mount when embedded). `{rail}` is `nmi`, `stripe`, `ccbill` or
@@ -289,6 +280,10 @@ joined with `-`. The account resolves the merchant, its own secret verifies the
 delivery, and the payload's account must agree. Rotating a signing secret keeps
 the old one for `webhook_secret_overlap` (24 h); `retire_webhook_overlap` on
 `UpdatePSP` refuses it at once.
+
+A card PSP (NMI, Stripe, CCBill) may declare `dispute_ratio_limit`, its
+acquirer's limit on a month's chargebacks over settled sales as a percentage
+(`"0.9%"`): it is monitored like the card networks' programs.
 
 ### NMI
 
@@ -310,13 +305,18 @@ and enable exactly these 14 events:
 - `acu.summary.automaticallyupdated`, `.closedaccount`, `.contactcustomer` (with
   NMI's Automatic Card Updater)
 
+NMI sends `chargeback.batch.complete` only for processors that report
+chargebacks: confirm yours does, or a PSP's dispute ratio reads 0% with no data
+behind it (`ListDisputePrograms` says whether any dispute was reported).
+
 Each NMI decline costs a fee; OpenRails retries renewals sparsely. A legacy NMI
 schedule keeps billing at NMI; OpenRails mirrors it and retries its declines.
 
 ### Stripe
 
-`account_id` is your `acct_…`; the key is checked against it, and a key of another
-account never arms. `secret_key` may be a restricted key. OpenRails registers the
+`account_id` is your `acct_…`; the key is checked against it, and a key of another account never arms. `secret_key` may be a restricted key with read access to its own account (`api.stripe.com/v1/account`; Stripe's refusal, which the posture probe reports, names the permission) and these permissions: `customer_write`, `payment_intent_write`, `setup_intent_write`, `payment_method_write`, `charge_write` (refunds), `subscription_write`, `invoice_write`, `checkout_session_write`, `customer_portal_write`, `webhook_write`, `payment_method_domain_write`, `product_read`, `plan_read` (prices), `dispute_read`, `event_read`, and `balance_read` on a test key.
+
+OpenRails registers the
 webhook endpoint itself when the configuration is in Vault, pinned to its Stripe
 API version, and keeps its events current. With a file it cannot keep the new
 signing secret, so register the endpoint once in the dashboard at
@@ -351,7 +351,7 @@ Solana prices are refused. `rpc_url`, a secret, is tried before the network's
 public endpoint. Prices are in USD and quoted in the merchant's accepted tokens
 at purchase; devnet and testnet price at $1.00 parity.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `usage_gate_safe_spend` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout.embed_origins`, `provider_refund_access`, `fraud_warning_refund` and `currencies`. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules
 (`currency`, `product`, `price`, `mode`), first match wins, a `prefer` list ranks.
@@ -648,14 +648,16 @@ return nil
 |---|---|
 | `ListPayments`, `GetPayment` | payments and refunds, with their order |
 | `ListPaymentAttempts`, `GetPaymentAttempt` | each provider attempt, with its decline |
-| `RefundPayment` | refund through the PSP, in full or in part; `RevokeAccess` ends what the payment bought; takes `idempotencyKey` |
+| `ListDisputes`, `GetDispute` | each provider dispute (inquiry, chargeback or prevented), with its network, reason family, code, dates and outcome |
+| `RefundPayment` | refund through the PSP, in full or in part; `RefundReason` says why (default `requested_by_customer`), `Reason` in the merchant's words; `RevokeAccess` ends what the payment bought; takes `idempotencyKey` |
 | `RecordExternalPayment` | money received outside OpenRails against a usage order, idempotent on its transaction id, at most what it owes (`409 payment_exceeds_due`) |
 
 ```go guide:refund
 // key: one per refund decision; a retry with it refunds once
 return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 	Full:         true,
-	Reason:       "requested_by_customer",
+	RefundReason: billing.RefundRequestedByCustomer,
+	Reason:       "cancelled within the first day",
 	RevokeAccess: true,
 })
 ```
@@ -663,6 +665,14 @@ return shop.RefundPayment(ctx, key, payment, billing.RefundPaymentParams{
 A refund through CCBill or Solana is `refund_unsupported`. Refunds and
 chargebacks revoke the access their payment bought. Staff never start a card
 charge.
+
+**Disputes.** A chargeback ends what its charge paid for and the card is never
+charged again (`disputed`): the customer's other subscriptions on it wait for
+another card, or end at period end where a provider bills them. An inquiry
+moves no money and ends nothing. A Stripe early fraud warning refunds its charge
+in full and ends what it paid for, unless the merchant setting
+`fraud_warning_refund` is `record`. Each chargeback raises a
+`life.disputes.customer_review` finding.
 
 **Saved cards.** A method is `{id, rail, psp_id, card, billing_details, health,
 default_currencies}`; only `active` ones are charged. Renewals and usage
@@ -692,11 +702,11 @@ limits:
     unit: units
     reset: {kind: rolling, window_seconds: 3600}
     overrun: admit_while_positive
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}] # adds quantity × weight ÷ per; both default to 1
   monthly:
     unit: units
     reset: {kind: billing_period}
-    rate_cards: [{meter: work, price: {model: per_unit, per_unit: {unit_amount: "1"}}}]
+    counts: [{meter: work}]
 products:
   starter: {display_name: Starter, limits: {hourly: "1000", monthly: "100000"}}
   usage:
@@ -792,35 +802,39 @@ is `fixed`, `billing_period`, `session`, `rolling`, `rate` or `lifetime`;
 `require_estimate` admits only an estimate that fits. Late usage settles in full,
 never clamped.
 
+A named-unit limit counts meters: each of its `counts` (`catalog.LimitCount`) adds an event's quantity × `weight` ÷ `per`, rounded half up, when its meter reads the event and its optional `filter` admits the event's dimensions; `weight` and `per` default to 1, so `counts: [{meter: tokens}]` counts tokens one to one. Several counts weight a mix: `[{meter: input-tokens, per: 1000}, {meter: output-tokens, weight: 4, per: 1000}, {meter: output-tokens, weight: 6, per: 1000, filter: {model: [large]}}]` counts thousands of input tokens, output at four times that and a large model's output at ten. A currency limit counts the rated amount and has no counts; rate cards price money only.
+
 Refusals are verdicts, not errors:
 
 | Deny code | Means |
 |---|---|
 | `limit_reached` | the limit is spent until `resets_at` |
-| `capacity_held` | it would fit but for capacity other gates hold; retry after `retry_after_seconds` |
 | `insufficient_balance`, `insufficient_credit`, `outstanding_cap_reached` | the built-in `balance` limit: prepaid balance, credit line, unpaid arrears |
 | `budget_exceeded`, `accrual_rate_cap_reached` | a billing policy's spend window or accrual rate |
 | `delinquent_unpaid_order` | an unpaid usage bill past grace |
 | `failure_rate_limited` | a delegated invoker's failed usage passed its limit |
 
 **The Gate** admits in your process over any `*Client` whose credential holds
-`merchant:usage:manage` and `merchant:usage:read`. It keeps one lease and holds
-of each served customer's capacity, sized from traffic: a warm decision makes no
-network call and continues while OpenRails is unreachable; a cold one waits for
-one `SyncLeases` round trip or is `openrails.ErrUnavailable`. Nothing tunes it.
+`merchant:usage:manage` and `merchant:usage:read`. Each sync of its lease answers
+views: where each customer it serves stands on its limits, reserving nothing. A
+warm decision takes the request's cost from the view, less what the gate has in
+flight, with no network call. Near a limit the request is decided on OpenRails,
+exactly, as a request hold of the gate's lease. A customer with no view waits for
+one `SyncLeases` round trip. Nothing tunes it.
+
+A limit may be overshot by a small, bounded amount: what other gates (and
+admissions and batch jobs) add for the customer within about four sync intervals,
+less the margin the gate keeps from what its views show others adding; steady
+traffic overshoots by nothing. While OpenRails is unreachable a gate keeps
+deciding on its views, spending at most its share of what each had left (the
+remaining divided by the merchant's live gates), so the gates together never
+spend more than was left; a request no share covers, or for a customer with no
+view, is `openrails.ErrUnavailable`. A gate with nothing to do stops syncing and
+its lease lapses; its next request is decided on its last view, and the next
+waits for a sync.
 
 ```go guide:gate-new
-var deps openrails.GateDeps
-if url := os.Getenv("REDIS_URL"); url != "" {
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	rdb := redis.NewClient(opts)
-	defer rdb.Close()
-	deps.Redis = rdb
-}
-gate, err := openrails.NewGate(client, deps)
+gate, err := openrails.NewGate(client, openrails.GateDeps{})
 if err != nil {
 	log.Fatal(err)
 }
@@ -867,18 +881,16 @@ if err := ticket.Capture(r.Context(), billing.CaptureUsage{Dimensions: map[strin
 | `Gate.Record` | report usage no admission held |
 | `Gate.ListCustomerLimits` | a customer's lines less usage not yet sent, for display |
 | `Gate.Flush` | sync now and wait for settlement |
-| `Gate.Close` | send pending usage and close the lease, returning its holds |
+| `Gate.Close` | send pending usage and close the lease, releasing its request holds |
 
 Usage is never refused for money: the work happened, and admission is the check
-before it. A Gate with neither Redis nor an outbox keeps captured usage in memory
-until it is sent: a crash loses it, never billed. `GateDeps.Outbox` stores it
-before `Capture` returns; with `GateDeps.Redis`, your processes sharing that
-Redis are one gate (one lease, warm everywhere; during an upgrade that changes
-the gate's Redis layout, old and new processes are two gates until the old
-stop) and a retried `Capture` or `Record` posts once, on any of them. `usage_gate_safe_spend: true` lets a gate spend each hold's
-money size again while OpenRails is unreachable.
+before it. A Gate without an outbox keeps captured usage in memory until it is
+sent: a crash loses it, never billed. `GateDeps.Outbox` stores it before
+`Capture` returns, and a restarted process resends it. Each process is its own
+gate with its own lease.
 
 **Admissions** are holds owned by one request, for a backend without a gate.
+They count what gates report in flight as held.
 `Admit` prices the estimate with the current rate cards and pins them, checks
 `balance`, spend windows and limits in that order, and holds it everywhere or
 nowhere; the durable `request_id` owns replay, and a changed term conflicts.
@@ -901,10 +913,14 @@ own row.
 
 `SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends
 it for you. A batch job picks one `lse_` lease id for its stream and sends up to
-1,000 numbered items per sync, in order; the lease's highest settled number makes
+1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes
 a resend harmless, a changed item is `422 idempotency_key_reused`, a gap
 `409 usage_out_of_order`, and items past `usage.through_n` are resent. An item
-may be up to 35 days old. A priced meter that cannot price an item refuses it
+may be up to 35 days old. Usage counts toward every limit that applies to it: in
+the windows current when its request was admitted (`admitted_at`, else when it
+settles), and in the spend windows of the invoker attributes it reports
+(`trust_level`, `roles`, `resource`; the customer's own trust level when absent).
+It is priced by the rate cards in force when it settles. A priced meter that cannot price an item refuses it
 alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up
 to the policy's `bad_spend_windows`, never charged to a delegated invoker.
 
@@ -1138,6 +1154,7 @@ destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-swit
 |---|---|
 | `GetMetricsSchema` | the measures, dimensions and grains a query may name, with each measure's group (`business` or `ops`), direction and thresholds |
 | `QueryMetrics` | cash, payment, subscription, renewal, usage and ops measures, grouped and bucketed |
+| `ListDisputePrograms` | each card PSP's standing in the dispute monitoring programs (Visa VAMP, Mastercard's excessive chargeback and fraud programs, Stripe's guidance, the PSP's `dispute_ratio_limit`) for a month: ratio so far, projected, level and thresholds |
 | `GetDashboard`, `SetDashboard` | the console dashboard's saved layout, or the health overview built for the merchant's profile |
 
 ```go guide:metrics

@@ -125,15 +125,20 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 			cfg.AlertEmail = address
 		}
 	}
-	if in.UsageGateSafeSpend != nil {
-		cfg.UsageGateSafeSpend = *in.UsageGateSafeSpend
-	}
 	if in.ProviderRefundAccess != nil {
 		policy, err := NormalizeProviderRefundAccess(billing.ProviderRefundAccess(strings.TrimSpace(string(*in.ProviderRefundAccess))))
 		if err != nil {
 			return Settings{}, err
 		}
 		cfg.ProviderRefundAccess = policy
+	}
+	if in.FraudWarningRefund != nil {
+		switch policy := billing.FraudWarningRefund(strings.TrimSpace(string(*in.FraudWarningRefund))); policy {
+		case "", billing.FraudWarningRefundCharge, billing.FraudWarningRecord:
+			cfg.FraudWarningRefund = policy
+		default:
+			return Settings{}, fmt.Errorf("fraud_warning_refund must be %q or %q", billing.FraudWarningRefundCharge, billing.FraudWarningRecord)
+		}
 	}
 	if in.DunningPolicy != nil {
 		if _, err := collection.PolicyOf(in.DunningPolicy); err != nil {

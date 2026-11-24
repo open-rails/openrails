@@ -13,7 +13,11 @@ sql:
       - "internal/migrate/postgres/0008_drop_entitlement_cache_contract.up.sql"
       - "internal/migrate/postgres/0009_order_keys_and_cancel_kinds.up.sql"
       - "internal/migrate/postgres/0010_credit_grants.up.sql"
-      - "internal/migrate/postgres/0014_decline_causes.up.sql"
+      - "internal/migrate/postgres/0011_disputes.up.sql"
+      - "internal/migrate/postgres/0012_operation_log.up.sql"
+      - "internal/migrate/postgres/0013_limit_counts.up.sql"
+      - "internal/migrate/postgres/0014_bounded_gate.up.sql"
+      - "internal/migrate/postgres/0023_decline_causes.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:
