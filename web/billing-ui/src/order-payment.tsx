@@ -180,16 +180,21 @@ export function OrderPayment({
     if (!awaitedOrder) return
     const abort = new AbortController()
     const confirmEvery = SOLANA_CONFIRM_MS / SOLANA_READ_MS
+    // A slow answer never replaces a newer one. Each tab reads on its own:
+    // two tabs confirm four times a minute, still under the limit.
     let reads = 0
+    let shown = 0
     const timer = window.setInterval(() => {
-      reads++
+      const read = ++reads
       const next =
-        reads % confirmEvery === 0
+        read % confirmEvery === 0
           ? client.confirmOrder(awaitedOrder).then((result) => result.order)
           : client.getOrder(awaitedOrder, abort.signal)
       next.then(
         (current) => {
-          if (!abort.signal.aborted) setOrder(current)
+          if (abort.signal.aborted || read < shown) return
+          shown = read
+          setOrder(current)
         },
         () => undefined
       )
@@ -371,7 +376,18 @@ export function OrderPayment({
       const answered = await stripe.handleNextAction({ clientSecret: secret })
       if (answered.error) throw new Error(answered.error.message)
     }
-    return answer(await client.confirmOrder(order.id))
+    let confirmed: OrderResult
+    try {
+      confirmed = await client.confirmOrder(order.id)
+    } catch (cause) {
+      // The challenge passed and only its confirmation was lost: the same
+      // payment, under the same key, read again.
+      const current = await client.getOrder(order.id).catch(() => undefined)
+      if (current) setOrder(current)
+      setError(message(cause))
+      return false
+    }
+    return answer(confirmed)
   }
 
   const message = (cause: unknown) =>

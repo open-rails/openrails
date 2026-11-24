@@ -62,14 +62,14 @@ A decline answers `402` with the order open again and keeps no card.
 
 ## Solana Pay
 
-A Solana payment option takes a token from `GET /v1/me/config`'s `payment.solana.tokens`; the pay sends its `token_symbol`. The order answers a `solana_pay` next action whose `url` the package shows as a QR code and a wallet link. OpenRails watches the chain itself: the package reads the order every 3 seconds until the transfer lands, and confirms it every 30, well under the `purchase` limit.
+A Solana payment option takes a token from `GET /v1/me/config`'s `payment.solana.tokens`; the pay sends its `token_symbol`. The order answers a `solana_pay` next action whose `url` the package shows as a QR code and a wallet link. OpenRails watches the chain itself: the package reads the order every 3 seconds until the transfer lands, and confirms it every 30, well under the `purchase` limit; an older read never replaces a newer one. Each open tab polls on its own, so two tabs confirm four times a minute, still under the limit.
 
 ## Pending payment outcomes
 
 `processing` means an accepted outcome is unresolved; `onSettled` reports it,
 and the host waits for the verified terminal state (the order read again, or
 its host event) rather than inferring payment from navigation or a timeout.
-Each payment sends one Idempotency-Key, minted when the button renders and kept until the payment has an answer: a retry of the same request answers what the first did. A pay whose answer is lost (network, `5xx`, or `idempotency_key_in_use`, `idempotency_key_reused`, `order_payment_in_progress`) is read back with `getOrderPaymentAttempt` under its key: an attempt it took is answered from the order, one that ended mints a new key, and none keeps the key for the retry. A decline, a refusal before any attempt, or a failed bank challenge shows its message, and the next pay is a new payment under a new key.
+Each payment sends one Idempotency-Key, minted when the button renders and kept until the payment has an answer: a retry of the same request answers what the first did. A pay whose answer is lost (network, `5xx`, or `idempotency_key_in_use`, `idempotency_key_reused`, `order_payment_in_progress`) is read back with `getOrderPaymentAttempt` under its key: an attempt it took is answered from the order, one that ended mints a new key, and none keeps the key for the retry. A decline, a refusal before any attempt, or a failed bank challenge shows its message, and the next pay is a new payment under a new key; a challenge that passed but whose confirmation was lost keeps the key and reads the order again.
 
 ## Separate NMI card setup
 
