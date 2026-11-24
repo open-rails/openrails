@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 412,
+  "scenario_count": 413,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1077,6 +1077,11 @@
       "id": "OR-J01-S16",
       "journey": "J01",
       "name": "Host customer admission policy preserves original proof and fixed billing scope ceilings"
+    },
+    {
+      "id": "OR-J01-S17",
+      "journey": "J01",
+      "name": "Personal access token reads as its customer and holds its permissions but never pays or takes a person-only action"
     },
     {
       "id": "OR-J22-S05",

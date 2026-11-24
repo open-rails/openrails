@@ -40,7 +40,7 @@ func (e *Env) mappedCustomerCheck(route Route, a auth.Authenticator) router.Midd
 			if !ok {
 				return
 			}
-			if identity.SubjectKind != auth.SubjectUser || !identity.SelfInvoked() || !billingauth.Interactive(identity) || identity.Credential.Kind == auth.CredentialPersonalAccessToken {
+			if !billingauth.Interactive(identity) {
 				refuseCode(r, route, a, billing.CodeInvokerScopedPrincipal, "")
 				return
 			}

@@ -142,10 +142,7 @@ Checks:
 
 ### 4. Access control and tenant isolation
 
-Every route is `MerchantConfig` with a read or manage permission, and Apply is
-`Person: true` (`403 person_required` for an API key). Jobs run in their
-merchant's scope, queries name `merchant_id`, and records reach their import by
-composite key.
+Every route is `MerchantConfig` with a read or manage permission, and Apply is `Person: true` (`403 person_required` for an API key or personal access token). Jobs run in their merchant's scope, queries name `merchant_id`, and records reach their import by composite key.
 
 Checks:
 - OR-J38-S27: only a person or the in-process host applies or approves; OR-J38-S34: a configuration reader writes nothing.

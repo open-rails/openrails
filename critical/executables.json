@@ -803,6 +803,9 @@
     "OR-J01-S16": [
       "TestHostedOwnershipContracts/OR-J01-S16/host-admission-preserves-proof-and-billing-scope"
     ],
+    "OR-J01-S17": [
+      "TestPersonalAccessTokens/OR-J01-S17/personal-access-token-never-acts-in-person"
+    ],
     "OR-J22-S05": [
       "TestRecurringCredits/OR-J22-S05/recurring-payment-grants-independent-service-credit"
     ],

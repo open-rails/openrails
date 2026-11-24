@@ -33,7 +33,7 @@ func ResolveExistingCustomer(ctx context.Context, logger *slog.Logger, rt *app.R
 	if err != nil {
 		return refused(err)
 	}
-	if id.SubjectKind != auth.SubjectUser || !id.SelfInvoked() || !billingauth.Interactive(id) || id.Credential.Kind == auth.CredentialPersonalAccessToken {
+	if !billingauth.Interactive(id) {
 		return refused(billingauth.Refusal(billing.CodeInvokerScopedPrincipal))
 	}
 	customer, err := billing.ParseCustomerID(id.Subject)
