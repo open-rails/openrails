@@ -262,5 +262,5 @@ func (DrainErasuresArgs) Kind() string { return DrainErasuresKind }
 // InsertOpts keeps one waiting drain per merchant.
 func (DrainErasuresArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "billing", MaxAttempts: 10, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
-		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateScheduled}}}
+		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}}}
 }
