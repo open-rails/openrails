@@ -21,6 +21,8 @@ type Config struct {
 
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig
+	// ClickHouse names the database of the event store, Deps.ClickHouse.
+	ClickHouse ClickHouseConfig
 	// Merchants declares the merchants an embedded engine provisions on
 	// start; none leaves that to run time (a standalone server's are
 	// provisioned through its API). A slug declared twice provisions neither
@@ -128,6 +130,14 @@ type DatabaseConfig struct {
 	// configuration, that renews idempotency leases. Zero is four
 	// connections.
 	LeaseConns int
+}
+
+// ClickHouseConfig names the ClickHouse database the event store keeps its
+// tables in. New creates or upgrades it; with Database.SkipMigrations it only
+// checks it, and MigrateClickHouse prepares it.
+type ClickHouseConfig struct {
+	// Database holds the event store's tables. Empty is "openrails".
+	Database string
 }
 
 // RateLimitsConfig maps a feature bucket (purchase, payment, subscribe,
@@ -297,6 +307,7 @@ func engineConfig(cfg Config) config.Config {
 		EngineAdmissionHold:     cfg.EngineAdmissionHold,
 		UsageBillingEnabled:     cfg.UsageBillingEnabled,
 		Database:                config.DatabaseConfig(cfg.Database),
+		ClickHouse:              config.ClickHouseConfig(cfg.ClickHouse),
 		Merchants:               cfg.Merchants,
 		PublicBillingBaseURL:    cfg.PublicBillingBaseURL,
 		ReturnOrigins:           cfg.ReturnOrigins,

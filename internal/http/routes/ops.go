@@ -35,7 +35,7 @@ var opsRoutes = []Route{
 		Responses: []Reply{{200, billing.AdminAccess{}}}, Bind: adminAccess},
 	{Method: POST, Path: "/v1/metrics/query", Group: Metrics, Auth: AuthMerchant, Name: "QueryMetrics",
 		Doc:     "QueryMetrics runs one metrics query.",
-		Request: billing.QueryMetricsParams{}, Responses: []Reply{{200, billing.MetricsResult{}}}, Errors: codes("metrics_query_invalid", "service_unavailable"), Handler: h(handlers.MerchantMetricsQuery)},
+		Request: billing.QueryMetricsParams{}, Responses: []Reply{{200, billing.MetricsResult{}}}, Errors: codes("event_store_required", "metrics_query_invalid", "service_unavailable"), Handler: h(handlers.MerchantMetricsQuery)},
 	{Method: GET, Path: "/v1/metrics/schema", Group: Metrics, Auth: AuthMerchant, Name: "GetMetricsSchema",
 		Doc:       "GetMetricsSchema lists every measure, dimension and grain a query may use.",
 		Responses: []Reply{{200, billing.MetricsSchema{}}}, Handler: h(handlers.MerchantMetricsSchema)},

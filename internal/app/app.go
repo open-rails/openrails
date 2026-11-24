@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/authkit/userinfo"
@@ -63,6 +64,9 @@ type BootstrapOptions struct {
 	Migrations fs.FS
 	// Vault is the host's authenticated client (Deps.Vault).
 	Vault *vaultapi.Client
+	// ClickHouse is the event store's connection (Deps.ClickHouse); nil
+	// turns usage off.
+	ClickHouse driver.Conn
 }
 
 // BootstrapWithOptions initialises core services with optional overrides.
@@ -115,6 +119,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		UserInfo:             opts.UserInfo,
 		Notifications:        opts.Notifications,
 		Migrations:           opts.Migrations,
+		ClickHouse:           opts.ClickHouse,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialise runtime: %w", err)

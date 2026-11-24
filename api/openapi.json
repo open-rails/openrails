@@ -1611,6 +1611,7 @@
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "catalog_revision_conflict",
+          "event_store_required",
           "merchant_unit_unsupported",
           "price_not_sellable",
           "product_not_found",
@@ -1831,6 +1832,7 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "default_rate_card_not_found",
@@ -1844,7 +1846,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6679,12 +6682,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6740,12 +6745,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6801,12 +6808,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6862,12 +6871,14 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -6948,13 +6959,15 @@
           }
         ],
         "x-openrails-auth": "customer",
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "currency_unsupported",
           "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7471,6 +7484,7 @@
           "merchant": "merchant:catalog:manage",
           "root": "root:catalog:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_revision_conflict",
@@ -7481,7 +7495,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7553,13 +7568,15 @@
           "merchant": "merchant:usage:read",
           "root": "root:usage:read"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "invalid_customer_id",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7607,9 +7624,11 @@
           }
         ],
         "x-openrails-auth": "customer",
+        "x-openrails-event-store": true,
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
-          "tier:customer"
+          "tier:customer",
+          "event_store"
         ]
       }
     },
@@ -7665,6 +7684,7 @@
           "merchant": "merchant:usage:manage",
           "root": "root:usage:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-errors": [
           "admission_not_found",
           "currency_unsupported",
@@ -7678,7 +7698,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:application",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -7742,6 +7763,7 @@
           "merchant": "merchant:customer:manage",
           "root": "root:customer:manage"
         },
+        "x-openrails-event-store": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "idempotency_key_reused",
@@ -7752,7 +7774,8 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request"
+          "request",
+          "event_store"
         ]
       }
     },
@@ -10528,6 +10551,7 @@
           "card_vault_unknown",
           "charge_psp_incompatible",
           "charge_psp_unknown",
+          "event_store_required",
           "invalid_param",
           "merchant_unit_unsupported",
           "platform_vault_mixed_class",
@@ -12707,6 +12731,7 @@
           "root": "root:metrics:read"
         },
         "x-openrails-errors": [
+          "event_store_required",
           "metrics_query_invalid",
           "service_unavailable"
         ],
@@ -19141,6 +19166,7 @@
               "embed_origins_required",
               "entitlement_required",
               "event_cursor_expired",
+              "event_store_required",
               "finding_action_failed",
               "finding_not_actionable",
               "finding_requires_merchant_config",
@@ -25158,6 +25184,7 @@
               "embed_origins_required",
               "entitlement_required",
               "event_cursor_expired",
+              "event_store_required",
               "finding_action_failed",
               "finding_not_actionable",
               "finding_requires_merchant_config",
@@ -25641,13 +25668,17 @@
                 "type": "null"
               }
             ]
+          },
+          "usage": {
+            "type": "boolean"
           }
         },
         "required": [
           "capabilities",
           "currencies",
           "rails",
-          "captcha"
+          "captcha",
+          "usage"
         ]
       },
       "PublicMerchant": {
@@ -29016,6 +29047,9 @@
     }
   },
   "x-openrails-error-sets": {
+    "event_store": [
+      "event_store_required"
+    ],
     "request": [
       "invalid_param",
       "invalid_query",
@@ -29375,6 +29409,11 @@
       "status": 410,
       "type": "invalid_request_error",
       "meaning": "The event cursor is no longer retained; resynchronize current state."
+    },
+    "event_store_required": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."
     },
     "finding_action_failed": {
       "status": 502,

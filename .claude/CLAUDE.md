@@ -42,10 +42,11 @@ through `host-four`; these are placeholders, not customer or repository names.
 - From v1.0.0 three contracts change only by adding to them (`compatibility/README.md`):
   the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `web/console`, `web/pay`, `server`), the
   HTTP API, and the database schema. `api/go.txt` lists both modules.
-- Each has a generated snapshot: `api/go.txt`, `api/openapi.json`, `api/schema.txt`.
-  `go run ./scripts/contracts` verifies them (CI runs it with `-dsn`); `-write` rewrites
-  them with `compatibility/contract.json` and the files generated from the route catalog.
-  The schema list needs `-dsn` (or `OPENRAILS_E2E_DSN`) naming a disposable PostgreSQL 18.
+- Each has a generated snapshot: `api/go.txt`, `api/openapi.json`, `api/schema.txt`, and the
+  event store's `api/clickhouse.txt`. `go run ./scripts/contracts` verifies them (CI runs it with
+  `-dsn` and `-clickhouse`); `-write` rewrites them with `compatibility/contract.json` and the files
+  generated from the route catalog. The schema lists need `-dsn` (or `OPENRAILS_E2E_DSN`) naming a
+  disposable PostgreSQL 18 and `-clickhouse` a disposable ClickHouse 26.8.
   Never hand-merge them.
 - A removed or changed snapshot line is a break. Don't make one without the owner.
 
@@ -216,6 +217,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   an `order_attempts` row (`oat_`) is a provider attempt; a host
   charges its own metered price with a `running_charges` row.
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
+- Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded
+  migrations); money stays in PostgreSQL. Whether `Deps.ClickHouse` is set decides usage: without
+  it the event-backed routes (`Route.EventStore`), catalog declarations and settings answer
+  409 `event_store_required`.
 - User-facing records soft-delete: `deleted_at`, and reads filter `deleted_at IS NULL`.
   Hard deletes only for privacy erasure and derived or short-lived rows.
 - Abuse state (rate limits, lockouts, captcha, card-testing counts, replay ids) and
@@ -257,9 +262,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   CLI command, and none that does not exist. `docs/architecture/` gets the link check only.
 
 ## Tests
-- The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis and
-  Vault (`OPENRAILS_CRITICAL_DSN`, `_REDIS_URL`, `_VAULT_ADDR`, `_VAULT_TOKEN`, all owned
-  and disposable). `critical/coverage.json` lists the scenarios and
+- The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis, Vault and
+  ClickHouse (`OPENRAILS_CRITICAL_DSN`, `_REDIS_URL`, `_VAULT_ADDR`, `_VAULT_TOKEN`,
+  `_CLICKHOUSE_ADDR`, all owned and disposable; each world creates its own ClickHouse
+  database). `critical/coverage.json` lists the scenarios and
   `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests
   registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` runs one against
   disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all.

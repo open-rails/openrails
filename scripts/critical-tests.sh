@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export GOWORK=off
 : "${OPENRAILS_CRITICAL_DSN:?Set OPENRAILS_CRITICAL_DSN to an owned disposable PostgreSQL database}"
+: "${OPENRAILS_CRITICAL_CLICKHOUSE_ADDR:?Set OPENRAILS_CRITICAL_CLICKHOUSE_ADDR to an owned disposable ClickHouse (host:port); each scenario creates its own database}"
 selected=()
 while (($#)); do
   case "$1" in

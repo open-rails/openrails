@@ -48,7 +48,7 @@ func (m *model) routesMD() []byte {
 	b.WriteString("Error codes are in [error-codes.md](error-codes.md).\n\n")
 	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or an application holding the route's permission, as `application`). Every route of a tier that checks a permission names one; the route catalog refuses one that does not.\n\n")
 	b.WriteString("**Permission** is, for a staff or programmatic route, what its caller holds (`billing.Permissions`): the `merchant:` name in the scope of the merchant the request acts on, or the `root:` name in the Auth's root scope.\n\n")
-	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer operation that also needs a recent sign-in; `person` a merchant operation only a person signed in, or the in-process host, may take; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client.\n")
+	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a customer operation that also needs a recent sign-in; `person` a merchant operation only a person signed in, or the in-process host, may take; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header; `console only` optional assistance outside the merchant Go client; `event store` a route that answers `event_store_required` on a deployment without ClickHouse.\n")
 	titled := map[routes.Group]bool{}
 	for _, g := range groupTitles {
 		titled[g.group] = true
@@ -104,6 +104,9 @@ func (m *model) routesMD() []byte {
 			}
 			if r.IdempotencyKey {
 				notes = append(notes, "`Idempotency-Key`")
+			}
+			if r.EventStore {
+				notes = append(notes, "event store")
 			}
 			fmt.Fprintf(&b, "| %s | `%s` | %s | %s | %s | %s | %s |\n", r.Method, r.Path, r.Auth, perm, m.bodyDoc(r.Request), strings.Join(replies, "<br>"), strings.Join(notes, "; "))
 		}

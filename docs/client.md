@@ -216,7 +216,7 @@ live ([standalone.md](standalone.md#vault)). PostgreSQL never holds it.
 | `UpdatePSP` | rotate credentials, change settings or archive; archiving the last active PSP of a rail is `409 psp_last_active` |
 | `PreviewPSPRouting` | which PSP a purchase would use, without charging |
 | `ListCustodians`, `SetCustodian` | card custodians (Basis Theory) a PSP charges through (`SetCustodianParams`) |
-| `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha |
+| `GetPublicConfig` | the deployment's public `GET /v1/config`: route groups, currencies, rails, captcha, and `usage`, whether the deployment serves usage |
 | `GetAdminAccess` | what the credential may reach, and its merchant's `ScopeID` |
 | `ListChanges` | the configuration history: each change to a product, price, meter, limit or configuration document, who made it and how (`LogListParams` filters by object and time) |
 
@@ -904,6 +904,8 @@ own row.
 
 ## Usage and running charges
 
+Usage needs the deployment's event store (ClickHouse). Without one `GET /v1/config` reports `usage: false`, and lease syncs, admissions, `GET /v1/me/usage`, customer limits and their adjustments, meter and limit edits and usage metrics answer `409 event_store_required` (`billing.ErrEventStoreRequired`); running charges and usage orders still work.
+
 `SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends
 it for you. A batch job picks one `lse_` lease id for its stream and sends up to
 1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes
@@ -1259,6 +1261,7 @@ default: // no answer, or a 5xx: it may have committed; retry with the same key 
   `403 captcha_required`: solve and send `X-Captcha-Token`.
 - `409 idempotency_key_in_use`, `payment_in_progress`: the original is still
   running. `provider_outcome_unknown`: read before retrying.
+- `409 event_store_required` (`billing.ErrEventStoreRequired`): the deployment has no event store, so usage is off ([usage](#usage-and-running-charges)); `param` and `metadata.paths` name what a refused document or setting declared. Retrying does not help.
 - `429` with `Retry-After`: the customer routes allow 10 purchases, 20
   subscription writes and 40 payment-method writes a minute; never retry
   purchases in a loop. `429 card_attempts_blocked`: too many recent declines.

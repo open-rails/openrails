@@ -1701,6 +1701,19 @@
     "OR-J24-S38": [
       "TestLeaseSyncs/OR-J24-S38/usage-counts-in-the-spend-windows-of-the-attributes-it-reports"
     ],
+    "OR-J24-S39": [
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-catalog-routes-client-and-gate",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-settings",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/subscriptions-credit-packs-and-running-charges",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-orders",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works"
+    ],
+    "OR-J24-S40": [
+      "TestEventStore/OR-J24-S40/new-migrates-clickhouse-idempotently-and-refuses-another-store"
+    ],
+    "OR-J24-S41": [
+      "TestEventStore/OR-J24-S41/public-config-reports-whether-usage-is-served"
+    ],
     "OR-J01-S20": [
       "TestRoutePermissions/OR-J01-S20/every-route-refuses-a-credential-without-its-permission"
     ],

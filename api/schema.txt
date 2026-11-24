@@ -15,6 +15,7 @@ migration 0011_disputes.up.sql sha256:2c2f3eea9343cece49fd8c8aa0b6a93a6e0292ee3d
 migration 0012_operation_log.up.sql sha256:230a94a136e3e0229505fbc58dbc87a052b9b6d3112ac24ae08795870e55b9e7
 migration 0013_limit_counts.up.sql sha256:d674b513c1dc9874c7580fa1625bc80d3474023d1bb165d6942b0c2a8bcd81d8
 migration 0014_bounded_gate.up.sql sha256:cbfefdff4b6968b735896de2c3f71b946954b25f151a10bbb2ab6e15729373c5
+migration 0015_event_store.up.sql sha256:67e10055bc149bb0f9049cd000d2b392a2f154dc10aa222fa0d48b0d00b195fe
 migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
 
 table billing.balance_watches
@@ -675,6 +676,14 @@ table billing.disputes
   index CREATE UNIQUE INDEX disputes_psp_id_provider_ref_key ON billing.disputes USING btree (merchant_id, psp_id, provider_ref)
   index CREATE INDEX disputes_waiting_idx ON billing.disputes USING btree (merchant_id, id) WHERE ((kind = 'chargeback'::text) AND (responded_at IS NULL))
   trigger CREATE TRIGGER disputes_network_activity AFTER INSERT OR DELETE OR UPDATE OF kind, chargeback_at, network, reason, amount, currency ON billing.disputes FOR EACH ROW EXECUTE FUNCTION billing.dispute_network_activity()
+
+table billing.event_store
+  column singleton boolean NOT NULL
+  column store_id uuid NOT NULL
+  column attached_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint event_store_pkey PRIMARY KEY (singleton)
+  constraint event_store_singleton_check CHECK (singleton)
+  index CREATE UNIQUE INDEX event_store_pkey ON billing.event_store USING btree (singleton)
 
 table billing.eventlog_events
   column source text NOT NULL

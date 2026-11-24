@@ -7,7 +7,9 @@
 //
 // The schema list is read from a real PostgreSQL: -dsn, or OPENRAILS_E2E_DSN,
 // names a disposable server. Without one the list is only checked against the
-// migration files, and -write refuses to leave it behind them.
+// migration files, and -write refuses to leave it behind them. The event
+// store's list (api/clickhouse.txt) is read the same way from the disposable
+// ClickHouse -clickhouse names.
 //
 // -lint instead checks the Go API against its conventions and the findings
 // baseline (api/lint-baseline.txt), needing no database; -lint -prune drops
@@ -37,6 +39,7 @@ import (
 func main() {
 	write := flag.Bool("write", false, "write the reviewed current contracts")
 	dsn := flag.String("dsn", os.Getenv(schemasnapshot.DSNEnv), "disposable PostgreSQL server the schema list is read from")
+	clickHouse := flag.String("clickhouse", "", "disposable ClickHouse server (host:port or clickhouse:// DSN) the event store's list is read from")
 	lint := flag.Bool("lint", false, "check the Go API against its conventions and "+apisurface.BaselineFile)
 	prune := flag.Bool("prune", false, "with -lint, drop the baseline lines that match nothing")
 	flag.Parse()
@@ -47,7 +50,7 @@ func main() {
 	case *lint:
 		err = lintAPI(*prune)
 	default:
-		err = run(*write, strings.TrimSpace(*dsn))
+		err = run(*write, strings.TrimSpace(*dsn), strings.TrimSpace(*clickHouse))
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -55,7 +58,7 @@ func main() {
 	}
 }
 
-func run(write bool, dsn string) error {
+func run(write bool, dsn, clickHouse string) error {
 	root, err := os.OpenRoot(".")
 	if err != nil {
 		return err
@@ -80,7 +83,7 @@ func run(write bool, dsn string) error {
 		if err := contractaudit.Verify(root.FS()); err != nil {
 			return err
 		}
-		return schema(ctx, root, dsn, false)
+		return errors.Join(schema(ctx, root, dsn, false), eventSchema(ctx, root, clickHouse, false))
 	}
 	files, err := contract.Files(root.FS())
 	if err != nil {
@@ -111,7 +114,30 @@ func run(write bool, dsn string) error {
 	if err := root.WriteFile(contractaudit.SnapshotPath, snapshot, 0o644); err != nil {
 		return err
 	}
-	return schema(ctx, root, dsn, true)
+	return errors.Join(schema(ctx, root, dsn, true), eventSchema(ctx, root, clickHouse, true))
+}
+
+// eventSchema checks or rewrites api/clickhouse.txt. With no server it can
+// only tell whether the list was taken from the migrations as they are now.
+func eventSchema(ctx context.Context, root *os.Root, addr string, write bool) error {
+	listed, err := root.ReadFile(schemasnapshot.ClickHouseFile)
+	if err != nil && !write {
+		return err
+	}
+	if addr == "" {
+		return schemasnapshot.CheckClickHouseMigrations(listed)
+	}
+	applied, err := schemasnapshot.CaptureClickHouse(ctx, addr)
+	if err != nil {
+		return err
+	}
+	if write {
+		return root.WriteFile(schemasnapshot.ClickHouseFile, applied, 0o644)
+	}
+	if !bytes.Equal(listed, applied) {
+		return schemasnapshot.ErrClickHouseStale
+	}
+	return nil
 }
 
 // lintAPI checks the Go API's findings against the baseline. prune rewrites
