@@ -1598,6 +1598,7 @@ export type MetricsRange = {
 
 export type MetricsResult = {
   grain?: string
+  timezone: string
   range: MetricsResultRange
   columns: MetricsColumn[]
   rows: unknown[][]

@@ -19,9 +19,10 @@ type QueryMetricsParams struct {
 	Compare string `json:"compare"`
 }
 
-// MetricsRange bounds a query. Date-only values are UTC calendar days, From
-// and To both inclusive; RFC 3339 instants are taken as [From, To). Last is a
-// trailing window ending today ("7d", "12w", "6m", "1y"), instead of From/To.
+// MetricsRange bounds a query. Date-only values are calendar days in the
+// merchant's accounting timezone, From and To both inclusive; RFC 3339
+// instants are taken as [From, To). Last is a trailing window ending today
+// there ("7d", "12w", "6m", "1y"), instead of From/To.
 type MetricsRange struct {
 	From string `json:"from,omitempty"`
 	To   string `json:"to,omitempty"`
@@ -38,9 +39,12 @@ type MetricsOrder struct {
 
 // MetricsResult is a query's table. A money cell is a decimal string of its
 // currency's native units, a count an integer, a ratio a number (null when
-// its denominator is zero).
+// its denominator is zero). A time cell is the instant its bucket starts:
+// days, weeks, months, quarters and years begin at midnight in Timezone, the
+// merchant's accounting timezone.
 type MetricsResult struct {
 	Grain        string              `json:"grain,omitempty"`
+	Timezone     string              `json:"timezone"`
 	Range        MetricsResultRange  `json:"range"`
 	Columns      []MetricsColumn     `json:"columns"`
 	Rows         [][]any             `json:"rows"`

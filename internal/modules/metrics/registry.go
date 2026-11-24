@@ -96,6 +96,10 @@ type familySpec struct {
 	DimValues map[string][]string
 	// BaseWhere: family-invariant predicate (no params).
 	BaseWhere string
+	// Calendar: TimeExpr is the UTC midnight of a day (or month) a daily
+	// rollup was kept for. It groups as that date in any zone: there is no
+	// finer time to regroup.
+	Calendar bool
 }
 
 // Slice restricts a funnel measure to the rows whose dimensions take the
@@ -190,7 +194,7 @@ const (
 
 // Dimensions is the dimension registry.
 var Dimensions = []Dimension{
-	{Name: "time", Description: "bucket by the query grain (auto|day|week|month|quarter|year, UTC calendar)"},
+	{Name: "time", Description: "bucket by the query grain (auto|day|week|month|quarter|year), on the calendar of the merchant's accounting timezone"},
 	{Name: "currency", Description: "currency code; added implicitly when a money measure is grouped without a single-currency filter"},
 	{Name: "rail", Description: "payment rail: nmi, ccbill, stripe or solana"},
 	{Name: "psp", Description: "the PSP's id (psp_…), empty when none"},
@@ -352,6 +356,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.network_activity_daily na`,
 		TimeExpr: `na.day_at`,
+		Calendar: true,
 		DimExprs: map[string]string{
 			"rail": `na.rail`,
 			"psp":  `'psp_' || na.psp_id::text`,
@@ -362,6 +367,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.network_activity_daily nap`,
 		TimeExpr: `(((nap.day_at AT TIME ZONE 'UTC') + interval '1 month') AT TIME ZONE 'UTC')`,
+		Calendar: true,
 		DimExprs: map[string]string{
 			"rail": `nap.rail`,
 			"psp":  `'psp_' || nap.psp_id::text`,
@@ -423,6 +429,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.usage_daily ud`,
 		TimeExpr: `ud.day_at`,
+		Calendar: true,
 		DimExprs: map[string]string{
 			"currency":  `ud.currency`,
 			"customer":  `ud.customer_id::text`,
@@ -438,6 +445,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.usage_daily ud CROSS JOIN LATERAL (VALUES ('charged', ud.amount), ('forgiven', ud.forgiven_amount)) AS uc(charge, amount)`,
 		TimeExpr: `ud.day_at`,
+		Calendar: true,
 		DimExprs: map[string]string{
 			"currency":  `ud.currency`,
 			"customer":  `ud.customer_id::text`,
@@ -524,6 +532,7 @@ var families = map[Family]familySpec{
 		LEFT JOIN billing.psps whp ON whp.merchant_id = whd.merchant_id AND whp.id = whd.psp_id
 		LEFT JOIN billing.custodians whc ON whc.merchant_id = whd.merchant_id AND whc.id = whd.custodian_id`,
 		TimeExpr: `whd.day_at`,
+		Calendar: true,
 		DimExprs: map[string]string{
 			"rail": `COALESCE(whp.rail, whc.kind)`,
 			"psp":  `COALESCE('psp_' || whd.psp_id::text, '')`,
@@ -611,6 +620,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.nmi_history_months h`,
 		TimeExpr: `h.month_at`,
+		Calendar: true,
 		DimExprs: map[string]string{
 			"psp":      `COALESCE('psp_' || h.psp_id::text, '')`,
 			"nmi_kind": `h.kind`,

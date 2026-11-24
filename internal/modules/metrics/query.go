@@ -31,10 +31,10 @@ const (
 // Query is the POST /v1/metrics/query body.
 type Query = billing.QueryMetricsParams
 
-// QueryRange bounds the query window. Date-only values are inclusive UTC days;
-// RFC3339 timestamps are taken verbatim as [from, to). Last ("7d", "12w", "6m",
-// "1y") is a trailing window ending today, exclusive with from/to, so a saved
-// widget stays current.
+// QueryRange bounds the query window. Date-only values are inclusive days in
+// the merchant's accounting timezone; RFC3339 timestamps are taken verbatim as
+// [from, to). Last ("7d", "12w", "6m", "1y") is a trailing window ending today
+// there, exclusive with from/to, so a saved widget stays current.
 type QueryRange = billing.MetricsRange
 
 // OrderTerm orders result rows by a requested measure or dimension.
@@ -83,14 +83,14 @@ func decodeFieldError(err error) FieldError {
 	return FieldError{Code: "invalid_body", Param: "body", Message: fmt.Sprintf("malformed JSON body: %v", err)}
 }
 
-// parseRangeTime parses a range endpoint: date-only or RFC3339.
-func parseRangeTime(s string, dayEnd bool) (time.Time, bool) {
-	if t, err := time.Parse("2006-01-02", s); err == nil {
-		t = t.UTC()
+// parseRangeTime parses a range endpoint: a date in zone or RFC3339, as a
+// UTC instant.
+func parseRangeTime(s string, dayEnd bool, zone *time.Location) (time.Time, bool) {
+	if t, err := time.ParseInLocation("2006-01-02", s, zone); err == nil {
 		if dayEnd {
 			t = t.AddDate(0, 0, 1)
 		}
-		return t, true
+		return t.UTC(), true
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t.UTC(), true

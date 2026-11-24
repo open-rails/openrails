@@ -46,10 +46,13 @@ type Plan struct {
 	HasTime  bool
 	Grain    string
 	From, To time.Time
-	Buckets  []time.Time // bucket labels (UTC calendar starts); empty when !HasTime
-	Filters  map[string][]string
-	Order    []OrderTerm
-	Limit    int
+	// Zone is the merchant's accounting timezone: its midnights start days,
+	// weeks, months, quarters and years.
+	Zone    *time.Location
+	Buckets []time.Time // bucket labels (calendar starts in Zone, as UTC instants); empty when !HasTime
+	Filters map[string][]string
+	Order   []OrderTerm
+	Limit   int
 	// Compare is the comparison window: "", previous_period or previous_year.
 	Compare string
 	// ImplicitCurrency: currency was added as a group-by because a money measure
@@ -57,8 +60,22 @@ type Plan struct {
 	ImplicitCurrency bool
 }
 
-// ValidateAt is Validate with an explicit "now" for relative-range resolution.
+// zone is the plan's calendar, UTC when none was named.
+func (p *Plan) zone() *time.Location {
+	if p.Zone == nil {
+		return time.UTC
+	}
+	return p.Zone
+}
+
+// ValidateAt is ValidateIn in UTC.
 func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
+	return ValidateIn(q, now, time.UTC)
+}
+
+// ValidateIn validates q with an explicit "now" for relative ranges, its
+// calendar days in zone.
+func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *ValidationError) {
 	var errs []FieldError
 	add := func(fe FieldError) { errs = append(errs, fe) }
 
@@ -136,14 +153,14 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	var from, to time.Time
 	if q.Range == nil || (q.Range.Last == "" && (q.Range.From == "" || q.Range.To == "")) {
 		add(FieldError{Code: "missing_range", Param: "range",
-			Message: `range is required: {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} (dates are inclusive UTC days), RFC3339 timestamps [from,to), or a relative window {"last":"7d"} (Nd|Nw|Nm|Ny, ending today)`})
+			Message: `range is required: {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} (dates are inclusive days in the accounting timezone), RFC3339 timestamps [from,to), or a relative window {"last":"7d"} (Nd|Nw|Nm|Ny, ending today)`})
 	} else if q.Range.Last != "" {
 		if q.Range.From != "" || q.Range.To != "" {
 			add(FieldError{Code: "invalid_range", Param: "range",
 				Message: `range.last is mutually exclusive with range.from/range.to: use either a relative window or explicit dates`})
 		} else {
 			var ok bool
-			from, to, ok = resolveLast(q.Range.Last, now)
+			from, to, ok = resolveLast(q.Range.Last, now, zone)
 			if !ok {
 				add(FieldError{Code: "invalid_range", Param: "range.last",
 					Message: fmt.Sprintf(`could not parse %q: use "<N>d", "<N>w", "<N>m" or "<N>y" (e.g. "7d" = the past 7 days incl. today)`, q.Range.Last)})
@@ -151,8 +168,8 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 	} else {
 		var okFrom, okTo bool
-		from, okFrom = parseRangeTime(q.Range.From, false)
-		to, okTo = parseRangeTime(q.Range.To, true)
+		from, okFrom = parseRangeTime(q.Range.From, false, zone)
+		to, okTo = parseRangeTime(q.Range.To, true, zone)
 		if !okFrom {
 			add(FieldError{Code: "invalid_range", Param: "range.from",
 				Message: fmt.Sprintf("could not parse %q: use YYYY-MM-DD or RFC3339", q.Range.From)})
@@ -172,7 +189,7 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	}
 	var buckets []time.Time
 	if hasTime && validGrain && grain != "auto" && !from.IsZero() && from.Before(to) {
-		buckets = bucketLabels(from, to, grain)
+		buckets = bucketLabels(from, to, grain, zone)
 		if len(buckets) > MaxBuckets {
 			add(FieldError{Code: "range_too_many_buckets", Param: "range",
 				Message: fmt.Sprintf("range at grain %q yields %d buckets; max %d — shrink the range or coarsen the grain", grain, len(buckets), MaxBuckets)})
@@ -317,7 +334,7 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	}
 	return &Plan{
 		Measures: measures, Dims: dims, HasTime: hasTime, Grain: grain,
-		From: from, To: to, Buckets: buckets, Filters: filters,
+		From: from, To: to, Zone: zone, Buckets: buckets, Filters: filters,
 		Order: q.Order, Limit: limit, Compare: q.Compare,
 		ImplicitCurrency: implicitCurrency,
 	}, nil
@@ -326,10 +343,10 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 var lastRangeRe = regexp.MustCompile(`^([0-9]+)([dwmy])$`)
 
 // resolveLast turns a relative window ("7d", "12w", "6m", "1y") into an
-// inclusive UTC day range ending today: "7d" = the past 7 calendar days
+// inclusive day range in zone ending today: "7d" = the past 7 calendar days
 // including today. Returned bounds match date-form from/to semantics
-// (from = day start, to = day end exclusive).
-func resolveLast(last string, now time.Time) (from, to time.Time, ok bool) {
+// (from = day start, to = day end exclusive), as UTC instants.
+func resolveLast(last string, now time.Time, zone *time.Location) (from, to time.Time, ok bool) {
 	m := lastRangeRe.FindStringSubmatch(last)
 	if m == nil {
 		return time.Time{}, time.Time{}, false
@@ -338,8 +355,8 @@ func resolveLast(last string, now time.Time) (from, to time.Time, ok bool) {
 	if err != nil || n < 1 {
 		return time.Time{}, time.Time{}, false
 	}
-	now = now.UTC()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	now = now.In(zone)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone)
 	to = today.AddDate(0, 0, 1) // inclusive of today
 	switch m[2] {
 	case "d":
@@ -351,7 +368,7 @@ func resolveLast(last string, now time.Time) (from, to time.Time, ok bool) {
 	case "y":
 		from = to.AddDate(-n, 0, 0)
 	}
-	return from, to, true
+	return from.UTC(), to.UTC(), true
 }
 
 // autoGrain is the grain a range reads best at: days up to 45, weeks up to
@@ -428,13 +445,14 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-// bucketLabels enumerates UTC calendar bucket starts covering [from, to).
-// Labels match Postgres date_trunc (weeks start Monday).
-func bucketLabels(from, to time.Time, grain string) []time.Time {
-	cur := truncGrain(from, grain)
+// bucketLabels enumerates the calendar bucket starts in zone covering
+// [from, to), as UTC instants. Labels match Postgres date_trunc(grain, t,
+// zone) (weeks start Monday).
+func bucketLabels(from, to time.Time, grain string, zone *time.Location) []time.Time {
+	cur := truncGrain(from.In(zone), grain)
 	var out []time.Time
 	for cur.Before(to) {
-		out = append(out, cur)
+		out = append(out, cur.UTC())
 		cur = stepGrain(cur, grain)
 		if len(out) > MaxBuckets {
 			break // clamp check reports the error; avoid unbounded loops
@@ -443,22 +461,23 @@ func bucketLabels(from, to time.Time, grain string) []time.Time {
 	return out
 }
 
+// truncGrain is the start of t's bucket in t's own location.
 func truncGrain(t time.Time, grain string) time.Time {
-	t = t.UTC()
+	zone := t.Location()
 	switch grain {
 	case "day":
-		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, zone)
 	case "week":
-		d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+		d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, zone)
 		offset := (int(d.Weekday()) + 6) % 7 // Monday start, like date_trunc
 		return d.AddDate(0, 0, -offset)
 	case "month":
-		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, zone)
 	case "quarter":
 		qm := time.Month(((int(t.Month())-1)/3)*3 + 1)
-		return time.Date(t.Year(), qm, 1, 0, 0, 0, 0, time.UTC)
+		return time.Date(t.Year(), qm, 1, 0, 0, 0, 0, zone)
 	case "year":
-		return time.Date(t.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		return time.Date(t.Year(), 1, 1, 0, 0, 0, 0, zone)
 	}
 	return t
 }

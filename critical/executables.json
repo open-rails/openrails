@@ -1635,6 +1635,9 @@
     "OR-J53-S03": [
       "TestReporting/OR-J53-S03/money-never-sums-across-currencies"
     ],
+    "OR-J53-S04": [
+      "TestReporting/OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day"
+    ],
     "OR-J43-S01": [
       "TestConfigurationHistory/OR-J43-S01/an-edit-and-its-entry-commit-and-roll-back-together"
     ],

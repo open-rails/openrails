@@ -21320,6 +21320,9 @@
           "grain": {
             "type": "string"
           },
+          "timezone": {
+            "type": "string"
+          },
           "range": {
             "$ref": "#/components/schemas/MetricsResultRange"
           },
@@ -21348,6 +21351,7 @@
           }
         },
         "required": [
+          "timezone",
           "range",
           "columns",
           "rows"

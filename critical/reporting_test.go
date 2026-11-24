@@ -31,6 +31,39 @@ func TestReporting(t *testing.T) {
 	t.Run("OR-J53-S01/funnel-measures-agree-with-the-ones-they-replace-and-a-removed-name-names-its-replacement", consolidatedMeasures)
 	t.Run("OR-J53-S02/the-overview-validates-for-every-profile-answers-for-an-empty-merchant-and-switches-currency", healthOverview)
 	t.Run("OR-J53-S03/money-never-sums-across-currencies", moneyPerCurrency)
+	t.Run("OR-J53-S04/a-sale-at-2330-in-the-accounting-timezone-counts-on-that-local-day", accountingDays)
+}
+
+// A sale at 23:30 in Honolulu, ten hours behind UTC all year, falls on the
+// next UTC day; a merchant keeping its books there sees it on its own day.
+func accountingDays(t *testing.T) {
+	honolulu, err := time.LoadLocation("Pacific/Honolulu")
+	require.NoError(t, err)
+	before := time.Now().In(honolulu).AddDate(0, 0, -2)
+	sold := time.Date(before.Year(), before.Month(), before.Day(), 23, 30, 0, 0, honolulu)
+	a, p := newPaymentWorld(t, func(w *world) {
+		w.clock.Advance(sold.Sub(w.clock.Now()))
+		m := cfgMerchant(w.cfg, "alpha")
+		m.Accounting = &billing.AccountingSettings{Timezone: "Pacific/Honolulu"}
+		setCfgMerchant(&w.cfg, "alpha", m)
+	})
+	sellOnce(t, a, p, "late-night", "USD", 10_000_000)
+	day := time.Date(sold.Year(), sold.Month(), sold.Day(), 0, 0, 0, 0, honolulu)
+	q := billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"time"}, Grain: "day",
+		Range:   &billing.MetricsRange{From: day.Format("2006-01-02"), To: day.AddDate(0, 0, 1).Format("2006-01-02")},
+		Filters: map[string][]string{"currency": {"USD"}}}
+	result, err := a.alpha.QueryMetrics(t.Context(), q)
+	require.NoError(t, err)
+	require.Equal(t, "Pacific/Honolulu", result.Timezone)
+	require.True(t, result.Range.From.Equal(day), "the range starts at the local midnight, %s", result.Range.From)
+	cash := map[string]int64{}
+	for _, row := range metricTable(t, a.alpha, q) {
+		cash[fmt.Sprint(row["time"])] = whole(t, row["cash"])
+	}
+	require.Equal(t, map[string]int64{
+		day.UTC().Format(time.RFC3339):                  10_000_000,
+		day.AddDate(0, 0, 1).UTC().Format(time.RFC3339): 0,
+	}, cash, "the sale counts on its local day")
 }
 
 // Alice buys a $10 daily membership and four $100 orders: one refunded $30,

@@ -2893,6 +2893,7 @@ pkg openrails/billing, type MetricsResult struct, CompareRows [][]any `json:"com
 pkg openrails/billing, type MetricsResult struct, Grain string `json:"grain,omitempty"`
 pkg openrails/billing, type MetricsResult struct, Range MetricsResultRange `json:"range"`
 pkg openrails/billing, type MetricsResult struct, Rows [][]any `json:"rows"`
+pkg openrails/billing, type MetricsResult struct, Timezone string `json:"timezone"`
 pkg openrails/billing, type MetricsResultRange struct
 pkg openrails/billing, type MetricsResultRange struct, From time.Time `json:"from"`
 pkg openrails/billing, type MetricsResultRange struct, To time.Time `json:"to"`

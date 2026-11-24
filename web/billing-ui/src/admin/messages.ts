@@ -734,8 +734,8 @@ export const billingAdminMessages = {
   "Remove the default rate?": "Remove the default rate?",
   Renewal: "Renewal",
   "Renewal not found.": "Renewal not found.",
-  "Renewal payments, cancellations and churn each calendar month (UTC); churn is the month's cancellations over the subscriptions it began with.":
-    "Renewal payments, cancellations and churn each calendar month (UTC); churn is the month's cancellations over the subscriptions it began with.",
+  "Renewal payments, cancellations and churn each calendar month in the accounting timezone; churn is the month's cancellations over the subscriptions it began with.":
+    "Renewal payments, cancellations and churn each calendar month in the accounting timezone; churn is the month's cancellations over the subscriptions it began with.",
   Renewals: "Renewals",
   "Renewing soon": "Renewing soon",
   Renews: "Renews",
@@ -801,8 +801,8 @@ export const billingAdminMessages = {
   "Subscription not found.": "Subscription not found.",
   "Subscription:": "Subscription:",
   Subscriptions: "Subscriptions",
-  "Subscriptions started and canceled each day (UTC), newest first.":
-    "Subscriptions started and canceled each day (UTC), newest first.",
+  "Subscriptions started and canceled each day in the accounting timezone, newest first.":
+    "Subscriptions started and canceled each day in the accounting timezone, newest first.",
   "Sum a numeric field": "Sum a numeric field",
   "Subscribe URL": "Subscribe URL",
   "Support URL": "Support URL",

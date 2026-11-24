@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 563,
+  "scenario_count": 564,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2672,6 +2672,11 @@
       "id": "OR-J53-S03",
       "journey": "J53",
       "name": "Every money measure splits by currency unless one currency is named, by PSP and by time too, and money beside a measure with no currency is refused rather than summed"
+    },
+    {
+      "id": "OR-J53-S04",
+      "journey": "J53",
+      "name": "A sale at 23:30 in a merchant's accounting timezone, ten hours behind UTC, counts on that local day: date ranges and day buckets start at its midnights and the result names the zone"
     },
     {
       "id": "OR-J43-S01",
