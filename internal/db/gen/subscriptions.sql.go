@@ -1507,6 +1507,53 @@ func (q *Queries) ListMigratableSubscriptionsByPriceIDs(ctx context.Context, arg
 	return items, nil
 }
 
+const listRespelledSubscriptions = `-- name: ListRespelledSubscriptions :many
+SELECT r.ref::text AS ref, s.rail_subscription_id::text AS spelled
+FROM unnest($1::uuid[], $2::text[], $3::text[]) AS r(psp_id, rail, ref)
+JOIN billing.subscriptions s ON s.merchant_id = $4::uuid AND s.psp_id = r.psp_id AND s.rail = r.rail
+    AND s.rail_subscription_key = billing.rail_subscription_key(r.rail, r.ref) AND s.deleted_at IS NULL
+WHERE s.rail_subscription_id <> r.ref
+`
+
+type ListRespelledSubscriptionsParams struct {
+	PspIds     []uuid.UUID
+	Rails      []string
+	Refs       []string
+	MerchantID uuid.UUID
+}
+
+type ListRespelledSubscriptionsRow struct {
+	Ref     string
+	Spelled string
+}
+
+// The rows naming these provider ids by identity but spelled otherwise: ref
+// as given, spelled as stored.
+func (q *Queries) ListRespelledSubscriptions(ctx context.Context, arg ListRespelledSubscriptionsParams) ([]ListRespelledSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listRespelledSubscriptions,
+		arg.PspIds,
+		arg.Rails,
+		arg.Refs,
+		arg.MerchantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRespelledSubscriptionsRow
+	for rows.Next() {
+		var i ListRespelledSubscriptionsRow
+		if err := rows.Scan(&i.Ref, &i.Spelled); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listScheduledSubscriptionsPage = `-- name: ListScheduledSubscriptionsPage :many
 SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key FROM billing.mrr_scheduled e
 JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
@@ -2607,53 +2654,6 @@ func (q *Queries) ResolveSubscriptionPaymentMethodID(ctx context.Context, arg Re
 	var payment_method_id *uuid.UUID
 	err := row.Scan(&payment_method_id)
 	return payment_method_id, err
-}
-
-const listRespelledSubscriptions = `-- name: ListRespelledSubscriptions :many
-SELECT r.ref::text AS ref, s.rail_subscription_id::text AS spelled
-FROM unnest($1::uuid[], $2::text[], $3::text[]) AS r(psp_id, rail, ref)
-JOIN billing.subscriptions s ON s.merchant_id = $4::uuid AND s.psp_id = r.psp_id AND s.rail = r.rail
-    AND s.rail_subscription_key = billing.rail_subscription_key(r.rail, r.ref) AND s.deleted_at IS NULL
-WHERE s.rail_subscription_id <> r.ref
-`
-
-type ListRespelledSubscriptionsParams struct {
-	PspIds     []uuid.UUID
-	Rails      []string
-	Refs       []string
-	MerchantID uuid.UUID
-}
-
-type ListRespelledSubscriptionsRow struct {
-	Ref     string
-	Spelled string
-}
-
-// The rows naming these provider ids by identity but spelled otherwise: ref
-// as given, spelled as stored.
-func (q *Queries) ListRespelledSubscriptions(ctx context.Context, arg ListRespelledSubscriptionsParams) ([]ListRespelledSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, listRespelledSubscriptions,
-		arg.PspIds,
-		arg.Rails,
-		arg.Refs,
-		arg.MerchantID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListRespelledSubscriptionsRow
-	for rows.Next() {
-		var i ListRespelledSubscriptionsRow
-		if err := rows.Scan(&i.Ref, &i.Spelled); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const respellSubscription = `-- name: RespellSubscription :one

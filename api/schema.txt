@@ -3132,6 +3132,7 @@ table billing.subscription_mrr
   constraint subscription_mrr_pkey PRIMARY KEY (merchant_id, subscription_id)
   constraint subscription_mrr_recorded_currency_check CHECK ((recorded_currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint subscription_mrr_recorded_mrr_check CHECK ((recorded_mrr >= 0))
+  constraint subscription_mrr_settle TRIGGER DEFERRABLE INITIALLY DEFERRED
   constraint subscription_mrr_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id) ON DELETE RESTRICT
   index CREATE INDEX subscription_mrr_customer_id_idx ON billing.subscription_mrr USING btree (merchant_id, customer_id)
   index CREATE INDEX subscription_mrr_dirty_idx ON billing.subscription_mrr USING btree (merchant_id, customer_id) WHERE dirty
