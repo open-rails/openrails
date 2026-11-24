@@ -46,7 +46,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 			return
 		}
 	}
-	if !cardFieldAdmitted(r, false, billingDetailStrings(body.BillingDetails)...) {
+	if refuseCardNumber(r, body) || !cardFieldAdmitted(r, false) {
 		return
 	}
 	customer := identity.CustomerIDFromString(user.ID)

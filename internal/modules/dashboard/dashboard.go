@@ -17,15 +17,24 @@ import (
 // VizTypes are the supported widget visualizations. A kpi is a tile's value,
 // its change and a sparkline of the same query by time; a funnel is a count
 // by one dimension whose values are ordered steps, each drawn with the rows
-// that reached it or went further; a heading is a section title with an
-// empty query.
-var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "funnel", "heading"}
+// that reached it or went further; a heading is a section title and programs
+// each card PSP's dispute program standing in the range's last month, both
+// with an empty query.
+var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "funnel", "heading", "programs"}
 
-// Heading is the viz of a section title; Funnel the viz of a funnel.
 const (
+	// Heading is the viz of a section title.
 	Heading = "heading"
-	Funnel  = "funnel"
+	// Funnel is the viz of a funnel.
+	Funnel = "funnel"
+	// Programs is the viz of the dispute program standings
+	// (GET /v1/metrics/dispute-programs).
+	Programs = "programs"
 )
+
+// Queryless reports whether a viz draws something other than a metrics
+// query; its query must be empty.
+func Queryless(viz string) bool { return viz == Heading || viz == Programs }
 
 // Grid is a widget's react-grid-layout position ({i,x,y,w,h} minus the id,
 // which lives on the widget).
@@ -115,10 +124,10 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 			errs = append(errs, metrics.FieldError{Code: "invalid_grid", Param: at("grid"),
 				Message: "grid needs x>=0, y>=0, w>=1, h>=1"})
 		}
-		if w.Viz == Heading {
+		if Queryless(w.Viz) {
 			if !emptyQuery(w.Query) {
-				errs = append(errs, metrics.FieldError{Code: "heading_has_query", Param: at("query"),
-					Message: "a heading widget is a section title: its query must be empty"})
+				errs = append(errs, metrics.FieldError{Code: "widget_has_query", Param: at("query"),
+					Message: fmt.Sprintf("a %s widget draws no metrics query: its query must be empty", w.Viz)})
 			}
 			continue
 		}

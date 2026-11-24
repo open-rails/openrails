@@ -41,6 +41,7 @@ import {
 } from "#orck/admin/components/ui/chart"
 import type {
   MetricsResult,
+  MetricsThreshold,
   QueryMetricsParams,
   WidgetViz as VizType,
 } from "#orck/admin/lib/api/metrics"
@@ -113,13 +114,14 @@ export function WidgetVizView({
     case "funnel":
       return <FunnelViz result={result} query={query} registry={registry} />
     case "heading":
+    case "programs":
       return null
   }
 }
 
 // usePSPKeys names a PSP by its key, for those who may read the PSPs; an
 // unread PSP keeps its id.
-function usePSPKeys(enabled: boolean): (id: string) => string {
+export function usePSPKeys(enabled: boolean): (id: string) => string {
   const { adminQueries } = useAdminServices()
   const config = useMerchantConfig()
   const psps = useQuery({
@@ -237,23 +239,42 @@ function KpiViz({
         />
       ) : null}
       {line && series && line.data.length > 1 ? (
-        <Sparkline data={line.data} dataKey={series.key} />
+        <Sparkline
+          data={line.data}
+          dataKey={series.key}
+          thresholds={registry.thresholds(primary.name)}
+        />
       ) : null}
     </div>
   )
 }
 
+// A sparkline draws its measure's thresholds (the networks' dispute levels),
+// unlabelled.
 function Sparkline({
   data,
   dataKey,
+  thresholds = [],
 }: {
   data: Record<string, number | string | null>[]
   dataKey: string
+  thresholds?: MetricsThreshold[]
 }) {
   const config: ChartConfig = { [dataKey]: { color: chartColor(0) } }
   return (
     <ChartContainer config={config} className="aspect-auto h-10 w-full">
       <LineChart data={data} margin={{ left: 0, right: 0, top: 2, bottom: 2 }}>
+        <YAxis hide domain={[0, "auto"]} />
+        {thresholds.map((t) => (
+          <ReferenceLine
+            key={t.value}
+            y={t.value}
+            stroke="var(--failed)"
+            strokeOpacity={0.5}
+            strokeDasharray="2 2"
+            ifOverflow="extendDomain"
+          />
+        ))}
         <Line
           dataKey={dataKey}
           type="monotone"

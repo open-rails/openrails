@@ -99,10 +99,10 @@ FROM (
         AND pi.updated_at < sqlc.arg(provider_write_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
-    (SELECT DISTINCT ml.merchant_id AS mid
-       FROM billing.provider_mutation_logs ml
-      WHERE (sqlc.narg(after)::uuid IS NULL OR ml.merchant_id > sqlc.narg(after)::uuid)
-        AND ml.created_at < sqlc.arg(provider_write_cutoff)::timestamptz
+    (SELECT DISTINCT ol.merchant_id AS mid
+       FROM billing.operation_log ol
+      WHERE (sqlc.narg(after)::uuid IS NULL OR ol.merchant_id > sqlc.narg(after)::uuid)
+        AND ol.occurred_at < sqlc.arg(provider_write_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT pk.merchant_id AS mid
@@ -227,9 +227,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- Finished intents that only carried an instruction to a provider. An intent
 -- that moved or refused money, enrolled a membership or erased a card is the
--- record of that: it is not one of these types and is never deleted here. A
--- mutation log entry that names a deleted intent keeps its own row and loses
--- the link.
+-- record of that: it is not one of these types and is never deleted here. An
+-- operation log entry of a deleted intent keeps its row and its operation id.
 -- name: DeleteFinishedOutboxIntentsBefore :execrows
 DELETE FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -244,14 +243,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- name: DeleteProviderMutationLogsBefore :execrows
-DELETE FROM billing.provider_mutation_logs
+-- name: DeleteOperationLogBefore :execrows
+DELETE FROM billing.operation_log
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id IN (
-    SELECT ml.id FROM billing.provider_mutation_logs ml
-    WHERE ml.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND ml.created_at < sqlc.arg(cutoff)::timestamptz
-    ORDER BY ml.created_at
+    SELECT ol.id FROM billing.operation_log ol
+    WHERE ol.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND ol.occurred_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY ol.occurred_at
     LIMIT sqlc.arg(row_limit)::int
 );
 

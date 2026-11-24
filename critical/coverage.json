@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 514,
+  "scenario_count": 540,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1369,6 +1369,11 @@
       "name": "A PSP's environment proof expires after an hour and is proven again before the next write; an account that changed environment is refused"
     },
     {
+      "id": "OR-J06-S09",
+      "journey": "J06",
+      "name": "A live Stripe key of the declared account passes the production write gate; one of another account is Mismatched and writes nothing"
+    },
+    {
       "id": "OR-J12-S08",
       "journey": "J12",
       "name": "Expired vault card is updated at its Account Updater, as a new token or a new expiry, and its renewal retries on it"
@@ -1777,6 +1782,21 @@
       "id": "OR-J12-S13",
       "journey": "J12",
       "name": "Each Stripe account charges and saves cards on its own customer; another account's customer is never reused or overwritten"
+    },
+    {
+      "id": "OR-J12-S14",
+      "journey": "J12",
+      "name": "A card number in any field of a card save or order payment but the typed card is refused before a provider sees it"
+    },
+    {
+      "id": "OR-J12-S15",
+      "journey": "J12",
+      "name": "A HyperSwitch card save consults the card-testing ledger: a blocked customer never reaches HyperSwitch"
+    },
+    {
+      "id": "OR-J12-S16",
+      "journey": "J12",
+      "name": "Legitimate phone numbers, UUIDs, Solana addresses and numeric order ids pass the firewall on every card route, which refuses a card number; a card number as a field name is not echoed and no test header is stored"
     },
     {
       "id": "OR-J06-S30",
@@ -2527,6 +2547,116 @@
       "id": "OR-J43-S07",
       "journey": "J43",
       "name": "A product edit, archive, key change or delete naming a stale expected revision is refused with revision_mismatch naming the current one, records nothing, and the current revision succeeds"
+    },
+    {
+      "id": "OR-J46-S01",
+      "journey": "J46",
+      "name": "A Stripe chargeback records one dispute with its network, reason family, code and due date, books one reversal, ends the subscription and its access, blocks the card and asks staff to review the customer; replays change nothing"
+    },
+    {
+      "id": "OR-J46-S06",
+      "journey": "J46",
+      "name": "A CCBill chargeback is recorded with its reason, card network and reversal, its outcome unreported"
+    },
+    {
+      "id": "OR-J46-S09",
+      "journey": "J46",
+      "name": "Mastercard's ratio divides a month's chargebacks by the previous month's sales, Visa's by the month's own"
+    },
+    {
+      "id": "OR-J46-S10",
+      "journey": "J46",
+      "name": "The VAMP level in force is the evaluated month's: 2.2% in March 2026, 1.5% from April"
+    },
+    {
+      "id": "OR-J46-S14",
+      "journey": "J46",
+      "name": "A staff refund carries its reason, requested_by_customer unless named; a Stripe dashboard refund carries Stripe's; refunds count in no dispute ratio"
+    },
+    {
+      "id": "OR-J46-S04",
+      "journey": "J46",
+      "name": "A won dispute books its recovery and stays won against a late notice that it opened; a lost one stays lost against a late notice from before the decision"
+    },
+    {
+      "id": "OR-J46-S08",
+      "journey": "J46",
+      "name": "Chargebacks that bring a PSP's ratio to its acquirer limit's warning raise one high finding that alerts; at the limit it escalates to critical and alerts again; sales settling afterwards re-evaluate and resolve it; minimums are actual counts"
+    },
+    {
+      "id": "OR-J46-S11",
+      "journey": "J46",
+      "name": "A charged-back card is never charged again: the customer's other engine subscription on it keeps its paid period and waits for another card, while one on their other card renews on it"
+    },
+    {
+      "id": "OR-J46-S15",
+      "journey": "J46",
+      "name": "A chargeback blocks the card its charge was taken from, never the card the subscription moved to since"
+    },
+    {
+      "id": "OR-J46-S16",
+      "journey": "J46",
+      "name": "A dispute update or an early fraud warning on a charge OpenRails does not know is answered with a finding, never retried"
+    },
+    {
+      "id": "OR-J46-S05",
+      "journey": "J46",
+      "name": "An NMI chargeback batch records every entry with its code: a matched entry is its charge's, reversed, linked and its subscription canceled; an unmatched one takes the masked number's network, books nothing and still counts in the monitor"
+    },
+    {
+      "id": "OR-J46-S13",
+      "journey": "J46",
+      "name": "The network rollup is derived and leaves no row in an archive: a restored book rebuilds it from its payments, disputes and fraud reports, equal to the source's, and its program standings with it"
+    },
+    {
+      "id": "OR-J46-S03",
+      "journey": "J46",
+      "name": "An RDR resolution books one refund (dispute_prevention), whichever of it and Stripe's own refund arrives first, and records the refund it absorbed; a stale inquiry notice reopens nothing; a CE 3.0 block books nothing; neither counts in a ratio"
+    },
+    {
+      "id": "OR-J46-S12",
+      "journey": "J46",
+      "name": "The dispute metrics equal the records: disputes by kind, reason, outcome and the disputed charge's kind, the win rate, the chargeback rate by network, the VAMP ratio with Visa's lines and ECM's with Mastercard's, fraud reports by outcome and refunds by reason; a card merchant's overview carries the dispute programs widget, whose read answers"
+    },
+    {
+      "id": "OR-J46-S02",
+      "journey": "J46",
+      "name": "A Stripe inquiry books, cancels and revokes nothing, its closing undoes nothing, its escalation books the chargeback once, and the reconcile pull records it without proposing it; a chargeback an advisory pull found waits for the merchant to be armed, or for a provider's notice of it"
+    },
+    {
+      "id": "OR-J46-S07",
+      "journey": "J46",
+      "name": "An actionable early fraud warning is a fraud report Visa counts once; without waiting for the deployment's destructive switch it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; the merchant's own stop holds it; one an event calls unactionable is not acted on; a charge in dispute is not refunded; a charge with nothing left to refund is still ended; recording reports only refunds nothing; below a full posture the response waits with one alerting finding and runs when the posture is raised"
+    },
+    {
+      "id": "OR-J43-S08",
+      "journey": "J43",
+      "name": "An operation's attempting entry is written before its provider call and outlives the process dying mid-call; recovery only appends"
+    },
+    {
+      "id": "OR-J43-S09",
+      "journey": "J43",
+      "name": "A subscription's history reads its provider operations from the operations history, each entry once with its phase, kind, attempt and attribution"
+    },
+    {
+      "id": "OR-J43-S10",
+      "journey": "J43",
+      "name": "A price key's moves to a new version, an archive and back are configuration history entries with the key's revision, and a price's history reads them"
+    },
+    {
+      "id": "OR-J43-S11",
+      "journey": "J43",
+      "name": "The breaker marks a destructive attempt sent before its provider call, and its phases are written ahead with their actor"
+    },
+    {
+      "id": "OR-J43-S12",
+      "journey": "J43",
+      "name": "A price migration's source archive waits for the catalog lock another writer holds, then is recorded once, as the migration's, with the key's move to nothing"
+    },
+    {
+      "id": "OR-J43-S13",
+      "journey": "J43",
+      "name": "A parked or stale claim never counts as sent: a stale executor marks nothing, and a park of an admitted attempt clears its mark"
     },
     {
       "id": "OR-J47-S01",

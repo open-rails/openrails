@@ -914,6 +914,9 @@
       "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write/test-account-leaves-test-mode",
       "TestPSPPostureExpiry/OR-J06-S08/an-armed-verdict-expires-and-is-proven-again-before-the-next-write/live-account-enters-test-mode"
     ],
+    "OR-J06-S09": [
+      "TestPSPControls/OR-J06-S09/a-live-stripe-key-of-another-account-is-mismatched-and-never-armed"
+    ],
     "OR-J06-S30": [
       "TestPSPControls/OR-J06-S30/a-declared-stripe-psp-registers-its-webhook-endpoint"
     ],
@@ -1237,6 +1240,15 @@
     ],
     "OR-J12-S13": [
       "TestStripeCustomerPerAccount/OR-J12-S13/each-stripe-account-resolves-its-own-customer"
+    ],
+    "OR-J12-S14": [
+      "TestCardGuard/OR-J12-S14/a-card-number-in-any-field-of-a-card-save-or-order-payment-is-refused"
+    ],
+    "OR-J12-S15": [
+      "TestPaymentMethodContracts/OR-J12-S15/a-hyperswitch-card-save-consults-the-card-testing-ledger"
+    ],
+    "OR-J12-S16": [
+      "TestCardGuard/OR-J12-S16/legitimate-values-pass-the-firewall-on-every-card-route"
     ],
     "OR-J38-S36": [
       "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
@@ -1613,6 +1625,88 @@
     ],
     "OR-J43-S07": [
       "TestConfigurationHistory/OR-J43-S07/a-stale-expected-revision-is-refused-and-the-current-one-succeeds"
+    ],
+    "OR-J46-S02": [
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/webhooks",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/reconcile-pull",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/a-notice-releases-a-pulled-case",
+      "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing"
+    ],
+    "OR-J46-S01": [
+      "TestDisputes/OR-J46-S01/a-chargeback-is-recorded-reversed-and-ends-its-charge"
+    ],
+    "OR-J46-S03": [
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/rdr-resolution-is-a-refund",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/refund-first-is-the-resolution",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/resolution-first-absorbs-the-refund",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/ce3-block-books-nothing",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback"
+    ],
+    "OR-J46-S04": [
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won/won",
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won/lost",
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won"
+    ],
+    "OR-J46-S06": [
+      "TestDisputes/OR-J46-S06/a-ccbill-chargeback-is-recorded"
+    ],
+    "OR-J46-S07": [
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/refunds-by-default",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-disputed-charge-is-not-refunded",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/unactionable-stays-so",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-held-response-waits-and-wakes",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/the-merchant-stop-holds-it",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/nothing-to-refund-still-ends",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
+    ],
+    "OR-J46-S08": [
+      "TestDisputes/OR-J46-S08/the-monitor-raises-and-escalates-alerting-findings"
+    ],
+    "OR-J46-S09": [
+      "TestDisputes/OR-J46-S09/mastercard-divides-by-the-previous-months-sales"
+    ],
+    "OR-J46-S10": [
+      "TestDisputes/OR-J46-S10/the-program-in-force-is-the-months"
+    ],
+    "OR-J46-S14": [
+      "TestDisputes/OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio"
+    ],
+    "OR-J46-S11": [
+      "TestDisputes/OR-J46-S11/a-charged-back-card-is-never-charged-again"
+    ],
+    "OR-J46-S15": [
+      "TestDisputes/OR-J46-S15/a-chargeback-blocks-the-charged-card-only"
+    ],
+    "OR-J46-S16": [
+      "TestDisputes/OR-J46-S16/a-report-on-an-unknown-charge-is-answered"
+    ],
+    "OR-J46-S12": [
+      "TestDisputes/OR-J46-S12/the-dispute-metrics-equal-the-records"
+    ],
+    "OR-J46-S05": [
+      "TestDisputes/OR-J46-S05/an-nmi-batch-records-every-entry"
+    ],
+    "OR-J46-S13": [
+      "TestDisputes/OR-J46-S13/the-rollup-equals-its-records-after-a-restore"
+    ],
+    "OR-J43-S08": [
+      "TestOperationsHistory/OR-J43-S08/an-operation-is-recorded-before-its-provider-call-and-survives-a-crash"
+    ],
+    "OR-J43-S09": [
+      "TestOperationsHistory/OR-J43-S09/a-subscriptions-history-reads-its-operations-from-the-operations-history"
+    ],
+    "OR-J43-S10": [
+      "TestOperationsHistory/OR-J43-S10/a-price-keys-moves-are-configuration-history-with-their-revisions"
+    ],
+    "OR-J43-S11": [
+      "TestOperationsHistory/OR-J43-S11/the-breaker-marks-an-attempt-sent-before-its-provider-call"
+    ],
+    "OR-J43-S12": [
+      "TestOperationsHistory/OR-J43-S12/a-price-migrations-source-archive-waits-for-the-catalog-lock"
+    ],
+    "OR-J43-S13": [
+      "TestOperationsHistory/OR-J43-S13/a-parked-or-stale-claim-never-counts-as-sent"
     ],
     "OR-J47-S01": [
       "TestCheckoutFunnel/OR-J47-S01/steps-are-recorded-where-the-customer-takes-them"

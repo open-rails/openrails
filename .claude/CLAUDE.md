@@ -210,7 +210,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   state), stated in its table comment; the `retention` package doc lists the periods.
   `limit_holds` and `limit_hold_parts` are partitioned by month, so every read of
   them names a time range. Usage keeps no events: settlement writes aggregates only.
-- External writes are `provider_intents` and `provider_mutation_logs`; per-PSP state is
+- External writes are `provider_intents` and their write-ahead `operation_log`; per-PSP state is
   `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
   with its `order_lines`, provider-run renewals included (`billing.Order`'s doc);
   an `order_attempts` row (`oat_`) is a provider attempt; a host

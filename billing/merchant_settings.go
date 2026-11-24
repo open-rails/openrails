@@ -54,3 +54,16 @@ type MerchantCurrency struct {
 	Symbol string           `json:"symbol,omitempty"`
 	Scale  int              `json:"scale"`
 }
+
+// FraudWarningRefund is what an actionable early fraud warning (an issuer's
+// fraud report on a charge not yet disputed) does.
+type FraudWarningRefund string
+
+const (
+	// FraudWarningRefundCharge refunds the charge in full, ends what it paid
+	// for and blocks its card, as a chargeback would: about 40% of reports
+	// become disputes otherwise. The default.
+	FraudWarningRefundCharge FraudWarningRefund = "refund"
+	// FraudWarningRecord records the report only.
+	FraudWarningRecord FraudWarningRefund = "record"
+)

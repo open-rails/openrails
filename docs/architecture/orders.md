@@ -215,15 +215,7 @@ Checks:
 - OR-J08-S70, OR-J08-S71, OR-J09-S70: expired orders act expired before any pass.
 
 ### 8. Abuse protection
-The `purchase` bucket ([limits.md](../standalone.md#abuse-limits)) covers `POST /v1/me/orders`,
-`…/pay`, `…/confirm` and `POST /v1/orders/{id}/solana-pay` (`ClassifyBucket`), and
-its captcha subjects ride into the sale (`intents.WithOrderCaptchaSubjects`). A pay
-URL allows 120 reads and 10 pays a minute per order (`payURLLimit`) and 10
-declines (`paymentpage.MaxDeclines`, `pay_url_attempts_exhausted`).
-`GuardCardAttempt` checks the card-testing ledger before any provider call
-(`card_attempts_blocked`); an Idempotency-Key holding a card number is refused
-(`cardguard.ContainsPAN`). Previews, carts, cancels and reads are not limited here,
-only bounded by `billing.MaxOrderLines` and `MaxCartLines`.
+The `purchase` bucket ([limits.md](../standalone.md#abuse-limits)) covers `POST /v1/me/orders`, `…/pay`, `…/confirm` and `POST /v1/orders/{id}/solana-pay` (`ClassifyBucket`), and its captcha subjects ride into the sale (`intents.WithOrderCaptchaSubjects`). A pay URL allows 120 reads and 10 pays a minute per order (`payURLLimit`) and 10 declines (`paymentpage.MaxDeclines`, `pay_url_attempts_exhausted`). `GuardCardAttempt` checks the card-testing ledger before any provider call (`card_attempts_blocked`); an Idempotency-Key or any field of the order create or pay body holding a card number is refused (`cardguard.ContainsPAN`, `cardguard.PANField`). Previews, carts, cancels and reads are not limited here, only bounded by `billing.MaxOrderLines` and `MaxCartLines`.
 
 Checks:
 - `isPurchasePath` matches exactly the routes above.

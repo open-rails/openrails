@@ -5,6 +5,11 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/disputerules"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/disputes"
+
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/authkit/userinfo"
@@ -31,6 +36,7 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/fx"
@@ -364,9 +370,18 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		RailCustomerService: serviceInstances.RailCustomerService,
 	}
 
+	runtime.Disputes = disputes.New(database, clock)
+	runtime.Disputes.Notifier, runtime.Disputes.Log = alertService, logger
+	runtime.Disputes.Limits = runtime.disputeRatioLimit
+	if serviceInstances.WebhookDispatcher != nil {
+		serviceInstances.WebhookDispatcher.Disputes = runtime.Disputes
+	}
+
 	// Arm the late-bound resolvers built above (#788): they close over
 	// runtimeRef, so every post-boot Merchants bind is visible immediately.
 	runtime.DestructiveAdmissions = runtime.NewDestructiveAdmissions(clock)
+	runtime.Disputes.Admissions, runtime.Disputes.Postures = runtime.DestructiveAdmissions, runtime.Posture()
+	runtime.Disputes.Lifecycle = runtime.SubscriptionLifecycleService
 	// Redirect PSPs and bank challenges come back to the payment page itself.
 	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
@@ -812,4 +827,34 @@ func (e *runtimeObserveEnqueuer) EnqueueProviderObjectObserve(ctx context.Contex
 		return fmt.Errorf("provider object observe enqueuer: river producer unavailable")
 	}
 	return riverjobs.ProviderObjectObserveEnqueuer{Client: e.runtime.RiverProducer}.EnqueueProviderObjectObserve(ctx, req)
+}
+
+// disputeRatioLimit is the PSP's declared dispute_ratio_limit, in basis
+// points.
+func (r *Runtime) disputeRatioLimit(ctx context.Context, psp uuid.UUID) (int64, bool) {
+	if r.MerchantConfig == nil {
+		return 0, false
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, false
+	}
+	row, err := r.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{ID: psp, MerchantID: mid.UUID()})
+	if err != nil {
+		return 0, false
+	}
+	set, err := r.MerchantConfig.Get(ctx, mid)
+	if err != nil {
+		return 0, false
+	}
+	doc, ok := set.PSPs[row.Key]
+	if !ok {
+		return 0, false
+	}
+	limit, ok := doc.Value.Settings["dispute_ratio_limit"]
+	if !ok {
+		return 0, false
+	}
+	bps, err := disputerules.ParseRatioLimit(limit)
+	return bps, err == nil
 }

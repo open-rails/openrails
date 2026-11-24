@@ -42,6 +42,7 @@ func DefaultWidgets(p Profile) []Widget {
 	}
 	if cards {
 		l.tile("kpi-chargeback-rate", "Chargeback rate", "chargeback_rate", nil)
+		l.tile("kpi-refund-rate", "Refund rate", "refund_rate", nil)
 	}
 	if p.Usage {
 		l.tile("kpi-usage-charged", "Usage charged", "usage_charged", map[string][]string{"charge": {"charged"}})
@@ -79,8 +80,16 @@ func DefaultWidgets(p Profile) []Widget {
 	}
 	if p.CardPayments {
 		health = append(health,
-			chart("refund-chargeback-rate", "Refund and chargeback rate", "line", series([]string{"refund_rate", "chargeback_rate"})),
+			chart("network-ratios", "Visa VAMP and Mastercard ECM ratios against their levels", "line",
+				metrics.Query{Measures: []string{"vamp_ratio", "ecm_ratio"}, By: []string{"time"}, Grain: "month"}),
+			chart("chargeback-rate", "Chargeback rate", "line", series([]string{"chargeback_rate"})),
+			chart("refund-rate", "Refund rate", "line", series([]string{"refund_rate"})),
+			Widget{ID: "dispute-programs", Title: "Dispute programs by PSP and network", Viz: Programs},
 			chart("attempts-by-psp", "Attempts by PSP and outcome", "table", metrics.Query{Measures: []string{"attempts"}, By: []string{"psp", "outcome"}}),
+			chart("disputes-by-reason", "Disputes by reason", "bar", series([]string{"disputes"}, "dispute_reason")),
+			chart("dispute-win-rate", "Dispute win rate", "line", series([]string{"dispute_win_rate"})),
+			chart("disputes-by-charge", "Disputes on initial charges and renewals", "bar", series([]string{"disputes"}, "kind")),
+			chart("fraud-reports", "Fraud reports by what was done", "bar", series([]string{"fraud_reports"}, "outcome")),
 		)
 	}
 	l.section("payment-health", "Payment health", health...)

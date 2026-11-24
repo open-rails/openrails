@@ -14,14 +14,14 @@ import (
 
 const insertChangeLogEntry = `-- name: InsertChangeLogEntry :exec
 INSERT INTO billing.change_log (merchant_id, occurred_at, actor, source, object_type, object_id, action, changes, reason, request_id, operation_id)
-VALUES ($1::uuid, $2::timestamptz, $3::text, $4::text,
+VALUES ($1::uuid, COALESCE($2::timestamptz, clock_timestamp()), $3::text, $4::text,
     $5::text, $6::text, $7::text, $8::jsonb,
     $9::text, $10::text, $11::uuid)
 `
 
 type InsertChangeLogEntryParams struct {
 	MerchantID  uuid.UUID
-	OccurredAt  time.Time
+	OccurredAt  *time.Time
 	Actor       string
 	Source      string
 	ObjectType  string
@@ -33,6 +33,7 @@ type InsertChangeLogEntryParams struct {
 	OperationID *uuid.UUID
 }
 
+// Stamped by the database clock when the writer names no time.
 func (q *Queries) InsertChangeLogEntry(ctx context.Context, arg InsertChangeLogEntryParams) error {
 	_, err := q.db.Exec(ctx, insertChangeLogEntry,
 		arg.MerchantID,
@@ -159,6 +160,69 @@ func (q *Queries) ListConfigurationChangeLog(ctx context.Context, merchantID uui
 			&i.ObjectID,
 			&i.Action,
 			&i.Changes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPriceKeyMoves = `-- name: ListPriceKeyMoves :many
+SELECT c.id, c.occurred_at, p.id AS price_id, (c.changes->>'archived')::boolean AS archived
+FROM billing.products product
+JOIN billing.change_log c ON c.merchant_id = product.merchant_id AND c.object_type = 'price'
+    AND c.object_id = product.key || ':' || $1::text AND c.action = 'move'
+JOIN billing.prices p ON p.merchant_id = c.merchant_id AND p.product_id = product.id AND p.key = $1::text
+    AND p.public_id = c.changes->>'price_id'
+WHERE product.merchant_id = $2::uuid AND product.id = $3::uuid AND p.deleted_at IS NULL
+  AND ($4::timestamptz IS NULL OR (c.occurred_at, c.id) < ($4::timestamptz, $5::uuid))
+ORDER BY c.occurred_at DESC, c.id DESC
+LIMIT $6::int
+`
+
+type ListPriceKeyMovesParams struct {
+	Key        string
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	FetchLimit int32
+}
+
+type ListPriceKeyMovesRow struct {
+	ID         uuid.UUID
+	OccurredAt time.Time
+	PriceID    uuid.UUID
+	Archived   bool
+}
+
+// A price key's moves, newest first: from occurred_at the key named the
+// price, or, archived, nothing. A deleted price's moves are left out.
+func (q *Queries) ListPriceKeyMoves(ctx context.Context, arg ListPriceKeyMovesParams) ([]ListPriceKeyMovesRow, error) {
+	rows, err := q.db.Query(ctx, listPriceKeyMoves,
+		arg.Key,
+		arg.MerchantID,
+		arg.ProductID,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.FetchLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPriceKeyMovesRow
+	for rows.Next() {
+		var i ListPriceKeyMovesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OccurredAt,
+			&i.PriceID,
+			&i.Archived,
 		); err != nil {
 			return nil, err
 		}

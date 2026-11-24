@@ -1103,4 +1103,13 @@ export const billingAdminMessages = {
   "Country: ": "Country: ",
   "Language: ": "Language: ",
   "Attribution: ": "Attribution: ",
+  "no card PSP": "no card PSP",
+  Program: "Program",
+  "So far": "So far",
+  Projected: "Projected",
+  Level: "Level",
+  Below: "Below",
+  Warning: "Warning",
+  Excessive: "Excessive",
+  "High excessive": "High excessive",
 } as const

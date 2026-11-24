@@ -29,6 +29,9 @@ const (
 	// PaymentMethodReplaced: another payment method took its place.
 	PaymentMethodReplaced PaymentMethodStatus = "replaced"
 	PaymentMethodRemoved  PaymentMethodStatus = "removed"
+	// PaymentMethodDisputed: a charge to it was charged back, so it is never
+	// charged again. Subscriptions it paid wait for another card.
+	PaymentMethodDisputed PaymentMethodStatus = "disputed"
 )
 
 // PaymentMethod is the card account a customer chose. Its issuer may reissue

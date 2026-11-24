@@ -99,7 +99,7 @@ The PostgreSQL examples use the default `billing` and `billing_river` schemas. A
 | Money, credits and metering | Creates ledger accounts and appends transfers. Issues, allocates, consumes, reverses or expires credits as covered by the book. Records and rates usage, changes running charge checkpoints, reserves or releases admissions, creates usage debt and collection orders, updates delinquency, and maintains balance and credit-expiry watches. | [Prepaid credits](client.md) · [Running charges](client.md) · [Usage billing and admissions](client.md) · [Transfers](../internal/db/queries/ledger.sql) · [Usage settlement](../internal/db/queries/usage_settlement.sql) · [Leases](../internal/db/queries/leases.sql) · [Running charges](../internal/db/queries/running_charges.sql) · [Balance watches](../internal/db/queries/balance_watches.sql) |
 | Payment provider configuration | Registers, archives or supersedes PSP and custodian identities. Records credential validation and fingerprints, PSP customer links, provider catalog observations, webhook endpoint identity and rollout digests, Solana references and receipts, and provider refresh watermarks. Merchant configuration documents and provider secrets can be written to Vault when they are managed there. | [Merchant configuration](client.md#merchant-configuration-and-psps) · [Vault](standalone.md#vault) · [PSPs](../internal/db/queries/psps.sql) · [Custodians](../internal/db/queries/custodians.sql) · [Observed provider catalog](../internal/db/queries/provider_catalog_objects.sql) · [Solana references](../internal/db/queries/solana_pay.sql) |
 | Imports and reconciliation | Stores the starting local basis, staged provider facts, links, unmatched rows, checkpoints and proposals. An explicit apply can land linked rows and approve eligible corrections. Provider refresh can recover confirmed receipts and update the local mirror within its gates. Findings can open, resolve, be held for review or be ignored. An unresolved provider subscription can be parked pending attribution or catalog work. | [Batch import](../internal/billingimport) · [Staged import and apply](../internal/pspimport) · [Refresh and convergence](standalone.md#provider-refresh) · [Imports](../internal/db/queries/psp_imports.sql) · [Reconciliation](../internal/db/queries/reconciliation.sql) · [Parking](../internal/db/queries/parking.sql) |
-| Provider operations and holds | Records accepted intent identity, origin, address, prerequisites, expiry, execution claims, evidence, and retry state. Appends attempt, hold and outcome records. Can schedule a verification, park an operation, supersede it, expire it or complete it. Records destructive admissions, budgets, policy switches and before-images for supported destructive runs. | [Provider intents](standalone.md#provider-intents) · [Destructive admission](standalone.md#destructive-holds) · [Intent transitions](../internal/db/queries/provider_intents.sql) · [Provider mutation logs](../internal/db/queries/provider_mutation_logs.sql) · [Before-images](../internal/db/queries/destructive_before_images.sql) |
+| Provider operations and holds | Records accepted intent identity, origin, address, prerequisites, expiry, execution claims, evidence, and retry state. Appends attempt, hold and outcome records. Can schedule a verification, park an operation, supersede it, expire it or complete it. Records destructive admissions, budgets, policy switches and before-images for supported destructive runs. | [Provider intents](standalone.md#provider-intents) · [Destructive admission](standalone.md#destructive-holds) · [Intent transitions](../internal/db/queries/provider_intents.sql) · [Operations history](../internal/db/queries/operation_log.sql) · [Before-images](../internal/db/queries/destructive_before_images.sql) |
 | Jobs, events and delivery | Inserts and updates River jobs, job claims and retry schedules. Takes periodic leases, records webhook deduplication and freshness, advances durable event streams, queues host deliveries, writes customer notices and records per-request idempotency receipts. Downstream delivery can be email, webhook or an account inbox. | [River inventory](river-jobs.md) · [Event log and delivery](client.md#events) · [Outbox](../internal/db/queries/host_lifecycle_events.sql) · [Webhook events](../internal/db/queries/webhook_events.sql) · [Leases](../internal/db/queries/periodic_leases.sql) · [Idempotency records](../internal/db/queries/idempotency_keys.sql) |
 | Maintenance and portability | Applies versioned PostgreSQL and River migrations, maintains rolling partitions, and prunes older operational records. Records migration and archive receipts, changes write posture when exporting or restoring a merchant, and supports scoped purge and undo where before-images exist. Merchant purge can also queue deletion of that merchant's Vault documents. | [Backups and retention](standalone.md#retention) · [Archive and restore](standalone.md#backup-and-restore) · [Migrations](../internal/migrate/migrator.go) · [Retention SQL](../internal/db/queries/retention.sql) · [Prune and restore](../internal/db/queries/rail_pull_prune.sql) · [Vault cleanup worker](../internal/river/jobs_merchant_secret_cleanup.go) |
 
@@ -196,7 +196,7 @@ The source scan found 483 named SQL statements in 90 files with an explicit qual
 | [merchant_archive.sql](../internal/db/queries/merchant_archive.sql) | 1 | `merchants` |
 | [merchant_binding.sql](../internal/db/queries/merchant_binding.sql) | 1 | `merchants` |
 | [merchant_config.sql](../internal/db/queries/merchant_config.sql) | 2 | `reconciliation_findings` |
-| [merchant_lifecycle.sql](../internal/db/queries/merchant_lifecycle.sql) | 16 | `mandates`, `money_settings`, `nmi_history_months`, `order_attempts`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `product_access`, `provider_intents`, `provider_mutation_logs`, `psp_customers`, `rebill_cycles`, `solana_pay_receipts`, `solana_pay_references`, `subscriptions` |
+| [merchant_lifecycle.sql](../internal/db/queries/merchant_lifecycle.sql) | 16 | `mandates`, `money_settings`, `nmi_history_months`, `operation_log`, `order_attempts`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `product_access`, `provider_intents`, `psp_customers`, `rebill_cycles`, `solana_pay_receipts`, `solana_pay_references`, `subscriptions` |
 | [merchant_retirement.sql](../internal/db/queries/merchant_retirement.sql) | 2 | `merchants` |
 | [merchant_secret_cleanup.sql](../internal/db/queries/merchant_secret_cleanup.sql) | 2 | `maintenance_runs` |
 | [merchants.sql](../internal/db/queries/merchants.sql) | 5 | `maintenance_runs`, `merchant_slug_aliases`, `merchants` |
@@ -206,6 +206,7 @@ The source scan found 483 named SQL statements in 90 files with an explicit qual
 | [nmi_history.sql](../internal/db/queries/nmi_history.sql) | 4 | `nmi_history_months`, `nmi_history_reads` |
 | [notification_events.sql](../internal/db/queries/notification_events.sql) | 3 | `notification_events` |
 | [notifications.sql](../internal/db/queries/notifications.sql) | 2 | `notification_events` |
+| [operation_log.sql](../internal/db/queries/operation_log.sql) | 4 | `operation_log`, `provider_intents` |
 | [order_attempts.sql](../internal/db/queries/order_attempts.sql) | 4 | `order_attempts` |
 | [order_pay_url.sql](../internal/db/queries/order_pay_url.sql) | 3 | `idempotency_keys`, `orders` |
 | [orders.sql](../internal/db/queries/orders.sql) | 20 | `host_outbox`, `order_attempts`, `order_lines`, `orders`, `ownership_claims`, `payments` |
@@ -215,7 +216,6 @@ The source scan found 483 named SQL statements in 90 files with an explicit qual
 | [payment_methods.sql](../internal/db/queries/payment_methods.sql) | 9 | `payment_method_versions`, `payment_methods` |
 | [payments.sql](../internal/db/queries/payments.sql) | 11 | `payments` |
 | [periodic_leases.sql](../internal/db/queries/periodic_leases.sql) | 1 | `periodic_leases` |
-| [price_key_movements.sql](../internal/db/queries/price_key_movements.sql) | 1 | `price_key_movements` |
 | [price_migrations.sql](../internal/db/queries/price_migrations.sql) | 3 | `price_migrations` |
 | [price_psp_bindings.sql](../internal/db/queries/price_psp_bindings.sql) | 2 | `price_psp_bindings` |
 | [prices.sql](../internal/db/queries/prices.sql) | 6 | `prices` |
@@ -227,7 +227,6 @@ The source scan found 483 named SQL statements in 90 files with an explicit qual
 | [provider_catalog_objects.sql](../internal/db/queries/provider_catalog_objects.sql) | 3 | `provider_catalog_objects` |
 | [provider_charge_attributions.sql](../internal/db/queries/provider_charge_attributions.sql) | 4 | `provider_charge_attributions` |
 | [provider_intents.sql](../internal/db/queries/provider_intents.sql) | 34 | `provider_intents` |
-| [provider_mutation_logs.sql](../internal/db/queries/provider_mutation_logs.sql) | 2 | `provider_mutation_logs` |
 | [provider_recovery.sql](../internal/db/queries/provider_recovery.sql) | 1 | `psp_refresh_watermarks` |
 | [provider_schedules.sql](../internal/db/queries/provider_schedules.sql) | 2 | `provider_cycle_receipts`, `provider_schedules` |
 | [provisioning_tokens.sql](../internal/db/queries/provisioning_tokens.sql) | 5 | `provisioning_tokens` |
@@ -239,7 +238,7 @@ The source scan found 483 named SQL statements in 90 files with an explicit qual
 | [rebill_cycles.sql](../internal/db/queries/rebill_cycles.sql) | 4 | `rebill_cycles` |
 | [reconciliation.sql](../internal/db/queries/reconciliation.sql) | 26 | `nmi_bulk_checkpoints`, `payment_methods`, `reconciliation_findings`, `reconciliation_state`, `subscription_verifications`, `subscriptions` |
 | [refund_access.sql](../internal/db/queries/refund_access.sql) | 1 | `payments` |
-| [retention.sql](../internal/db/queries/retention.sql) | 17 | `failed_usage_windows`, `host_outbox`, `leases`, `limit_adjustments`, `limit_windows`, `meter_period_quantities`, `order_attempts`, `parked_provider_subscriptions`, `periodic_leases`, `provider_intents`, `provider_mutation_logs`, `reconciliation_findings`, `subscription_billing_changes`, `subscription_status_transitions`, `usage_daily`, `usage_minutes`, `webhook_health_daily` |
+| [retention.sql](../internal/db/queries/retention.sql) | 17 | `failed_usage_windows`, `host_outbox`, `leases`, `limit_adjustments`, `limit_windows`, `meter_period_quantities`, `operation_log`, `order_attempts`, `parked_provider_subscriptions`, `periodic_leases`, `provider_intents`, `reconciliation_findings`, `subscription_billing_changes`, `subscription_status_transitions`, `usage_daily`, `usage_minutes`, `webhook_health_daily` |
 | [running_charges.sql](../internal/db/queries/running_charges.sql) | 2 | `running_charges` |
 | [scheduled_changes.sql](../internal/db/queries/scheduled_changes.sql) | 8 | `destructive_actions`, `provider_intents`, `scheduled_changes` |
 | [solana_crankers.sql](../internal/db/queries/solana_crankers.sql) | 1 | `solana_crankers` |
@@ -264,11 +263,11 @@ The migrations declare these 108 billing tables. The list includes durable suppo
 - `eventlog_streams`, `failed_usage_windows`, `grants`, `host_outbox`, `idempotency_keys`, `leases`, `ledger_accounts`
 - `ledger_transfers`, `limit_adjustments`, `limit_hold_parts`, `limit_holds`, `limit_windows`, `maintenance_runs`, `mandates`
 - `merchant_destructive_policy`, `merchant_slug_aliases`, `merchant_write_posture`, `merchants`, `meter_period_quantities`, `money_settings`, `nmi_bulk_checkpoints`
-- `nmi_history_months`, `nmi_history_reads`, `notification_channel_state`, `notification_events`, `notification_issue_revisions`, `order_attempts`, `order_lines`
+- `nmi_history_months`, `nmi_history_reads`, `notification_channel_state`, `notification_events`, `notification_issue_revisions`, `operation_log`, `order_attempts`, `order_lines`
 - `orders`, `owed_items`, `ownership_claims`, `parked_provider_subscriptions`, `payment_attempts`, `payment_method_versions`, `payment_methods`
-- `payments`, `periodic_leases`, `price_key_movements`, `price_keys`, `price_migrations`, `price_psp_bindings`, `prices`
+- `payments`, `periodic_leases`, `price_keys`, `price_migrations`, `price_psp_bindings`, `prices`
 - `product_access`, `product_entitlements`, `products`, `provider_bills`, `provider_catalog_objects`, `provider_charge_attributions`, `provider_cycle_receipts`
-- `provider_intents`, `provider_mutation_logs`, `provider_schedules`, `provisioning_tokens`, `psp_customers`, `psp_import_basis`, `psp_import_mappings`
+- `provider_intents`, `provider_schedules`, `provisioning_tokens`, `psp_customers`, `psp_import_basis`, `psp_import_mappings`
 - `psp_import_records`, `psp_imports`, `psp_refresh_watermarks`, `psps`, `rebill_cycles`, `reconciliation_findings`, `reconciliation_state`
 - `running_charges`, `scheduled_changes`, `solana_crankers`, `solana_pay_receipts`, `solana_pay_references`, `solana_subscriptions`, `stored_card_checks`
 - `subscription_billing_changes`, `subscription_status_transitions`, `subscription_verifications`, `subscriptions`, `usage_accruals`, `usage_daily`, `usage_minutes`
