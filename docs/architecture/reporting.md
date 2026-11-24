@@ -15,7 +15,7 @@ Reporting is the metrics engine and the merchant dashboard. The engine answers a
 - **Compare**: `previous_period` runs the same plan over the preceding window of equal length, `previous_year` over the same window a year before.
 - **Removed**: `metrics.Removed` names each retired measure's replacement and `RemovedDimensions` each renamed dimension; a query naming one is refused with it. There are no aliases. `Deferred` lists the measures later work builds; naming one is refused as planned.
 - **Widget** (`billing.DashboardWidget`): `id`, `title`, `viz`, `query` (a `billing.MetricsQuery`), `grid` and `fixed_range`.
-- **Viz**: one of `dashboard.VizTypes`: `kpi`, `stat`, `line`, `area`, `bar`, `donut`, `table`, `heading`.
+- **Viz**: one of `dashboard.VizTypes`: `kpi`, `stat`, `line`, `area`, `bar`, `donut`, `table`, `heading`, `programs`.
 - **Grid** (`billing.DashboardGrid`): `x`, `y`, `w`, `h` on the console's react-grid-layout grid.
 - **Fixed range**: the widget keeps its query's own range; other widgets follow the console's range picker, their saved range the default.
 - **Layout**: the merchant's ordered widget list, stored whole.
@@ -24,10 +24,11 @@ Reporting is the metrics engine and the merchant dashboard. The engine answers a
 
 ## Measures
 
-Business measures: `cash`, `payments`, `refund_rate`, `chargeback_rate`, `new_subscriptions`, `cancellations`, `net_new_subscriptions`, `churn_rate`, `subscriptions`, `mrr`, `attempts`, `attempt_failure_rate`, `purchases`, `purchase_failure_rate`, `rebills`, `rebill_rate`, `dunning_recovery_rate`, `rebill_first_failure_rate`, `credits_sold`, `repeat_topup_rate`, `usage_charged`, `usage_units`, `active_customers`, `limits_reached`, `outstanding_credit_liability`, `outstanding_owed` and `customers_at_depletion_risk`. `GET /v1/metrics/schema` gives each one's formula and dimensions.
+Business measures: `cash`, `payments`, `refund_rate`, `chargeback_rate`, `disputes`, `dispute_win_rate`, `fraud_reports`, `new_subscriptions`, `cancellations`, `net_new_subscriptions`, `churn_rate`, `subscriptions`, `mrr`, `attempts`, `attempt_failure_rate`, `purchases`, `purchase_failure_rate`, `rebills`, `rebill_rate`, `dunning_recovery_rate`, `rebill_first_failure_rate`, `credits_sold`, `repeat_topup_rate`, `usage_charged`, `usage_units`, `active_customers`, `limits_reached`, `outstanding_credit_liability`, `outstanding_owed` and `customers_at_depletion_risk`. `GET /v1/metrics/schema` gives each one's formula and dimensions.
 
 - `cash` is signed money by `cash_kind`: a payment and a won dispute add, a refund and a chargeback subtract; its total is net cash, gross of processor fees.
-- `payments` counts settled sales and reversals by `payment_kind`; `refund_rate` and `chargeback_rate` are refunds and chargebacks over sales in the same bucket.
+- `payments` counts settled sales and reversals by `payment_kind`, a refund also by `refund_reason`; `refund_rate` and `chargeback_rate` are refunds and chargebacks over sales in the same bucket, by `network` (`billing.card_network` of the card brand) among others. `chargeback_rate`'s thresholds are the Visa, Mastercard and Stripe monitoring levels (`disputerules.ChargebackLines`).
+- `disputes` counts dispute cases by when they opened, by `dispute_kind` (inquiry, chargeback, prevented, unknown), `dispute_reason`, `outcome` (open, won, lost, closed, unreported), `network` and `kind` (the disputed charge: initial or renewal); `dispute_win_rate` is won over won and lost. `fraud_reports` counts issuer fraud reports by `outcome`: what OpenRails did. A program's standing, which divides by the month's sales or the month before's, is the `programs` widget's (`GET /v1/metrics/dispute-programs`), not a measure.
 - `purchases` and `rebills` take their outcome as of the range end: a purchase quiet for an hour without an approval has failed, a renewal past its 15-day dunning window uncollected is lost. `rebill_rate` is collected over closed renewals; `dunning_recovery_rate` is recovered over closed renewals whose first try failed or was missed.
 - `usage_charged` is priced usage by `charge`: charged, or forgiven by the customer's grace.
 
@@ -37,12 +38,13 @@ The `ops` group is operator signals, queryable but off the health overview, each
 
 ## Health overview
 
-`DefaultWidgets(profile)` is a row of `kpi` tiles, then a `heading` and its charts for each section the profile has data for. The tiles are Cash collected for everyone; Subscriptions, New subscriptions, Cancellations, Renewals in dunning (`rebills` open) and Rebill rate for subscriptions; Chargeback rate for card payments; Usage charged and Active customers for usage; Credits sold for credits. The sections are Revenue and cash; Recurring and Retention for subscriptions; Payment health for subscriptions or card payments; Credits and usage for usage or credits. An empty merchant gets the tiles of a subscription business and no sections; the console reads them as "—" and points to catalog and PSP setup.
+`DefaultWidgets(profile)` is a row of `kpi` tiles, then a `heading` and its charts for each section the profile has data for. The tiles are Cash collected for everyone; Subscriptions, New subscriptions, Cancellations, Renewals in dunning (`rebills` open) and Rebill rate for subscriptions; Chargeback rate and Refund rate for card payments; Usage charged and Active customers for usage; Credits sold for credits. The sections are Revenue and cash; Recurring and Retention for subscriptions; Payment health for subscriptions or card payments; Credits and usage for usage or credits. An empty merchant gets the tiles of a subscription business and no sections; the console reads them as "—" and points to catalog and PSP setup.
 
 The widget kinds are general, so adding a tile or chart is adding a widget to `DefaultWidgets`:
 
 - `kpi`: the value over the range (a snapshot at its end), its change against the comparison, coloured by the measure's `direction`, a ratio's in points, and a sparkline: the console runs the same query by `time` at grain `auto`.
-- `heading`: a section title; its query is empty, which validation requires.
+- `heading`: a section title; its query is empty, which validation requires (`widget_has_query`).
+- `programs`: each card PSP's standing in each dispute monitoring program for the month the page's range ends in: the ratio so far, projected, and its level; its query is empty too. Card payments' Payment health section carries it beside the chargeback rate against the networks' levels, the refund rate, disputes by reason and by the disputed charge's kind, the dispute win rate and fraud reports by outcome.
 - `bar` and `area` stack signed values apart (`stackOffset` sign), so refunds stack below the axis.
 - `line` draws each of its measures' `thresholds` as a reference line.
 - The page's currency switch lists the currencies with cash, usage or credits in the range, defaults to the one with the most cash in major units, hides with one, and filters every widget all of whose measures allow `currency`. Money never sums across currencies.
@@ -63,8 +65,8 @@ The engine owns no table and runs no job. It reads `payments`, `order_lines`,
 `usage_daily`, `limit_windows`, `product_access`, `product_entitlements`,
 `ledger_transfers`, `ledger_accounts`, `webhook_health`, `webhook_health_daily`,
 `psps`, `custodians`, `payment_attempts`, `payment_method_versions`,
-`provider_intents`, `rebill_cycles`, `nmi_history_months` and
-`reconciliation_findings`. A measure sees only what those tables still retain:
+`provider_intents`, `rebill_cycles`, `nmi_history_months`,
+`reconciliation_findings`, `disputes` and `fraud_reports`. A measure sees only what those tables still retain:
 payment attempts, status transitions, rebill cycles and NMI history 25 months;
 daily usage 24 months after billing; webhook health days 13 months; resolved
 findings 12 months.
@@ -77,7 +79,7 @@ findings 12 months.
 
 1. `DecodePut` decodes `{"widgets": [...]}` strictly: an unknown key anywhere,
    widget queries included, is `unknown_body_key`.
-2. `ValidateWidgets` returns every error at once, each named by its widget (`widgets[i].<field>`): at most `MaxWidgets` (60); an `id` present and unique; a `title`; a `viz` from `VizTypes`; `x, y >= 0` and `w, h >= 1`; a heading's query empty (`heading_has_query`); and each other query through `metrics.ValidateAt`, its errors re-parameterized `widgets[i].query.<param>`. A failure is `400 dashboard_invalid` with the errors in `metadata.errors`.
+2. `ValidateWidgets` returns every error at once, each named by its widget (`widgets[i].<field>`): at most `MaxWidgets` (60); an `id` present and unique; a `title`; a `viz` from `VizTypes`; `x, y >= 0` and `w, h >= 1`; a heading's or programs widget's query empty (`widget_has_query`); and each other query through `metrics.ValidateAt`, its errors re-parameterized `widgets[i].query.<param>`. A failure is `400 dashboard_invalid` with the errors in `metadata.errors`.
 3. The handler requires a bound staff identity (`authentication_required`
    otherwise); `UpsertDashboardConfig` stores the layout with `updated_at` and
    `updated_by` (the staff subject; `host` for an in-process call).
@@ -187,6 +189,7 @@ Does not apply: the engine is read-only, and the dashboard's only write replaces
 - OR-J53-S01 buys a membership and four orders on one merchant (a refund, a chargeback and its won dispute, a decline recovered by another card, a decline left) and checks `cash`, `payments`, `attempts`, `purchases` and `rebills` by kind and outcome, and their rates, against the measures they replace; a removed measure and `attempt_kind` are refused naming their replacements.
 - OR-J53-S02 checks the overview a subscription and card merchant gets, that every widget answers under each currency of the switch with only that currency's cash, that an empty merchant's tiles answer, that every profile's overview saves, that a removed measure cannot be saved, and that the dashboard migration drops saved widgets naming one.
 - OR-J53-S03 checks that every money measure splits by currency unless one is named, by PSP and over time too, and that money beside a measure without currency is refused.
+- OR-J46-S12 checks the dispute measures against their records (disputes by kind, reason, outcome and charge kind, the win rate, the chargeback rate by network and its lines, fraud reports, refunds by reason) and that a card merchant's overview carries the `programs` widget.
 - OR-J14-S70 (`rebills` missed), OR-J17-S01 (`mrr`) and OR-J23-S16 (`limits_reached`) query through the Go client over real PostgreSQL.
 - OR-J38-S41 draws the health overview in the console (its sections, the cash donut and the attempts table naming the PSP by key, tile labels that fit), which reads `GET /v1/metrics/dashboard`.
 - OR-J38-S34 counts `POST /v1/metrics/query` as a read when proving a configuration reader writes nothing.

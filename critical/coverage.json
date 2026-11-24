@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 472,
+  "scenario_count": 473,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2362,6 +2362,11 @@
       "id": "OR-J46-S07",
       "journey": "J46",
       "name": "An actionable early fraud warning is a fraud report Visa counts once; it refunds the charge in full once (fraud_warning, fraudulent at Stripe), ends what it paid for and blocks the card whatever events repeat it; one an event calls unactionable is not acted on; a charge already in dispute is not refunded; recording reports only refunds nothing; limited mode does none of it"
+    },
+    {
+      "id": "OR-J46-S12",
+      "journey": "J46",
+      "name": "The dispute metrics equal the records: disputes by kind, reason, outcome and the disputed charge's kind, the win rate, the chargeback rate by network against the networks' levels, fraud reports by outcome and refunds by reason; a card merchant's overview carries the dispute programs widget, whose read answers"
     }
   ]
 }

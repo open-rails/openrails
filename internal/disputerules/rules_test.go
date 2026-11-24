@@ -1,6 +1,7 @@
 package disputerules
 
 import (
+	"maps"
 	"testing"
 	"time"
 
@@ -153,5 +154,19 @@ func TestMinimumsAreActualCounts(t *testing.T) {
 	days[month.AddDate(0, 0, 3)] = Activity{Chargebacks: 1}
 	if st := program(billing.ProgramStripe).Evaluate(WindowFor(month, month.AddDate(0, 0, 10), days)); st.Level != billing.DisputeLevelExcessive {
 		t.Errorf("Stripe at 5 actual chargebacks over 100 sales: %s", st.Level)
+	}
+}
+
+// A chargeback ratio is drawn against each network's levels, one line per
+// ratio.
+func TestChargebackLines(t *testing.T) {
+	got := map[float64]string{}
+	for _, l := range ChargebackLines() {
+		got[l.Value] = l.Label
+	}
+	want := map[float64]string{0.005: "Visa VAMP warning · Stripe warning", 0.0075: "Stripe excessive", 0.01: "Mastercard warning",
+		0.015: "Visa VAMP excessive · Mastercard excessive", 0.03: "Mastercard high excessive"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("lines %v, want %v", got, want)
 	}
 }

@@ -2,7 +2,9 @@ package disputerules
 
 import (
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -278,4 +280,29 @@ func ParseRatioLimit(v any) (int64, error) {
 		return 0, fmt.Errorf("dispute_ratio_limit %q is not a percentage between 0%% and 100%% such as \"0.9%%\"", s)
 	}
 	return int64(math.Round(percent * 100)), nil
+}
+
+// ChargebackLines are the count programs' standing levels as lines a
+// chargeback ratio is drawn against, one per ratio: Visa's, Mastercard's and
+// Stripe's, as they stand from their latest change.
+func ChargebackLines() []billing.MetricsThreshold {
+	names := map[billing.DisputeProgram]string{billing.ProgramVisaVAMP: "Visa VAMP", billing.ProgramMastercardECP: "Mastercard", billing.ProgramStripe: "Stripe"}
+	levels := map[billing.DisputeLevel]string{billing.DisputeLevelWarning: "warning", billing.DisputeLevelExcessive: "excessive", billing.DisputeLevelHighExcessive: "high excessive"}
+	labels := map[int64][]string{}
+	for _, p := range Programs {
+		name, ok := names[p.ID]
+		if !ok {
+			continue
+		}
+		for _, l := range p.Levels {
+			if l.Until.IsZero() {
+				labels[l.RatioBPS] = append(labels[l.RatioBPS], name+" "+levels[l.Level])
+			}
+		}
+	}
+	var out []billing.MetricsThreshold
+	for _, bps := range slices.Sorted(maps.Keys(labels)) {
+		out = append(out, billing.MetricsThreshold{Value: float64(bps) / 10_000, Label: strings.Join(labels[bps], " · ")})
+	}
+	return out
 }

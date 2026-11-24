@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/stripemock"
 )
 
@@ -33,6 +34,7 @@ func TestDisputes(t *testing.T) {
 	t.Run("OR-J46-S09/mastercard-divides-by-the-previous-months-sales", disputeMastercardLag)
 	t.Run("OR-J46-S10/the-program-in-force-is-the-months", disputeProgramDates)
 	t.Run("OR-J46-S11/a-charged-back-card-is-never-charged-again", disputeBlockedCard)
+	t.Run("OR-J46-S12/the-dispute-metrics-equal-the-records", disputeMetrics)
 	t.Run("OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio", disputeRefundReasons)
 	t.Run("OR-J46-S15/a-chargeback-blocks-the-charged-card-only", disputeChargedCardOnly)
 	t.Run("OR-J46-S16/a-report-on-an-unknown-charge-is-answered", disputeUnknownCharge)
@@ -481,13 +483,82 @@ func (s *sales) buy(t *testing.T, key string) billing.Payment {
 
 func (s *sales) chargeback(t *testing.T, payment billing.PaymentID, id string) {
 	t.Helper()
+	s.dispute(t, payment, "evt_"+id, "charge.dispute.created", id, "needs_response", "chargeback", "fraudulent", "10.4")
+}
+
+// dispute is Stripe's notice of a dispute of payment's whole charge.
+func (s *sales) dispute(t *testing.T, payment billing.PaymentID, event, kind, id, status, caseType, reason, code string) {
+	t.Helper()
 	ch := s.charges[payment]
 	d := stripemock.Object{"id": id, "object": "dispute", "amount": int64(1000), "currency": "usd", "charge": ch[0], "payment_intent": ch[1],
-		"status": "needs_response", "reason": "fraudulent", "created": s.a.clock.Now().Unix(),
-		"payment_method_details": map[string]any{"type": "card", "card": map[string]any{"brand": "visa", "case_type": "chargeback", "network_reason_code": "10.4"}}}
-	body := stripeNotice(t, "evt_"+id, "charge.dispute.created", d)
+		"status": status, "reason": reason, "created": s.a.clock.Now().Unix(),
+		"payment_method_details": map[string]any{"type": "card", "card": map[string]any{"brand": "visa", "case_type": caseType, "network_reason_code": code}}}
+	body := stripeNotice(t, event, kind, d)
+	code2, raw := callback(t, s.a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
+	require.Equal(t, http.StatusOK, code2, raw)
+}
+
+// The dispute metrics equal the records: disputes by kind, reason, outcome
+// and the disputed charge's kind, the win rate, the chargeback rate by
+// network against the networks' levels, fraud reports by outcome and refunds
+// by reason. A card merchant's overview carries the programs widget, whose
+// read answers.
+func disputeMetrics(t *testing.T) {
+	s := newSales(t)
+	var paid []billing.Payment
+	for i := range 4 {
+		paid = append(paid, s.buy(t, fmt.Sprintf("metrics-sale-%d", i)))
+	}
+	s.chargeback(t, paid[0].ID, "dp_metrics_fraud")
+	s.dispute(t, paid[1].ID, "evt_metrics_won_created", "charge.dispute.created", "dp_metrics_won", "needs_response", "chargeback", "product_not_received", "13.1")
+	s.dispute(t, paid[1].ID, "evt_metrics_won_closed", "charge.dispute.closed", "dp_metrics_won", "won", "chargeback", "product_not_received", "13.1")
+	s.dispute(t, paid[2].ID, "evt_metrics_inquiry", "charge.dispute.created", "dp_metrics_inquiry", "warning_needs_response", "inquiry", "general", "")
+	_, err := s.a.alpha.RefundPayment(t.Context(), "metrics-refund", paid[3].ID, billing.RefundPaymentParams{Full: true, RefundReason: billing.RefundDuplicate})
+	require.NoError(t, err)
+	ch := s.charges[paid[2].ID]
+	body := stripeNotice(t, "evt_metrics_efw", "radar.early_fraud_warning.created", stripemock.Object{"id": "issfr_metrics", "object": "radar.early_fraud_warning",
+		"charge": ch[0], "payment_intent": ch[1], "fraud_type": "made_with_stolen_card", "actionable": true, "created": s.a.clock.Now().Unix()})
 	status, raw := callback(t, s.a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
 	require.Equal(t, http.StatusOK, status, raw)
+
+	window := &billing.MetricsRange{Last: "30d"}
+	by := func(measure, dim string, filters map[string][]string) map[string]int64 {
+		t.Helper()
+		return split(t, metricTable(t, s.a.alpha, billing.QueryMetricsParams{Measures: []string{measure}, By: []string{dim}, Filters: filters, Range: window}), dim, measure)
+	}
+	require.Equal(t, map[string]int64{"chargeback": 2, "inquiry": 1}, by("disputes", "dispute_kind", nil))
+	require.Equal(t, map[string]int64{"fraud": 1, "not_received": 1}, by("disputes", "dispute_reason", map[string][]string{"dispute_kind": {"chargeback"}}))
+	require.Equal(t, map[string]int64{"open": 2, "won": 1}, by("disputes", "outcome", nil))
+	require.Equal(t, map[string]int64{"initial": 3}, by("disputes", "kind", nil), "every disputed charge was a first sale")
+	require.Equal(t, map[string]int64{"recorded": 1}, by("fraud_reports", "outcome", nil))
+	require.Equal(t, map[string]int64{"duplicate": 1}, by("payments", "refund_reason", map[string][]string{"payment_kind": {"refund"}}))
+	win := only(t, metricTable(t, s.a.alpha, billing.QueryMetricsParams{Measures: []string{"dispute_win_rate"}, Range: window}))
+	require.InDelta(t, 1, fraction(t, win["dispute_win_rate"]), 1e-12, "one won of one decided")
+	rates := metricTable(t, s.a.alpha, billing.QueryMetricsParams{Measures: []string{"chargeback_rate"}, By: []string{"network"}, Range: window})
+	require.Len(t, rates, 1)
+	require.Equal(t, "visa", rates[0]["network"])
+	require.InDelta(t, 0.5, fraction(t, rates[0]["chargeback_rate"]), 1e-12, "two chargebacks of four visa sales")
+
+	schema, err := s.a.alpha.GetMetricsSchema(t.Context())
+	require.NoError(t, err)
+	for _, m := range schema.Measures {
+		if m.Name == "chargeback_rate" {
+			require.Len(t, m.Thresholds, 5, "each network's levels")
+		}
+	}
+	board, err := s.a.alpha.GetDashboard(t.Context())
+	require.NoError(t, err)
+	programs := 0
+	for _, w := range board.Widgets {
+		if w.Viz == dashboard.Programs {
+			programs++
+		}
+	}
+	require.Equal(t, 1, programs, "a card merchant's payment health shows the dispute programs")
+	standings, err := s.a.alpha.ListDisputePrograms(t.Context(), billing.DisputeProgramListParams{})
+	require.NoError(t, err)
+	require.NotEmpty(t, standings.Items)
+	require.EqualValues(t, 3, standing(t, s.a, billing.ProgramVisaVAMP, s.a.clock.Now()).Count, "two chargebacks and a fraud report")
 }
 
 // thresholdFinding is the open threshold finding of program, if any.

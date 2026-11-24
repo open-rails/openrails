@@ -1518,6 +1518,9 @@
     ],
     "OR-J46-S16": [
       "TestDisputes/OR-J46-S16/a-report-on-an-unknown-charge-is-answered"
+    ],
+    "OR-J46-S12": [
+      "TestDisputes/OR-J46-S12/the-dispute-metrics-equal-the-records"
     ]
   }
 }
