@@ -95,6 +95,8 @@ Its transfer types are `cash_received`, `cash_applied`, `cash_returned`, `revenu
 
 A credit lot's money is described in [prepaid credits](prepaid-credits.md).
 
+A spend releases what the lot holds less what its units left are worth (`CreditLot.Worth`), so a fully deferred lot releases in proportion to the units spent, rounded cumulatively. A partly deferred lot, whose payment applied less than its price (`books.credit.unapplied`), takes its shortfall from its first spends: they release nothing until its units left are worth less than it holds, and the spend that crosses that point releases only the difference.
+
 ### Cash and revenue recognition
 
 A payment's money is booked when the payment row is stored with it: a positive, succeeded charge that moved money at a rail, or a manual payment (`books.ReceiptOf`), in the payment's transaction and dated `purchased_at`, at (`cash`, `payment`, payment id). It stays in `unapplied_cash` until the bill it paid completes; a payment stored before the books is booked when its bill is applied. A payment on a closed order, a second payment of a paid one, or money beyond a bill's total is never applied; its refund comes from `unapplied_cash`. A usage order's payment settles its receivable, and a credit line's money waits for its lot.
