@@ -146,6 +146,9 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Cu
 		return 0, err
 	}
 	cur := normalizeCurrency(currency)
+	if IsMerchantUnit(cur) {
+		return 0, nil // nothing is owed in a merchant's unit
+	}
 	if err := RequireBillingCurrency(cur); err != nil {
 		return 0, err
 	}

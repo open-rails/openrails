@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,10 +16,11 @@ import (
 )
 
 // VizTypes are the supported widget visualizations. A kpi is a tile's value,
-// its change and a sparkline of the same query by time; a heading is a
+// its change and a sparkline of the same query by time; a cohort is a heatmap
+// of cohort_retention by cohort and months_since_start; a heading is a
 // section title and programs each card PSP's dispute program standing in the
 // range's last month, both with an empty query.
-var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "heading", "programs"}
+var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "cohort", "heading", "programs"}
 
 const (
 	// Heading is the viz of a section title.
@@ -26,6 +28,8 @@ const (
 	// Programs is the viz of the dispute program standings
 	// (GET /v1/metrics/dispute-programs).
 	Programs = "programs"
+	// Cohort is the viz of a cohort heatmap.
+	Cohort = "cohort"
 )
 
 // Queryless reports whether a viz draws something other than a metrics
@@ -132,6 +136,10 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 				fe.Param = at("query." + fe.Param)
 				errs = append(errs, fe)
 			}
+		}
+		if w.Viz == Cohort && !(slices.Contains(w.Query.By, "cohort") && slices.Contains(w.Query.By, "months_since_start")) {
+			errs = append(errs, metrics.FieldError{Code: "invalid_widget_query", Param: at("query.by"),
+				Message: "a cohort widget groups by cohort and months_since_start", Valid: []string{"cohort", "months_since_start"}})
 		}
 	}
 	if len(errs) > 0 {

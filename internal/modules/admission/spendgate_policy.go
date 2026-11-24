@@ -7,6 +7,7 @@ import (
 	"time"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/budgets"
@@ -53,6 +54,12 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string
 func (l *SpendgatePolicyLoader) InCurrency(ctx context.Context, resolved ResolvedPolicy, requestCurrency string) (ResolvedPolicy, error) {
 	from := strings.TrimSpace(resolved.PolicyCurrency)
 	to := money.NormalizeCurrency(requestCurrency)
+	// No rate converts money into a merchant's unit, and a cap naming no
+	// currency is money: a policy's caps bind no unit.
+	if currency.IsUnitCode(to) && money.NormalizeCurrency(from) != to {
+		resolved.OutstandingCapAmount, resolved.AccrualRateCapPerHour = 0, 0
+		return resolved, nil
+	}
 	if from == "" || money.NormalizeCurrency(from) == to {
 		return resolved, nil
 	}
@@ -80,6 +87,10 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 		c := strings.TrimSpace(w.Currency)
 		if c == "" {
 			c = strings.TrimSpace(policyCurrency)
+		}
+		// A window naming no currency is money: it binds no unit.
+		if currency.IsUnitCode(reqCur) && money.NormalizeCurrency(c) != reqCur {
+			continue
 		}
 		if c != "" && money.NormalizeCurrency(c) != reqCur {
 			conv, _, err := fx.ConvertAmount(ctx, l.fx, money.NormalizeCurrency(c), reqCur, w.Limit)

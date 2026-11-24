@@ -7,7 +7,7 @@ import type {
   MetricsRange,
   MetricsResult,
 } from "#orck/admin/lib/api/metrics"
-import { formatNativeAmount } from "#orck/admin/lib/format"
+import { formatSummaryAmount } from "#orck/admin/lib/format"
 
 // formatMeasure renders one measure cell by its column unit.
 export function formatMeasure(
@@ -17,8 +17,8 @@ export function formatMeasure(
 ): string {
   if (value === null || value === undefined) return "—"
   // "money" cells are exact decimal strings of native units at the
-  // currency's registered scale (a money-unit ratio arrives already rounded).
-  if (unit === "money") return formatNativeAmount(value, currency ?? "")
+  // currency's registered scale; a tile or chart shows them to the cent.
+  if (unit === "money") return formatSummaryAmount(value, currency ?? "")
   const n = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(n)) return String(value)
   switch (unit) {
@@ -199,6 +199,24 @@ export function exactKey(seriesKey: string): string {
   return `${seriesKey}:exact`
 }
 
+// IDENTIFIER_DIMS hold identifiers, shown as they are; any other dimension's
+// values are words (needs_payment_method reads "needs payment method").
+const IDENTIFIER_DIMS = new Set([
+  "psp",
+  "product_id",
+  "price_id",
+  "customer",
+  "card_bin",
+  "currency",
+  "cohort",
+  "discount_code",
+])
+
+export function dimValueLabel(dim: string, value: MetricsCell): string {
+  const text = String(value ?? "")
+  return IDENTIFIER_DIMS.has(dim) ? text : text.replaceAll("_", " ")
+}
+
 // pivotTimeSeries turns tabular rows into recharts rows keyed by bucket, one
 // series per measure × dimension-value combination. Server-zero-filled
 // buckets render as-is; combos absent for a bucket fill 0 so stacks align.
@@ -222,8 +240,8 @@ export function pivotTimeSeries(
       buckets.set(t, entry)
     }
     const dimensions = idx.dims.map((d) => row[d.index])
-    const dimLabel = dimensions
-      .map((value) => String(value ?? ""))
+    const dimLabel = idx.dims
+      .map((d) => dimValueLabel(d.name, row[d.index]))
       .filter(Boolean)
       .join(" · ")
     for (const m of idx.measures) {
@@ -292,7 +310,9 @@ export function donutSlices(
           idx.dims
             .map((d) => {
               const value = String(row[d.index] ?? "")
-              return d.name === "psp" && value ? pspKey(value) : value
+              return d.name === "psp" && value
+                ? pspKey(value)
+                : dimValueLabel(d.name, value)
             })
             .filter(Boolean)
             .join(" · ") || primary.name,
@@ -318,14 +338,11 @@ export function chartColor(i: number): string {
 // Payment-health measures open Payments → Health.
 const HEALTH_MEASURES = new Set([
   "attempts",
-  "attempt_failure_rate",
   "authorization_rate",
   "issuer_discretion_decline_rate",
   "purchases",
-  "purchase_failure_rate",
   "rebills",
   "rebill_rate",
-  "rebill_first_failure_rate",
   "first_try_rebill_approval_rate",
   "dunning_recovery_rate",
   "nmi_history_authorizations",
@@ -341,16 +358,11 @@ export function deepLinkFor(
   const measures = query.measures ?? []
   if (measures.some((m) => HEALTH_MEASURES.has(m))) return "/payments/health"
   if (viz !== "stat" && viz !== "kpi") return null
-  const status = query.filters?.status?.[0]
   const has = (...names: string[]) => names.some((n) => measures.includes(n))
-  if (has("subscriptions")) {
-    return status
-      ? `/subscriptions?status=${encodeURIComponent(status)}`
-      : "/subscriptions"
-  }
-  if (has("new_subscriptions", "net_new_subscriptions"))
-    return "/subscriptions?status=active"
-  if (has("cancellations")) return "/subscriptions?view=recently_canceled"
+  if (has("mrr_at_risk")) return "/subscriptions?view=at_risk"
+  if (has("mrr", "subscribers", "arpa")) return "/subscriptions"
+  if (has("cancellations", "subscriber_churn_rate"))
+    return "/subscriptions?view=recently_canceled"
   if (has("cash", "payments", "refund_rate", "chargeback_rate"))
     return "/payments"
   if (has("entitled_customers")) return "/customers"
@@ -361,9 +373,10 @@ export function deepLinkFor(
 export function ownRange(range: MetricsRange | undefined): string {
   if (!range) return "its saved range"
   if (range.from && range.to) return `${range.from} to ${range.to}`
-  const m = /^(\d+)([dwmy])$/.exec(range.last ?? "")
+  const ahead = !range.last && !!range.next
+  const m = /^(\d+)([dwmy])$/.exec((ahead ? range.next : range.last) ?? "")
   if (!m) return "its saved range"
   if (m[1] === "1" && m[2] === "d") return "today"
   const unit = { d: "day", w: "week", m: "month", y: "year" }[m[2]]!
-  return `the last ${m[1]} ${unit}${m[1] === "1" ? "" : "s"}`
+  return `the ${ahead ? "next" : "last"} ${m[1]} ${unit}${m[1] === "1" ? "" : "s"}`
 }

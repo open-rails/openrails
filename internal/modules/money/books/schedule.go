@@ -141,6 +141,9 @@ type schedule struct {
 	// reinstatements counts forfeits taken back: the generation of the
 	// termination and reinstatement coordinates.
 	reinstatements int
+	// forfeited is what of recognized an early end forfeited and no undone
+	// end took back: all an undone end reinstates.
+	forfeited int64
 }
 
 // recognition is one posting a schedule owes: amount from deferred revenue,
@@ -156,7 +159,7 @@ type recognition struct {
 
 func scheduleOf(row gen.BillingRevenueSchedule) schedule {
 	s := schedule{service: Service{Starts: row.ServiceStartsAt, Ends: row.ServiceEndsAt}, funded: row.Funded,
-		recognized: row.RecognizedNet, through: row.RecognizedThroughAt, ended: row.EndedAt, reinstatements: int(row.Reinstatements)}
+		recognized: row.RecognizedNet, through: row.RecognizedThroughAt, ended: row.EndedAt, reinstatements: int(row.Reinstatements), forfeited: row.Forfeited}
 	if row.ServiceMonths != nil {
 		s.service.Months = int(*row.ServiceMonths)
 	}
@@ -193,9 +196,17 @@ func (s *schedule) catchUp(at time.Time, loc *time.Location) ([]recognition, *ti
 		return steps, s.nextDue(loc)
 	}
 	if s.ended != nil {
-		steps = s.earn(steps, OpTermination, at, at, s.funded)
+		steps = s.forfeit(steps, at, at)
 	}
 	return steps, nil
+}
+
+// forfeit recognises what an early end leaves unearned, at its end.
+func (s *schedule) forfeit(steps []recognition, at, dated time.Time) []recognition {
+	before := s.recognized
+	steps = s.earn(steps, OpTermination, at, dated, s.funded)
+	s.forfeited += s.recognized - before
+	return steps
 }
 
 // advance recognises every month boundary reached by now, each dated the last
@@ -203,12 +214,21 @@ func (s *schedule) catchUp(at time.Time, loc *time.Location) ([]recognition, *ti
 // service did not earn, and an end undone takes back what it forfeited. It
 // returns when the schedule is next due, nil once done.
 func (s *schedule) advance(ctx context.Context, loc *time.Location, now time.Time) ([]recognition, *time.Time, error) {
+	return s.progress(ctx, loc, now, true)
+}
+
+// progress is advance; without forfeit an early end recognises what its
+// service earned and leaves the rest deferred, for a reversal to take first.
+func (s *schedule) progress(ctx context.Context, loc *time.Location, now time.Time, forfeit bool) ([]recognition, *time.Time, error) {
 	end := s.end()
 	var steps []recognition
-	if earned := s.service.target(s.funded, s.through); s.recognized > earned && (s.ended == nil || s.ended.After(s.through)) {
+	// An end undone takes back what it forfeited, never more: revenue a
+	// reversal took is no forfeit.
+	if back := min(s.recognized-s.service.target(s.funded, s.through), s.forfeited); back > 0 && (s.ended == nil || s.ended.After(s.through)) {
 		s.reinstatements++
-		steps = append(steps, recognition{op: OpReinstatement, at: s.through, gen: s.reinstatements, dated: now, amount: s.recognized - earned})
-		s.recognized = earned
+		steps = append(steps, recognition{op: OpReinstatement, at: s.through, gen: s.reinstatements, dated: now, amount: back})
+		s.recognized -= back
+		s.forfeited -= back
 	}
 	for {
 		if err := ctx.Err(); err != nil {
@@ -232,8 +252,8 @@ func (s *schedule) advance(ctx context.Context, loc *time.Location, now time.Tim
 	}
 	dated := end.Add(-time.Microsecond)
 	steps = s.earn(steps, OpRecognition, end, dated, s.service.target(s.funded, end))
-	if s.ended != nil {
-		steps = s.earn(steps, OpTermination, end, dated, s.funded)
+	if s.ended != nil && forfeit {
+		steps = s.forfeit(steps, end, dated)
 	}
 	s.through = maxTime(s.through, end)
 	return steps, nil, nil

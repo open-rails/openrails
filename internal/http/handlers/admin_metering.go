@@ -63,7 +63,7 @@ func SetMeter(r *httprequest.Request) {
 		if rc.Filter == nil {
 			rc.Filter = map[string][]string{}
 		}
-		if err := moneyutil.ValidateCurrency(string(rc.Price.Currency)); err != nil {
+		if err := moneyutil.ValidateBalanceCurrency(string(rc.Price.Currency)); err != nil {
 			writeMeteringValidationError(r, billing.CodeUsageRateCardInvalid, err)
 			return
 		}

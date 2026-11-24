@@ -224,8 +224,10 @@ type CreditMove struct {
 	Into *Line
 }
 
-// Line is an order line a spend of credit pays.
+// Line is an order line a spend of credit pays, and its order, which the
+// spend's legs in both books name.
 type Line struct {
+	Order     uuid.UUID
 	OrderLine uuid.UUID
 	Product   *uuid.UUID
 }
@@ -272,9 +274,13 @@ func (b *Books) postInto(ctx context.Context, l CreditLot, debit Ref, amount int
 	if product == nil {
 		product = l.Product
 	}
+	var order *uuid.UUID
+	if m.Into.Order != uuid.Nil {
+		order = &m.Into.Order
+	}
 	_, _, err := b.Post(ctx, Posting{
 		Debit: debit, Credit: Ref{Type: DeferredRevenue}, Amount: amount, Currency: currency, Type: typ, Coord: m.Coord,
-		EffectiveAt: m.At, Customer: &customer, CreditGrant: &lot, OrderLine: &line, Product: product,
+		EffectiveAt: m.At, Customer: &customer, CreditGrant: &lot, Order: order, OrderLine: &line, Product: product,
 	})
 	if err != nil {
 		return fmt.Errorf("books: credit lot %s %s into line %s: %w", l.ID, typ, line, err)

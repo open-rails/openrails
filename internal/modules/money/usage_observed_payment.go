@@ -269,6 +269,9 @@ func (s *MoneyService) RecoverObservedUsagePayment(ctx context.Context, receipt 
 			PSP: &receipt.psp, Amount: charged, Currency: order.Currency, At: facts.PaidAt}); err != nil {
 			return err
 		}
+		if err := books.Started(ctx, q, mid.UUID(), order.Currency, s.now()); err != nil {
+			return err
+		}
 		transfer, err := ledger.New(q, mid.UUID()).PayOwed(ctx, order.CustomerID, order.Currency, due, ledger.Coord{Operation: ledger.OpOrderPayment, Source: "observed_invoice_payment", SourceID: key}, &orderID)
 		if err != nil {
 			return err

@@ -223,6 +223,7 @@ export type AskCatalogParams = {
 export type Balance = {
   customer_id: string
   currency: string
+  unit: MerchantCurrency | null
   billing_mode: "arrears" | "prepaid"
   balance_amount: string
   held_amount: string
@@ -1583,6 +1584,7 @@ export type MetricsMeasure = {
   dim_values?: Record<string, string[]>
   money?: boolean
   utc_days?: boolean
+  program?: "acquirer" | "mastercard_ecp" | "mastercard_efm" | "stripe" | "visa_vamp"
 }
 
 export type MetricsOrder = {
@@ -1595,6 +1597,7 @@ export type MetricsRange = {
   from?: string
   to?: string
   last?: string
+  next?: string
 }
 
 export type MetricsResult = {
@@ -1626,6 +1629,8 @@ export type MetricsSchema = {
 export type MetricsThreshold = {
   value: number
   label: string
+  from?: string
+  until?: string
 }
 
 export type MyOrderPayURLParams = {

@@ -26,7 +26,7 @@ type ClaimPeriodicLeaseParams struct {
 
 // billing.periodic_leases: deployment-global, no merchant scope.
 // Takes the lease on the kind for the holder when it is free, expired or the
-// holder's own; zero rows means another fleet holds it.
+// holder's own (a renewal); zero rows means another holder has it.
 func (q *Queries) ClaimPeriodicLease(ctx context.Context, arg ClaimPeriodicLeaseParams) (int64, error) {
 	result, err := q.db.Exec(ctx, claimPeriodicLease, arg.Kind, arg.Holder, arg.TtlSeconds)
 	if err != nil {
@@ -66,15 +66,18 @@ func (q *Queries) ListPeriodicLeasesHeldElsewhere(ctx context.Context, arg ListP
 	return items, nil
 }
 
-const tryLockPass = `-- name: TryLockPass :one
-SELECT pg_try_advisory_lock(hashtext(current_database()), hashtext($1::text))::boolean AS locked
+const releasePeriodicLease = `-- name: ReleasePeriodicLease :exec
+DELETE FROM billing.periodic_leases
+WHERE kind = $1::text AND holder = $2::text
 `
 
-// Held by the session running a pass for its whole run: a copy that starts
-// meanwhile, on this fleet or another, finds it taken.
-func (q *Queries) TryLockPass(ctx context.Context, passKey string) (bool, error) {
-	row := q.db.QueryRow(ctx, tryLockPass, passKey)
-	var locked bool
-	err := row.Scan(&locked)
-	return locked, err
+type ReleasePeriodicLeaseParams struct {
+	Kind   string
+	Holder string
+}
+
+// Ends the holder's lease on the kind; another holder's is untouched.
+func (q *Queries) ReleasePeriodicLease(ctx context.Context, arg ReleasePeriodicLeaseParams) error {
+	_, err := q.db.Exec(ctx, releasePeriodicLease, arg.Kind, arg.Holder)
+	return err
 }

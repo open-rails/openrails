@@ -3,7 +3,6 @@
 import argparse
 from collections import Counter
 import json
-import os
 from pathlib import Path
 import re
 import sys
@@ -20,21 +19,27 @@ def unique_object(pairs):
 
 parser = argparse.ArgumentParser()
 parser.add_argument("manifest", type=Path)
-parser.add_argument("events", type=Path)
+parser.add_argument("events", type=Path, nargs="?")
 parser.add_argument("--executables", type=Path, default=Path("critical/executables.json"))
 parser.add_argument("--case", action="append", default=[])
+parser.add_argument("--journey", action="append", default=[])
+parser.add_argument("--run-pattern", action="store_true", help="print the selection's go test -run pattern")
 args = parser.parse_args()
-if args.case and os.environ.get("CI") == "true":
-    parser.error("focused local cases cannot qualify hosted CI")
+if (args.events is None) != args.run_pattern:
+    parser.error("give the events file or --run-pattern")
 manifest = json.loads(args.manifest.read_text(), object_pairs_hook=unique_object)
 rows = manifest["scenarios"]
 all_ids = {row["id"] for row in rows}
 if len(rows) != len(all_ids) or len(all_ids) != manifest["scenario_count"]:
     raise SystemExit("critical manifest has duplicated or missing scenario identities")
 executable_map = json.loads(args.executables.read_text(), object_pairs_hook=unique_object)
-expected = set(args.case) if args.case else all_ids
-if not expected or not expected <= all_ids or len(args.case) != len(set(args.case)):
-    parser.error("selection must name unique, known scenario IDs")
+journeys = {row["journey"] for row in rows}
+focused = bool(args.case or args.journey)
+if len(args.case) != len(set(args.case)) or not set(args.case) <= all_ids or not set(args.journey) <= journeys:
+    parser.error("selection must name unique, known scenario IDs and journeys")
+expected = set(args.case) | {row["id"] for row in rows if row["journey"] in args.journey} if focused else all_ids
+if not expected:
+    parser.error("empty selection")
 bindings = executable_map["scenarios"]
 if set(bindings) - all_ids:
     raise SystemExit("executable map names unknown scenarios")
@@ -52,6 +57,10 @@ for identifier, names in bindings.items():
             raise SystemExit(f"invalid or duplicate executable binding: {name}")
         owners[name] = identifier
 required = {name for name, identifier in owners.items() if identifier in expected}
+if args.run_pattern:
+    tops = sorted({name.split("/")[0] for name in required})
+    print(f"^({'|'.join(tops)})$/^({'|'.join(sorted(expected))})$")
+    raise SystemExit(0)
 runs, passes = Counter(), Counter()
 failures = []
 package_passed = False
@@ -88,4 +97,4 @@ if failures:
     raise SystemExit(1)
 print(json.dumps({"selected_scenarios": len(expected), "required_executable_cases": len(required),
                   "passed_executable_cases": len(required),
-                  "scope": "focused local only" if args.case else "complete critical-first suite"}))
+                  "scope": "focused: qualifies nothing" if focused else "complete critical-first suite"}))

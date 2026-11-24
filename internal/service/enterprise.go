@@ -103,6 +103,9 @@ func (s *Service) setUsageRateCard(ctx context.Context, in UsageRateCardInput) e
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
+	if err := s.ownUnit(ctx, "rate_card.price.currency", string(in.Price.Currency)); err != nil {
+		return err
+	}
 	return money.NewMoneyService(s.catalogDatabase()).SetUsageRateCard(ctx, money.UsageRateCardInput{
 		ProductID: in.ProductID,
 		MeterKey:  in.MeterKey,

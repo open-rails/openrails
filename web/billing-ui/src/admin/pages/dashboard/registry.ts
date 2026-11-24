@@ -66,10 +66,26 @@ export function useRegistry(): Registry {
   return React.useMemo(() => registry(data), [data])
 }
 
-// measureLabel names a measure for people: new_subscriptions reads "New
-// subscriptions".
+// ACRONYMS are the words a label spells in capitals.
+const ACRONYMS: Record<string, string> = {
+  psp: "PSP",
+  mrr: "MRR",
+  nrr: "NRR",
+  grr: "GRR",
+  arpa: "ARPA",
+  ltv: "LTV",
+  vamp: "VAMP",
+  ecm: "ECM",
+  bin: "BIN",
+}
+
+// measureLabel names a measure or column for people: mrr_movements reads
+// "MRR movements".
 export function measureLabel(name: string): string {
-  if (name === "psp") return "PSP"
-  const words = name.replaceAll("_", " ").trim()
+  const words = name
+    .split("_")
+    .filter(Boolean)
+    .map((w) => ACRONYMS[w] ?? w)
+    .join(" ")
   return words.charAt(0).toUpperCase() + words.slice(1)
 }

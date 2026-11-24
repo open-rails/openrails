@@ -36,14 +36,11 @@ const (
 	// OpAllowance moves an uncollectible usage order's allowance at
 	// (allowance, order:<id>, n).
 	OpAllowance Operation = "allowance"
-	// A chargeback of a payment posts at (chargeback, payment, its id), its
-	// won dispute at (dispute_won_reopened, payment, its id) for the owed it
-	// collects again from the receivable, (dispute_won_revenue, ...) for owed
-	// from before the books and (dispute_won, payment, its id) for the rest.
-	OpChargeback         Operation = "chargeback"
-	OpDisputeWon         Operation = "dispute_won"
-	OpDisputeWonReopened Operation = "dispute_won_reopened"
-	OpDisputeWonRevenue  Operation = "dispute_won_revenue"
+	// OpDisputeWonRevenue is a usage order payment's won dispute settling
+	// owed from before the books again, as usage revenue; the owed it
+	// collects from the receivable is at OpDisputeWonReopened, the rest at
+	// OpDisputeWon.
+	OpDisputeWonRevenue Operation = "dispute_won_revenue"
 )
 
 // Receivable is what the general ledger holds receivable from a customer in
@@ -70,11 +67,20 @@ type UsageCollection struct {
 }
 
 // CollectUsage applies a usage order payment's cash, which Receive booked
-// to unapplied cash, to what it settles: as much as the customer's
-// receivable holds, usage_collected DR unapplied_cash / CR usage_receivable;
-// the rest settles owed from before the books and is usage revenue.
+// to unapplied cash, to what it settles, never beyond what the payment left
+// unapplied: as much as the customer's receivable holds, usage_collected DR
+// unapplied_cash / CR usage_receivable; the rest settles owed from before the
+// books and is usage revenue. Both at the payment's own coordinate (source
+// payment), which the reversal poster counts as applied.
 func (b *Books) CollectUsage(ctx context.Context, c UsageCollection) error {
 	if c.Amount <= 0 || CheckCurrency(c.Currency) != nil {
+		return nil
+	}
+	cash, err := b.q.GetPaymentCashApplication(ctx, gen.GetPaymentCashApplicationParams{MerchantID: b.merchant, PaymentID: c.Payment.String()})
+	if err != nil {
+		return err
+	}
+	if c.Amount = min(c.Amount, cash.Received-cash.Applied); c.Amount <= 0 {
 		return nil
 	}
 	receivable, err := b.Receivable(ctx, c.Customer, c.Currency)

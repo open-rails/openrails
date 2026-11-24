@@ -4,7 +4,7 @@ import { appearanceStyle } from "../appearance"
 import type { AdminAccess } from "../client/generated/wire"
 import { ApiError, createAdminClient } from "./lib/api/client"
 import { createAdminAPI } from "./lib/api"
-import { formatNativeAmount } from "./lib/format"
+import { formatBalanceAmount, formatNativeAmount } from "./lib/format"
 import { errorText } from "./lib/error-text"
 import { statusLabel } from "./components/status-badge"
 import type { BillingAdminProps } from "./types"
@@ -171,10 +171,7 @@ export function BillingCustomerSummary(props: BillingCustomerSummaryProps) {
                   key={balance.currency}
                   label="Available balance"
                   items={[
-                    formatNativeAmount(
-                      balance.available_amount,
-                      balance.currency
-                    ),
+                    formatBalanceAmount(balance.available_amount, balance),
                   ]}
                 />
               ))}

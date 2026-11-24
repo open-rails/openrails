@@ -207,7 +207,9 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 			b.Results[i].Err = apperr.Invalidf("customer_id required").WithParam("customer_id")
 		case it.EventType == "" || len(it.EventType) > 255:
 			b.Results[i].Err = apperr.Invalidf("event_type must contain 1 to 255 bytes").WithParam("event_type")
-		case moneyutil.ValidateCurrency(it.Currency) != nil:
+		// Usage in a merchant's unit arrives only through the capture of an
+		// admission, which checked the merchant declares the unit.
+		case moneyutil.ValidateCurrency(it.Currency) != nil && (it.Capture == nil || moneyutil.ValidateBalanceCurrency(it.Currency) != nil):
 			b.Results[i].Err = apperr.New(400, billing.CodeCurrencyUnsupported, "currency is not supported").WithParam("currency")
 		case it.Amount != nil && *it.Amount < 0:
 			b.Results[i].Err = apperr.Invalidf("amount must be nonnegative").WithParam("amount")

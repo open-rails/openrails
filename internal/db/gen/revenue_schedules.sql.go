@@ -16,17 +16,18 @@ const createRevenueSchedule = `-- name: CreateRevenueSchedule :one
 INSERT INTO billing.revenue_schedules (
     merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id,
     product_id, price_id, method, revenue_account, funded, recognized_net,
-    service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements
+    service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, forfeited
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::text,
     $5::uuid, $6::uuid, $7::uuid, $8::uuid,
     $9::uuid, $10::uuid, $11::text, $12::text,
     $13::bigint, $14::bigint,
     $15::timestamptz, $16::timestamptz, $17::int,
-    $18::timestamptz, $19::timestamptz, $20::timestamptz, 0
+    $18::timestamptz, $19::timestamptz, $20::timestamptz, 0,
+    $21::bigint
 )
 ON CONFLICT (merchant_id, order_line_id) DO NOTHING
-RETURNING merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at
+RETURNING merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at, forfeited
 `
 
 type CreateRevenueScheduleParams struct {
@@ -50,6 +51,7 @@ type CreateRevenueScheduleParams struct {
 	EndedAt             *time.Time
 	RecognizedThroughAt time.Time
 	NextRecognitionAt   *time.Time
+	Forfeited           int64
 }
 
 // A paid line's schedule, at its application, as its first recognition left
@@ -76,6 +78,7 @@ func (q *Queries) CreateRevenueSchedule(ctx context.Context, arg CreateRevenueSc
 		arg.EndedAt,
 		arg.RecognizedThroughAt,
 		arg.NextRecognitionAt,
+		arg.Forfeited,
 	)
 	var i BillingRevenueSchedule
 	err := row.Scan(
@@ -102,6 +105,7 @@ func (q *Queries) CreateRevenueSchedule(ctx context.Context, arg CreateRevenueSc
 		&i.Reinstatements,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Forfeited,
 	)
 	return i, err
 }
@@ -420,8 +424,7 @@ func (q *Queries) ListScheduledOrderLines(ctx context.Context, arg ListScheduled
 
 const listUnscheduledOrderLines = `-- name: ListUnscheduledOrderLines :many
 WITH started AS (
-    SELECT min(created_at) AS at FROM billing.ledger_transfers
-    WHERE merchant_id = $1::uuid AND book = 'general'
+    SELECT (SELECT started_at FROM billing.books_starts WHERE merchant_id = $1::uuid) AS at
 )
 SELECT l.order_id, l.id AS order_line_id, o.currency, l.amount,
        (l.source IS NOT DISTINCT FROM 'provider_adjustment')::boolean AS adjustment,
@@ -449,7 +452,7 @@ type ListUnscheduledOrderLinesRow struct {
 // A completed bill's line that sells revenue (not credit or usage) but has no
 // revenue schedule: a provider's tax and shipping line among them, which is
 // never scheduled. before_books is a line whose order was made and completed
-// before the merchant's general ledger took its first transfer.
+// before the merchant's books started.
 func (q *Queries) ListUnscheduledOrderLines(ctx context.Context, merchantID uuid.UUID) ([]ListUnscheduledOrderLinesRow, error) {
 	rows, err := q.db.Query(ctx, listUnscheduledOrderLines, merchantID)
 	if err != nil {
@@ -478,7 +481,7 @@ func (q *Queries) ListUnscheduledOrderLines(ctx context.Context, merchantID uuid
 }
 
 const lockDueRevenueSchedule = `-- name: LockDueRevenueSchedule :one
-SELECT merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at FROM billing.revenue_schedules
+SELECT merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at, forfeited FROM billing.revenue_schedules
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND next_recognition_at <= $3::timestamptz
 FOR UPDATE
@@ -518,6 +521,7 @@ func (q *Queries) LockDueRevenueSchedule(ctx context.Context, arg LockDueRevenue
 		&i.Reinstatements,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Forfeited,
 	)
 	return i, err
 }
@@ -595,8 +599,9 @@ SET recognized_net = $1::bigint,
     recognized_through_at = $2::timestamptz,
     next_recognition_at = $3::timestamptz,
     reinstatements = $4::int,
+    forfeited = $5::bigint,
     updated_at = now()
-WHERE merchant_id = $5::uuid AND id = $6::uuid
+WHERE merchant_id = $6::uuid AND id = $7::uuid
 `
 
 type SetRevenueScheduleRecognizedParams struct {
@@ -604,6 +609,7 @@ type SetRevenueScheduleRecognizedParams struct {
 	RecognizedThroughAt time.Time
 	NextRecognitionAt   *time.Time
 	Reinstatements      int32
+	Forfeited           int64
 	MerchantID          uuid.UUID
 	ID                  uuid.UUID
 }
@@ -614,6 +620,7 @@ func (q *Queries) SetRevenueScheduleRecognized(ctx context.Context, arg SetReven
 		arg.RecognizedThroughAt,
 		arg.NextRecognitionAt,
 		arg.Reinstatements,
+		arg.Forfeited,
 		arg.MerchantID,
 		arg.ID,
 	)

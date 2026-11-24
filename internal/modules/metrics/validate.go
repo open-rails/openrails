@@ -110,6 +110,13 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 				add(FieldError{Code: "duplicate_dimension", Param: fmt.Sprintf("by[%d]", i), Message: `"time" requested more than once`})
 			}
 			hasTime = true
+			for _, m := range measures {
+				if m.Untimed {
+					add(FieldError{Code: "dimension_not_allowed", Param: fmt.Sprintf("by[%d]", i),
+						Message: fmt.Sprintf("measure %q has no time series: its own dimensions order it (%s), and the range picks what it reads", m.Name, strings.Join(m.Dims, ", ")),
+						Valid:   m.Dims})
+				}
+			}
 			continue
 		}
 		d, ok := dimensionByName[name]
@@ -152,19 +159,27 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 	}
 
 	var from, to time.Time
-	if q.Range == nil || (q.Range.Last == "" && (q.Range.From == "" || q.Range.To == "")) {
+	if q.Range == nil || (q.Range.Last == "" && q.Range.Next == "" && (q.Range.From == "" || q.Range.To == "")) {
 		add(FieldError{Code: "missing_range", Param: "range",
-			Message: `range is required: {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} (dates are inclusive days in the accounting timezone), RFC3339 timestamps [from,to), or a relative window {"last":"7d"} (Nd|Nw|Nm|Ny, ending today)`})
-	} else if q.Range.Last != "" {
-		if q.Range.From != "" || q.Range.To != "" {
+			Message: `range is required: {"from":"YYYY-MM-DD","to":"YYYY-MM-DD"} (dates are inclusive days in the accounting timezone), RFC3339 timestamps [from,to), or a relative window {"last":"7d"} (Nd|Nw|Nm|Ny, ending today) or {"next":"12w"} (starting today)`})
+	} else if q.Range.Last != "" || q.Range.Next != "" {
+		param, window := "range.last", q.Range.Last
+		if q.Range.Next != "" {
+			param, window = "range.next", q.Range.Next
+		}
+		if q.Range.From != "" || q.Range.To != "" || q.Range.Last != "" && q.Range.Next != "" {
 			add(FieldError{Code: "invalid_range", Param: "range",
-				Message: `range.last is mutually exclusive with range.from/range.to: use either a relative window or explicit dates`})
+				Message: `range.last, range.next and range.from/range.to are mutually exclusive: use one relative window or explicit dates`})
 		} else {
 			var ok bool
-			from, to, ok = resolveLast(q.Range.Last, now, zone)
+			if q.Range.Next != "" {
+				from, to, ok = resolveNext(window, now, zone)
+			} else {
+				from, to, ok = resolveLast(window, now, zone)
+			}
 			if !ok {
-				add(FieldError{Code: "invalid_range", Param: "range.last",
-					Message: fmt.Sprintf(`could not parse %q: use "<N>d", "<N>w", "<N>m" or "<N>y" (e.g. "7d" = the past 7 days incl. today)`, q.Range.Last)})
+				add(FieldError{Code: "invalid_range", Param: param,
+					Message: fmt.Sprintf(`could not parse %q: use "<N>d", "<N>w", "<N>m" or "<N>y" (e.g. "7d" = the past 7 days incl. today; as next, today and the 6 days after)`, window)})
 			}
 		}
 	} else {
@@ -369,6 +384,32 @@ func resolveLast(last string, now time.Time, zone *time.Location) (from, to time
 		from = calendarutil.DayStart(y, mo-time.Month(n), d, zone)
 	case "y":
 		from = calendarutil.DayStart(y-n, mo, d, zone)
+	}
+	return from.UTC(), to.UTC(), true
+}
+
+// resolveNext is resolveLast forward: N days, weeks, months or years from
+// the start of today in zone.
+func resolveNext(next string, now time.Time, zone *time.Location) (from, to time.Time, ok bool) {
+	m := lastRangeRe.FindStringSubmatch(next)
+	if m == nil {
+		return time.Time{}, time.Time{}, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n < 1 {
+		return time.Time{}, time.Time{}, false
+	}
+	y, mo, d := now.In(zone).Date()
+	from = calendarutil.DayStart(y, mo, d, zone)
+	switch m[2] {
+	case "d":
+		to = calendarutil.DayStart(y, mo, d+n, zone)
+	case "w":
+		to = calendarutil.DayStart(y, mo, d+7*n, zone)
+	case "m":
+		to = calendarutil.DayStart(y, mo+time.Month(n), d, zone)
+	case "y":
+		to = calendarutil.DayStart(y+n, mo, d, zone)
 	}
 	return from.UTC(), to.UTC(), true
 }

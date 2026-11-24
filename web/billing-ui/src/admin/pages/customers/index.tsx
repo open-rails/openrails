@@ -14,7 +14,11 @@ import { Button } from "#orck/admin/components/ui/button"
 import { Input } from "#orck/admin/components/ui/input"
 import type { Customer } from "#orck/client/generated/wire"
 import { downloadCsv } from "#orck/admin/lib/csv"
-import { formatDate, formatNativeAmount, shortId } from "#orck/admin/lib/format"
+import {
+  formatBalanceAmount,
+  formatDate,
+  shortId,
+} from "#orck/admin/lib/format"
 
 const columns: ColumnDef<Customer, unknown>[] = [
   {
@@ -55,12 +59,12 @@ const columns: ColumnDef<Customer, unknown>[] = [
         <div className="flex flex-col gap-0.5 tabular-nums">
           {balances.map((b) => (
             <span key={b.currency}>
-              {formatNativeAmount(b.balance_amount, b.currency)}
+              {formatBalanceAmount(b.balance_amount, b)}
               {BigInt(b.owed_amount) > 0n && (
                 <span className="text-muted-foreground">
                   {" "}
                   <AdminMessage id={"· owed "} />
-                  {formatNativeAmount(b.owed_amount, b.currency)}
+                  {formatBalanceAmount(b.owed_amount, b)}
                 </span>
               )}
             </span>
