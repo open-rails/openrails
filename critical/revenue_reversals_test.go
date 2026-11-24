@@ -4,7 +4,9 @@ package critical_test
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/books"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
@@ -543,36 +546,53 @@ func TestRevenueReversals(t *testing.T) {
 			booksAudited(t, a.world)
 		})
 		// The same in a merchant's own unit: 400 GOLD bought for $20 with a
-		// $30 item.
+		// $30 item, all checked out together.
 		t.Run("merchant-unit", func(t *testing.T) {
-			s := newCreditShop(t)
-			w := s.a.world
-			payment := s.cardPayment(t, 50_000_000, models.MoneyMovementRail, "gold-and-item")
-			lot := s.issue(t, "GOLD", 400, 20_000_000, payment)
-			database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+			s, p := unitPaymentWorld(t, 0)
+			a := s.a
+			gold := s.pack(t, "gold-400", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
+			item, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "item", DisplayName: "Item", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"item:owned"}})
 			require.NoError(t, err)
-			ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
-			service := payments.NewPaymentService(database, w.clock)
+			itemPrice, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: item.ID, Key: "item", UnitAmount: 30_000_000, Currency: "USD"})
+			require.NoError(t, err)
+			m := &mixedSale{a: a, p: p, customer: s.alice, lines: []billing.OrderLineParams{{PriceID: gold["usd"]}, {PriceID: itemPrice.ID}}}
+			input := billing.CreateMyOrderParams{Lines: m.lines, ExpectedTotal: ptr(int64(50_000_000)), Reusable: ptr(true),
+				Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "gold-and-item"})
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var order billing.Order
+			require.NoError(t, json.Unmarshal(raw, &order))
+			require.Equal(t, billing.OrderComplete, order.Status)
+			payment := *order.Payment.PaymentID
+			unitBalance(t, a.alpha, s.alice, "GOLD", 400, 0, 400)
 
-			chargeback, err := service.Refund(ctx, payment, "gold-chargeback", 20_000_000, payments.ReversalChargeback)
+			// R1, a $20 chargeback, takes the pack's line: 400 GOLD, $20.
+			charge, intent := m.charge(t, payment)
+			dispute := stripemock.Object{"id": "dp_gold_share", "object": "dispute", "amount": 2000, "currency": "usd", "charge": charge, "payment_intent": intent, "status": "needs_response", "reason": "fraudulent"}
+			m.notice(t, "evt_gold_share_dispute", "charge.dispute.created", dispute)
+			unitBalance(t, a.alpha, s.alice, "GOLD", 0, 0, 0)
+			read, err := a.alpha.GetPayment(t.Context(), payment)
 			require.NoError(t, err)
-			require.Equal(t, [2]int64{20_000_000, 400}, lotShare(t, w, chargeback.ID))
-			require.Zero(t, lotUnits(t, w, lot))
-			refund, err := service.Refund(ctx, payment, "item-refund", 30_000_000, payments.ReversalRefund)
-			require.NoError(t, err)
-			require.Equal(t, [2]int64{0, 0}, lotShare(t, w, refund.ID))
-			require.EqualValues(t, 30_000_000, cashMoved(t, w, refund.ID.String()))
+			require.Len(t, read.Refunds, 1)
+			require.Equal(t, [2]int64{20_000_000, 400}, lotShare(t, a.world, read.Refunds[0].ID.UUID()))
 
-			s.recover(t, billing.PaymentID(payment), chargeback.ID, 20_000_000, "gold-won")
-			require.EqualValues(t, 400, lotUnits(t, w, lot))
-			require.False(t, applyLotReversal(t, w, payment, refund.ID), "the next pass moves nothing")
-			require.EqualValues(t, 400, lotUnits(t, w, lot))
-			var refunded int64
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT credits_posted FROM "+booksTable(w, "ledger_type_totals")+" WHERE merchant_id=$1 AND book='units' AND currency='GOLD' AND account_type='units_refunded'",
-				w.alpha.MerchantID().UUID()).Scan(&refunded))
-			require.EqualValues(t, 400, refunded, "the chargeback's 400 alone")
-			require.EqualValues(t, 30_000_000, cashMoved(t, w, refund.ID.String()))
-			booksAudited(t, w)
+			// R2, $30 refunded, finds the line returned: it takes none of the
+			// lot and is booked against the item.
+			refund, err := a.alpha.RefundPayment(t.Context(), "gold-item-refund", payment, billing.RefundPaymentParams{Amount: 30_000_000, Reason: "Return the item"})
+			require.NoError(t, err)
+			r := refund.ID.UUID()
+			require.Equal(t, [2]int64{0, 0}, lotShare(t, a.world, r))
+			require.EqualValues(t, 30_000_000, cashMoved(t, a.world, r.String()))
+
+			// R1 won: its 400 GOLD and $20 come back, and stay.
+			dispute["status"] = "won"
+			m.notice(t, "evt_gold_share_won", "charge.dispute.closed", dispute)
+			unitBalance(t, a.alpha, s.alice, "GOLD", 400, 0, 400)
+			require.False(t, applyLotReversal(t, a.world, payment.UUID(), r), "the next pass moves nothing")
+			unitBalance(t, a.alpha, s.alice, "GOLD", 400, 0, 400)
+			require.Zero(t, systemBalance(t, a, "GOLD", ledger.UnitsRefunded), "400 refunded, 400 restored, none to R2")
+			require.EqualValues(t, 30_000_000, cashMoved(t, a.world, r.String()), "30 moved for 30")
+			booksAudited(t, a.world)
 		})
 	})
 

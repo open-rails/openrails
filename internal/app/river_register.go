@@ -249,7 +249,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	for i := range scans {
 		scans[i].Timeout = riverjobs.ScanBudget(scans[i].Kind)
 	}
-	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Scans: scans, Clock: clock, Log: r.Log}); err != nil {
+	if err := addWorker(workers, &riverjobs.BillingPassWorker{DB: r.DB, Leases: r.leaseDB, Scans: scans, Clock: clock, Log: r.Log}); err != nil {
 		return fmt.Errorf("add billing pass worker: %w", err)
 	}
 	r.riverCompositionMu.Lock()
@@ -478,6 +478,7 @@ func (r *Runtime) refreshWorkers(clock clockwork.Clock) (*riverjobs.ProviderRefr
 	refresh := &riverjobs.ProviderRefreshWorker{
 		StripeClients:  r.StripeClients,
 		DB:             r.DB,
+		Leases:         r.leaseDB,
 		Config:         r.Config,
 		Clock:          clock,
 		Merchants:      r.Merchants, // per-merchant store-armed pulls

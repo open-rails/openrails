@@ -86,7 +86,7 @@
       "TestMerchantCurrencies/OR-J05-S07/an-invalid-or-colliding-unit-is-refused-at-load-and-on-edit"
     ],
     "OR-J05-S08": [
-      "TestMerchantCurrencies/OR-J05-S08/a-unit-is-refused-where-money-is-taken"
+      "TestMerchantCurrencies/OR-J05-S08/a-unit-is-never-owed-never-a-packs-price-and-only-the-merchants-own"
     ],
     "OR-J05-S09": [
       "TestMerchantCurrencies/OR-J05-S09/another-merchant-does-not-see-a-merchants-units"
@@ -2223,6 +2223,63 @@
     ],
     "OR-J41-S36": [
       "TestRevenueReversals/OR-J41-S36/a-provider-discount-never-reaches-a-credit-line"
+    ],
+    "OR-J04-S80": [
+      "TestBillingPass/OR-J04-S80/two-passes-started-together-one-scans-the-other-exits-and-neither-holds-a-session"
+    ],
+    "OR-J04-S81": [
+      "TestBillingPass/OR-J04-S81/a-dead-passs-lease-lapses-and-the-next-pass-runs"
+    ],
+    "OR-J38-S83": [
+      "TestMerchantPullLease/OR-J38-S83/one-pull-of-a-merchant-runs-the-others-skip-and-none-holds-a-session"
+    ],
+    "OR-J38-S84": [
+      "TestMerchantPullLease/OR-J38-S84/a-pull-outlives-its-lease-period-and-a-dead-holders-lease-lapses"
+    ],
+    "OR-J05-S10": [
+      "TestMerchantCurrencies/OR-J05-S10/a-restart-on-a-file-that-rescales-a-counted-unit-keeps-its-recorded-scale"
+    ],
+    "OR-J05-S11": [
+      "TestMerchantCurrencies/OR-J05-S11/a-catalog-that-names-a-unit-counts-it"
+    ],
+    "OR-J05-S12": [
+      "TestMerchantCurrencies/OR-J05-S12/a-units-first-count-reads-its-declaration-where-it-is-stored"
+    ],
+    "OR-J48-S01": [
+      "TestMerchantUnits/OR-J48-S01/packs-buy-units-at-their-own-rates"
+    ],
+    "OR-J48-S02": [
+      "TestMerchantUnits/OR-J48-S02/the-same-units-bought-in-another-currency"
+    ],
+    "OR-J48-S03": [
+      "TestMerchantUnits/OR-J48-S03/a-plan-allowance-and-a-gift-give-units"
+    ],
+    "OR-J48-S04": [
+      "TestMerchantUnits/OR-J48-S04/a-unit-priced-product-is-paid-from-the-balance"
+    ],
+    "OR-J48-S05": [
+      "TestMerchantUnits/OR-J48-S05/usage-priced-in-units-draws-lots-soonest-expiry-first"
+    ],
+    "OR-J48-S06": [
+      "TestMerchantUnits/OR-J48-S06/an-unspent-pack-expires-in-its-unit"
+    ],
+    "OR-J48-S07": [
+      "TestMerchantUnits/OR-J48-S07/a-refund-claws-back-its-lots-units-first"
+    ],
+    "OR-J48-S08": [
+      "TestMerchantUnits/OR-J48-S08/admission-holds-the-unit-balance-and-an-overrun-is-forgiven-usage"
+    ],
+    "OR-J48-S09": [
+      "TestMerchantUnits/OR-J48-S09/a-packs-reversals-take-what-they-took-as-they-settled"
+    ],
+    "OR-J48-S10": [
+      "TestMerchantUnits/OR-J48-S10/a-period-whose-price-falls-takes-back-forgiveness-first"
+    ],
+    "OR-J48-S11": [
+      "TestMerchantUnits/OR-J48-S11/a-lease-sync-takes-no-usage-in-a-unit"
+    ],
+    "OR-J48-S12": [
+      "TestMerchantUnits/OR-J48-S12/the-first-balance-in-a-unit-takes-the-units-lock"
     ]
   }
 }

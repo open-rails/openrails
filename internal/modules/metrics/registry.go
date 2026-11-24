@@ -1000,7 +1000,7 @@ var declared = []Measure{
 		Formula:     "repeat top-ups / all top-ups",
 		Dims:        []string{"currency", "product_id"}},
 	{Name: "usage_charged", Class: ClassAdditive, Family: FamUsageCharged, Money: true, Unit: UnitMoney, Direction: UpIsGood,
-		Description: "priced usage from usage history, by charge: charged (the day's share of its period's price, and failed usage charged) or forgiven (failed usage the customer's grace absorbed); cash-in is credits_sold",
+		Description: "priced usage from usage history, by charge: charged (the day's share of its period's price, and failed usage charged) or forgiven (failed usage the customer's grace absorbed, or usage in a merchant's unit its lots could not take when it posted, moved out of charged); cash-in is credits_sold",
 		Formula:     "SUM(charged amount) + SUM(forgiven amount) of usage history",
 		Agg:         sum(`uc.amount`, ""),
 		Dims:        with(usageDims, "charge")},

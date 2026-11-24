@@ -158,6 +158,15 @@ func (s *Service) MerchantSettings(ctx context.Context, id billing.MerchantID) (
 	return s.config.MerchantSettings(ctx, id)
 }
 
+// StoredCurrencies are the units the merchant's document declares in its
+// file or Vault now (db.MerchantConfig).
+func (s *Service) StoredCurrencies(ctx context.Context, id billing.MerchantID) ([]billing.MerchantCurrency, error) {
+	if s == nil || s.config == nil {
+		return nil, errors.New("merchants: merchant configuration unavailable")
+	}
+	return s.config.StoredCurrencies(ctx, id)
+}
+
 // MerchantMessages is the messages document the merchant serves
 // (db.MerchantConfig).
 func (s *Service) MerchantMessages(ctx context.Context, id billing.MerchantID) (billing.MessageSettings, error) {

@@ -96,10 +96,11 @@ type GetUsageParams struct {
 }
 
 // UsageRow is one group of a usage report: EventCount usage items and Amount
-// what they charged. Grouped by meter, Key is the meter key, Cell its matrix
-// cell (null without a matrix), EventCount the items it priced, Quantity the
-// summed quantity and Amount what it charged; Quantity is null in other
-// groupings.
+// what they cost at their rate cards; in a merchant's own unit that includes
+// any part a posting forgave. Grouped by meter, Key is the meter key, Cell its
+// matrix cell (null without a matrix), EventCount the items it priced,
+// Quantity the summed quantity and Amount what it cost; Quantity is null in
+// other groupings.
 type UsageRow struct {
 	Key        string  `json:"key"`
 	Cell       *string `json:"cell"`

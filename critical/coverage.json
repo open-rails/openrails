@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 685,
+  "scenario_count": 704,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -141,17 +141,32 @@
     {
       "id": "OR-J05-S07",
       "journey": "J05",
-      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing"
+      "name": "A unit that collides with the registry or breaks the code, name, symbol or scale rules, or a money setting naming a unit, is refused at load and on a Vault edit, which then writes nothing; a unit a balance counts is neither removed nor rescaled, and a Vault edit outside OpenRails that removes it keeps serving its declaration with a finding"
     },
     {
       "id": "OR-J05-S08",
       "journey": "J05",
-      "name": "A merchant unit is refused merchant_unit_unsupported by credit grants, balances, prices and catalog credit grants and rate cards, and a catalog cannot price in one; nothing is written"
+      "name": "A merchant's unit is never owed, never the price of a credit pack and never a recurring price; a credit limit in one, a pack paid from_payment and the amount shorthand are refused; a unit the merchant does not declare is an unknown currency anywhere a document or request names it"
     },
     {
       "id": "OR-J05-S09",
       "journey": "J05",
       "name": "Another merchant does not see a merchant's units: the same code is its own unit at its own scale, and another merchant's code is an unknown currency"
+    },
+    {
+      "id": "OR-J05-S10",
+      "journey": "J05",
+      "name": "A unit the units book counts keeps the scale it recorded (ledger_units) when a restart loads a file that rescales it: the balance reads at the recorded scale and the operator gets the refused-document finding"
+    },
+    {
+      "id": "OR-J05-S11",
+      "journey": "J05",
+      "name": "A catalog write that first names a unit (a price, a pack's credit, a rate card) records its scale under the units lock, so a restart on a file that rescales it keeps that scale before any balance holds it"
+    },
+    {
+      "id": "OR-J05-S12",
+      "journey": "J05",
+      "name": "A unit's first count reads its declaration in Vault under the units lock, not a replica's stale copy"
     },
     {
       "id": "OR-J06-S01",
@@ -2944,6 +2959,66 @@
       "name": "A replayed NMI chargeback batch, its reversal already booked, reverses and revokes nothing again: access the merchant restored after the dispute survives it"
     },
     {
+      "id": "OR-J48-S01",
+      "journey": "J48",
+      "name": "A pack buys a merchant's unit at its own price-to-units ratio, bonus packs included: one lot per pack records its units, what was paid and in what currency, deposited from units_sold; the balance shows at the unit's scale, and the lots move with a billing archive"
+    },
+    {
+      "id": "OR-J48-S02",
+      "journey": "J48",
+      "name": "The same units bought in another currency credit the same unit balance; each lot records the currency that paid it and nothing converts"
+    },
+    {
+      "id": "OR-J48-S03",
+      "journey": "J48",
+      "name": "A plan's allowance delivers its units each paid cycle as a recurring lot, and a staff gift in a unit is granted from units_granted with nothing paid"
+    },
+    {
+      "id": "OR-J48-S04",
+      "journey": "J48",
+      "name": "An order priced in a merchant's unit is paid from the customer's balance as it is created, with no payment or provider, and grants its product's keys; its key answers a retry with the same order; a balance short of it is refused insufficient_credits and creates nothing"
+    },
+    {
+      "id": "OR-J48-S05",
+      "journey": "J48",
+      "name": "Usage priced in a unit by rate card holds and draws the unit balance, soonest-expiring lot first, and a card naming no currency prices no unit; usage the units cannot cover is never owed"
+    },
+    {
+      "id": "OR-J48-S06",
+      "journey": "J48",
+      "name": "A lapsed pack is never drawn and its unspent units expire in the unit, once; usage captured while a lot lived posts before it lapses, so the lot pays it and only the rest expires"
+    },
+    {
+      "id": "OR-J48-S07",
+      "journey": "J48",
+      "name": "Refunding a pack's payment takes that lot's unspent units first, refuses a refund whose share is spent, books a chargeback's spent share as consumed, and a won dispute returns what the chargeback took, with no cash leg in the unit"
+    },
+    {
+      "id": "OR-J48-S08",
+      "journey": "J48",
+      "name": "Admission holds a unit balance: a request beyond what is left, or one that holds nothing once it is all held, is refused, and a dollar failed-usage limit binds no unit; a capture prices its overrun in full, its posting takes what the lots hold and records the rest forgiven (usage_postings.forgiven, usage_charged charge: forgiven), never owed, and the customer reads its usage in the unit"
+    },
+    {
+      "id": "OR-J48-S09",
+      "journey": "J48",
+      "name": "Reversals of a multi-line order's pack apply in the order they settle: a chargeback settling before an earlier pending refund takes the line's share first, the refund then takes the rest, each share is recorded once, in the general ledger, and a won dispute restores what the chargeback took"
+    },
+    {
+      "id": "OR-J48-S10",
+      "journey": "J48",
+      "name": "A period in a unit whose volume price falls below what posted is credited once its late window closes, taking back what the period forgave, from the shares its posting stored, before crediting what the lots paid beyond its price"
+    },
+    {
+      "id": "OR-J48-S11",
+      "journey": "J48",
+      "name": "A lease sync's usage in a merchant's unit is refused currency_unsupported and moves nothing: usage in a unit arrives through an admission's capture"
+    },
+    {
+      "id": "OR-J48-S12",
+      "journey": "J48",
+      "name": "The first balance in a unit waits for the units lock a settings change takes before it locks any customer, and records the unit's scale; a gift in a counted unit takes no lock"
+    },
+    {
       "id": "OR-J53-S01",
       "journey": "J53",
       "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a removed measure is refused naming its replacement"
@@ -3427,6 +3502,26 @@
       "id": "OR-J40-S26",
       "journey": "J40",
       "name": "A credit lot whose payment brought no cash defers nothing, raises books.credit.unapplied and commits"
+    },
+    {
+      "id": "OR-J04-S80",
+      "journey": "J04",
+      "name": "Two billing passes started together: one runs its scans and the other exits without a report; the running pass holds a lease row, not a database session"
+    },
+    {
+      "id": "OR-J04-S81",
+      "journey": "J04",
+      "name": "A billing pass whose holder died leaves a lease that lapses on its own; a pass started meanwhile exits, and the next takes what is due"
+    },
+    {
+      "id": "OR-J38-S83",
+      "journey": "J38",
+      "name": "Of concurrent pulls of one merchant one runs and the others skip, another merchant's pull runs beside it, and a provider refresh waits for the running pull; the pull holds a lease row, not a database session"
+    },
+    {
+      "id": "OR-J38-S84",
+      "journey": "J38",
+      "name": "A pull that runs past one lease period keeps its lease and others still skip; a dead holder's lease lapses on its own and the next pull takes it"
     }
   ]
 }

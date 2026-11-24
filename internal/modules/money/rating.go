@@ -60,8 +60,9 @@ type eventFields struct {
 }
 
 // usageCards reads the rate cards that price eventType in currency. A card in
-// another currency does not price the event; an event type whose cards are
-// all in other currencies is not priced at all.
+// another currency does not price the event, and a card naming no currency is
+// money: it never prices a merchant's unit. An event type whose cards are all
+// in other currencies is not priced at all.
 func usageCards(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, eventType, currency string) ([]ratingCard, error) {
 	rows, err := q.ListUsageRatingCards(ctx, gen.ListUsageRatingCardsParams{MerchantID: merchantID, EventType: eventType})
 	if err != nil {
@@ -83,7 +84,7 @@ func usageCards(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, event
 	}
 	priced := cards[:0:0]
 	for _, card := range cards {
-		if c := strings.ToUpper(strings.TrimSpace(string(card.Price.Currency))); c == "" || c == currency {
+		if c := strings.ToUpper(strings.TrimSpace(string(card.Price.Currency))); c == currency || c == "" && !IsMerchantUnit(currency) {
 			priced = append(priced, card)
 		}
 	}

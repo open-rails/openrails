@@ -332,6 +332,10 @@ func piecedAndUnitRefunds(t *testing.T) {
 		s := newCreditShop(t)
 		w := s.a.world
 		payment := s.cardPayment(t, 20_000_000, models.MoneyMovementRail, "gold-pack")
+		// Counted as a catalog naming it counts it: this transaction binds no
+		// merchant configuration to read GOLD's declaration from.
+		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "ledger_units")+" (merchant_id, unit, scale) VALUES ($1, 'GOLD', 0)", w.alpha.MerchantID().UUID())
+		require.NoError(t, err)
 		lot := s.issue(t, "GOLD", 400, 20_000_000, payment)
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 			_, err := credits.New(q, w.alpha.MerchantID().UUID(), w.clock.Now).Spend(ctx, s.customer.UUID(), "GOLD", 100, s.customer.String(), "critical",

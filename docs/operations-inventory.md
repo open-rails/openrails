@@ -161,7 +161,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 491 named SQL statements in 89 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 495 named SQL statements in 90 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -190,13 +190,14 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [host_lifecycle_events.sql](../internal/db/queries/host_lifecycle_events.sql) | 2 | `host_outbox` |
 | [idempotency_keys.sql](../internal/db/queries/idempotency_keys.sql) | 6 | `idempotency_keys` |
 | [leases.sql](../internal/db/queries/leases.sql) | 11 | `leases`, `limit_hold_parts`, `limit_holds` |
-| [ledger.sql](../internal/db/queries/ledger.sql) | 2 | `ledger_accounts`, `ledger_transfers` |
+| [ledger.sql](../internal/db/queries/ledger.sql) | 3 | `ledger_accounts`, `ledger_transfers`, `ledger_units` |
 | [limit_holds.sql](../internal/db/queries/limit_holds.sql) | 5 | `limit_hold_parts`, `limit_holds` |
 | [limits.sql](../internal/db/queries/limits.sql) | 9 | `catalog_limits`, `catalog_product_limits`, `customer_limit_overrides`, `limit_adjustments`, `limit_windows` |
 | [mandates.sql](../internal/db/queries/mandates.sql) | 8 | `host_outbox`, `mandates` |
 | [merchant_archive.sql](../internal/db/queries/merchant_archive.sql) | 1 | `merchants` |
 | [merchant_binding.sql](../internal/db/queries/merchant_binding.sql) | 1 | `merchants` |
 | [merchant_config.sql](../internal/db/queries/merchant_config.sql) | 2 | `reconciliation_findings` |
+| [merchant_leases.sql](../internal/db/queries/merchant_leases.sql) | 2 | `merchant_leases` |
 | [merchant_lifecycle.sql](../internal/db/queries/merchant_lifecycle.sql) | 19 | `customer_contacts`, `mandates`, `money_settings`, `nmi_history_months`, `operation_log`, `order_attempts`, `payment_attempts`, `payment_method_versions`, `payment_methods`, `payments`, `product_access`, `provider_intents`, `provisioning_tokens`, `psp_customers`, `rebill_cycles`, `solana_pay_receipts`, `solana_pay_references`, `stripe_fee_reads`, `subscriptions` |
 | [merchant_retirement.sql](../internal/db/queries/merchant_retirement.sql) | 2 | `merchants` |
 | [merchant_secret_cleanup.sql](../internal/db/queries/merchant_secret_cleanup.sql) | 2 | `maintenance_runs` |
@@ -216,7 +217,7 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [payment_method_versions.sql](../internal/db/queries/payment_method_versions.sql) | 3 | `payment_method_versions`, `payment_methods` |
 | [payment_methods.sql](../internal/db/queries/payment_methods.sql) | 9 | `payment_method_versions`, `payment_methods` |
 | [payments.sql](../internal/db/queries/payments.sql) | 11 | `payments` |
-| [periodic_leases.sql](../internal/db/queries/periodic_leases.sql) | 1 | `periodic_leases` |
+| [periodic_leases.sql](../internal/db/queries/periodic_leases.sql) | 2 | `periodic_leases` |
 | [price_migrations.sql](../internal/db/queries/price_migrations.sql) | 3 | `price_migrations` |
 | [price_psp_bindings.sql](../internal/db/queries/price_psp_bindings.sql) | 2 | `price_psp_bindings` |
 | [prices.sql](../internal/db/queries/prices.sql) | 6 | `prices` |
@@ -255,14 +256,14 @@ The source scan found 491 named SQL statements in 89 files with an explicit qual
 | [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
 | [write_posture.sql](../internal/db/queries/write_posture.sql) | 2 | `merchant_write_posture` |
 
-The migrations declare these 123 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
+The migrations declare these 124 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema, and rolling partition names depend on the calendar. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
 
 - `balance_watches`, `book_identity`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`, `catalog_meters`
 - `catalog_product_limits`, `catalog_rate_cards`, `catalog_restore_receipts`, `credit_grant_events`, `credit_grants`, `custodians`, `customer_contacts`
 - `customer_delinquency`, `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`, `customer_mrr`, `customers`, `dashboard_configs`
 - `destructive_action_switch`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`, `event_store`, `eventlog_events`, `eventlog_migrations`
 - `eventlog_pending`, `eventlog_streams`, `grants`, `host_outbox`, `idempotency_keys`, `leases`, `ledger_accounts`
-- `ledger_daily`, `ledger_rollup_pending`, `ledger_transfers`, `ledger_type_totals`, `limit_adjustments`, `limit_hold_parts`, `limit_holds`
+- `ledger_daily`, `ledger_rollup_pending`, `ledger_transfers`, `ledger_type_totals`, `ledger_units`, `limit_adjustments`, `limit_hold_parts`, `limit_holds`
 - `limit_windows`, `maintenance_runs`, `mandates`, `merchant_destructive_policy`, `merchant_slug_aliases`, `merchant_write_posture`, `merchants`
 - `money_settings`, `mrr_cohort_flows`, `mrr_flows`, `mrr_movement_lines`, `mrr_movements`, `mrr_product_flows`, `mrr_risk_cases`
 - `mrr_risk_due`, `mrr_risk_episodes`, `mrr_risk_flows`, `mrr_risk_totals`, `mrr_scheduled`, `mrr_totals`, `nmi_bulk_checkpoints`

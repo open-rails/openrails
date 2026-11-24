@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Host-owned usage meters and rate cards.
@@ -130,7 +131,7 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if in.Price.Currency == "" {
 		return invalidUsageRateCard(fmt.Errorf("usage rate card: currency is required"))
 	}
-	if err := RequireBillingCurrency(string(in.Price.Currency)); err != nil {
+	if err := moneyutil.ValidateBalanceCurrency(string(in.Price.Currency)); err != nil {
 		return invalidUsageRateCard(err)
 	}
 	if err := catalogrules.ValidateUsageAllowance("usage rate card", in.Price, in.Allowance); err != nil {

@@ -88,7 +88,10 @@ func RequestProviderRefresh(ctx context.Context, database *db.DB, id billing.Mer
 type ProviderRefreshWorker struct {
 	StripeClients *stripeapi.Factory
 	WorkerDefaults[ProviderRefreshRequestArgs]
-	DB     *db.DB
+	DB *db.DB
+	// Leases renews the merchant's pull lease, on connections the pull cannot
+	// take; nil is DB.
+	Leases *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
 	// Merchants resolves per-merchant PSPs and scoped secrets. nil = nothing
@@ -186,14 +189,19 @@ func (w *ProviderRefreshWorker) work(ctx context.Context, mid, psp uuid.UUID) er
 	stats := providerRefreshStats{Merchants: 1}
 
 	// One refresh per merchant at a time, across every replica.
-	release, held, err := reconcile.LockMerchantPull(ctx, w.DB, mid)
+	leases := w.Leases
+	if leases == nil {
+		leases = w.DB
+	}
+	lease, err := reconcile.LockMerchantPull(ctx, leases, mid)
 	if err != nil {
 		return err
 	}
-	if !held {
+	if lease == nil {
 		return river.JobSnooze(5 * time.Second)
 	}
-	defer release()
+	defer lease.Release()
+	ctx = lease.Context()
 
 	// Fetchers and per-subscription probers arm per merchant, inside its scope.
 	// A rail that cannot arm is absent for that merchant (its WARN names
