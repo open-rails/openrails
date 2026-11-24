@@ -159,7 +159,12 @@ var billingScanBudgets = map[string]time.Duration{
 	KindStoredCardRefreshDue:          time.Hour,
 	KindOperationWakes:                DefaultTimeout,
 	KindMRRDue:                        DefaultTimeout,
+	KindStripeFees:                    DefaultTimeout,
 }
+
+// KindStripeFees is the scan that reads the processor fees of the Stripe
+// charges, refunds and disputes queued in stripe_fee_reads.
+const KindStripeFees = "openrails.stripe_fees"
 
 // ScanBudget is a scan's budget inside the pass.
 func ScanBudget(kind string) time.Duration { return billingScanBudgets[kind] }

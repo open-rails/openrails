@@ -25,6 +25,7 @@ migration 0026_books.up.sql sha256:8b188df060f1b827c4deb6069081cbfe94cd8f5dc6c9c
 migration 0027_mrr_at_risk.up.sql sha256:e2fdd4b8664adc64b11d71405c1b8be66ac173c5d761f2afb15c3c6437c654d6
 migration 0028_usage_posting_watermark.up.sql sha256:0e646875e208f9c138878ffbd7d01cf52d7212b8f6817c33904a5a39d5d6b392
 migration 0029_revenue_schedules.up.sql sha256:442e42863007d36a38c81d7024b9e99cc3092fb10211ba49b2f43c3627121c7a
+migration 0030_stripe_fees.up.sql sha256:9eaf00b0f211b60fe71ab2d91e59e5303c3cb0488c211d66865199d8d79c91b0
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -701,6 +702,7 @@ table billing.disputes
   index CREATE UNIQUE INDEX disputes_psp_id_provider_ref_key ON billing.disputes USING btree (merchant_id, psp_id, provider_ref)
   index CREATE INDEX disputes_waiting_idx ON billing.disputes USING btree (merchant_id, id) WHERE ((kind = 'chargeback'::text) AND (responded_at IS NULL))
   trigger CREATE TRIGGER disputes_network_activity AFTER INSERT OR DELETE OR UPDATE OF kind, chargeback_at, network, reason, amount, currency ON billing.disputes FOR EACH ROW EXECUTE FUNCTION billing.dispute_network_activity()
+  trigger CREATE TRIGGER disputes_queue_stripe_fee_read AFTER INSERT OR UPDATE OF status ON billing.disputes FOR EACH ROW EXECUTE FUNCTION billing.queue_stripe_fee_read()
 
 table billing.event_store
   column singleton boolean NOT NULL
@@ -2340,6 +2342,7 @@ table billing.payments
   index CREATE INDEX payments_subscription_id_idx ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   trigger CREATE TRIGGER payments_enqueue_settlement_event AFTER INSERT OR UPDATE OF status ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.enqueue_payment_settlement_event()
   trigger CREATE TRIGGER payments_network_activity AFTER INSERT OR DELETE OR UPDATE OF status, amount, currency, deleted_at, card_brand, purchased_at, psp_id, money_movement ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.payment_network_activity()
+  trigger CREATE TRIGGER payments_queue_stripe_fee_read AFTER INSERT OR UPDATE OF status, money_movement ON billing.payments FOR EACH ROW EXECUTE FUNCTION billing.queue_stripe_fee_read()
 
 table billing.periodic_leases
   column kind text NOT NULL
@@ -3040,6 +3043,7 @@ table billing.reconciliation_findings
   index CREATE INDEX reconciliation_findings_proposals_idx ON billing.reconciliation_findings USING btree (merchant_id, status, source, psp_id) WHERE (finding_type ~~ 'pull.%'::text)
   index CREATE INDEX reconciliation_findings_pull_id_idx ON billing.reconciliation_findings USING btree (merchant_id, pull_id) WHERE (pull_id IS NOT NULL)
   index CREATE INDEX reconciliation_findings_resolved_idx ON billing.reconciliation_findings USING btree (merchant_id, GREATEST(resolved_at, last_seen_at)) WHERE (resolved_at IS NOT NULL)
+  trigger CREATE TRIGGER reconciliation_findings_requeue_stripe_fee_read AFTER UPDATE OF status ON billing.reconciliation_findings FOR EACH ROW EXECUTE FUNCTION billing.requeue_stripe_fee_read()
 
 table billing.reconciliation_state
   column merchant_id uuid NOT NULL
@@ -3280,6 +3284,24 @@ table billing.stored_card_checks
   constraint stored_card_checks_pkey PRIMARY KEY (merchant_id, payment_method_id)
   index CREATE INDEX stored_card_checks_due_at_idx ON billing.stored_card_checks USING btree (due_at)
   index CREATE UNIQUE INDEX stored_card_checks_pkey ON billing.stored_card_checks USING btree (merchant_id, payment_method_id)
+
+table billing.stripe_fee_reads
+  column merchant_id uuid NOT NULL
+  column psp_id uuid NOT NULL
+  column ref text NOT NULL
+  column kind text NOT NULL
+  column due_at timestamp with time zone NOT NULL
+  column attempts integer NOT NULL DEFAULT 0
+  column last_error text
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint stripe_fee_reads_attempts_check CHECK ((attempts >= 0))
+  constraint stripe_fee_reads_kind_check CHECK ((kind = ANY (ARRAY['payment'::text, 'refund'::text, 'dispute'::text])))
+  constraint stripe_fee_reads_last_error_check CHECK ((last_error <> ''::text))
+  constraint stripe_fee_reads_pkey PRIMARY KEY (merchant_id, psp_id, ref)
+  constraint stripe_fee_reads_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
+  constraint stripe_fee_reads_ref_check CHECK ((ref <> ''::text))
+  index CREATE INDEX stripe_fee_reads_due_at_idx ON billing.stripe_fee_reads USING btree (due_at, merchant_id, psp_id, ref)
+  index CREATE UNIQUE INDEX stripe_fee_reads_pkey ON billing.stripe_fee_reads USING btree (merchant_id, psp_id, ref)
 
 table billing.subscription_billing_changes
   column merchant_id uuid NOT NULL
@@ -4660,6 +4682,7 @@ function billing.guard_billing_restore_receipt()
                     'solana_pay_references',
                     'solana_subscriptions',
                     'stored_card_checks',
+                    'stripe_fee_reads',
                     'subscription_billing_changes',
                     'subscription_mrr',
                     'subscription_status_transitions',
@@ -5496,6 +5519,42 @@ function billing.queue_mrr_risk(uuid,uuid,timestamp with time zone)
   INSERT INTO billing.mrr_risk_due (merchant_id, customer_id, changed_at) VALUES (p_merchant, p_customer, p_at)
   $function$
 
+function billing.queue_stripe_fee_read()
+  CREATE OR REPLACE FUNCTION billing.queue_stripe_fee_read()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE fresh boolean;
+  BEGIN
+      IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NULL; END IF;
+      IF TG_TABLE_NAME = 'payments' THEN
+          IF NEW.rail IS DISTINCT FROM 'stripe' OR NEW.psp_id IS NULL OR NEW.money_movement <> 'rail' OR NEW.status <> 'succeeded'
+             OR NEW.amount = 0 OR NEW.deleted_at IS NOT NULL OR NEW.transaction_id = ''
+             OR coalesce(NEW.reversal_kind IN ('chargeback', 'dispute_reversal'), false)
+             OR NEW.reversal_kind = 'refund' AND NEW.transaction_id !~ '^(re|pyr)_'
+             OR TG_OP = 'UPDATE' AND OLD.status = 'succeeded' AND OLD.money_movement = 'rail' THEN
+              RETURN NULL;
+          END IF;
+          INSERT INTO billing.stripe_fee_reads (merchant_id, psp_id, ref, kind, due_at)
+          VALUES (NEW.merchant_id, NEW.psp_id, NEW.transaction_id, CASE WHEN NEW.reversal_kind = 'refund' THEN 'refund' ELSE 'payment' END, now())
+          ON CONFLICT DO NOTHING;
+      ELSIF NEW.rail = 'stripe' AND NEW.provider_ref <> '' THEN
+          fresh := TG_OP = 'INSERT';
+          IF NOT fresh THEN
+              fresh := OLD.status IS DISTINCT FROM NEW.status;
+          END IF;
+          INSERT INTO billing.stripe_fee_reads AS r (merchant_id, psp_id, ref, kind, due_at)
+          VALUES (NEW.merchant_id, NEW.psp_id, NEW.provider_ref, 'dispute', now())
+          ON CONFLICT (merchant_id, psp_id, ref) DO UPDATE SET kind = 'dispute',
+              due_at = CASE WHEN fresh THEN now() ELSE r.due_at END,
+              attempts = CASE WHEN fresh THEN 0 ELSE r.attempts END,
+              last_error = CASE WHEN fresh THEN NULL ELSE r.last_error END;
+      END IF;
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.rail_subscription_key(text,text)
   CREATE OR REPLACE FUNCTION billing.rail_subscription_key(rail text, ref text)
    RETURNS text
@@ -5675,6 +5734,24 @@ function billing.release_inactive_default()
           UPDATE billing.money_settings SET default_payment_method_id = NULL, updated_at = now()
           WHERE merchant_id = NEW.merchant_id AND customer_id = NEW.customer_id AND default_payment_method_id = NEW.id;
       END IF;
+      RETURN NULL;
+  END;
+  $function$
+
+function billing.requeue_stripe_fee_read()
+  CREATE OR REPLACE FUNCTION billing.requeue_stripe_fee_read()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF NEW.finding_type <> 'books.fee.unread' OR NEW.status NOT IN ('fixed', 'auto_fixed')
+         OR OLD.status NOT IN ('reconcile_required', 'requires_review') THEN
+          RETURN NULL;
+      END IF;
+      UPDATE billing.stripe_fee_reads SET due_at = now(), attempts = 0, last_error = NULL
+       WHERE merchant_id = NEW.merchant_id AND psp_id::text = split_part(NEW.subject_key, '/', 1)
+         AND ref = substr(NEW.subject_key, length(split_part(NEW.subject_key, '/', 1)) + 2) AND due_at = 'infinity';
       RETURN NULL;
   END;
   $function$
