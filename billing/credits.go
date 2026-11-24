@@ -328,10 +328,13 @@ type MerchantSettings struct {
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
 	// through OpenRails follow their own revoke_access choice.
-	ProviderRefundAccess    *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
-	ArrearsGraceDays        *int                  `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor *int64                `json:"arrears_delinquency_floor,omitempty,string"`
-	PSPRouting              *[]PSPRoutingRule     `json:"psp_routing,omitempty"`
+	ProviderRefundAccess *ProviderRefundAccess `json:"provider_refund_access,omitempty"`
+	// FraudWarningRefund decides what an actionable early fraud warning does:
+	// FraudWarningRefundCharge (default) or FraudWarningRecord.
+	FraudWarningRefund      *FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
+	ArrearsGraceDays        *int                `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor *int64              `json:"arrears_delinquency_floor,omitempty,string"`
+	PSPRouting              *[]PSPRoutingRule   `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`

@@ -31,6 +31,11 @@ var opsRoutes = []Route{
 	{Method: GET, Path: "/v1/metrics/schema", Group: Metrics, Auth: AuthMerchant, Name: "GetMetricsSchema",
 		Doc:       "GetMetricsSchema lists every measure, dimension and grain a query may use.",
 		Responses: []Reply{{200, billing.MetricsSchema{}}}, Handler: h(handlers.MerchantMetricsSchema)},
+	{Method: GET, Path: "/v1/metrics/dispute-programs", Group: Metrics, Auth: AuthMerchant, Name: "ListDisputePrograms",
+		Doc: "ListDisputePrograms is each card PSP's standing in the dispute monitoring programs for the month containing " +
+			"params.At (now when unset): the counts, the ratio so far and projected over the month, the level reached and " +
+			"the thresholds in force.",
+		Query: billing.DisputeProgramListParams{}, Responses: []Reply{{200, billing.ListPage[billing.DisputeStanding]{}}}, Errors: codes("invalid_param", "service_unavailable"), Handler: h(handlers.ListDisputePrograms)},
 	{Method: GET, Path: "/v1/metrics/dashboard", Group: Metrics, Auth: AuthMerchant, Name: "GetDashboard",
 		Doc:       "GetDashboard returns the merchant's widget layout.",
 		Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetMerchantDashboard)},

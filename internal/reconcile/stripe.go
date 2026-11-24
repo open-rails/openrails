@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/booktag"
 	"io"
 	"net/http"
@@ -14,7 +15,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/disputes"
+	"github.com/open-rails/openrails/internal/disputerules"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/transient"
@@ -583,7 +584,7 @@ func normalizeStripeDispute(obj json.RawMessage) (RemoteTransaction, bool) {
 		} `json:"payment_method_details"`
 	}
 	_ = json.Unmarshal(obj, &d)
-	if disputes.StripeKind(d.Status, d.PaymentMethodDetails.Card.CaseType) != disputes.KindChargeback {
+	if disputerules.StripeKind(d.Status, d.PaymentMethodDetails.Card.CaseType) != billing.DisputeChargeback {
 		return RemoteTransaction{}, false
 	}
 

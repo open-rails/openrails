@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/disputes"
+
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -74,7 +76,9 @@ type WebhookDispatcher struct {
 	// ObserveEnqueuer schedules the read of a catalog object a Stripe
 	// product.* or price.* event names.
 	ObserveEnqueuer ProviderObjectObserveEnqueuer
-	Log             *slog.Logger
+	// Disputes records disputes and fraud reports and alerts on them.
+	Disputes *disputes.Service
+	Log      *slog.Logger
 }
 
 // webhookRegistry resolves WebhookHandlers by rail: adding a rail means
@@ -137,6 +141,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		DeduplicationService:         d.DeduplicationService,
 		OrderAttemptService:          d.OrderAttemptService,
 		MoneyService:                 d.MoneyService,
+		Disputes:                     d.Disputes,
 		Log:                          h.Log,
 	}
 	return service.HandleCCBillWebhook(ctx)
@@ -171,6 +176,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		ConvergeEnqueuer:             d.ConvergeEnqueuer,
 		NMIResolver:                  d.NMIResolver,
 		Clock:                        d.Clock,
+		Disputes:                     d.Disputes,
 		Log:                          h.Log,
 	}
 	return service.HandleNMIWebhook(ctx)
@@ -217,6 +223,7 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		ConvergeEnqueuer:     d.ConvergeEnqueuer,
 		ObserveEnqueuer:      d.ObserveEnqueuer,
 		StripePaymentState:   paymentState,
+		Disputes:             d.Disputes,
 		Log:                  h.Log,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)

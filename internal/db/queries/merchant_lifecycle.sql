@@ -25,6 +25,24 @@ SELECT count(*) FROM billing.product_access WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsProductAccess :exec
 DELETE FROM billing.product_access WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsDisputes :one
+SELECT count(*) FROM billing.disputes WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsDisputes :exec
+DELETE FROM billing.disputes WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsFraudReports :one
+SELECT count(*) FROM billing.fraud_reports WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsFraudReports :exec
+DELETE FROM billing.fraud_reports WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsNetworkActivity :one
+SELECT count(*) FROM billing.network_activity_daily WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsNetworkActivity :exec
+DELETE FROM billing.network_activity_daily WHERE merchant_id = $1;
+
 -- name: CountMerchantRowsPayments :one
 SELECT count(*) FROM billing.payments WHERE merchant_id = $1;
 

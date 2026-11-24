@@ -252,7 +252,7 @@ func (q *Queries) EndUsageCollection(ctx context.Context, arg EndUsageCollection
 }
 
 const getOrderPayment = `-- name: GetOrderPayment :one
-SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity FROM billing.payments
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity, refund_reason FROM billing.payments
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND order_id = $3::uuid AND id = $4::uuid
 `
@@ -307,6 +307,7 @@ func (q *Queries) GetOrderPayment(ctx context.Context, arg GetOrderPaymentParams
 		&i.OrderID,
 		&i.LedgerTransferID,
 		&i.Quantity,
+		&i.RefundReason,
 	)
 	return i, err
 }
@@ -426,7 +427,7 @@ func (q *Queries) GetUsageRecoveryLedgerTransfer(ctx context.Context, arg GetUsa
 }
 
 const getUsageRecoveryPayment = `-- name: GetUsageRecoveryPayment :many
-SELECT p.id, p.channel, p.rail, p.transaction_id, p.amount, p.list_amount, p.currency, p.status, p.subscription_id, p.refunded_payment_id, p.discount_code, p.discount_reason, p.discount_metadata, p.metadata, p.purchased_at, p.created_at, p.card_brand, p.card_last4, p.merchant_id, p.customer_id, p.psp_id, p.attempt_kind, p.failure_code, p.failure_reason, p.reversal_kind, p.token_type, p.deleted_at, p.destructive_run_id, p.destructive_run_class, p.money_movement, p.credit_grant_snapshot, p.order_id, p.ledger_transfer_id, p.quantity FROM billing.payments p
+SELECT p.id, p.channel, p.rail, p.transaction_id, p.amount, p.list_amount, p.currency, p.status, p.subscription_id, p.refunded_payment_id, p.discount_code, p.discount_reason, p.discount_metadata, p.metadata, p.purchased_at, p.created_at, p.card_brand, p.card_last4, p.merchant_id, p.customer_id, p.psp_id, p.attempt_kind, p.failure_code, p.failure_reason, p.reversal_kind, p.token_type, p.deleted_at, p.destructive_run_id, p.destructive_run_class, p.money_movement, p.credit_grant_snapshot, p.order_id, p.ledger_transfer_id, p.quantity, p.refund_reason FROM billing.payments p
 JOIN billing.orders o ON o.merchant_id = p.merchant_id AND o.id = p.order_id AND o.origin = 'usage'
 WHERE p.merchant_id = $1::uuid AND p.psp_id = $2::uuid
   AND p.transaction_id = $3::text
@@ -483,6 +484,7 @@ func (q *Queries) GetUsageRecoveryPayment(ctx context.Context, arg GetUsageRecov
 			&i.OrderID,
 			&i.LedgerTransferID,
 			&i.Quantity,
+			&i.RefundReason,
 		); err != nil {
 			return nil, err
 		}

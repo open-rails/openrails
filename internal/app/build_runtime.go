@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/modules/disputes"
+
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/authkit/userinfo"
@@ -362,6 +364,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock, Log: logger},
 		MoneyCharger:        moneyCharger,
 		RailCustomerService: serviceInstances.RailCustomerService,
+	}
+
+	runtime.Disputes = disputes.New(database, clock)
+	runtime.Disputes.Notifier, runtime.Disputes.Log = alertService, logger
+	if serviceInstances.WebhookDispatcher != nil {
+		serviceInstances.WebhookDispatcher.Disputes = runtime.Disputes
 	}
 
 	// Arm the late-bound resolvers built above (#788): they close over

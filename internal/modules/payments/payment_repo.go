@@ -126,11 +126,24 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		FailureCode:         p.FailureCode,
 		FailureReason:       p.FailureReason,
 		ReversalKind:        p.ReversalKind,
+		RefundReason:        refundReason(p),
 		TokenType:           p.TokenType,
 		MoneyMovement:       string(movement),
 		OrderID:             p.OrderID,
 		Quantity:            quantity,
 	}, nil
+}
+
+// refundReason is a refund row's reason: unknown when its writer named none.
+func refundReason(p *models.Payment) *string {
+	if p.ReversalKind == nil || *p.ReversalKind != ReversalRefund {
+		return nil
+	}
+	if p.RefundReason != nil && billing.RefundReason(*p.RefundReason).Valid() {
+		return p.RefundReason
+	}
+	unknown := string(billing.RefundUnknown)
+	return &unknown
 }
 
 func (s *PaymentService) insert(ctx context.Context, payment *models.Payment) error {

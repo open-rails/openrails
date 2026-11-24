@@ -10,7 +10,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id, quantity
+    money_movement, order_id, quantity, refund_reason
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(channel)::text, sqlc.narg(rail)::text,
     sqlc.arg(transaction_id)::text, sqlc.arg(amount)::bigint, sqlc.arg(list_amount)::bigint,
@@ -26,7 +26,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int
+    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int, sqlc.narg(refund_reason)::text
 );
 
 -- name: CreatePaymentIfNotExists :execrows
@@ -37,7 +37,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id, quantity
+    money_movement, order_id, quantity, refund_reason
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(channel)::text, sqlc.narg(rail)::text,
     sqlc.arg(transaction_id)::text, sqlc.arg(amount)::bigint, sqlc.arg(list_amount)::bigint,
@@ -53,7 +53,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int
+    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int, sqlc.narg(refund_reason)::text
 )
 ON CONFLICT DO NOTHING;
 

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -108,7 +109,12 @@ const (
 // ID. reversalKind says WHAT the reversal is (refund vs chargeback); the rails
 // handle the actual money movement, this persists the event. amount is micros.
 func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string) (*models.Payment, error) {
-	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, time.Time{}, nil, true)
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, "", time.Time{}, nil, true)
+}
+
+// RefundWithReason records a provider's refund and the reason it gives.
+func (s *PaymentService) RefundWithReason(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reason billing.RefundReason) (*models.Payment, error) {
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, ReversalRefund, reason, time.Time{}, nil, true)
 }
 
 // RecordObservedRefund retains the provider's occurrence time and provenance.
@@ -118,7 +124,7 @@ func (s *PaymentService) RecordObservedRefund(ctx context.Context, originalPayme
 	if occurredAt.IsZero() {
 		return nil, errors.New("observed refund requires its provider occurrence time")
 	}
-	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, occurredAt.UTC().Truncate(time.Microsecond), metadata, true)
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, "", occurredAt.UTC().Truncate(time.Microsecond), metadata, true)
 }
 
 // RecordImportedRefund is RecordObservedRefund for a refund an import brings
@@ -128,12 +134,12 @@ func (s *PaymentService) RecordImportedRefund(ctx context.Context, originalPayme
 	if occurredAt.IsZero() {
 		return nil, errors.New("imported refund requires its provider occurrence time")
 	}
-	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, ReversalRefund, occurredAt.UTC().Truncate(time.Microsecond), nil, false)
+	return s.recordRefund(ctx, originalPaymentID, refundTransactionID, amount, ReversalRefund, "", occurredAt.UTC().Truncate(time.Microsecond), nil, false)
 }
 
 // recordRefund records the reversal; receipt records a new refund's
 // refund_completed fact with it.
-func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any, receipt bool) (*models.Payment, error) {
+func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, reason billing.RefundReason, occurredAt time.Time, metadata map[string]any, receipt bool) (*models.Payment, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -161,7 +167,7 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 		}
 		scoped := NewPaymentService(transactionDB, s.clock)
 		var created bool
-		refund, created, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, occurredAt, metadata)
+		refund, created, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind, reason, occurredAt, metadata)
 		if err != nil {
 			return err
 		}
@@ -181,13 +187,26 @@ func (s *PaymentService) recordRefund(ctx context.Context, originalPaymentID uui
 	return refund, err
 }
 
+// refundReasonOf is a reversal's reason: a refund's, unknown when none is
+// named; nil on a chargeback or a won dispute.
+func refundReasonOf(kind string, reason billing.RefundReason) *string {
+	if kind != ReversalRefund {
+		return nil
+	}
+	if !reason.Valid() {
+		reason = billing.RefundUnknown
+	}
+	r := string(reason)
+	return &r
+}
+
 // ErrRefundReservationPending defers a provider refund fact while an OpenRails
 // refund of the same payment is unresolved.
 var ErrRefundReservationPending = errors.New("an OpenRails refund of this payment is still in flight; retry")
 
 // refundLocked records the reversal unless it is recorded already; created
 // reports a new one.
-func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, occurredAt time.Time, metadata map[string]any) (_ *models.Payment, created bool, _ error) {
+func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string, reason billing.RefundReason, occurredAt time.Time, metadata map[string]any) (_ *models.Payment, created bool, _ error) {
 	if reversalKind != ReversalRefund && reversalKind != ReversalChargeback && reversalKind != ReversalDisputeReversal {
 		return nil, false, fmt.Errorf("invalid reversal kind %q", reversalKind)
 	}
@@ -254,6 +273,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		CardLast4:     orig.CardLast4,
 		Status:        PaymentStatusSucceededValue,
 		ReversalKind:  &reversalKind,
+		RefundReason:  refundReasonOf(reversalKind, reason),
 		// The reversal settled at the rail; the feed excludes it on
 		// amount/refunded_payment_id, not on this marker.
 		MoneyMovement: models.MoneyMovementRail,
@@ -267,7 +287,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 	return refund, true, nil
 }
 
-func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uuid.UUID, reservationTransactionID string, amount int64, metadata map[string]any) (*models.Payment, error) {
+func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uuid.UUID, reservationTransactionID string, amount int64, reason billing.RefundReason, metadata map[string]any) (*models.Payment, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -289,13 +309,13 @@ func (s *PaymentService) ReserveRefund(ctx context.Context, originalPaymentID uu
 		if err := purchasedcredits.New(d, s.clock).ValidateRefund(ctx, originalPaymentID, amount); err != nil {
 			return err
 		}
-		reservation, err = scoped.reserveRefundLocked(ctx, originalPaymentID, reservationTransactionID, amount, metadata)
+		reservation, err = scoped.reserveRefundLocked(ctx, originalPaymentID, reservationTransactionID, amount, reason, metadata)
 		return err
 	})
 	return reservation, err
 }
 
-func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymentID uuid.UUID, reservationTransactionID string, amount int64, metadata map[string]any) (*models.Payment, error) {
+func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymentID uuid.UUID, reservationTransactionID string, amount int64, reason billing.RefundReason, metadata map[string]any) (*models.Payment, error) {
 	orig, err := s.GetByID(ctx, originalPaymentID)
 	if err != nil {
 		return nil, err
@@ -330,6 +350,7 @@ func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymen
 		CardLast4:     orig.CardLast4,
 		Status:        PaymentStatusPendingValue,
 		ReversalKind:  &kind,
+		RefundReason:  refundReasonOf(kind, reason),
 		Metadata:      metadata,
 		PurchasedAt:   now,
 		CreatedAt:     now,

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/open-rails/openrails/internal/modules/disputes"
+
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/identity"
@@ -138,6 +140,9 @@ type Runtime struct {
 	MoneyService         *money.MoneyService
 	// MetricsService is the #733 merchant analytics query engine.
 	MetricsService *metrics.Service
+	// Disputes records disputes and fraud reports and evaluates the card
+	// networks' monitoring programs.
+	Disputes *disputes.Service
 	// DashboardService is the merchant's saved dashboard layout.
 	DashboardService *dashboard.Service
 	// CopilotService answers catalog questions and drafts price changes for a

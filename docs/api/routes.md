@@ -116,6 +116,8 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/payments/{id}/refunds` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | `Idempotency-Key` |
 | GET | `/v1/admin/payment-attempts` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<PaymentAttempt>` |  |
 | GET | `/v1/admin/payment-attempts/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `PaymentAttempt` |  |
+| GET | `/v1/admin/disputes` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Dispute>` |  |
+| GET | `/v1/admin/disputes/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Dispute` |  |
 | GET | `/v1/admin/renewals` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Renewal>` |  |
 | GET | `/v1/admin/renewals/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Renewal` |  |
 | GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<PaymentMethod>` |  |
@@ -211,6 +213,7 @@ Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`.
 |---|---|---|---|---|---|---|
 | POST | `/v1/metrics/query` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `QueryMetricsParams` | 200 `MetricsResult` |  |
 | GET | `/v1/metrics/schema` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `MetricsSchema` |  |
+| GET | `/v1/metrics/dispute-programs` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `ListPage<DisputeStanding>` |  |
 | GET | `/v1/metrics/dashboard` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `Dashboard` |  |
 
 ## Access

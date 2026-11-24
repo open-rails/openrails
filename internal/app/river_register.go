@@ -126,6 +126,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	}); err != nil {
 		return fmt.Errorf("add customer converge worker: %w", err)
 	}
+	// A PSP's dispute monitoring programs, queued by each chargeback and
+	// fraud report.
+	if err := addWorker(workers, &riverjobs.DisputeMonitorWorker{DB: r.DB, Disputes: r.Disputes}); err != nil {
+		return fmt.Errorf("add dispute monitor worker: %w", err)
+	}
 	// Health findings and timed access lapses, for merchants with activity.
 	if err := addWorker(workers, &riverjobs.MerchantHealthWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, Alerts: r.AlertService,

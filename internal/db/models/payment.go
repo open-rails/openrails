@@ -76,6 +76,8 @@ type Payment struct {
 	FailureReason *string `json:"failure_reason,omitempty"`
 	// ReversalKind discriminates mirror rows: refund|chargeback|dispute_reversal.
 	ReversalKind *string `json:"reversal_kind,omitempty"`
+	// RefundReason is why a refund row was made; set exactly on refunds.
+	RefundReason *string `json:"refund_reason,omitempty"`
 	// TokenType is the credential form presented at charge time:
 	// network_token|pan_via_proxy|psp_token. Nil = unknown/legacy.
 	TokenType *string `json:"token_type,omitempty"`

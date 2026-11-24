@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -85,6 +86,11 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		// zero. Preserve that meaning; no schedule existed before #1289.
 		if p.Name == "money_settings" && len(r.Values) == len(p.Columns)-5 {
 			r.Values = append(r.Values, new("true"), nil, nil, nil, new("false"))
+		}
+		// Payments before refund reasons: a refund's is unknown, as the
+		// migration that added them reads it.
+		if p.Name == "payments" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, legacyRefundReason(p, r.Values))
 		}
 		if p.Name == "subscription_status_transitions" && len(r.Values) == len(p.Columns)-4 {
 			r.Values = append(r.Values, nil, nil, nil, nil)
@@ -237,7 +243,7 @@ func holdFromAdmission(v []*string) ([]*string, error) {
 // addedTables are tables an archive from before them lacks; it holds none
 // of their rows.
 var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "catalog_product_limits": true, "customer_limit_overrides": true, "limit_windows": true, "limit_adjustments": true,
-	"usage_daily": true, "usage_accruals": true}
+	"usage_daily": true, "usage_accruals": true, "disputes": true, "fraud_reports": true}
 
 // usageRenames are the tables usage orders renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}
@@ -349,4 +355,33 @@ func ClearMeteredPaymentTerm(p Profile, values []*string) {
 			values[i] = nil
 		}
 	}
+}
+
+// legacyRefundReason is the reason a refund exported before reasons reads as:
+// the same reading the migration that added them gave the rows it found.
+func legacyRefundReason(p Profile, values []*string) *string {
+	at := func(name string) *string {
+		for i, c := range p.Columns[:len(values)] {
+			if c.Name == name {
+				return values[i]
+			}
+		}
+		return nil
+	}
+	if kind := at("reversal_kind"); kind == nil || *kind != "refund" {
+		return nil
+	}
+	reason := "unknown"
+	if meta := at("metadata"); meta != nil {
+		var m map[string]any
+		if json.Unmarshal([]byte(*meta), &m) == nil {
+			switch {
+			case m["charge_after_cancel"] == true:
+				reason = "charged_after_cancel"
+			case m["order_late_payment"] == true:
+				reason = "duplicate"
+			}
+		}
+	}
+	return &reason
 }

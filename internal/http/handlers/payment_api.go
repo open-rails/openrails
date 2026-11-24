@@ -73,6 +73,10 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		card.Last4 = *p.CardLast4
 	}
 	out.Card = card.Details()
+	if p.RefundReason != nil {
+		reason := billing.RefundReason(*p.RefundReason)
+		out.RefundReason = &reason
+	}
 	if p.RefundedPaymentID != nil {
 		original := billing.PaymentID(*p.RefundedPaymentID)
 		out.RefundedPaymentID = &original

@@ -66,6 +66,7 @@ var excludedTables = map[string]string{
 	"customer_entitlement_cache":        "derived from product access and product keys; rebuilt on read",
 	"customer_entitlement_cache_stamps": "derived from product access and product keys; rebuilt on read",
 	"price_keys":                        "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
+	"network_activity_daily":            "derived: the payments, disputes and fraud_reports triggers rebuild it as they are restored",
 	"balance_watches":                   "derived: when a watched balance is next looked at; restore watches every prepaid balance and running charge again",
 	"psp_imports":                       "import working state: the destination pulls its PSPs again",
 	"psp_import_records":                "import working state: copies of provider objects, pulled again",
@@ -125,6 +126,7 @@ var excludedColumns = map[string]string{
 	"customer_entitlement_cache":        "id merchant_id customer_id entitlement quantity",
 	"customer_entitlement_cache_stamps": "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
 	"price_keys":                        "merchant_id product_id key revision created_at updated_at",
+	"network_activity_daily":            "merchant_id psp_id rail network currency day_at sales sales_amount refunds refund_amount chargebacks chargeback_amount fraud_chargebacks fraud_chargeback_amount fraud_reports fraud_report_amount",
 	"balance_watches":                   "merchant_id customer_id currency next_check_at depletes_at low_notified_at depleted_at updated_at funded_at usage_rate_per_hour rate_sampled_at",
 }
 

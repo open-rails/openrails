@@ -12,6 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/disputerules"
+	"github.com/open-rails/openrails/internal/modules/disputes"
+
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/payment"
@@ -55,7 +58,9 @@ type CCBillWebhookService struct {
 	DeduplicationService         *DeduplicationService
 	OrderAttemptService          *payment.OrderAttemptService
 	MoneyService                 *money.MoneyService
-	Log                          *slog.Logger
+	// Disputes records each chargeback; nil records with no alerts.
+	Disputes *disputes.Service
+	Log      *slog.Logger
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -1324,9 +1329,13 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				if amount > originalPayment.Amount {
 					amount = originalPayment.Amount
 				}
-				if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount, payments.ReversalChargeback); refundErr != nil {
+				reversal, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, amount, payments.ReversalChargeback)
+				if refundErr != nil {
 					ledgerErr = fmt.Errorf("record CCBill chargeback reversal: %w", refundErr)
 					s.Log.ErrorContext(ctx, "Failed to record CCBill chargeback reversal; continuing entitlement revocation", logx.Err(ledgerErr), "chargeback_transaction_id", reversalID, "original_payment_id", originalPayment.ID)
+				}
+				if err := s.recordCCBillChargeback(ctx, txdb, data, originalPayment, reversal, amount, currency); err != nil {
+					return err
 				}
 			}
 		} else {
@@ -1381,6 +1390,30 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// recordCCBillChargeback records the chargeback with its reason and card
+// network. CCBill reports no outcome.
+func (s *CCBillWebhookService) recordCCBillChargeback(ctx context.Context, d *db.DB, data CCBillChargebackEvent, original, reversal *models.Payment, amount int64, currency string) error {
+	psp, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return fmt.Errorf("record CCBill chargeback: %w", err)
+	}
+	ref := strings.TrimSpace(data.TransactionID)
+	if ref == "" {
+		ref = strings.TrimSpace(data.SubscriptionID)
+	}
+	service := s.Disputes
+	if service == nil {
+		service = disputes.New(s.DB, s.Clock)
+	}
+	rec, err := service.Record(ctx, d, disputes.Report{PSPID: psp, Rail: models.RailCCBill, ProviderRef: ref, Payment: original,
+		Kind: billing.DisputeChargeback, Status: billing.DisputeUnreported, Network: disputerules.Network(data.CardType),
+		ProviderReason: data.Reason, Amount: amount, Currency: currency})
+	if err != nil || reversal == nil {
+		return err
+	}
+	return service.Link(ctx, d, rec, &reversal.ID, nil)
 }
 
 func (s *CCBillWebhookService) handleRenewalSuccess(ctx context.Context) error {
