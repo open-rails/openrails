@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 719,
+  "scenario_count": 721,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3597,6 +3597,16 @@
       "id": "OR-J47-S10",
       "journey": "J47",
       "name": "A checkout's customer type is new on a first purchase, returning after one or while subscribed, reactivated once a subscription ended; sales and cash split by it, and subscriber_type is refused with it"
+    },
+    {
+      "id": "OR-J47-S11",
+      "journey": "J47",
+      "name": "Spending a merchant's units is not a checkout: unit orders carry no checkout facts and leave the funnel, conversion, purchase numbers and repeat purchases to purchases in money"
+    },
+    {
+      "id": "OR-J47-S12",
+      "journey": "J47",
+      "name": "A customer's erasure clears every attribution field of its checkouts; the checkouts stand"
     }
   ]
 }

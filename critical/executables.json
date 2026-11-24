@@ -2325,6 +2325,12 @@
     ],
     "OR-J47-S10": [
       "TestCheckoutFunnel/OR-J47-S10/the-customer-type-is-new-returning-or-reactivated"
+    ],
+    "OR-J47-S11": [
+      "TestCheckoutFunnel/OR-J47-S11/spending-a-merchants-units-is-not-a-checkout"
+    ],
+    "OR-J47-S12": [
+      "TestCheckoutFunnel/OR-J47-S12/an-erasure-clears-a-checkouts-attribution"
     ]
   }
 }

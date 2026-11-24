@@ -3,6 +3,7 @@
 package critical_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,8 +16,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/abusestate"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/modules/metrics"
+	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -65,6 +70,43 @@ func underAttack(t *testing.T, a *authorityWorld) (clear func()) {
 	subject := captcha.CardAttackModeSubject(a.alpha.MerchantID().UUID())
 	store.MarkChallenged(t.Context(), subject, time.Hour)
 	return func() { store.ClearChallenged(t.Context(), subject) }
+}
+
+// readIndexes is the indexes the plan of sql reads billing.orders through,
+// with sequential scans off: a sequential scan of the merchant's orders
+// fails it.
+func readIndexes(t *testing.T, a *authorityWorld, sql string, args []any) []string {
+	t.Helper()
+	sql, err := sqlschema.Rewrite(sql, a.schema)
+	require.NoError(t, err)
+	tx, err := a.pool.Begin(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(t.Context()) }()
+	_, err = tx.Exec(t.Context(), "SET LOCAL enable_seqscan = off")
+	require.NoError(t, err)
+	var explained string
+	require.NoError(t, tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+sql, args...).Scan(&explained))
+	var plans []struct {
+		Plan map[string]any `json:"Plan"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(explained), &plans))
+	var out []string
+	var walk func(n map[string]any)
+	walk = func(n map[string]any) {
+		require.False(t, n["Node Type"] == "Seq Scan" && n["Relation Name"] == "orders", "orders are scanned whole: %s", explained)
+		if index, ok := n["Index Name"].(string); ok && strings.HasPrefix(index, "orders_") {
+			out = append(out, index)
+		}
+		children, _ := n["Plans"].([]any)
+		for _, c := range children {
+			if child, ok := c.(map[string]any); ok {
+				walk(child)
+			}
+		}
+	}
+	walk(plans[0].Plan)
+	require.NotEmpty(t, out, "orders are read through an index: %s", explained)
+	return out
 }
 
 func TestCheckoutFunnel(t *testing.T) {
@@ -257,6 +299,18 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, map[string]int64{"newsletter": 10_000_000, "search": 10_000_000},
 			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"attribution_source"}, Filters: usd, Range: window}), "attribution_source", "cash"))
 
+		// Checkouts and sales read their own indexes, never every order.
+		for measure, index := range map[string][]string{"checkouts": {"orders_checkout_created_at_idx", "orders_created_at_id_idx"}, "sales": {"orders_sale_completed_at_idx"}} {
+			q := billing.QueryMetricsParams{Measures: []string{measure}, By: []string{"country"}, Range: window}
+			plan, refused := metrics.ValidateIn(&q, a.clock.Now(), time.UTC)
+			require.Nil(t, refused)
+			statements, err := metrics.Statements(plan, a.alpha.MerchantID().UUID())
+			require.NoError(t, err)
+			for _, st := range statements {
+				require.Subset(t, index, readIndexes(t, a, st.SQL, st.Args), "%s: %s", measure, st.SQL)
+			}
+		}
+
 		// The overview carries the checkout section, and each of its widgets answers.
 		board, err := a.alpha.GetDashboard(t.Context())
 		require.NoError(t, err)
@@ -342,11 +396,27 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Nil(t, facts.Country)
 		require.Nil(t, facts.CountrySource)
 
-		// Neither the order nor the merchant's archive holds the address.
+		// Neither the order nor its archived row holds the address.
 		staff, raw := a.request(t, http.MethodGet, "/v1/admin/orders/"+order.ID.String(), a.alphaKey.Secret, nil)
 		require.Equal(t, http.StatusOK, staff, string(raw))
 		require.NotContains(t, string(raw), client)
-		require.NotContains(t, string(archiveBytes(t, a.alpha)), client)
+		table, archived := "", 0
+		_, err := archivewire.Read(bytes.NewReader(archiveBytes(t, a.alpha)), func(archivewire.Header) error { return nil }, func(r archivewire.Record) error {
+			switch {
+			case r.Kind == "table":
+				table = r.Table
+			case r.Kind == "row" && table == "orders":
+				archived++
+				for _, v := range r.Values {
+					if v != nil {
+						require.NotContains(t, *v, client)
+					}
+				}
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		require.Positive(t, archived)
 
 		// A trusted proxy that is not Cloudflare's is never read for a country.
 		u, _ := newPaymentWorld(t, func(w *world) { w.cfg.TrustedProxies = []string{"127.0.0.1/32", "::1/128"} })
@@ -468,9 +538,16 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, "JP", *facts.Country)
 		require.Equal(t, "ja", *facts.Language)
 		require.Equal(t, "retained", *facts.Attribution.Campaign)
+		// The merchant's archive carries the facts to a restore.
+		_, restored := archiveTarget(t, w)
+		_, err := restored.ImportBillingArchive(t.Context(), bytes.NewReader(archiveBytes(t, a.alpha)))
+		require.NoError(t, err)
+		moved, err := restored.GetOrder(t.Context(), order.ID)
+		require.NoError(t, err)
+		require.Equal(t, facts, moved.Checkout)
 		w.clock.Advance(306 * 24 * time.Hour)
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
-		_, err := a.alpha.GetOrder(t.Context(), order.ID)
+		_, err = a.alpha.GetOrder(t.Context(), order.ID)
 		require.ErrorIs(t, err, billing.ErrNotFound, "397 days after it closed it is gone")
 	})
 	t.Run("OR-J47-S08/renewals-name-the-checkout-that-bought-their-subscription", func(t *testing.T) {
@@ -513,6 +590,9 @@ func TestCheckoutFunnel(t *testing.T) {
 			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"country"}, Filters: usd, Range: window}), "country", "cash"))
 		require.Equal(t, map[string]int64{"renewals": 20_000_000},
 			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"attribution_campaign"}, Filters: usd, Range: window}), "attribution_campaign", "cash"))
+		require.Equal(t, map[string]int64{"new": 10_000_000, "": 10_000_000},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"cash"}, By: []string{"customer_type"}, Filters: usd, Range: window}), "customer_type", "cash"),
+			"a renewal's cash bought nothing new: no customer type")
 
 		// An upgrade's membership keeps the checkout, and so do its bills.
 		higher := upgradePrice(t, a, sub)
@@ -591,6 +671,73 @@ func TestCheckoutFunnel(t *testing.T) {
 			byType("cash", map[string][]string{"currency": {"USD"}, "cash_kind": {"payment"}}))
 		_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"sales"}, By: []string{"subscriber_type"}, Range: window})
 		require.Equal(t, "customer_type", metricRefusals(t, err)["by[0]"]["did_you_mean"])
+		// A measure without a customer type names no replacement.
+		_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"mrr"}, By: []string{"subscriber_type"}, Range: window})
+		removed := metricRefusals(t, err)["by[0]"]
+		require.Nil(t, removed["did_you_mean"])
+		require.Contains(t, removed["message"], "was removed")
+	})
+	t.Run("OR-J47-S11/spending-a-merchants-units-is-not-a-checkout", func(t *testing.T) {
+		s, _ := unitPaymentWorld(t, 0)
+		a := s.a
+		gold := s.pack(t, "funnel-gold", "GOLD", 400, 365, unitPrice{"usd", 20_000_000, "USD"})
+		sword := s.item(t, "funnel-sword", catalog.OwnershipConsumable, 50, "GOLD", "shop:sword")
+
+		pack := s.buy(t, gold["usd"], 20_000_000, "funnel-gold")
+		require.Equal(t, 1, checkoutOf(t, a, pack.ID).PurchaseNumber)
+		for i := range 3 {
+			status, raw := s.spend(t, sword, fmt.Sprintf("funnel-sword-%d", i))
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var spent billing.Order
+			require.NoError(t, json.Unmarshal(raw, &spent))
+			require.Equal(t, billing.OrderComplete, spent.Status)
+			read, err := a.alpha.GetOrder(t.Context(), spent.ID)
+			require.NoError(t, err)
+			require.Nil(t, read.Checkout, "spending units is not a checkout")
+		}
+		again := s.buy(t, gold["usd"], 20_000_000, "funnel-gold-again")
+		facts := checkoutOf(t, a, again.ID)
+		require.Equal(t, 2, facts.PurchaseNumber, "spends are no purchases")
+		require.Equal(t, billing.CustomerTypeReturning, facts.CustomerType)
+
+		window := &billing.MetricsRange{Last: "7d"}
+		funnel := map[string]int64{}
+		for _, row := range metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"checkouts"}, By: []string{"step", "outcome"}, Range: window}) {
+			if n := whole(t, row["checkouts"]); n != 0 {
+				funnel[fmt.Sprint(row["step"])+"/"+fmt.Sprint(row["outcome"])] = n
+			}
+		}
+		require.Equal(t, map[string]int64{"paid/paid": 2}, funnel)
+		read := only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"checkout_conversion_rate", "sales", "sales_customers", "repeat_purchase_rate"}, Range: window}))
+		require.InDelta(t, 1.0, fraction(t, read["checkout_conversion_rate"]), 1e-12)
+		require.EqualValues(t, 2, whole(t, read["sales"]))
+		require.EqualValues(t, 1, whole(t, read["sales_customers"]))
+		require.InDelta(t, 1.0, fraction(t, read["repeat_purchase_rate"]), 1e-12)
+		require.Equal(t, map[string]int64{"1": 1, "2": 1},
+			split(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"sales"}, By: []string{"purchase_number"}, Range: window}), "purchase_number", "sales"))
+	})
+	t.Run("OR-J47-S12/an-erasure-clears-a-checkouts-attribution", func(t *testing.T) {
+		a, _ := newPaymentWorld(t, func(w *world) { w.deps.UserInfo = nil })
+		provisioner, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "owned directory"})
+		require.NoError(t, err)
+		id := uuid.NewString()
+		user := map[string]any{"schemas": []string{hostSCIMUserSchema}, "externalId": id, "userName": "erased-buyer", "displayName": "Erased Buyer",
+			"emails": []any{map[string]any{"value": "erased-buyer@directory.invalid", "primary": true}}, "active": true}
+		status, raw := a.request(t, http.MethodPost, "/v1/app/scim/v2/Users", provisioner.Token, user)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		customer := billing.CustomerID(uuid.MustParse(id))
+		_, price := publicSale(t, a, "funnel-erased", 9_990_000, nil)
+		given := billing.OrderAttribution{Source: ptr("newsletter"), Medium: ptr("email"), Campaign: ptr("spring"), Term: ptr("recipient-4711"),
+			Content: ptr("variant-b"), Referrer: ptr("news.example.org"), Affiliate: ptr("partner-7")}
+		made, err := a.alphaRemote.CreateOrder(t.Context(), "funnel-erased", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, Attribution: &given})
+		require.NoError(t, err)
+		require.Equal(t, "recipient-4711", *made.Checkout.Attribution.Term)
+
+		status, raw = a.request(t, http.MethodDelete, "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
+		require.Equal(t, http.StatusNoContent, status, string(raw))
+		facts := checkoutOf(t, a, made.ID)
+		require.Equal(t, billing.OrderAttribution{}, facts.Attribution, "an erasure leaves nothing attribution said of the customer")
+		require.Equal(t, 1, facts.PurchaseNumber, "the checkout itself stands")
 	})
 }
 

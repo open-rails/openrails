@@ -104,8 +104,8 @@ type CreateOrderParams struct {
 	LinesDigest          []byte
 	ExpiresAt            time.Time
 	Now                  time.Time
-	CustomerType         string
-	PurchaseNumber       int32
+	CustomerType         *string
+	PurchaseNumber       *int32
 	IpCountry            *string
 	Language             *string
 	AttributionSource    *string
@@ -367,11 +367,34 @@ func (q *Queries) EnqueueOrderHostEvent(ctx context.Context, arg EnqueueOrderHos
 	return result.RowsAffected(), nil
 }
 
+const eraseCustomerOrderAttribution = `-- name: EraseCustomerOrderAttribution :exec
+UPDATE billing.orders
+SET attribution_source = NULL, attribution_medium = NULL, attribution_campaign = NULL, attribution_term = NULL,
+    attribution_content = NULL, attribution_referrer = NULL, attribution_affiliate = NULL
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND purchase_number IS NOT NULL
+  AND num_nonnulls(attribution_source, attribution_medium, attribution_campaign, attribution_term,
+      attribution_content, attribution_referrer, attribution_affiliate) > 0
+`
+
+type EraseCustomerOrderAttributionParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// An erased customer's checkouts keep no attribution: a campaign's term or
+// content can name its recipient.
+func (q *Queries) EraseCustomerOrderAttribution(ctx context.Context, arg EraseCustomerOrderAttributionParams) error {
+	_, err := q.db.Exec(ctx, eraseCustomerOrderAttribution, arg.MerchantID, arg.CustomerID)
+	return err
+}
+
 const getCheckoutCustomer = `-- name: GetCheckoutCustomer :one
 SELECT
     (SELECT count(*) FROM billing.orders
      WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-       AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial'))::int AS purchases,
+       AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial')
+       AND currency = ANY($3::text[]))::int AS purchases,
     EXISTS (SELECT 1 FROM billing.customer_mrr
             WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
               AND first_active_at IS NOT NULL)::boolean AS had_mrr,
@@ -383,6 +406,7 @@ SELECT
 type GetCheckoutCustomerParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
+	Money      []string
 }
 
 type GetCheckoutCustomerRow struct {
@@ -391,11 +415,11 @@ type GetCheckoutCustomerRow struct {
 	HasMrr    bool
 }
 
-// Who a new checkout's customer is: their paid purchases (complete checkouts
-// and observed initial enrollments), whether they ever had MRR with the
-// merchant, and whether they have any now.
+// Who a new checkout's customer is: their paid purchases (complete orders in
+// money, never a merchant's unit, and observed initial enrollments), whether
+// they ever had MRR with the merchant, and whether they have any now.
 func (q *Queries) GetCheckoutCustomer(ctx context.Context, arg GetCheckoutCustomerParams) (GetCheckoutCustomerRow, error) {
-	row := q.db.QueryRow(ctx, getCheckoutCustomer, arg.MerchantID, arg.CustomerID)
+	row := q.db.QueryRow(ctx, getCheckoutCustomer, arg.MerchantID, arg.CustomerID, arg.Money)
 	var i GetCheckoutCustomerRow
 	err := row.Scan(&i.Purchases, &i.HadMrr, &i.HasMrr)
 	return i, err

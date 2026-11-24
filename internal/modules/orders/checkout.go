@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -218,6 +219,32 @@ func MarkCheckoutSubmitted(ctx context.Context, d *db.DB, merchantID, customerID
 	}
 	_, err := d.Gen(ctx).MarkCheckoutSubmitted(ctx, params)
 	return err
+}
+
+// money is the registry's currencies: a purchase is in one, never in a
+// merchant's unit.
+var money = func() []string {
+	var out []string
+	for _, u := range currency.List() {
+		out = append(out, u.Code)
+	}
+	return out
+}()
+
+// checkoutFacts stamps a new checkout with what its request and its
+// customer's history say, under the customer lock its creation holds.
+func checkoutFacts(ctx context.Context, q *gen.Queries, params *gen.CreateOrderParams, facts CheckoutFacts) error {
+	who, err := q.GetCheckoutCustomer(ctx, gen.GetCheckoutCustomerParams{MerchantID: params.MerchantID, CustomerID: params.CustomerID, Money: money})
+	if err != nil {
+		return err
+	}
+	kind, number := string(customerType(who)), who.Purchases+1
+	a := facts.Attribution
+	params.CustomerType, params.PurchaseNumber = &kind, &number
+	params.IpCountry, params.Language = optional(Country(facts.IPCountry)), optional(language(facts.Language))
+	params.AttributionSource, params.AttributionMedium, params.AttributionCampaign = a.Source, a.Medium, a.Campaign
+	params.AttributionTerm, params.AttributionContent, params.AttributionReferrer, params.AttributionAffiliate = a.Term, a.Content, a.Referrer, a.Affiliate
+	return nil
 }
 
 // customerType is who a checkout's customer is: reactivated when they had

@@ -12,20 +12,21 @@ INSERT INTO billing.orders (
     'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
     sqlc.narg(idempotency_key)::text, sqlc.narg(request_digest)::bytea, sqlc.narg(lines_digest)::bytea,
     sqlc.arg(expires_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz,
-    sqlc.arg(customer_type)::text, sqlc.arg(purchase_number)::int,
+    sqlc.narg(customer_type)::text, sqlc.narg(purchase_number)::int,
     sqlc.narg(ip_country)::text, sqlc.narg(language)::text,
     sqlc.narg(attribution_source)::text, sqlc.narg(attribution_medium)::text, sqlc.narg(attribution_campaign)::text,
     sqlc.narg(attribution_term)::text, sqlc.narg(attribution_content)::text, sqlc.narg(attribution_referrer)::text, sqlc.narg(attribution_affiliate)::text
 );
 
 -- name: GetCheckoutCustomer :one
--- Who a new checkout's customer is: their paid purchases (complete checkouts
--- and observed initial enrollments), whether they ever had MRR with the
--- merchant, and whether they have any now.
+-- Who a new checkout's customer is: their paid purchases (complete orders in
+-- money, never a merchant's unit, and observed initial enrollments), whether
+-- they ever had MRR with the merchant, and whether they have any now.
 SELECT
     (SELECT count(*) FROM billing.orders
      WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-       AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial'))::int AS purchases,
+       AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial')
+       AND currency = ANY(sqlc.arg(money)::text[]))::int AS purchases,
     EXISTS (SELECT 1 FROM billing.customer_mrr
             WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
               AND first_active_at IS NOT NULL)::boolean AS had_mrr,
@@ -84,6 +85,17 @@ SET checkout_order_id = p.checkout_order_id
 FROM billing.subscriptions p
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = sqlc.arg(id)::uuid AND s.checkout_order_id IS NULL
   AND p.merchant_id = s.merchant_id AND p.id = sqlc.arg(predecessor_id)::uuid AND p.checkout_order_id IS NOT NULL;
+
+-- name: EraseCustomerOrderAttribution :exec
+-- An erased customer's checkouts keep no attribution: a campaign's term or
+-- content can name its recipient.
+UPDATE billing.orders
+SET attribution_source = NULL, attribution_medium = NULL, attribution_campaign = NULL, attribution_term = NULL,
+    attribution_content = NULL, attribution_referrer = NULL, attribution_affiliate = NULL
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND purchase_number IS NOT NULL
+  AND num_nonnulls(attribution_source, attribution_medium, attribution_campaign, attribution_term,
+      attribution_content, attribution_referrer, attribution_affiliate) > 0;
 
 -- name: GetOpenOrderByLines :one
 -- The customer's open order of these lines, expired or not.

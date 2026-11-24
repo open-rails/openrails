@@ -3919,6 +3919,7 @@
       "fmt": "fmt",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "regexp": "regexp",
+      "slices": "slices",
       "sort": "sort",
       "strconv": "strconv",
       "strings": "strings",

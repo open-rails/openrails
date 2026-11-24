@@ -311,17 +311,16 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 		if keyed != "" {
 			key = &keyed
 		}
-		who, err := q.GetCheckoutCustomer(ctx, gen.GetCheckoutCustomerParams{MerchantID: mid.UUID(), CustomerID: in.CustomerID})
-		if err != nil {
-			return err
-		}
-		a := in.Checkout.Attribution
-		if err := q.CreateOrder(ctx, gen.CreateOrderParams{MerchantID: mid.UUID(), ID: id, CustomerID: in.CustomerID, Origin: string(in.Origin),
+		params := gen.CreateOrderParams{MerchantID: mid.UUID(), ID: id, CustomerID: in.CustomerID, Origin: string(in.Origin),
 			Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: digest, LinesDigest: in.LinesDigest,
-			ExpiresAt: now.Add(in.TTL), Now: now, CustomerType: string(customerType(who)), PurchaseNumber: who.Purchases + 1,
-			IpCountry: optional(Country(in.Checkout.IPCountry)), Language: optional(language(in.Checkout.Language)),
-			AttributionSource: a.Source, AttributionMedium: a.Medium, AttributionCampaign: a.Campaign,
-			AttributionTerm: a.Term, AttributionContent: a.Content, AttributionReferrer: a.Referrer, AttributionAffiliate: a.Affiliate}); err != nil {
+			ExpiresAt: now.Add(in.TTL), Now: now}
+		// Spending a merchant's units is not a checkout: no facts.
+		if !unit {
+			if err := checkoutFacts(ctx, q, &params, in.Checkout); err != nil {
+				return err
+			}
+		}
+		if err := q.CreateOrder(ctx, params); err != nil {
 			return err
 		}
 		for i, l := range quote.Lines {
