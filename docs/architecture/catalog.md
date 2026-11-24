@@ -4,10 +4,9 @@ What a merchant sells: products, prices, meters, rate cards and usage limits, an
 
 ## Concepts
 
-- **Product**: key, display fields, entitlements, tier group and rank,
-  ownership rule, credit grant, rate cards and limit capacities.
-- **Price**: an immutable financial version of a price key, id `product:key:vN`
-  (`billing.PriceID`); `Price.Revision` is the key's concurrency counter.
+- **Product**: a merchant-set `key` (unique in the merchant), display fields, entitlements, tier group and rank, ownership rule, credit grant, rate cards and limit capacities. Products are edited in place; `products.revision`, set only by OpenRails, advances on every change to the product, its keys or its rate cards, never on a change to its prices.
+- **Price**: an immutable financial version of a price key, id `product:key:vN` (`billing.PriceID`). The key is merchant-set and unique within its product; changing a price's terms writes the next version (`v2`, `v3`, …) and archives the current one, whose subscribers stay on it until a price migration moves them. `Price.Revision` is the key's concurrency counter: it advances on any change to the key's versions or their PSP links.
+- **Version and revision**: a *version* is a new immutable row (only prices have versions); a *revision* counts edits to something mutable (products and price keys).
 - **Provider price**: mirrors an NMI plan, Stripe price or CCBill FlexForm; read,
   never written. Its **binding** (`price_psp_bindings`) names the object.
 - **Manager**: who last set a field, `apply` (a document) or `edit`
