@@ -213,6 +213,11 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	}
 
 	available, creditLine, outstanding := payerCapacity(capacity, resolved)
+	// A merchant's unit is never owed: a request that holds nothing of it is
+	// admitted only while its balance, net of what is held, has some left.
+	if money.IsMerchantUnit(req.Currency) && req.EstimatedAmount == 0 && available <= 0 {
+		return AdmitDecision{BlockedBy: "money", DenyCode: billing.DenyInsufficientBalance, AvailableAmount: available}, nil
+	}
 	input := spendgate.AdmitInput{
 		Customer: req.CustomerID.UUID(), Currency: req.Currency, RequestID: req.SourceID,
 		Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt,

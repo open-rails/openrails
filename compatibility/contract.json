@@ -3767,9 +3767,11 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "identity": "github.com/open-rails/openrails/internal/billingidentity",
       "json": "encoding/json",
+      "limits": "github.com/open-rails/openrails/internal/modules/limits",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "spendgate": "github.com/open-rails/openrails/internal/modules/admission/spendgate",
-      "strings": "strings"
+      "strings": "strings",
+      "time": "time"
     },
     "internal/modules/money/invoice_profile.go": {
       "context": "context",

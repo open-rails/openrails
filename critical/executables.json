@@ -1634,6 +1634,9 @@
     ],
     "OR-J48-S07": [
       "TestMerchantUnits/OR-J48-S07/a-refund-claws-back-its-lots-units-first"
+    ],
+    "OR-J48-S08": [
+      "TestMerchantUnits/OR-J48-S08/admission-holds-the-unit-balance-and-an-overrun-is-forgiven-usage"
     ]
   }
 }

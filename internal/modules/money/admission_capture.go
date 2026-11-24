@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -14,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -210,6 +212,18 @@ func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.
 	if result.Err != nil {
 		return nil, usageParam(result.Err)
 	}
+	// A merchant's unit is never owed: what the lots cannot take of an
+	// overrun is forgiven usage, charged to no one.
+	if IsMerchantUnit(row.Currency) && result.Amount > 0 {
+		covered, err := s.unitCoverage(ctx, q, row, parts, now)
+		if err != nil {
+			return nil, err
+		}
+		if over := result.Amount - covered; over > 0 {
+			batch.forgive(0, over)
+			result = batch.Results[0]
+		}
+	}
 	receipt.Amount, receipt.Charges = result.Amount, result.Charges
 	charges, err := json.Marshal(result.Charges)
 	if err != nil {
@@ -227,6 +241,33 @@ func (s *MoneyService) captureOnce(ctx context.Context, q *gen.Queries, row gen.
 		return nil, err
 	}
 	return receipt, nil
+}
+
+// unitCoverage is what a capture in a merchant's unit can take of its
+// customer's lots: what they hold less what other admissions, unposted usage
+// and pending refunds keep of them. The hold being captured keeps nothing.
+func (s *MoneyService) unitCoverage(ctx context.Context, q *gen.Queries, row gen.BillingLimitHold, parts []gen.ListHoldPartsRow, now time.Time) (int64, error) {
+	bal, err := s.lockBalance(ctx, q, identity.CustomerID(row.CustomerID), "", row.Currency)
+	if err != nil {
+		return 0, err
+	}
+	held := bal.HeldBalance
+	if row.State == "open" && row.ExpiresAt != nil && row.ExpiresAt.After(now) && !row.CreatedAt.Before(limits.HeldSince(now)) {
+		for _, p := range parts {
+			if p.LimitKey == catalog.BalanceLimit {
+				held -= p.Held
+			}
+		}
+	}
+	lots, err := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{MerchantID: row.MerchantID, CustomerID: row.CustomerID, Currency: row.Currency, AsOf: now})
+	if err != nil {
+		return 0, err
+	}
+	var spendable int64
+	for _, lot := range lots {
+		spendable += lot.Available
+	}
+	return max(min(bal.Balance-held, spendable), 0), nil
 }
 
 // captureReplay answers a captured admission's receipt for a retry with its

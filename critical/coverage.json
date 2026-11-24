@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 512,
+  "scenario_count": 513,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2551,7 +2551,7 @@
     {
       "id": "OR-J48-S05",
       "journey": "J48",
-      "name": "Usage priced in a unit by rate card holds and draws the unit balance, soonest-expiring lot first; admitted usage the units cannot cover is never owed"
+      "name": "Usage priced in a unit by rate card holds and draws the unit balance, soonest-expiring lot first; usage the units cannot cover is never owed"
     },
     {
       "id": "OR-J48-S06",
@@ -2562,6 +2562,11 @@
       "id": "OR-J48-S07",
       "journey": "J48",
       "name": "Refunding a pack's payment takes that lot's unspent units first, refuses a refund whose share is spent, books a chargeback's spent share as consumed, and a won dispute returns what the chargeback took, with no cash leg in the unit"
+    },
+    {
+      "id": "OR-J48-S08",
+      "journey": "J48",
+      "name": "Admission holds a unit balance: a request beyond what is left, or one that holds nothing once it is all held, is refused; a capture's overrun charges what the units still cover and the rest is forgiven usage in usage_charged, and the customer reads its usage in the unit"
     }
   ]
 }

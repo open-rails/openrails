@@ -480,6 +480,24 @@ func (s *MoneyService) PriceUsageTx(ctx context.Context, q *gen.Queries, items [
 	return b, nil
 }
 
+// forgive takes amount off item i's charge, across its meters in proportion
+// to what each charged: forgiven usage, rolled up as forgiven and never
+// accrued.
+func (b *UsageBatch) forgive(i int, amount int64) {
+	p, r := &b.priced[i], &b.Results[i]
+	amount = min(amount, r.Amount)
+	weights := make([]int64, len(p.charges))
+	for j, c := range p.charges {
+		weights[j] = c.amount
+	}
+	for j, cut := range share(amount, weights) {
+		p.charges[j].amount -= cut
+		r.Charges[j].Amount -= cut
+	}
+	r.Amount -= amount
+	r.Forgiven += amount
+}
+
 // SettleUsageTx settles a priced batch in the caller's transaction: the
 // accruals, rollups and per-minute spend take its amounts, live lease holds
 // give up what their usage took, and the limits take it in full, never

@@ -89,15 +89,12 @@ func (r usageReport) days() (time.Time, time.Time) {
 	return from, to
 }
 
-// readUsageParams reads a usage report request. A cursor reads the rest of
-// its own report: a window the request leaves out is the cursor's, and
-// without a cursor it ends now and starts a month before.
+// readUsageParams reads a usage report request, its currency already checked.
+// A cursor reads the rest of its own report: a window the request leaves out
+// is the cursor's, and without a cursor it ends now and starts a month before.
 func readUsageParams(params billing.GetUsageParams, now func() time.Time) (usageReport, error) {
-	currency, err := requireCurrency(string(params.Currency))
-	if err != nil {
-		return usageReport{}, err
-	}
-	out := usageReport{currency: currency, groupBy: cmp.Or(params.GroupBy, billing.UsageByEventType), from: params.From.UTC(), to: params.To.UTC()}
+	var err error
+	out := usageReport{currency: string(params.Currency), groupBy: cmp.Or(params.GroupBy, billing.UsageByEventType), from: params.From.UTC(), to: params.To.UTC()}
 	switch out.groupBy {
 	case billing.UsageByEventType, billing.UsageByInvoker, billing.UsageByMeter:
 	default:
@@ -141,6 +138,11 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 	if customer.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
+	currency, err := s.balanceCurrency(ctx, "currency", string(params.Currency))
+	if err != nil {
+		return nil, err
+	}
+	params.Currency = catalog.Currency(currency)
 	report, err := readUsageParams(params, s.now)
 	if err != nil {
 		return nil, err

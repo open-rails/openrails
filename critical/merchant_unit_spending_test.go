@@ -4,6 +4,7 @@ package critical_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ func TestMerchantUnits(t *testing.T) {
 	t.Run("OR-J48-S05/usage-priced-in-units-draws-lots-soonest-expiry-first", unitUsage)
 	t.Run("OR-J48-S06/an-unspent-pack-expires-in-its-unit", unitExpiry)
 	t.Run("OR-J48-S07/a-refund-claws-back-its-lots-units-first", unitRefundByLot)
+	t.Run("OR-J48-S08/admission-holds-the-unit-balance-and-an-overrun-is-forgiven-usage", unitOverrun)
 }
 
 // unitPaymentWorld declares GOLD and CREDITS on alpha, whose card PSP is
@@ -397,21 +399,35 @@ func mustProduct(t *testing.T, a *authorityWorld, key string) billing.ProductID 
 	return products.Items[0].ID
 }
 
-func unitUsage(t *testing.T) {
-	s, _ := unitPaymentWorld(t, 0)
-	a := s.a
+// imageMeter prices an image at 4 GOLD.
+func imageMeter(t *testing.T, a *authorityWorld) billing.ProductID {
+	t.Helper()
 	images, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "images", DisplayName: "Images"})
 	require.NoError(t, err)
 	_, err = a.alpha.SetMeter(t.Context(), "images", billing.SetMeterParams{EventType: "image", ValueProperty: "images", Aggregation: catalog.AggregationSum,
 		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: images.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "GOLD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 4}}})})
 	require.NoError(t, err, "4 GOLD an image")
+	return images.ID
+}
+
+// admitImages admits n images of customer's in GOLD.
+func admitImages(t *testing.T, a *authorityWorld, customer billing.CustomerID, id string, n int64) billing.AdmissionVerdict {
+	t.Helper()
+	return admitOne(t, a.alpha, billing.AdmitParams{RequestID: id, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "GOLD",
+		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "image", Dimensions: map[string]int64{"images": n}}})
+}
+
+func unitUsage(t *testing.T) {
+	s, _ := unitPaymentWorld(t, 0)
+	a := s.a
+	images := imageMeter(t, a)
 	tokens, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "tokens", DisplayName: "Tokens"})
 	require.NoError(t, err)
 	_, err = a.alpha.SetMeter(t.Context(), "tokens", billing.SetMeterParams{EventType: "completion", ValueProperty: "tokens", Aggregation: catalog.AggregationSum,
 		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: tokens.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "CREDITS", PerUnit: &catalog.PerUnitPrice{UnitAmount: 100, DivideBy: 1000}}})})
 	require.NoError(t, err, "1 credit per 1k tokens")
 	_, err = a.alpha.SetMeter(t.Context(), "gems", billing.SetMeterParams{EventType: "gem", ValueProperty: "n", Aggregation: catalog.AggregationSum,
-		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: images.ID, Price: catalog.RatePrice{Model: catalog.ModelDynamic, Currency: "GEMS"}})})
+		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: images, Price: catalog.RatePrice{Model: catalog.ModelDynamic, Currency: "GEMS"}})})
 	requireCode(t, err, billing.CodeCurrencyUnsupported)
 
 	customer := billing.CustomerID(uuid.New())
@@ -456,8 +472,7 @@ func unitUsage(t *testing.T) {
 	thin := billing.CustomerID(uuid.New())
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: thin, Currency: "GOLD", Amount: 10, Source: "critical", SourceID: "thin"}})
 	require.NoError(t, err)
-	verdict = admitOne(t, a.alpha, billing.AdmitParams{RequestID: "over", CustomerID: thin, Invoker: thin.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "GOLD",
-		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "image", Dimensions: map[string]int64{"images": 2}}})
+	verdict = admitImages(t, a, thin, "over", 2)
 	require.True(t, verdict.Allowed())
 	captureUsage(t, a.alpha, "over", "image", map[string]int64{"images": 4}, nil)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: thin, Currency: "GOLD", Amount: 5, Source: "critical", SourceID: "after"}})
@@ -467,8 +482,66 @@ func unitUsage(t *testing.T) {
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "ledger_accounts"}.Sanitize()+
 		" WHERE merchant_id = $1 AND account_type = $2 AND currency IN ('GOLD', 'CREDITS')", a.alpha.MerchantID().UUID(), string(ledger.ArrearsLiability)).Scan(&arrears))
 	require.Zero(t, arrears, "no arrears account exists in a unit")
-	requireDenied(t, admitOne(t, a.alpha, billing.AdmitParams{RequestID: "beyond", CustomerID: thin, Invoker: thin.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "GOLD",
-		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "image", Dimensions: map[string]int64{"images": 2}}}), "insufficient_balance")
+	requireDenied(t, admitImages(t, a, thin, "beyond", 2), "insufficient_balance")
+}
+
+func unitOverrun(t *testing.T) {
+	s, _ := unitPaymentWorld(t, 0)
+	a := s.a
+	imageMeter(t, a)
+	_, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: 20, Source: "critical", SourceID: "twenty"}})
+	require.NoError(t, err)
+
+	// Admission holds the unit balance: once it is held, a request beyond
+	// what is left, or one that holds nothing, is refused.
+	require.True(t, admitImages(t, a, s.alice, "first", 3).Allowed())
+	unitBalance(t, a.alpha, s.alice, "GOLD", 8, 12, 20)
+	requireDenied(t, admitImages(t, a, s.alice, "beyond", 3), "insufficient_balance")
+	require.True(t, admitImages(t, a, s.alice, "second", 2).Allowed())
+	unitBalance(t, a.alpha, s.alice, "GOLD", 0, 20, 20)
+	requireDenied(t, admitOne(t, a.alpha, billing.AdmitParams{RequestID: "costless", CustomerID: s.alice, Invoker: s.alice.String(), InvokerType: billing.InvokerTypeCustomer,
+		Currency: "GOLD", ExpiresAt: ptr(a.clock.Now().Add(time.Hour))}), "insufficient_balance")
+
+	// The first request overruns its hold: 5 images cost 20, the lots can
+	// take 12 beside what the second holds, and 8 are forgiven.
+	receipt := captureUsage(t, a.alpha, "first", "image", map[string]int64{"images": 5}, nil)
+	require.EqualValues(t, 12, receipt.Amount, "the capture charges what the units cover")
+	receipt = captureUsage(t, a.alpha, "second", "image", map[string]int64{"images": 2}, nil)
+	require.EqualValues(t, 8, receipt.Amount)
+	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: 1, Source: "critical", SourceID: "post"}})
+	require.NoError(t, err)
+	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)
+
+	day := a.clock.Now().UTC().Format(time.DateOnly)
+	result, err := a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"usage_charged"}, By: []string{"charge"},
+		Filters: map[string][]string{"customer": {s.alice.String()}, "currency": {"GOLD"}}, Range: &billing.MetricsRange{From: day, To: day}})
+	require.NoError(t, err)
+	charge, amount := -1, -1
+	for i, c := range result.Columns {
+		switch c.Name {
+		case "charge":
+			charge = i
+		case "usage_charged":
+			amount = i
+		}
+	}
+	require.True(t, charge >= 0 && amount >= 0, "%+v", result.Columns)
+	byCharge := map[string]int64{}
+	for _, row := range result.Rows {
+		var n int64
+		_, err := fmt.Sscan(fmt.Sprint(row[amount]), &n)
+		require.NoError(t, err)
+		byCharge[fmt.Sprint(row[charge])] += n
+	}
+	require.Equal(t, map[string]int64{"charged": 20, "forgiven": 8}, byCharge, "the overrun shows as forgiven usage")
+
+	status, raw := a.request(t, http.MethodGet, "/v1/me/usage?currency=GOLD", a.aliceToken, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var usage billing.Usage
+	require.NoError(t, json.Unmarshal(raw, &usage))
+	require.Len(t, usage.Rows, 1)
+	require.Equal(t, "image", usage.Rows[0].Key)
+	require.EqualValues(t, 20, usage.Rows[0].Amount, "the customer's usage in the unit is what it charged")
 }
 
 func unitExpiry(t *testing.T) {
