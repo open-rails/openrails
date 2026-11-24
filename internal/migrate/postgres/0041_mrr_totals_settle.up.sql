@@ -5,8 +5,9 @@
 -- refused. Both totals are now made at zero and then moved, and every
 -- merchant's are derived again from what they sum.
 --
--- A finding of the MRR risk drain (mrr.risk.evaluation_failed) is a finding
--- type.
+-- A cancel decision takes every kind a subscription records (a provider's
+-- end, an abandoned checkout), and a finding of the MRR risk drain
+-- (mrr.risk.evaluation_failed) is a finding type.
 
 -- Nothing settles while the totals are derived again; the locks follow the
 -- order writers take.
@@ -14,6 +15,9 @@ LOCK TABLE billing.subscriptions IN SHARE ROW EXCLUSIVE MODE;
 LOCK TABLE billing.subscription_mrr, billing.subscription_status_transitions, billing.customer_mrr, billing.mrr_movements, billing.mrr_product_flows
     IN SHARE MODE;
 
+ALTER TABLE billing.subscription_cancellations DROP CONSTRAINT subscription_cancellations_cancel_type_check,
+    ADD CONSTRAINT subscription_cancellations_cancel_type_check
+        CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade', 'provider', 'abandoned'));
 ALTER TABLE billing.reconciliation_findings DROP CONSTRAINT reconciliation_findings_type_check,
     ADD CONSTRAINT reconciliation_findings_type_check
         CHECK (finding_type ~ '^(pull|derive|life|consistency|notify|catalog|books|mrr)\.[a-z0-9_]+(\.[a-z0-9_]+)?$');

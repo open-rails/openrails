@@ -61,7 +61,7 @@ CREATE TABLE billing.subscription_cancellations (
     merchant_id uuid NOT NULL,
     id uuid NOT NULL DEFAULT uuidv7(),
     subscription_id uuid NOT NULL,
-    cancel_type text CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade', 'provider', 'abandoned')),
+    cancel_type text CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade')),
     decided_at timestamptz NOT NULL,
     reversed_at timestamptz,
     PRIMARY KEY (merchant_id, id),
