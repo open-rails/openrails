@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/disputerules"
+
 	"github.com/goccy/go-yaml"
 
 	"github.com/open-rails/openrails/billing"
@@ -84,6 +86,11 @@ func ValidatePSPKeys(psp string, p billing.PSPConfig) error {
 	}
 	if len(unknown) > 0 {
 		return fmt.Errorf("psps.%s: a %s PSP has no %s (%s takes %s)", psp, d.Rail, strings.Join(unknown, ", "), d.Rail, strings.Join(PSPDocumentFields(d.Rail), ", "))
+	}
+	if limit, ok := p.Settings["dispute_ratio_limit"]; ok {
+		if _, err := disputerules.ParseRatioLimit(limit); err != nil {
+			return fmt.Errorf("psps.%s: %w", psp, err)
+		}
 	}
 	secrets := make([]string, 0, len(d.CredentialKeys))
 	for _, k := range d.CredentialKeys {

@@ -205,6 +205,7 @@ pkg openrails, type CCBillPSP struct, ClientAccnum string `psp:"client_accnum"`
 pkg openrails, type CCBillPSP struct, ClientSubacc string `psp:"client_subacc"`
 pkg openrails, type CCBillPSP struct, DatalinkPassword string `psp:"secrets.datalink_password"`
 pkg openrails, type CCBillPSP struct, DatalinkUsername string `psp:"secrets.datalink_username"`
+pkg openrails, type CCBillPSP struct, DisputeRatioLimit string `psp:"dispute_ratio_limit"`
 pkg openrails, type CCBillPSP struct, Environment billing.Environment `psp:"environment"`
 pkg openrails, type CCBillPSP struct, Salt string `psp:"secrets.salt,required"`
 pkg openrails, type CaptchaConfig struct
@@ -316,6 +317,7 @@ pkg openrails, type NMIPSP struct
 pkg openrails, type NMIPSP struct, Archived bool `psp:"archived"`
 pkg openrails, type NMIPSP struct, CardEntry string `psp:"card_entry"`
 pkg openrails, type NMIPSP struct, Custodian string `psp:"custodian"`
+pkg openrails, type NMIPSP struct, DisputeRatioLimit string `psp:"dispute_ratio_limit"`
 pkg openrails, type NMIPSP struct, Environment billing.Environment `psp:"environment"`
 pkg openrails, type NMIPSP struct, GatewayID string `psp:"gateway_id"`
 pkg openrails, type NMIPSP struct, SecurityKey string `psp:"secrets.security_key,required"`
@@ -390,6 +392,7 @@ pkg openrails, type StartOption func(*startOptions)
 pkg openrails, type StripePSP struct
 pkg openrails, type StripePSP struct, AccountID string `psp:"account_id"`
 pkg openrails, type StripePSP struct, Archived bool `psp:"archived"`
+pkg openrails, type StripePSP struct, DisputeRatioLimit string `psp:"dispute_ratio_limit"`
 pkg openrails, type StripePSP struct, Environment billing.Environment `psp:"environment"`
 pkg openrails, type StripePSP struct, PublishableKey string `psp:"publishable_key"`
 pkg openrails, type StripePSP struct, SecretKey string `psp:"secrets.secret_key,required"`

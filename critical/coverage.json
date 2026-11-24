@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 460,
+  "scenario_count": 469,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2302,6 +2302,51 @@
       "id": "OR-J46-S02",
       "journey": "J46",
       "name": "A Stripe inquiry books, cancels and revokes nothing, its closing undoes nothing, its escalation books the chargeback once, and the reconcile pull proposes nothing for it"
+    },
+    {
+      "id": "OR-J46-S01",
+      "journey": "J46",
+      "name": "A Stripe chargeback records one dispute with its network, reason family, code and due date, books one reversal, ends the subscription and its access, blocks the card and asks staff to review the customer; replays change nothing"
+    },
+    {
+      "id": "OR-J46-S03",
+      "journey": "J46",
+      "name": "An RDR resolution books one refund (dispute_prevention) and no chargeback, a Compelling Evidence 3.0 block books nothing, and neither counts in a dispute ratio"
+    },
+    {
+      "id": "OR-J46-S04",
+      "journey": "J46",
+      "name": "A won dispute books its recovery and stays won: a late notice that it opened reverses nothing"
+    },
+    {
+      "id": "OR-J46-S06",
+      "journey": "J46",
+      "name": "A CCBill chargeback is recorded with its reason, card network and reversal, its outcome unreported"
+    },
+    {
+      "id": "OR-J46-S07",
+      "journey": "J46",
+      "name": "An actionable early fraud warning is a fraud report Visa counts; it refunds the charge in full once (fraud_warning), ends what it paid for and blocks the card, and a merchant that records reports only refunds nothing"
+    },
+    {
+      "id": "OR-J46-S08",
+      "journey": "J46",
+      "name": "Chargebacks that bring a PSP's ratio to its acquirer limit's warning raise one high finding that alerts; at the limit it escalates to critical and alerts again, and the program read shows the same standing"
+    },
+    {
+      "id": "OR-J46-S09",
+      "journey": "J46",
+      "name": "Mastercard's ratio divides a month's chargebacks by the previous month's sales, Visa's by the month's own"
+    },
+    {
+      "id": "OR-J46-S10",
+      "journey": "J46",
+      "name": "The VAMP level in force is the evaluated month's: 2.2% in March 2026, 1.5% from April"
+    },
+    {
+      "id": "OR-J46-S14",
+      "journey": "J46",
+      "name": "A staff refund carries its reason, requested_by_customer unless named; a Stripe dashboard refund carries Stripe's; refunds count in no dispute ratio"
     }
   ]
 }

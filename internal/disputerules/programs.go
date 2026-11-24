@@ -1,7 +1,10 @@
 package disputerules
 
 import (
+	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
@@ -260,3 +263,18 @@ func rank(l billing.DisputeLevel) int {
 
 // Rank orders levels: none, warning, excessive, high excessive.
 func Rank(l billing.DisputeLevel) int { return rank(l) }
+
+// ParseRatioLimit reads a PSP's dispute_ratio_limit: a percentage such as
+// "0.9%", more than 0 and less than 100. It answers basis points.
+func ParseRatioLimit(v any) (int64, error) {
+	s, ok := v.(string)
+	if !ok {
+		return 0, fmt.Errorf("dispute_ratio_limit is a percentage such as \"0.9%%\"")
+	}
+	number, found := strings.CutSuffix(strings.TrimSpace(s), "%")
+	percent, err := strconv.ParseFloat(strings.TrimSpace(number), 64)
+	if !found || err != nil || percent <= 0 || percent >= 100 {
+		return 0, fmt.Errorf("dispute_ratio_limit %q is not a percentage between 0%% and 100%% such as \"0.9%%\"", s)
+	}
+	return int64(math.Round(percent * 100)), nil
+}

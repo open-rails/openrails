@@ -25,6 +25,17 @@ against an order with no provider call.
 - **Credit line**: the order line that bought a credit lot; reversals return its
   money first ([prepaid credits](prepaid-credits.md)).
 - **External payment**: a `payments` row with `channel = 'manual'`.
+- **Dispute**: a `disputes` row per provider case (`disputes.Service.Record`):
+  `kind` `inquiry` (nothing withdrawn), `chargeback`, or `prevented` (an RDR
+  refund or a Compelling Evidence 3.0 block), with its network, reason family
+  (`disputerules.Classify`), code, dates and outcome. The money stays in the
+  `payments` rows it names (`reversal_payment_id`, `recovery_payment_id`).
+- **Fraud report**: a `fraud_reports` row per Stripe early fraud warning (Visa
+  TC40, Mastercard SAFE).
+- **Refund reason**: `payments.refund_reason`, set exactly on refund rows.
+- **Network activity**: `network_activity_daily`, card sales, refunds,
+  chargebacks and fraud reports per PSP, network, currency and UTC day, kept by
+  triggers on `payments`, `disputes` and `fraud_reports`.
 - **Ledger repair**: a `consistency.ledger.unbooked` finding for a provider
   reversal OpenRails could not book (`alerting.RecordLedgerRepair`).
 
@@ -80,17 +91,42 @@ System refunds use the same reservation and intents with `OriginSystem`
   id with the same facts and refuses one with other facts, defers while an
   OpenRails refund of the payment is pending (`ErrRefundReservationPending`), and
   applies the merchant's `provider_refund_access` (`ApplyRefundAccessPolicy`).
-- Chargebacks (`ReversalChargeback`) come from Stripe `charge.dispute.created`
-  (or `charge.dispute.closed` as lost), NMI chargeback reports and CCBill
-  `Chargeback` notices. Each records the reversal, then cancels the subscription
-  (`CancelTypeChargeback`) or ends a one-off purchase's access. A reversal it
-  cannot book (no matching charge, more than remains) raises
+- Disputes come from Stripe's `charge.dispute.*` events (classified by status
+  and card `case_type`, `disputerules.StripeKind`), NMI chargeback batches (every
+  entry, matched or not) and CCBill `Chargeback` notices. Each is recorded; a
+  chargeback (`ReversalChargeback`) records the reversal on whichever notice says
+  so first, cancels the subscription (`CancelTypeChargeback`) or ends a one-off
+  purchase's access, and blocks the card (`disputes.Service.BlockCard`): the
+  method is `disputed`, its mandates end (`disputed`), and the customer's other
+  provider-billed subscriptions on it end at period end. An inquiry and a CE 3.0
+  block book nothing; an RDR resolution books a refund (`dispute_prevention`). A
+  reversal it cannot book (no matching charge, more than remains) raises
   `consistency.ledger.unbooked`; access still ends.
 - A won Stripe dispute (`handleStripeDisputeWon`) records a positive
   `dispute_reversal` whose `metadata.reverses_payment_id` names the chargeback,
-  and reactivates a provider-managed subscription this dispute canceled. An
-  engine-collected one stays canceled, and a one-off purchase's access is not
-  restored; it is only logged for review.
+  and reactivates a provider-managed subscription this dispute canceled. The
+  dispute's `won` status is final against later notices. An engine-collected
+  subscription stays canceled, and a one-off purchase's access is not restored;
+  it is only logged for review.
+- A Stripe early fraud warning (`handleEarlyFraudWarning`) is recorded once; an
+  actionable one refunds its charge in full (`intents.QueueFraudWarningRefund`,
+  `fraud_warning`) and ends what it paid for like a chargeback, unless
+  `fraud_warning_refund` is `record`.
+
+### Dispute monitoring
+
+Recording a chargeback or a fraud report queues `openrails.dispute_monitor` for
+its PSP in the same transaction (`disputes.QueueMonitor`, unique while queued).
+The job reads at most 62 days of `network_activity_daily` and evaluates each
+program in `disputerules.Programs` (and `AcquirerProgram` for a PSP's
+`dispute_ratio_limit`) over the month so far, scaled to the whole month (the last
+30 days before its 7th day). Mastercard divides by the previous month's sales. A
+program at its warning level raises `life.disputes.threshold` (high), at its
+excessive level (critical), subject `<psp>:<program>:<YYYY-MM>`; both alert
+through `alerting.Service.NotifyFinding`, and an evaluation below the warning
+level resolves it. The job also alerts on `life.disputes.customer_review`
+findings each chargeback raises. `GET /v1/metrics/dispute-programs` evaluates the
+same programs for any month.
 
 After any reversal of a charge that funded a lot, `syncPurchasedCreditRefund` runs
 `purchasedcredits.Service.ApplyReversal` per reversal, negatives oldest first and
@@ -108,20 +144,24 @@ never refundable through OpenRails.
 ## Interfaces
 
 - Go: `Client.RefundPayment` (`billing.RefundPaymentParams`), `Client.GetPayment`,
-  `Client.ListPayments`, `Client.RecordExternalPayment`
+  `Client.ListPayments`, `Client.ListDisputes`, `Client.GetDispute`,
+  `Client.ListDisputePrograms`, `Client.RecordExternalPayment`
   (`billing.RecordExternalPaymentParams`). `billing.PaymentKind` is `charge`,
   `refund`, `chargeback` or `dispute_reversal`; a charge with reversals reads
   `refunded` or `partially_refunded`. Sentinels: `billing.ErrRefundUnsupported`,
   `billing.ErrRefundRailUnavailable`.
 - HTTP: `POST /v1/admin/payments/{id}/refunds` and `POST /v1/admin/payments`
   (`merchant:customer:manage`); `GET /v1/admin/payments` and
-  `GET /v1/admin/payments/{id}` (`merchant:customer:read`); `GET /v1/me/payments`.
+  `GET /v1/admin/payments/{id}`, `GET /v1/admin/disputes` and
+  `GET /v1/admin/disputes/{id}` (`merchant:customer:read`);
+  `GET /v1/metrics/dispute-programs`; `GET /v1/me/payments`.
 - Error codes: `idempotency_key_required`, `idempotency_key_reused`,
   `invalid_param`, `payment_not_found`, `payment_not_refundable`,
   `refund_unsupported`, `refund_rail_unavailable`, `refund_failed`,
   `payment_exceeds_due`, `order_not_payable`, `order_has_recurring_line`.
-- Merchant setting: `provider_refund_access` (`revoke_on_full`, `revoke_on_any`,
-  `keep`). Events: none of its own; `payment.settled` fires only for charges.
+- Merchant settings: `provider_refund_access` (`revoke_on_full`, `revoke_on_any`,
+  `keep`), `fraud_warning_refund` (`refund`, `record`); PSP setting
+  `dispute_ratio_limit`. Events: none of its own; `payment.settled` fires only for charges.
 - Docs: [merchant operations](../client.md#payments-and-refunds),
   [provider uncertainty](../standalone.md#provider-intents),
   [destructive actions](../standalone.md#destructive-holds).
@@ -218,6 +258,8 @@ Checks:
 - Refund paths read reversals by `refunded_payment_id` or a provider transaction
   id (`ListRefundsForPayment`, `ListRefundRowsForTotal`, `GetByPSPTransactionID`).
 - `syncPurchasedCreditRefund` loops over one charge's reversals only.
+- The dispute monitor runs per chargeback or fraud report and reads a PSP's
+  `network_activity_daily` days, never its payments.
 
 ### 8. Abuse protection
 Refunds are staff-only. Provider webhooks use the `webhook` bucket and per-rail
@@ -254,6 +296,10 @@ Checks:
   (`TestCCBillRefunds`).
 - J21: OR-J21-S01 to S03 external payments (`TestExternalPayments`); OR-J21-S04
   imported refund allowance (`TestImportedReceipt`).
+- J46 (`TestDisputes`): OR-J46-S01 a chargeback; S02 an inquiry, its escalation
+  and the reconcile pull; S03 RDR and CE 3.0; S04 a won dispute; S06 CCBill; S07
+  early fraud warnings; S08 the monitor's findings and alerts; S09 Mastercard's
+  previous-month basis; S10 the levels in force; S14 refund reasons.
 - Credit-line reversals (`TestMixedOrderCreditRefunds`): OR-J22-S07 (a pending
   refund holds the lot), S08 (refunds, chargeback, won dispute), S09 (dispute credit).
 - OR-J27-S04: a staff refund's `revoke_access`, and a full revoking refund ends

@@ -1473,6 +1473,37 @@
       "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/webhooks",
       "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing/reconcile-pull",
       "TestDisputes/OR-J46-S02/an-inquiry-books-and-cancels-nothing"
+    ],
+    "OR-J46-S01": [
+      "TestDisputes/OR-J46-S01/a-chargeback-is-recorded-reversed-and-ends-its-charge"
+    ],
+    "OR-J46-S03": [
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/rdr-resolution-is-a-refund",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback/ce3-block-books-nothing",
+      "TestDisputes/OR-J46-S03/a-prevented-dispute-is-no-chargeback"
+    ],
+    "OR-J46-S04": [
+      "TestDisputes/OR-J46-S04/a-won-dispute-stays-won"
+    ],
+    "OR-J46-S06": [
+      "TestDisputes/OR-J46-S06/a-ccbill-chargeback-is-recorded"
+    ],
+    "OR-J46-S07": [
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/refunds-by-default",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
+      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
+    ],
+    "OR-J46-S08": [
+      "TestDisputes/OR-J46-S08/the-monitor-raises-and-escalates-alerting-findings"
+    ],
+    "OR-J46-S09": [
+      "TestDisputes/OR-J46-S09/mastercard-divides-by-the-previous-months-sales"
+    ],
+    "OR-J46-S10": [
+      "TestDisputes/OR-J46-S10/the-program-in-force-is-the-months"
+    ],
+    "OR-J46-S14": [
+      "TestDisputes/OR-J46-S14/refunds-carry-their-reason-and-count-in-no-ratio"
     ]
   }
 }

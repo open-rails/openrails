@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/disputerules"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // Service records disputes and evaluates the monitoring programs.
@@ -38,10 +39,7 @@ type Service struct {
 
 // New is a Service on database.
 func New(database *db.DB, clock clockwork.Clock) *Service {
-	if clock == nil {
-		clock = clockwork.NewRealClock()
-	}
-	return &Service{DB: database, Clock: clock, Log: slog.New(slog.DiscardHandler)}
+	return &Service{DB: database, Clock: timeutil.FirstClock(clock), Log: slog.New(slog.DiscardHandler)}
 }
 
 func (s *Service) now() time.Time { return s.Clock.Now().UTC().Truncate(time.Microsecond) }
@@ -102,6 +100,13 @@ func (s *Service) Record(ctx context.Context, d *db.DB, r Report) (Case, error) 
 		network = billing.NetworkUnknown
 	}
 	reason := disputerules.Classify(network, r.ReasonCode, r.ProviderReason)
+	// Only a chargeback is won, lost or unreported; any other case ends closed.
+	if r.Kind != billing.DisputeChargeback && (r.Status == billing.DisputeWon || r.Status == billing.DisputeLost || r.Status == billing.DisputeUnreported) {
+		r.Status = billing.DisputeClosed
+	}
+	if r.Kind == billing.DisputePrevented {
+		r.Status = billing.DisputeClosed
+	}
 	var out Case
 	err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := d.NewWithPgxTx(tx)
