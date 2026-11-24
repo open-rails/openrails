@@ -58,7 +58,7 @@ func Transition(sub *models.Subscription, ev lifecycle.Event, now time.Time) ([]
 			if next.Status == lifecycle.Active || next.Status == lifecycle.Canceled {
 				sub.ClearRetrySchedule()
 			} else {
-				sub.NextRetryAt, sub.GraceEndsAt = nil, nil // attempts stay as evidence
+				sub.NextRetryAt, sub.GraceEndsAt, sub.RetryAdvisedAt = nil, nil, nil // attempts stay as evidence
 			}
 		}
 	}
@@ -67,9 +67,9 @@ func Transition(sub *models.Subscription, ev lifecycle.Event, now time.Time) ([]
 	}
 	switch next.Status {
 	case lifecycle.Canceled, lifecycle.Unverified:
-		sub.NextRetryAt, sub.GraceEndsAt = nil, nil
+		sub.NextRetryAt, sub.GraceEndsAt, sub.RetryAdvisedAt = nil, nil, nil
 	case lifecycle.AwaitingMethod:
-		sub.NextRetryAt = nil // nothing is charged; GraceEndsAt is the deadline
+		sub.NextRetryAt, sub.RetryAdvisedAt = nil, nil // nothing is charged; GraceEndsAt is the deadline
 	}
 	return effects, nil
 }

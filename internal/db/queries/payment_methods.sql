@@ -165,7 +165,7 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = $1 AND pm.custome
 -- #589 derived health: each payment method's most recent charge attempt
 -- (#1111), approved or not.
 SELECT DISTINCT ON (a.payment_method_id)
-    a.payment_method_id, a.attempted_at, a.category
+    a.payment_method_id, a.attempted_at, a.outcome
 FROM billing.payment_attempts a
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.payment_method_id = ANY(sqlc.arg(ids)::uuid[]) AND a.kind <> 'verify'
 ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC;

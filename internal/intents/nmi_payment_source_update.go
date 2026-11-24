@@ -441,6 +441,8 @@ func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen
 			if err := subscriptions.ReplaceMethod(sub, now); err != nil {
 				return err
 			}
+		} else if err := subscriptions.ForgetAdvice(ctx, h.DB.NewWithPgxTx(tx), sub); err != nil {
+			return err
 		}
 		return repo.UpdateAt(ctx, sub, now)
 	})

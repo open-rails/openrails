@@ -18,6 +18,7 @@ migration 0014_bounded_gate.up.sql sha256:cbfefdff4b6968b735896de2c3f71b946954b2
 migration 0015_event_store.up.sql sha256:67e10055bc149bb0f9049cd000d2b392a2f154dc10aa222fa0d48b0d00b195fe
 migration 0016_mrr.up.sql sha256:df42cce7fb504628cf0b3b44851be7e90dde4f39d7a9afab03ece7d1650200ec
 migration 0018_contact_erasure_admission.up.sql sha256:5eadf21f7f3f11c7174b6fdf459fdddd5c2dcff02418031fb5b794d9ea5d9575
+migration 0023_decline_causes.up.sql sha256:f49588857f53d1b4b9c1883f8ebc6b377650cf192aa51a1211cb788ced9b4d0d
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1537,18 +1538,20 @@ table billing.nmi_history_months
   column psp_id uuid NOT NULL
   column month_at timestamp with time zone NOT NULL
   column kind text NOT NULL
-  column category text NOT NULL
   column reason text NOT NULL
   column authorizations bigint NOT NULL
+  column outcome text NOT NULL
+  column decline_cause text
   constraint nmi_history_months_authorizations_check CHECK ((authorizations > 0))
-  constraint nmi_history_months_category_check CHECK ((category = ANY (ARRAY['approved'::text, 'card_data'::text, 'issuer_soft'::text, 'issuer_hard'::text, 'gateway_rule'::text, 'system_error'::text, 'unknown'::text])))
+  constraint nmi_history_months_decline_cause_check CHECK ((decline_cause = ANY (ARRAY['customer'::text, 'issuer'::text, 'fraud'::text, 'merchant'::text, 'processing'::text, 'unknown'::text])))
   constraint nmi_history_months_kind_check CHECK ((kind = ANY (ARRAY['verification'::text, 'one_off_sale'::text, 'scheduled_rebill'::text])))
   constraint nmi_history_months_month_at_check CHECK ((month_at = date_trunc('month'::text, month_at, 'UTC'::text)))
-  constraint nmi_history_months_pkey PRIMARY KEY (merchant_id, psp_id, month_at, kind, category, reason)
+  constraint nmi_history_months_outcome_check CHECK ((outcome = ANY (ARRAY['approved'::text, 'declined'::text, 'refused'::text, 'error'::text])))
+  constraint nmi_history_months_pkey PRIMARY KEY (merchant_id, psp_id, month_at, kind, reason)
   constraint nmi_history_months_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
-  constraint nmi_history_months_reason_check CHECK (((category = 'approved'::text) = (reason = ''::text)))
+  constraint nmi_history_months_reason_check CHECK ((((outcome = 'approved'::text) = (reason = ''::text)) AND ((outcome = 'approved'::text) = (decline_cause IS NULL)) AND ((decline_cause = 'merchant'::text) = (outcome = 'refused'::text)) AND ((decline_cause = 'processing'::text) = (outcome = 'error'::text))))
   index CREATE INDEX nmi_history_months_month_at_idx ON billing.nmi_history_months USING btree (merchant_id, month_at)
-  index CREATE UNIQUE INDEX nmi_history_months_pkey ON billing.nmi_history_months USING btree (merchant_id, psp_id, month_at, kind, category, reason)
+  index CREATE UNIQUE INDEX nmi_history_months_pkey ON billing.nmi_history_months USING btree (merchant_id, psp_id, month_at, kind, reason)
 
 table billing.nmi_history_reads
   column merchant_id uuid NOT NULL
@@ -1921,7 +1924,6 @@ table billing.payment_attempts
   column card_entry text NOT NULL
   column source text NOT NULL
   column observed_via text NOT NULL
-  column category text NOT NULL
   column reason text
   column action text
   column response_code text
@@ -1950,15 +1952,20 @@ table billing.payment_attempts
   column mandate_id uuid
   column sent_initial_transaction_id text
   column order_id uuid
+  column outcome text NOT NULL
+  column decline_cause text
+  column advice_code text
+  column network_advice_code text
   constraint payment_attempts_action_check CHECK (((action IS NULL) OR (action = ANY (ARRAY['retry'::text, 'fix_payment_method'::text, 'non_recoverable'::text]))))
+  constraint payment_attempts_advice_check CHECK (((advice_code <> ''::text) AND (length(advice_code) <= 32) AND (network_advice_code <> ''::text) AND (length(network_advice_code) <= 8)))
   constraint payment_attempts_amount_check CHECK ((amount >= 0))
   constraint payment_attempts_card_bin_check CHECK ((card_bin ~ '^[0-9]{6,8}$'::text))
   constraint payment_attempts_card_entry_check CHECK ((card_entry = ANY (ARRAY['new'::text, 'saved'::text])))
-  constraint payment_attempts_category_check CHECK ((category = ANY (ARRAY['approved'::text, 'card_data'::text, 'issuer_soft'::text, 'issuer_hard'::text, 'gateway_rule'::text, 'system_error'::text, 'unknown'::text])))
   constraint payment_attempts_currency_check CHECK (((currency ~ '^[A-Z0-9]{3,12}$'::text) OR ((currency IS NULL) AND (amount = 0))))
   constraint payment_attempts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint payment_attempts_cycle_check CHECK (((kind = ANY (ARRAY['rebill'::text, 'dunning_retry'::text, 'customer_retry'::text])) = (cycle_id IS NOT NULL)))
   constraint payment_attempts_cycle_id_fkey FOREIGN KEY (merchant_id, cycle_id) REFERENCES billing.rebill_cycles(merchant_id, id)
+  constraint payment_attempts_decline_cause_check CHECK ((decline_cause = ANY (ARRAY['customer'::text, 'issuer'::text, 'fraud'::text, 'merchant'::text, 'processing'::text, 'unknown'::text])))
   constraint payment_attempts_issuer_check CHECK (((length(issuer_code) <= 32) AND (length(issuer_text) <= 128)))
   constraint payment_attempts_kind_check CHECK ((kind = ANY (ARRAY['verify'::text, 'initial'::text, 'upgrade'::text, 'rebill'::text, 'dunning_retry'::text, 'customer_retry'::text, 'collection'::text])))
   constraint payment_attempts_last4_check CHECK ((card_last4 ~ '^[0-9]{4}$'::text))
@@ -1966,7 +1973,7 @@ table billing.payment_attempts
   constraint payment_attempts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint payment_attempts_observed_via_check CHECK ((observed_via = ANY (ARRAY['response'::text, 'webhook'::text, 'pull'::text])))
   constraint payment_attempts_order_id_fkey FOREIGN KEY (merchant_id, order_id) REFERENCES billing.orders(merchant_id, id) ON DELETE SET NULL (order_id)
-  constraint payment_attempts_outcome_check CHECK (((category = 'approved'::text) = ((reason IS NULL) AND (action IS NULL))))
+  constraint payment_attempts_outcome_check CHECK ((outcome = ANY (ARRAY['approved'::text, 'declined'::text, 'refused'::text, 'error'::text])))
   constraint payment_attempts_owner_check CHECK ((owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text, 'none'::text])))
   constraint payment_attempts_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE SET NULL (payment_id)
   constraint payment_attempts_payment_method_id_fkey FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE SET NULL (payment_method_id)
@@ -1974,6 +1981,7 @@ table billing.payment_attempts
   constraint payment_attempts_provider_intent_id_fkey FOREIGN KEY (merchant_id, provider_intent_id) REFERENCES billing.provider_intents(merchant_id, id) ON DELETE SET NULL (provider_intent_id)
   constraint payment_attempts_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint payment_attempts_purchase_check CHECK (((purchase_id IS NULL) = (purchase_target IS NULL)))
+  constraint payment_attempts_refusal_check CHECK ((((outcome = 'approved'::text) = (decline_cause IS NULL)) AND ((decline_cause IS NULL) = (reason IS NULL)) AND ((reason IS NULL) = (action IS NULL)) AND ((decline_cause = 'merchant'::text) = (outcome = 'refused'::text)) AND ((decline_cause = 'processing'::text) = (outcome = 'error'::text))))
   constraint payment_attempts_sent_initial_transaction_id_check CHECK ((sent_initial_transaction_id <> ''::text))
   constraint payment_attempts_source_check CHECK ((source = ANY (ARRAY['openrails'::text, 'provider_schedule'::text, 'external'::text])))
   constraint payment_attempts_text_check CHECK ((length(response_text) <= 128))
@@ -3237,6 +3245,7 @@ table billing.subscriptions
   column facts_authority text NOT NULL DEFAULT 'provider'::text
   column due_recheck_at timestamp with time zone
   column rail_subscription_key text GENERATED ALWAYS AS (billing.rail_subscription_key(rail, rail_subscription_id)) STORED
+  column retry_advised_at timestamp with time zone
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))

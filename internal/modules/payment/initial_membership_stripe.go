@@ -136,8 +136,15 @@ func (h *InitialMembershipIntentHandler) executeStripeInitialDecline(ctx context
 		return intents.Ambiguous("submitted Stripe payment requires exact readback; no resend")
 	}
 	if result.State == subscriptions.StripeEngineDeclined && result.FailureCode != "canceled" {
-		// Cancellation erases the decline at Stripe; retain it first.
-		if err := intents.NewStore(h.database()).RecordProgress(ctx, current.ID, map[string]any{"decline_code": result.FailureCode}); err != nil {
+		// Cancellation erases the decline and its advice at Stripe; retain
+		// them first.
+		progress := map[string]any{"decline_code": result.FailureCode}
+		for key, value := range map[string]string{"advice_code": result.AdviceCode, "network_advice_code": result.NetworkAdviceCode, "network_decline_code": result.NetworkDeclineCode} {
+			if value != "" {
+				progress[key] = value
+			}
+		}
+		if err := intents.NewStore(h.database()).RecordProgress(ctx, current.ID, progress); err != nil {
 			return intents.Ambiguous(err.Error())
 		}
 		if _, err := service.FinalizeEngineDecline(ctx, params, result.PaymentIntentID); err != nil {

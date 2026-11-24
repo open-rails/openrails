@@ -96,7 +96,7 @@ func (m *Mock) sale(form url.Values) string {
 	}
 	if code := charged.Decline; code != "" {
 		d := &Sale{Book: book(form), TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: v.BillingID, Amount: amount, ScheduleID: scheduleID,
-			Currency: currency, Card: *charged, Declined: code, At: m.now()}
+			Currency: currency, Card: *charged, Declined: code, IssuerCode: m.issuers[charged.Last4], At: m.now()}
 		m.sales = append(m.sales, d)
 		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", d.TransactionID, "avsresponse", charged.AVS, "cvvresponse", charged.CVV,
 			"orderid", order, "type", "sale", "response_code", code, "customer_vault_id", v.ID)
@@ -145,7 +145,7 @@ func (m *Mock) tokenSale(form url.Values) string {
 	s := &Sale{Book: book(form), TransactionID: m.txnID(), OrderID: order, OrderDescription: form.Get("order_description"), Amount: amount, Currency: currency,
 		InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id"), Card: c, At: m.now()}
 	if c.Decline != "" && c.Decline != "vault" {
-		s.Declined = c.Decline
+		s.Declined, s.IssuerCode = c.Decline, m.issuers[c.Last4]
 		m.sales = append(m.sales, s)
 		fields := []string{"response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", s.TransactionID, "avsresponse", c.AVS, "cvvresponse", c.CVV,
 			"orderid", order, "type", "sale", "response_code", c.Decline}

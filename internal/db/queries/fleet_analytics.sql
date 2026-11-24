@@ -34,8 +34,8 @@ ORDER BY p.currency;
 -- name: FleetRailHealth :many
 WITH charges AS (
     SELECT a.rail AS r,
-           count(*) FILTER (WHERE a.category = 'approved') AS ok,
-           count(*) FILTER (WHERE a.category <> 'approved') AS refused
+           count(*) FILTER (WHERE a.outcome = 'approved') AS ok,
+           count(*) FILTER (WHERE a.outcome <> 'approved') AS refused
       FROM billing.payment_attempts a
      WHERE a.attempted_at >= sqlc.arg(since)::timestamptz AND a.kind <> 'verify'
        AND (sqlc.narg(exclude_merchant_id)::uuid IS NULL OR a.merchant_id <> sqlc.narg(exclude_merchant_id)::uuid)

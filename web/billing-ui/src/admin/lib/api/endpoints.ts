@@ -101,7 +101,8 @@ export type AttemptFilters = Partial<
 export const ATTEMPT_FILTERS = [
   "kind",
   "owner",
-  "category",
+  "outcome",
+  "decline_cause",
   "reason",
   "response_code",
   "card_entry",

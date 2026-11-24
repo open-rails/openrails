@@ -35,15 +35,8 @@ export const NEW_CARD: Filters = {
   kind: ["verify", "initial"],
   card_entry: ["new"],
 }
-export const FAILED_CATEGORIES = [
-  "card_data",
-  "issuer_soft",
-  "issuer_hard",
-  "gateway_rule",
-  "system_error",
-  "unknown",
-]
-export const FIRST_FAILED = ["declined", "error", "missed"]
+export const FAILED_OUTCOMES = ["declined", "refused", "error"]
+export const FIRST_FAILED = ["declined", "refused", "error", "missed"]
 
 function scoped(scope: Scope, extra: Filters = {}): Filters | undefined {
   const out: Filters = { ...extra }
@@ -89,7 +82,7 @@ export const TILES: Tile[] = [
     better: "lower",
     query: (scope) => compared(["attempt_failure_rate"], scope, NEW_CARD),
     list: "attempts",
-    listFilters: { ...NEW_CARD, category: FAILED_CATEGORIES },
+    listFilters: { ...NEW_CARD, outcome: FAILED_OUTCOMES },
   },
   {
     id: "purchase-failure",
@@ -197,14 +190,14 @@ export const trendQueries = (scope: Scope) => {
 
 export const reasonsQuery = (scope: Scope): QueryMetricsParams => ({
   measures: ["attempts"],
-  by: ["category", "reason", "response_code"],
+  by: ["decline_cause", "reason", "response_code"],
   range: { last: scope.last },
-  filters: scoped(scope, { outcome: ["declined"] }),
+  filters: scoped(scope, { outcome: FAILED_OUTCOMES }),
   compare: "previous_period",
 })
 
 export interface ReasonRow {
-  category: string
+  cause: string
   reason: string
   code: string
   count: number
@@ -214,13 +207,13 @@ export interface ReasonRow {
 }
 
 export interface ReasonGroup {
-  category: string
+  cause: string
   count: number
   share: number
   rows: ReasonRow[]
 }
 
-// reasonGroups nests category → reason → code, largest first; share is of all
+// reasonGroups nests cause → reason → code, largest first; share is of all
 // failed attempts in the range.
 export function reasonGroups(result: MetricsResult | undefined): ReasonGroup[] {
   if (!result) return []
@@ -228,7 +221,7 @@ export function reasonGroups(result: MetricsResult | undefined): ReasonGroup[] {
   const col = (name: string) =>
     idx.dims.find((d) => d.name === name)?.index ?? -1
   const [cat, rsn, code] = [
-    col("category"),
+    col("decline_cause"),
     col("reason"),
     col("response_code"),
   ]
@@ -239,7 +232,7 @@ export function reasonGroups(result: MetricsResult | undefined): ReasonGroup[] {
   for (const r of result.compare_rows ?? [])
     previous.set(key(r), Number(r[measure] ?? 0))
   const rows: ReasonRow[] = result.rows.map((r) => ({
-    category: String(r[cat] ?? ""),
+    cause: String(r[cat] ?? ""),
     reason: String(r[rsn] ?? ""),
     code: String(r[code] ?? ""),
     count: Number(r[measure] ?? 0),
@@ -250,10 +243,10 @@ export function reasonGroups(result: MetricsResult | undefined): ReasonGroup[] {
   const groups = new Map<string, ReasonGroup>()
   for (const r of rows) {
     r.share = total ? r.count / total : 0
-    let g = groups.get(r.category)
+    let g = groups.get(r.cause)
     if (!g) {
-      g = { category: r.category, count: 0, share: 0, rows: [] }
-      groups.set(r.category, g)
+      g = { cause: r.cause, count: 0, share: 0, rows: [] }
+      groups.set(r.cause, g)
     }
     g.count += r.count
     g.rows.push(r)
@@ -492,9 +485,9 @@ export const nmiHistoryQueries = (scope: Scope) => {
   }
   const reasons: QueryMetricsParams = {
     measures: ["nmi_history_authorizations"],
-    by: ["nmi_kind", "category", "reason"],
+    by: ["nmi_kind", "decline_cause", "reason"],
     range,
-    filters: { ...psp, outcome: ["declined"] },
+    filters: { ...psp, outcome: FAILED_OUTCOMES },
   }
   // OpenRails' own NMI attempts by month: the first marks where it began.
   const recorded: QueryMetricsParams = {
@@ -563,7 +556,7 @@ export function nmiHistoryMonths(
       refusalRate: null,
     })
     cell.authorizations += n
-    if (r[outcome] === "declined")
+    if (r[outcome] !== "approved")
       refused.set(cell, (refused.get(cell) ?? 0) + n)
   }
   for (const m of months.values())
@@ -574,7 +567,7 @@ export function nmiHistoryMonths(
 
 export interface NMIRefusal {
   kind: string
-  category: string
+  cause: string
   reason: string
   count: number
   // share is of every refusal in the range.
@@ -586,13 +579,17 @@ export function nmiRefusals(result: MetricsResult | undefined): NMIRefusal[] {
   const idx = indexColumns(result.columns)
   const col = (name: string) =>
     idx.dims.find((d) => d.name === name)?.index ?? -1
-  const [kind, cat, rsn] = [col("nmi_kind"), col("category"), col("reason")]
+  const [kind, cat, rsn] = [
+    col("nmi_kind"),
+    col("decline_cause"),
+    col("reason"),
+  ]
   const count = idx.measures[0]?.index ?? -1
   if ([kind, cat, rsn, count].includes(-1)) return []
   const rows = result.rows
     .map((r) => ({
       kind: String(r[kind] ?? ""),
-      category: String(r[cat] ?? ""),
+      cause: String(r[cat] ?? ""),
       reason: String(r[rsn] ?? ""),
       count: Number(r[count] ?? 0),
       share: 0,

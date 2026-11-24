@@ -152,7 +152,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.BillingProvide
 		if !response.Declined || response.ResponseCode <= 0 || nmi.UncertainResponseCode(response.ResponseCode) {
 			return Ambiguous("rebill response requires provider verification")
 		}
-		if err := h.retainDecline(ctx, in, response.ResponseCode, response.TransactionID); err != nil {
+		refusal := RecurringDecline{ResponseCode: response.ResponseCode, Reference: response.TransactionID, At: h.now()}
+		refusal.Issuer = readIssuerAnswer(ctx, h.DB.Log, client, response.TransactionID, p.Initiator == charge.InitiatorCustomer)
+		if err := h.retainDecline(ctx, in, refusal); err != nil {
 			return Ambiguous("retain rebill refusal: " + err.Error())
 		}
 		current, err := NewStore(h.DB).Get(ctx, in.ID)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
 )
 
@@ -27,20 +28,22 @@ var HistoryNotes = []string{
 }
 
 // HistoryCount is how many authorizations of one kind NMI answered in one
-// month with one outcome: category approved, or a refusal's category and
-// reason from the one decline classifier.
+// month with one answer: an approval (Reason ""), or a refusal's reason, and
+// its outcome and cause, from the one decline classifier.
 type HistoryCount struct {
 	// Month is the month's first instant, UTC.
-	Month            time.Time
-	Kind             string
-	Category, Reason string
-	Count            int
+	Month   time.Time
+	Kind    string
+	Outcome billing.AttemptOutcome
+	Cause   billing.DeclineCause
+	Reason  string
+	Count   int
 }
 
 // DeclineHistory is the authorizations NMI answered in [Since, Until).
 type DeclineHistory struct {
 	Since, Until time.Time
-	// Counts are ordered by month, kind, category and reason.
+	// Counts are ordered by month, kind and reason.
 	Counts []HistoryCount
 	// Undated authorizations carry a date NMI garbled; no month holds them.
 	Undated int
@@ -70,7 +73,7 @@ func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) 
 		h.Counts = append(h.Counts, k)
 	}
 	slices.SortFunc(h.Counts, func(a, b HistoryCount) int {
-		return cmp.Or(a.Month.Compare(b.Month), cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Category, b.Category), cmp.Compare(a.Reason, b.Reason))
+		return cmp.Or(a.Month.Compare(b.Month), cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Reason, b.Reason))
 	})
 	return h, nil
 }
@@ -110,7 +113,7 @@ func (h *DeclineHistory) count(t QueryTransaction, counts map[HistoryCount]int, 
 	if at.Before(h.Since) || !at.Before(h.Until) {
 		return
 	}
-	key := HistoryCount{Month: MonthStart(at), Kind: HistoryOneOffSale, Category: string(decline.Approved)}
+	key := HistoryCount{Month: MonthStart(at), Kind: HistoryOneOffSale, Outcome: billing.AttemptApproved}
 	switch {
 	case action.Is("validate"):
 		key.Kind = HistoryVerification
@@ -119,7 +122,7 @@ func (h *DeclineHistory) count(t QueryTransaction, counts map[HistoryCount]int, 
 	}
 	if !action.Succeeded() {
 		verdict := decline.ClassifyEvidence(t.Evidence(action))
-		key.Category, key.Reason = string(verdict.Category), string(verdict.Reason)
+		key.Outcome, key.Cause, key.Reason = verdict.Outcome(), verdict.Cause, string(verdict.Reason)
 	}
 	counts[key]++
 }

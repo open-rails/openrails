@@ -2017,13 +2017,16 @@ export type PaymentAttempt = {
   card_entry: string
   source: string
   observed_via: string
-  category: string
-  reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
+  outcome: "approved" | "declined" | "error" | "refused"
+  decline_cause: "customer" | "fraud" | "issuer" | "merchant" | "processing" | "unknown"
+  reason: "authentication_required" | "blocked_by_psp" | "brand_not_accepted" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "suspected_fraud" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
   action: string
   response_code: string
   response_text: string
   issuer_code: string
   issuer_text: string
+  advice_code: string
+  network_advice_code: string
   avs_result: string
   cvv_result: string
   card: CardDetails | null
@@ -2051,7 +2054,7 @@ export type PaymentConfig = {
 }
 
 export type PaymentFailure = {
-  reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
+  reason: "authentication_required" | "blocked_by_psp" | "brand_not_accepted" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "suspected_fraud" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
   message: string
   field?: "cvc" | "expiry" | "number" | "postal_code"
 }
@@ -2095,7 +2098,7 @@ export type PaymentMethodSubscription = {
 }
 
 export type PaymentRecovery = {
-  last_failure_reason?: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
+  last_failure_reason?: "authentication_required" | "blocked_by_psp" | "brand_not_accepted" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "suspected_fraud" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
   retryable: boolean
   blocked_reason?: string
   order_id?: string
@@ -2709,7 +2712,7 @@ export type SubscriptionDunning = {
   next_retry_at: string | null
   final_retry_at: string | null
   waiting_for_new_card: boolean
-  last_failure_reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data" | null
+  last_failure_reason: "authentication_required" | "blocked_by_psp" | "brand_not_accepted" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "suspected_fraud" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data" | null
 }
 
 export type SubscriptionHistory = {
@@ -2720,7 +2723,8 @@ export type SubscriptionHistory = {
 export type SubscriptionHistoryAttempt = {
   id: string
   kind: string
-  category: string
+  outcome: "approved" | "declined" | "error" | "refused"
+  decline_cause?: "customer" | "fraud" | "issuer" | "merchant" | "processing" | "unknown"
   reason?: string
   action?: string
   source: string

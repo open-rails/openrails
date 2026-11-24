@@ -373,6 +373,23 @@ func (w *DunningWorker) processSubscription(
 	priceSvc *catalog.PriceService,
 	materialize bool,
 ) (dunningOutcome, error) {
+	if sub.AdviceDeferred() {
+		// The network's advice allowed no retry before the next renewal: the
+		// case ends there. Limited mode never ends it locally.
+		blocked := ""
+		if materialize {
+			blocked = "mode=limited holds local terminal cancellations"
+		} else if gate := destructive.New(w.DB).Check(ctx, sub.MerchantID); !gate.Allowed {
+			blocked = gate.Reason
+		}
+		if _, err := lifecycle.EndAdviceDeferred(ctx, w.DB, sub, blocked); err != nil {
+			return dunningOutcomeFailed, err
+		}
+		if blocked != "" {
+			return dunningOutcomeRefused, nil
+		}
+		return dunningOutcomeWindowExpired, nil
+	}
 	if sub.Status == models.StatusAwaitingMethod {
 		// The wait for a new card outlived its dunning window. Limited mode
 		// never ends it locally; the operator sees the held outcome.
@@ -471,7 +488,11 @@ func (w *DunningWorker) processSubscription(
 		}
 		return dunningOutcomeRefused, nil
 	}
-	if w.now().UTC().After(periodEnd.Add(window)) {
+	caseEnd, err := subscriptions.CaseEnd(ctx, w.DB, policy, sub, periodEnd, cycleHours)
+	if err != nil {
+		return dunningOutcomeRefused, err
+	}
+	if w.now().UTC().After(caseEnd) {
 		return w.parkStaleSubscription(ctx, logEntry, sub, lifecycle, periodEnd, window), nil
 	}
 

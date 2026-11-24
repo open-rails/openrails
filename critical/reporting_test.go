@@ -92,17 +92,14 @@ func consolidatedMeasures(t *testing.T) {
 	require.Empty(t, listed.Next)
 	answered := map[string]int64{}
 	for _, attempt := range listed.Items {
-		if attempt.Category == "approved" {
-			answered["approved"]++
-		} else {
-			answered["declined"]++
-		}
+		answered[string(attempt.Outcome)]++
 	}
-	require.Equal(t, int64(2), answered["declined"])
+	require.Equal(t, int64(2), int64(len(listed.Items))-answered["approved"])
 	attempts := query([]string{"attempts"}, closed, "outcome")
 	require.Equal(t, answered, split(t, attempts, "outcome", "attempts"))
-	failure := only(t, query([]string{"attempt_failure_rate"}, closed))
-	require.InDelta(t, 2/float64(len(listed.Items)), fraction(t, failure["attempt_failure_rate"]), 1e-12)
+	rates = only(t, query([]string{"attempt_failure_rate", "authorization_rate"}, closed))
+	require.InDelta(t, 2/float64(len(listed.Items)), fraction(t, rates["attempt_failure_rate"]), 1e-12)
+	require.InDelta(t, float64(answered["approved"])/float64(answered["approved"]+answered["declined"]), fraction(t, rates["authorization_rate"]), 1e-12)
 
 	// purchases by outcome are what failed_purchases, purchase_recovery_rate
 	// and settled_purchases counted: one recovered, one failed once quiet an
@@ -120,9 +117,10 @@ func consolidatedMeasures(t *testing.T) {
 	// rebills_open, rebills_missed and rebill_first_failures.
 	require.Equal(t, map[string]int64{"open": 1}, split(t, query([]string{"rebills"}, inDunning, "outcome"), "outcome", "rebills"))
 	require.Equal(t, map[string]int64{"missed": 1}, split(t, query([]string{"rebills"}, inDunning, "first_outcome"), "first_outcome", "rebills"))
-	open := only(t, query([]string{"rebills", "rebill_rate", "rebill_first_failure_rate"}, inDunning))
+	open := only(t, query([]string{"rebills", "rebill_rate", "rebill_first_failure_rate", "first_try_rebill_approval_rate"}, inDunning))
 	require.Nil(t, open["rebill_rate"], "no renewal has closed")
 	require.InDelta(t, 1.0, fraction(t, open["rebill_first_failure_rate"]), 1e-12)
+	require.Nil(t, open["first_try_rebill_approval_rate"], "a missed renewal had no first attempt")
 	require.Equal(t, map[string]int64{"lost": 1}, split(t, query([]string{"rebills"}, closed, "outcome"), "outcome", "rebills"))
 	lost := only(t, query([]string{"rebill_rate", "dunning_recovery_rate"}, closed))
 	require.InDelta(t, 0.0, fraction(t, lost["rebill_rate"]), 1e-12)
