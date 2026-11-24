@@ -52,6 +52,9 @@ const (
 	// The PSP's own rule refused it; the issuer never saw it.
 	DeclineGatewayRejected DeclineReason = "gateway_rejected"
 	DeclineBlockedByPSP    DeclineReason = "blocked_by_psp"
+	// DeclineBrandNotAccepted: the merchant's account does not take the
+	// card's brand.
+	DeclineBrandNotAccepted DeclineReason = "brand_not_accepted"
 
 	// The gateway, the processor or the merchant's configuration failed.
 	DeclineProcessingError      DeclineReason = "processing_error"
@@ -87,7 +90,7 @@ var declineCustomer = map[DeclineReason]DeclineReason{
 	DeclinePickupCard: "generic_decline", DeclineLostCard: "generic_decline", DeclineStolenCard: "generic_decline",
 	DeclineFraudulent: "generic_decline", DeclineStopRecurring: "do_not_honor",
 
-	DeclineGatewayRejected: "processing_error", DeclineBlockedByPSP: "generic_decline",
+	DeclineGatewayRejected: "processing_error", DeclineBlockedByPSP: "generic_decline", DeclineBrandNotAccepted: "card_not_supported",
 
 	DeclineProcessingError: "processing_error", DeclineCommunicationError: "try_again_later",
 	DeclineIssuerUnavailable: "try_again_later", DeclineInvalidRequest: "processing_error",

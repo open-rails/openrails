@@ -54,8 +54,9 @@ var reasons = map[billing.DeclineReason]reasonSpec{
 	billing.DeclineFraudulent:             {category: IssuerHard, action: NonRecoverable},
 	billing.DeclineStopRecurring:          {category: IssuerHard, action: NonRecoverable},
 
-	billing.DeclineGatewayRejected: {category: GatewayRule, action: Retry},
-	billing.DeclineBlockedByPSP:    {category: GatewayRule, action: FixPaymentMethod},
+	billing.DeclineGatewayRejected:  {category: GatewayRule, action: Retry},
+	billing.DeclineBlockedByPSP:     {category: GatewayRule, action: FixPaymentMethod},
+	billing.DeclineBrandNotAccepted: {category: GatewayRule, action: FixPaymentMethod},
 
 	billing.DeclineProcessingError:      {category: SystemError, action: Retry, transient: true},
 	billing.DeclineCommunicationError:   {category: SystemError, action: Retry, transient: true},

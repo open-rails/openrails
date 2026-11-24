@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 478,
+  "scenario_count": 479,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2392,6 +2392,11 @@
       "id": "OR-J45-S03",
       "journey": "J45",
       "name": "A Stripe renewal Radar blocked is the merchant's refusal and waits for a new card; an issuer's fraudulent decline stays the issuer's"
+    },
+    {
+      "id": "OR-J45-S04",
+      "journey": "J45",
+      "name": "Newly mapped codes decline with their cause: NMI 461 is the merchant account's brand, and Stripe's do_not_try_again, new_account_information_available, service_not_allowed, mobile_device_authentication_required, invalid_amount and testmode_decline have their reasons"
     }
   ]
 }

@@ -30,14 +30,15 @@ func IssuerForbidsReattempt(code string) bool {
 	return noReattempt[strings.ToUpper(strings.TrimSpace(code))]
 }
 
-// forbidsReattempt: Stripe's do_not_try_again, MAC 03 or 21, or a forbidding
-// issuer code.
+// forbidsReattempt: Stripe's do_not_try_again (advice or decline code), MAC
+// 03 or 21, or a forbidding issuer code.
 func forbidsReattempt(e Evidence) bool {
 	switch strings.TrimSpace(e.NetworkAdvice) {
 	case "03", "21":
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(e.Advice), "do_not_try_again") || IssuerForbidsReattempt(e.IssuerCode)
+	return strings.EqualFold(strings.TrimSpace(e.Advice), "do_not_try_again") || IssuerForbidsReattempt(e.IssuerCode) ||
+		strings.EqualFold(e.Rail, "stripe") && strings.EqualFold(strings.TrimSpace(e.Code), "do_not_try_again")
 }
 
 // needsNewData: the card's data must change first (Stripe's

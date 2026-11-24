@@ -48,6 +48,52 @@ func TestDeclineCauses(t *testing.T) {
 			})
 		}
 	})
+	t.Run("OR-J45-S04/newly-mapped-codes-decline-with-their-cause", func(t *testing.T) {
+		for _, tc := range []struct {
+			code   string
+			reason billing.DeclineReason
+			action string
+		}{
+			{"do_not_try_again", billing.DeclineGeneric, "fix_payment_method"},
+			{"new_account_information_available", billing.DeclineUpdateCardholderData, "fix_payment_method"},
+			{"service_not_allowed", billing.DeclineTransactionNotAllowed, "fix_payment_method"},
+			{"mobile_device_authentication_required", billing.DeclineAuthenticationRequired, "fix_payment_method"},
+			{"invalid_amount", billing.DeclineInvalidRequest, "retry"},
+			{"testmode_decline", billing.DeclineInvalidRequest, "retry"},
+		} {
+			t.Run("stripe-"+tc.code, func(t *testing.T) {
+				a, p, sub := purchasedMembership(t, 7*24)
+				p.core.SetDecline("4242", tc.code)
+				a.clock.Advance(sub.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+				fleet := startFleet(t, a.world)
+				runRegistered(t, fleet, "openrails.billing_pass", 1)
+				rebill := awaitAttempt(t, a, sub.ID, "rebill")
+				require.Equal(t, tc.reason, rebill.Reason)
+				require.Equal(t, tc.action, rebill.Action)
+				state := "past_due"
+				if tc.action == "fix_payment_method" {
+					state = "awaiting_method"
+				}
+				subscriptionState(t, a, sub.ID, state)
+			})
+		}
+		t.Run("nmi-461-the-merchants-account-takes-no-such-brand", func(t *testing.T) {
+			a, p, sub := nmiMembership(t)
+			due := *sub.CurrentPeriodEndsAt
+			sale := p.core.AddScheduleSale(*sub.RailSubscriptionID, due)
+			p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Declined = "461" })
+			a.clock.Advance(due.Sub(a.clock.Now()) + time.Hour)
+			fleet := hostFleet(t, a.world)
+			fleet.PeriodicJobs().Clear()
+			require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+			require.NoError(t, fleet.Start(t.Context()))
+			convergeNMISubscription(t, a, fleet, sub)
+			rebill := awaitAttempt(t, a, sub.ID, "rebill")
+			require.Equal(t, billing.DeclineBrandNotAccepted, rebill.Reason)
+			require.Equal(t, "fix_payment_method", rebill.Action)
+			subscriptionState(t, a, sub.ID, "awaiting_method")
+		})
+	})
 	t.Run("OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code", func(t *testing.T) {
 		for _, tc := range []struct {
 			name, issuer string
