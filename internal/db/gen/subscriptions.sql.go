@@ -1266,8 +1266,9 @@ type ListDueDunningMerchantsParams struct {
 // CROSS-MERCHANT: merchants with due dunning work. Four legs, each served by
 // its own partial index so a pass reads only due rows: provider-billed NMI
 // retries with no retry already queued, expired awaiting_method grace,
-// provider-billed past_due rows whose grace ended with no retry scheduled
-// (any rail: the provider never said renewed or canceled), and engine
+// past_due rows whose grace ended with no retry scheduled (provider-billed,
+// any rail: the provider never said renewed or canceled; or a case network
+// advice deferred to its next renewal), and engine
 // collections due (admit_engine false while admissions are held). A row the
 // pass left unchanged waits for its due_recheck_at. Ids only, in id order
 // after a cursor, so a pass reaches every merchant; due rows run per merchant.
@@ -1330,8 +1331,9 @@ type ListDueDunningSubscriptionsParams struct {
 }
 
 // Dunning work due in one merchant (see ListDueDunningMerchants): NMI retries
-// due with none queued, awaiting_method past grace (due to end), provider-billed
-// past_due past grace with no retry (due to be read by id), and engine
+// due with none queued, awaiting_method past grace (due to end), past_due past
+// grace with no retry (a provider-billed row due to be read by id, or a case
+// network advice deferred to its next renewal, due to end), and engine
 // collections due, including one whose stored method is unusable, which
 // admission routes to awaiting_method (never the default card). Most overdue
 // first, a page after the (due instant, id) cursor: a row the pass left due is
@@ -1570,7 +1572,7 @@ func (q *Queries) ListRespelledSubscriptions(ctx context.Context, arg ListRespel
 }
 
 const listScheduledSubscriptionsPage = `-- name: ListScheduledSubscriptionsPage :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key FROM billing.mrr_scheduled e
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key, sub.retry_advised_at FROM billing.mrr_scheduled e
 JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
 WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
   AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
@@ -1673,6 +1675,7 @@ func (q *Queries) ListScheduledSubscriptionsPage(ctx context.Context, arg ListSc
 			&i.FactsAuthority,
 			&i.DueRecheckAt,
 			&i.RailSubscriptionKey,
+			&i.RetryAdvisedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1685,7 +1688,7 @@ func (q *Queries) ListScheduledSubscriptionsPage(ctx context.Context, arg ListSc
 }
 
 const listScheduledSubscriptionsPageByCanceledAt = `-- name: ListScheduledSubscriptionsPageByCanceledAt :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key FROM billing.mrr_scheduled e
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key, sub.retry_advised_at FROM billing.mrr_scheduled e
 JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
 WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
   AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
@@ -1790,6 +1793,7 @@ func (q *Queries) ListScheduledSubscriptionsPageByCanceledAt(ctx context.Context
 			&i.FactsAuthority,
 			&i.DueRecheckAt,
 			&i.RailSubscriptionKey,
+			&i.RetryAdvisedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1802,7 +1806,7 @@ func (q *Queries) ListScheduledSubscriptionsPageByCanceledAt(ctx context.Context
 }
 
 const listScheduledSubscriptionsPageByPeriodEnd = `-- name: ListScheduledSubscriptionsPageByPeriodEnd :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key FROM billing.mrr_scheduled e
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, sub.provider_access_default_snapshot, sub.facts_authority, sub.due_recheck_at, sub.rail_subscription_key, sub.retry_advised_at FROM billing.mrr_scheduled e
 JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
 WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
   AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
@@ -1907,6 +1911,7 @@ func (q *Queries) ListScheduledSubscriptionsPageByPeriodEnd(ctx context.Context,
 			&i.FactsAuthority,
 			&i.DueRecheckAt,
 			&i.RailSubscriptionKey,
+			&i.RetryAdvisedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2603,7 +2608,8 @@ type ListSubscriptionsToWakeParams struct {
 }
 
 // The delinquent memberships OpenRails collects that a replaced card retries
-// at the next due pass, and those awaiting a card
+// at the next due pass (a retry not yet due, or one network advice on the old
+// card set), and those awaiting a card
 // (subscriptions.WakeForReplacedMethod).
 func (q *Queries) ListSubscriptionsToWake(ctx context.Context, arg ListSubscriptionsToWakeParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionsToWake, arg.MerchantID, arg.PaymentMethodID, arg.Now)
