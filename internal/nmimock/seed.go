@@ -190,7 +190,17 @@ func (m *Mock) Settle(txID string) {
 	if s == nil || !s.Approved() || s.Voided {
 		panic("nmimock: settle of " + txID + ": not an unvoided approved sale")
 	}
-	s.Condition, s.Changed, s.SettledAt = "complete", m.now(), m.now()
+	at := m.after(s)
+	s.Condition, s.Changed, s.SettledAt = "complete", at, at
+}
+
+// after is now, or the sale's own time when it is backdated history in the
+// future: a later action never precedes the sale it follows.
+func (m *Mock) after(s *Sale) time.Time {
+	if now := m.now(); now.After(s.At) {
+		return now
+	}
+	return s.At
 }
 
 // Void voids an approved, unsettled sale outside OpenRails (a dashboard
