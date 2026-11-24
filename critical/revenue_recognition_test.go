@@ -455,6 +455,8 @@ func TestRevenueRecognition(t *testing.T) {
 			t.Run(collection, func(t *testing.T) {
 				a, _, customer := usageBillingWorld(t, true, collection == "remittance")
 				oneUsage(t, a.alpha, usageInput(customer, "billed-work", 3))
+				// The pass posts usage taken in before its instant.
+				a.clock.Advance(time.Second)
 				fleet := startFleet(t, a.world)
 				if collection == "remittance" {
 					postUsageMonth(t, a.world, fleet)
