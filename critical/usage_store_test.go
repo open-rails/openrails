@@ -234,6 +234,33 @@ func TestUsageStore(t *testing.T) {
 		})
 	})
 
+	t.Run("OR-J24-S56/a-month-closes-at-its-end-in-the-merchants-accounting-zone", func(t *testing.T) {
+		ny, err := time.LoadLocation("America/New_York")
+		require.NoError(t, err)
+		w := newWorld(t, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.Accounting = &billing.AccountingSettings{Timezone: "America/New_York"}
+			setCfgMerchant(&w.cfg, "alpha", m)
+			// 02:00 UTC on the 1st is still the month's last evening in New York.
+			now := w.clock.Now().UTC()
+			w.clock.Advance(time.Date(now.Year(), now.Month()+1, 1, 2, 0, 0, 0, time.UTC).Sub(now))
+		})
+		usageMeter(t, w.alpha, 100)
+		customer, _ := fundedCustomer(t, w)
+		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "last-evening", 2))...)
+		fleet := startFleet(t, w)
+		closeMonths(t, fleet)
+		require.Empty(t, usageDeductions(t, w.alpha, customer), "New York's month has not ended")
+		local := w.clock.Now().In(ny)
+		end := time.Date(local.Year(), local.Month()+1, 1, 0, 0, 0, 0, ny)
+		w.clock.Advance(end.Add(time.Minute).Sub(w.clock.Now()))
+		closeMonths(t, fleet)
+		deductions := usageDeductions(t, w.alpha, customer)
+		require.Len(t, deductions, 1)
+		require.EqualValues(t, -200, deductions[0].Amount)
+		require.True(t, end.Equal(deductions[0].Usage.Through), "cut at New York's month end, not UTC's: %s", deductions[0].Usage.Through)
+	})
+
 	t.Run("OR-J24-S50/late-usage-after-its-month-posted-posts-the-difference", func(t *testing.T) {
 		w := newWorld(t, earlyInMonth)
 		usageMeter(t, w.alpha, 100)

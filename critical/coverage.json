@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 600,
+  "scenario_count": 601,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -867,6 +867,11 @@
       "id": "OR-J24-S55",
       "journey": "J24",
       "name": "Equal lease ids and numbers under two merchants are two events, each counted by its merchant"
+    },
+    {
+      "id": "OR-J24-S56",
+      "journey": "J24",
+      "name": "A month's usage posts at the month's end in the merchant's accounting zone, not UTC's"
     },
     {
       "id": "OR-J25-S01",

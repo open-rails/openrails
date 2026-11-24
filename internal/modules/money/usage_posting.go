@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/retention"
@@ -45,8 +46,19 @@ const (
 	usagePostingReversal = "reversal"
 )
 
-// accountingZone is the zone a merchant's months close in: UTC.
-func (s *MoneyService) accountingZone(context.Context) *time.Location { return time.UTC }
+// accountingZone is the zone a merchant's months close in: its
+// accounting.timezone, UTC when it names none.
+func (s *MoneyService) accountingZone(ctx context.Context) *time.Location {
+	cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx)
+	if err != nil || cfg.AccountingTimezone == "" {
+		return time.UTC
+	}
+	zone, err := time.LoadLocation(cfg.AccountingTimezone)
+	if err != nil {
+		return time.UTC
+	}
+	return zone
+}
 
 // monthAfter is the start of the month after the one t falls in, in the
 // merchant's accounting zone: when the close posts usage of t.

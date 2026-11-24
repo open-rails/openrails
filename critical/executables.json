@@ -1881,6 +1881,9 @@
     "OR-J24-S55": [
       "TestUsageStore/OR-J24-S55/equal-lease-ids-and-numbers-under-two-merchants-stay-apart"
     ],
+    "OR-J24-S56": [
+      "TestUsageStore/OR-J24-S56/a-month-closes-at-its-end-in-the-merchants-accounting-zone"
+    ],
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/pick-up-card-waits-for-a-new-card",

@@ -5136,7 +5136,6 @@
       "logx": "github.com/open-rails/openrails/internal/logx",
       "strings": "strings",
       "time": "time",
-      "usageerasure": "github.com/open-rails/openrails/internal/usageerasure",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
@@ -5162,6 +5161,7 @@
       "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
       "catalogwire": "github.com/open-rails/openrails/catalog",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
