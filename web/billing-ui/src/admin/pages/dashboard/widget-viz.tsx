@@ -3,6 +3,7 @@ import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
 // (shadcn chart on recharts), donut, table. Input is the raw tabular metrics
 // result; nothing re-queries client-side. Direction and thresholds come from
 // the registry, so any measure draws.
+import * as React from "react"
 import type { ComponentProps } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -11,13 +12,14 @@ import {
   Area,
   AreaChart,
   Bar,
-  BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Line,
   LineChart,
   Pie,
   PieChart,
+  ReferenceArea,
   ReferenceLine,
   XAxis,
   YAxis,
@@ -46,6 +48,7 @@ import type {
   WidgetViz as VizType,
 } from "#orck/admin/lib/api/metrics"
 import { cn } from "#orck/admin/lib/utils"
+import { Tabs, TabsList, TabsTrigger } from "#orck/admin/components/ui/tabs"
 import { useAdminServices } from "#orck/admin/context"
 import { useMerchantConfig } from "#orck/admin/lib/capabilities"
 
@@ -66,7 +69,11 @@ import {
   indexColumns,
   pivotTimeSeries,
 } from "./lib"
-import { registry as emptyRegistry, type Registry } from "./registry"
+import {
+  registry as emptyRegistry,
+  measureLabel,
+  type Registry,
+} from "./registry"
 
 export function WidgetVizView({
   viz,
@@ -110,6 +117,8 @@ export function WidgetVizView({
       return <DonutViz result={result} currency={currency} />
     case "table":
       return <TableViz result={result} currency={currency} />
+    case "cohort":
+      return <CohortViz result={result} currency={currency} />
     case "heading":
     case "programs":
       return null
@@ -208,6 +217,18 @@ function KpiViz({
       ? "—"
       : formatMeasure(row ? row[primary.index] : 0, primary.unit, currency)
   const delta = row ? statDelta(result, row, primary.index) : null
+  const thresholds = registry.thresholds(primary.name)
+  const reading = row ? Number(row[primary.index] ?? NaN) : NaN
+  // A network's dispute program levels: the highest the value reached reads
+  // as held, the top one as failed.
+  const levels = [...thresholds].sort((a, b) => a.value - b.value)
+  const crossed = levels.filter((t) => reading >= t.value).at(-1)
+  const lowest = levels[0]
+  const tone = crossed
+    ? crossed === levels.at(-1)
+      ? "text-failed"
+      : "text-held"
+    : undefined
   const line = spark ? pivotTimeSeries(spark, fallback) : undefined
   const series = line?.series.find(
     (s) =>
@@ -217,7 +238,12 @@ function KpiViz({
   return (
     <div className="flex h-full flex-col justify-between gap-1">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="text-2xl font-semibold tabular-nums @min-[12rem]/tile:text-3xl">
+        <span
+          className={cn(
+            "text-2xl font-semibold tabular-nums @min-[12rem]/tile:text-3xl",
+            tone
+          )}
+        >
           {value}
         </span>
         {result.rows.length > 1 ? (
@@ -234,6 +260,31 @@ function KpiViz({
           good={better(registry, primary.name, delta)}
           against={comparedWith(result)}
         />
+      ) : null}
+      {thresholds.length > 0 ? (
+        // One line: the level reached, or the first one ahead; every level
+        // on hover and as dashed lines in the sparkline.
+        <span
+          className={cn(
+            "truncate text-[0.6875rem] tabular-nums",
+            crossed ? cn("font-medium", tone) : "text-muted-foreground"
+          )}
+          title={levels
+            .map((t) => `${t.label} ${formatMeasure(t.value, primary.unit)}`)
+            .join(" · ")}
+        >
+          {crossed ? (
+            <>
+              <AdminMessage id={"Reached "} />
+              {crossed.label} {formatMeasure(crossed.value, primary.unit)}
+            </>
+          ) : (
+            <>
+              <AdminMessage id={"Below "} />
+              {lowest!.label} {formatMeasure(lowest!.value, primary.unit)}
+            </>
+          )}
+        </span>
       ) : null}
       {line && series && line.data.length > 1 ? (
         <Sparkline
@@ -428,8 +479,9 @@ export function MetricTooltip({
 
 // rateAxisTop is a rate axis's top: a quarter above the highest value, up to
 // the next whole step of its leading digit (a 52% peak tops at 70%), never
-// past 100%.
+// past 100% unless a value is.
 function rateAxisTop(max: number): number {
+  if (max > 1) return Math.ceil(max * 10.2) / 10
   const raw = max * 1.25
   const step = 10 ** Math.floor(Math.log10(raw))
   return Math.min(1, Number((Math.ceil(raw / step) * step).toPrecision(12)))
@@ -527,22 +579,92 @@ function TimeSeriesChart({
     </>
   )
   const tooltip = <ChartTooltip content={<MetricTooltip series={series} />} />
-  // A measure's thresholds (a network's dispute ratio limit) cross its line.
-  const thresholds = [...new Set(series.map((s) => s.measure))].flatMap(
-    (measure) =>
-      registry
-        .thresholds(measure)
-        .map((t) => (
-          <ReferenceLine
-            key={`${measure}:${t.value}`}
-            y={t.value}
-            stroke="var(--failed)"
-            strokeDasharray="4 4"
-            ifOverflow="extendDomain"
-            label={{ value: t.label, position: "insideTopRight", fontSize: 10 }}
+  // A measure's thresholds (a network's dispute program levels) cross its
+  // line; alone on its chart, each level shades the band up to the next.
+  const measures = [...new Set(series.map((s) => s.measure))]
+  const thresholds = measures.flatMap((measure) => {
+    const levels = [...registry.thresholds(measure)].sort(
+      (a, b) => a.value - b.value
+    )
+    const prefix = measures.length > 1 ? `${measureLabel(measure)} ` : ""
+    return levels.flatMap((t, i) => {
+      const top = i === levels.length - 1
+      const tone = top ? "var(--failed)" : "var(--held)"
+      return [
+        measures.length === 1 ? (
+          <ReferenceArea
+            key={`${measure}:${t.value}:band`}
+            y1={t.value}
+            // The top band runs to the chart's top edge, clipped there.
+            y2={levels[i + 1]?.value ?? Math.max(1, t.value * 10)}
+            fill={tone}
+            fillOpacity={top ? 0.1 : 0.07}
+            ifOverflow="hidden"
           />
-        ))
+        ) : null,
+        <ReferenceLine
+          key={`${measure}:${t.value}`}
+          y={t.value}
+          stroke={tone}
+          strokeDasharray="4 4"
+          ifOverflow="extendDomain"
+          label={{
+            value: prefix + t.label,
+            position: "insideTopRight",
+            fontSize: 10,
+            fill: "var(--muted-foreground)",
+          }}
+        />,
+      ]
+    })
+  })
+  // Signed stacked bars (MRR movements, cash by kind) draw their net: one
+  // line per measure whose series go both ways.
+  const nets =
+    viz === "bar"
+      ? [...new Set(series.map((s) => s.measure))].flatMap((measure) => {
+          const parts = series.filter((s) => s.measure === measure)
+          const signed =
+            parts.length > 1 &&
+            data.some((row) =>
+              parts.some((s) => Number(row[s.key] ?? 0) < 0)
+            ) &&
+            data.some((row) => parts.some((s) => Number(row[s.key] ?? 0) > 0))
+          return signed
+            ? [
+                {
+                  ...parts[0],
+                  key: `net:${measure}`,
+                  label: "Net",
+                  dimensions: [],
+                  parts,
+                },
+              ]
+            : []
+        })
+      : []
+  const barProps = {
+    ...chartProps,
+    data: nets.length
+      ? data.map((row) => {
+          const out = { ...row }
+          for (const n of nets)
+            out[n.key] = n.parts.reduce(
+              (sum, s) => sum + Number(row[s.key] ?? 0),
+              0
+            )
+          return out
+        })
+      : data,
+  }
+  const netTooltip = nets.length ? (
+    <ChartTooltip content={<MetricTooltip series={[...series, ...nets]} />} />
+  ) : (
+    tooltip
   )
+  if (nets.length)
+    for (const n of nets)
+      config[n.key] = { label: n.label, color: "var(--foreground)" }
   const legend =
     series.length > 1 ? (
       <ChartLegend
@@ -591,9 +713,9 @@ function TimeSeriesChart({
           ))}
         </AreaChart>
       ) : (
-        <BarChart {...chartProps} stackOffset="sign">
+        <ComposedChart {...barProps} stackOffset="sign">
           {axes}
-          {tooltip}
+          {netTooltip}
           {legend}
           {series.map((s, i) => (
             <Bar
@@ -605,7 +727,18 @@ function TimeSeriesChart({
               isAnimationActive={animate()}
             />
           ))}
-        </BarChart>
+          {nets.map((n) => (
+            <Line
+              key={n.key}
+              dataKey={n.key}
+              type="monotone"
+              stroke="var(--foreground)"
+              strokeWidth={1.5}
+              dot={{ r: 2 }}
+              isAnimationActive={animate()}
+            />
+          ))}
+        </ComposedChart>
       )}
     </ChartContainer>
   )
@@ -686,11 +819,7 @@ function DonutViz({
 
 // humanizeColumn turns a result column name (first_failure_reason) into a
 // label (First failure reason).
-function humanizeColumn(name: string): string {
-  if (name === "psp") return "PSP"
-  const words = name.replaceAll("_", " ").trim()
-  return words.charAt(0).toUpperCase() + words.slice(1)
-}
+const humanizeColumn = measureLabel
 
 function TableViz({
   result,
@@ -760,5 +889,156 @@ function TableViz({
         </TableBody>
       </Table>
     </div>
+  )
+}
+
+// CohortViz is a cohort heatmap: a row per cohort (the month its customers
+// first had MRR), a column per month since, each cell the share of its
+// customers still with MRR, or of its MRR, shaded by it. A query by basis
+// offers both. One grid per currency.
+function CohortViz({
+  result,
+  currency,
+}: {
+  result: MetricsResult
+  currency?: string
+}) {
+  const { text: adminText } = useAdminUI()
+  const [basis, setBasis] = React.useState("subscribers")
+  const idx = indexColumns(result.columns)
+  const primary = idx.measures[0]
+  const at = (name: string) => result.columns.findIndex((c) => c.name === name)
+  const cohortAt = at("cohort")
+  const monthAt = at("months_since_start")
+  const basisAt = at("basis")
+  if (!primary || cohortAt < 0 || monthAt < 0)
+    return <Empty label={adminText("group by cohort and months since start")} />
+  const byCurrency = new Map<string, MetricsResult["rows"]>()
+  for (const row of result.rows) {
+    if (basisAt >= 0 && row[basisAt] !== basis) continue
+    const c = idx.currency >= 0 ? String(row[idx.currency] ?? "") : ""
+    if (currency && c && c !== currency) continue
+    byCurrency.set(c, [...(byCurrency.get(c) ?? []), row])
+  }
+  return (
+    <div className="flex h-full flex-col gap-2">
+      {basisAt >= 0 ? (
+        <Tabs value={basis} onValueChange={(v) => setBasis(String(v))}>
+          <TabsList className="h-7">
+            <TabsTrigger value="subscribers" className="px-2 text-xs">
+              <AdminMessage id={"Customers"} />
+            </TabsTrigger>
+            <TabsTrigger value="mrr" className="px-2 text-xs">
+              MRR
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      ) : null}
+      {byCurrency.size === 0 ? (
+        <Empty label={adminText("no data in range")} />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
+          {[...byCurrency].map(([c, rows]) => (
+            <CohortGrid
+              key={c}
+              currency={byCurrency.size > 1 ? c : undefined}
+              rows={rows}
+              cohortAt={cohortAt}
+              monthAt={monthAt}
+              valueAt={primary.index}
+              unit={primary.unit}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CohortGrid({
+  currency,
+  rows,
+  cohortAt,
+  monthAt,
+  valueAt,
+  unit,
+}: {
+  currency?: string
+  rows: MetricsResult["rows"]
+  cohortAt: number
+  monthAt: number
+  valueAt: number
+  unit?: string
+}) {
+  const { text: adminText } = useAdminUI()
+  const cohorts = [...new Set(rows.map((r) => String(r[cohortAt])))].sort()
+  const span = Math.max(...rows.map((r) => Number(r[monthAt] ?? 0)), 0) + 1
+  const cell = new Map(
+    rows.map((r) => [`${r[cohortAt]}:${r[monthAt]}`, r[valueAt]])
+  )
+  return (
+    <section className="min-w-0">
+      {currency ? (
+        <div className="mb-1 text-xs font-medium text-muted-foreground">
+          {currency}
+        </div>
+      ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full border-separate border-spacing-0.5 text-[0.6875rem] tabular-nums">
+          <thead>
+            <tr>
+              <th className="pr-2 text-left font-medium whitespace-nowrap text-muted-foreground">
+                <AdminMessage id={"Cohort"} />
+              </th>
+              {Array.from({ length: span }, (_, n) => (
+                <th
+                  key={n}
+                  className="min-w-10 text-center font-medium text-muted-foreground"
+                >
+                  {n === 0 ? adminText("Month 0") : `+${n}`}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {cohorts.map((cohort) => (
+              <tr key={cohort}>
+                <th className="pr-2 text-left font-medium whitespace-nowrap">
+                  {formatBucket(`${cohort}-01T12:00:00Z`, "month")}
+                </th>
+                {Array.from({ length: span }, (_, n) => {
+                  const v = cell.get(`${cohort}:${n}`)
+                  if (v === undefined || v === null) return <td key={n} />
+                  // The shade deepens with the share kept; past the middle
+                  // the text takes the page's background to stay legible in
+                  // either theme. MRR kept can pass 100%.
+                  const shade = Math.round(
+                    Math.max(0, Math.min(1, Number(v))) * 85
+                  )
+                  return (
+                    <td
+                      key={n}
+                      title={formatMeasure(v, unit)}
+                      className="rounded-sm px-1 py-1 text-center"
+                      style={{
+                        background: `color-mix(in oklch, var(--chart-1) ${shade}%, var(--muted))`,
+                        color:
+                          shade > 45
+                            ? "var(--background)"
+                            : "var(--foreground)",
+                      }}
+                    >
+                      {unit === "ratio"
+                        ? `${Math.round(Number(v) * 100)}%`
+                        : formatMeasure(v, unit)}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }

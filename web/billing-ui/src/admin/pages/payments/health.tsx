@@ -137,11 +137,11 @@ export function PaymentHealthPage() {
       <Tiles scope={scope} />
       <div className="grid gap-4 @min-[48rem]/page:grid-cols-2">
         <Trend
-          title={adminText("New-card decline rate by week")}
+          title={adminText("New-card authorization rate by week")}
           query={trendQueries(scope).newCard}
         />
         <Trend
-          title={adminText("Rebill first-attempt failure rate by week")}
+          title={adminText("First-try rebill approval by week")}
           query={trendQueries(scope).rebill}
         />
       </div>

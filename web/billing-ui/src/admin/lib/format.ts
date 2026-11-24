@@ -79,7 +79,9 @@ function decimalFromUnits(value: bigint, decimals: number): string {
 export function formatUnits(
   amount: MoneyAmount,
   currency: string,
-  decimals: number
+  decimals: number,
+  // digits rounds the display to fewer decimals than the units carry.
+  digits = decimals
 ): string {
   const units = exactUnits(amount)
   if (units === null || !validDecimals(decimals))
@@ -95,12 +97,31 @@ export function formatUnits(
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: code,
-      maximumFractionDigits: decimals,
+      maximumFractionDigits: digits,
     }).format(decimal)
   const number = new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: decimals,
+    maximumFractionDigits: digits,
   }).format(decimal)
   return `${number} ${currency}`
+}
+
+// formatSummaryAmount is money in a chart or tile: a fiat amount to its
+// minor unit (cents), any other to four decimals. Exact amounts are
+// formatNativeAmount's.
+export function formatSummaryAmount(
+  amount: MoneyAmount,
+  currency: string
+): string {
+  const scale = currencyScale(currency)
+  if (scale === undefined) return formatNativeAmount(amount, currency)
+  const code = currency.trim().toUpperCase()
+  const digits = Intl.supportedValuesOf("currency").includes(code)
+    ? new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: code,
+      }).resolvedOptions().maximumFractionDigits!
+    : 4
+  return formatUnits(amount, currency, scale, Math.min(digits, scale))
 }
 
 // formatNativeAmount formats an amount at its currency's registered scale.
