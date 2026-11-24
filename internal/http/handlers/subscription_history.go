@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/decline"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/pagination"
 )
@@ -109,9 +108,7 @@ func subscriptionHistoryEntry(row gen.ListSubscriptionHistoryRow) billing.Subscr
 			ID: billing.PaymentAttemptID(row.ID), Kind: row.Kind, Outcome: billing.AttemptOutcome(row.Category), Reason: row.Reason,
 			Action: row.Action, Source: row.Origin, ObservedVia: row.ObservedVia, Amount: row.Amount, Currency: catalog.Currency(row.Currency),
 		}
-		if row.Reason != "" {
-			out.Attempt.DeclineCause = decline.CauseOf(billing.DeclineReason(row.Reason))
-		}
+		out.Attempt.DeclineCause = billing.DeclineCause(row.DeclineCause)
 		if row.PspID != nil {
 			out.Attempt.PSPID = billing.PSPID(*row.PspID)
 		}

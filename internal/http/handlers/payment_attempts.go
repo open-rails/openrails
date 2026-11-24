@@ -24,7 +24,7 @@ import (
 // ListPaymentAttempts lists the merchant's payment attempts, newest first
 // (#1116).
 //
-//	GET /admin/payment-attempts?kind&owner&category&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&payment_id&invoice_id&order_id&subscription_id&cycle_id&since&until&limit&offset
+//	GET /admin/payment-attempts?kind&owner&outcome&decline_cause&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&payment_id&invoice_id&order_id&subscription_id&cycle_id&since&until&limit&offset
 //
 // A text filter takes one value or a comma-separated list.
 func ListPaymentAttempts(r *httprequest.Request) {

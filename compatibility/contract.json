@@ -2876,7 +2876,6 @@
     "internal/http/handlers/subscription_history.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "catalog": "github.com/open-rails/openrails/catalog",
-      "decline": "github.com/open-rails/openrails/internal/decline",
       "errors": "errors",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",

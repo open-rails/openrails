@@ -43,9 +43,7 @@ import {
 } from "#orck/admin/lib/format"
 
 export function Outcome({ outcome }: { outcome: string }) {
-  return (
-    <StatusBadge status={outcome === "approved" ? "approved" : "declined"} />
-  )
+  return <StatusBadge status={outcome} />
 }
 
 const attemptColumns: ColumnDef<PaymentAttempt, unknown>[] = [

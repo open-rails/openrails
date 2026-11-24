@@ -47,7 +47,7 @@ type NMIDeclineReportOptions struct {
 
 // NMIDeclineReport reads an NMI account's authorization history through the
 // Query API and reports approval and refusal rates by month and kind, and each
-// refusal's reason and category from the decline classifier. Read-only.
+// refusal's reason and cause from the decline classifier. Read-only.
 func NMIDeclineReport(ctx context.Context, logger *slog.Logger, opts NMIDeclineReportOptions) error {
 	if opts.Out == nil {
 		opts.Out = io.Discard
