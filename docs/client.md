@@ -69,11 +69,7 @@ touched billing holds nothing; that is never an error.
 
 ## Credentials
 
-| Path | Backend credential | Browser credential (`/v1/me`) |
-|---|---|---|
-| Embedded | none: the handle is in process | your app's own sign-in, sent as a header to your mount ([embedded.md](embedded.md)) |
-| Standalone | an access token from your issuer (`client_credentials`, scope `openrails:merchant`) or a merchant API key | an `openrails:self` token: token exchange at your issuer, or a customer token |
-| SaaS | the console's API key | a customer token, or a token from your own registered issuer |
+Who presents which credential in each mode, and why, is [authentication](authentication.md). Embedded, the handle is in process and needs none; over HTTP, each merchant's `RemoteCredential` carries one of the following.
 
 **Standalone.** The server trusts your issuer for one merchant
 (`remote_application` in its manifest, [standalone.md](standalone.md)).
@@ -124,19 +120,9 @@ from the `billing.Permission` constants. The standalone server's declared roles
 are `viewer`, `support` and `owner`; custom roles hold any `merchant:`
 permissions ([standalone.md](standalone.md)).
 
-**SaaS.** On the hosted platform, create the merchant, its PSPs and an API key
-in the console; the console documents its own pages and routes. Copy **API URL**
-from **Integration** and the key from **Settings → API keys** (shown once).
-`GetAdminAccess` (`GET /v1/admin/access`) returns the key's `ScopeID`: the
-merchant UUID `NewRemote` files the key under. The PSP webhook URLs to give each
-provider are shown under **Integration**. Keep the key on your server.
+**SaaS.** On the hosted platform, create the merchant, its PSPs and an API key in the console; the console documents its own pages and routes. Copy **API URL** from **Integration** and the key from **API keys** (shown once). `GetAdminAccess` (`GET /v1/admin/access`) returns the key's `ScopeID`: the merchant UUID `NewRemote` files the key under. The PSP webhook URLs to give each provider are shown under **Integration**. Keep the key on your server.
 
-**Customer tokens.** A backend whose signing key is registered as the merchant's
-application (standalone: the manifest's `remote_application`; SaaS:
-**Integration → Customer tokens**) sets `RemoteCredential.Assertion`.
-`CreateCustomerToken` redeems an RFC 7523 assertion for a short `openrails:self` token
-(about 15 minutes); `CreateCustomerAssertion` only signs one, for the browser to redeem
-with its own DPoP key. An API key alone cannot mint customer tokens.
+**Customer tokens.** A backend whose signing key is registered as the merchant's application (standalone: the manifest's `remote_application` or the console's **Access → Signing keys**; SaaS: **Integration → Customer tokens**) sets `RemoteCredential.Assertion`. `CreateCustomerToken` redeems an RFC 7523 assertion for a short `openrails:self` token (about 15 minutes); `CreateCustomerAssertion` only signs one, for the browser to redeem with its own DPoP key. An API key alone cannot mint customer tokens.
 
 The [hosted example](../examples/hosted) files its key as
 `AssertionKey{Issuer, KeyID, Signer, TokenURL}` beside the API key and mints a
