@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,6 +69,10 @@ func readLimitedWebhookBody(r *httprequest.Request, maxBytes int64) ([]byte, boo
 func Webhook(r *httprequest.Request) {
 	provider, ok := canonicalWebhookRail(r)
 	if !ok {
+		return
+	}
+	if r.Param("token") != "" && provider != subscriptions.RailCCBill {
+		r.ErrorCode(billing.CodeRouteNotFound, "")
 		return
 	}
 	clientIP := r.ClientIP()
@@ -205,17 +211,20 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 			r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
 			return true, false
 		}
-		// CCBill signs nothing (the source-IP allowlist authenticated the
-		// delivery), so a live and a non-live PSP of one account cannot be
-		// told apart.
-		unsigned := func(context.Context, merchants.PSPIdentity) (signedWebhook[struct{}], error) {
-			return signedWebhook[struct{}]{keyed: true}, nil
-		}
-		account, _, release, ok := routeSignedWebhook(r, subscriptions.RailCCBill, accountID, unsigned, nil, func(error) bool { rejectWebhook(r); return false })
+		// CCBill signs nothing: the source-IP allowlist and the PSP's webhook
+		// token authenticate the delivery, so a live and a non-live PSP of one
+		// account cannot be told apart.
+		account, tokenless, release, ok := routeSignedWebhook(r, subscriptions.RailCCBill, accountID, checkCCBillWebhook(r), nil, func(error) bool {
+			r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook token")
+			return true
+		})
 		if !ok {
 			return true, false
 		}
 		defer release()
+		if tokenless {
+			r.Log.WarnContext(r.Request.Context(), "ccbill webhook accepted without its webhook token: require_webhook_token is false", "account_id", account.AccountID)
+		}
 		return true, processMerchantCCBillWebhookPrepared(r, clientIP, prepared, account.AccountID)
 	case rail == string(models.EventSourceBasisTheory):
 		body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
@@ -259,8 +268,8 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 	}
 }
 
-// ccbillWebhookIPAllowed binds the request to the ONE CCBill source-IP gate
-// (webhookauth.CCBillIPAllowed) that the embedded Service surface also calls.
+// ccbillWebhookIPAllowed binds the request to the CCBill source-IP gate,
+// webhookauth.CCBillIPAllowed.
 func ccbillWebhookIPAllowed(logger *slog.Logger, r *httprequest.Request, clientIP string) bool {
 	if r == nil || r.State == nil {
 		return iputil.IsValidCCBillIP(logger, clientIP)
@@ -438,6 +447,38 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, tenantID strin
 		return merchants.CustodianIdentity{}, noop, false
 	}
 	return custodian, release, true
+}
+
+var errCCBillWebhookToken = errors.New("invalid ccbill webhook token")
+
+// checkCCBillWebhook checks the delivery's URL token against one PSP's
+// tokens; verified reports a tokenless delivery the PSP still admits.
+func checkCCBillWebhook(r *httprequest.Request) func(context.Context, merchants.PSPIdentity) (signedWebhook[bool], error) {
+	presented := r.Param("token")
+	return func(ctx context.Context, psp merchants.PSPIdentity) (signedWebhook[bool], error) {
+		tokens, err := r.State.Merchants.LoadCCBillWebhookTokens(ctx, psp.MerchantID, psp.ID)
+		if err != nil {
+			return signedWebhook[bool]{}, err
+		}
+		out := signedWebhook[bool]{keyed: true}
+		switch {
+		case presented == "" && (tokens.Current == "" || !tokens.Required):
+			out.verified = tokens.Current != ""
+		case presented == "" || !tokenMatches(presented, tokens.Current) && !tokenMatches(presented, tokens.Previous):
+			out.mismatch, out.err = true, errCCBillWebhookToken
+		}
+		return out, nil
+	}
+}
+
+// tokenMatches compares digests, so the time taken reveals nothing of want,
+// its length included.
+func tokenMatches(presented, want string) bool {
+	if want == "" {
+		return false
+	}
+	a, b := sha256.Sum256([]byte(presented)), sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
 }
 
 // nmiSigned is an NMI delivery and the key that verified it.
@@ -636,7 +677,8 @@ func prepareCCBillWebhookWithAccountID(r *httprequest.Request, body []byte) (web
 }
 
 func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP string, prepared webhookutil.Prepared, accountID string) bool {
-	// CCBill has no HMAC: IP-allowlisted + well-formed IS its verified-accepted.
+	// CCBill has no HMAC: IP-allowlisted, token-checked and well-formed IS its
+	// verified-accepted.
 	r.State.WebhookHealth.Accepted(r.Request.Context())
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing unavailable")
@@ -662,7 +704,7 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 }
 
 // ccbillWebhookMessage builds the dispatch message for a CCBill event. CCBill
-// has no signature (the source-IP allowlist authenticates it), so
+// has no signature (the source-IP allowlist and URL token authenticate it), so
 // SignatureValid stays nil: never claimed.
 func ccbillWebhookMessage(clientIP string, prepared webhookutil.Prepared, accountID string) *webhooks.WebhookMessage {
 	msg := &webhooks.WebhookMessage{

@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/jonboulle/clockwork"
+
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // SEC-29: a rotated-out webhook signing secret verifies only until an explicit
@@ -41,7 +43,24 @@ func (s *Service) overlapOpen(scope PSPScope) bool {
 	return !scope.WebhookOverlapUntil.IsZero() && s.now().Before(scope.WebhookOverlapUntil)
 }
 
-// hasWebhookOverlap reports whether the rail keeps a previous webhook secret.
-func hasWebhookOverlap(rail string) bool {
-	return rail == "stripe" || rail == "nmi"
+// webhookSecretKey is the rail's webhook secret slot, which rotation keeps
+// verifying as its _previous slot; "" when the rail keeps none.
+func webhookSecretKey(rail string) string {
+	switch rail {
+	case "stripe", "nmi":
+		return "webhook_signing_secret"
+	case "ccbill":
+		return "webhook_token"
+	}
+	return ""
+}
+
+// suppliedPrevious refuses a _previous webhook secret: rotation retains it.
+func suppliedPrevious(credentials map[string]string) error {
+	for _, key := range []string{"webhook_signing_secret_previous", "webhook_token_previous"} {
+		if _, supplied := credentials[key]; supplied {
+			return apperr.Invalidf("%s is retained by rotation and cannot be supplied", key).WithParam("credentials")
+		}
+	}
+	return nil
 }

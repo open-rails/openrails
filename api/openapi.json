@@ -10105,6 +10105,84 @@
         ]
       }
     },
+    "/v1/webhooks/{rail}/{account_id}/{token}": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "parameters": [
+          {
+            "name": "rail",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "eventType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [],
+        "x-openrails-auth": "provider_signature",
+        "x-openrails-errors": [
+          "authentication_required",
+          "invalid_param",
+          "resource_access_denied",
+          "route_not_found",
+          "service_unavailable",
+          "webhook_account_mismatch"
+        ],
+        "x-openrails-error-sets": [
+          "tier:provider_signature",
+          "request"
+        ]
+      }
+    },
     "/v1/merchant/configuration": {
       "get": {
         "tags": [
