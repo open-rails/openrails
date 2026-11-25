@@ -85,7 +85,7 @@ materialized view usage_history_events_mv TO {database}.usage_history
   SELECT merchant_id, customer_id, day_at, toStartOfFifteenMinutes(toDateTime(occurred_at, 'UTC')) AS bucket_at, currency, event_type, '' AS meter, '' AS cell, '' AS print, period_starts_at, invoker, outcome, toInt64(1) AS requests, toInt64(0) AS quantity, ifNull(stated, 0) AS stated, charged, forgiven FROM {database}.usage_intake
 
 table usage_intake
-  engine Null
+  engine `Null`
   column merchant_id UUID
   column event_id UUID
   column customer_id UUID
