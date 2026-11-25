@@ -21,7 +21,7 @@ args: [run-server]
 
 # config.yaml, rendered as is (config.example.yaml lists every key). Keep
 # secrets out: they come from `secrets`, as environment variables or files
-# named like them (database.url is DATABASE_URL). host, port and private_port are the
+# named like them (database.url is DATABASE_URL). host, port and metrics_port are the
 # chart's (ports.http, metrics.port).
 config:
   # public_billing_base_url: https://billing.example.com
@@ -55,8 +55,9 @@ config:
 
 # More files in /etc/openrails, each a YAML document or a string. The server
 # reads these names when present:
-#   merchants.yaml  merchant manifest, applied at every boot (its secrets go in
-#                   secrets.merchantOverlays)
+#   merchants.yaml  merchant manifest, applied at every boot; with PSP secrets
+#                   in it, mount it from a Secret (secrets.merchantManifest)
+#                   instead, or keep them in Vault (config.vault.kv_mount)
 #   bootstrap.yaml  AuthKit's first-run operators and trusted applications
 #   catalog.yaml    the catalog document `openrails catalog apply` takes
 files: {}
@@ -75,11 +76,10 @@ secrets:
   # and reloaded when it changes. Empty mounts a scratch directory, which only
   # a loopback issuer's generated development keys can use, with one replica.
   authKeys: ""
-  # Merchant manifest overlays: a Secret key holding YAML in the manifest's
-  # shape (PSP credentials kept outside Vault), added to
-  # merchant_manifest_overlays.
-  #   - {name: shop-psps, key: overlay.yaml}
-  merchantOverlays: []
+  # The merchant manifest with its PSP secrets: a Secret key mounted as
+  # /etc/openrails/merchants.yaml, in place of files.merchants.yaml.
+  #   {name: shop-merchants, key: merchants.yaml}
+  merchantManifest: {}
 
 env: []
 envFrom: []
@@ -87,8 +87,11 @@ envFrom: []
 ports:
   http: 3053
 
-# The private listener: GET /metrics, on its own ClusterIP Service
-# (<fullname>-metrics), never routed by the ingress.
+# The metrics listener (config's metrics_port): the operator's Prometheus
+# GET /metrics (dependency up/down, abuse-state fallbacks, per-job-kind
+# health), on its own ClusterIP Service (<fullname>-metrics) so it is never
+# public; the ingress never routes it. Not the merchant dashboard's business
+# metrics, which are the /v1/metrics API on ports.http.
 metrics:
   enabled: true
   port: 9090

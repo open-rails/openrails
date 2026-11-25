@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
 // ControlPlane is the standalone server's multi-merchant control plane over
@@ -179,22 +180,19 @@ func AuthKit(cfg *billing.Config, auth authkit.Config, opts Options) (authkit.Co
 	return auth, nil
 }
 
-// clientIPPosture derives AuthKit's client-IP posture from the engine's
-// trusted proxies, its one source: the same proxies, or the direct peer when
-// there are none. AuthKit's own proxies may only split the same set (the
-// Cloudflare ones, whose CF-Connecting-IP it takes); direct_peer_ip beside
-// any proxy is refused.
+// clientIPPosture derives AuthKit's client-IP posture from the engine's:
+// trusted_proxies, and Cloudflare's ranges, whose CF-Connecting-IP it takes.
+// AuthKit's own proxies may only restate that set; direct_peer_ip asserts
+// there are no trusted_proxies.
 func clientIPPosture(h *authkit.HTTPConfig, trusted []string) error {
 	own := append(slices.Clone(h.TrustedProxies), h.CloudflareProxies...)
 	switch {
 	case h.DirectPeerIP && (len(trusted) > 0 || len(own) > 0):
-		return errors.New("controlplane: auth.http.direct_peer_ip says no proxy sits in front, but trusted_proxies or cloudflare_proxies names one; set only the proxies")
-	case len(own) == 0:
-		h.TrustedProxies = slices.Clone(trusted)
-		h.DirectPeerIP = len(trusted) == 0
-	case !sameCIDRs(own, trusted):
-		return errors.New("controlplane: auth.http's proxies differ from trusted_proxies and cloudflare_proxies; declare the proxies once, at the top level")
+		return errors.New("controlplane: auth.http.direct_peer_ip says no proxy sits in front, but trusted_proxies or auth.http names one; set only trusted_proxies")
+	case len(own) > 0 && !sameCIDRs(own, append(slices.Clone(trusted), iputil.CloudflareRanges...)):
+		return errors.New("controlplane: auth.http's proxies differ from trusted_proxies and Cloudflare's ranges; declare trusted_proxies once, at the top level")
 	}
+	h.TrustedProxies, h.CloudflareProxies, h.DirectPeerIP = slices.Clone(trusted), slices.Clone(iputil.CloudflareRanges), false
 	return nil
 }
 

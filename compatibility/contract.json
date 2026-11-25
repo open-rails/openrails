@@ -175,7 +175,7 @@
       "func (t *Ticket) Release(ctx context.Context) error",
       "func DefaultConfig() Config",
       "func Migrate(ctx context.Context, pool *pgxpool.Pool, database billing.DatabaseConfig) error",
-      "func MigrateClickHouse(ctx context.Context, conn driver.Conn, clickhouse billing.ClickHouseConfig) error",
+      "func MigrateClickHouse(ctx context.Context, pool *pgxpool.Pool, conn driver.Conn, clickhouse billing.ClickHouseConfig) error",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error)",
       "func NewGate(c *Client, deps GateDeps) (*Gate, error)",
       "func NewRemote(baseURL string, opts RemoteOptions) (*Remote, error)",
@@ -705,7 +705,7 @@
       "type CheckEntitlementsParams struct {\n\tCustomerID   CustomerID `json:\"customer_id\"`\n\tEntitlements []string   `json:\"entitlements\"`\n\tPrefixes     []string   `json:\"prefixes,omitempty\"`\n\tPrefixLimit  int        `json:\"prefix_limit,omitempty\"`\n\tAt           time.Time  `json:\"at,omitzero\"`\n\n\tIncludeValidity bool `json:\"include_validity,omitempty\"`\n}",
       "type ClearDestructiveHoldParams struct {\n\tReason string `json:\"reason\"`\n}",
       "type ClickHouseConfig struct {\n\tDatabase string `yaml:\"database\"`\n}",
-      "type Config struct {\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\"`\n\n\tUsageBillingEnabled bool `yaml:\"usage_billing_enabled\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\"`\n\n\tClickHouse ClickHouseConfig `yaml:\"clickhouse\"`\n\n\tMerchants []MerchantDeclaration `yaml:\"-\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\"`\n\n\tCheckoutOrigin string `yaml:\"checkout_origin\"`\n\n\tRateLimits RateLimitsConfig `yaml:\"rate_limits\"`\n\n\tCaptcha CaptchaAccount `yaml:\"captcha\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\"`\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig `yaml:\"destructive_action_limits\"`\n\n\tVault VaultConfig `yaml:\"vault\"`\n\n\tCardVault CardVaultConfig `yaml:\"card_vault\"`\n\n\tHyperSwitch HyperSwitchConfig `yaml:\"hyperswitch\"`\n\n\tSolana SolanaConfig `yaml:\"solana\"`\n\n\tLLM LLMConfig `yaml:\"llm\"`\n\n\tReadCache ReadCache `yaml:\"-\"`\n\n\tProviderSandbox ProviderSandboxConfig `yaml:\"provider_sandbox\"`\n\n\tEventRetention time.Duration `yaml:\"event_retention\"`\n\n\tWebhookSecretOverlap time.Duration `yaml:\"webhook_secret_overlap\"`\n}",
+      "type Config struct {\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\"`\n\n\tClickHouse ClickHouseConfig `yaml:\"clickhouse\"`\n\n\tMerchants []MerchantDeclaration `yaml:\"-\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\"`\n\n\tCheckoutOrigin string `yaml:\"checkout_origin\"`\n\n\tRateLimits RateLimitsConfig `yaml:\"rate_limits\"`\n\n\tCaptcha CaptchaAccount `yaml:\"captcha\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\"`\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig `yaml:\"destructive_action_limits\"`\n\n\tVault VaultConfig `yaml:\"vault\"`\n\n\tCardVault CardVaultConfig `yaml:\"card_vault\"`\n\n\tHyperSwitch HyperSwitchConfig `yaml:\"hyperswitch\"`\n\n\tSolana SolanaConfig `yaml:\"solana\"`\n\n\tLLM LLMConfig `yaml:\"llm\"`\n\n\tReadCache ReadCache `yaml:\"-\"`\n\n\tProviderSandbox ProviderSandboxConfig `yaml:\"provider_sandbox\"`\n}",
       "type ConfirmOrderParams struct {\n\tSignature *string `json:\"signature,omitempty\"`\n}",
       "type ConfirmPaymentMethodParams struct {\n\tCapture *CustodianCaptureReference `json:\"capture,omitempty\"`\n}",
       "type CreateAlertWebhookParams struct {\n\tName    string             `json:\"name\"`\n\tURL     string             `json:\"url\"`\n\tFormat  AlertWebhookFormat `json:\"format\"`\n\tEnabled *bool              `json:\"enabled\"`\n}",
@@ -1091,7 +1091,7 @@
       "type Rail string",
       "type RailDefinition struct {\n\tRail        Rail   `json:\"rail\"`\n\tDisplayName string `json:\"display_name\"`\n\n\tAccountFields []string `json:\"account_fields\"`\n\n\tFields         []string `json:\"fields\"`\n\tCredentialKeys []string `json:\"credential_keys\"`\n\n\tEnvironments []Environment `json:\"environments\"`\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int `yaml:\"requests_per_minute\"`\n}",
-      "type RateLimitsConfig map[string]*RateLimit",
+      "type RateLimitsConfig struct {\n\tPurchase *RateLimit `yaml:\"purchase\"`\n\n\tPayment *RateLimit `yaml:\"payment\"`\n\n\tSubscribe *RateLimit `yaml:\"subscribe\"`\n\n\tWebhook *RateLimit `yaml:\"webhook\"`\n}",
       "type Read string",
       "type ReadCache map[Read]ReadPolicy",
       "type ReadPolicy struct {\n\tRefreshAfter time.Duration\n\tMaxStale     time.Duration\n}",
@@ -1415,7 +1415,7 @@
       "func (s *Server) MerchantByName(ctx context.Context, name string) (billing.MerchantID, string, error)",
       "func (s *Server) MerchantPurgeInventory(ctx context.Context, id billing.MerchantID) (*billing.MerchantPurgeInventory, error)",
       "func (s *Server) MerchantScope(ctx context.Context, id billing.MerchantID) (auth.Scope, error)",
-      "func (s *Server) PrivateHandler() http.Handler",
+      "func (s *Server) MetricsHandler() http.Handler",
       "func (s *Server) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)",
       "func (s *Server) PurgeMerchant(ctx context.Context, id billing.MerchantID, params billing.PurgeMerchantParams) (*billing.MerchantPurge, error)",
       "func (s *Server) RenameMerchant(ctx context.Context, id billing.MerchantID, req billing.RenameMerchantParams) (*billing.MerchantName, error)",
@@ -1434,7 +1434,7 @@
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
       "type AdminConsole struct {\n\tDisabled bool `yaml:\"disabled\"`\n\n\tIssuers map[string]ConsoleIssuer `yaml:\"issuers\"`\n}",
-      "type Config struct {\n\tEngine openrails.Config `yaml:\",inline\"`\n\n\tAuth authkit.Config `yaml:\"auth\"`\n\n\tLocalSignIn bool `yaml:\"local_sign_in\"`\n\n\tNaming billing.NamingConfig `yaml:\"naming\"`\n\n\tMerchantCreation *MerchantCreationConfig `yaml:\"-\"`\n\n\tRouteGroups openrails.RouteGroups `yaml:\"route_groups\"`\n\n\tAdminConsole AdminConsole `yaml:\"admin_console\"`\n\n\tHost string `yaml:\"host\"`\n\tPort int    `yaml:\"port\"`\n\n\tPrivatePort int `yaml:\"private_port\"`\n}",
+      "type Config struct {\n\tEngine openrails.Config `yaml:\",inline\"`\n\n\tAuth authkit.Config `yaml:\"auth\"`\n\n\tLocalSignIn bool `yaml:\"local_sign_in\"`\n\n\tNaming billing.NamingConfig `yaml:\"naming\"`\n\n\tMerchantCreation *MerchantCreationConfig `yaml:\"-\"`\n\n\tRouteGroups openrails.RouteGroups `yaml:\"route_groups\"`\n\n\tAdminConsole AdminConsole `yaml:\"admin_console\"`\n\n\tHost string `yaml:\"host\"`\n\tPort int    `yaml:\"port\"`\n\n\tMetricsPort int `yaml:\"metrics_port\"`\n}",
       "type ConsoleIssuer struct {\n\tURL string `yaml:\"url\"`\n\n\tClientID string `yaml:\"client_id\"`\n\n\tName string `yaml:\"name\"`\n\n\tScope string `yaml:\"scope\"`\n}",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tConsoleAssets fs.FS\n}",
       "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}",
@@ -2181,8 +2181,7 @@
     "billing/config.go": {
       "cmp": "cmp",
       "reflect": "reflect",
-      "strings": "strings",
-      "time": "time"
+      "strings": "strings"
     },
     "billing/control_plane.go": {
       "catalog": "github.com/open-rails/openrails/catalog",
@@ -2595,6 +2594,7 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
       "logx": "github.com/open-rails/openrails/internal/logx",
+      "migrate": "github.com/open-rails/openrails/internal/migrate",
       "slices": "slices",
       "slog": "log/slog",
       "strings": "strings",
@@ -2977,8 +2977,8 @@
       "billing": "github.com/open-rails/openrails/billing",
       "config": "github.com/open-rails/openrails/internal/config",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
-      "slices": "slices",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
     },
@@ -5333,6 +5333,7 @@
       "errors": "errors",
       "eventstore": "github.com/open-rails/openrails/internal/eventstore",
       "logx": "github.com/open-rails/openrails/internal/logx",
+      "migrate": "github.com/open-rails/openrails/internal/migrate",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool"
     },
     "notification_adoption.go": {
@@ -5448,7 +5449,6 @@
     "server/event_log.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
-      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "eventlog": "github.com/open-rails/openrails/internal/eventlog",
       "merchant": "github.com/open-rails/openrails/internal/merchant",

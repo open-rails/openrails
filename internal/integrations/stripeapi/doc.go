@@ -19,8 +19,8 @@
 // bump creates the successor first, stamps the predecessor
 // openrails_superseded_at, keeps it enabled and verifies its secret for at
 // most 7 days; retiring it is destructive and waits for the kill switch. A
-// rotated signing secret verifies only within webhook_secret_overlap (default
-// 24h, at most 168h); retire_webhook_overlap refuses the old one at once. A
+// rotated signing secret verifies for 24 hours; retire_webhook_overlap
+// refuses the old one at once. A
 // secret missing locally is unknown, never lost: no remote endpoint is deleted
 // for it. Thin v1.* events (webhook_signing_secret_thin) are verified,
 // hydrated through the pinned version and may only wake work the operation

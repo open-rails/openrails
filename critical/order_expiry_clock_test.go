@@ -133,7 +133,7 @@ func TestOrderExpiryClock(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &challenged))
 		require.NotNil(t, challenged.Payment.NextAction)
 		hostedInput := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: input.Lines[0].PriceID, Quantity: ptr(2)}}, ExpectedTotal: ptr(int64(60_000_000)),
-			Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}}
+			Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}}
 		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, hostedInput, map[string]string{"Idempotency-Key": "hosted-expiring"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var hosted billing.Order

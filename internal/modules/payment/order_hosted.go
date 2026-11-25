@@ -70,7 +70,7 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 	if returnURL == "" {
 		return OrderCharge{}, fmt.Errorf("%w: return_url is required", ErrOrderAttemptValidation)
 	}
-	if err := s.validateReturnURLs(returnURL); err != nil {
+	if err := s.validateReturnURLs(ctx, returnURL); err != nil {
 		return OrderCharge{}, err
 	}
 	if err := moneyutil.RequireFiatCurrency(order.Currency); err != nil {
@@ -168,9 +168,9 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 	return OrderCharge{}, err
 }
 
-// CheckReturnURL refuses a return URL off the host's allowed origins.
-func (s *OrderAttemptService) CheckReturnURL(raw string) error {
-	return s.validateReturnURLs(raw)
+// CheckReturnURL refuses a return URL off the merchant's return origins.
+func (s *OrderAttemptService) CheckReturnURL(ctx context.Context, raw string) error {
+	return s.validateReturnURLs(ctx, raw)
 }
 
 // HostedOption is the hosted-page PSP that takes the order: the one named, or

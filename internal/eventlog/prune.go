@@ -15,11 +15,11 @@ import (
 
 // Prune removes a bounded prefix of expired facts. It owns no reader state;
 // the recorded floor lets readers distinguish expiry from an empty new page.
-func Prune(ctx context.Context, database *db.DB, now time.Time, retention time.Duration, limit int) (int, error) {
-	if limit < 1 || limit > math.MaxInt32 || retention <= 0 {
-		return 0, fmt.Errorf("event log pruning needs a bounded positive limit and retention")
+func Prune(ctx context.Context, database *db.DB, now time.Time, limit int) (int, error) {
+	if limit < 1 || limit > math.MaxInt32 {
+		return 0, fmt.Errorf("event log pruning needs a bounded positive limit")
 	}
-	cutoff := now.Add(-retention)
+	cutoff := now.Add(-eventRetention)
 	merchants, err := database.GenDirectory().ListExpiredEventLogMerchants(ctx, gen.ListExpiredEventLogMerchantsParams{Cutoff: cutoff, RowLimit: int32(limit)})
 	if err != nil {
 		return 0, err

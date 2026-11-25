@@ -7,12 +7,12 @@ import (
 )
 
 // TrustedProxies is the one proxy-aware client-IP resolver, built from the
-// configured trusted proxies, so rate limits, abuse tracking, request logs,
-// webhook IP recording and the CCBill allowlist all trust proxies identically.
+// configured trusted proxies and CloudflareRanges, so rate limits, abuse
+// tracking, request logs, webhook IP recording and the CCBill allowlist all
+// trust proxies identically.
 //
-// Empty trusts nothing: every resolution returns the socket peer. When the
-// peer is trusted, ClientIP walks X-Forwarded-For right-to-left past trusted
-// hops to the first untrusted address.
+// When the peer is trusted, ClientIP walks X-Forwarded-For right-to-left past
+// trusted hops to the first untrusted address; otherwise it is the peer.
 type TrustedProxies struct {
 	nets []*net.IPNet
 }
@@ -34,10 +34,14 @@ func ParseTrustedProxies(cidrs []string) *TrustedProxies {
 }
 
 func (t *TrustedProxies) trusts(ip net.IP) bool {
-	if t == nil || ip == nil {
+	return t != nil && (inNets(ip, t.nets) || inNets(ip, cloudflareNets))
+}
+
+func inNets(ip net.IP, nets []*net.IPNet) bool {
+	if ip == nil {
 		return false
 	}
-	for _, n := range t.nets {
+	for _, n := range nets {
 		if n.Contains(ip) {
 			return true
 		}
@@ -54,10 +58,10 @@ func (t *TrustedProxies) ClientIP(r *http.Request) string {
 	return t.resolve(r.RemoteAddr, strings.Join(r.Header.Values("X-Forwarded-For"), ","))
 }
 
-// Country is the client's ISO country code from a trusted proxy's
-// CF-IPCountry header, or "" when the peer is untrusted or the country unknown.
+// Country is the client's ISO country code from CF-IPCountry, or "" when
+// Cloudflare did not send the request or the country is unknown.
 func (t *TrustedProxies) Country(r *http.Request) string {
-	if !t.trusts(net.ParseIP(hostOnly(r.RemoteAddr))) {
+	if !t.fromCloudflare(r) {
 		return ""
 	}
 	country := strings.ToUpper(strings.TrimSpace(r.Header.Get("CF-IPCountry")))
@@ -81,6 +85,26 @@ func (t *TrustedProxies) ForwardedHTTPS(r *http.Request) bool {
 		}
 	}
 	return true
+}
+
+// fromCloudflare reports whether the peer, or the nearest hop past the
+// configured proxies, is Cloudflare's. A generic proxy relays CF-* headers
+// verbatim, so only Cloudflare's own are believed.
+func (t *TrustedProxies) fromCloudflare(r *http.Request) bool {
+	if t == nil {
+		return false
+	}
+	hops := splitForwardedFor(strings.Join(r.Header.Values("X-Forwarded-For"), ","))
+	ip := net.ParseIP(hostOnly(r.RemoteAddr))
+	for i := len(hops); ; i-- {
+		switch {
+		case inNets(ip, cloudflareNets):
+			return true
+		case !inNets(ip, t.nets) || i == 0:
+			return false
+		}
+		ip = net.ParseIP(hops[i-1])
+	}
 }
 
 // resolve walks forwardedFor, the joined X-Forwarded-For hops, back from

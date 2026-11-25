@@ -12,11 +12,11 @@ import (
 	"github.com/open-rails/openrails/internal/logx"
 )
 
-// PrivateHandler is the operator's private surface, never the public one:
-// GET /metrics.
-func (s *Server) PrivateHandler() http.Handler {
+// MetricsHandler is the operator's Prometheus GET /metrics, never on the
+// public surface.
+func (s *Server) MetricsHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /metrics", s.metricsHandler)
+	mux.HandleFunc("GET /metrics", s.serveMetrics)
 	return mux
 }
 
@@ -26,11 +26,11 @@ func (s *Server) UnlockAdminLockout(ctx context.Context, userID, actor string) e
 	return s.adminLimiter.Unlock(ctx, userID, actor)
 }
 
-// metricsHandler serves /metrics: one gauge per dependency Ready reports,
+// serveMetrics serves /metrics: one gauge per dependency Ready reports,
 // optional ones included, from the same cached state (no provider calls),
 // the abuse state memory took while Redis did not answer, and each
 // background job kind's health.
-func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveMetrics(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	var runtime *app.Runtime

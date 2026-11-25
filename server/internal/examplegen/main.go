@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding"
 	"flag"
 	"fmt"
@@ -112,51 +113,50 @@ func loadDocs(settings []hostconfig.Setting) (docs, error) {
 			}
 		}
 	})
-	out, err := exec.Command("go", append([]string{"list", "-f", "{{.ImportPath}}\t{{.Dir}}"}, list...)...).Output()
+	out, err := exec.CommandContext(context.Background(), "go", append([]string{"list", "-f", "{{.ImportPath}}\t{{.Dir}}\t{{join .GoFiles \" \"}}"}, list...)...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("go list: %w", err)
 	}
 	d := docs{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		pkg, dir, _ := strings.Cut(line, "\t")
+		pkg, rest, _ := strings.Cut(line, "\t")
+		dir, names, _ := strings.Cut(rest, "\t")
 		fset := token.NewFileSet()
-		parsed, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, parser.ParseComments)
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range parsed {
-			for _, f := range p.Files {
-				ast.Inspect(f, func(n ast.Node) bool {
-					ts, ok := n.(*ast.TypeSpec)
-					if !ok {
-						return true
-					}
-					st, ok := ts.Type.(*ast.StructType)
-					if !ok {
-						return true
-					}
-					previous := ""
-					for _, field := range st.Fields.List {
-						doc := field.Doc.Text()
-						if doc == "" {
-							doc = field.Comment.Text()
-						}
-						for _, name := range field.Names {
-							text := doc
-							if text == "" && strings.Contains(previous, name.Name) {
-								text = previous // "Host and Port are …"
-							}
-							if text != "" {
-								d[pkg+"."+ts.Name.Name+"."+name.Name] = sentence(text)
-							}
-						}
-						if doc != "" {
-							previous = doc
-						}
-					}
-					return false
-				})
+		for _, name := range strings.Fields(names) {
+			f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments)
+			if err != nil {
+				return nil, err
 			}
+			ast.Inspect(f, func(n ast.Node) bool {
+				ts, ok := n.(*ast.TypeSpec)
+				if !ok {
+					return true
+				}
+				st, ok := ts.Type.(*ast.StructType)
+				if !ok {
+					return true
+				}
+				previous := ""
+				for _, field := range st.Fields.List {
+					doc := field.Doc.Text()
+					if doc == "" {
+						doc = field.Comment.Text()
+					}
+					for _, name := range field.Names {
+						text := doc
+						if text == "" && strings.Contains(previous, name.Name) {
+							text = previous // "Host and Port are …"
+						}
+						if text != "" {
+							d[pkg+"."+ts.Name.Name+"."+name.Name] = sentence(text)
+						}
+					}
+					if doc != "" {
+						previous = doc
+					}
+				}
+				return false
+			})
 		}
 	}
 	return d, nil
@@ -200,7 +200,9 @@ func envExample(settings []hostconfig.Setting, d docs) ([]byte, error) {
 # (empty: none) and each secret is empty. A variable is its config.yaml key,
 # upper-cased and joined by "_"; a list is comma-separated, a section or a
 # list of sections JSON. A variable inside a known section that names no key
-# refuses boot. A merchant's settings are no variables: its document is
+# refuses boot. Policy (rate_limits, user_action_rate_limit,
+# destructive_action_limits, auth.http.rate_limits) is set in config.yaml
+# only. A merchant's settings are no variables: its document is
 # merchant.example.yaml.
 `)
 	var order []string
@@ -258,7 +260,8 @@ func merchantExample(d docs) ([]byte, error) {
 # its default, which its description names; values here are empty. A file
 # document names its slug; a merchant manifest keys each document by it under
 # merchants.<slug>, and with vault.kv_mount Vault holds them. Secrets belong
-# in a manifest overlay or Vault. A list shows one element, a map one <key>.
+# in Vault, or in a manifest mounted from a secret. A list shows one element,
+# a map one <key>.
 `)
 	w.fields(reflect.TypeFor[billing.MerchantDocument](), 0, map[reflect.Type]bool{})
 	if len(w.missing) > 0 {

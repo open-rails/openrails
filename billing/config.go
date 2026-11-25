@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"reflect"
 	"strings"
-	"time"
 )
 
 // Config is the engine's settings: plain data, as openrails.New takes them
@@ -16,8 +15,6 @@ import (
 type Config struct {
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool `yaml:"engine_admission_hold"`
-	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
-	UsageBillingEnabled bool `yaml:"usage_billing_enabled"`
 
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig `yaml:"database"`
@@ -35,24 +32,20 @@ type Config struct {
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
 	// used only to build provider callbacks and customer billing links.
 	PublicBillingBaseURL string `yaml:"public_billing_base_url"`
-	// ReturnOrigins are the exact origins (scheme://host[:port]) that purchase
-	// and billing-portal return URLs may name. Empty allows only the origin of
-	// PublicBillingBaseURL.
-	ReturnOrigins []string `yaml:"return_origins"`
 	// TrustedProxies are the CIDRs whose X-Forwarded-For is trusted when
 	// resolving a client's address. Empty trusts none: the socket peer is the
 	// client.
 	TrustedProxies []string `yaml:"trusted_proxies"`
-	// CheckoutOrigin is the origin (https://pay.example.com) of the payment
-	// page, which Engine.CheckoutPage serves from Deps.CheckoutAssets. It is
-	// an origin of its own, apart from PublicBillingBaseURL and every
-	// declared Issuer; one that is not is refused and reported. Empty serves
-	// none.
+	// CheckoutOrigin is needed only to serve OpenRails's own hosted pay page:
+	// the separate origin (https://pay.example.com) where /pay/<order> is
+	// served from Deps.CheckoutAssets; leave it empty when you use the
+	// embedded checkout or your own card form, and pay URLs then answer
+	// pay_url_unavailable. It is an origin of its own, apart from
+	// PublicBillingBaseURL and every declared Issuer; one that is not is
+	// refused and reported.
 	CheckoutOrigin string `yaml:"checkout_origin"`
 
-	// RateLimits are the per-bucket request limits: nil takes the defaults,
-	// an empty map limits nothing (a host that fronts billing with its own
-	// limiter).
+	// RateLimits are the per-bucket request limits.
 	RateLimits RateLimitsConfig `yaml:"rate_limits"`
 	// Captcha challenges a client that keeps hitting a rate limit; it is on
 	// when both its keys are set.
@@ -90,13 +83,6 @@ type Config struct {
 	// gateway is refused beside a live PSP and for anything but a literal
 	// loopback address.
 	ProviderSandbox ProviderSandboxConfig `yaml:"provider_sandbox"`
-
-	// EventRetention is the retained event-log lifetime, at least 1s. Reader
-	// progress never extends retention.
-	EventRetention time.Duration `yaml:"event_retention"`
-	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
-	// keeps verifying: between 1m and 168h.
-	WebhookSecretOverlap time.Duration `yaml:"webhook_secret_overlap"`
 }
 
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
@@ -127,17 +113,30 @@ type ClickHouseConfig struct {
 	Database string `yaml:"database"`
 }
 
-// RateLimitsConfig maps a feature bucket (purchase, payment, subscribe,
-// webhook, catalog-ask) to its request limit. A bucket left out is not
-// limited; other routes never are (a per-address ceiling belongs to the proxy
-// in front of OpenRails). Counting is per one-minute window, bucket and
-// subject (the client address, plus the user when authenticated); any
-// subject tripping refuses the request with 429. An unknown bucket is
-// reported and ignored. In-process Client calls count nothing. The client
-// address is the socket peer unless TrustedProxies lists the proxy.
-type RateLimitsConfig map[string]*RateLimit
+// RateLimitsConfig is each bucket's request limit. A bucket left nil takes
+// DefaultConfig's; RequestsPerMinute 0 does not limit it, so a host that
+// fronts billing with its own limiter sets every bucket to 0. Other routes
+// are never limited (a per-address ceiling belongs to the proxy in front of
+// OpenRails). Counting is per one-minute window, bucket and subject (the
+// client address, plus the user when authenticated); any subject tripping
+// refuses the request with 429. In-process Client calls count nothing. The
+// client address is the socket peer unless TrustedProxies lists the proxy.
+type RateLimitsConfig struct {
+	// Purchase limits buying: checkout and paying an order, kept tight to
+	// deter card testing.
+	Purchase *RateLimit `yaml:"purchase"`
+	// Payment limits a customer's payment-method routes, where cards are
+	// added.
+	Payment *RateLimit `yaml:"payment"`
+	// Subscribe limits a customer's subscription changes.
+	Subscribe *RateLimit `yaml:"subscribe"`
+	// Webhook limits provider callbacks, which share their rail's source
+	// addresses: a DoS floor that must absorb rebill runs.
+	Webhook *RateLimit `yaml:"webhook"`
+}
 
-// RateLimit is one bucket's limit over a fixed one-minute window.
+// RateLimit is one bucket's limit over a fixed one-minute window; 0 does not
+// limit it.
 type RateLimit struct {
 	RequestsPerMinute int `yaml:"requests_per_minute"`
 }
@@ -318,15 +317,11 @@ func DefaultConfig() Config {
 		Database:   DatabaseConfig{Schema: "billing", LeaseConns: 4},
 		ClickHouse: ClickHouseConfig{Database: "openrails"},
 		RateLimits: RateLimitsConfig{
-			// Kept tight to deter card testing.
-			"purchase": {RequestsPerMinute: 10},
-			// Mutation endpoint; the per-user limit is the real fraud control.
-			"subscribe": {RequestsPerMinute: 20},
-			"payment":   {RequestsPerMinute: 40},
-			// All webhooks from a rail share its source addresses: it must
-			// absorb rebill runs. A DoS floor; webhooks are authenticated.
-			"webhook":     {RequestsPerMinute: 1200},
-			"catalog-ask": {RequestsPerMinute: 10},
+			Purchase: &RateLimit{RequestsPerMinute: 10},
+			// The per-user limit is the real fraud control.
+			Subscribe: &RateLimit{RequestsPerMinute: 20},
+			Payment:   &RateLimit{RequestsPerMinute: 40},
+			Webhook:   &RateLimit{RequestsPerMinute: 1200},
 		},
 		UserActionRateLimit: UserActionRateLimitConfig{
 			MinimumCustomersPerHour: 5, PaidCustomersPerHourlyCustomer: 400,
@@ -336,16 +331,14 @@ func DefaultConfig() Config {
 			ActorPerHour: 5, ActorPerDay: 15, MerchantPerHour: 15, MerchantPerDay: 25,
 			DeploymentPerHour: 50, DeploymentPerDay: 100, ErasurePerHour: 100, ErasurePerDay: 1000,
 		},
-		Captcha:              CaptchaAccount{Provider: "turnstile"},
-		Vault:                VaultConfig{ScopePrefix: "openrails", TransitMount: "transit"},
-		EventRetention:       2160 * time.Hour,
-		WebhookSecretOverlap: 24 * time.Hour,
+		Captcha: CaptchaAccount{Provider: "turnstile"},
+		Vault:   VaultConfig{ScopePrefix: "openrails", TransitMount: "transit"},
 	}
 }
 
 // WithDefaults is c with every zero setting, field by field, at
 // DefaultConfig's value, and an empty Database.RiverSchema at the schema plus
-// "_river". A nil RateLimits takes the defaults; an empty one stays empty.
+// "_river".
 func (c Config) WithDefaults() Config {
 	c.Database.Schema = strings.ToLower(strings.TrimSpace(c.Database.Schema))
 	fill(reflect.ValueOf(&c).Elem(), reflect.ValueOf(DefaultConfig()))

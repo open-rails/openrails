@@ -11,9 +11,9 @@ services:
   openrails:
     network_mode: service:nmi
     ports: !reset []
+    command: [run-server, --config, /etc/openrails/config.e2e.yaml, --merchant-manifest, /etc/openrails/merchant.yaml]
     environment:
       PROVIDER_SANDBOX_NMI_GATEWAY_URL: http://127.0.0.1:9091
-      RATE_LIMITS_DISABLED: "true" # every purchase comes from one browser
     depends_on:
       nmi: { condition: service_started }
 

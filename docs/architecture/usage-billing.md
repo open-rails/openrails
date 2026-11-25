@@ -76,8 +76,8 @@ one takes what the lots hold and forgives the rest (`usage_postings.forgiven`),
 and a reversal takes forgiveness back before it credits
 ([prepaid credits](prepaid-credits.md)).
 
-**Billing.** With `usage_billing_enabled`, the usage pass (`UsageOrderWorker`)
-bills each account whose `money_settings.usage_due_at` has come (its bill date, or
+**Billing.** The usage pass (`UsageOrderWorker`), on every deployment, with or
+without an event store, bills each account whose `money_settings.usage_due_at` has come (its bill date, or
 a threshold crossing) as a usage order (`BillDueUsageAccount`), then queues due
 collections as `order_collection` operations. An order bills the pending owed
 items of its window; its period starts where their charges began (a posting's
@@ -101,8 +101,7 @@ movements (`postRunningChargesThrough`).
   `MarkOrderUncollectible`, `RecordExternalPayment`.
 - **Customer**: `GET /v1/me/usage` (priced per 15-minute UTC bucket and folded into the merchant's days, `UsageHistory`), `/v1/me/balance/transactions`.
 - **Metrics and events**: `usage_units` and `usage_charged` by `charge` (charged, forgiven) (`POST /v1/metrics/query`); `delinquency.*`; customer facts `order_due`, `order_overdue`, `order_collection_stopped`.
-- **Configuration**: `usage_billing_enabled` (`Config.UsageBillingEnabled`);
-  merchant `usage_billing`, `billing_period_boundary`
+- **Configuration**: merchant `usage_billing` (its terms turn usage billing on), `billing_period_boundary`
   ([usage billing](../client.md#usage-and-running-charges)).
 
 ## Guarantees

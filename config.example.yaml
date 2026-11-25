@@ -13,12 +13,13 @@
 # writes to a merchant's providers is the merchant's write posture
 # (`openrails merchant hold` / `openrails merchant arm`).
 
-# Independent of reader progress; 2160h = 90 days. Env: EVENT_RETENTION.
-event_retention: 2160h
-
 host: 0.0.0.0
 port: 3053
-# private_port: 9090 # the operator's /metrics, apart from the public port; unset serves none
+# The metrics listener: the operator's Prometheus GET /metrics (dependency
+# up/down, abuse-state fallbacks, per-job-kind health), on its own port so it
+# is never public. Unset serves none; the Helm chart sets 9090. Not the
+# merchant dashboard's business metrics, which are the /v1/metrics API on port.
+# metrics_port: 9090
 # On SIGTERM readiness fails at once, serving continues for 5s, then in-flight
 # requests and workers finish within 20s.
 public_billing_base_url: http://localhost:3053 # default http://localhost:<port>
@@ -78,8 +79,8 @@ auth:
     refresh_token_duration: 720h
   # keys:
   #   path: /vault/auth # keys.json and totp.key; a loopback issuer without them gets generated development keys
-  # AuthKit's client IP follows the top-level trusted_proxies and
-  # cloudflare_proxies: the socket peer when both are empty.
+  # AuthKit's client IP follows the top-level trusted_proxies and Cloudflare's
+  # published ranges: the socket peer for any other peer.
   database:
     schema: profiles # the server's AuthKit tables
   # Accept the RFC 9068 access tokens trusted issuers mint for this
@@ -153,54 +154,52 @@ naming:
 #   password: ""
 #   from: "Billing <noreply@example.com>"
 
-rate_limits:
-  subscribe:
-    requests_per_minute: 20
-  purchase:
-    requests_per_minute: 10
-  webhook:
-    requests_per_minute: 1200
-  payment:
-    requests_per_minute: 40
+# Policy sections (rate_limits, user_action_rate_limit,
+# destructive_action_limits) are set here only, never in the environment.
+# Shown are the defaults.
 
-# Combined customer card-removal and subscription-cancellation protection.
-# Distinct affected customers across all actors/apps; no per-minute window.
+# Requests per minute per client, by bucket; 0 leaves a bucket unlimited.
+rate_limits:
+  purchase:
+    requests_per_minute: 10   # buying: checkout and paying an order
+  payment:
+    requests_per_minute: 40   # a customer's payment-method routes
+  subscribe:
+    requests_per_minute: 20   # a customer's subscription changes
+  webhook:
+    requests_per_minute: 1200 # provider callbacks
+
+# Customer card removals and subscription cancellations: one merchant-wide
+# budget of distinct customers, whatever the rate_limits.
 user_action_rate_limit:
-  minimum_customers_per_hour: 5
-  paid_customers_per_hourly_customer: 400
-  minimum_customers_per_day: 10
-  paid_customers_per_daily_customer: 100
+  minimum_customers_per_hour: 5            # the hourly budget's floor
+  paid_customers_per_hourly_customer: 400  # +1 an hour per this many paying customers
+  minimum_customers_per_day: 10            # the daily budget's floor
+  paid_customers_per_daily_customer: 100   # +1 a day per this many paying customers
 
 # Staff refunds, revokes, cancels and other held destructive actions per
-# rolling hour/day (docs/standalone.md#destructive-holds). Shown are the defaults.
-# destructive_action_limits:
-#   actor_per_hour: 5
-#   actor_per_day: 15
-#   merchant_per_hour: 15
-#   merchant_per_day: 25
-#   deployment_per_hour: 50
-#   deployment_per_day: 100
+# rolling hour/day (docs/standalone.md#destructive-holds).
+destructive_action_limits:
+  actor_per_hour: 5          # one actor's an hour
+  actor_per_day: 15          # one actor's a day
+  merchant_per_hour: 15      # one merchant's floor an hour, rising with its active customers
+  merchant_per_day: 25       # one merchant's floor a day
+  deployment_per_hour: 50    # the deployment's floor an hour, rising with active customers
+  deployment_per_day: 100    # the deployment's floor a day
+  erasure_per_hour: 100      # a merchant's contact erasures an hour, rising with its directory
+  erasure_per_day: 1000      # a merchant's contact erasures a day
 
-# Exact origins purchase success/cancel and billing-portal return URLs may
-# name. Empty allows only the origin of public_billing_base_url.
-# return_origins:
-#   - https://shop.example.com
+# Return URLs (pay URLs, hosted payments, the billing portal) may name only
+# the billing origin, the merchant's issuer's or its checkout.embed_origins.
 
-# How long a rotated-out webhook signing secret keeps verifying (max 168h).
-# webhook_secret_overlap: 24h
-
-# CIDRs whose X-Forwarded-For is trusted. Empty (default) trusts
-# NOTHING — rate limiting, abuse tracking, webhook IPAddress recording, and the
-# CCBill IP allowlist all use the raw socket peer. Set this to your load
-# balancer's/reverse proxy's address range when deploying behind one.
+# CIDRs of your own proxies, whose X-Forwarded-For is trusted. Empty (default)
+# trusts none of yours — rate limiting, abuse tracking, webhook IPAddress
+# recording, and the CCBill IP allowlist use the raw socket peer. Set this to
+# your load balancer's/reverse proxy's address range when deploying behind one.
+# Cloudflare's published ranges are built in: trusted like these, and the only
+# peers whose CF-Connecting-IP and CF-IPCountry are taken.
 # trusted_proxies:
 #   - 10.0.0.0/8
-
-# Cloudflare egress ranges, ONLY where Cloudflare fronts this origin: trusted for
-# X-Forwarded-For like trusted_proxies, and the only peers AuthKit accepts
-# CF-Connecting-IP from. Lock the origin down to Cloudflare ingress when set.
-# cloudflare_proxies:
-#   - 173.245.48.0/20
 
 # Loopback-only provider gateway for sandbox qualification: every store-armed
 # NMI client (purchase sales, invoice collection, payment-method updates and
@@ -259,8 +258,10 @@ admin_console:
   #     name: Example app
   #     scope: openid profile email offline_access openrails:merchant
 
-# The checkout origin: an order's pay URL (/pay/<order>#<secret>) is on it,
-# where the customer pays. It must be an origin of its own (not
+# The checkout origin, needed only to serve OpenRails' own hosted pay page:
+# an order's pay URL (/pay/<order>#<secret>) is on it, where the customer
+# pays. Leave it unset with the embedded checkout or your own card form; pay
+# URLs then answer pay_url_unavailable. It must be an origin of its own (not
 # public_billing_base_url's, the console's or AuthKit's); the server serves
 # it by Host.
 # checkout_origin: https://pay.example.com
@@ -283,6 +284,3 @@ admin_console:
 #                            # and this gate requires separate deployment consent; env
 #                            # LLM_CATALOG_DRAFTING_ENABLED
 
-# Opt in only for hosts that sell metered usage on credit.
-# Merchants configure usage_billing in their own document.
-usage_billing_enabled: false

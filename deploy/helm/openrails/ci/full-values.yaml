@@ -18,11 +18,6 @@ config:
     k8s_role: openrails
     auth_mount: openrails-prod/k8s
 files:
-  merchants.yaml:
-    version: 1
-    merchants:
-      shop:
-        display_name: Shop
   catalog.yaml: |
     version: 1
 secrets:
@@ -30,8 +25,7 @@ secrets:
     DATABASE_URL: {name: openrails-db-app, key: uri}
   files: [openrails-secrets, openrails-smtp]
   authKeys: openrails-auth-keys
-  merchantOverlays:
-    - {name: shop-psps, key: overlay.yaml}
+  merchantManifest: {name: shop-merchants, key: merchants.yaml}
 metrics:
   serviceMonitor:
     enabled: true

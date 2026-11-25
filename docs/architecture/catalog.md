@@ -231,7 +231,7 @@ Checks:
 Catalog routes are staff routes, outside the customer limits
 ([limits](../standalone.md#abuse-limits)). Bodies are capped at 1 MiB
 (`middleware.DefaultMaxBodyBytes`), documents at 2000 items. The assistant
-spends model tokens: the `catalog-ask` bucket (10 a minute) and a capped loop.
+spends model tokens in a capped loop.
 
 Checks:
 - `ClassifyBucket` maps `POST /v1/console/catalog/ask` to `catalog-ask`.

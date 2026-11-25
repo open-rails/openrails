@@ -35,7 +35,7 @@ func flatten(prefix string, v reflect.Value, out map[string]string) {
 			path = strings.TrimPrefix(prefix+"."+name, ".")
 		}
 		if v.Field(i).Kind() == reflect.Map {
-			continue // rate_limits: their own table
+			continue // maps: their own tables
 		}
 		flatten(path, v.Field(i), out)
 	}

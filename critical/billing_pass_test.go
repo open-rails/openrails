@@ -236,7 +236,7 @@ func TestBillingPass(t *testing.T) {
 		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lots[0].ID), "the 00:00 pass books the lapse")
 	})
 	t.Run("OR-J04-S45/a-delinquency-grace-ends-on-the-next-pass", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
+		a, _, customer := usageBillingWorld(t, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(1)
 			setCfgMerchant(&w.cfg, "alpha", m)
