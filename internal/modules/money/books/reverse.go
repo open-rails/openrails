@@ -267,7 +267,7 @@ func (pb paymentBooks) held() map[uuid.UUID]int64 {
 	return out
 }
 
-// bySchedule invoices amounts by schedule.
+// bySchedule orders amounts by schedule.
 func bySchedule(amounts map[uuid.UUID]int64) ([]uuid.UUID, []int64) {
 	ids := make([]uuid.UUID, 0, len(amounts))
 	for id := range amounts {

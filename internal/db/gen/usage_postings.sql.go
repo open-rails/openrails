@@ -713,7 +713,7 @@ type ShareUsageEventTypesParams struct {
 	EventTypes []string
 }
 
-// An intake's fence on the event types it takes in, in the invoice
+// An intake's fence on the event types it takes in, in the order
 // LockUsageEventTypes takes them.
 func (q *Queries) ShareUsageEventTypes(ctx context.Context, arg ShareUsageEventTypesParams) error {
 	_, err := q.db.Exec(ctx, shareUsageEventTypes, arg.MerchantID, arg.EventTypes)

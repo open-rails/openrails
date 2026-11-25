@@ -9,7 +9,7 @@ import (
 
 // Typed resource identifiers. Each kind has exactly one wire spelling:
 // OpenRails-minted resources travel as prefixed text (prod_, sub_,
-// pay_, pm_, mdt_, oat_, att_, cyc_, psp_, ord_, oli_) and host-owned identities (CustomerID, MerchantID) as the
+// pay_, pm_, mdt_, iat_, att_, cyc_, psp_, in_, il_) and host-owned identities (CustomerID, MerchantID) as the
 // plain UUID. A typed id marshals to that spelling and refuses any other — a
 // missing or wrong prefix, or a non-UUID body, is a decoding error. The zero
 // id marshals to "" and "" decodes to the zero id; use IsZero (and the json
