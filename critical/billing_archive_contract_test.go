@@ -443,7 +443,7 @@ func TestBillingArchive(t *testing.T) {
 		require.Eventually(t, func() bool {
 			var reason string
 			err := target.pool.QueryRow(t.Context(), "SELECT last_failure_reason FROM "+intents+" WHERE intent_type = 'solana_pull' AND status = 'pending' AND next_attempt_at = $1", retryAt).Scan(&reason)
-			return err == nil && strings.Contains(reason, "readonly (restored)")
+			return err == nil && strings.Contains(reason, "readonly (billing restore)")
 		}, 20*time.Second, 20*time.Millisecond, "the due pull is parked while the restored merchant is read-only")
 		require.NoError(t, fleet.Stop(t.Context()))
 		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
