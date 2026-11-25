@@ -89,6 +89,19 @@ func topLevelKeys(types ...reflect.Type) (scalar, nested map[string]bool) {
 	return scalar, nested
 }
 
+// envNames are the variables whose key is not their mechanical spelling:
+// HashiCorp's VAULT_ADDR and VAULT_CACERT, AuthKit's AUTHKIT_* inline key (the
+// unprefixed names refuse boot), and naming's nested former_names.
+var envNames = map[string]string{
+	"vault_addr":                     "vault.address",
+	"vault_cacert":                   "vault.ca_cert",
+	"naming_former_names_mode":       "naming.former_names.mode",
+	"naming_former_names_duration":   "naming.former_names.duration",
+	"authkit_active_key_id":          "signing_key.active_key_id",
+	"authkit_active_private_key_pem": "signing_key.active_private_key_pem",
+	"authkit_public_keys":            "signing_key.public_keys",
+}
+
 // envKeyToConfigKey maps an environment variable's name to its key:
 // PUBLIC_BILLING_BASE_URL is public_billing_base_url, DATABASE_URL
 // database.url. A name that routes to no section is "" and never loaded (the
@@ -98,31 +111,8 @@ func topLevelKeys(types ...reflect.Type) (scalar, nested map[string]bool) {
 func envKeyToConfigKey(s string) string {
 	s = strings.ToLower(s)
 
-	// VAULT_ADDR and VAULT_CACERT are HashiCorp's canonical names for the
-	// server URL and its CA file (the mechanical split would yield vault.addr
-	// and vault.cacert).
-	switch s {
-	case "vault_addr":
-		return "vault.address"
-	case "vault_cacert":
-		return "vault.ca_cert"
-	}
-
-	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
-	// AUTHKIT_PUBLIC_KEYS are AuthKit's canonical inline-key env names
-	// (mirrored by cmd/authkit-server). The unprefixed names are poison: Load
-	// refuses boot on them.
-	switch s {
-	case "naming_former_names_mode":
-		return "naming.former_names.mode"
-	case "naming_former_names_duration":
-		return "naming.former_names.duration"
-	case "authkit_active_key_id":
-		return "signing_key.active_key_id"
-	case "authkit_active_private_key_pem":
-		return "signing_key.active_private_key_pem"
-	case "authkit_public_keys":
-		return "signing_key.public_keys"
+	if key, ok := envNames[s]; ok {
+		return key
 	}
 	// AUTH_* is AuthKit's configuration, by AuthKit's keys.
 	if rest, ok := strings.CutPrefix(s, "auth_"); ok && rest != "" {
@@ -504,20 +494,22 @@ var retiredSettings = []struct{ key, env, now string }{
 
 // retiredAuthKeys are the server's former auth keys and their replacements.
 var retiredAuthKeys = map[string]string{
-	"auth.issuer":                      "auth.token.issuer (AUTH_TOKEN_ISSUER)",
-	"auth.schema":                      "auth.database.schema (AUTH_DATABASE_SCHEMA)",
-	"auth.keys_path":                   "auth.keys.path (AUTH_KEYS_PATH)",
-	"auth.mint_disabled":               "auth.keys.verify_only (AUTH_KEYS_VERIFY_ONLY)",
-	"auth.allow_ephemeral_signing_key": "auth.keys.allow_ephemeral_dev_keys (AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS)",
-	"auth.allow_private_network_jwks":  "auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
-	"auth.allow_missing_senders":       "auth.registration.allow_missing_senders (AUTH_REGISTRATION_ALLOW_MISSING_SENDERS)",
-	"auth.direct_peer_ip":              "auth.http.direct_peer_ip (AUTH_HTTP_DIRECT_PEER_IP)",
-	"auth.request_origin":              "auth.resource.public_url (AUTH_RESOURCE_PUBLIC_URL)",
-	"auth.naming":                      "naming (NAMING_*) for merchant names, auth.username for usernames",
-	"auth.allow_loopback_http":         "nothing: AuthKit admits http only on a loopback host",
-	"auth.allow_memory":                "nothing: AuthKit keeps its limits and proofs in Redis or memory",
-	"auth.active_key_id":               "signing_key.active_key_id (AUTHKIT_ACTIVE_KEY_ID)",
-	"auth.active_private_key_pem":      "signing_key.active_private_key_pem (AUTHKIT_ACTIVE_PRIVATE_KEY_PEM)",
-	"auth.public_keys":                 "signing_key.public_keys (AUTHKIT_PUBLIC_KEYS)",
-	"resource_server":                  "auth.resource (id, public_url) and each merchant's trusted issuers in AuthKit",
+	"auth.issuer":                        "auth.token.issuer (AUTH_TOKEN_ISSUER)",
+	"auth.schema":                        "auth.database.schema (AUTH_DATABASE_SCHEMA)",
+	"auth.keys_path":                     "auth.keys.path (AUTH_KEYS_PATH)",
+	"auth.mint_disabled":                 "auth.keys.verify_only (AUTH_KEYS_VERIFY_ONLY)",
+	"auth.allow_ephemeral_signing_key":   "auth.keys.allow_ephemeral_dev_keys (AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS)",
+	"auth.allow_private_network_jwks":    "auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
+	"auth.allow_missing_senders":         "auth.registration.allow_missing_senders (AUTH_REGISTRATION_ALLOW_MISSING_SENDERS)",
+	"auth.direct_peer_ip":                "auth.http.direct_peer_ip (AUTH_HTTP_DIRECT_PEER_IP)",
+	"auth.request_origin":                "auth.resource.public_url (AUTH_RESOURCE_PUBLIC_URL)",
+	"auth.naming":                        "naming (NAMING_*) for merchant names, auth.username for usernames",
+	"auth.allow_loopback_http":           "nothing: AuthKit admits http only on a loopback host",
+	"auth.allow_memory":                  "nothing: AuthKit keeps its limits and proofs in Redis or memory",
+	"auth.active_key_id":                 "signing_key.active_key_id (AUTHKIT_ACTIVE_KEY_ID)",
+	"auth.active_private_key_pem":        "signing_key.active_private_key_pem (AUTHKIT_ACTIVE_PRIVATE_KEY_PEM)",
+	"auth.public_keys":                   "signing_key.public_keys (AUTHKIT_PUBLIC_KEYS)",
+	"auth.default_tenant_id":             "nothing: AuthKit creates the server's one account directory, or adopts the one its database holds",
+	"auth.keys.allow_ephemeral_dev_keys": "nothing: a loopback issuer's development keys are generated, under auth.keys.path when set",
+	"resource_server":                    "auth.resource (id, public_url) and each merchant's trusted issuers in AuthKit",
 }

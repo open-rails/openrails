@@ -16,7 +16,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -42,23 +41,16 @@ import (
 const issuer = "http://localhost:8080"
 
 // newAuth is a development AuthKit with the README's roles: open
-// registration, ephemeral signing keys, and its own River client (ak.Start
-// runs it).
+// registration, development signing keys AuthKit generates for a loopback
+// issuer, and its own River client (ak.Start runs it).
 func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authkit.Client, error) {
-	// A deployment keeps this directory ID across every restart.
-	tenant, err := iam.ParseTenantID(cmp.Or(os.Getenv("AUTH_DEFAULT_TENANT_ID"), "8c67667c-8837-439a-a485-2c9a385c64c3"))
-	if err != nil {
-		return nil, err
-	}
 	return authkit.New(ctx, authkit.Config{
-		DefaultTenantID: tenant,
-		Database:        authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
-		Token:           authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{"onlydemo"}},
-		Keys:            authkit.KeysConfig{AllowEphemeralDevKeys: true}, // the README's Path: "/vault/auth" in production
-		Roles:           rbac,
-		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true}, // the React app keeps its session in an HttpOnly cookie
-		Registration:    authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
-		TwoFactor:       authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		Database:     authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
+		Token:        authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{"onlydemo"}},
+		Roles:        rbac,
+		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true}, // the React app keeps its session in an HttpOnly cookie
+		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
+		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 	}, authkit.Deps{Postgres: db}) // the same pool OpenRails uses
 }
 

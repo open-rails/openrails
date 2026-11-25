@@ -99,7 +99,6 @@ func TestTheReferenceStatesEveryDefault(t *testing.T) {
 	want["database.url"] = defaultDatabaseURL
 	want["naming.former_names.duration"] = cfg.Server.Naming.FormerNames.Duration.String()
 	want["auth.token.issuer"] = "public_billing_base_url"
-	want["auth.default_tenant_id"] = cfg.Server.Auth.DefaultTenantID.String()
 	want["auth.token.refresh_token_duration"] = cfg.Server.Auth.Token.RefreshTokenDuration.String()
 	want["auth.database.schema"] = cfg.Server.Auth.Database.Schema
 	documented := standaloneDefaults(t)
@@ -120,8 +119,8 @@ func TestTheReferenceStatesEveryDefault(t *testing.T) {
 }
 
 // With nothing configured, the server runs on the defaults against Compose's
-// dependencies: the database, its own URL, and a loopback issuer whose
-// account directory is the local one.
+// dependencies: the database, its own URL and a loopback issuer, whose
+// account directory and development keys AuthKit makes.
 func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 	configPath, _ := isolate(t)
 	cfg, err := Load(configPath)
@@ -129,12 +128,11 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	for got, want := range map[string]string{
-		cfg.Database.URL:                         defaultDatabaseURL,
-		cfg.Server.Engine.PublicBillingBaseURL:   "http://localhost:3053",
-		cfg.Server.Auth.Token.Issuer:             "http://localhost:3053",
-		cfg.Server.Auth.DefaultTenantID.String(): localTenantID.String(),
-		cfg.Server.Engine.Database.Schema:        "billing",
-		fmt.Sprint(cfg.Server.Port):              "3053",
+		cfg.Database.URL:                       defaultDatabaseURL,
+		cfg.Server.Engine.PublicBillingBaseURL: "http://localhost:3053",
+		cfg.Server.Auth.Token.Issuer:           "http://localhost:3053",
+		cfg.Server.Engine.Database.Schema:      "billing",
+		fmt.Sprint(cfg.Server.Port):            "3053",
 	} {
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
@@ -142,19 +140,5 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 	}
 	if cfg.Redis != nil || cfg.ClickHouse != nil || cfg.Vault != nil {
 		t.Error("no Redis, ClickHouse or Vault is declared by default")
-	}
-}
-
-// A deployed issuer names its own account directory: the local one never
-// stands in for it, so boot refuses.
-func TestOnlyALoopbackIssuerTakesTheLocalTenant(t *testing.T) {
-	configPath, _ := isolate(t)
-	t.Setenv("PUBLIC_BILLING_BASE_URL", "https://billing.example.com")
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a := cfg.Server.Auth; a.Token.Issuer != "https://billing.example.com" || !a.DefaultTenantID.IsZero() {
-		t.Fatalf("issuer %q, tenant %s", a.Token.Issuer, a.DefaultTenantID)
 	}
 }

@@ -2,7 +2,7 @@
 // GetMeter reads one meter with its rate card.
 func (c *Client) GetMeter(ctx context.Context, key string) (*billing.Meter, error) {
 	var out billing.Meter
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

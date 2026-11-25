@@ -50,20 +50,20 @@ type RouteGroups struct {
 	// subscriptions, payments, refunds, orders, credits, access and usage.
 	// Its reads need billing.MerchantCustomerRead or RootCustomerRead, its
 	// changes MerchantCustomerManage or RootCustomerManage.
-	Admin bool
+	Admin bool `yaml:"admin"`
 	// Catalog is the catalog: products, prices, meters and their rates,
 	// archiving a product, applying a catalog document, moving subscribers
 	// between prices. It needs billing.MerchantCatalogManage or
 	// RootCatalogManage.
-	Catalog bool
+	Catalog bool `yaml:"catalog"`
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
 	// billing import and export, the dashboard layout. It needs
 	// billing.MerchantConfigManage or RootConfigManage.
-	MerchantConfig bool
+	MerchantConfig bool `yaml:"merchant_config"`
 	// Metrics is the merchant's business metrics, read-only: revenue, sales,
 	// the metrics queries and the dashboard. It needs
 	// billing.MerchantMetricsRead or RootMetricsRead.
-	Metrics bool
+	Metrics bool `yaml:"metrics"`
 	// Programmatic is the routes the host's backend calls over HTTP at
 	// /v1/app: entitlement checks, usage and admissions, provider
 	// operations, host events and SCIM provisioning. They take an
@@ -74,7 +74,7 @@ type RouteGroups struct {
 	// merchant or the merchant's provisioning token, and is not mounted with
 	// Deps.UserInfo, which reads the directory instead. Embedded, the Client
 	// calls the same operations in process without it.
-	Programmatic bool
+	Programmatic bool `yaml:"programmatic"`
 }
 
 // CustomerRoutes mounts customer operations with a host-authorized binding.

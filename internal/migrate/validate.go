@@ -64,7 +64,7 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 		}
 	}
 	if opts.RiverSchema != "" {
-		if err := riverhelpers.ValidateMigrations(ctx, pool, opts.RiverSchema); err != nil {
+		if err := riverhelpers.ValidateMigrations(ctx, pool, riverhelpers.MigrationOptions{Schema: opts.RiverSchema}); err != nil {
 			return validationError(err)
 		}
 	}
