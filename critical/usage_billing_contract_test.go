@@ -304,7 +304,9 @@ func TestUsageBillingContracts(t *testing.T) {
 		}
 	})
 	t.Run("OR-J26-S51/an-overdue-order-is-told-once-by-the-billing-pass", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, false)
+		a, p, customer := usageBillingWorld(t, false)
+		// The card declines, so the order stays unpaid past its due date.
+		p.core.SetDecline("4242", "202")
 		oneUsage(t, a.alpha, usageInput(customer, "billed-on-revocation", 3))
 		// What the revocation bills is owed once the month's usage posts.
 		fleet := startFleet(t, a.world)
@@ -312,8 +314,8 @@ func TestUsageBillingContracts(t *testing.T) {
 		// Revoking the collection agreement bills what is owed so far.
 		status, raw := a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduledAgreement(t, a).ID.String()+"/revoke", a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
-		order := oneUsageOrder(t, a, customer)
-		require.Equal(t, billing.OrderOpen, order.Status)
+		require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderOpen }, 15*time.Second, 50*time.Millisecond,
+			"the declined collection leaves the order open")
 		a.clock.Advance(time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		notices, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order_overdue"}, Limit: 100})
@@ -434,6 +436,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
+		// Starting the charge gave the account its bill date, the 25th.
 		a.clock.Advance(12*time.Hour + 10*time.Second)
 		runUsageDue(t, fleet)
 		order := oneUsageOrder(t, a, customer)

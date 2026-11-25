@@ -223,6 +223,7 @@ pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Notifications *NotificationChannel
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
 pkg openrails, type Deps struct, PostgresSession *pgxpool.Config
+pkg openrails, type Deps struct, ProviderEndpoints ProviderEndpoints
 pkg openrails, type Deps struct, Redis redis.UniversalClient
 pkg openrails, type Deps struct, StripeTransport http.RoundTripper
 pkg openrails, type Deps struct, UserInfo userinfo.Lookup
@@ -271,6 +272,12 @@ pkg openrails, type NotificationRecipient struct, MerchantID billing.MerchantID
 pkg openrails, type Probe struct
 pkg openrails, type Probe struct, Check func(context.Context) error
 pkg openrails, type Probe struct, Name string
+pkg openrails, type ProviderEndpoints struct
+pkg openrails, type ProviderEndpoints struct, CCBillDataLinkURL string
+pkg openrails, type ProviderEndpoints struct, CCBillWebhookSources []string
+pkg openrails, type ProviderEndpoints struct, NMIGatewayURL string
+pkg openrails, type ProviderEndpoints struct, SolanaRPCURL string
+pkg openrails, type ProviderEndpoints struct, StripeAPIURL string
 pkg openrails, type Remote struct
 pkg openrails, type RemoteCredential struct
 pkg openrails, type RemoteCredential struct, APIKey string
@@ -1564,7 +1571,6 @@ pkg openrails/billing, type Config struct, Database DatabaseConfig `yaml:"databa
 pkg openrails/billing, type Config struct, EngineAdmissionHold bool `yaml:"engine_admission_hold"`
 pkg openrails/billing, type Config struct, HyperSwitch HyperSwitchConfig `yaml:"hyperswitch"`
 pkg openrails/billing, type Config struct, Merchants []MerchantDeclaration `yaml:"-"`
-pkg openrails/billing, type Config struct, ProviderSandbox ProviderSandboxConfig `yaml:"provider_sandbox"`
 pkg openrails/billing, type Config struct, PublicURL string `yaml:"public_url"`
 pkg openrails/billing, type Config struct, RateLimits RateLimitsConfig `yaml:"rate_limits"`
 pkg openrails/billing, type Config struct, ReadCache ReadCache `yaml:"-"`
@@ -3586,12 +3592,6 @@ pkg openrails/billing, type ProviderCatalogTerms struct, BillingIntervalMonths *
 pkg openrails/billing, type ProviderCatalogTerms struct, Currency *catalog.Currency `json:"currency"`
 pkg openrails/billing, type ProviderCatalogTerms struct, StatedAmount *string `json:"stated_amount"`
 pkg openrails/billing, type ProviderRefundAccess string
-pkg openrails/billing, type ProviderSandboxConfig struct
-pkg openrails/billing, type ProviderSandboxConfig struct, CCBillDataLinkURL string `yaml:"ccbill_datalink_url"`
-pkg openrails/billing, type ProviderSandboxConfig struct, CCBillWebhookSources []string `yaml:"ccbill_webhook_sources"`
-pkg openrails/billing, type ProviderSandboxConfig struct, NMIGatewayURL string `yaml:"nmi_gateway_url"`
-pkg openrails/billing, type ProviderSandboxConfig struct, SolanaRPCURL string `yaml:"solana_rpc_url"`
-pkg openrails/billing, type ProviderSandboxConfig struct, StripeAPIURL string `yaml:"stripe_api_url"`
 pkg openrails/billing, type ProvisionMerchantParams struct
 pkg openrails/billing, type ProvisionMerchantParams struct, DisplayName string
 pkg openrails/billing, type ProvisionMerchantParams struct, OwnerUserID string

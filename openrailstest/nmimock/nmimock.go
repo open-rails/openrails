@@ -3,18 +3,18 @@
 // was charged and declines on demand. It accepts any credentials and sends no
 // webhooks. Only test code may import it.
 //
-// Point a sandbox engine at it, sharing one clock so a renewal is a clock step:
+// Point an engine at it (Deps.ProviderEndpoints), sharing one clock so a
+// renewal is a clock step:
 //
 //	gateway := nmimock.New(nmimock.Options{Clock: clock.Now})
 //	defer gateway.Close()
 //	engine, err := openrails.New(ctx, openrails.Config{
-//		ProviderSandbox: billing.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
 //		Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{
 //			Slug: "shop", DisplayName: "Shop", PSPs: billing.PSPs{
 //				"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),
 //			},
 //		}}},
-//	}, openrails.Deps{Postgres: pool, Clock: clock})
+//	}, openrails.Deps{Postgres: pool, Clock: clock, ProviderEndpoints: openrails.ProviderEndpoints{NMIGatewayURL: gateway.URL()}})
 //	id, err := engine.DeclaredMerchant("shop")
 //	shop, err := engine.Merchant(id)
 //
@@ -87,7 +87,7 @@ func New(opts Options) *Mock {
 	return &Mock{nmimock.New(nmimock.Options{Clock: opts.Clock})}
 }
 
-// URL is the gateway root: Config.ProviderSandbox.NMIGatewayURL.
+// URL is the gateway root: Deps.ProviderEndpoints.NMIGatewayURL.
 func (g *Mock) URL() string { return g.m.URL() }
 
 // Close stops the listener.

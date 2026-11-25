@@ -127,7 +127,6 @@ an optional section is on once set.
 | `CardVault`, `HyperSwitch` | A platform card vault and HyperSwitch ([custody](client.md#merchant-configuration-and-psps)). |
 | `Solana` | The deployment's crankers: they publish plans and pull renewals. Without one, Solana rebilling is off. |
 | `ReadCache` | Overrides how long a handle serves catalog and configuration reads from memory ([caching](client.md#caching)); code only. |
-| `ProviderSandbox` | Fake provider endpoints and CCBill webhook sources for tests; refused beside a live PSP. |
 
 How much OpenRails writes to a merchant's providers is the merchant's write
 posture, kept in the database: `openrails merchant hold` and
@@ -158,6 +157,7 @@ and closes none.
 | `MerchantGroups` | Live group metadata for tenant-bound merchants ([merchants](#merchants)). |
 | `CheckoutAssets` | The built payment page (`web/pay`) as an `fs.FS`. |
 | `StripeTransport`, `NMITransport`, `BasisTheoryTransport`, `FXTransport`, `Clock` | Test seams; refused beside a live PSP. |
+| `ProviderEndpoints` | Test seam: loopback fakes the provider clients reach instead of NMI, Stripe, Solana RPC and CCBill DataLink, and extra CCBill webhook source CIDRs for accounts that move no money. Each URL's host is a loopback IP literal; refused beside a live PSP. |
 
 `Deps` holds no auth: your `Routes.Auth` guards what you mount.
 
@@ -501,7 +501,8 @@ pay URLs.
 ## Testing
 
 - `openrailstest/nmimock` and `openrailstest/stripemock` are provider fakes
-  behind `Deps.NMITransport` and `Deps.StripeTransport`; `openrailstest.UserInfo`
+  behind `Deps.NMITransport` and `Deps.StripeTransport`, or on loopback behind
+  `Deps.ProviderEndpoints`; `openrailstest.UserInfo`
   is an in-memory directory. Test seams are refused beside a live PSP.
 - `openrailstest.CheckAuth` checks your `Authenticator`.
 - Run your tests against a real PostgreSQL 18: `New` migrates a fresh schema in

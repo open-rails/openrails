@@ -160,7 +160,7 @@ func TestFindingAlerts(t *testing.T) {
 		require.Zero(t, mail.count("life.customer.messages_rate_limited"), "a medium finding goes to alert webhooks, not email")
 	})
 
-	t.Run("OR-J06-S73/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none", func(t *testing.T) {
+	t.Run("OR-J06-S74/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none", func(t *testing.T) {
 		a, p, first := purchasedMembershipWith(t, 24, alertEmail)
 		tokens := []string{a.aliceToken, a.bobToken}
 		for range 4 {

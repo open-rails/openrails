@@ -25,8 +25,8 @@ import (
 // late-bound; a nil fn or service arms nothing.
 type MerchantRPCBuilder struct {
 	MerchantsFn func() *merchants.Service
-	// Endpoint replaces the network's public endpoint: a sandbox run's
-	// loopback node (provider_sandbox.solana_rpc_url).
+	// Endpoint replaces the network's public endpoint: a loopback fake node
+	// (Deps.ProviderEndpoints.SolanaRPCURL).
 	Endpoint string
 	// Postures is each merchant's write posture: a readonly merchant's client
 	// submits nothing, and so does every client without Postures.
