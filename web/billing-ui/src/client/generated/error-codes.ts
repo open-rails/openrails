@@ -17,6 +17,7 @@ export type OpenRailsErrorCode =
   | "billing_archive_platform_cards"
   | "billing_archive_unavailable"
   | "billing_archive_unsupported_state"
+  | "billing_details_required"
   | "billing_policy_not_found"
   | "cancel_unsupported_on_rail"
   | "captcha_invalid"
@@ -230,6 +231,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   billing_archive_platform_cards: { status: 409, type: "invalid_request_error", meaning: "The merchant holds cards in the platform vault; export or remove them first." },
   billing_archive_unavailable: { status: 500, type: "api_error", meaning: "The billing archive operation failed." },
   billing_archive_unsupported_state: { status: 409, type: "invalid_request_error", meaning: "The merchant has state that cannot safely be moved." },
+  billing_details_required: { status: 400, type: "invalid_request_error", meaning: "A billing detail the merchant's checkout.billing_fields require of a new card is missing; param names it." },
   billing_policy_not_found: { status: 404, type: "invalid_request_error", meaning: "The billing policy does not exist." },
   cancel_unsupported_on_rail: { status: 400, type: "invalid_request_error", meaning: "This rail has no cancel operation." },
   captcha_invalid: { status: 403, type: "invalid_request_error", meaning: "The captcha token was rejected." },

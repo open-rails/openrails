@@ -438,7 +438,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		require.Len(t, psps.Items, 1)
 		save := func() billing.PaymentMethod {
 			t.Helper()
-			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var method billing.PaymentMethod
 			require.NoError(t, json.Unmarshal(raw, &method))
@@ -508,7 +508,7 @@ func (b *nmiBook) saveCard(t *testing.T) billing.PaymentMethod {
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
 	status, raw := b.a.request(t, http.MethodPost, "/v1/me/payment-methods", b.a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID,
-		Token: b.nmi.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		Token: b.nmi.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var method billing.PaymentMethod
 	require.NoError(t, json.Unmarshal(raw, &method))

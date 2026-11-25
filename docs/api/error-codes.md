@@ -22,6 +22,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `billing_archive_platform_cards` | 409 | `invalid_request_error` | The merchant holds cards in the platform vault; export or remove them first. |
 | `billing_archive_unavailable` | 500 | `api_error` | The billing archive operation failed. |
 | `billing_archive_unsupported_state` | 409 | `invalid_request_error` | The merchant has state that cannot safely be moved. |
+| `billing_details_required` | 400 | `invalid_request_error` | A billing detail the merchant's checkout.billing_fields require of a new card is missing; param names it. |
 | `billing_policy_not_found` | 404 | `invalid_request_error` | The billing policy does not exist. |
 | `cancel_unsupported_on_rail` | 400 | `invalid_request_error` | This rail has no cancel operation. |
 | `captcha_invalid` | 403 | `invalid_request_error` | The captcha token was rejected. |

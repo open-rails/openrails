@@ -174,6 +174,19 @@ func (w loopbackWire) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func ptr[T any](v T) *T { return &v }
 
+// billedTo is a new card's billing details as its form collects them: the
+// country, and the postal code where it asks for one.
+func billedTo(country, postal string) *billing.BillingDetails {
+	details := &billing.BillingDetails{Name: ptr("Alice Buyer"), Address: &billing.BillingAddress{}}
+	if country != "" {
+		details.Address.Country = ptr(country)
+	}
+	if postal != "" {
+		details.Address.PostalCode = ptr(postal)
+	}
+	return details
+}
+
 // cfgMerchant is a copy of cfg's declaration of slug; the bare slug when it
 // declares none.
 func cfgMerchant(cfg openrails.Config, slug string) billing.MerchantDeclaration {

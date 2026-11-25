@@ -1288,6 +1288,15 @@
     "OR-J12-S16": [
       "TestCardGuard/OR-J12-S16/legitimate-values-pass-the-firewall-on-every-card-route"
     ],
+    "OR-J12-S17": [
+      "TestBillingFields/OR-J12-S17/a-us-card-without-a-postal-code-is-refused-before-nmi"
+    ],
+    "OR-J12-S18": [
+      "TestBillingFields/OR-J12-S18/a-card-outside-the-us-needs-no-postal-code"
+    ],
+    "OR-J12-S19": [
+      "TestBillingFields/OR-J12-S19/hidden-billing-fields-are-not-required-and-never-sent"
+    ],
     "OR-J38-S36": [
       "TestCardGuard/OR-J38-S36/ccbill-references-import-and-export-unchanged"
     ],

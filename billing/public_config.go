@@ -68,6 +68,9 @@ type CaptchaConfig struct {
 // network and accepted tokens. It never contains merchant secrets.
 type PaymentConfig struct {
 	PSPs []PSPPaymentConfig `json:"psps"`
+	// BillingFields are the billing details a new card's form asks for,
+	// defaults filled in.
+	BillingFields BillingFieldSettings `json:"billing_fields"`
 	// Solana is the network and the tokens the merchant accepts when a Solana
 	// PSP is armed, else null.
 	Solana *SolanaPaymentConfig `json:"solana"`

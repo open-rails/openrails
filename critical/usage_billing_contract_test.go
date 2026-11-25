@@ -60,7 +60,7 @@ func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*
 	psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
-	status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: p.core.Tokenize(nmimock.Card{Last4: "4242", Exp: "1235"})})
+	status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: p.core.Tokenize(nmimock.Card{Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var saved billing.PaymentMethod
 	require.NoError(t, json.Unmarshal(raw, &saved))
