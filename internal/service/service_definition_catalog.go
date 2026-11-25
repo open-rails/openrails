@@ -72,6 +72,34 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 		}
 	}
 	req.CreditGrant = credit
+	req.Entitlements, err = syntax.NormalizeProductEntitlements(req.Entitlements)
+	if err != nil {
+		return nil, apperr.Invalidf("%v", err)
+	}
+	req.RequiredEntitlements, err = syntax.NormalizeRequiredEntitlements(req.RequiredEntitlements)
+	if err != nil {
+		return nil, apperr.Invalidf("%v", err)
+	}
+	if req.TierGroup != nil && *req.TierGroup == "" {
+		req.TierGroup = nil // The INSERT stores an empty tier group as NULL.
+	}
+	// catalogMutation holds the merchant's catalog row lock across this lookup
+	// and the insert, so concurrent creates compare against the committed winner.
+	existing, err := products.GetByKey(ctx, req.Key)
+	if err == nil {
+		if existing.DisplayName != req.DisplayName || existing.Description != req.Description ||
+			!slices.Equal(existing.Entitlements, req.Entitlements) ||
+			!slices.Equal(existing.RequiredEntitlements, req.RequiredEntitlements) ||
+			!reflect.DeepEqual(existing.CreditGrant, req.CreditGrant) ||
+			!reflect.DeepEqual(existing.TierGroup, req.TierGroup) ||
+			existing.TierRank != req.TierRank || existing.Ownership != req.Ownership || existing.Archived != req.Archived {
+			return nil, ErrCatalogConflict
+		}
+		return productToCatalogProduct(existing), nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, productLookup(err)
+	}
 	now := time.Now().UTC()
 	tid, err := merchant.Require(ctx)
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -77,21 +76,6 @@ func Degrade(cfg *billing.Config) []Degradation {
 			kept = append(kept, raw)
 		}
 		return kept
-	}
-	{
-		sandbox := &cfg.ProviderSandbox
-		sandbox.CCBillWebhookSources = keep("provider_sandbox.ccbill_webhook_sources", sandbox.CCBillWebhookSources, validateSourceCIDR)
-		for _, gateway := range []struct {
-			key string
-			url *string
-		}{{"nmi_gateway_url", &sandbox.NMIGatewayURL}, {"stripe_api_url", &sandbox.StripeAPIURL}, {"solana_rpc_url", &sandbox.SolanaRPCURL}, {"ccbill_datalink_url", &sandbox.CCBillDataLinkURL}} {
-			if raw := strings.TrimSpace(*gateway.url); raw != "" {
-				if err := ValidateLoopbackGatewayURL(raw); err != nil {
-					*gateway.url = ""
-					off("provider_sandbox."+gateway.key, fmt.Errorf("%w; the provider's own sandbox endpoint applies", err))
-				}
-			}
-		}
 	}
 	cfg.TrustedProxies = keep("trusted_proxies", cfg.TrustedProxies, validateSourceCIDR)
 	return out

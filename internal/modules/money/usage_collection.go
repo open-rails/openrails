@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -85,12 +86,20 @@ func (s *MoneyService) DefaultPaymentMethodCurrencies(ctx context.Context, payer
 // CollectDueUsageOrder queues the scheduled collection of a usage order whose
 // next charge is due: one order_collection operation, which its own job
 // charges. An order whose customer has no card that can pay it waits until a
-// card is designated.
+// card is designated; one of a merchant whose rebills are held waits for
+// their release.
 func (s *MoneyService) CollectDueUsageOrder(ctx context.Context, payer identity.CustomerID, orderID uuid.UUID) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	_, _, err := s.enqueueUsageCollection(ctx, payer, orderID, usageCollectionEnqueue{origin: intents.OriginSystem, originReason: "scheduled usage collection"})
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if c, err := (controls.View{DB: s.db}).Get(ctx, mid.UUID()); err != nil || c.RebillsHeld {
+		return err
+	}
+	_, _, err = s.enqueueUsageCollection(ctx, payer, orderID, usageCollectionEnqueue{origin: intents.OriginSystem, originReason: "scheduled usage collection"})
 	return err
 }
 

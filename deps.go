@@ -85,13 +85,33 @@ type Deps struct {
 	// Test seams, refused beside a live PSP. StripeTransport and
 	// NMITransport replace the provider wires; FXTransport replaces the FX
 	// source's, which each process reads its rates from into memory; Clock
-	// drives renewal dates, retries, entitlement windows and FX rate freshness.
+	// drives renewal dates, retries, entitlement windows and FX rate freshness;
+	// ProviderEndpoints sends the provider clients to loopback fakes.
 	StripeTransport http.RoundTripper
 	// BasisTheoryTransport substitutes the Basis Theory wire; test custody only.
 	BasisTheoryTransport http.RoundTripper
 	NMITransport         http.RoundTripper
 	FXTransport          http.RoundTripper
 	Clock                clockwork.Clock
+	ProviderEndpoints    ProviderEndpoints
+}
+
+// ProviderEndpoints are loopback fakes the provider clients reach instead
+// of the providers (Deps.ProviderEndpoints). Each URL is absolute http(s)
+// with a loopback IP literal for its host; New refuses anything else.
+type ProviderEndpoints struct {
+	// NMIGatewayURL replaces NMI's endpoints.
+	NMIGatewayURL string
+	// StripeAPIURL replaces the Stripe API root; the readonly guard and the
+	// pinned API version still apply.
+	StripeAPIURL string
+	// SolanaRPCURL replaces every merchant's Solana RPC endpoint.
+	SolanaRPCURL string
+	// CCBillDataLinkURL replaces CCBill's DataLink endpoint.
+	CCBillDataLinkURL string
+	// CCBillWebhookSources are extra CCBill webhook source CIDRs, accepted
+	// only for a webhook naming a CCBill account that moves no money.
+	CCBillWebhookSources []string
 }
 
 // EmailSender is Deps.Email: it delivers OpenRails' rendered email (the
@@ -154,6 +174,7 @@ func engineDeps(deps Deps) engine.Deps {
 			NMITransport:         deps.NMITransport,
 			FXTransport:          deps.FXTransport,
 			Clock:                deps.Clock,
+			ProviderEndpoints:    config.ProviderEndpoints(deps.ProviderEndpoints),
 			MessageRenderer:      deps.MessageRenderer,
 		},
 		MerchantGroups: deps.MerchantGroups,

@@ -50,7 +50,7 @@ type Importer struct {
 	Stripe *stripeapi.Factory
 	// Objects records the PSP's catalog the pull observes.
 	Objects *providerobjects.Observer
-	// CCBillDataLinkURL points DataLink at a loopback fake (sandbox runs).
+	// CCBillDataLinkURL points DataLink at a loopback fake (Deps.ProviderEndpoints).
 	CCBillDataLinkURL string
 	// DataLinkPacing paces live CCBill accounts' DataLink requests.
 	DataLinkPacing ccbill.Pacing

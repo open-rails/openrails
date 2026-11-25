@@ -29,10 +29,12 @@ func newCatalogApplyCmd() *cobra.Command {
 		Short: "Apply one catalog document to an explicitly selected merchant",
 		Long: "Loads one catalog document, applies every product, price and meter in it that no edit contests, " +
 			"and prints what changed and what it skipped. An object with a field an edit set differently is skipped " +
-			"whole and the command exits non-zero; --force-conflicts overwrites those fields instead. " +
+			"whole and the command exits non-zero; --force-conflicts overwrites those fields instead. A price none of " +
+			"whose methods can sell it is refused, printed with why, and the command exits non-zero. " +
 			"A document that applied whole is remembered by its content hash: applying it again changes nothing, " +
 			"even after later edits. A prior document is not a rollback. " +
-			"Omitted items are kept unless the document sets prune: true, which archives only those it alone set. " +
+			"Omitted items are kept unless the document sets prune: true: an omitted item only documents set is " +
+			"deleted when nothing refers to it and archived otherwise, and the receipt lists each one. " +
 			"Starting OpenRails never applies a catalog: this command, the API or the console does.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -81,6 +83,15 @@ func runCatalogApply(cmd *cobra.Command, file string, opts catalogApplyOptions) 
 	}
 	if n := len(receipt.Conflicts); n > 0 {
 		return fmt.Errorf("catalog document skipped %d object(s) an edit changed; --force-conflicts overwrites them", n)
+	}
+	var refused int
+	for _, w := range receipt.Warnings {
+		if w.Refused {
+			refused++
+		}
+	}
+	if refused > 0 {
+		return fmt.Errorf("catalog document refused %d price(s); fix them and apply again", refused)
 	}
 	return nil
 }

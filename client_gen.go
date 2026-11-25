@@ -112,11 +112,13 @@ func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID)
 // was set differently by an edit: that object is skipped and listed in the
 // receipt's Conflicts, the rest applies, and the document is not recorded as
 // applied, so applying it again retries the skipped objects. params.Force
-// overwrites those fields instead. A document that applied whole is
-// remembered by its canonical content hash: applying it again returns the
-// original receipt even after later catalog edits. It is an operator action,
-// never a side effect of starting: run it from a command (openrails catalog
-// apply, or the host's own) or the console.
+// overwrites those fields instead. The receipt lists deleted objects in
+// Changes with Deleted true, empty Fields and their last Revision before
+// deletion. A document that applied whole is remembered by its canonical
+// content hash: applying it again returns the original receipt even after
+// later catalog edits. It is an operator action, never a side effect of
+// starting: run it from a command (openrails catalog apply, or the host's
+// own) or the console.
 func (c *Client) ApplyCatalog(ctx context.Context, application *catalog.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
 	var out billing.CatalogApplicationReceipt
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/catalog/apply", body: application, query: params}, &out); err != nil {
@@ -904,10 +906,10 @@ func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing
 }
 
 // ListChanges lists the merchant's configuration history, newest first: each
-// change to a product, price, meter or limit and to the merchant, messages,
-// PSP and custodian documents, with who made it and how. A credential reads
-// "changed", never its value. ObjectType and ObjectID narrow it to one
-// object, Since and Until to a time range.
+// change to a product, price, meter or limit, to the merchant, messages, PSP
+// and custodian documents and to its operator controls, with who made it and
+// how. A credential reads "changed", never its value. ObjectType and
+// ObjectID narrow it to one object, Since and Until to a time range.
 func (c *Client) ListChanges(ctx context.Context, params billing.LogListParams) (*billing.ListPage[billing.LogEntry], error) {
 	var out billing.ListPage[billing.LogEntry]
 	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/changes", query: params}, &out); err != nil {

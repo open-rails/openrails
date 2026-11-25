@@ -31,9 +31,11 @@ through `host-four`; these are placeholders, not customer or repository names.
 ## Branches
 - Feature branch → open RC → master → tag. `OPEN.md` names the one open RC, `rc/X.Y.Z` for the
   version it becomes (cut from master, deleted once merged); branch from it and target it, never master.
-- A ready PR into `rc/**` runs the light CI tier (no `critical/`); the RC → master PR runs everything once.
-  `scripts/ci-scope.py` selects the light suites from the changed paths (a deletion or rename selects
-  all; docs-only runs the guards alone); draft PRs run nothing; `CI Gate` needs every selected job.
+- A ready PR into `rc/**` runs the light CI tier: the suites `scripts/ci-scope.py` selects from its changed paths (a deletion or rename selects all; docs-only runs the guards alone), no `critical/` and no gosec. Draft PRs run nothing; `CI Gate` needs every selected job.
+- `rc/**` merges through GitHub's merge queue: `gh pr merge N --squash` queues a green PR (`--auto --squash` queues it once green). Each group runs the light suites over its combined changes on top of the RC and the groups ahead of it, and merges only if `CI Gate` passes, so sessions no longer coordinate merges. `--admin` skips the gate and the queue when the owner wants a change in fast; the push run then checks it on the RC.
+- Groups also run the whole critical suite once `QUEUE_RUNS_CRITICAL` in `scripts/ci-scope.py` is on. It stays off until a full run of the RC is green: while the RC is red every group would fail, the fixes included.
+- Every push to `rc/**` or master runs the suites the push changed plus gosec, reported as `Post-merge CI` (never `CI Gate`), and saves the Go caches; only pushes save them, so pull requests restore their base's and everything else master's.
+- The RC → master PR, and a `Validate` dispatch with no selection, run everything once: every suite, gosec, and the critical suite on `CRITICAL_SHARDS` runners balanced by `critical/durations.json`; `Critical coverage` proves from the shards' reports that every scenario ran once.
 - No bot opens dependency PRs: `scripts/deps` lists the advisory feed's open alerts; fixes go in one batch per RC.
 - Master takes PRs only from `rc/X.Y.Z` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
   A release is a tag on master; not every master commit is one.
@@ -269,14 +271,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   CLI command, and none that does not exist. `docs/architecture/` gets the link check only.
 
 ## Tests
-- The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis, Vault and
-  ClickHouse (`OPENRAILS_CRITICAL_DSN`, `_REDIS_URL`, `_VAULT_ADDR`, `_VAULT_TOKEN`,
-  `_CLICKHOUSE_ADDR`, all owned and disposable; each world creates its own ClickHouse
-  database). `critical/coverage.json` lists the scenarios and
-  `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests
-  registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` (or `--journey Jxx`)
-  runs a selection against disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all. A
-  `Validate` dispatch with `critical: "J24 OR-J04-S80"` runs only those in CI and qualifies nothing.
+- The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis, Vault and ClickHouse (`OPENRAILS_CRITICAL_DSN`, `_REDIS_URL`, `_VAULT_ADDR`, `_VAULT_TOKEN`, `_CLICKHOUSE_ADDR`, all owned and disposable; each world creates its own PostgreSQL schema and ClickHouse database). `critical/coverage.json` lists the scenarios and `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` (or `--journey Jxx`) runs a selection against disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all in shards (`--shard K/N`). A `Validate` dispatch with `critical: "J24 OR-J04-S80"` runs only those in CI, on one runner, and qualifies nothing.
+- After a full run, refresh the shard balance: `gh run download RUN -p 'critical-results-*' -D DIR`, then `python3 scripts/critical-results.py critical/coverage.json DIR/*/events.jsonl --write-durations`. A test missing from `critical/durations.json` weighs the median.
 - A behaviour change gets a scenario that fails first, and sweeps `critical/` for the codes,
   constants and statuses it changed. Green-in-my-package is not green.
 - A test that needs PostgreSQL, Redis, Vault or a fixture process is tagged `integration`, like

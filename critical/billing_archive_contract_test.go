@@ -277,7 +277,7 @@ func TestBillingArchive(t *testing.T) {
 		require.Len(t, provider.effects(t), 1)
 		// Final source writers really stop before the operator authorizes the copy.
 		require.NoError(t, source.engine.Close(context.Background()))
-		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		hostCLI(t, target, "merchant", "writes", "full", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator", "--reason", "the source is stopped")
 		order, err := client.CreateOrder(t.Context(), "destination-after-arm", request)
 		require.NoError(t, err)
 		address, err := url.Parse(*order.PayURL)
@@ -413,7 +413,7 @@ func TestBillingArchive(t *testing.T) {
 		archive := archiveBytes(t, s.alpha)
 		target, client := archiveTarget(t, s.world, func(w *world) {
 			w.clock.Advance(s.clock.Now().Sub(w.clock.Now()))
-			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{SolanaRPCURL: s.wire.server.URL}
 			w.cfg.Solana = billing.SolanaConfig{Crankers: []billing.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
 		})
 		s.node.SetClock(target.clock.Now)
@@ -445,11 +445,11 @@ func TestBillingArchive(t *testing.T) {
 		require.Eventually(t, func() bool {
 			var reason string
 			err := target.pool.QueryRow(t.Context(), "SELECT last_failure_reason FROM "+intents+" WHERE intent_type = 'solana_pull' AND status = 'pending' AND next_attempt_at = $1", retryAt).Scan(&reason)
-			return err == nil && strings.Contains(reason, "readonly (restored)")
+			return err == nil && strings.Contains(reason, "readonly (billing restore)")
 		}, 20*time.Second, 20*time.Millisecond, "the due pull is parked while the restored merchant is read-only")
 		require.NoError(t, fleet.Stop(t.Context()))
 		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
-		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		hostCLI(t, target, "merchant", "writes", "full", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator", "--reason", "the source is stopped")
 		advanceTo(target, retryAt)
 		wakeOperations(t, fleet)
 		require.NoError(t, fleet.Start(t.Context()))

@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
@@ -31,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/open-rails/openrails/internal/vaulttest"
-	"github.com/open-rails/openrails/internal/writeposture"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -272,7 +272,7 @@ func TestPSPControls(t *testing.T) {
 		// is driven directly, on the production path: a wired factory checks
 		// posture and sends writes through the Stripe fixture as through Stripe.
 		stripe := stripemock.NewUnstarted(stripemock.Options{})
-		factory := stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))
+		factory := stripeapi.NewWiredFactory(stripe, controls.Fixed(controls.Full))
 		client := factory.Client(0)
 		suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
 		declared, own, foreign := "acct_declared"+suffix, "sk_live_acct_declared"+suffix, "rk_live_acct_other"+suffix
@@ -314,8 +314,8 @@ func TestPSPControls(t *testing.T) {
 					require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
 					require.Contains(t, string(raw), `"code":"provider_writes_disabled"`)
 					require.Empty(t, p.provider.effects(t))
-					// A posture is one merchant's: alpha armed writes while beta stays readonly.
-					setWritePosture(t, a.world, "full", a.alpha.MerchantID())
+					// Writes are one merchant's: alpha's are full while beta's stay readonly.
+					operator(t, a.world, "writes", "full", "alpha", "reviewed")
 					input.Payment.Token = p.provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
 					status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "armed-purchase"})
 					require.Equal(t, http.StatusCreated, status, string(raw))

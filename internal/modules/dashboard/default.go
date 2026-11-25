@@ -59,6 +59,9 @@ func DefaultWidgets(p Profile) []Widget {
 	if p.Credits {
 		l.tile("kpi-credits-sold", "Credits sold", "credits_sold", nil)
 	}
+	if p.Checkouts {
+		l.tile("kpi-checkout-conversion", "Checkout conversion", "checkout_conversion_rate", nil)
+	}
 	if empty {
 		return l.widgets
 	}
@@ -118,6 +121,19 @@ func DefaultWidgets(p Profile) []Widget {
 		)
 	}
 	l.section("payment-health", "Payment health", health...)
+	if p.Checkouts {
+		top := func(id, title, by string) Widget {
+			return chart(id, title, "table", metrics.Query{Measures: []string{"sales", "cash"}, By: []string{by},
+				Order: []metrics.OrderTerm{{Measure: "sales", Dir: "desc"}}, Limit: intp(10)})
+		}
+		l.section("checkouts", "Checkout and customers",
+			chart("checkout-funnel", "Checkout funnel", Funnel, metrics.Query{Measures: []string{"checkouts"}, By: []string{"step"}}),
+			chart("customers-by-type", "Customers by type", "bar", series([]string{"sales_customers"}, "customer_type")),
+			chart("repeat-purchase-rate", "Repeat purchase rate", "line", series([]string{"repeat_purchase_rate"})),
+			top("sales-by-country", "Sales and cash by country", "country"),
+			top("sales-by-source", "Sales and cash by source", "attribution_source"),
+		)
+	}
 	var credits []Widget
 	switch {
 	case p.Usage && p.Credits:

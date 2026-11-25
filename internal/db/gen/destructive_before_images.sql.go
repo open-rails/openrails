@@ -117,31 +117,6 @@ func (q *Queries) CountBeforeImagesForRun(ctx context.Context, arg CountBeforeIm
 	return i, err
 }
 
-const disarmMerchantEnforcement = `-- name: DisarmMerchantEnforcement :exec
-INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
-VALUES ($1::uuid, false, NULL, $2::text, $3::text, now())
-ON CONFLICT (merchant_id) DO UPDATE SET
-    destructive_actions_enabled = false,
-    enforce_armed_at = NULL,
-    updated_by = EXCLUDED.updated_by,
-    reason = EXCLUDED.reason,
-    updated_at = now()
-`
-
-type DisarmMerchantEnforcementParams struct {
-	MerchantID uuid.UUID
-	UpdatedBy  *string
-	Reason     *string
-}
-
-// Clears first-enforce arming, so post-rollback pulls run advisory until an
-// operator re-arms, and trips the merchant's destructive stop, which the intent
-// runner's gate reads: no new provider write starts during the reversal.
-func (q *Queries) DisarmMerchantEnforcement(ctx context.Context, arg DisarmMerchantEnforcementParams) error {
-	_, err := q.db.Exec(ctx, disarmMerchantEnforcement, arg.MerchantID, arg.UpdatedBy, arg.Reason)
-	return err
-}
-
 const invalidateAccessFromBeforeImages = `-- name: InvalidateAccessFromBeforeImages :execrows
 UPDATE billing.product_access e
 SET deleted_at = $1::timestamptz,

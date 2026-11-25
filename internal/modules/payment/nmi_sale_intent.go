@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -29,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func NMISaleIdempotencyKey(key string) string {
@@ -119,7 +119,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		if h.Sale.Config == nil {
 			return intents.Parked("Basis Theory sale writes unavailable")
 		}
-		if posture := (writeposture.View{DB: h.database()}).Posture(ctx, in.MerchantID); posture.ReadOnly() {
+		if posture := (controls.View{DB: h.database()}).Posture(ctx, in.MerchantID); posture.ReadOnly() {
 			return intents.Parked("Basis Theory sale writes unavailable: " + posture.Reason)
 		}
 		if p.Instrument.CustodianID == nil {
@@ -314,7 +314,7 @@ func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.Bil
 	if h.Sale.Config == nil {
 		return intents.Parked("Stripe sale writes unavailable")
 	}
-	if posture := (writeposture.View{DB: h.database()}).Posture(ctx, in.MerchantID); posture.ReadOnly() {
+	if posture := (controls.View{DB: h.database()}).Posture(ctx, in.MerchantID); posture.ReadOnly() {
 		return intents.Parked("Stripe sale writes unavailable: " + posture.Reason)
 	}
 	if _, err := h.stripeService(ctx, in); err != nil {

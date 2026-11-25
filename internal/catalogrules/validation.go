@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/currency"
 )
 
@@ -43,14 +44,13 @@ func NormalizeKey(value string) string {
 	return strings.Trim(value, "-_")
 }
 
-// ValidateMeter normalizes and validates a meter definition.
+// ValidateMeter validates the exact key and normalizes a meter's definition.
 func ValidateMeter(where string, meter *Meter) error {
 	if meter == nil {
 		return fmt.Errorf("%s: meter is required", where)
 	}
-	meter.Key = NormalizeKey(meter.Key)
-	if meter.Key == "" {
-		return fmt.Errorf("%s: key is required", where)
+	if err := syntax.ValidateApplicationKey(meter.Key, "meter"); err != nil {
+		return fmt.Errorf("%s: %w", where, err)
 	}
 	meter.EventType = strings.TrimSpace(meter.EventType)
 	meter.ValueProperty = strings.TrimSpace(meter.ValueProperty)

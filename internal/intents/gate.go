@@ -6,12 +6,23 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/writeposture"
+	"github.com/open-rails/openrails/internal/controls"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// ModeView is a merchant's effective write posture: its stored posture,
-// readonly in a copy of the billing book. writeposture.View satisfies it.
-type ModeView = writeposture.Reader
+// RebillHold is why a charge waits under its merchant's rebill brake: one
+// OpenRails initiates (system origin) waits while the merchant's rebills are
+// held; one its customer started never does.
+func RebillHold(ctx context.Context, view controls.View, in gen.BillingProviderIntent) string {
+	if Origin(in.Origin) != OriginSystem {
+		return ""
+	}
+	return view.RebillHold(ctx, in.MerchantID)
+}
+
+// ModeView is a merchant's effective writes: its stored control, readonly in
+// a copy of the billing book. controls.View satisfies it.
+type ModeView = controls.Reader
 
 // GateExecution decides whether an intent of the given origin may attempt a
 // provider write for merchantID under its posture. blocked=true parks the

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -30,7 +31,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/normalize"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -124,7 +124,7 @@ func (w *DunningWorker) due(ctx context.Context) error {
 	// visible in `openrails intents`. Nothing on this path cancels without a
 	// charge. Readonly (an exported or restored merchant, a copied book) only
 	// observes.
-	postures := writeposture.View{DB: w.DB}
+	postures := controls.View{DB: w.DB}
 	if w.NMIResolver == nil && w.EngineCollections == nil {
 		w.Log.WarnContext(ctx, "NMI client resolver not configured; skipping dunning run")
 		return nil
@@ -132,15 +132,15 @@ func (w *DunningWorker) due(ctx context.Context) error {
 
 	// Merchants with due work come from the dunning work queue (ids only); the
 	// scan and charge run inside each merchant's scope. w.now(), not SQL NOW(),
-	// so tests can mock time. Held admissions leave engine renewals unselected:
-	// they wait, untouched, until the hold lifts.
-	nmiRails, includeEngine, admitEngine := w.dueScope()
+	// so tests can mock time. A merchant whose rebills are held has its retries
+	// and engine renewals unselected: they wait, untouched, until the release.
+	nmiRails, includeEngine := w.dueScope()
 	now := w.now()
 	var merchantIDs []uuid.UUID
 	after := uuid.Nil
 	for {
 		page, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
-			Rails: nmiRails, Now: now, MerchantLimit: dunningMerchantBatch, IncludeEngine: includeEngine, AdmitEngine: admitEngine, AfterMerchantID: after,
+			Rails: nmiRails, Now: now, MerchantLimit: dunningMerchantBatch, IncludeEngine: includeEngine, AfterMerchantID: after,
 		})
 		if err != nil {
 			return fmt.Errorf("query merchants with due subscriptions: %w", err)
@@ -179,7 +179,7 @@ func (w *DunningWorker) due(ctx context.Context) error {
 		// this merchant's openrails.merchant_id, exactly as a request would.
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "dunning pass", func(mctx context.Context) error {
 			repo := subscriptions.NewSubscriptionRepo(w.DB)
-			dueSubscriptions, err := repo.ListDueDunningSubscriptions(mctx, nmiRails, now, includeEngine, admitEngine, nil)
+			dueSubscriptions, err := repo.ListDueDunningSubscriptions(mctx, nmiRails, now, includeEngine, nil)
 			if err != nil {
 				return fmt.Errorf("query due subscriptions: %w", err)
 			}
@@ -234,7 +234,7 @@ func (w *DunningWorker) due(ctx context.Context) error {
 					break
 				}
 				cursor := subscriptions.DueDunningCursorOf(&dueSubscriptions[len(dueSubscriptions)-1])
-				if dueSubscriptions, err = repo.ListDueDunningSubscriptions(mctx, nmiRails, now, includeEngine, admitEngine, &cursor); err != nil {
+				if dueSubscriptions, err = repo.ListDueDunningSubscriptions(mctx, nmiRails, now, includeEngine, &cursor); err != nil {
 					return errors.Join(merchantErr, fmt.Errorf("query due subscriptions: %w", err))
 				}
 			}
@@ -253,21 +253,19 @@ func (w *DunningWorker) due(ctx context.Context) error {
 
 // dueScope is what the pass selects: the rails it collects, and whether it
 // ends and admits engine renewals.
-func (w *DunningWorker) dueScope() (rails []string, includeEngine, admitEngine bool) {
+func (w *DunningWorker) dueScope() (rails []string, includeEngine bool) {
 	rails = []string{string(models.RailNMI)}
 	if w.EngineCollections != nil {
 		rails = append(rails, string(models.RailStripe))
 	}
-	includeEngine = w.EngineCollections != nil
-	admitEngine = includeEngine && (w.Config == nil || !w.Config.EngineAdmissionHold)
-	return rails, includeEngine, admitEngine
+	return rails, w.EngineCollections != nil
 }
 
 // DueBy reports a subscription the pass would select at at.
 func (w *DunningWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
-	rails, includeEngine, admitEngine := w.dueScope()
+	rails, includeEngine := w.dueScope()
 	ids, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
-		Rails: rails, Now: at, MerchantLimit: 1, IncludeEngine: includeEngine, AdmitEngine: admitEngine, AfterMerchantID: uuid.Nil,
+		Rails: rails, Now: at, MerchantLimit: 1, IncludeEngine: includeEngine, AfterMerchantID: uuid.Nil,
 	})
 	return len(ids) > 0, err
 }
@@ -280,7 +278,7 @@ func (w *DunningWorker) overdueRenewals(ctx context.Context, now time.Time) erro
 		return errors.New("overdue renewals: lifecycle not wired")
 	}
 	before := now.Add(-reconcile.PeriodGrace)
-	postures := writeposture.View{DB: w.DB}
+	postures := controls.View{DB: w.DB}
 	var workErr error
 	after := uuid.Nil
 	for {
@@ -414,7 +412,7 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeWindowExpired, nil
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
-		// The due query selects no engine renewal while admissions are held.
+		// The due query selects no engine renewal while rebills are held.
 		if w.EngineCollections == nil {
 			return dunningOutcomeRefused, nil
 		}
@@ -441,8 +439,9 @@ func (w *DunningWorker) processSubscription(
 			}
 			return dunningOutcomeFailed, nil
 		}
-		if errors.Is(err, money.ErrEngineCollectionNotDue) {
-			// Settled by another writer after this pass read it: nothing to do.
+		if errors.Is(err, money.ErrEngineCollectionNotDue) || errors.Is(err, controls.ErrRebillsHeld) {
+			// Settled by another writer after this pass read it, or the
+			// merchant's rebills were held since: nothing to do now.
 			return dunningOutcomeSettled, nil
 		}
 		return dunningOutcomeMaterialized, err
@@ -529,6 +528,9 @@ func (w *DunningWorker) processSubscription(
 			return dunningOutcomeFailed, fmt.Errorf("await a payment method: %w", err)
 		}
 		return dunningOutcomeFailed, nil
+	}
+	if errors.Is(err, controls.ErrRebillsHeld) {
+		return dunningOutcomeSettled, nil
 	}
 	if err != nil {
 		logEntry.WarnContext(ctx, "Dunning: subscription has no admissible recurring attempt", logx.Err(err))

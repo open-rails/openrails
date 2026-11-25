@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -22,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // A Stripe card is saved in one call: the page's Stripe fields make a pm_,
@@ -109,7 +109,7 @@ func (s *PurchaseService) SaveStripeCard(ctx context.Context, psp uuid.UUID, tok
 	} else if !db.IsNotFound(err) {
 		return SavedCard{}, err
 	}
-	if (writeposture.View{DB: d}).Posture(ctx, account.params.MerchantID).ReadOnly() {
+	if (controls.View{DB: d}).Posture(ctx, account.params.MerchantID).ReadOnly() {
 		return SavedCard{}, errors.New("Stripe card save unavailable: provider writes are disabled")
 	}
 	account.params.CustomerRef, err = resolveStripeCustomerWith(ctx, s.RailCustomerService, account.service, user)

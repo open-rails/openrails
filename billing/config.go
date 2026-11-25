@@ -10,12 +10,10 @@ import (
 // and as the standalone server's file spells them (the yaml keys).
 // Everything that reaches outside the process is in openrails.Deps. Whether
 // money is real is each PSP's declared environment, never the deployment's;
-// how much OpenRails may write to providers is each merchant's write posture.
+// how much OpenRails may write to providers, and whether the charges it
+// initiates wait, are each merchant's controls.
 // A field left zero takes DefaultConfig's value (WithDefaults).
 type Config struct {
-	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
-	EngineAdmissionHold bool `yaml:"engine_admission_hold"`
-
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig `yaml:"database"`
 	// ClickHouse names the database of the event store, Deps.ClickHouse.
@@ -73,13 +71,6 @@ type Config struct {
 	// configuration reads from memory. Set in code: the standalone server
 	// reads through no handle.
 	ReadCache ReadCache `yaml:"-"`
-
-	// ProviderSandbox points non-live PSPs' provider clients at loopback
-	// gateways, to qualify a process against fake providers, and accepts
-	// extra CCBill webhook sources for sandbox accounts; unset, none. A
-	// gateway is refused beside a live PSP and for anything but a literal
-	// loopback address.
-	ProviderSandbox ProviderSandboxConfig `yaml:"provider_sandbox"`
 }
 
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
@@ -264,26 +255,6 @@ type SolanaCrankerConfig struct {
 	Key string `yaml:"key"`
 	// PrivateKey is the base58 keypair (local_keypair). A secret.
 	PrivateKey string `yaml:"private_key"`
-}
-
-// ProviderSandboxConfig names loopback provider gateways for sandbox runs.
-// Each is an absolute http(s) URL whose host is a loopback IP literal, with no
-// userinfo; hostnames, even "localhost", are refused.
-type ProviderSandboxConfig struct {
-	// NMIGatewayURL replaces the NMI sandbox endpoints.
-	NMIGatewayURL string `yaml:"nmi_gateway_url"`
-	// StripeAPIURL replaces the Stripe API root. The readonly guard and the
-	// pinned API version still apply.
-	StripeAPIURL string `yaml:"stripe_api_url"`
-	// SolanaRPCURL replaces every merchant's Solana RPC endpoint.
-	SolanaRPCURL string `yaml:"solana_rpc_url"`
-	// CCBillDataLinkURL replaces the CCBill DataLink endpoint.
-	CCBillDataLinkURL string `yaml:"ccbill_datalink_url"`
-	// CCBillWebhookSources are extra source CIDRs accepted as a sandbox
-	// CCBill account's webhook origins. CCBill signs nothing, so the source
-	// address is the authentication: a live account accepts CCBill's own
-	// ranges alone.
-	CCBillWebhookSources []string `yaml:"ccbill_webhook_sources"`
 }
 
 // DefaultConfig is every engine setting's default: the value a setting left

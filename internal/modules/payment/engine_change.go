@@ -177,7 +177,8 @@ func (s *PurchaseService) addEngineSeats(ctx context.Context, req *SubscriptionC
 }
 
 // enqueueEngineChange runs an accepted engine charge as the durable operation
-// the request's Idempotency-Key names.
+// the request's Idempotency-Key names. Only the customer, present, charges a
+// change now, so a hold on the merchant's rebills never holds it.
 func (s *PurchaseService) enqueueEngineChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, sub *models.Subscription, terms subscriptions.InitialMembershipTerms) (*TierChangeResponse, error) {
 	if req.Staff {
 		return nil, errStaffImmediateCharge
@@ -188,9 +189,6 @@ func (s *PurchaseService) enqueueEngineChange(ctx context.Context, req *Subscrip
 	}
 	if s.Intents == nil || s.Lifecycle == nil || s.Config == nil || s.SubscriptionService == nil {
 		return nil, errors.New("engine subscription change services unavailable")
-	}
-	if s.Config.EngineAdmissionHold {
-		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "engine payment admission is held"}
 	}
 	ctx = db.WithPSPID(ctx, sub.PspID)
 	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)

@@ -190,7 +190,7 @@ are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
 (`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
 signing keys; none relaxes a protection, and a deployment that leaves one unset
-fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit`, `destructive_action_limits` and `provider_sandbox`.
+fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit` and `destructive_action_limits`.
 
 **Listener and lifecycle**
 
@@ -205,7 +205,6 @@ fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metric
 
 | Key | Default | Meaning |
 |---|---|---|
-| `engine_admission_hold` | `false` | pause admission and first submission of new engine payments; submitted ones are still verified |
 | `route_groups.admin` | off | customer support: `/v1/admin` |
 | `route_groups.catalog` | off | catalog reads and edits: `/v1/catalog` |
 | `route_groups.merchant_config` | off | PSPs, settings, findings, imports and archives: `/v1/merchant` |
@@ -360,15 +359,6 @@ user_action_rate_limit:
   minimum_customers_per_day: 10
   paid_customers_per_daily_customer: 100
 ```
-
-**Provider sandbox (tests only)**
-
-| Key | Meaning |
-|---|---|
-| `provider_sandbox.nmi_gateway_url`, `.stripe_api_url`, `.solana_rpc_url`, `.ccbill_datalink_url` | loopback fakes the rails talk to instead of the providers. The host must be a loopback IP literal and every PSP non-live; anything else refuses boot |
-| `provider_sandbox.ccbill_webhook_sources` | extra CCBill webhook source CIDRs, honored only for a webhook naming a sandbox CCBill account; `/0` is refused |
-
-`openrails sandbox nmi-gateway` serves such an NMI fake.
 
 ## The merchant manifest
 
@@ -684,8 +674,7 @@ the checkout origin. Give one public origin to `public_billing_base_url`,
   (`nmi`, `stripe`, `ccbill`, `basistheory`), never a PSP key, and the PSP's
   account id. The account resolves the merchant and its own secret verifies the
   request. NMI and Stripe sign; CCBill signs nothing and is accepted only from
-  its published ranges (plus `provider_sandbox.ccbill_webhook_sources` for
-  sandbox accounts). Stripe endpoints are registered automatically once
+  its published ranges. Stripe endpoints are registered automatically once
   `public_billing_base_url` is public https and provider writes are allowed.
   Per-rail setup: [PSPs](client.md#merchant-configuration-and-psps).
 
@@ -738,7 +727,7 @@ count, primary or sticky session.
   River every instance runs the Solana Pay poller (leased claims) and checks its
   PSP credentials at start, on change and before a write once its verdict is an
   hour old.
-- **Caches:** catalog, merchants, write posture, the kill switch and access are
+- **Caches:** catalog, merchants, merchant controls and access are
   read per request. Merchant configuration is cached per instance (see
   [Vault](#vault)). An FX rate published more than 48 hours ago is never quoted.
 - **Connections:** size PostgreSQL `max_connections` for every instance's pool,
@@ -761,11 +750,7 @@ instances NTP-synchronized. Two fences stop a copy from billing:
   `openrails book status` says so; `openrails book arm --by NAME` arms it once
   every other copy is stopped. A promoted physical replica or a physical clone
   keeps the identity: rotate the PSP credentials before running a clone.
-- **Merchant write posture.** `billing.merchant_write_posture` holds one
-  merchant's writes ([write safety](#write-safety-and-the-kill-switch)). A billing export leaves its source
-  readonly and an import lands readonly until
-  `openrails merchant arm --merchant NAME --by NAME`;
-  `openrails merchant hold --mode readonly|limited` holds one merchant.
+- **Merchant controls.** `billing.merchant_controls` holds one merchant's writes ([merchant controls](#merchant-controls)). A billing export leaves its source readonly and an import lands readonly and disarmed until `openrails merchant writes full --merchant NAME --by NAME --reason TEXT`.
 
 Move a merchant only by a billing archive ([backup and restore](#backup-and-restore)),
 and never restart a stale source as a rollback.
@@ -826,16 +811,18 @@ or discarded jobs. [River jobs](river-jobs.md) lists every job kind, what queues
 it and how to inspect one; the [operations inventory](operations-inventory.md)
 lists each provider call and local change behind them.
 
-## Write safety and the kill switch
+## Merchant controls
 
-Each merchant's write posture decides how much OpenRails writes to its
-providers: `full` (none stored), `limited` or `readonly`.
-`openrails merchant hold --merchant NAME --mode readonly|limited --by NAME`
-holds a merchant's writes and `openrails merchant arm --merchant NAME --by NAME`
-restores them; a billing export leaves its source readonly and an import lands
-readonly. In a copy of the billing book every merchant is readonly
-([one billing database](#one-billing-database)). One merchant's posture never
-holds another's.
+Each merchant has three operator controls, one row of `billing.merchant_controls`; a merchant without one writes `full`, rebills released and destructive actions disarmed. One merchant's controls never hold another's. Every command names one merchant (`--merchant NAME`) or every merchant in the directory (`--all-merchants`), and requires `--by NAME` and `--reason TEXT`; each change is a `controls` entry of the merchant's configuration history (`GET /v1/merchant/changes`), and a control already at its value records nothing.
+
+| Command | Control |
+|---|---|
+| `openrails merchant controls [--merchant NAME]` | show every merchant's controls, or one's, with the last change |
+| `openrails merchant writes full\|limited\|readonly` | how much OpenRails writes to the merchant's providers |
+| `openrails merchant rebills hold\|release` | whether the charges OpenRails initiates wait |
+| `openrails merchant destructive arm\|disarm` | whether destructive convergence runs |
+
+**Writes.** In a copy of the billing book every merchant is readonly whatever its writes say ([one billing database](#one-billing-database)). A billing export leaves its source readonly and an import lands readonly and disarmed.
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
@@ -846,68 +833,30 @@ holds another's.
 | `catalog apply` publishing a recurring Solana plan | yes | binds an existing plan, else refuses the price | as `limited` |
 | `catalog apply` local changes, provider reads, webhooks | yes | yes | yes |
 
-`limited` stops what the system initiates; `readonly` stops the wire, enforced
-in each rail's transport. Verified receipt recovery runs under every posture. Every
-subscription has one collector, fixed when it is created or imported:
-`engine` (OpenRails charges a saved card or pulls on chain, and retries
-declines), `nmi_schedule` (NMI charges, OpenRails retries) or `provider` (Stripe
-or CCBill charge and retry). Configuration never moves a subscription to another
-collector.
+`limited` stops what the system initiates; `readonly` stops the wire, enforced in each rail's transport. Verified receipt recovery runs under every setting. Every subscription has one collector, fixed when it is created or imported: `engine` (OpenRails charges a saved card or pulls on chain, and retries declines), `nmi_schedule` (NMI charges, OpenRails retries) or `provider` (Stripe or CCBill charge and retry). Configuration never moves a subscription to another collector.
 
-Each PSP's environment decides whether money is real, and the provider must
-agree before it arms; test seams (`provider_sandbox`) are refused beside a live
-PSP, and a non-live PSP relaxes no other protection.
+Each PSP's environment decides whether money is real, and the provider must agree before it arms; no setting redirects a provider, and a non-live PSP relaxes no other protection.
 
-**Importing a merchant with production credentials.** Hold it before its
-subscriptions arrive: imported `past_due` subscriptions are due at once.
+**Rebills.** Held, the charges OpenRails initiates for the merchant wait: engine renewals (with any scheduled plan change they apply), dunning retries, NMI recurring recovery, scheduled usage collection and Solana renewal pulls. The due pass does not select them and an accepted one parks unsent; access is kept as for any renewal that has not been attempted. Released, they run at the next billing pass. What the customer starts never waits: a purchase and its first charge, an immediate plan or seat change, paying a renewal or usage order now. Refunds, card refreshes and deletes follow writes, not rebills. A hold longer than a whole period leaves that period to the operator, as any missed period is.
 
-1. Provision the merchant, then hold it `limited` (the site works; system
-   writes park) or `readonly` before importing.
-2. Let provider reads catch up. Dunning materializes in-window charges as parked
-   `manual_rebill` intents and parks window-expired cases `unverified`; it
-   cancels nothing.
-3. `openrails intents --merchant <name>` prints the drain forecast ("N execute
-   under limited, M require full"). Resolve what should not fire.
+**Importing a merchant with production credentials.** Hold it before its subscriptions arrive: imported `past_due` subscriptions are due at once.
+
+1. Provision the merchant, then set its writes `limited` (the site works; system writes park) or `readonly` before importing.
+2. Let provider reads catch up. Dunning materializes in-window charges as parked `manual_rebill` intents and parks window-expired cases `unverified`; it cancels nothing.
+3. `openrails intents --merchant <name>` prints the drain forecast ("N execute under limited, M require full"). Resolve what should not fire.
 4. Review `GET /v1/merchant/findings` and `openrails proposals list`.
-5. `openrails merchant arm`. Missed whole periods are never back-billed.
+5. `openrails merchant writes full`. Missed whole periods are never back-billed.
 
-**The kill switch.** `billing.destructive_action_switch` is one row read before
-every destructive act, so one `UPDATE` reaches every instance at its next check.
-It ships off: a fresh deployment makes no cancellation, revocation, provider
-delete or pull overwrite until it is enabled. Detection, findings, additive
-repairs and notices run either way. A held retraction stays
-`reconcile_required` with `held_by: kill_switch`; a provider-confirmed cancel it
-holds parks the subscription `unverified` with access kept, until a targeted
-verification or an operator refresh applies it after the switch is enabled.
+**Destructive actions.** Disarmed (the default for every new merchant), the merchant's provider pulls run advisory: findings are stored, nothing changes, and the first completed pull stamps `first_pull_completed_at`. No cancellation, revocation, provider delete or pull overwrite runs; detection, findings, additive repairs and notices run either way. A held retraction stays `reconcile_required` with `held_by: kill_switch`; a provider-confirmed cancel it holds parks the subscription `unverified` with access kept, until a targeted verification or an operator refresh applies it once armed. A rollback of a destructive run disarms its merchant. Review the first pull, then arm:
 
-```sql
--- stop everything now; parked intents resume when it is enabled again
-UPDATE billing.destructive_action_switch SET enabled = false,
-       updated_by = 'you', reason = 'incident: mass cancellation observed';
-SELECT enabled, updated_by, reason, updated_at FROM billing.destructive_action_switch;
+```sh
+openrails merchant controls --merchant shop
+openrails merchant destructive arm --merchant shop --by you --reason "reviewed first-pull findings"
+# stop one merchant, or every merchant, now; parked intents resume when it is armed again
+openrails merchant destructive disarm --all-merchants --by you --reason "incident: mass cancellation observed"
 ```
 
-Workers log `retractions held — instance kill switch is OFF`.
-
-**First enforcement.** A merchant with no `billing.merchant_destructive_policy`
-row, or `enforce_armed_at` null, pulls in advisory mode: findings are stored,
-nothing changes, and `first_pull_completed_at` marks the survey ready. Review it,
-then arm both halves:
-
-```sql
-SELECT finding_type, status, count(*) FROM billing.reconciliation_findings
- WHERE merchant_id = :merchant GROUP BY 1, 2 ORDER BY 3 DESC;
-INSERT INTO billing.merchant_destructive_policy
-       (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
-VALUES (:merchant, true, now(), 'you', 'reviewed first-pull findings')
-ON CONFLICT (merchant_id) DO UPDATE
-   SET enforce_armed_at = now(), destructive_actions_enabled = true;
-UPDATE billing.destructive_action_switch SET enabled = true, updated_by = 'you';
-```
-
-Until then a cancel of an NMI- or CCBill-owned membership is
-`409 provider_cancel_held`: OpenRails will not cancel locally while the provider
-would keep charging.
+Every destructive act reads the control first, so a change reaches every instance at its next check. Until the merchant is armed a cancel of an NMI- or CCBill-owned membership is `409 provider_cancel_held`: OpenRails will not cancel locally while the provider would keep charging.
 
 **Cancellation caps.** A provider read, or a billing import's cancels of subscriptions it did not create, may cancel at most `min(25, max(3, 5% of the PSP's live linked book))` subscriptions per PSP, or the whole book when it has at most 5. Over that it cancels none, halts the merchant's pass and raises `pull.cancellation.capped`; a held import cancel keeps the subscription `unverified` with access. The usual causes are a misdeclared `account_id`, a credential rotated onto a sibling sub-account, or a provider returning a short page.
 
@@ -1042,8 +991,8 @@ within it, waits and resumes; it never fails the job. The hour is kept per
 CCBill account in the abuse state (Redis), so every instance shares it; a
 sandbox account is not paced.
 
-Refresh reads run under every write posture. Overwrites and lifecycle repairs need an
-armed merchant, the kill switch on and a posture above `readonly`. Unverified
+Refresh reads run under every write posture. Overwrites and lifecycle repairs need the
+merchant's destructive actions armed and its writes above `readonly`. Unverified
 subscriptions are also checked without a refresh: the hourly billing pass
 retries flagged ones against their own PSP in bounded batches.
 
@@ -1084,7 +1033,7 @@ openrails proposals runs    --merchant <name>
 
 Each proposal applies in its own transaction; a filtered set needs `--expect`
 equal to its size. One whose basis moved, or that ends access on evidence older
-than 7 days, is superseded. The kill switch holds changes that end access or
+than 7 days, is superseded. Disarmed destructive actions hold changes that end access or
 write to a provider (`409 destructive_actions_held`); a readonly posture holds
 those that move money. Over HTTP: `/v1/merchant/proposals` (approving and
 dismissing need a person: `403 person_required`).
@@ -1115,7 +1064,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 | `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
-| `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 90 days |
+| `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 397 days |
 | `parked_provider_subscriptions` | 90 days after release |
 | `carts` | 30 days after `last_changed_at` |
 | `notification_events`, `host_outbox`, the event log | 90 days |
@@ -1160,7 +1109,7 @@ integrity-protected snapshot of one merchant's billing to a private file, with
 every writer stopped (`--source-stopped` attests it), and leaves the source
 readonly. `openrails billing prepare-target` provisions the exact merchant
 identity at the destination; `openrails billing import --target-stopped` restores
-into it and lands readonly until `openrails merchant arm`. Over HTTP the same
+into it and lands readonly and disarmed until `openrails merchant writes full`. Over HTTP the same
 archive is `GET` and `POST /v1/merchant/billing-archive`. With an event store the
 archive carries the merchant's usage from it: raw events within their 100 days,
 and the history and limit usage older events no longer rebuild. Restoring one
@@ -1183,7 +1132,7 @@ grants or ledger) and `undo-run` (one operation).
 credentials resolve nothing, records kept; `merchants restore` brings it back.
 `openrails merchant purge --merchant NAME --by NAME` records an inventory;
 typing back its id, row count and confirmation phrase (`--inventory`,
-`--expect-rows`, `--confirm`) with the kill switch on deletes the merchant's rows
+`--expect-rows`, `--confirm`) with its destructive actions armed deletes the merchant's rows
 permanently and queues its Vault cleanup. No deletion revokes cards at the PSP.
 
 ## Commands
@@ -1212,7 +1161,7 @@ the merchant the token is bound to.
 | `openrails catalog export --merchant UUID --out FILE [--overwrite]`, `openrails catalog import --merchant UUID --in FILE` | a sealed catalog snapshot with ids and history |
 | `openrails billing export`, `openrails billing import`, `openrails billing prepare-target` | move one merchant's billing ([backup and restore](#backup-and-restore)) |
 | `openrails merchants list`, `merchants get`, `merchants create`, `merchants rename`, `merchants delete`, `merchants restore` | the merchant directory; delete is soft, a rename forwards the former name under `naming` |
-| `openrails merchant arm`, `openrails merchant hold` | a merchant's write posture |
+| `openrails merchant controls`, `merchant writes`, `merchant rebills`, `merchant destructive` | a merchant's controls ([merchant controls](#merchant-controls)) |
 | `openrails merchant purge` | record a purge inventory, or with it typed back delete the merchant permanently |
 | `openrails book status`, `openrails book arm --by NAME` | the book identity |
 | `openrails usage attach --actor NAME --reason TEXT [--discard-unposted]` | record the configured ClickHouse as the event store in place of a lost one; `--discard-unposted` discards usage not yet posted, recorded per merchant |
@@ -1226,7 +1175,6 @@ the merchant the token is bound to.
 | `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters, credit lot counters, rollups and sign rules, and warn of a general-ledger total opposite its normal side; non-zero on a finding, not a warning. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
-| `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |
 
 ## Kubernetes and Helm
 
@@ -1362,7 +1310,7 @@ kubectl -n openrails exec deploy/openrails -- \
 | every client shares one rate limit | `trusted_proxies` is unset behind a proxy |
 | webhooks refused | the URL's rail and account id, the PSP's signing secret, CCBill's source address |
 | `400 pay_url_unavailable` | `checkout_origin` is unset |
-| renewals not charging | the merchant's write posture, `openrails book status`, `openrails intents` |
-| cancels refused with `provider_cancel_held` | the kill switch and the merchant's first enforcement |
+| renewals not charging | `openrails merchant controls` (writes, rebills), `openrails book status`, `openrails intents` |
+| cancels refused with `provider_cancel_held` | the merchant's destructive arming (`openrails merchant controls`) |
 | jobs stuck | `openrails workers`, `openrails_job_progress`, the River schema of every fleet |
 | missed provider events | `openrails provider-refresh --merchant NAME` |

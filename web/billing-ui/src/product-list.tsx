@@ -9,7 +9,7 @@ import { RESET } from "#orck/account/format"
 import { EmptyState } from "#orck/account/section"
 import type { BillingAppearance } from "#orck/appearance"
 import { BuyButton } from "#orck/buy-button"
-import type { Order, Product } from "#orck/client/types"
+import type { Order, OrderAttribution, Product } from "#orck/client/types"
 import type { PaymentFallbacks } from "#orck/fallbacks"
 import {
   Card,
@@ -44,6 +44,8 @@ export interface ProductListProps {
   returnUrl?: string
   /** PSPs kept back until others fail on the order; see OrderPayment. */
   fallbacks?: PaymentFallbacks
+  /** Where the host's page says the customer came from (utm_*, referrer). */
+  attribution?: OrderAttribution
   appearance?: BillingAppearance
   className?: string
 }
@@ -67,6 +69,7 @@ export function ProductList({
   signedIn,
   returnUrl,
   fallbacks,
+  attribution,
   appearance,
   className,
 }: ProductListProps) {
@@ -115,6 +118,7 @@ export function ProductList({
               signedIn={signedIn}
               returnUrl={returnUrl}
               fallbacks={fallbacks}
+              attribution={attribution}
               appearance={appearance}
             />
           ))}

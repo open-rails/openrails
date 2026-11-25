@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -27,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Sentinel errors for subscription operations. The typed ones carry the
@@ -51,7 +51,7 @@ type UserSubscriptionService struct {
 	// NMIResolver arms store-scoped NMI clients per merchant.
 	NMIResolver railresolve.NMIClientResolver
 	clock       clockwork.Clock
-	postures    writeposture.View
+	postures    controls.View
 
 	// providerCancel queues the durable provider cancel of a membership the
 	// member ends (injected post-construction, after the intent ledger).
@@ -453,7 +453,7 @@ func NewUserSubscriptionService(logger *slog.Logger,
 	notificationService *NotificationService,
 	entitlementService *entitlements.EntitlementService,
 	nmiResolver railresolve.NMIClientResolver,
-	postures writeposture.View,
+	postures controls.View,
 	clocks ...clockwork.Clock,
 ) *UserSubscriptionService {
 	return &UserSubscriptionService{

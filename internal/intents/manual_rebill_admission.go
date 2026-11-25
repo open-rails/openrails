@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -98,6 +99,17 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		}
+		// A scheduled recovery waits while the merchant's rebills are held;
+		// the customer's own retry never does.
+		if !customer {
+			c, err := controls.Load(ctx, d.Gen(ctx), mid.UUID())
+			if err != nil {
+				return err
+			}
+			if c.RebillsHeld {
+				return fmt.Errorf("%w: %w", ErrRebillNotRetryable, controls.ErrRebillsHeld)
+			}
 		}
 		// Only an NMI schedule whose recovery OpenRails qualified to own is
 		// rebilled here; engine and provider-owned periods are never charged.

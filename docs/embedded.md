@@ -114,7 +114,6 @@ an optional section is on once set.
 
 | Field | Meaning |
 |---|---|
-| `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
 | `Database` | `billing.DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
 | `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)); code only. |
@@ -129,12 +128,8 @@ an optional section is on once set.
 | `CardVault`, `HyperSwitch` | A platform card vault and HyperSwitch ([custody](client.md#merchant-configuration-and-psps)). |
 | `Solana` | The deployment's crankers: they publish plans and pull renewals. Without one, Solana rebilling is off. |
 | `ReadCache` | Overrides how long a handle serves catalog and configuration reads from memory ([caching](client.md#caching)); code only. |
-| `ProviderSandbox` | Fake provider endpoints and CCBill webhook sources for tests; refused beside a live PSP. |
 
-How much OpenRails writes to a merchant's providers is the merchant's write
-posture, kept in the database: `openrails merchant hold` and
-`openrails merchant arm`, run with the engine's database and schema, change it
-([write safety](standalone.md#write-safety-and-the-kill-switch)).
+How much OpenRails writes to a merchant's providers, whether the charges it initiates wait and whether its destructive actions run are the merchant's controls, kept in the database: `openrails merchant writes`, `merchant rebills` and `merchant destructive`, run with the engine's database and schema, change them ([merchant controls](standalone.md#merchant-controls)).
 
 A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicBillingBaseURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours.
 
@@ -160,6 +155,7 @@ and closes none.
 | `MerchantGroups` | Live group metadata for tenant-bound merchants ([merchants](#merchants)). |
 | `CheckoutAssets` | The built payment page (`web/pay`) as an `fs.FS`. |
 | `StripeTransport`, `NMITransport`, `BasisTheoryTransport`, `FXTransport`, `Clock` | Test seams; refused beside a live PSP. |
+| `ProviderEndpoints` | Test seam: loopback fakes the provider clients reach instead of NMI, Stripe, Solana RPC and CCBill DataLink, and extra CCBill webhook source CIDRs for accounts that move no money. Each URL's host is a loopback IP literal; refused beside a live PSP. |
 
 `Deps` holds no auth: your `Routes.Auth` guards what you mount.
 
@@ -505,7 +501,8 @@ pay URLs.
 ## Testing
 
 - `openrailstest/nmimock` and `openrailstest/stripemock` are provider fakes
-  behind `Deps.NMITransport` and `Deps.StripeTransport`; `openrailstest.UserInfo`
+  behind `Deps.NMITransport` and `Deps.StripeTransport`, or on loopback behind
+  `Deps.ProviderEndpoints`; `openrailstest.UserInfo`
   is an in-memory directory. Test seams are refused beside a live PSP.
 - `openrailstest.CheckAuth` checks your `Authenticator`.
 - Run your tests against a real PostgreSQL 18: `New` migrates a fresh schema in

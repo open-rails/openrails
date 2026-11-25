@@ -66,6 +66,7 @@ import {
   type Pivoted,
   formatBucket,
   formatMeasure,
+  funnelSteps,
   indexColumns,
   pivotTimeSeries,
 } from "./lib"
@@ -148,6 +149,8 @@ function WidgetVizBody({
       return <TableViz result={result} currency={currency} />
     case "cohort":
       return <CohortViz result={result} currency={currency} />
+    case "funnel":
+      return <FunnelViz result={result} query={query} registry={registry} />
     case "heading":
     case "programs":
       return null
@@ -956,6 +959,55 @@ function DonutViz({
   })
   return (
     <div className="flex h-full flex-col gap-4 overflow-auto">{charts}</div>
+  )
+}
+
+// FunnelViz draws a count by ordered steps: each bar is the rows that reached
+// its step or went further, with its share of the first step and of the one
+// before.
+function FunnelViz({
+  result,
+  query,
+  registry,
+}: {
+  result: MetricsResult
+  query?: QueryMetricsParams
+  registry: Registry
+}) {
+  const { text: adminText } = useAdminUI()
+  const dim = indexColumns(result.columns).dims.find(
+    (d) => d.name !== "currency"
+  )
+  const order = dim ? (registry.values(query?.measures ?? [], dim.name) ?? []) : []
+  const steps = funnelSteps(result, order)
+  if (steps.length === 0 || steps[0].value === 0)
+    return <Empty label={adminText("no data in range")} />
+  return (
+    <ol className="flex h-full flex-col justify-center gap-2 overflow-auto">
+      {steps.map((step) => (
+        <li
+          key={step.key}
+          className="grid grid-cols-[6rem_1fr_7rem] items-center gap-2 text-xs"
+        >
+          <span className="truncate">{humanizeColumn(step.key)}</span>
+          <span className="h-5 w-full">
+            <span
+              className="block h-full rounded-sm"
+              style={{
+                width: `${Math.max(1, (step.ofFirst ?? 0) * 100)}%`,
+                background: chartColor(0),
+              }}
+            />
+          </span>
+          <span className="text-right tabular-nums text-muted-foreground">
+            {step.value.toLocaleString()}
+            {step.fromPrevious === null
+              ? ""
+              : ` · ${(step.fromPrevious * 100).toFixed(1)}%`}
+          </span>
+        </li>
+      ))}
+    </ol>
   )
 }
 
