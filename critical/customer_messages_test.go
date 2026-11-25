@@ -1056,7 +1056,7 @@ func (m *stalledMailbox) CheckHealth(context.Context) error { return nil }
 // scenario.
 func promptFleet(t *testing.T, w *world) *river.Client[pgx.Tx] {
 	t.Helper()
-	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
+	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
 		RetryPolicy: retryAtOnce{}, FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond}, w.engine.RiverJobs())
 	require.NoError(t, err)
 	fleet.PeriodicJobs().Clear()
