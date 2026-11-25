@@ -40,7 +40,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -158,9 +157,6 @@ type Runtime struct {
 	Disputes *disputes.Service
 	// DashboardService is the merchant's saved dashboard layout.
 	DashboardService *dashboard.Service
-	// CopilotService answers catalog questions and drafts price changes for a
-	// person to review (off without an LLM and its consent).
-	CopilotService *copilot.Service
 	// CheckoutOrigin is where a server serving the payment page
 	// serves it; merchant orders take a purchase only when it is set.
 	checkoutOrigin atomic.Pointer[string]

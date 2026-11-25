@@ -530,12 +530,6 @@
       "feature": ""
     },
     {
-      "method": "POST",
-      "path": "/v1/console/catalog/ask",
-      "auth": "merchant",
-      "feature": "catalog_copilot"
-    },
-    {
       "method": "GET",
       "path": "/v1/me",
       "auth": "customer",

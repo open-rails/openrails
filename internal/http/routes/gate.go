@@ -979,11 +979,6 @@ func adminAccess(e *Env) router.Handler {
 			}
 			slices.Sort(access.ApplicationPermissions)
 		}
-		llm := e.Runtime.Config.LLM
-		access.Assistants = billing.AdminAssistants{
-			CatalogCopilot:  access.Catalog != billing.AccessNone && config.LLMCatalogCopilotConfigured(llm),
-			CatalogDrafting: access.Catalog != billing.AccessNone && config.LLMCatalogDraftingConfigured(llm),
-		}
 		if failed != nil {
 			refuse(r, route, e.Auth, stepCan, failed)
 			return

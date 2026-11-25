@@ -128,7 +128,6 @@ an optional section is on once set.
 | `Vault` | `KVMount` (merchant configuration in Vault), `ScopePrefix` (default `openrails`), `TransitMount` (Solana signing, default `transit`). The client is `Deps.Vault`, which turns it on. |
 | `CardVault`, `HyperSwitch` | A platform card vault and HyperSwitch ([custody](client.md#merchant-configuration-and-psps)). |
 | `Solana` | The deployment's crankers: they publish plans and pull renewals. Without one, Solana rebilling is off. |
-| `LLM` | The model behind the console's catalog Q&A and drafting. |
 | `ReadCache` | Overrides how long a handle serves catalog and configuration reads from memory ([caching](client.md#caching)); code only. |
 
 How much OpenRails writes to a merchant's providers is the merchant's write

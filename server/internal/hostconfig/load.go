@@ -526,6 +526,12 @@ var retiredSettings = []retiredSetting{
 	{"webhook_secret_overlap", "WEBHOOK_SECRET_OVERLAP", "a rotated-out webhook signing secret keeps verifying for 24 hours; retire_webhook_overlap ends it early"},
 	{"return_origins", "RETURN_ORIGINS", "return URLs may name the billing origin, the merchant's issuer and its checkout.embed_origins"},
 	{"event_retention", "EVENT_RETENTION", "the event log keeps 90 days"},
+	{"llm.provider", "LLM_PROVIDER", noCatalogAssistant},
+	{"llm.model", "LLM_MODEL", noCatalogAssistant},
+	{"llm.base_url", "LLM_BASE_URL", noCatalogAssistant},
+	{"llm.api_key", "LLM_API_KEY", noCatalogAssistant},
+	{"llm.catalog_copilot_enabled", "LLM_CATALOG_COPILOT_ENABLED", noCatalogAssistant},
+	{"llm.catalog_drafting_enabled", "LLM_CATALOG_DRAFTING_ENABLED", noCatalogAssistant},
 	{"provider_sandbox", "PROVIDER_SANDBOX_*", "no setting redirects a provider: a PSP's environment (test or sandbox) and its test credentials reach the provider's own test system; tests wire fakes in Go (Deps.ProviderEndpoints)"},
 }
 
@@ -545,6 +551,8 @@ func (r retiredSetting) inEnv() bool {
 	_, present := os.LookupEnv(r.env)
 	return present
 }
+
+const noCatalogAssistant = "the catalog assistant was removed; OpenRails calls no language model"
 
 // retiredAuthKeys are the server's former auth keys and their replacements.
 var retiredAuthKeys = map[string]string{

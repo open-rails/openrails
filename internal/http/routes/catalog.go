@@ -48,11 +48,6 @@ var catalogRoutes = []Route{
 			"usage keeps its definition (billing.ErrConflict, code meter_in_use).",
 		Request: billing.SetMeterParams{}, Responses: []Reply{{200, billing.Meter{}}}, Errors: codes(append([]billing.ErrorCode{"currency_unsupported"}, meterErrors...)...), Handler: h(handlers.SetMeter)},
 
-	// The catalog assistant answers questions about the catalog and drafts
-	// price changes for a person to review; it never changes a catalog row.
-	{Method: POST, Path: "/v1/console/catalog/ask", Group: CatalogAdmin, Auth: AuthMerchant, ConsoleOnly: true, Level: LevelRead, When: FeatureCatalogCopilot,
-		Request: billing.AskCatalogParams{}, Responses: []Reply{{200, billing.CatalogAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.AskCatalog)},
-
 	{Method: POST, Path: "/v1/catalog/products", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreateProduct", Level: LevelUpdate,
 		Doc:     "CreateProduct creates a product.",
 		Request: billing.CreateProductParams{}, Responses: []Reply{{201, billing.Product{}}}, Errors: codes(append([]billing.ErrorCode{"currency_unsupported"}, productErrors...)...), Handler: h(handlers.CreateProduct)},

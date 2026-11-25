@@ -187,9 +187,6 @@ func (m *model) operation(r routes.Route) *obj {
 		op.set("operationId", r.Name)
 		op.set("description", r.Doc)
 	}
-	if r.ConsoleOnly {
-		op.set("x-openrails-console-only", true)
-	}
 	var params []any
 	for _, p := range pathParams(r.Path) {
 		params = append(params, newObj("name", p, "in", "path", "required", true, "schema", newObj("type", "string")))

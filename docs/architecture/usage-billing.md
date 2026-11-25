@@ -88,6 +88,8 @@ policy's `policy_currency`, as they do in a gate's views (OR-J26-S61). A running
 computed on read and posts at its stop, at 00:00 UTC and before other balance
 movements (`postRunningChargesThrough`).
 
+**Books.** Every owed accrual is usage revenue receivable in the general ledger as it posts, and every way the units book settles owed settles the receivable: a collection by card, remittance or observed provider payment, a repayment from credit, a waiver. An uncollectible usage order carries an allowance for doubtful accounts while it stays uncollectible; a chargeback of a usage order's payment owes again what it paid, billed at once on a usage order whatever its minimum or usage terms (in a currency whose terms are gone, that order bills all its pending owed, since nothing else would), and a won dispute's cash beyond what is still owed and the chargeback's loss is the customer's credit. See [books](books.md).
+
 ## Interfaces
 
 - **Intake**: `SyncLeases` ([entitlements and limits](entitlements.md)).
@@ -207,6 +209,7 @@ Critical journeys, over real PostgreSQL, Redis and Vault:
 - **J24**, intake and posting: OR-J24-S01, S02, S04 to S11, S21, S22, S36, S47 to S64 (replay, pricing on totals, month-end posting, owed dating, lots, the store out of reach, start refusals, erasure, archive, tenancy, recovery from lost commits and a store that lost usage). Its lease scenarios are in [entitlements and limits](entitlements.md).
 - **J25**, running charges and balance looks: OR-J25-S01 to S05, S37, S40 to S42.
 - **J26**, usage billing and delinquency: OR-J26-S01 to S04, S30, S40, S50 to S58.
+- **J40**, the usage receivable: OR-J40-S20 to S22, S27 to S29.
 
 Other tests: `internal/modules/money/rating_test.go` prices every accepted model; `usage_price_test.go` a period's total and history by bucket and zone; `usage_posting_test.go` the unposted mark and what a posting takes after the store lost usage; `internal/modules/limits/window_test.go` a rate level from buckets.
 
