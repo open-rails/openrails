@@ -21,21 +21,6 @@ const (
 	CollectionSendInvoice         = money.CollectionSendInvoice
 )
 
-// EnsureUsageMeter idempotently declares a catalog meter.
-func (s *Service) EnsureUsageMeter(ctx context.Context, spec catalogrules.Meter) error {
-	_, err := catalogCommand(ctx, s, "meter/"+spec.Key, spec, "", meterEditPlan(spec, nil, false, nil), func(ctx context.Context, s *Service) (struct{}, error) {
-		return struct{}{}, s.ensureUsageMeterCommand(ctx, spec)
-	})
-	return err
-}
-
-func (s *Service) ensureUsageMeterCommand(ctx context.Context, spec catalogrules.Meter) error {
-	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
-		return struct{}{}, scoped.ensureUsageMeter(ctx, spec)
-	})
-	return err
-}
-
 func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {

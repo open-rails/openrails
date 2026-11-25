@@ -572,7 +572,7 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Ap
 				}
 			}
 		}
-		return s.SyncCatalogSidecars(ctx, desired, CatalogMutationOptions{Insert: true, Overwrite: true, Prune: true})
+		return s.SyncCatalogSidecars(ctx, desired)
 	})
 }
 func catalogApplicationPriceRequest(product *billing.Product, key string, decl catalogwire.ApplyPrice, byKey map[string][]billing.Price, byID map[string]billing.Price) (current *billing.Price, req billing.CreatePriceParams, err error) {
