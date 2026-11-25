@@ -99,6 +99,9 @@ func validateCredentialValue(rail, key, value string) error {
 	if value == "" {
 		return errors.New("empty")
 	}
+	if rail == "ccbill" && (key == "webhook_token" || key == "webhook_token_previous") {
+		return config.ValidateCCBillWebhookToken(value)
+	}
 	if rail == "stripe" {
 		switch key {
 		case "secret_key":

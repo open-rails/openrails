@@ -50,4 +50,8 @@ var pspsRoutes = []Route{
 	// is the provider's own payload.
 	{Method: POST, Path: "/v1/webhooks/{rail}/{account_id}", Group: Webhooks, Auth: AuthProvider, NoConn: true,
 		Query: handlers.WebhookQuery{}, Request: Stream{"application/json"}, Responses: []Reply{{200, handlers.WebhookReceipt{}}}, Errors: codes("authentication_required", "invalid_param", "resource_access_denied", "service_unavailable", "webhook_account_mismatch"), Handler: h(handlers.Webhook)},
+	// A CCBill PSP's webhook URL ends in its secret webhook token; CCBill
+	// appends its own query. Any other rail answers route_not_found.
+	{Method: POST, Path: "/v1/webhooks/{rail}/{account_id}/{token}", Group: Webhooks, Auth: AuthProvider, NoConn: true,
+		Query: handlers.WebhookQuery{}, Request: Stream{"application/json"}, Responses: []Reply{{200, handlers.WebhookReceipt{}}}, Errors: codes("authentication_required", "invalid_param", "resource_access_denied", "route_not_found", "service_unavailable", "webhook_account_mismatch"), Handler: h(handlers.Webhook)},
 }

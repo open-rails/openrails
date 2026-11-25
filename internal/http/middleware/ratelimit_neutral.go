@@ -208,7 +208,7 @@ func EvaluateRateLimit(logger *slog.Logger, w http.ResponseWriter, r *http.Reque
 			retryAfter = 60
 		}
 		headers["Retry-After"] = strconv.Itoa(retryAfter)
-		logger.WarnContext(r.Context(), "Rate limit exceeded", "limited_subject", combined.subject.Key, "client_ip", clientIP, "user_id", userID, "path", r.URL.Path, "method", r.Method, "bucket", bucket)
+		logger.WarnContext(r.Context(), "Rate limit exceeded", "limited_subject", combined.subject.Key, "client_ip", clientIP, "user_id", userID, "path", loggedPath(r), "method", r.Method, "bucket", bucket)
 		decision.Outcome = RateLimitTooMany
 		return decision
 	}

@@ -211,8 +211,10 @@ var descriptors = []Descriptor{
 		autoBilledAlways,
 		cancelDestructive, // DataLink SMS cancel: no resume API, access rides the paid runway
 		"",                // CancelPortalURL (cancels happen on our site)
-		[]CredentialKey{{"salt", true, true}, {"datalink_username", true, false}, {"datalink_password", true, false}},
-		[]string{"dispute_ratio_limit"},
+		// webhook_token is the webhook URL's last segment; webhook_token_previous
+		// verifies only until webhook_overlap_expires_at.
+		[]CredentialKey{{"salt", true, true}, {"datalink_username", true, false}, {"datalink_password", true, false}, {"webhook_token", true, false}, {"webhook_token_previous", true, false}},
+		[]string{"webhook_overlap_expires_at", "require_webhook_token", "dispute_ratio_limit"},
 		false,                       // OneOffSale
 		NewSubscriptionHostedForm,   // an invoice's FlexForm sale; CCBill bills it
 		false,                       // ServerCardEntry (CCBill's own page takes the card)
