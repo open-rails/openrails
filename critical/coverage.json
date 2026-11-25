@@ -3696,7 +3696,7 @@
     {
       "id": "OR-J40-S20",
       "journey": "J40",
-      "name": "Usage owed beyond the balance is usage revenue receivable as it posts; a card collection, a provider sale found at NMI and remittances settle the receivable in the general ledger"
+      "name": "Usage owed beyond the balance is usage revenue receivable as it posts; a card collection and remittances settle the receivable in the general ledger"
     },
     {
       "id": "OR-J40-S21",

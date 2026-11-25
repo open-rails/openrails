@@ -263,10 +263,8 @@ func TestRevenueReversals(t *testing.T) {
 		var paid uuid.UUID
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND order_id=$2",
 			a.alpha.MerchantID().UUID(), order.ID.UUID()).Scan(&paid))
-		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
-		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
-		service := payments.NewPaymentService(database, a.clock)
+		service := payments.NewPaymentService(configuredDB(t, a.world), a.clock)
 		now := a.clock.Now().UTC().Truncate(time.Microsecond)
 		// Its cash settled the usage receivable: none waits unapplied.
 		require.Zero(t, unappliedCash(t, a.world, "USD"))

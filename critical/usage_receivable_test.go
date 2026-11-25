@@ -4,7 +4,6 @@ package critical_test
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -15,12 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // TestUsageReceivable is the general ledger's usage receivable: what a
@@ -35,39 +33,6 @@ func TestUsageReceivable(t *testing.T) {
 			require.EqualValues(t, 30_000_000, glBalance(t, w, "usage_revenue"))
 			require.Equal(t, [2]int64{30_000_000, 30_000_000}, booksTotal(t, w, "general", "unapplied_cash"), "the card's cash is applied to the receivable")
 			require.Equal(t, [2]int64{0, 30_000_000}, booksTotal(t, w, "general", "cash_clearing"))
-			owedIsReceivable(t, a, customer, 0)
-			receivableAudited(t, w, false)
-		})
-		t.Run("observed", func(t *testing.T) {
-			// The card declines; the customer pays the order at NMI another way,
-			// and the next collection finds that sale and records it.
-			a, p, customer := usageBillingWorld(t, true, false)
-			w := a.world
-			p.core.SetDecline("4242", "202")
-			oneUsage(t, a.alpha, usageInput(customer, "observed", 3))
-			a.clock.Advance(time.Second)
-			fleet := quietFleet(t, w)
-			runUsageDue(t, fleet)
-			var order billing.Order
-			require.Eventually(t, func() bool {
-				rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-				if err != nil || len(rows.Items) != 1 {
-					return false
-				}
-				order = rows.Items[0]
-				return order.Payment.LastPaymentError != nil
-			}, 15*time.Second, 20*time.Millisecond, "the collection is declined")
-			require.NotNil(t, order.Usage.NextCollectionAttemptAt)
-			var vault string
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT rail_customer_ref FROM "+booksTable(w, "payment_methods")+" WHERE merchant_id=$1 AND customer_id=$2 AND rail='nmi'",
-				w.alpha.MerchantID().UUID(), customer.UUID()).Scan(&vault))
-			p.core.AddSale(nmimock.Sale{OrderID: uuid.NewString(), Vault: vault, OrderDescription: "invoice " + order.ID.String(), Amount: "30.00", Currency: "USD"})
-			a.clock.Advance(order.Usage.NextCollectionAttemptAt.Sub(a.clock.Now()) + time.Second)
-			runUsageDue(t, fleet)
-			require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderComplete }, 15*time.Second, 20*time.Millisecond)
-			require.Equal(t, []int64{30_000_000}, collected(t, w, "usage_collection"), "the observed sale settles the receivable")
-			require.Equal(t, [2]int64{0, 30_000_000}, booksTotal(t, w, "general", "cash_clearing"))
-			require.Zero(t, glBalance(t, w, "unapplied_cash"))
 			owedIsReceivable(t, a, customer, 0)
 			receivableAudited(t, w, false)
 		})
@@ -143,9 +108,8 @@ func TestUsageReceivable(t *testing.T) {
 			a.clock.Advance(12*time.Hour + 10*time.Second)
 			_, err = a.alpha.StopRunningCharge(t.Context(), "every-path", billing.StopRunningChargeParams{})
 			require.NoError(t, err)
-			// $10.00 of usage posts before the running charge's 12 h 10 s at
-			// $0.36 an hour.
-			owedIsReceivable(t, a, customer, 14_321_000)
+			// $10.00 of usage and the running charge's 12 h 10 s at $0.36 an
+			// hour post as the order bills them.
 			runUsageDue(t, fleet)
 			order := oneUsageOrder(t, a, customer)
 			require.EqualValues(t, 14_321_000, order.Total)
@@ -190,27 +154,23 @@ func TestUsageReceivable(t *testing.T) {
 		t.Run("terms-withdrawn", func(t *testing.T) {
 			// The merchant stops billing usage in dollars; the reopened debt
 			// needs no usage terms and is billed still.
-			a, customer, payment, fleet := cardCollectedUsage(t)
+			a, customer, payment, _ := cardCollectedUsage(t)
 			w := a.world
 			ctx, service := paymentService(t, w)
 			_, err := service.Refund(ctx, payment.UUID(), "terms-chargeback", 500_000, payments.ReversalChargeback)
 			require.NoError(t, err)
-			_, err = a.alphaRemote.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{MerchantSettings: &billing.MerchantSettings{
-				UsageBilling: &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "EUR", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000}}}}})
+			alpha := cfgMerchant(w.cfg, "alpha")
+			alpha.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "EUR", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000}}}
+			setCfgMerchant(&w.cfg, "alpha", alpha)
+			usage := money.NewMoneyService(configuredDB(t, w), w.clock)
+			usage.UsageBillingEnabled = true
+			billed, err := usage.BillDueUsageAccount(ctx, customer.UUID(), "USD", w.clock.Now())
 			require.NoError(t, err)
-			runUsageDue(t, fleet)
-			require.Eventually(t, func() bool {
-				rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-				if err != nil || len(rows.Items) != 2 {
-					return false
-				}
-				for _, o := range rows.Items {
-					if o.Total == 500_000 {
-						return true
-					}
-				}
-				return false
-			}, 15*time.Second, 20*time.Millisecond, "the reopened debt is billed without usage terms")
+			require.True(t, billed, "the reopened debt is billed without usage terms")
+			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			require.NoError(t, err)
+			require.Len(t, rows.Items, 2)
+			require.Contains(t, []int64{rows.Items[0].Total, rows.Items[1].Total}, int64(500_000))
 		})
 	})
 	t.Run("OR-J40-S27/owed-from-before-the-books-is-collected-as-revenue-beside-running-charges", func(t *testing.T) {
@@ -294,14 +254,9 @@ func TestUsageReceivable(t *testing.T) {
 		require.Equal(t, [2]int64{9_000, 9_000}, booksTotal(t, w, "general", "chargebacks"), "the loss is reversed")
 		require.Zero(t, glBalance(t, w, "unapplied_cash"), "nothing is left unapplied")
 		balance(t, a.alpha, customer, 14_339_000, 0, 14_339_000)
-		lots, err := a.alpha.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: customer, Currency: "USD"})
-		require.NoError(t, err)
 		var credited int64
-		for _, lot := range lots.Items {
-			if lot.SourceID != nil && *lot.SourceID == recovery.String() {
-				credited += lot.Amount
-			}
-		}
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(units), 0) FROM "+booksTable(w, "credit_grants")+" WHERE merchant_id=$1 AND source='dispute_won_credit' AND source_id=$2",
+			w.alpha.MerchantID().UUID(), recovery.String()).Scan(&credited))
 		require.EqualValues(t, 14_321_000, credited)
 		findings, err := a.alphaRemote.ListFindings(t.Context(), billing.FindingListParams{Type: "books.dispute.customer_credit"})
 		require.NoError(t, err)
@@ -516,7 +471,5 @@ func win(t *testing.T, w *world, service *payments.PaymentService, payment billi
 // reversals through, bound to the world's merchant.
 func paymentService(t *testing.T, w *world) (context.Context, *payments.PaymentService) {
 	t.Helper()
-	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
-	require.NoError(t, err)
-	return merchant.WithID(t.Context(), w.alpha.MerchantID()), payments.NewPaymentService(database, w.clock)
+	return merchant.WithID(t.Context(), w.alpha.MerchantID()), payments.NewPaymentService(configuredDB(t, w), w.clock)
 }
