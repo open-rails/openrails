@@ -11,9 +11,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/open-rails/authkit"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -88,7 +85,7 @@ func defaults() *Config {
 		// No clickhouse.addr: no event store, so usage is off.
 		ClickHouse: &ClickHouseLogin{Username: "default"},
 		Logger:     LoggerConfig{Level: "info", Format: "json"},
-		// public_billing_base_url: defaultPublicBillingBaseURL; auth: authDefaults.
+		// public_billing_base_url: defaultPublicBillingBaseURL.
 	}
 }
 
@@ -112,17 +109,6 @@ func defaultSSLMode(host string) string {
 		return "require"
 	}
 	return "verify-full"
-}
-
-// authDefaults are AuthKit's settings the binary defaults: the token issuer
-// is public_billing_base_url. AuthKit's refresh sessions last 30 days and its
-// tables live in "profiles". Registration stays the server's: closed, or
-// invite_only with local_sign_in. AuthKit itself creates its one account
-// directory, and a loopback issuer's development keys.
-func authDefaults(a *authkit.Config, publicBillingBaseURL string) {
-	a.Token.Issuer = cmp.Or(strings.TrimSpace(a.Token.Issuer), publicBillingBaseURL)
-	a.Token.RefreshTokenDuration = cmp.Or(a.Token.RefreshTokenDuration, 30*24*time.Hour)
-	a.Database.Schema = cmp.Or(a.Database.Schema, "profiles")
 }
 
 // DatabaseConnection is the database section's connection: URL, or the
@@ -286,7 +272,6 @@ func (c *Config) finish(secretsDir string) error {
 	s := &c.Server
 	s.Engine.PublicBillingBaseURL = cmp.Or(strings.TrimSpace(s.Engine.PublicBillingBaseURL), defaultPublicBillingBaseURL(cmp.Or(s.Port, server.DefaultConfig().Port)))
 	s.Engine.CheckoutOrigin = strings.TrimSpace(s.Engine.CheckoutOrigin)
-	authDefaults(&s.Auth, s.Engine.PublicBillingBaseURL)
 	*s = s.WithDefaults()
 	if _, err := c.Logger.Handler(io.Discard); err != nil {
 		return err

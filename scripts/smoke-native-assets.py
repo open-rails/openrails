@@ -76,13 +76,7 @@ def main():
                 "database": {"url": owned_dsn}, "redis": {"addr": redis},
                 "public_billing_base_url": origin,
                 "checkout_origin": "http://" + checkout, "route_groups": {"admin": True},
-                "local_sign_in": True,
-                "auth": {
-                    "token": {"issuer": origin}, "resource": {"id": origin},
-                    "keys": {"path": str(temporary / "keys.json")},
-                    "http": {"direct_peer_ip": True},
-                    "registration": {"native_user_mode": "closed", "allow_missing_senders": True},
-                },
+                "auth": {"keys": {"path": str(temporary / "keys")}},
             }
             config_path = temporary / "config.json"
             config_path.write_text(json.dumps(config))

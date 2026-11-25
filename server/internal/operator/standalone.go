@@ -9,7 +9,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/server/internal/adminconsole"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	server "github.com/open-rails/openrails/server/internal/http"
 )
@@ -20,7 +19,6 @@ type Surface struct {
 	CustomerAdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
 	RouteGroups             config.RouteGroups
 	ConsoleDisabled         bool
-	ConsoleIssuers          []adminconsole.Issuer
 	ConsoleAssets           fs.FS
 	// Resource is AuthKit's resource identifier, the console's audience at a
 	// trusted issuer.
@@ -44,7 +42,6 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 		ConsoleAssets:           s.ConsoleAssets,
 		RouteGroups:             s.RouteGroups,
 		ConsoleDisabled:         s.ConsoleDisabled,
-		ConsoleIssuers:          s.ConsoleIssuers,
 		CheckoutOrigin:          s.CheckoutOrigin,
 		CheckoutHandler:         s.CheckoutHandler,
 	})

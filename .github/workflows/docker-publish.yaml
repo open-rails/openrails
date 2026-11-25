@@ -266,18 +266,14 @@ jobs:
           # Readiness requires an OpenRails-managed River consumer; smoke the
           # normal server mode so /health/ready can prove the full image posture.
           # The smoke declares no merchant, so it never writes to a provider.
-          # Enabling the console proves it is embedded; the
-          # console needs a staff route group and a sign-in method, so the server
-          # turns on the admin group and serves its own sign-in; a session of its
-          # own accounts reaches a merchant by token exchange for its resource.
+          # Enabling the console proves it is embedded; it needs a staff route
+          # group. The server's own accounts sign staff in, and a session of
+          # them reaches a merchant by token exchange for its resource.
           cid="$(docker run -d --network host \
             -e ROUTE_GROUPS_ADMIN=true \
             -e PORT=3053 \
-            -e AUTH_REGISTRATION_ALLOW_MISSING_SENDERS=true \
-            -e AUTH_HTTP_DIRECT_PEER_IP=true \
-            -e AUTH_KEYS_PATH=/tmp/openrails-smoke-keys.json \
-            -e AUTH_TOKEN_ISSUER=http://127.0.0.1:3053 \
-            -e AUTH_RESOURCE_ID=http://127.0.0.1:3053 \
+            -e PUBLIC_BILLING_BASE_URL=http://127.0.0.1:3053 \
+            -e AUTH_KEYS_PATH=/tmp/openrails-smoke-keys \
             -e DATABASE_HOST=127.0.0.1 \
             -e DATABASE_PORT=5434 \
             -e DATABASE_NAME=openrails_db \

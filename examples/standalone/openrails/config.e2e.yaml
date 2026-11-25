@@ -10,23 +10,13 @@ database:
 redis: # optional for one server; replicas share rate limits and spent proofs through it
   addr: redis:6379
 
-# The server's own AuthKit, by AuthKit's keys: its signing key, and the
-# resource server it is. Its sign-in stays off: people sign in at the app,
-# which merchant.yaml declares the merchant's trusted issuer.
+# The server's own AuthKit: its issuer and resource are
+# public_billing_base_url, and its keys (keys.json, totp.key) live here. It
+# accepts the tokens of the app merchant.yaml declares the merchant's trusted
+# issuer; on a loopback URL that app's keys may be on localhost.
 auth:
-  token:
-    issuer: http://localhost:3053
-    allow_private_network_jwks: true # local only: the app's keys at http://localhost:8080
   keys:
     path: /vault/auth
-  http:
-    direct_peer_ip: true             # clients connect directly; behind a proxy, set trusted_proxies
-  registration:
-    allow_missing_senders: true      # it sends no sign-in mail of its own
-  # OpenRails is an OAuth resource server: it accepts the tokens its
-  # merchants' trusted issuers mint for it.
-  resource:
-    id: http://localhost:3053        # the tokens' aud, and where DPoP proofs point
 
 # Route groups beyond the public, customer (/v1/me) and webhook routes.
 route_groups:

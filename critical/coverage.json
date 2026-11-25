@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 741,
+  "scenario_count": 747,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1332,6 +1332,26 @@
       "id": "OR-J01-S26",
       "journey": "J01",
       "name": "A proposal rewritten before its lock is held to the change kinds its approval allowed"
+    },
+    {
+      "id": "OR-J01-S27",
+      "journey": "J01",
+      "name": "A trusted issuer's token without openrails:self, a staff member's openrails:merchant one, is refused at /v1/me and admits no customer; the same issuer's openrails:self token reads the customer's billing"
+    },
+    {
+      "id": "OR-J01-S28",
+      "journey": "J01",
+      "name": "Every account of the standalone server's own needs a second factor: a password alone gets no session until it enrolls an authenticator app, and every later sign-in asks for it"
+    },
+    {
+      "id": "OR-J01-S29",
+      "journey": "J01",
+      "name": "The console offers a sign-in button for each trusted issuer whose metadata names an authorization endpoint, at the client openrails-console, named by its merchant; issuers that only sign assertions get none, and the server's own accounts always sign in"
+    },
+    {
+      "id": "OR-J01-S30",
+      "journey": "J01",
+      "name": "An application registered at run time names only https key URLs on public hosts: a loopback, private or cluster-internal jwks_uri, or such an issuer to discover keys from, is refused; the operator declares one on a private network"
     },
     {
       "id": "OR-J22-S05",
@@ -3592,6 +3612,16 @@
       "id": "OR-J06-S72",
       "journey": "J06",
       "name": "Retired provider write mode and drain settings refuse boot and name their replacement"
+    },
+    {
+      "id": "OR-J06-S73",
+      "journey": "J06",
+      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and say what OpenRails derives instead; the key path alone loads"
+    },
+    {
+      "id": "OR-J06-S74",
+      "journey": "J06",
+      "name": "A server whose staff cannot enroll a second factor, a public issuer with no totp.key, is not ready and logs the key to mount; with it mounted the server is ready"
     },
     {
       "id": "OR-J07-S10",

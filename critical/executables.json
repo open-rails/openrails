@@ -1924,6 +1924,18 @@
     "OR-J01-S26": [
       "TestRoutePermissions/OR-J01-S26/a-proposal-rewritten-before-its-lock-is-held-to-the-kinds-allowed"
     ],
+    "OR-J01-S27": [
+      "TestStandaloneAuthSurface/OR-J01-S27/a-trusted-issuers-staff-token-is-no-customer"
+    ],
+    "OR-J01-S28": [
+      "TestStandaloneAuthSurface/OR-J01-S28/own-accounts-need-a-second-factor"
+    ],
+    "OR-J01-S29": [
+      "TestStandaloneAuthSurface/OR-J01-S29/console-sign-in-is-the-trusted-issuers-that-sign-people-in"
+    ],
+    "OR-J01-S30": [
+      "TestStandaloneAuthSurface/OR-J01-S30/run-time-applications-name-only-public-key-urls"
+    ],
     "OR-J24-S42": [
       "TestLeaseSyncs/OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands"
     ],
@@ -2322,6 +2334,12 @@
     ],
     "OR-J06-S72": [
       "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
+    ],
+    "OR-J06-S73": [
+      "TestStandaloneAuthSurface/OR-J06-S73/auth-settings-beyond-the-key-path-refuse-boot"
+    ],
+    "OR-J06-S74": [
+      "TestStandaloneAuthSurface/OR-J06-S74/a-server-whose-staff-cannot-enroll-a-second-factor-is-not-ready"
     ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"

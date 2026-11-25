@@ -57,7 +57,7 @@ func Settings() ([]Setting, error) {
 				continue
 			}
 			path := strings.TrimPrefix(prefix+"."+name, ".")
-			if _, retired := retiredAuthKeys[path]; retired || fileOnlySection(path) != "" {
+			if fileOnlySection(path) != "" {
 				continue
 			}
 			for fv.Kind() == reflect.Pointer {

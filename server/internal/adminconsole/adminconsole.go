@@ -2,7 +2,6 @@
 package adminconsole
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -12,7 +11,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 )
 
@@ -23,13 +21,12 @@ type Config struct {
 	AuthBaseURL string `json:"auth_base_url"`
 	// APIBaseURL is the admin API base, default "/v1".
 	APIBaseURL string `json:"api_base_url"`
-	// LocalSignIn offers this server's own accounts alongside app sign-in.
-	LocalSignIn bool     `json:"local_sign_in"`
-	Issuers     []Issuer `json:"issuers"`
-	// Exchange is where the console trades the session's token for one bound
-	// to the merchant staff choose (RFC 8693, the merchant's id as group_id);
-	// null where the session's token is bound already (an issuer's, or the
-	// one merchant a declared issuer binds).
+	// Issuers are the sign-in buttons beside the server's own accounts: the
+	// trusted issuers that sign people in (Directory), read per request.
+	Issuers []Issuer `json:"issuers"`
+	// Exchange is where the console trades an own account's token for one
+	// bound to the merchant staff choose (RFC 8693, the merchant's id as
+	// group_id). An issuer's token is bound already.
 	Exchange *Exchange `json:"exchange"`
 }
 
@@ -65,38 +62,10 @@ type Issuer struct {
 // Path is where the standalone server serves the console, apart from /v1.
 const Path = "/admin"
 
-// DefaultScope is what the console asks a trusted issuer for by default.
+// DefaultScope is what the console asks a trusted issuer for. With openid it
+// checks the ID token, which it uses only to name the person and to end the
+// issuer's session at sign-out; OpenRails accepts only the access token.
 const DefaultScope = "openid profile email openrails:merchant"
-
-// NewIssuer checks one declared sign-in choice: key names a merchant (id or
-// name) or root; url is one of AuthKit's trusted issuers, where clientID is
-// the console's public client; resource is what its tokens are for
-// (auth.resource.id). An empty name is the URL, an empty scope DefaultScope.
-func NewIssuer(key, url, clientID, name, scope, resource string) (Issuer, error) {
-	url = strings.TrimRight(strings.TrimSpace(url), "/")
-	clientID = strings.TrimSpace(clientID)
-	switch {
-	case url == "":
-		return Issuer{}, fmt.Errorf("admin console issuer: url is required")
-	case clientID == "":
-		return Issuer{}, fmt.Errorf("admin console issuer %q: client_id is required", url)
-	case strings.TrimSpace(resource) == "":
-		return Issuer{}, fmt.Errorf("admin console issuer %q: declare auth.resource.id, the resource its tokens are for", url)
-	case key == "" || key == "local":
-		return Issuer{}, fmt.Errorf("admin_console.issuers key %q must name a merchant or root", key)
-	}
-	if key != "root" {
-		if _, err := billing.ParseMerchantID(key); err != nil {
-			if err := billing.ValidateMerchantSlug(key); err != nil {
-				return Issuer{}, fmt.Errorf("admin_console.issuers[%q]: %w", key, err)
-			}
-		}
-	}
-	return Issuer{
-		Key: key, URL: url, ClientID: clientID, Name: cmp.Or(strings.TrimSpace(name), url), Resource: resource,
-		Scope: cmp.Or(strings.Join(strings.Fields(scope), " "), DefaultScope),
-	}, nil
-}
 
 // Present reports whether assets hold a servable console build: a non-nil
 // fs.FS with index.html at its root. A source-only build without assets answers an explicit 503 at the console.
@@ -114,26 +83,19 @@ var baseTag = regexp.MustCompile(`<base\s+href="/admin/"\s*/?>`)
 
 // Handler serves the console from assets (a Vite build rooted at index.html)
 // at path, a validated mount path such as "/billing/admin":
-// path/config.json from cfg, static files, and index.html — its <base href>
+// path/config.json from cfg with issuers' buttons, static files, and index.html — its <base href>
 // rewritten to path/ — as the SPA fallback for client routes; bare path
 // redirects to path/. Mount it at path without stripping the prefix (ServeMux
 // "path/", gin "path/*any" and chi Mount all keep it): the build's URLs resolve
 // against path, so a request outside it is a mount mistake, answered 500 and
 // logged. Without a build
 // every request answers 503 naming the build step.
-func Handler(logger *slog.Logger, path string, cfg Config, assets fs.FS) (http.Handler, error) {
+func Handler(logger *slog.Logger, path string, cfg Config, issuers *Directory, assets fs.FS) (http.Handler, error) {
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = "/auth/v1"
 	}
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = "/v1"
-	}
-	if cfg.Issuers == nil {
-		cfg.Issuers = []Issuer{}
-	}
-	configJSON, err := json.Marshal(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("admin console: encode config.json: %w", err)
 	}
 	present := Present(assets)
 	var index []byte
@@ -165,9 +127,19 @@ func Handler(logger *slog.Logger, path string, cfg Config, assets fs.FS) (http.H
 		}
 
 		if rel == "config.json" {
+			out := cfg
+			out.Issuers = []Issuer{}
+			if issuers != nil {
+				list, err := issuers.Issuers(r.Context())
+				if err != nil {
+					// The server's own accounts still sign in.
+					logger.WarnContext(r.Context(), "admin console: listing trusted issuers failed", "error", err)
+				}
+				out.Issuers = append(out.Issuers, list...)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
-			_, _ = w.Write(configJSON)
+			_ = json.NewEncoder(w).Encode(out)
 			return
 		}
 

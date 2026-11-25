@@ -98,9 +98,6 @@ func TestTheReferenceStatesEveryDefault(t *testing.T) {
 	want["public_billing_base_url"] = cfg.Server.Engine.PublicBillingBaseURL
 	want["database.url"] = defaultDatabaseURL
 	want["naming.former_names.duration"] = cfg.Server.Naming.FormerNames.Duration.String()
-	want["auth.token.issuer"] = "public_billing_base_url"
-	want["auth.token.refresh_token_duration"] = cfg.Server.Auth.Token.RefreshTokenDuration.String()
-	want["auth.database.schema"] = cfg.Server.Auth.Database.Schema
 	documented := standaloneDefaults(t)
 	for key, value := range want {
 		values, ok := documented[key]
@@ -130,7 +127,6 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 	for got, want := range map[string]string{
 		cfg.Database.URL:                       defaultDatabaseURL,
 		cfg.Server.Engine.PublicBillingBaseURL: "http://localhost:3053",
-		cfg.Server.Auth.Token.Issuer:           "http://localhost:3053",
 		cfg.Server.Engine.Database.Schema:      "billing",
 		fmt.Sprint(cfg.Server.Port):            "3053",
 	} {

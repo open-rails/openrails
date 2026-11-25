@@ -288,8 +288,8 @@ function Workspace({
                     <h1>Access</h1>
                     <p>
                       People and roles are managed in {session.issuer.name}.
-                      Local owners or the operator manage this server's API keys
-                      and signing keys.
+                      API keys and signing keys are managed here signed in with
+                      an OpenRails account.
                     </p>
                   </section>
                 ) : (

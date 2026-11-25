@@ -4717,23 +4717,21 @@ pkg openrails/server, method (Config) Addr() string
 pkg openrails/server, method (Config) WithDefaults() Config
 pkg openrails/server, type AdminConsole struct
 pkg openrails/server, type AdminConsole struct, Disabled bool `yaml:"disabled"`
-pkg openrails/server, type AdminConsole struct, Issuers map[string]ConsoleIssuer `yaml:"issuers"`
+pkg openrails/server, type AuthConfig struct
+pkg openrails/server, type AuthConfig struct, Keys AuthKeys `yaml:"keys"`
+pkg openrails/server, type AuthKeys struct
+pkg openrails/server, type AuthKeys struct, Path string `yaml:"path"`
 pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, AdminConsole AdminConsole `yaml:"admin_console"`
-pkg openrails/server, type Config struct, Auth authkit.Config `yaml:"auth"`
+pkg openrails/server, type Config struct, Auth AuthConfig `yaml:"auth"`
+pkg openrails/server, type Config struct, AuthKit func(*authkit.Config) `yaml:"-"`
 pkg openrails/server, type Config struct, Engine openrails.Config `yaml:",inline"`
 pkg openrails/server, type Config struct, Host string `yaml:"host"`
-pkg openrails/server, type Config struct, LocalSignIn bool `yaml:"local_sign_in"`
 pkg openrails/server, type Config struct, MerchantCreation *MerchantCreationConfig `yaml:"-"`
 pkg openrails/server, type Config struct, MetricsPort int `yaml:"metrics_port"`
 pkg openrails/server, type Config struct, Naming billing.NamingConfig `yaml:"naming"`
 pkg openrails/server, type Config struct, Port int `yaml:"port"`
 pkg openrails/server, type Config struct, RouteGroups openrails.RouteGroups `yaml:"route_groups"`
-pkg openrails/server, type ConsoleIssuer struct
-pkg openrails/server, type ConsoleIssuer struct, ClientID string `yaml:"client_id"`
-pkg openrails/server, type ConsoleIssuer struct, Name string `yaml:"name"`
-pkg openrails/server, type ConsoleIssuer struct, Scope string `yaml:"scope"`
-pkg openrails/server, type ConsoleIssuer struct, URL string `yaml:"url"`
 pkg openrails/server, type Deps struct
 pkg openrails/server, type Deps struct, Auth authkit.Deps
 pkg openrails/server, type Deps struct, ConsoleAssets fs.FS

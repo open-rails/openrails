@@ -30,21 +30,9 @@ function SignInChoices({
           Sign in with {issuer.name}
         </button>
       ))}
-      {config.local_sign_in && (
-        <button onClick={() => choose("local")}>
-          Sign in with a local account
-        </button>
-      )}
-      {!config.local_sign_in && config.issuers.length === 0 && (
-        <div role="status">
-          <h2>Declare a sign-in method</h2>
-          <p>
-            Configure <code>admin_console.issuers</code> to sign in through a
-            merchant's app, or enable <code>local_sign_in</code> and seed the
-            first operator through the authority manifest.
-          </p>
-        </div>
-      )}
+      <button onClick={() => choose("local")}>
+        Sign in with an OpenRails account
+      </button>
     </main>
   )
 }
@@ -57,13 +45,13 @@ export function ConsoleApp({ config }: { config: BootstrapConfig }) {
   const [method, setMethod] = useState(
     () =>
       sessionStorage.getItem(METHOD_KEY) ??
-      (config.issuers.length === 0 && config.local_sign_in ? "local" : "")
+      (config.issuers.length === 0 ? "local" : "")
   )
-  const selectedMethod = nativeLink && config.local_sign_in ? "local" : method
+  const selectedMethod = nativeLink ? "local" : method
   const issuer = config.issuers.find((item) => item.key === selectedMethod)
   const session = useMemo(
     () =>
-      issuer || (selectedMethod === "local" && config.local_sign_in)
+      issuer || selectedMethod === "local"
         ? createConsoleSession(config, issuer)
         : null,
     [config, issuer, selectedMethod]
@@ -79,16 +67,6 @@ export function ConsoleApp({ config }: { config: BootstrapConfig }) {
         : `/login?return_to=${encodeURIComponent(location.pathname + location.search)}`
     void navigate(target ?? login)
   }
-  if (nativeLink && !config.local_sign_in)
-    return (
-      <main className="console-sign-in">
-        <h1>Local enrollment is unavailable</h1>
-        <p>
-          This server uses app sign-in. Ask the operator for access through your
-          app.
-        </p>
-      </main>
-    )
   if (!session) return <SignInChoices config={config} choose={choose} />
   return (
     <ConsoleSession key={selectedMethod} session={session}>
