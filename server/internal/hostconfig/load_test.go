@@ -153,3 +153,44 @@ func TestOnlyTheKeyPathIsAnAuthSetting(t *testing.T) {
 		})
 	}
 }
+
+// The default ClickHouse is optional; a URL a source names, even the
+// default's spelling, is the operator's, and an empty one declares none.
+func TestOnlyTheDefaultClickHouseIsOptional(t *testing.T) {
+	for name, c := range map[string]struct {
+		yaml, env, secret string
+		want              *ClickHouseConnection
+	}{
+		"nothing":      {want: &ClickHouseConnection{URL: defaultClickHouseURL, Default: true}},
+		"empty file":   {yaml: "clickhouse: {}\n", want: &ClickHouseConnection{URL: defaultClickHouseURL, Default: true}},
+		"file":         {yaml: "clickhouse:\n  url: clickhouse://events.internal:9000/usage\n", want: &ClickHouseConnection{URL: "clickhouse://events.internal:9000/usage"}},
+		"env":          {env: defaultClickHouseURL, want: &ClickHouseConnection{URL: defaultClickHouseURL}},
+		"secret file":  {secret: "clickhouse://u:p@events.internal:9000/usage", want: &ClickHouseConnection{URL: "clickhouse://u:p@events.internal:9000/usage"}},
+		"empty url":    {yaml: "clickhouse:\n  url: \"\"\n"},
+		"empty in env": {yaml: "clickhouse:\n  url: clickhouse://events.internal:9000/usage\n", env: " "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			configPath, secrets := isolate(t)
+			if c.yaml != "" {
+				if err := os.WriteFile(configPath, []byte(c.yaml), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.env != "" {
+				t.Setenv("CLICKHOUSE_URL", c.env)
+			}
+			if c.secret != "" {
+				if err := os.WriteFile(filepath.Join(secrets, "CLICKHOUSE_URL"), []byte(c.secret), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (cfg.ClickHouse == nil) != (c.want == nil) || c.want != nil && *cfg.ClickHouse != *c.want {
+				t.Fatalf("clickhouse %+v, want %+v", cfg.ClickHouse, c.want)
+			}
+		})
+	}
+}

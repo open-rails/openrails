@@ -411,6 +411,10 @@ func Load(configPath string) (*Config, error) {
 	if unknown := unknownKeys(unused...); len(unknown) > 0 {
 		return nil, fmt.Errorf("unknown configuration keys refuse boot: %s", strings.Join(unknown, ", "))
 	}
+	// A clickhouse.url any source names, empty included, is the operator's.
+	if cfg.ClickHouse != nil && k.Exists("clickhouse.url") {
+		cfg.ClickHouse.Default = false
+	}
 	if err := cfg.finish(secretsDir); err != nil {
 		return nil, err
 	}

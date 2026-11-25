@@ -58,9 +58,9 @@ type Opened struct {
 	closes []func()
 }
 
-// Open opens cfg's connections. It waits for the database until ctx ends; a
-// malformed optional section (redis, vault, email_smtp) is left out and
-// reported in Degraded.
+// Open opens cfg's connections. It waits for the database, and a ClickHouse
+// a source named, until ctx ends; a malformed optional section (redis, vault,
+// email_smtp) is left out and reported in Degraded.
 func Open(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*Opened, error) {
 	pool, err := Pool(ctx, logger, cfg, true)
 	if err != nil {
@@ -79,19 +79,21 @@ func Open(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*Op
 		}
 	}
 	if cfg.ClickHouse != nil {
-		conn, err := ClickHouse(cfg.ClickHouse)
+		conn, err := ClickHouse(ctx, logger, cfg.ClickHouse)
 		if err != nil {
 			o.Close()
 			return nil, err
 		}
-		o.closes = append(o.closes, func() { _ = conn.Close() })
-		// The event store is waited for like the database: usage lives there.
-		if err := pingUntil(ctx, logger, conn.Ping); err != nil {
-			o.Close()
-			return nil, fmt.Errorf("clickhouse: %w", err)
+		if conn != nil {
+			o.closes = append(o.closes, func() { _ = conn.Close() })
+			// The event store is waited for like the database: usage lives there.
+			if err := pingUntil(ctx, logger, "clickhouse", conn.Ping); err != nil {
+				o.Close()
+				return nil, fmt.Errorf("clickhouse: %w", err)
+			}
+			logger.InfoContext(ctx, "ClickHouse declared", "database", cfg.Server.Engine.ClickHouse.Database)
+			o.Deps.ClickHouse = conn
 		}
-		logger.InfoContext(ctx, "ClickHouse declared", "database", cfg.Server.Engine.ClickHouse.Database)
-		o.Deps.ClickHouse = conn
 	}
 	if cfg.Vault != nil {
 		if session, err := Vault(context.WithoutCancel(ctx), cfg.Vault); err != nil {
@@ -156,7 +158,7 @@ func Pool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config, retr
 	}
 	ping := pool.Ping
 	if retry {
-		ping = func(ctx context.Context) error { return pingUntil(ctx, logger, pool.Ping) }
+		ping = func(ctx context.Context) error { return pingUntil(ctx, logger, "database", pool.Ping) }
 	}
 	if err := ping(ctx); err != nil {
 		pool.Close()
@@ -165,9 +167,9 @@ func Pool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config, retr
 	return pool, nil
 }
 
-// pingUntil pings until the database answers or ctx ends: a database that is
-// failing over is waited for, never a boot failure.
-func pingUntil(ctx context.Context, logger *slog.Logger, ping func(context.Context) error) error {
+// pingUntil pings until what (database, clickhouse) answers or ctx ends: one
+// that is failing over is waited for, never a boot failure.
+func pingUntil(ctx context.Context, logger *slog.Logger, what string, ping func(context.Context) error) error {
 	started, delay := time.Now(), connectBaseDelay
 	for {
 		pingCtx, cancel := context.WithTimeout(ctx, connectPingTimeout)
@@ -177,12 +179,12 @@ func pingUntil(ctx context.Context, logger *slog.Logger, ping func(context.Conte
 			return nil
 		}
 		waited := time.Since(started).Round(time.Second)
-		logger.WarnContext(ctx, "database ping failed; retrying", logx.Err(err), "waiting_for", waited.String(), "retry_in", delay.String())
+		logger.WarnContext(ctx, what+" ping failed; retrying", logx.Err(err), "waiting_for", waited.String(), "retry_in", delay.String())
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return fmt.Errorf("failed to connect to database after %s (last: %v): %w", waited, err, ctx.Err())
+			return fmt.Errorf("failed to connect to %s after %s (last: %v): %w", what, waited, err, ctx.Err())
 		case <-timer.C:
 		}
 		delay = min(2*delay, connectMaxDelay)

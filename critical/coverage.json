@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 784,
+  "scenario_count": 785,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3832,6 +3832,11 @@
       "id": "OR-J24-S68",
       "journey": "J24",
       "name": "A usage item whose metadata is longer than 1,024 bytes of compact JSON is refused alone with invalid_param metadata; the rest of the sync settles"
+    },
+    {
+      "id": "OR-J24-S69",
+      "journey": "J24",
+      "name": "With no clickhouse.url and nothing on the default's port, the standalone server serves with usage off and logs one line saying so; a clickhouse.url the operator names that does not answer keeps it from serving"
     },
     {
       "id": "OR-J40-S20",

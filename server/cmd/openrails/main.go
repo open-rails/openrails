@@ -244,14 +244,16 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 		return err
 	}
 	if host.ClickHouse != nil {
-		conn, err := hostdeps.ClickHouse(host.ClickHouse)
+		conn, err := hostdeps.ClickHouse(ctx, slog.Default(), host.ClickHouse)
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
-		chdb := config.ClickHouseDatabase(&host.Server.Engine)
-		if err := eventstore.Migrate(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)}); err != nil {
-			return err
+		if conn != nil {
+			defer conn.Close()
+			chdb := config.ClickHouseDatabase(&host.Server.Engine)
+			if err := eventstore.Migrate(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)}); err != nil {
+				return err
+			}
 		}
 	}
 	// The control plane owns the AuthKit/River schema selection. Preserve its

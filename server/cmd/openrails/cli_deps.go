@@ -85,14 +85,14 @@ func cliVault(ctx context.Context) (*vaultapi.Client, error) {
 }
 
 // cliEventStore is the deployment's event store, checked and not migrated;
-// nil without a clickhouse section.
+// nil without a clickhouse section or with an unreachable default one.
 func cliEventStore(ctx context.Context) (*eventstore.Store, error) {
 	h := hostconfig.FromContext(ctx)
 	if h == nil || h.ClickHouse == nil {
 		return nil, nil
 	}
-	conn, err := hostdeps.ClickHouse(h.ClickHouse)
-	if err != nil {
+	conn, err := hostdeps.ClickHouse(ctx, slog.Default(), h.ClickHouse)
+	if err != nil || conn == nil {
 		return nil, err
 	}
 	cli.mu.Lock()

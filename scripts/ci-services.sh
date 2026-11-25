@@ -24,11 +24,12 @@ start_postgres() {
   timeout 60 bash -c 'until docker exec critical-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
 }
 
+# Valkey, the BSD-licensed Redis fork docker-compose.yaml runs.
 start_redis() {
   local image
-  image="$(scripts/ci-pull-image.sh redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe)" # 7-alpine
+  image="$(scripts/ci-pull-image.sh valkey/valkey@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc)" # 8-alpine (8.1.12)
   docker run -d --pull never --name critical-redis -p 127.0.0.1:6379:6379 "$image"
-  timeout 60 bash -c 'until docker exec critical-redis redis-cli ping; do sleep 1; done'
+  timeout 60 bash -c 'until docker exec critical-redis valkey-cli ping; do sleep 1; done'
 }
 
 # A dev server: in memory, unsealed, OPENRAILS_CRITICAL_VAULT_TOKEN its root token.
@@ -42,11 +43,12 @@ start_vault() {
 }
 
 # The event store: the default user without a password, reachable from the
-# host. Each critical world creates its own database.
+# host. Each critical world creates its own database. Port 19000, not 9000:
+# the server's default clickhouse.url must find nothing there.
 start_clickhouse() {
   local image
   image="$(scripts/ci-pull-image.sh clickhouse/clickhouse-server@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7)" # 26.8.36.3
-  docker run -d --pull never --name critical-clickhouse -p 127.0.0.1:9000:9000 \
+  docker run -d --pull never --name critical-clickhouse -p 127.0.0.1:19000:9000 \
     --tmpfs /var/lib/clickhouse:rw,size=2g --ulimit nofile=262144:262144 \
     -e CLICKHOUSE_SKIP_USER_SETUP=1 "$image"
   timeout 60 bash -c 'until docker exec critical-clickhouse clickhouse-client --query "SELECT 1"; do sleep 1; done'

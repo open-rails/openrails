@@ -58,9 +58,12 @@ func openAttachedStore(ctx context.Context, database *db.DB) (*eventstore.Store,
 	if h.ClickHouse == nil {
 		return nil, fmt.Errorf("no clickhouse section: there is no event store to attach")
 	}
-	conn, err := hostdeps.ClickHouse(h.ClickHouse)
+	conn, err := hostdeps.ClickHouse(ctx, slog.Default(), h.ClickHouse)
 	if err != nil {
 		return nil, err
+	}
+	if conn == nil {
+		return nil, fmt.Errorf("the default ClickHouse does not answer: there is no event store to attach")
 	}
 	cli.mu.Lock()
 	cli.closes = append(cli.closes, func() { _ = conn.Close() })

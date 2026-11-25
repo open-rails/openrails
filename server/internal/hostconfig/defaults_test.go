@@ -114,9 +114,9 @@ func TestTheReferenceStatesEveryDefault(t *testing.T) {
 }
 
 // With nothing configured but public_url, the server runs on the defaults
-// against Compose's dependencies: the database and a loopback issuer, whose
-// account directory and development keys AuthKit makes. Without public_url
-// boot refuses.
+// against Compose's dependencies: the database, ClickHouse when it answers,
+// and a loopback issuer, whose account directory and development keys
+// AuthKit makes. Without public_url boot refuses.
 func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 	configPath, _ := isolate(t)
 	cfg, err := Load(configPath)
@@ -133,8 +133,11 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	}
-	if cfg.Redis != nil || cfg.ClickHouse != nil || cfg.Vault != nil {
-		t.Error("no Redis, ClickHouse or Vault is declared by default")
+	if cfg.Redis != nil || cfg.Vault != nil {
+		t.Error("no Redis or Vault is declared by default")
+	}
+	if c := cfg.ClickHouse; c == nil || c.URL != defaultClickHouseURL || !c.Default || cfg.Server.Engine.ClickHouse.Database != "openrails" {
+		t.Errorf("Compose's ClickHouse is the optional default: %+v", c)
 	}
 	t.Setenv("PUBLIC_URL", "")
 	if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), "public_url (PUBLIC_URL) is required") {

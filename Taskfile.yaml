@@ -40,12 +40,6 @@ tasks:
     cmds:
       - bash scripts/build-payment-page.sh
 
-  build-console-binary:
-    desc: Build the standalone binary WITH the admin console embedded (admin-build + build)
-    cmds:
-      - task: admin-build
-      - task: build
-
   run:
     desc: Build and run the application server
     deps: [build]
@@ -59,6 +53,9 @@ tasks:
 
   dev:api:
     desc: The API server under Air, rebuilt on every Go change
+    env:
+      # The one setting without a default; the rest are the Compose dependencies'.
+      PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3053"}}'
     cmds:
       - air -c .air.toml
 
@@ -87,44 +84,6 @@ tasks:
     dir: web/billing-ui
     cmds:
       - pnpm --config.verify-deps-before-run=false exec vite build --config vite.admin.config.ts --watch
-
-  docker-up:
-    desc: Start local docker compose stack (openrails + deps)
-    cmds:
-      - docker compose -f docker-compose.yaml --profile all up -d
-
-  docker-down:
-    desc: Stop local docker compose stack
-    cmds:
-      # --profile all: without it, profiled services (openrails) are left running.
-      - docker compose -f docker-compose.yaml --profile all down
-
-  docker-reset:
-    desc: "Recreate the local stack from EMPTY: down + delete volumes (Postgres data) + up"
-    prompt: This DELETES the local Postgres and Garnet volumes. Continue?
-    cmds:
-      # -v drops the named volumes (postgres_data, redis_data, runtime keys).
-      # `docker-down` deliberately does NOT do this — a schema reset has to be asked for.
-      - docker compose -f docker-compose.yaml --profile all down -v
-      - task: docker-up
-
-  docker-logs:
-    desc: Tail openrails logs from docker compose stack
-    cmds:
-      - docker compose -f docker-compose.yaml logs -f openrails
-
-  tunnel-webhooks:
-    desc: Run cloudflared tunnel for deterministic webhook hostname (requires CLOUDFLARED_TUNNEL_TOKEN)
-    dotenv: [.env]
-    cmds:
-      - cloudflared tunnel run --token "${CLOUDFLARED_TUNNEL_TOKEN:?set it in .env or your shell}"
-
-  verify-webhook-tunnel:
-    desc: Verify Cloudflared routing reaches local openrails (/health/live + /health/ready)
-    dotenv: [.env]
-    cmds:
-      - curl -fsS "https://${CLOUDFLARED_PUBLIC_HOSTNAME:?set it in .env or your shell}/health/live" >/dev/null
-      - curl -fsS "https://$CLOUDFLARED_PUBLIC_HOSTNAME/health/ready" >/dev/null
 
   sqlc:
     desc: Generate SQL bindings and prepare every query against a disposable migrated database

@@ -30,8 +30,8 @@ type Config struct {
 	// Redis is the redis section; nil declares none.
 	Redis *RedisConfig `yaml:"redis"`
 	// ClickHouse is the clickhouse section's connection, the event store
-	// usage needs; nil declares none, and usage is off. Its database becomes
-	// Server.Engine.ClickHouse.
+	// usage needs; nil (an empty url) declares none, and usage is off. Its
+	// database becomes Server.Engine.ClickHouse.
 	ClickHouse *ClickHouseConnection `yaml:"clickhouse"`
 	// SMTP is the email_smtp section; nil sends no email.
 	SMTP *SMTPConfig `yaml:"email_smtp"`
@@ -67,18 +67,19 @@ func Engine(ctx context.Context) *billing.Config {
 
 // defaults is the configuration before any source is read: server.
 // DefaultConfig (the engine's and the server's) and the binary's own. They
-// run a local server against the Compose dependencies (`docker compose up -d
-// postgres garnet`) with nothing else configured; none is a security
-// exception, and a production deploy that leaves one unset fails loudly or is
-// unharmed. A default that follows another key is a rule below, applied once
-// every source is read.
+// run a local server against the Compose dependencies (`docker compose up
+// -d`) with nothing else configured; none is a security exception, and a
+// production deploy that leaves one unset fails loudly or is unharmed. A
+// default that follows another key is a rule below, applied once every
+// source is read.
 func defaults() *Config {
 	return &Config{
 		Server: server.DefaultConfig(),
 		// database.url: DSN. No redis: rate limits and lockouts live in
-		// memory, for one instance. No clickhouse: no event store, so usage
-		// is off. public_url has no default: boot refuses without it.
-		Logger: LoggerConfig{Level: "info"},
+		// memory, for one instance. public_url has no default: boot refuses
+		// without it.
+		ClickHouse: &ClickHouseConnection{URL: defaultClickHouseURL, Default: true},
+		Logger:     LoggerConfig{Level: "info"},
 	}
 }
 
@@ -86,6 +87,10 @@ func defaults() *Config {
 // nor a libpq variable names a connection. A deploy that forgets its
 // database fails to connect; it never reaches another.
 const defaultDatabaseURL = "postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable"
+
+// defaultClickHouseURL is Compose's ClickHouse. Unlike a URL a source names,
+// it is optional: unreachable at boot, the server runs without usage.
+const defaultClickHouseURL = "clickhouse://localhost:9000/openrails"
 
 // libpqConnection are the libpq variables that name a connection.
 var libpqConnection = []string{"PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE"}
@@ -143,9 +148,13 @@ type RedisConfig struct {
 type ClickHouseConnection struct {
 	// URL is clickhouse://[user[:password]@]host[:port][/database], port 9000
 	// by default; the path names the event store's database, openrails by
-	// default. A secret: CLICKHOUSE_URL, from the environment or a mounted
-	// secret file.
+	// default; empty declares no event store. A secret: CLICKHOUSE_URL, from
+	// the environment or a mounted secret file.
 	URL string `yaml:"url"`
+	// Default reports that no source named URL: it is Compose's ClickHouse,
+	// and the server runs without usage when it does not answer at boot. A
+	// URL a source names is waited for.
+	Default bool `yaml:"-"`
 }
 
 // SMTPConfig is the email_smtp section (EMAIL_SMTP_HOST, …), the same names

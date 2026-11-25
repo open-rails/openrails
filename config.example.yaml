@@ -5,7 +5,7 @@
 # (PSPs, custodians, settings) lives in the merchant manifest or in Vault.
 # Every key has the default docs/standalone.md's configuration reference
 # states; with none set, `openrails run-server` runs against the Compose
-# dependencies (`docker compose up -d postgres garnet`). The values below
+# dependencies (`docker compose up -d`). The values below
 # are the defaults unless a comment says otherwise.
 
 # Whether money is real is each PSP's declared environment (live | test |
@@ -38,7 +38,10 @@ database:
   schema: billing # every OpenRails table lives here, River's jobs in billing_river (env DATABASE_SCHEMA)
 
 # The event store usage needs (ClickHouse's native protocol). Without it
-# usage, limits and admissions answer event_store_required.
+# usage, limits and admissions answer event_store_required. Unset, it is
+# Compose's ClickHouse, clickhouse://localhost:9000/openrails, and usage is
+# off when that does not answer at boot; a url set here is waited for, and an
+# empty one declares none.
 # clickhouse:
 #   url: clickhouse://default:password@localhost:9000/openrails # a secret (CLICKHOUSE_URL); the path is the database, created or upgraded at boot
 

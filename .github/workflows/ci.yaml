@@ -335,13 +335,13 @@ jobs:
       # the schema lists are read from databases migrated on these servers.
       - name: Reviewed contracts are current
         if: ${{ !cancelled() }}
-        run: go run ./scripts/contracts -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' -clickhouse 127.0.0.1:9000
+        run: go run ./scripts/contracts -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' -clickhouse 127.0.0.1:19000
       # Snapshots are written against a database; a drifted run offers them as a patch to review and commit.
       # The SQL bindings are the regenerated-sqlc patch's, so the two never overlap.
       - name: Regenerate the drifted contracts as a patch
         if: ${{ failure() }}
         run: |
-          go run ./scripts/contracts -write -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' -clickhouse 127.0.0.1:9000
+          go run ./scripts/contracts -write -dsn 'postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' -clickhouse 127.0.0.1:19000
           git add -A -- . ':(exclude)internal/db/gen' && git diff --cached --binary > "$RUNNER_TEMP/regenerated-contracts.patch"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() }}
@@ -421,7 +421,7 @@ jobs:
       OPENRAILS_CRITICAL_REDIS_URL: redis://127.0.0.1:6379/0
       OPENRAILS_CRITICAL_VAULT_ADDR: http://127.0.0.1:8200
       OPENRAILS_CRITICAL_VAULT_TOKEN: critical-fixture-only
-      OPENRAILS_CRITICAL_CLICKHOUSE_ADDR: 127.0.0.1:9000
+      OPENRAILS_CRITICAL_CLICKHOUSE_ADDR: 127.0.0.1:19000
       OPENRAILS_CRITICAL_PAYMENT_ASSETS: ${{ github.workspace }}/web/pay/dist
     steps:
       - name: Set owned fixture paths

@@ -66,6 +66,7 @@ func TestEventStore(t *testing.T) {
 	})
 	t.Run("OR-J24-S40/new-migrates-clickhouse-idempotently-and-refuses-another-store", storeMigrationsAndIdentity)
 	t.Run("OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start", concurrentStoreMigrations)
+	t.Run("OR-J24-S69/the-servers-default-clickhouse-is-optional-and-a-named-one-is-waited-for", serverClickHouseDefault)
 	t.Run("OR-J24-S41/public-config-reports-whether-usage-is-served", func(t *testing.T) {
 		require.True(t, usageFlag(t, newAuthorityWorld(t)))
 		require.False(t, usageFlag(t, newAuthorityWorld(t, withoutEventStore)))

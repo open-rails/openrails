@@ -34,7 +34,9 @@ to it.
 | Helm | `oci://ghcr.io/open-rails/charts/openrails`, chart `X.Y.Z` for image `vX.Y.Z` ([Kubernetes and Helm](#kubernetes-and-helm)) |
 | Source | `task build` builds `bin/openrails`, embedding the console if `task admin-build` ran and the payment page if `task payment-page-build` ran |
 
-`openrails version` prints the version, commit and build date. For a local stack from a checkout, `task docker-up` starts PostgreSQL, Redis and the server on `:3053` (`task docker-down`, `task docker-reset` deletes the database volume).
+`openrails version` prints the version, commit and build date.
+
+From a checkout, `docker compose up -d` starts the local dependencies: PostgreSQL, Redis (Valkey, the BSD-licensed Redis fork) and ClickHouse, each on a loopback port the defaults name. `task dev` then runs the server on `:3053` under Air and the console under Vite, with nothing to configure. `docker compose --profile openrails up -d` also runs the server in Docker, `docker compose logs -f openrails` follows it, and `docker compose --profile openrails down -v` removes everything, volumes included.
 
 ## First run
 
@@ -159,7 +161,7 @@ merchant's document, both generated from the configuration types (`go run
 them stale). Durations
 are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
-(`docker compose up -d postgres garnet`) with nothing configured but `public_url`; none relaxes a protection, and a deployment that leaves one unset fails to connect or refuses to boot. The top-level keys: `port`, `metrics_port`, `logger`, `public_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits` and `captcha`.
+(`docker compose up -d`) with nothing configured but `public_url`; none relaxes a protection, and a deployment that leaves one unset fails to connect or refuses to boot. The top-level keys: `port`, `metrics_port`, `logger`, `public_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits` and `captcha`.
 
 **Listener and lifecycle**
 
@@ -200,7 +202,7 @@ tables in `<database.schema>_auth` (`billing_auth`) and its jobs in `<database.s
 
 | Key | Default | Meaning |
 |---|---|---|
-| `clickhouse.url` | none | `clickhouse://user:password@host:9000/database` over the native protocol; the path names the event store's database (`openrails` by default), created or upgraded at boot. A secret (`CLICKHOUSE_URL`). Set, the server waits for it at boot like the database; unset, usage is off |
+| `clickhouse.url` | `clickhouse://localhost:9000/openrails` | `clickhouse://user:password@host:9000/database` over the native protocol; the path names the event store's database (`openrails` by default), created or upgraded at boot. A secret (`CLICKHOUSE_URL`). Set, the server waits for it at boot like the database; set empty, usage is off. The default is Compose's ClickHouse: when it does not answer at boot, the server logs one line and runs with usage off |
 
 **Redis**
 
@@ -602,7 +604,7 @@ Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' 
 
 Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 90 days: what was reported, its identity and its priced meter cells), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and history by UTC hour, kept with no TTL and grouped into the merchant's `accounting.timezone` days as it is read). PostgreSQL keeps what the ledger took (`usage_postings`), who has usage it has not taken yet (`usage_unposted`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_close`), and before any other movement of a customer's balance, so up to a month of usage is only in ClickHouse: back it up nightly ([backup and restore](#backup-and-restore)).
 
-Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.unposted_usage` finding, and the customers it belongs to can neither read nor move their balances (`event_store_required`) until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
+Without an event store (`clickhouse.url` empty, or the default one unreachable at boot) the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.unposted_usage` finding, and the customers it belongs to can neither read nor move their balances (`event_store_required`) until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
 
 The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 
@@ -664,7 +666,7 @@ and never restart a stale source as a rollback.
 under an advisory lock before serving: one instance migrates, the rest wait, and
 a failed migration fails the start. `openrails migrate up` runs the same step on
 its own, as a deploy step; `openrails migrate status [--json]` compares the
-applied ledger with the binary's chain and exits non-zero on any mismatch. With `clickhouse`, the same step creates or upgrades the event store's database, under the same lock.
+applied ledger with the binary's chain and exits non-zero on any mismatch. With ClickHouse, the same step creates or upgrades the event store's database, under the same lock.
 
 The schema is one baseline migration and numbered migrations after it, each an
 addition, so the previous build runs on a schema the next one migrated and

@@ -46,26 +46,53 @@ services:
       start_period: 90s
       retries: 5
   
-  garnet:
-    image: redis:7-alpine
+  # Valkey: the BSD-licensed, drop-in Redis fork
+  valkey:
+    image: valkey/valkey@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc # 8-alpine (8.1.12)
     cpus: 0.5
     mem_limit: 1g
     pids_limit: 256
     volumes:
-      - redis_data:/data
+      - valkey_data:/data
     ports:
-      - "127.0.0.1:${GARNET_HOST_PORT:-6380}:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 2s
       timeout: 5s
       retries: 5
     networks:
       - local-openrails
 
+  # The event store usage needs; the server's default clickhouse.url.
+  clickhouse:
+    image: clickhouse/clickhouse-server@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7 # 26.8.36.3
+    cpus: 2.0
+    mem_limit: 2g
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      # The default user, without a password, reachable through the
+      # loopback-only port.
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ports:
+      - "127.0.0.1:${CLICKHOUSE_HOST_PORT:-9000}:9000"
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      start_period: 60s
+      retries: 10
+    networks:
+      - local-openrails
+
   # OpenRails service (HTTP server only)
   openrails:
-    profiles: ["all", "openrails"]
+    profiles: ["openrails"]
     build:
       context: .
       dockerfile: Dockerfile
@@ -74,7 +101,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      garnet:
+      valkey:
+        condition: service_healthy
+      clickhouse:
         condition: service_healthy
     ports:
       # Single public API surface. Server-to-server callers authenticate with
@@ -86,7 +115,8 @@ services:
       # (docs/standalone.md, configuration reference).
       PUBLIC_URL: "http://localhost:${PORT:-3053}"
       DATABASE_URL: "postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_password}@postgres:5432/openrails_db?sslmode=disable"
-      REDIS_URL: "redis://garnet:6379"
+      REDIS_URL: "redis://valkey:6379"
+      CLICKHOUSE_URL: "clickhouse://clickhouse:9000/openrails"
       # AuthKit writes development keys (keys.json, totp.key) to the volume,
       # so restarts keep sessions and authenticator enrollments.
       AUTH_KEYS_PATH: /vault/auth
@@ -100,7 +130,8 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
+  valkey_data:
+  clickhouse_data:
   openrails_auth_keys:
 
 networks:

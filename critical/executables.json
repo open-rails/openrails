@@ -2470,6 +2470,9 @@
     "OR-J24-S68": [
       "TestUsageStore/OR-J24-S68/usage-metadata-past-1024-bytes-of-compact-json-is-refused-alone"
     ],
+    "OR-J24-S69": [
+      "TestEventStore/OR-J24-S69/the-servers-default-clickhouse-is-optional-and-a-named-one-is-waited-for"
+    ],
     "OR-J40-S20": [
       "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/card",
       "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/remittance",
