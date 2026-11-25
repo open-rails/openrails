@@ -41,7 +41,7 @@ prepare)
   [[ "$base" == master || "$base" == "rc/${version#v}" ]] || die "the base is master or rc/${version#v}; $usage"
   git fetch --quiet origin "$base"
   git merge-base --is-ancestor origin/master "origin/$base" || die "$base is behind origin/master; update it first"
-  work="$HOME/cozy/.worktrees/openrails/release-$version"
+  work="$HOME/worktrees/openrails/release-$version"
   [[ ! -e "$work" ]] || die "$work already exists; resume its owned release work"
   mkdir -p "${work%/*}"
   git worktree add --quiet -b "$branch" "$work" "origin/$base"
