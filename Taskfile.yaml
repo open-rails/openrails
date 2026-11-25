@@ -54,6 +54,8 @@ tasks:
       - task: dev:api
         vars: { PUBLIC_URL: "http://localhost:3054" }
       - dev:console
+      - task: dev:operator
+        vars: { PUBLIC_URL: "http://localhost:3054" }
 
   dev:api:
     desc: The API server under Air, rebuilt on every Go change
@@ -62,6 +64,52 @@ tasks:
       PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3053"}}'
     cmds:
       - air -c .air.toml
+
+  dev:operator:
+    desc: Seed this machine's dashboard operator (root:owner, random password kept in ~/.config/openrails-dev/operator.txt) once the local API is ready; refuses anything but localhost
+    silent: true
+    env:
+      PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3053"}}'
+    cmds:
+      - cmd: |
+          bash <<'BASH'
+          set -euo pipefail
+          loopback() { [[ "$1" =~ ^[a-z+]*://([^@/]*@)?(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/|$) ]]; }
+          loopback "$PUBLIC_URL" || { echo "dev:operator: PUBLIC_URL is not localhost; refusing to seed an operator" >&2; exit 1; }
+          if [[ -n "${DATABASE_URL:-}" ]] && ! loopback "$DATABASE_URL"; then
+            echo "dev:operator: DATABASE_URL is not localhost; refusing to seed an operator" >&2; exit 1
+          fi
+          dir="${XDG_CONFIG_HOME:-$HOME/.config}/openrails-dev"
+          umask 077
+          mkdir -p "$dir"
+          if [[ ! -s "$dir/operator.txt" ]]; then
+            printf 'email: operator@localhost.test\npassword: %s\n' "$(openssl rand -hex 16)" >"$dir/operator.txt"
+          fi
+          password="$(sed -n 's/^password: //p' "$dir/operator.txt")"
+          cat >"$dir/bootstrap.yaml" <<EOF
+          users:
+            - email: operator@localhost.test
+              username: operator
+              email_verified: true
+              password: { plaintext: "$password" }
+              root_role: root:owner
+          EOF
+          for _ in $(seq 180); do curl -fsS -o /dev/null http://localhost:3053/health/ready 2>/dev/null && break; sleep 1; done
+          ./tmp/openrails push-auth-bootstrap --file "$dir/bootstrap.yaml" >/dev/null
+          printf '\n========================================\n OpenRails dashboard  %s/admin/\n email     operator@localhost.test\n password  %s\n========================================\n(task dev:login prints this again)\n\n' "$PUBLIC_URL" "$password"
+          BASH
+        ignore_error: true
+
+  dev:login:
+    desc: Print this machine's local dashboard sign-in
+    silent: true
+    env:
+      PUBLIC_URL: '{{.PUBLIC_URL | default "http://localhost:3054"}}'
+    cmds:
+      - |
+        f="${XDG_CONFIG_HOME:-$HOME/.config}/openrails-dev/operator.txt"
+        [ -s "$f" ] || { echo "No local operator yet: run task dev." >&2; exit 1; }
+        printf '\n========================================\n OpenRails dashboard  %s/admin/\n email     operator@localhost.test\n password  %s\n========================================\n\n' "$PUBLIC_URL" "$(sed -n 's/^password: //p' "$f")"
 
   dev:console:
     desc: The merchant console's Vite dev server on :3054, proxying the API on :3053 (builds billing-ui first; `task dev:billing-ui` rebuilds it live)
