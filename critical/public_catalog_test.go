@@ -49,6 +49,81 @@ func publicPurchase(t *testing.T, a *authorityWorld, p *providerLedger, price bi
 }
 
 func TestPublicCatalog(t *testing.T) {
+	t.Run("OR-J05-S16/quantity-only-price-versions-and-document-apply", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		product, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "team", DisplayName: "Team"})
+		require.NoError(t, err)
+		input := billing.CreatePriceParams{ProductID: product.ID, Key: "seats", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(720), Quantity: &catalog.Quantity{Min: 1, Max: 10}}
+		status, raw := a.request(t, http.MethodPost, "/v1/catalog/prices", a.alphaKey.Secret, input)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var first billing.Price
+		require.NoError(t, json.Unmarshal(raw, &first))
+		require.EqualValues(t, 1, first.Version)
+		require.False(t, first.Archived)
+		require.Equal(t, input.Quantity, first.Quantity)
+
+		input.Quantity = &catalog.Quantity{Min: 1, Max: 50}
+		status, raw = a.request(t, http.MethodPost, "/v1/catalog/prices", a.alphaKey.Secret, input)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var second billing.Price
+		require.NoError(t, json.Unmarshal(raw, &second))
+		require.NotEqual(t, first.ID, second.ID)
+		require.EqualValues(t, 2, second.Version)
+		require.False(t, second.Archived)
+		require.Equal(t, input.Quantity, second.Quantity)
+		archived, err := a.alphaRemote.GetPrice(t.Context(), first.ID)
+		require.NoError(t, err)
+		require.True(t, archived.Archived)
+		require.Equal(t, first.Quantity, archived.Quantity)
+
+		// A file-owned price exercises the same change without an edit-ownership
+		// conflict; another product's rename must commit in the same document.
+		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"file-team":{"display_name":"File team","prices":{"seats":{"amount":"10.00 USD","billing_interval":"30 days","quantity":{"min":1,"max":10}}}},"other":{"display_name":"Original name"}}}`))
+		require.NoError(t, err)
+		receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, receipt.Conflicts)
+		require.Empty(t, receipt.Warnings)
+		prices, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "file-team", Key: "seats"})
+		require.NoError(t, err)
+		require.Len(t, prices.Items, 1)
+		original := prices.Items[0]
+		require.EqualValues(t, 1, original.Version)
+		require.Equal(t, &catalog.Quantity{Min: 1, Max: 10}, original.Quantity)
+		team := document.Products["file-team"]
+		seats := team.Prices["seats"]
+		seats.Quantity = catalog.Value(catalog.Quantity{Min: 1, Max: 50})
+		team.Prices["seats"] = seats
+		document.Products["file-team"] = team
+		other := document.Products["other"]
+		other.DisplayName = catalog.Value("Renamed product")
+		document.Products["other"] = other
+		receipt, err = a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, receipt.Conflicts)
+		require.Empty(t, receipt.Warnings)
+		require.Equal(t, 1, receipt.PricesChanged)
+		require.Equal(t, 1, receipt.ProductsChanged)
+		prices, err = a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "file-team", Key: "seats", Archived: ptr(false)})
+		require.NoError(t, err)
+		require.Len(t, prices.Items, 1)
+		current := prices.Items[0]
+		require.NotEqual(t, original.ID, current.ID)
+		require.EqualValues(t, 2, current.Version)
+		require.Equal(t, &catalog.Quantity{Min: 1, Max: 50}, current.Quantity)
+		archived, err = a.alphaRemote.GetPrice(t.Context(), original.ID)
+		require.NoError(t, err)
+		require.True(t, archived.Archived)
+		require.Equal(t, original.Quantity, archived.Quantity)
+		products, err := a.alphaRemote.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"other"}})
+		require.NoError(t, err)
+		require.Len(t, products.Items, 1)
+		require.Equal(t, "Renamed product", products.Items[0].DisplayName)
+		require.ElementsMatch(t, []billing.CatalogChange{
+			{Object: billing.CatalogObjectPrice, Key: "seats", ProductKey: ptr("file-team"), Fields: []string{"quantity"}, Revision: current.Revision},
+			{Object: billing.CatalogObjectProduct, Key: "other", Fields: []string{"display_name"}, Revision: products.Items[0].Revision},
+		}, receipt.Changes)
+	})
 	t.Run("OR-J05-S15/product-creates-retry-by-content-including-concurrently", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		const path = "/v1/catalog/products"
