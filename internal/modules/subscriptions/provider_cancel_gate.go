@@ -18,9 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// ErrProviderCancelHeld refuses a cancel that needs the provider's billing
-// schedule deleted while destructive provider actions are disarmed: the local
-// row would say canceled while the provider kept charging.
+// ErrProviderCancelHeld refuses a staff cancel that needs the provider's
+// billing schedule deleted while destructive provider actions are disarmed:
+// the local row would say canceled while the provider kept charging.
 var ErrProviderCancelHeld = apperr.New(http.StatusConflict, billing.CodeProviderCancelHeld,
 	"cancellation needs the provider's billing schedule deleted and destructive provider actions are not armed for this merchant; an operator has been notified")
 
@@ -46,11 +46,12 @@ func needsArmedProviderStop(sub *models.Subscription) bool {
 	return NeedsProviderScheduleDelete(sub) || (sub != nil && sub.Rail == models.RailCCBill && sub.CollectionPolicy != models.CollectionPolicyEngine && sub.RailSubscriptionID != "")
 }
 
-// RequireProviderCancelArmed admits a cancel of sub. A cancel that needs a
-// provider schedule stop while the merchant is disarmed raises the held
-// finding and is refused, unless accountDeletion: a deleted account is
+// RequireProviderCancelArmed admits a staff cancel of sub. A cancel that
+// needs a provider schedule stop while the merchant is disarmed raises the
+// held finding and is refused, unless accountDeletion: a deleted account is
 // canceled locally now and its stop waits for the operator's arming
-// (held=true).
+// (held=true). A customer's own cancel is not gated here: only its budget
+// (destructive.UserActionLimiter) refuses it.
 func RequireProviderCancelArmed(ctx context.Context, d *db.DB, sub *models.Subscription, accountDeletion bool) (held bool, err error) {
 	if !needsArmedProviderStop(sub) {
 		return false, nil
@@ -80,7 +81,7 @@ func raiseProviderCancelHeld(ctx context.Context, d *db.DB, sub *models.Subscrip
 	if err != nil {
 		return err
 	}
-	action := "A member asked to cancel a provider-billed subscription while destructive provider actions are disarmed; the provider schedule still bills. Arm destructive actions for this merchant, then cancel again."
+	action := "Staff asked to cancel a provider-billed subscription while destructive provider actions are disarmed; the provider schedule still bills. Arm destructive actions for this merchant, then cancel again."
 	if accountDeletion {
 		action = "An account was deleted; its subscription is canceled locally but the provider schedule still bills until destructive provider actions are armed for this merchant (the held delete then runs)."
 	}
