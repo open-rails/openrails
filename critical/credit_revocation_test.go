@@ -30,7 +30,7 @@ func TestCreditRevocation(t *testing.T) {
 		ticket := gateAdmit(t, g, computeSpend(customer, "held-credit", 450))
 		// The gate reports the open ticket in flight: the credit it may spend
 		// is held.
-		gateFlush(t, g)
+		inFlightReported()
 		reason := billing.RevokeCreditGrantParams{Reason: "Revoke only unused credit"}
 		_, err := w.alpha.RevokeCreditGrant(t.Context(), "", grant.ID, reason)
 		var held *billing.StatusError

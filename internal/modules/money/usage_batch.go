@@ -175,9 +175,21 @@ func (s *MoneyService) capacities(ctx context.Context, q *gen.Queries, merchantI
 	if err != nil {
 		return nil, nil, err
 	}
+	// A lot that lapsed is offered to no view, expired or not: views expire
+	// nothing, so what it holds counts as held until a look expires it.
+	lapsed, err := q.ListLapsedRemaining(ctx, gen.ListLapsedRemainingParams{MerchantID: merchantID, CustomerIds: customers, Currency: currency, AsOf: now})
+	if err != nil {
+		return nil, nil, err
+	}
 	out := make(map[uuid.UUID]AdmissionCapacity, len(rows))
 	for _, r := range rows {
 		out[r.CustomerID] = AdmissionCapacity{Balance: r.Balance, Held: r.Held, BillingMode: r.BillingMode, CreditLimit: r.CreditLimitAmount, OutstandingOwed: r.OutstandingOwed}
+	}
+	for _, l := range lapsed {
+		if c, ok := out[l.CustomerID]; ok {
+			c.Held = addSat(c.Held, l.Remaining)
+			out[l.CustomerID] = c
+		}
 	}
 	return out, unposted, nil
 }

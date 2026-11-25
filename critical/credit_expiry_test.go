@@ -97,7 +97,8 @@ func TestCreditExpiry(t *testing.T) {
 		w.clock.Advance(time.Hour + time.Second)
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
 		require.EqualValues(t, 500, lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit).Remaining, "credit that lapsed is not offered")
-		balance(t, w.alpha, customer, 500, 0, 500)
+		// The ledger holds the lapsed lot until its watch expires it.
+		balance(t, w.alpha, customer, 500, 0, 1500)
 	})
 	t.Run("OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it", func(t *testing.T) {
 		w := newWorld(t)

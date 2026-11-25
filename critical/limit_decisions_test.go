@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/stretchr/testify/require"
 )
 
@@ -107,7 +108,9 @@ func admitOne(t *testing.T, client *openrails.Client, p billing.AdmitParams) dec
 	g := newGate(t, client, openrails.GateDeps{})
 	ticket, err := g.Admit(t.Context(), p)
 	require.NoError(t, err)
-	gateFlush(t, g)
+	if ticket.Allowed() {
+		inFlightReported()
+	}
 	return decided{g, ticket}
 }
 
@@ -123,8 +126,12 @@ func (d decided) capture(t *testing.T, u billing.CaptureUsage) {
 func (d decided) release(t *testing.T) {
 	t.Helper()
 	require.NoError(t, d.Release(t.Context()))
-	gateFlush(t, d.g)
+	inFlightReported()
 }
+
+// inFlightReported waits for an active gate's report to catch up: it reports a
+// ticket once a sync has passed it, and it syncs every interval.
+func inFlightReported() { time.Sleep(2*limits.SyncInterval + 500*time.Millisecond) }
 
 func requireLimitReached(t *testing.T, d decided, limit string) *billing.Refusal {
 	t.Helper()

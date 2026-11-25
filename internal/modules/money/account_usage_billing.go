@@ -386,7 +386,7 @@ func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Querie
 		capacity.BillingMode = BillingModePrepaid
 		return capacity, nil
 	}
-	method, err := s.collectionMethodFor(ctx, q, mid.UUID(), payer.UUID(), currency, usageCollectionEnqueue{initiator: charge.InitiatorMerchant})
+	method, err := s.collectionMethodFor(ctx, q, mid.UUID(), payer.UUID(), currency, usageCollectionEnqueue{initiator: charge.InitiatorMerchant, read: true})
 	if errors.Is(err, ErrDefaultPaymentMethodInvalid) || errors.Is(err, ErrDefaultPaymentMethodRequired) || errors.Is(err, charge.ErrAgreementRequired) {
 		method = nil
 		err = nil
