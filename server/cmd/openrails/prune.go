@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // newPruneCmd wires the prune and its run list:
@@ -42,12 +42,12 @@ func newPruneCmd() *cobra.Command {
 			"dependents, is skipped. An applied prune is reversed in one step with `openrails undo-run --run <id>`.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			cfg := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(c.Context())
 			mid, err := resolveConfiguredCLIMerchant(c.Context(), cfg, merchantSlug)
 			if err != nil {
 				return err
 			}
-			manifest, err := cliMerchantManifest(c.Context(), manifestPath)
+			manifest, err := cliMerchantManifest(manifestPath)
 			if err != nil {
 				return err
 			}
@@ -82,7 +82,7 @@ func newPruneCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List this merchant's destructive runs, newest first",
 		RunE: func(c *cobra.Command, _ []string) error {
-			cfg := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(c.Context())
 			mid, err := resolveConfiguredCLIMerchant(c.Context(), cfg, listMerchant)
 			if err != nil {
 				return err

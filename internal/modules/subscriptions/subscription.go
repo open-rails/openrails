@@ -157,6 +157,11 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 		}
 	}
 
+	// A new row's change is dated by the service clock, as an update's is:
+	// its MRR and risk take their instant from updated_at.
+	if subscription.UpdatedAt.IsZero() {
+		subscription.UpdatedAt = s.now().UTC()
+	}
 	if err := s.subscriptionRepo.Create(ctx, subscription); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "subscriptions_customer_id_product_id_key" {
@@ -279,18 +284,6 @@ func subscriptionSortKey(sort billing.SubscriptionSort) func(*models.Subscriptio
 		return func(sub *models.Subscription) *time.Time { return sub.CanceledAt }
 	}
 	return nil
-}
-
-// CountSubscribers is how many of the merchant's subscriptions match f.
-func (s *SubscriptionService) CountSubscribers(ctx context.Context, f GetSubscriptionsFilters) (int64, error) {
-	filter, err := s.filters(ctx, f)
-	if db.IsNotFound(err) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return s.subscriptionRepo.Count(ctx, filter)
 }
 
 func (s *SubscriptionService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {

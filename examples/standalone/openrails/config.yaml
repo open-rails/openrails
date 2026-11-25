@@ -1,11 +1,10 @@
 # The OpenRails server's configuration: `openrails run-server --config
-# config.yaml`. Every key also reads from the environment, its path
-# upper-cased and joined by "_" (db.url is DB_URL); the environment wins. This
-# file is the local stack in ../compose.yaml; README.md says what production
-# changes.
+# config.yaml`. Every key but a policy section (rate_limits and the action
+# limits) also reads from the environment, its path upper-cased and joined by
+# "_" (database.url is DATABASE_URL); the environment wins. This file is the local stack in ../compose.yaml; README.md says what
+# production changes.
 
 # guide:standalone-config
-provider_write_mode: full # full | limited | readonly: how much it may do at the PSPs
 # The merchant's configuration, its PSPs and their keys, is merchant.yaml: read
 # at boot and read-only. To change it in the console instead, name a Vault KV
 # mount (vault.kv_mount) and keep only the merchant's name in merchant.yaml.
@@ -14,7 +13,7 @@ host: 0.0.0.0
 port: 3053
 public_billing_base_url: http://localhost:3053 # where browsers and PSPs reach this server
 
-db:
+database:
   url: postgres://openrails:openrails@postgres:5432/openrails?sslmode=disable
 redis: # optional for one server; replicas share rate limits and spent proofs through it
   addr: redis:6379
@@ -23,14 +22,11 @@ redis: # optional for one server; replicas share rate limits and spent proofs th
 # resource server it is. Its sign-in stays off: people sign in at the app,
 # which merchant.yaml declares the merchant's trusted issuer.
 auth:
-  # Stable example platform/operator directory, independent of the app's own.
-  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
   token:
     issuer: http://localhost:3053
     allow_private_network_jwks: true # local only: the app's keys at http://localhost:8080
   keys:
     path: /vault/auth
-    allow_ephemeral_dev_keys: true   # local only: generates its key under keys.path
   http:
     direct_peer_ip: true             # clients connect directly; behind a proxy, set trusted_proxies
   registration:

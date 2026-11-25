@@ -1,9 +1,9 @@
-// Package ccbillmock is a stateful CCBill DataLink for tests and disposable
-// sandbox stacks: the ACTIVEMEMBERS roster, REBILL and CANCELLATION
+// Package ccbillmock is a stateful CCBill DataLink for tests and test
+// fixtures: the ACTIVEMEMBERS roster, REBILL and CANCELLATION
 // transaction exports and the subscription-management (SMS) status and
 // cancel actions. Point
-// Config.ProviderSandbox.CCBillDataLinkURL at URL. Only tests and sandbox
-// commands may import it.
+// Deps.ProviderEndpoints.CCBillDataLinkURL at URL. Only tests and test
+// fixtures may import it.
 //
 // Times are written as CCBill's DataLink guide writes them: a roster row's
 // transaction timestamp as YYYYMMDDHHMMSS, a REBILL row's and every rebill,
@@ -112,7 +112,7 @@ func New() *Mock {
 	return m
 }
 
-// URL is the loopback root: Config.ProviderSandbox.CCBillDataLinkURL.
+// URL is the loopback root: Deps.ProviderEndpoints.CCBillDataLinkURL.
 func (m *Mock) URL() string { return m.server.URL }
 
 // Close stops the listener.

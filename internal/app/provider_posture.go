@@ -38,9 +38,11 @@ import (
 // it (followPSPPosture), or at its first mutation.
 //
 // Every NMI account proves its environment (SEC-33): an account left in test
-// mode approves without moving money, so it never arms as live.
+// mode approves without moving money, so it never arms as live. A merchant
+// whose write posture is readonly is skipped: it writes nothing, and once
+// armed each PSP is verified before its first write.
 func (r *Runtime) StartProviderPosture(declared ...billing.MerchantID) {
-	if r == nil || r.Config == nil || config.IsProviderReadOnly(r.Config) || r.DB == nil || r.Merchants == nil {
+	if r == nil || r.Config == nil || r.DB == nil || r.Merchants == nil {
 		if r != nil {
 			r.postureWait.Store(nil)
 		}
@@ -87,6 +89,9 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 			continue
 		}
 		seen[mid] = true
+		if r.Posture().Posture(merchant.WithID(ctx, mid), mid.UUID()).ReadOnly() {
+			continue
+		}
 		var ids []uuid.UUID
 		scopes, err := r.Merchants.LivePSPScopes(merchant.WithID(ctx, mid), mid)
 		for _, scope := range scopes {
@@ -229,9 +234,10 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 // followPSPPosture keeps the verified PSPs in step with a merchant's
 // configuration as this replica loads it: a PSP no longer live is forgotten,
 // and one whose document changed is verified again, so purchase on every
-// replica serves the current credentials without a restart.
+// replica serves the current credentials without a restart. A readonly
+// merchant's changed PSPs are not verified (StartProviderPosture).
 func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current merchantdocs.Set) {
-	if r == nil || r.Config == nil || config.IsProviderReadOnly(r.Config) || r.DB == nil || r.Merchants == nil {
+	if r == nil || r.Config == nil || r.DB == nil || r.Merchants == nil {
 		return
 	}
 	changed := map[string]bool{}
@@ -268,6 +274,9 @@ func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current mer
 			}
 		}
 		r.providerPosture.ForgetPSPs(mid.UUID(), func(id uuid.UUID) bool { return unchanged[id] })
+		if r.Posture().Posture(ctx, mid.UUID()).ReadOnly() {
+			return
+		}
 		for id := range verify {
 			vctx, cancel := context.WithTimeout(ctx, postureCheckTimeout)
 			r.verifyPSPPosture(vctx, mid, id)

@@ -12,6 +12,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -102,17 +103,17 @@ func (a *Admissions) AdmitErasure(ctx context.Context, c Command) (Action, error
 				return err
 			}
 		}
-		args := DrainErasuresArgs{MerchantID: c.MerchantID}
 		if !start {
-			return a.db.QueueRiverJobNowTx(ctx, tx, args, nil)
+			return QueueDrain(ctx, a.db, tx, c.MerchantID)
 		}
 		if row, err = q.StartDestructiveAction(ctx, gen.StartDestructiveActionParams{MerchantID: c.MerchantID, ID: id, Now: now}); err != nil {
 			return err
 		}
 		out = actionOf(row)
-		later := args.InsertOpts()
+		recovery := DrainErasuresArgs{MerchantID: c.MerchantID, Recovers: id.String()}
+		later := recovery.InsertOpts()
 		later.ScheduledAt = now.Add(StuckErasure + time.Minute)
-		_, err = a.db.InsertRiverJobTx(ctx, tx, args, &later)
+		_, err = a.db.InsertRiverJobTx(ctx, tx, recovery, &later)
 		return err
 	})
 	return out, err
@@ -251,16 +252,49 @@ func (a *Admissions) StartErasures(ctx context.Context, mid uuid.UUID, limit int
 const DrainErasuresKind = "openrails.contact_erasures"
 
 // DrainErasuresArgs is the due work that drains a merchant's erasure queue:
-// queued when an erasure waits and when its scope's hold is cleared.
+// queued when an erasure waits and when its scope's hold is cleared
+// (QueueDrain), and for each started erasure when it would be stuck.
 type DrainErasuresArgs struct {
-	MerchantID uuid.UUID `json:"merchant_id"`
+	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
+	// Follows is the running drain this one was queued behind: that drain
+	// may have read the queue before the erasure now waiting.
+	Follows int64 `json:"follows,omitempty" river:"unique"`
+	// Recovers is the started erasure this drain runs again should its run
+	// not finish; it leaves waiting erasures to the other drains.
+	Recovers string `json:"recovers,omitempty" river:"unique"`
 }
 
 // Kind names the job.
 func (DrainErasuresArgs) Kind() string { return DrainErasuresKind }
 
-// InsertOpts keeps one waiting drain per merchant.
+// InsertOpts keeps one unfinished drain per args: River's unique states but
+// completed, so a finished drain never blocks the next.
 func (DrainErasuresArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "billing", MaxAttempts: 10, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{
-		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateScheduled}}}
+		rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateRunning, rivertype.JobStateScheduled}}}
+}
+
+// maxFollows bounds the drains queued behind running ones.
+const maxFollows = 4
+
+// QueueDrain queues the merchant's erasure drain to run now, in tx. One
+// waiting for later is brought forward; one running may have read the queue
+// before tx commits, so another is queued to follow it.
+func QueueDrain(ctx context.Context, d *db.DB, tx pgx.Tx, mid uuid.UUID) error {
+	args := DrainErasuresArgs{MerchantID: mid}
+	for range maxFollows {
+		res, err := d.InsertRiverJobTx(ctx, tx, args, nil)
+		if err != nil || res == nil || !res.UniqueSkippedAsDuplicate || res.Job == nil {
+			return err
+		}
+		switch res.Job.State {
+		case rivertype.JobStateRunning:
+			args.Follows = res.Job.ID
+		case rivertype.JobStateScheduled, rivertype.JobStateRetryable:
+			return d.RetryRiverJobTx(ctx, tx, res.Job.ID)
+		default:
+			return nil
+		}
+	}
+	return fmt.Errorf("queue the erasure drain: %d drains of merchant %s are running", maxFollows, mid)
 }

@@ -44,7 +44,6 @@ The example's server files are a working local configuration. `config.yaml` is
 the process: listeners, database, Redis, the server's AuthKit and route groups.
 
 ```yaml guide:standalone-config
-provider_write_mode: full # full | limited | readonly: how much it may do at the PSPs
 # The merchant's configuration, its PSPs and their keys, is merchant.yaml: read
 # at boot and read-only. To change it in the console instead, name a Vault KV
 # mount (vault.kv_mount) and keep only the merchant's name in merchant.yaml.
@@ -53,7 +52,7 @@ host: 0.0.0.0
 port: 3053
 public_billing_base_url: http://localhost:3053 # where browsers and PSPs reach this server
 
-db:
+database:
   url: postgres://openrails:openrails@postgres:5432/openrails?sslmode=disable
 redis: # optional for one server; replicas share rate limits and spent proofs through it
   addr: redis:6379
@@ -62,14 +61,11 @@ redis: # optional for one server; replicas share rate limits and spent proofs th
 # resource server it is. Its sign-in stays off: people sign in at the app,
 # which merchant.yaml declares the merchant's trusted issuer.
 auth:
-  # Stable example platform/operator directory, independent of the app's own.
-  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
   token:
     issuer: http://localhost:3053
     allow_private_network_jwks: true # local only: the app's keys at http://localhost:8080
   keys:
     path: /vault/auth
-    allow_ephemeral_dev_keys: true   # local only: generates its key under keys.path
   http:
     direct_peer_ip: true             # clients connect directly; behind a proxy, set trusted_proxies
   registration:
@@ -143,37 +139,39 @@ openrails catalog apply /etc/openrails/catalog.yaml --merchant your-merchant
 
 In production drop every `allow_*` key, use https for the issuer and resource,
 mount a real signing key ([secrets](#secrets)) and set `trusted_proxies` behind a
-proxy. Boot refuses an unset `provider_write_mode`, an unknown key and a retired
-one (naming its replacement).
+proxy. Boot refuses an unknown key and a retired one (naming its replacement).
 
 ## Configuration sources
 
-Each key of `config.yaml` can come from four places; the later wins:
+Each key of `config.yaml` but a policy section ([below](#configuration-reference)) can come from three places; the later wins:
 
 1. `config.yaml` (`--config`/`-c`, else `OPENRAILS_CONFIG`, else `config.yaml`
    in the working directory or `config/`).
 2. Mounted secret files: a file named like the key's environment variable under
    `/vault/secrets` (`VAULT_SECRETS_PATH` names another directory). Vault Agent,
    a Kubernetes Secret or CSI renders them.
-3. The environment: the key's path upper-cased and joined by `_` (`db.url` is
-   `DB_URL`, `email_smtp.password` is `EMAIL_SMTP_PASSWORD`). A list is
-   comma-separated or a JSON array; a section may be a JSON object. A `.env` in
-   the working directory is loaded too, and the server logs that it did.
-4. Flags: `--provider-write-mode` on every command, `--merchant-manifest` on
-   `run-server` and `run-worker`.
+3. The environment: the key's path upper-cased and joined by `_`
+   (`database.url` is `DATABASE_URL`, `email_smtp.password` is
+   `EMAIL_SMTP_PASSWORD`). A list is comma-separated or a JSON array; a section
+   may be a JSON object. A `.env` in the working directory is loaded too, and
+   the server logs that it did.
 
 Exceptions to the mechanical name: `VAULT_ADDR` is `vault.address`;
 `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and
 `AUTHKIT_PUBLIC_KEYS` are `signing_key.*`; `AUTH_<PATH>` is `auth.<path>` by
 AuthKit's keys (`AUTH_TOKEN_ISSUER`); `NAMING_FORMER_NAMES_MODE` and
-`NAMING_FORMER_NAMES_DURATION` are `naming.former_names.*`. Inside a section a
-key matches its field name with or without underscores (`db.sql_trace`).
+`NAMING_FORMER_NAMES_DURATION` are `naming.former_names.*`. A key is spelled
+exactly as here.
+
+The file is two Go types: `server.Config`, whose `Engine` is `openrails.Config` with its keys at the top level, and the keys only the binary reads (the connections it opens, `logger`, `signing_key`). A key neither reads refuses boot. Embedded, decode the same keys into `openrails.Config` (its `yaml` tags).
+
+The environment holds secrets and per-environment facts (URLs, hosts, ports, credentials); `config.yaml` holds policy. `rate_limits`, `user_action_rate_limit`, `destructive_action_limits` and `auth.http.rate_limits` are set in `config.yaml` alone: a variable or secret file naming one refuses boot.
 
 Three inputs configure a deployment, each on its own lifecycle:
 
 | Input | Owns | Read |
 |---|---|---|
-| `config.yaml` and its sources | the process: database, Redis, write mode, Vault, route groups, the server's AuthKit | at boot |
+| `config.yaml` and its sources | the process: database, Redis, Vault, route groups, the server's AuthKit | at boot |
 | the merchant manifest, or Vault | each merchant: name, settings, alert webhooks, PSPs and their secrets | at every boot (file), or live (Vault) |
 | catalog documents | products, prices, entitlements, limits, provider links | only when an operator applies one ([catalog](client.md#catalog)) |
 
@@ -182,27 +180,24 @@ declared environment does ([merchant configuration](client.md#merchant-configura
 
 ## Configuration reference
 
-[`config.example.yaml`](../config.example.yaml) is an annotated file. Durations
-are Go durations (`90s`, `24h`). Every key below is read at boot. The top-level
-keys: `host`, `port`, `private_port`, `drain_delay`, `shutdown_timeout`,
-`logger`, `provider_write_mode`, `engine_admission_hold`,
-`usage_billing_enabled`, `event_retention`, `webhook_secret_overlap`,
-`merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
-`checkout_origin`, `return_origins`, `trusted_proxies`,
-`cloudflare_proxies`, `db`, `database`, `clickhouse`, `redis`,
-`auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`,
-`email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`,
-`rate_limits_disabled`, `captcha`, `user_action_rate_limit`,
-`destructive_action_limits`, `llm` and `provider_sandbox`.
+[`config.example.yaml`](../config.example.yaml) is an annotated file;
+[`.env.example`](../.env.example) lists every environment variable with its
+default and [`merchant.example.yaml`](../merchant.example.yaml) every key of a
+merchant's document, both generated from the configuration types (`go run
+./internal/examplegen -write` in `server/`; `scripts/check.sh guards` refuses
+them stale). Durations
+are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
+run a server on this machine against the repository's Compose dependencies
+(`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
+signing keys; none relaxes a protection, and a deployment that leaves one unset
+fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit` and `destructive_action_limits`.
 
 **Listener and lifecycle**
 
 | Key | Default | Meaning |
 |---|---|---|
 | `host`, `port` | `0.0.0.0`, `3053` | the public listener: API, console, payment page, webhooks |
-| `private_port` | unset | the private listener for `/metrics`; unset serves none |
-| `drain_delay` | `5s` | on SIGTERM readiness fails at once and serving continues this long |
-| `shutdown_timeout` | `20s` | then in-flight requests and workers finish within this |
+| `metrics_port` | unset | the metrics listener: the operator's Prometheus `GET /metrics` (dependency up/down, abuse-state fallbacks, per-job-kind health), on its own port so it is never public; unset serves none, and the chart sets 9090. Not the merchant dashboard's business metrics, which are the `/v1/metrics` API on `port` |
 | `logger.level` | `info` | `debug`, `info`, `warn` or `error` |
 | `logger.format` | `json` | `json` or `text`; logs go to stderr |
 
@@ -210,12 +205,7 @@ keys: `host`, `port`, `private_port`, `drain_delay`, `shutdown_timeout`,
 
 | Key | Default | Meaning |
 |---|---|---|
-| `provider_write_mode` | required | `full`, `limited` or `readonly` ([write safety](#write-safety-and-the-kill-switch)) |
 | `engine_admission_hold` | `false` | pause admission and first submission of new engine payments; submitted ones are still verified |
-| `usage_billing_enabled` | `false` | turn on automatic usage orders on credit ([usage billing](client.md)) |
-| `event_retention` | `2160h` | how long the event log keeps facts, whatever readers have read |
-| `webhook_secret_overlap` | `24h` | how long a rotated-out webhook signing secret keeps verifying, at most `168h` |
-| `merchant_manifest_overlays` | none | secret overlays merged over the merchant manifest ([the merchant manifest](#the-merchant-manifest)) |
 | `route_groups.admin` | off | customer support: `/v1/admin` |
 | `route_groups.catalog` | off | catalog reads and edits: `/v1/catalog` |
 | `route_groups.merchant_config` | off | PSPs, settings, findings, imports and archives: `/v1/merchant` |
@@ -227,24 +217,24 @@ the deployment does not serve answers `404 route_not_found`.
 
 **URLs and origins**
 
-| Key | Meaning |
-|---|---|
-| `public_billing_base_url` | where browsers and PSPs reach the server, without `/v1`. Provider callbacks and billing links are built on it; Stripe webhook registration needs it public https |
-| `checkout_origin` | the payment page's own origin ([the payment page](#the-payment-page)); unset issues no pay URLs |
-| `return_origins` | exact origins a purchase's success, cancel and billing-portal return URLs may name; empty allows `public_billing_base_url`'s origin only |
-| `trusted_proxies` | CIDRs whose `X-Forwarded-For` is walked; empty trusts none ([proxies](#tls-proxies-cors-and-webhooks)) |
-| `cloudflare_proxies` | Cloudflare's ranges where Cloudflare fronts the origin: trusted like `trusted_proxies`, and the only peers whose `CF-Connecting-IP` AuthKit takes |
+| Key | Default | Meaning |
+|---|---|---|
+| `public_billing_base_url` | `http://localhost:3053` (the port's) | where browsers and PSPs reach the server, without `/v1`. Provider callbacks and billing links are built on it; Stripe webhook registration needs it public https |
+| `checkout_origin` | none | needed only to serve OpenRails' own hosted pay page: its separate origin ([the payment page](#the-payment-page)). Leave it unset with the embedded checkout or your own card form; pay URLs then answer `pay_url_unavailable` |
+| `trusted_proxies` | none | CIDRs of your own proxies, whose `X-Forwarded-For` is walked; Cloudflare's published ranges are trusted too ([proxies](#tls-proxies-cors-and-webhooks)) |
+
+A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the billing origin, the origin of the merchant's issuer, or one of its `checkout.embed_origins`, so one merchant's checkout never returns to another's site.
 
 **Database**
 
 | Key | Default | Meaning |
 |---|---|---|
-| `db.url` | — | the connection string (`DB_URL`); overrides the parts below |
-| `db.host`, `db.port`, `db.database`, `db.username`, `db.password` | — | the parts, when `db.url` is unset; all four of host, port, database and username or boot refuses |
-| `db.sslmode` | `verify-full`; `require` for a loopback host or Unix socket | libpq's `sslmode` for the parts |
-| `db.sslrootcert` | the system roots | PEM file of the CAs that verify the database's certificate, for the parts |
-| `db.sql_trace` | `false` | log every query at debug level |
-| `db.lease_conns` | `4` | the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls); count it in `max_connections` |
+| `database.url` | `postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable` when no connection key is set | the connection string (`DATABASE_URL`); overrides the parts below. The default is Compose's Postgres: a deploy that forgets its database fails to connect |
+| `database.host`, `database.port`, `database.name`, `database.username`, `database.password` | none | the parts, when `database.url` is unset; all four of host, port, name and username or boot refuses |
+| `database.sslmode` | `verify-full`; `require` for a loopback host or Unix socket | libpq's `sslmode` for the parts |
+| `database.sslrootcert` | the system roots | PEM file of the CAs that verify the database's certificate, for the parts |
+| `database.sql_trace` | `false` | log every query at debug level |
+| `database.lease_conns` | `4` | the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls); count it in `max_connections` |
 | `database.schema` | `billing` | every OpenRails table, function and type; a plain identifier |
 | `database.river_schema` | the schema plus `_river` | OpenRails' River jobs |
 | `database.skip_migrations` | `false` | only check the migration ledger at boot; run `openrails migrate up` yourself |
@@ -255,11 +245,11 @@ own schema (`auth.database.schema`, default `profiles`).
 
 **Event store**
 
-| Key | Meaning |
-|---|---|
-| `clickhouse.addr` | `host:port` of ClickHouse's native protocol. Set, the server waits for it at boot like the database; unset, usage is off |
-| `clickhouse.database` | the event store's database, created or upgraded at boot; default `openrails` |
-| `clickhouse.username`, `clickhouse.password` | the user (default `default`) and its password |
+| Key | Default | Meaning |
+|---|---|---|
+| `clickhouse.addr` | none | `host:port` of ClickHouse's native protocol. Set, the server waits for it at boot like the database; unset, usage is off |
+| `clickhouse.database` | `openrails` | the event store's database, created or upgraded at boot |
+| `clickhouse.username`, `clickhouse.password` | `default`, none | the user and its password |
 
 **Redis**
 
@@ -279,32 +269,27 @@ costs sharing, not service ([scaling](#scaling-and-redis)).
 `auth` is AuthKit's own configuration in AuthKit's keys; an unknown key refuses
 boot. The ones a deployment sets:
 
-| Key | Meaning |
-|---|---|
-| `auth.default_tenant_id` | the server's operator account directory: a UUID generated once for the deployment and never changed ([the account directory](#the-account-directory)) |
-| `auth.token.issuer` | required; the server's own issuer, https (http only on a loopback host). No billing URL stands in for it |
-| `auth.token.refresh_token_duration` | how long a session lasts from its sign-in: 30 days when unset; negative lasts until revoked |
-| `auth.token.allow_private_network_jwks` | fetch a trusted issuer's keys from a private address (local federation only) |
-| `auth.keys.path` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
-| `auth.keys.allow_ephemeral_dev_keys` | generate keys under `auth.keys.path`; one instance, local only |
-| `auth.keys.verify_only` | verify tokens, mint none |
-| `auth.resource.id` | the resource trusted issuers mint tokens for: their `aud` (RFC 8707). Turns trusted-issuer tokens on |
-| `auth.resource.public_url` | the public origin DPoP proofs point at |
-| `auth.registration.native_user_mode` | local enrollment: `invite_only` by default, `closed` turns it off; `open` is refused unless a hosted product supplies `server.Config.MerchantCreation` |
-| `auth.registration.allow_missing_senders` | run without an email or SMS sender |
-| `auth.sign_in.dpop` | `optional` or `required` for the server's own users |
-| `auth.http.direct_peer_ip` | optional: AuthKit's client IP follows `trusted_proxies` and `cloudflare_proxies`, the socket peer when both are empty; `true` beside either refuses boot |
-| `auth.http.rate_limits` | AuthKit's own buckets |
-| `auth.database.schema` | AuthKit's tables, default `profiles` |
-| `signing_key.active_key_id`, `signing_key.active_private_key_pem`, `signing_key.public_keys` | an inline signing key from `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` (a JSON object of further PEM keys by kid); fixed until restart, where `auth.keys.path` rotates live |
-| `local_sign_in` | serve sign-in to the server's own accounts; off, people sign in at a trusted issuer |
-| `naming.enabled`, `naming.rename_interval` | merchant renames on (default) and how often one merchant may rename (`72h`; `0s` at once) |
-| `naming.former_names.mode`, `naming.former_names.duration` | how long a former name forwards: `finite` for the duration (`2160h`), `forever`, or `immediate` |
+| Key | Default | Meaning |
+|---|---|---|
+| `auth.token.issuer` | `public_billing_base_url` | the server's own issuer, https (http only on a loopback host) |
+| `auth.token.refresh_token_duration` | `720h` | how long a session lasts from its sign-in; negative lasts until revoked |
+| `auth.token.allow_private_network_jwks` | `false` | fetch a trusted issuer's keys from a private address (local federation only) |
+| `auth.keys.path` | `/vault/auth`; for a loopback issuer without keys, a per-issuer directory where AuthKit generates development keys | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
+| `auth.keys.verify_only` | `false` | verify tokens, mint none |
+| `auth.resource.id` | `public_billing_base_url` when https (http on a loopback host) | the resource trusted issuers mint tokens for: their `aud` (RFC 8707). Turns trusted-issuer tokens on |
+| `auth.resource.public_url` | none | the public origin DPoP proofs point at |
+| `auth.registration.native_user_mode` | `closed`; `invite_only` with `local_sign_in` | local enrollment; `open` is refused unless a hosted product supplies `server.Config.MerchantCreation` |
+| `auth.registration.allow_missing_senders` | `false` | run without an email or SMS sender |
+| `auth.sign_in.dpop` | `optional` | `optional` or `required` for the server's own users |
+| `auth.http.direct_peer_ip` | follows `trusted_proxies` | AuthKit's client IP follows `trusted_proxies` and Cloudflare's published ranges; `true` asserts there are no `trusted_proxies`, and beside them refuses boot |
+| `auth.http.rate_limits` | AuthKit's | AuthKit's own buckets |
+| `auth.database.schema` | `profiles` | AuthKit's tables |
+| `signing_key.active_key_id`, `signing_key.active_private_key_pem`, `signing_key.public_keys` | none | an inline signing key from `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` (a JSON object of further PEM keys by kid); fixed until restart, where `auth.keys.path` rotates live |
+| `local_sign_in` | `false` | serve sign-in to the server's own accounts; off, people sign in at a trusted issuer |
+| `naming.enabled`, `naming.rename_interval` | `true`, `72h` | merchant renames on, and how often one merchant may rename (`0s` at once) |
+| `naming.former_names.mode`, `naming.former_names.duration` | `finite`, `2160h` | how long a former name forwards: `finite` for the duration, `forever`, or `immediate` |
 
-The server fixes the rest: merchant roles, the API-key prefix, the scopes
-`openrails:merchant` and `openrails:self`, AuthKit's River schema and mount. The
-root owner needs a second factor, so boot refuses without a 16, 24 or 32-byte
-`totp.key` or an email or SMS sender.
+The server fixes the rest: merchant roles, the API-key prefix, the scopes `openrails:merchant` and `openrails:self`, AuthKit's River schema and mount. The root owner needs a second factor: when none can be enrolled (no 16, 24 or 32-byte `totp.key` and no email or SMS sender), the server still starts, logs why, and refuses the sign-ins that need one.
 
 **The admin console**
 
@@ -330,8 +315,8 @@ root owner needs a second factor, so boot refuses without a 16, 24 or 32-byte
 |---|---|
 | `vault.address` | the server (`VAULT_ADDR`); declaring any `vault` key connects |
 | `vault.kv_mount` | a KV v2 mount: Vault holds merchant configuration ([Vault](#vault)) |
-| `vault.scope_prefix` | the path under the mount, default `openrails` |
-| `vault.transit_mount` | the Transit mount for Solana crankers, default `transit` |
+| `vault.scope_prefix` | the path under the mount: `openrails` by default |
+| `vault.transit_mount` | the Transit mount for Solana crankers: `transit` by default |
 | `vault.namespace` | a Vault Enterprise namespace |
 | `vault.auth_method` | `kubernetes`, `approle` or `token` |
 | `vault.k8s_role` | the kubernetes auth role |
@@ -349,51 +334,32 @@ root owner needs a second factor, so boot refuses without a 16, 24 or 32-byte
 
 | Key | Default | Meaning |
 |---|---|---|
-| `rate_limits.<bucket>.requests_per_minute` | see [abuse limits](#abuse-limits) | per-minute limits of the `purchase`, `subscribe`, `payment`, `webhook` and `catalog-ask` buckets; a bucket left out is unlimited, an unknown key is reported and ignored, 0 or less means 60 |
-| `rate_limits_disabled` | `false` | make the middleware a passthrough where your gateway limits instead |
+| `rate_limits.purchase.requests_per_minute` | `10` | buying: checkout and paying an order ([abuse limits](#abuse-limits)) |
+| `rate_limits.payment.requests_per_minute` | `40` | a customer's payment-method routes |
+| `rate_limits.subscribe.requests_per_minute` | `20` | a customer's subscription changes |
+| `rate_limits.webhook.requests_per_minute` | `1200` | provider callbacks |
 | `captcha.provider`, `captcha.site_key`, `captcha.secret_key` | `turnstile` | both keys set turn captcha on; `turnstile`, `recaptcha-v3` or `hcaptcha` |
-| `user_action_rate_limit.minimum_customers_per_hour`, `.paid_customers_per_hourly_customer` | 5, 400 | the merchant-wide hourly budget for customer cancellations and card removals |
-| `user_action_rate_limit.minimum_customers_per_day`, `.paid_customers_per_daily_customer` | 10, 100 | the daily one |
-| `destructive_action_limits.actor_per_hour`, `.actor_per_day` | 5, 15 | staff destructive actions per actor ([destructive holds](#destructive-holds)) |
-| `destructive_action_limits.merchant_per_hour`, `.merchant_per_day` | 15, 25 | per merchant, floors that rise with active customers |
-| `destructive_action_limits.deployment_per_hour`, `.deployment_per_day` | 50, 100 | per deployment, likewise |
-| `destructive_action_limits.erasure_per_hour`, `.erasure_per_day` | 100, 1000 | contact erasures over OpenRails' own SCIM routes per merchant, floors that rise with its directory; past them an erasure waits ([client](client.md#customers)) |
+| `user_action_rate_limit.minimum_customers_per_hour`, `user_action_rate_limit.paid_customers_per_hourly_customer` | `5`, `400` | the merchant-wide hourly budget for customer cancellations and card removals |
+| `user_action_rate_limit.minimum_customers_per_day`, `user_action_rate_limit.paid_customers_per_daily_customer` | `10`, `100` | the daily one |
+| `destructive_action_limits.actor_per_hour`, `destructive_action_limits.actor_per_day` | `5`, `15` | staff destructive actions per actor ([destructive holds](#destructive-holds)) |
+| `destructive_action_limits.merchant_per_hour`, `destructive_action_limits.merchant_per_day` | `15`, `25` | per merchant, floors that rise with active customers |
+| `destructive_action_limits.deployment_per_hour`, `destructive_action_limits.deployment_per_day` | `50`, `100` | per deployment, likewise |
+| `destructive_action_limits.erasure_per_hour`, `destructive_action_limits.erasure_per_day` | `100`, `1000` | contact erasures over OpenRails' own SCIM routes per merchant, floors that rise with its directory; past them an erasure waits ([client](client.md#customers)) |
 
-The example file sets the shipped buckets explicitly:
+A bucket set to 0 is unlimited: a deployment whose gateway limits sets every bucket to 0. Captcha is on only with its keys. The example file sets the shipped limits explicitly:
 
 ```yaml
 rate_limits:
-  subscribe: {requests_per_minute: 20}
   purchase: {requests_per_minute: 10}
-  webhook: {requests_per_minute: 1200}
   payment: {requests_per_minute: 40}
+  subscribe: {requests_per_minute: 20}
+  webhook: {requests_per_minute: 1200}
 user_action_rate_limit:
   minimum_customers_per_hour: 5
   paid_customers_per_hourly_customer: 400
   minimum_customers_per_day: 10
   paid_customers_per_daily_customer: 100
 ```
-
-**LLM**
-
-| Key | Meaning |
-|---|---|
-| `llm.provider`, `llm.model` | `anthropic` (default) or `openai`, and a model; each provider has a default |
-| `llm.api_key` | a secret (`LLM_API_KEY`); without it the catalog copilot is not mounted |
-| `llm.base_url` | an endpoint override; with `openai`, any compatible backend, including `/v1` |
-| `llm.catalog_copilot_enabled` | consent to send aggregate catalog and subscriber counts to the provider for `POST /v1/console/catalog/ask` |
-| `llm.catalog_drafting_enabled` | separate consent for the copilot's draft tools |
-
-Metrics and dashboards use no LLM.
-
-**Provider sandbox (tests only)**
-
-| Key | Meaning |
-|---|---|
-| `provider_sandbox.nmi_gateway_url`, `.stripe_api_url`, `.solana_rpc_url`, `.ccbill_datalink_url` | loopback fakes the rails talk to instead of the providers. The host must be a loopback IP literal and every PSP non-live; anything else refuses boot |
-| `provider_sandbox.ccbill_webhook_sources` | extra CCBill webhook source CIDRs, honored only for a webhook naming a sandbox CCBill account; `/0` is refused |
-
-`openrails sandbox nmi-gateway` serves such an NMI fake.
 
 ## The merchant manifest
 
@@ -407,7 +373,7 @@ group holding its owner role ([trusted issuers](#trusted-issuers)).
 (an explicit path must exist), else `/etc/openrails/merchants.yaml` when present;
 none boots control-plane-only. At boot:
 
-1. The manifest and its overlays merge (later wins) and parse strictly: unknown
+1. The manifest parses strictly: unknown
    fields, retired keys (`accounts`, `rail_merchant_accounts`,
    `provider_accounts`, which name their rename), several documents, aliases,
    anchors, merge keys and tags refuse boot, and so do secrets for an undeclared
@@ -427,22 +393,7 @@ metadata by revision where Vault holds it; `push-merchant-config --insert`
 creates the merchants a manifest names; `dump-merchant-config --slug` prints a
 merchant's configuration in the manifest's shape, without credentials.
 
-**Secret overlays.** Keep secret values out of the committed manifest. Render
-them as YAML in the manifest's shape, holding only `secrets` blocks, and list the
-files in `merchant_manifest_overlays` (`MERCHANT_MANIFEST_OVERLAYS`,
-comma-separated). An overlay that changes anything but secret values is refused:
-the manifest stays the authority for identities, account ids and settings.
-
-```yaml
-# /vault/secrets/merchants.yaml
-merchants:
-  onlydemo:
-    psps:
-      mobius:
-        secrets: {security_key: replace-me, webhook_signing_secret: replace-me}
-```
-
-To rotate a credential, update the secret source, re-render and restart.
+**Secrets.** The manifest is one file. Keep PSP secrets out of a committed copy: put them in Vault (`vault.kv_mount`), or keep the whole manifest, secrets included, in a secret store and mount the file from it (the chart's `secrets.merchantManifest`). To rotate a credential in the file, update the secret and restart.
 
 ## Secrets
 
@@ -451,15 +402,14 @@ mounted file or the environment, named like its key's variable.
 
 | Secret | Where it goes |
 |---|---|
-| database URL | `DB_URL` (with `sslmode=verify-full` across a network) |
+| database URL | `DATABASE_URL` (with `sslmode=verify-full` across a network) |
 | Redis | `REDIS_URL` or `REDIS_PASSWORD`, `REDIS_CA_CERT` |
 | ClickHouse | `CLICKHOUSE_PASSWORD` |
 | SMTP | `EMAIL_SMTP_PASSWORD` |
 | Vault | `VAULT_TOKEN`, or `VAULT_SECRET_ID` re-read from `vault.secrets_path` |
-| LLM | `LLM_API_KEY` |
 | Solana local keypairs | `SOLANA_CRANKERS` |
 | AuthKit's signing key and TOTP key | `keys.json` and `totp.key` under `auth.keys.path`, or the `AUTHKIT_*` variables |
-| PSP and custodian credentials | Vault, or a merchant manifest overlay |
+| PSP and custodian credentials | Vault, or the merchant manifest mounted from a secret |
 
 `keys.json` is `{active_key_id, active_private_key_pem, public_keys}`; the file
 is watched, so rotate by adding the new key as active, moving the old one into
@@ -588,14 +538,11 @@ the credential to one merchant and checks the route's permission; nothing in a
 request selects the merchant, and a valid credential bound to none is
 `403 merchant_unresolved` ([credentials](client.md#credentials)).
 
+Who signs in, and how, in each mode, with the flows step by step: [authentication](authentication.md).
+
 ### The account directory
 
-`auth.default_tenant_id` (`AUTH_DEFAULT_TENANT_ID`) is the server's own operator
-account directory: generate a UUID once for the deployment, keep it in
-configuration and never change it. It is never inferred. `openrails migrate up`
-migrates OpenRails and AuthKit and passes it as AuthKit's adoption target for
-existing accounts, keeping their ids: review that mapping before migrating a
-populated database.
+The server's AuthKit is single-tenant: `openrails migrate up`, or the first boot, creates its one operator account directory on a fresh database and adopts the one an existing database holds; a database with several refuses to start. Nothing names it in configuration.
 
 ### Trusted issuers
 
@@ -611,9 +558,7 @@ its scopes:
 | `openrails:merchant` | merchant permissions, within the application's role: your backend |
 | `openrails:self` | none: a customer's own billing at `/v1/me` |
 
-When your app runs AuthKit, it is the authorization server: it registers the
-server as a resource, a public client for the browser's token exchange and a
-confidential client for the backend's client credentials. In the example's app:
+When your app runs AuthKit, it is the authorization server: it registers the server as a resource, a public client for the browser's token exchange and a confidential client for the backend's client credentials; for staff to sign in to the console there too, also the console's public client ([authentication](authentication.md#standalone-at-your-apps-issuer)). In the example's app:
 
 ```go guide:standalone-issuer
 // OpenRails is a resource server this AuthKit mints tokens for.
@@ -681,22 +626,16 @@ refused on `/v1/app` (`403 application_required`).
 
 ### The console
 
-`/admin` is the staff console. Staff sign in at an app's issuer
-(`admin_console.issuers`, one choice per merchant or `root`) or, with
-`local_sign_in`, with the server's own accounts. The console exchanges the
-person's token for one bound to the chosen merchant (RFC 8693 through the
-server's `openrails-console` client), refused where they hold no role. Its
-session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once. `admin_console.disabled` omits it.
+`/admin` is the staff console. Staff sign in at an app's issuer (`admin_console.issuers`, one choice per merchant or `root`) or, with `local_sign_in`, with the server's own accounts, which people join by invitation; the console offers each that is on.
+
+- **At an app's issuer** the console is an OAuth 2.0 public client there (authorization code with PKCE, redirect URI `<origin>/admin/callback`). The token it receives is already bound to OpenRails' resource and the issuer's merchant, so there is no exchange; people, roles and second factors are the app's.
+- **With `local_sign_in`** the console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once.
+
+Each flow, and what the app's issuer registers, is in [authentication](authentication.md#staff-and-operators). `admin_console.disabled` omits the console.
 
 ### Customer contacts
 
-The server mounts no SCIM routes. A customer of the server's own accounts is
-read from them; a trusted issuer's customer from the merchant's directory in the
-server's AuthKit, which the issuer's AuthKit pushes to over SCIM at
-`/directory/scim/v2` with its client credentials, and from the verified contact
-claims of its tokens. Each customer is read from its own issuer's directory,
-newest write winning. OpenRails emails a customer only at an address the issuer
-proved.
+The server mounts none of OpenRails' own SCIM routes (`/v1/app/scim/v2`, [client](client.md#customers)). A customer of the server's own accounts is read from them; a trusted issuer's customer from the merchant's directory in the server's AuthKit, which the issuer's AuthKit pushes to over SCIM at `/directory/scim/v2` with its client credentials, and from the verified contact claims of its tokens. Each customer is read from its own issuer's directory, newest write winning. A customer your backend names in an assertion (`CreateCustomerToken`) is the merchant's own, and its contact is what that application pushed or asserted for it. OpenRails emails a customer only at an address the issuer proved.
 
 ## The payment page
 
@@ -706,8 +645,7 @@ where the customer pays that one order. The server serves it at
 that origin's DNS and TLS at the same server. The checkout origin has no path
 and must differ from `public_billing_base_url`, the server's issuer and the
 frontend's origin: the page runs the PSPs' scripts and never shares an origin
-with the API or the console. Boot refuses otherwise. Without it an order asking
-for a pay URL is `400 pay_url_unavailable`.
+with the API or the console. Boot refuses otherwise. It is needed only for this page: with the embedded checkout or your own card form leave it unset, and an order asking for a pay URL is `400 pay_url_unavailable`.
 
 The page is built from `web/pay` and embedded in the release binary and image.
 A host building its own binary on `server` builds it with
@@ -725,7 +663,7 @@ console at `/admin`, `/v1/webhooks/{rail}/{account_id}` for provider webhooks an
 the checkout origin. Give one public origin to `public_billing_base_url`,
 `auth.token.issuer` and `auth.resource.id`, and another to `checkout_origin`.
 
-- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies; `auth.http` declares none of its own. Behind Cloudflare, list its ranges in `cloudflare_proxies` and lock the origin to Cloudflare's ingress.
+- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies; `auth.http` declares none of its own. Cloudflare's published ranges are built in and trusted like `trusted_proxies`, and their peers alone are believed for `CF-Connecting-IP` (AuthKit's client IP) and `CF-IPCountry` (the checkout's country); Cloudflare overwrites both, so this holds also where it does not front the origin.
 - **Body size.** Requests are capped at 1 MiB (`413 request_body_too_large`),
   but a billing archive import (`POST /v1/merchant/billing-archive`) streams up
   to 1 GiB: raise the proxy's limit if you import over HTTP.
@@ -737,8 +675,7 @@ the checkout origin. Give one public origin to `public_billing_base_url`,
   (`nmi`, `stripe`, `ccbill`, `basistheory`), never a PSP key, and the PSP's
   account id. The account resolves the merchant and its own secret verifies the
   request. NMI and Stripe sign; CCBill signs nothing and is accepted only from
-  its published ranges (plus `provider_sandbox.ccbill_webhook_sources` for
-  sandbox accounts). Stripe endpoints are registered automatically once
+  its published ranges. Stripe endpoints are registered automatically once
   `public_billing_base_url` is public https and provider writes are allowed.
   Per-rail setup: [PSPs](client.md#merchant-configuration-and-psps).
 
@@ -747,8 +684,7 @@ hosted product should not let merchants claim.
 
 ### Network egress
 
-Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers'
-JWKS, `llm.base_url`):
+Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' JWKS):
 
 | Destination | For |
 |---|---|
@@ -758,15 +694,14 @@ JWKS, `llm.base_url`):
 | `api.basistheory.com`, `cdn.basistheory.com` | Basis Theory custodians |
 | `api.mainnet-beta.solana.com`, `api.devnet.solana.com`, a PSP's `rpc_url` | Solana RPC |
 | `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | captcha, when set |
-| `api.anthropic.com`, `api.openai.com` | the catalog copilot, with `llm.api_key` and no `llm.base_url` |
 
 ## Event store
 
 Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 100 days), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and 15-minute UTC history buckets kept 25 months, which readers fold into the merchant's `accounting.timezone` days). PostgreSQL keeps what the ledger took (`usage_postings`), who has usage it has not taken yet (`usage_unposted`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_close`), and before any other movement of a customer's balance, so up to a month of usage is only in ClickHouse: back it up nightly ([backup and restore](#backup-and-restore)).
 
-Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken does not start without ClickHouse (`event_store_required`, naming the merchants): only the store can post it.
+Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.unposted_usage` finding, and the customers it belongs to can neither read nor move their balances (`event_store_required`) until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
 
-The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs and admissions answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
+The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 
 ## Scaling and Redis
 
@@ -781,11 +716,10 @@ count, primary or sticky session.
   logs, counts `openrails_abuse_state_fallbacks_total` and reports Redis
   degraded; what it counted meanwhile still counts when Redis returns. Use a
   trusted Redis 6.2+ with synchronized clocks across failover nodes.
-- **Identical everywhere:** schemas, `provider_write_mode`, merchant
-  configuration (the same manifest and overlays, or Vault mount),
-  `rate_limits`, `captcha`, `trusted_proxies`, `return_origins`, `route_groups`
+- **Identical everywhere:** schemas, merchant configuration (the same manifest, or Vault mount),
+  `rate_limits`, `captcha`, `trusted_proxies`, `route_groups`
   (a route some instances lack is a 404 on them), the signing key and `totp.key`
-  (`auth.keys.allow_ephemeral_dev_keys` is one instance only), the captcha
+  (generated development keys are one instance only), the captcha
   secret, and the version outside a rolling upgrade.
 - **Background work:** every instance with workers takes River jobs, each job on
   one instance. River's leader alone schedules periodic work; a crashed leader
@@ -798,7 +732,7 @@ count, primary or sticky session.
   read per request. Merchant configuration is cached per instance (see
   [Vault](#vault)). An FX rate published more than 48 hours ago is never quoted.
 - **Connections:** size PostgreSQL `max_connections` for every instance's pool,
-  its `db.lease_conns` lease pool, and one connection per instance for each listener: unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode. The billing pass and merchant pulls hold lease rows, not sessions.
+  its `database.lease_conns` lease pool, and one connection per instance for each listener: unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes and, with Vault configuration, configuration edits. `LISTEN` needs a session, so a pooler in front of the database must run in session mode, not transaction mode. The billing pass and merchant pulls hold lease rows, not sessions.
 
 A webhook takes effect once per provider event: a concurrent copy waits up to
 10 seconds, then answers 500 so the provider retries. An idempotent request runs
@@ -817,8 +751,8 @@ instances NTP-synchronized. Two fences stop a copy from billing:
   `openrails book status` says so; `openrails book arm --by NAME` arms it once
   every other copy is stopped. A promoted physical replica or a physical clone
   keeps the identity: rotate the PSP credentials before running a clone.
-- **Merchant write posture.** `billing.merchant_write_posture` lowers one
-  merchant below `provider_write_mode`. A billing export leaves its source
+- **Merchant write posture.** `billing.merchant_write_posture` holds one
+  merchant's writes ([write safety](#write-safety-and-the-kill-switch)). A billing export leaves its source
   readonly and an import lands readonly until
   `openrails merchant arm --merchant NAME --by NAME`;
   `openrails merchant hold --mode readonly|limited` holds one merchant.
@@ -840,8 +774,8 @@ With `clickhouse`, the same step creates or upgrades the event store's database,
 The schema is one baseline migration and numbered migrations after it, each an
 addition, so the previous build runs on a schema the next one migrated and
 rolling upgrades are safe. A database that recorded a migration with other
-content is compared with a fresh build of the migrations it records, whatever
-monthly partitions exist: equal, it is re-stamped and the change audited;
+content is compared with a fresh build of the migrations it records: equal, it
+is re-stamped and the change audited;
 different, the migration stops and reports the difference. Before v1 a release
 may break the schema in one step: its release notes say so, the previous build
 does not run on the migrated schema, there is no rollback past it, and every
@@ -862,7 +796,7 @@ with the command ([provider refresh](#provider-refresh)).
 |---|---|
 | `GET /health/live` | the process serves HTTP; only after PostgreSQL answers and migrations finish, so allow a long startup probe |
 | `GET /health/ready` | PostgreSQL, the merchants service, the River producer and a local River consumer. Redis, Vault, PSP posture and refused configuration are degraded, never failing. Public and detail-free: a failure is logged and answers 503 |
-| `GET /metrics` on `private_port` | `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Never route it publicly; `Server.PrivateHandler` mounts it in your own binary |
+| `GET /metrics` on `metrics_port` | the operator's Prometheus telemetry, on its own listener so it is never public (unset serves none; the chart enables it on 9090 with its own ClusterIP Service): `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Not the merchant dashboard's business metrics, which are the `/v1/metrics` API on `port`. `Server.MetricsHandler` mounts it in your own binary |
 | probes | `openrails_psp_posture`, `openrails_configuration` (what is not served and why), `openrails_solana_crankers` and `openrails_job_progress` |
 | `openrails workers [--json]` | each job kind as River holds it: overrunning, retrying and discarded jobs, last completion and the newest error |
 | logs | structured (`logger.format`), to stderr, at `logger.level`. Secrets, card data and SQL arguments are never logged |
@@ -872,9 +806,9 @@ billing pass that has not finished within a day or left critical work (usage
 postings, renewals and retries, balance watches, delinquency, order expiry,
 usage billing) due since before the start of yesterday (UTC).
 
-On SIGTERM the server fails readiness at once, keeps serving for `drain_delay`,
-then stops within `shutdown_timeout`; keep their sum under your orchestrator's
-grace period. `run-server --no-workers` serves but never becomes ready;
+On SIGTERM the server fails readiness at once, keeps serving for 5 seconds,
+then stops within 20 seconds; give it a grace period of at least 25 seconds
+(Kubernetes' default is 30). `run-server --no-workers` serves but never becomes ready;
 `run-worker` has no listener.
 
 Healthy is a near-empty `openrails intents`, no open findings and no overrunning
@@ -884,9 +818,14 @@ lists each provider call and local change behind them.
 
 ## Write safety and the kill switch
 
-Declare `provider_write_mode` (`PROVIDER_WRITE_MODE`, `--provider-write-mode`)
-explicitly. The lower of it, the merchant's write posture and the book identity
-applies.
+Each merchant's write posture decides how much OpenRails writes to its
+providers: `full` (none stored), `limited` or `readonly`.
+`openrails merchant hold --merchant NAME --mode readonly|limited --by NAME`
+holds a merchant's writes and `openrails merchant arm --merchant NAME --by NAME`
+restores them; a billing export leaves its source readonly and an import lands
+readonly. In a copy of the billing book every merchant is readonly
+([one billing database](#one-billing-database)). One merchant's posture never
+holds another's.
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
@@ -898,7 +837,7 @@ applies.
 | `catalog apply` local changes, provider reads, webhooks | yes | yes | yes |
 
 `limited` stops what the system initiates; `readonly` stops the wire, enforced
-in each rail's transport. Verified receipt recovery runs in every mode. Every
+in each rail's transport. Verified receipt recovery runs under every posture. Every
 subscription has one collector, fixed when it is created or imported:
 `engine` (OpenRails charges a saved card or pulls on chain, and retries
 declines), `nmi_schedule` (NMI charges, OpenRails retries) or `provider` (Stripe
@@ -906,20 +845,21 @@ or CCBill charge and retry). Configuration never moves a subscription to another
 collector.
 
 Each PSP's environment decides whether money is real, and the provider must
-agree before it arms; test seams (`provider_sandbox`) are refused beside a live
-PSP, and a non-live PSP relaxes no other protection.
+agree before it arms; no setting redirects a provider, and a non-live PSP
+relaxes no other protection.
 
-**Booting against production credentials.** Set the mode before the first
-start: imported `past_due` subscriptions are due at once.
+**Importing a merchant with production credentials.** Hold it before its
+subscriptions arrive: imported `past_due` subscriptions are due at once.
 
-1. Boot `limited` (the site works; system writes park) or `readonly`.
+1. Provision the merchant, then hold it `limited` (the site works; system
+   writes park) or `readonly` before importing.
 2. Let provider reads catch up. Dunning materializes in-window charges as parked
    `manual_rebill` intents and parks window-expired cases `unverified`; it
    cancels nothing.
 3. `openrails intents --merchant <name>` prints the drain forecast ("N execute
    under limited, M require full"). Resolve what should not fire.
 4. Review `GET /v1/merchant/findings` and `openrails proposals list`.
-5. Set `full`. Missed whole periods are never back-billed.
+5. `openrails merchant arm`. Missed whole periods are never back-billed.
 
 **The kill switch.** `billing.destructive_action_switch` is one row read before
 every destructive act, so one `UPDATE` reaches every instance at its next check.
@@ -1006,7 +946,6 @@ Redis when configured, otherwise in each process's memory; never in PostgreSQL.
 | `subscribe` | 20 | the `/v1/me/subscriptions` writes |
 | `payment` | 40 | `/v1/me/payment-methods` |
 | `webhook` | 1200 | `/v1/webhooks/{rail}/{account_id}` |
-| `catalog-ask` | 10 | `POST /v1/console/catalog/ask` |
 
 Counting is per minute, per bucket and per subject (the client IP, and the user
 when authenticated); the strictest trip refuses with `429 rate_limit_exceeded`,
@@ -1029,7 +968,7 @@ caps for webhooks).
   recent decline is blocked. A customer without a recent decline is never
   blocked.
 - **Customer cancellations and card removals** share one merchant-wide budget,
-  enforced even with `rate_limits_disabled`: per rolling day the larger of 10
+  enforced even with every `rate_limits` bucket at 0: per rolling day the larger of 10
   customers or 1 % of customers who paid in the last 30 days, per rolling hour
   the larger of 5 or one per 400 paying customers (`user_action_rate_limit`).
   A refusal is 429, records a finding and changes nothing.
@@ -1039,7 +978,7 @@ caps for webhooks).
 
 ## Provider intents
 
-Every outbound provider mutation is first a row in `billing.provider_intents`: an idempotency key, an origin (`user`, `admin`, `system`), the PSP it targets and a relevance window. Its own job (`openrails.provider_operation`) claims it under a lease, rechecks relevance, gates on mode and origin, executes and classifies the outcome; each attempt's phases (attempting before the provider call, then its result or a hold) are written ahead to `billing.operation_log`, the operations history. A blocked intent (provider down, write mode, credentials that do not arm) stays pending with its reason and drains when the blocker lifts; one past its relevance window is superseded or expires instead of firing stale. An ambiguous money movement is resolved by reading the provider before any retry; deletes verify, then execute.
+Every outbound provider mutation is first a row in `billing.provider_intents`: an idempotency key, an origin (`user`, `admin`, `system`), the PSP it targets and a relevance window. Its own job (`openrails.provider_operation`) claims it under a lease, rechecks relevance, gates on the merchant's write posture and the origin, executes and classifies the outcome; each attempt's phases (attempting before the provider call, then its result or a hold) are written ahead to `billing.operation_log`, the operations history. A blocked intent (provider down, write posture, credentials that do not arm) stays pending with its reason and drains when the blocker lifts; one past its relevance window is superseded or expires instead of firing stale. An ambiguous money movement is resolved by reading the provider before any retry; deletes verify, then execute.
 
 Intents follow the PSP id, not its key: they never execute against another
 account. To move to another account, declare a new PSP and archive the old one
@@ -1093,7 +1032,7 @@ within it, waits and resumes; it never fails the job. The hour is kept per
 CCBill account in the abuse state (Redis), so every instance shares it; a
 sandbox account is not paced.
 
-Refresh reads run in every write mode. Overwrites and lifecycle repairs need an
+Refresh reads run under every write posture. Overwrites and lifecycle repairs need an
 armed merchant, the kill switch on and a posture above `readonly`. Unverified
 subscriptions are also checked without a refresh: the hourly billing pass
 retries flagged ones against their own PSP in bounded batches.
@@ -1159,44 +1098,38 @@ touches the ledger, grants or logs.
 
 ## Retention
 
-Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage postings, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **partitioned** (monthly partitions dropped whole), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
+Periods are constants, the same for every merchant. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage postings, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|
-| `limit_holds` (by `created_at`), `limit_hold_parts` (by `hold_created_at`) | partition dropped after 61 days |
 | `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
-| `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 90 days |
+| `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 397 days |
 | `parked_provider_subscriptions` | 90 days after release |
 | `carts` | 30 days after `last_changed_at` |
-| `notification_events`, `host_outbox`, the event log | 90 days, never before `event_retention` |
+| `notification_events`, `host_outbox`, the event log | 90 days |
 | `webhook_events` | 90 days after completion |
 | `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
 | `user_destructive_reservations` | 24 hours |
 | `limit_windows` | 61 days after `window_ends_at`; a lifetime or rate limit's row stays |
-| `leases` (with their holds), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
+| `leases` (with their in-flight reports), `limit_adjustments` | 61 days after the last sync, or after the adjustment |
 | `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
 
 The event store's tables expire by their own TTLs: raw usage events 100 days after they occurred, a pricing period's quantities 100 days after it starts, minutes after 2 days, usage history after 25 months, and a limit window's usage 61 days after it ends (a lifetime limit's stays).
 
-The hourly cleanup creates partitions two months ahead and drops expired ones
-(giving up after 2 seconds rather than queue behind a long reader), then deletes
-1,000 rows per statement and at most 50,000 per merchant per pass.
+The hourly cleanup deletes 1,000 rows per statement and at most 50,000 per
+merchant per pass.
 `subscription_status_transitions` refuses other deletes
 (`billing.guard_retention_delete`). What integrators see: usage may be dated up
-to 35 days back; a lease answers resends for 61 days after its last sync; a
-request hold lasts at most 30 days; after 61 days a request id reads as never
-admitted; usage reports reach back about 26 months.
+to 35 days back; a lease answers resends for 61 days after its last sync; usage
+reports reach back about 26 months.
 
 ## Backup and restore
 
-Back up PostgreSQL and the merchant configuration (Vault with its
-`credential_fingerprint_key`, or the manifest and its overlays), plus
-`keys.json` and `totp.key` in your secret manager. PostgreSQL holds no
-credential, so a database alone cannot charge anyone.
+Back up PostgreSQL and the merchant configuration (Vault with its `credential_fingerprint_key`, or the manifest), plus `keys.json` and `totp.key` in your secret manager. PostgreSQL holds no credential, so a database alone cannot charge anyone.
 
 Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an off-host `archive_command`, periodic base backups). PITR is whole-cluster: right for disaster, wrong for one damaged merchant. A restore never undoes what happened at a provider; it creates divergence that convergence repairs. Money is reversed by compensating entries, never deletion; the append-only tables (the ledger, grants, status transitions, the operations and configuration histories, `webhook_events`, findings) are restored whole or not at all.
 
@@ -1246,7 +1179,7 @@ permanently and queues its Vault cleanup. No deletion revokes cards at the PSP.
 ## Commands
 
 The image is the CLI. Every command takes `--config`/`-c` (default
-`config.yaml`) and `--provider-write-mode`. One-off commands open only what they
+`config.yaml`). One-off commands open only what they
 need, start no server or workers, and keep standard output parseable. A
 merchant is named by its name or `id:<uuid>`; commands that act over HTTP take
 `--server-url` (or `--url`) with `--token-file`, re-read on every call, and act on
@@ -1283,7 +1216,6 @@ the merchant the token is bound to.
 | `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters, credit lot counters, rollups and sign rules, and warn of a general-ledger total opposite its normal side; non-zero on a finding, not a warning. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
-| `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |
 
 ## Kubernetes and Helm
 
@@ -1300,10 +1232,8 @@ A minimal `values.yaml`:
 
 ```yaml
 config:
-  provider_write_mode: full
   public_billing_base_url: https://billing.example.com
   auth:
-    default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11  # generate once
     token: {issuer: https://billing.example.com}
     resource: {id: https://billing.example.com}
   redis: {addr: redis:6379}
@@ -1320,7 +1250,7 @@ files:
           jwks_uri: https://id.example.com/.well-known/jwks.json
 secrets:
   env:
-    DB_URL: {name: openrails-db-app, key: uri}
+    DATABASE_URL: {name: openrails-db-app, key: uri}
   files: [openrails-secrets]         # EMAIL_SMTP_PASSWORD, REDIS_PASSWORD, …
   authKeys: openrails-auth-keys      # keys.json and totp.key
 ingress:
@@ -1336,18 +1266,18 @@ ingress:
 | `image` | `repository`, `tag` (default the chart's `vX.Y.Z`; required to render a checkout, whose appVersion is `latest`), `digest` (pins over the tag), `pullPolicy` |
 | `imagePullSecrets` | for a private registry |
 | `args` | the command, `[run-server]`; the chart appends `--config=/etc/openrails/config.yaml` |
-| `config` | `config.yaml`, rendered as written; no secrets. `host`, `port` and `private_port` are the chart's and refused here |
-| `files` | more files in `/etc/openrails`: `merchants.yaml` (read at every boot), `bootstrap.yaml` (first run), `catalog.yaml` (for `openrails catalog apply`) |
-| `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantOverlays` (`{name, key}` overlays added to `merchant_manifest_overlays`) |
+| `config` | `config.yaml`, rendered as written; no secrets. Policy (`rate_limits`, `user_action_rate_limit`, `destructive_action_limits`) goes here, never in `env`. `host`, `port` and `metrics_port` are the chart's and refused here |
+| `files` | more files in `/etc/openrails`: `merchants.yaml` (read at every boot; without secrets), `bootstrap.yaml` (first run), `catalog.yaml` (for `openrails catalog apply`) |
+| `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantManifest` (`{name, key}`: a Secret key mounted as `/etc/openrails/merchants.yaml`, the manifest with its PSP secrets, in place of `files.merchants.yaml`) |
 | `env`, `envFrom` | further environment |
 | `ports` | `http`, default 3053 |
-| `metrics` | the private `/metrics` listener (`enabled`, `port` 9090), served by its own ClusterIP Service `<fullname>-metrics` whatever `service.type` is, and an optional Prometheus Operator `serviceMonitor` |
+| `metrics` | the metrics listener, the operator's Prometheus `GET /metrics` (`enabled`, default true; `port` 9090, rendered as `metrics_port`), served by its own ClusterIP Service `<fullname>-metrics` whatever `service.type` is so it is never public, and an optional Prometheus Operator `serviceMonitor`. Not the `/v1/metrics` business metrics API |
 | `service` | `type`, `port` (80), `annotations` |
 | `ingress` | `enabled`, `className`, `annotations`, `hosts` (every path to the server), `tls` |
 | `resources` | requests 100m and 256Mi, limits one CPU and 768Mi |
 | `podSecurityContext`, `securityContext` | UID and GID 10001, non-root, read-only root filesystem, no capabilities |
 | `startupProbe`, `livenessProbe`, `readinessProbe` | `/health/live` (startup allows 10 minutes for migrations) and `/health/ready` |
-| `terminationGracePeriodSeconds` | 30; raise it with `drain_delay` and `shutdown_timeout` |
+| `terminationGracePeriodSeconds` | 30: the server drains 5 seconds, then stops within 20 |
 | `strategy` | the Deployment's rollout strategy |
 | `podDisruptionBudget` | off; `maxUnavailable: 1` when enabled |
 | `serviceAccount` | created, no token mounted unless `config.vault.auth_method` is `kubernetes` |
@@ -1364,7 +1294,7 @@ gh attestation verify oci://docker.io/openrails/openrails:vX.Y.Z --repo open-rai
 ```
 
 **Secrets.** `secrets.env` takes CloudNativePG's app Secret directly
-(`DB_URL: {name: openrails-db-app, key: uri}`). With External Secrets Operator,
+(`DATABASE_URL: {name: openrails-db-app, key: uri}`). With External Secrets Operator,
 name each target key after its variable; with the Vault Agent Injector render one
 file per variable into `/vault/secrets` with `podAnnotations` and leave
 `secrets.files` empty. For Vault-held merchant configuration declare
@@ -1380,12 +1310,12 @@ kubectl -n openrails create secret generic openrails-secrets --from-literal=EMAI
 **PostgreSQL** needs version 18 and one role owning its database: a
 CloudNativePG cluster (`imageName: ghcr.io/cloudnative-pg/postgresql:18`,
 `bootstrap.initdb: {database: openrails, owner: openrails}`) writes the
-`openrails-db-app` Secret whose `uri` key is `DB_URL`. **Redis** or Garnet has no
+`openrails-db-app` Secret whose `uri` key is `DATABASE_URL`. **Redis** or Garnet has no
 default; its credentials and CA go in `secrets.files` (`REDIS_PASSWORD`,
 `REDIS_CA_CERT`).
 
 **Probes and drain.** On SIGTERM `/health/ready` answers 503 at once while the
-pod keeps serving for `drain_delay`, so endpoints drop it before it stops
+pod keeps serving for 5 seconds, so endpoints drop it before it stops
 accepting; no `preStop` hook is needed. Every pod runs `run-server`, so a replica
 adds both API and workers; the chart runs neither `--no-workers` nor
 `run-worker`.
@@ -1421,7 +1351,7 @@ kubectl -n openrails exec deploy/openrails -- \
 | every client shares one rate limit | `trusted_proxies` is unset behind a proxy |
 | webhooks refused | the URL's rail and account id, the PSP's signing secret, CCBill's source address |
 | `400 pay_url_unavailable` | `checkout_origin` is unset |
-| renewals not charging | `provider_write_mode`, the merchant's posture, `openrails book status`, `openrails intents` |
+| renewals not charging | the merchant's write posture, `openrails book status`, `openrails intents` |
 | cancels refused with `provider_cancel_held` | the kill switch and the merchant's first enforcement |
 | jobs stuck | `openrails workers`, `openrails_job_progress`, the River schema of every fleet |
 | missed provider events | `openrails provider-refresh --merchant NAME` |

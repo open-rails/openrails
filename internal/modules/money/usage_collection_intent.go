@@ -518,7 +518,10 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			orderID := p.OrderID
-			transfer, err = ml.PayOwed(ctx, p.CustomerID, currency, p.Amount, coord, &orderID)
+			if transfer, err = ml.PayOwed(ctx, p.CustomerID, currency, p.Amount, coord, &orderID); err == nil {
+				err = books.New(q, intent.MerchantID).CollectUsage(ctx, books.UsageCollection{Payment: p.PaymentID, Customer: p.CustomerID, Order: &orderID,
+					Currency: currency, Amount: p.Amount, At: now})
+			}
 		}
 		if err != nil {
 			return err
@@ -637,7 +640,7 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 			return err
 		}
 		// The collection attempt names its outcome: a replay records it once.
-		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), uuid.NewSHA1(intent.ID, []byte("collection_outcome")), row, action, failureCode, now); err != nil {
+		if err := queueCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), uuidutil.ChildV7(intent.ID, "collection_outcome"), row, action, failureCode, now); err != nil {
 			return err
 		}
 		return complete()
@@ -840,7 +843,7 @@ func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 		return err
 	}
 	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-		ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, string(models.NotificationUsageCharged), merchantID.String(), payment.String()),
+		ID:         uuidutil.DerivedV7(uuidutil.TimeOf(payment), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationUsageCharged), merchantID.String(), payment.String())),
 		MerchantID: merchantID, CustomerID: order.CustomerID, EventType: string(models.NotificationUsageCharged), Data: raw, CreatedAt: now,
 	})
 }

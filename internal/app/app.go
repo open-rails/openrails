@@ -23,7 +23,7 @@ import (
 
 // App encapsulates the long-lived dependencies shared across transports.
 type App struct {
-	Config      *config.Config
+	Config      *billing.Config
 	Runtime     *Runtime
 	RedisClient redis.UniversalClient
 
@@ -47,11 +47,14 @@ type BootstrapOptions struct {
 	// posture is still verified through it.
 	NMITransport http.RoundTripper
 	// FXTransport replaces the FX sources' wire (test seam).
-	FXTransport     http.RoundTripper
-	PGXPool         *pgxpool.Pool
-	PostgresSession *pgxpool.Config
-	Redis           redis.UniversalClient
-	Clock           clockwork.Clock
+	FXTransport http.RoundTripper
+	// ProviderEndpoints sends the provider clients to loopback fakes (test
+	// seam).
+	ProviderEndpoints config.ProviderEndpoints
+	PGXPool           *pgxpool.Pool
+	PostgresSession   *pgxpool.Config
+	Redis             redis.UniversalClient
+	Clock             clockwork.Clock
 	// EmailSender delivers OpenRails' email; nil sends none.
 	EmailSender config.EmailSender
 	// MessageRenderer is Deps.MessageRenderer.
@@ -73,7 +76,7 @@ type BootstrapOptions struct {
 // BootstrapWithOptions builds the application graph. ctx is the BOOT context:
 // it bounds the wait for the database (xs-007 row 40 — a process asked to
 // stop while its database is failing over stops; nothing else ends the wait).
-func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *BootstrapOptions) (*App, error) {
+func BootstrapWithOptions(ctx context.Context, cfg *billing.Config, opts *BootstrapOptions) (*App, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -86,12 +89,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	logger := opts.Logger
 	// Omission never disables the protective defaults; an empty RateLimits
 	// does.
-	if cfg.RateLimits == nil {
-		cfg.RateLimits = config.DefaultRateLimits()
-	}
-	if cfg.Captcha == nil {
-		cfg.Captcha = config.DefaultCaptcha()
-	}
+	*cfg = cfg.WithDefaults()
 	// An optional setting that cannot be served is turned off and reported;
 	// only what the engine cannot serve without fails.
 	degraded := config.Degrade(cfg)
@@ -110,6 +108,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		StripeTransport:      opts.StripeTransport,
 		NMITransport:         opts.NMITransport,
 		FXTransport:          opts.FXTransport,
+		ProviderEndpoints:    opts.ProviderEndpoints,
 		DB:                   database,
 		Vault:                opts.Vault,
 		Redis:                opts.Redis,

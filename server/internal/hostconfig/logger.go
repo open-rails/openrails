@@ -10,9 +10,9 @@ import (
 // LoggerConfig is the binary's logger: logger.level and logger.format.
 type LoggerConfig struct {
 	// Level is debug, info, warn or error; unset is info.
-	Level string `koanf:"level"`
+	Level string `yaml:"level"`
 	// Format is json or text; unset is json.
-	Format string `koanf:"format"`
+	Format string `yaml:"format"`
 }
 
 // Handler is the handler c selects, writing to w.

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	auth "github.com/open-rails/authkit/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -23,6 +24,9 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/http/wireform"
+	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/scim"
 )
@@ -157,8 +161,6 @@ func (e *Env) enabled(f Feature) bool {
 		return e.providers.StripePortal
 	case FeatureMerchantConfigManages:
 		return rt.MerchantConfigManageable()
-	case FeatureCatalogCopilot:
-		return rt != nil && rt.CopilotService.Configured()
 	case FeatureCustomerProvisioning:
 		return rt != nil && !rt.HostUserInfo && e.Groups.Programmatic
 	}
@@ -209,7 +211,11 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthCustomer:
 		mw = e.customerGates(route)
 		if e.payURL {
-			mw = append(mw, payURLScope(route), e.payURLLimit(route))
+			mw = append(mw, payURLScope(route))
+		}
+		mw = append(mw, e.checkoutSubmission(route)...)
+		if e.payURL {
+			mw = append(mw, e.payURLLimit(route))
 		}
 		mw = append(append(mw, e.cardAttack(route)...), conn...)
 	case AuthSignedIn:
@@ -232,6 +238,35 @@ func (e *Env) gates(route Route) []router.Middleware {
 		mw = append(mw, queryMW(route))
 	}
 	return mw
+}
+
+// checkoutSubmission records the customer's request to pay a checkout
+// before the pay URL limit or the attack captcha may refuse it. A request the
+// deployment's rate limiter refuses ahead of authentication is not recorded:
+// nothing yet says whose it is.
+func (e *Env) checkoutSubmission(route Route) []router.Middleware {
+	if !route.SubmitsCheckout || e.Runtime == nil || e.Runtime.DB == nil {
+		return nil
+	}
+	return []router.Middleware{func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			ctx := r.Request.Context()
+			scope, scoped := r.CustomerScope()
+			mid, bound := merchant.FromContext(ctx)
+			id, err := billing.ParseOrderID(r.Param("id"))
+			if scoped && bound && err == nil && scope.Present() {
+				now := time.Now()
+				if e.Runtime.Clock != nil {
+					now = e.Runtime.Clock.Now()
+				}
+				facts := orders.CheckoutFacts{IPCountry: r.ClientCountry(), Language: r.ClientLanguage()}
+				if err := orders.MarkCheckoutSubmitted(ctx, e.Runtime.DB, mid.UUID(), scope.Customer().UUID(), id.UUID(), facts, "", uuid.Nil, now); err != nil {
+					r.Log.WarnContext(ctx, "checkout: cannot record its submission", logx.Err(err), "order_id", id.String())
+				}
+			}
+			next(r)
+		}
+	}}
 }
 
 // eventStore answers event_store_required, after the route's gates, on a

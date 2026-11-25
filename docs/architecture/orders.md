@@ -73,7 +73,7 @@ handed to what they produced, the receipt notice and `order.completed`. A defini
 decline (`Declined`) reopens the order with `last_payment_error`; a challenge
 (`Pending`) waits for `POST …/confirm`, which reads the provider (`ConfirmOrder`).
 
-**Books.** Storing a payment books its money in the general ledger (`cash_received` into `unapplied_cash`). When an order completes, by `Paid`, `RecordRemittance`, a renewal (`RenewalPaid`) or a provider's bill (`observed.Record`), `books.ApplyOrder` applies its money to its lines (`cash_applied`, and `revenue_adjusted` for a provider's non-cash settlement) and gives each line a revenue schedule over the service it sells: a subscription's period, an access window, or delivery at once. A late or second payment stays unapplied. See [books](books.md#cash-and-revenue-recognition).
+**Books.** Storing a payment books its money in the general ledger (`cash_received` into `unapplied_cash`). When an order completes, by `Paid`, `RecordRemittance`, a renewal (`RenewalPaid`) or a provider's bill (`observed.Record`), `books.ApplyOrder` applies its money to its lines (`cash_applied`, and `revenue_adjusted` for a provider's non-cash settlement) and gives each line a revenue schedule over the service it sells: a subscription's period, an access window, or delivery at once. A late or second payment stays unapplied. An order in a merchant's own unit has no payment: its lines' spends released each lot's money into `deferred_revenue` in the lot's paid currency, naming the schedule `books.CreditLineSchedule(line, currency)`, and applying it creates one schedule per currency, funded with exactly that (`applyUnitOrder`); money released into it later adds to its funding, and `ledger-audit` fails a release with no schedule. See [books](books.md#cash-and-revenue-recognition).
 
 **Close.** `close` cancels or expires an open order, releases its claims and
 abandons a challenged attempt at the provider (`AbandonOrderAttempt`). An order
@@ -85,6 +85,18 @@ person) and a critical `life.order.late_payment` is raised, as for a second
 payment of a complete order (`PaidAgain`). `RecordExternalPayment`
 (`RecordRemittance`) pays an open order with money received elsewhere: exactly the
 total, no recurring line, replayed by `transaction_id`.
+
+**Checkout facts** (`internal/modules/orders/checkout.go`). A checkout is an order `Create` makes for a customer to pay in money (origin `customer` or `merchant`); renewals, usage orders, provider bills and orders in a merchant's unit (spent from the balance, never paid) are not, and the purchase count leaves the last out. Each records, on the order:
+
+- `customer_type`: `reactivated` when the customer had MRR with the merchant (`customer_mrr`) and has none now, `new` on a first purchase without MRR history, `returning` otherwise; read with `purchase_number` (`GetCheckoutCustomer`). MRR adopted at import starts from the subscriptions' state then, so an imported former subscriber reads `new`.
+- `purchase_number`: 1 + the customer's paid purchases (complete checkouts, refunded ones included, and observed initial enrollments) when it was created, counted under the same lock. Two checkouts open at once share the number neither has paid yet.
+- `opened_at`: the customer's first read of the open order in person (`MarkCheckoutOpened`): billing-ui's `OrderPayment` and the payment page both read it on load. A merchant creating a pay URL, staff reads and later reads change nothing.
+- `submitted_at`: the first pay request (`MarkCheckoutSubmitted`). On `POST /v1/me/orders/{id}/pay` a route step writes it right after the customer gate (`SubmitsCheckout`), before the pay URL limit, the attack captcha, card-attempt limits or the provider can refuse the request; a request the deployment's rate limiter refuses before authentication is not recorded. A one-call buy is opened and submitted when it is created. Both stamps write only to an open, unexpired checkout, and nothing when nothing would change.
+- Countries, never the address: `billing_country` from the latest pay request's billing details or the saved card's, and `ip_country` from `CF-IPCountry` on the first request in person, read only when the request came through Cloudflare's published ranges (`iputil.CloudflareRanges`, `TrustedProxies.Country`; `XX` and `T1` ignored). `card_country`, the card's issuing country, is not recorded yet and reads null, so `country` is the billing country, else the IP's.
+- `language`: the first in-person request's `Accept-Language`, as language[-region] (`request.PreferredLanguage`): its first tag by weight that names one language, skipping `*`, `mul` and entries that do not parse.
+- Attribution (`billing.OrderAttribution`): source, medium, campaign, term, content, referrer and affiliate, set on creation (`orders.CheckAttribution`): percent-decoded and NFKC-normalized (a value over 4,096 bytes is left out before either); the referrer keeps only its lowercase ASCII host. A field over 100 bytes, unprintable, or carrying an email address or card number is left out and counted (`checkout.attribution_dropped`); attribution never refuses a sale. Reopening the open order of the same lines keeps the first. Term and content often carry a recipient's id: they are kept for the merchant's own reads and are no metrics dimension. A customer's erasure (`scim.RunErasure`) clears every attribution field of its checkouts (`EraseCustomerOrderAttribution`).
+
+A zero-total checkout completes when it is created, with neither `opened_at` nor `submitted_at`; conversion counts leave it out. Settling a checkout, or a provider's first bill bound to one, names it on the subscription it creates (`subscriptions.checkout_order_id`); a membership that replaces another (an upgrade, a Solana tier change) keeps the one it replaces. Every bill of the subscription copies it (`orders.checkout_order_id`, the `assign_checkout_order` trigger, one row read; `Order.renewal.checkout_order_id`). Staff and application reads show the facts as `Order.checkout`; the customer's own reads never do. The checkout measures read them ([reporting](reporting.md)).
 
 **Payment page** (`internal/paymentpage`). `Attach` stores the secret's sha256 on a
 merchant order, with a creation receipt (`idempotency_keys`, `pay_url_creation`)
@@ -182,7 +194,7 @@ Checks:
 
 ### 6. Data lifecycle
 Retention classes (`retention.Tables`): `orders` rows (unpaid closed orders that
-never started an attempt go 90 days after closing, `DeleteClosedUnpaidOrders`),
+never started an attempt go 397 days after closing, `DeleteClosedUnpaidOrders`, so a checkout's abandonment can be compared with the same month a year before),
 `order_attempts` rows (expired never-sent attempts after 90 days), `order_lines`
 with their order, `carts` 30 days after the last change, `ownership_claims` state,
 `revenue_schedules` permanent.
@@ -192,6 +204,7 @@ attempt refuses an export (`preflightChecks`).
 Checks:
 - Each table comment carries the `Retention:` rule `retention.Tables` states.
 - OR-J29-S08 (cleanup and expiry) and OR-J31-S09 (a paid hosted order exports).
+- OR-J47-S09: an unpaid checkout keeps its facts for 397 days, then is deleted.
 
 ### 7. Work scales with activity
 Payment runs in the request; settlement comes from intents and webhooks. The only
@@ -233,12 +246,13 @@ Journeys:
   refused lines and stale totals, settled orders survive cancel and expiry.
 - OR-J09-S01 to S06, S70: one-off charge, challenge, decline, rollback, lost
   answer, partial approval, expiry during a challenge.
+- OR-J47-S01, S02, S04 to S10: checkout steps where they happen (an attack captcha's refusal included), purchase number, customer type, country, language, attribution, renewals naming their checkout, and retention.
 - OR-J48-S04: an order in a unit is paid from the balance and grants its keys; a short balance creates nothing.
 - Also: OR-J05-S05, OR-J10-S01 to S05, OR-J21-S01 to S03, OR-J28-S04, OR-J28-S08,
   OR-J04-S04, OR-J04-S37, OR-J04-S46, OR-J29-S02, OR-J29-S08, OR-J31-S09,
   OR-J37-S70, OR-J38-S43.
 
-Other tests: none; the order, payment and payment-page packages have no unit tests.
+Other tests: `orders.CheckAttribution` and `request.PreferredLanguage` have unit tests; the payment and payment-page packages have none.
 
 Gaps:
 - No scenario for the customer's own embedded pay URL (`AttachMine`,

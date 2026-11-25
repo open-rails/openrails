@@ -3,17 +3,17 @@ package hosttools
 import (
 	"context"
 	"fmt"
-	vaultapi "github.com/hashicorp/vault/api"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	vaultapi "github.com/hashicorp/vault/api"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // providerRuntime is a one-off provider read's world. Rail clients arm per
@@ -29,13 +30,13 @@ import (
 type providerRuntime struct {
 	StripeClients *stripeapi.Factory
 	DB            *db.DB
-	Config        *config.Config
+	Config        *billing.Config
 	Merchants     *merchants.Service
 }
 
 // providerRuntimeOptions is what a one-off provider read arms from.
 type providerRuntimeOptions struct {
-	Config     *config.Config
+	Config     *billing.Config
 	PGXPool    *pgxpool.Pool
 	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID
@@ -62,14 +63,14 @@ func newProviderRuntime(ctx context.Context, logger *slog.Logger, opts providerR
 	}
 	// Rails arm as the server's pulls do: a declared account with a missing
 	// credential is a rail not armed, loudly.
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.Vault, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.Vault, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("merchant configuration unavailable, so no rail can be armed: %w", err)
 	}
 	cleanup = func() { opened.Close(); _ = database.Close() }
 	// The factory the configuration's load registered Stripe posture with.
-	stripeClients := stripeapi.ConfiguredFactory(cfg)
+	stripeClients := stripeapi.NewFactory(nil, writeposture.View{DB: database})
 	if opened.Service != nil {
 		stripeClients = opened.Service.StripeClients
 	}

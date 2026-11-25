@@ -3,10 +3,8 @@ replicaCount: 2
 image:
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 config:
-  provider_write_mode: full
   public_billing_base_url: https://billing.example.com
   auth:
-    default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
     token:
       issuer: https://billing.example.com
     resource:
@@ -20,20 +18,14 @@ config:
     k8s_role: openrails
     auth_mount: openrails-prod/k8s
 files:
-  merchants.yaml:
-    version: 1
-    merchants:
-      shop:
-        display_name: Shop
   catalog.yaml: |
     version: 1
 secrets:
   env:
-    DB_URL: {name: openrails-db-app, key: uri}
+    DATABASE_URL: {name: openrails-db-app, key: uri}
   files: [openrails-secrets, openrails-smtp]
   authKeys: openrails-auth-keys
-  merchantOverlays:
-    - {name: shop-psps, key: overlay.yaml}
+  merchantManifest: {name: shop-merchants, key: merchants.yaml}
 metrics:
   serviceMonitor:
     enabled: true

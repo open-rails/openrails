@@ -52,9 +52,6 @@ const (
 
 // CleanupConfig defines retention periods for various data types
 type CleanupConfig struct {
-	// EventRetention bounds retained facts independently of reader progress.
-	EventRetention time.Duration
-
 	// WebhookEventRetention is how long completed webhook dedup marks
 	// (webhook_events) are kept. Default: 90 days.
 	WebhookEventRetention time.Duration
@@ -80,7 +77,6 @@ func clampInt32(v int) int32 {
 // zero retention fails loudly instead of mass-deleting.
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
-		EventRetention:        retention.EventLog,
 		WebhookEventRetention: webhooks.WebhookEventRetention,
 
 		PaymentAttemptRetention: retention.PaymentAttempts,
@@ -88,7 +84,7 @@ func DefaultCleanupConfig() CleanupConfig {
 }
 
 func (c CleanupConfig) validate() error {
-	if c.EventRetention <= 0 || c.WebhookEventRetention <= 0 ||
+	if c.WebhookEventRetention <= 0 ||
 		c.PaymentAttemptRetention <= 0 {
 		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
 	}
@@ -151,9 +147,6 @@ type CleanupResult struct {
 	OperationLog               int64
 	ReleasedParks              int64
 	CustomerMessages           int64
-	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
-	PartitionsCreated int
-	PartitionsDropped int
 	// MerchantsBudgetCapped counts merchants whose backlog exceeded one pass's
 	// row budget. Nonzero over many passes = the retention window is losing to
 	// the write rate.
@@ -162,7 +155,7 @@ type CleanupResult struct {
 
 // Work is the one retention owner. A pass's first job runs the
 // deployment-wide sweeps (event log, notification journal, reservations,
-// partitions, carts, idempotency keys, Solana Pay references and orphan
+// carts, idempotency keys, Solana Pay references and orphan
 // leases); every job then runs each retention sweep once per
 // merchant with due work, inside that merchant's scope and with the merchant
 // predicate in the SQL:
@@ -209,7 +202,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListRetentionWorkMerchants(ctx, gen.ListRetentionWorkMerchantsParams{
 			WebhookCutoff:       now.Add(-config.WebhookEventRetention),
-			OutboxCutoff:        now.Add(-max(retention.EventLog, config.EventRetention)),
+			OutboxCutoff:        now.Add(-retention.EventLog),
 			AttemptCutoff:       now.Add(-config.PaymentAttemptRetention),
 			TransitionCutoff:    now.Add(-retention.SubscriptionTransitions),
 			OrderAttemptCutoff:  now.Add(-retention.ExpiredOrderAttempts),
@@ -247,7 +240,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 		}
 	}
 
-	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "order_attempts", result.OrderAttempts, "unpaid_orders", result.UnpaidOrders, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "webhook_health_days", result.WebhookHealthDays, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "operation_log", result.OperationLog, "released_parks", result.ReleasedParks, "customer_messages", result.CustomerMessages, "partitions_created", result.PartitionsCreated, "partitions_dropped", result.PartitionsDropped})
+	opsmetric.Emit(ctx, w.Log, opsmetric.MetricRetentionSweep, []any{"worker", KindCleanupExpiredData, "merchants_with_work", len(merchantIDs), "merchants_budget_capped", result.MerchantsBudgetCapped, "continued", after != nil, "more_work_queued", next != nil, "duration_ms", clock.Now().Sub(started).Milliseconds(), "carts", result.Carts, "idempotency_keys", result.IdempotencyKeys, "solana_pay_references", result.SolanaPayReferences, "periodic_leases", result.PeriodicLeases, "notification_events", result.NotificationEvents, "event_log", result.EventLog, "webhook_events", result.WebhookEvents, "host_outbox", result.HostOutbox, "payment_attempts", result.PaymentAttempts, "rebill_cycles", result.RebillCycles, "nmi_history_months", result.NMIHistoryMonths, "subscription_transitions", result.SubscriptionTransitions, "subscription_billing_changes", result.SubscriptionBillingChanges, "order_attempts", result.OrderAttempts, "unpaid_orders", result.UnpaidOrders, "limit_windows", result.LimitWindows, "leases", result.Leases, "limit_adjustments", result.LimitAdjustments, "webhook_health_days", result.WebhookHealthDays, "reconciliation_findings", result.ReconciliationFindings, "provider_intents", result.ProviderIntents, "operation_log", result.OperationLog, "released_parks", result.ReleasedParks, "customer_messages", result.CustomerMessages})
 
 	if cleanupErr != nil {
 		return next, fmt.Errorf("cleanup expired data: %w", cleanupErr)
@@ -259,7 +252,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.Time, config CleanupConfig, result *CleanupResult, cleanupErr *error) {
 	logger := w.Log.With("worker", KindCleanupExpiredData)
 	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
-		n, err := eventlog.Prune(ctx, w.DB, now, config.EventRetention, cleanupDeleteBatch)
+		n, err := eventlog.Prune(ctx, w.DB, now, cleanupDeleteBatch)
 		if err != nil {
 			*cleanupErr = errors.Join(*cleanupErr, err)
 			break
@@ -271,7 +264,7 @@ func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.
 	}
 
 	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
-		n, err := w.DB.GenDirectory().PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: cleanupDeleteBatch})
+		n, err := w.DB.GenDirectory().PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: now.Add(-retention.EventLog), RowLimit: cleanupDeleteBatch})
 		if err != nil {
 			*cleanupErr = errors.Join(*cleanupErr, err)
 			break
@@ -298,21 +291,6 @@ func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.
 	}
 
 	directory := w.DB.GenDirectory()
-	// Partitioned tables are pruned by the calendar: whole months are created
-	// ahead and dropped behind, and no row is read.
-	if n, err := retention.EnsurePartitions(ctx, directory, now); err != nil {
-		logger.ErrorContext(ctx, "Cleanup: ensure partitions failed", logx.Err(err))
-		*cleanupErr = errors.Join(*cleanupErr, err)
-	} else {
-		result.PartitionsCreated = n
-	}
-	if n, err := retention.DropExpiredPartitions(ctx, directory, now); err != nil {
-		logger.ErrorContext(ctx, "Cleanup: drop expired partitions failed", logx.Err(err))
-		*cleanupErr = errors.Join(*cleanupErr, err)
-	} else {
-		result.PartitionsDropped = n
-	}
-
 	// Indexed, bounded deletes across merchants.
 	global := func(name string, total *int64, fn func(limit int32) (int64, error)) {
 		for range cleanupIndexedMaxBatches {
@@ -399,7 +377,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	// The host outbox dedupe journal, retained from ingestion.
 	sweep("delete host outbox", &result.HostOutbox, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteHostOutboxBefore(ctx, gen.DeleteHostOutboxBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: limit,
+			MerchantID: mid, Cutoff: now.Add(-retention.EventLog), RowLimit: limit,
 		})
 	})
 

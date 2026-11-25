@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -46,7 +45,7 @@ func newVaultCards(t *testing.T, platform, armed bool, configure ...func(*world)
 		w.cfg.Vault = vault.Config()
 		w.deps.Vault = vault.Client()
 		if platform {
-			w.cfg.CardVault = &openrails.CardVaultConfig{Kind: "basis_theory", TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
+			w.cfg.CardVault = billing.CardVaultConfig{Kind: "basis_theory", TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
 		}
 		vendor.gateway = w.deps.NMITransport
 		target, err := url.Parse(vendor.server.URL)
@@ -114,7 +113,7 @@ func (v *vaultCards) saveCard(t *testing.T, bearer, number, brand, last4 string)
 	t.Helper()
 	v.journal.core.AddNumber(number, nmimock.Card{Brand: brand, Last4: last4})
 	token := v.vendor.collectCard(merchantBTTenant, number, basistheory.CardDetails{Brand: brand, Last4: last4, ExpirationMonth: 12, ExpirationYear: 2035})
-	status, raw := v.request(t, http.MethodPost, "/v1/me/payment-methods", bearer, billing.CreatePaymentMethodParams{PSPID: v.psp, Token: token})
+	status, raw := v.request(t, http.MethodPost, "/v1/me/payment-methods", bearer, billing.CreatePaymentMethodParams{PSPID: v.psp, Token: token, BillingDetails: billedTo("US", "10001")})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var method billing.PaymentMethod
 	require.NoError(t, json.Unmarshal(raw, &method))

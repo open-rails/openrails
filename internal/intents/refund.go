@@ -17,7 +17,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -351,7 +350,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 		return parkedBeforeEffect(fmt.Sprintf("nmi rail is not armed for provider %q", intent.Rail))
 	}
 	if client.ReadOnly {
-		return parkedBeforeEffect("nmi client is read-only (mode=readonly)")
+		return parkedBeforeEffect("nmi client is read-only (readonly write posture)")
 	}
 
 	if intent.Attempts > 1 {
@@ -365,7 +364,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 	result, err := client.Refund(ctx, nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents, Currency: p.Currency})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
-			return parkedBeforeEffect("nmi provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("nmi provider writes blocked (readonly write posture)")
 		}
 		if errors.Is(err, providerposture.ErrDisarmed) {
 			// The posture gate refused before any bytes were sent.
@@ -445,13 +444,13 @@ func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.BillingProvid
 // matched on the metadata mirror of the key).
 type StripeRefundHandler struct {
 	refundReservations
-	Config *config.Config
+	Config *billing.Config
 	Rails  railresolve.Source
 	Stripe *subscriptions.StripeRefundService
 	Policy BackoffPolicy
 }
 
-func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock, clients *stripeapi.Factory) *StripeRefundHandler {
+func NewStripeRefundHandler(d *db.DB, cfg *billing.Config, rails railresolve.Source, clock clockwork.Clock, clients *stripeapi.Factory) *StripeRefundHandler {
 	return &StripeRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Config:             cfg,
@@ -495,7 +494,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingPro
 	})
 	if err != nil {
 		if errors.Is(err, stripeapi.ErrProviderReadOnly) {
-			return parkedBeforeEffect("stripe provider writes blocked (mode=readonly)")
+			return parkedBeforeEffect("stripe provider writes blocked (readonly write posture)")
 		}
 		if errors.Is(err, providerposture.ErrDisarmed) {
 			return parkedBeforeEffect("stripe refund held by sandbox posture gate: " + err.Error())

@@ -9,7 +9,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
@@ -18,7 +17,7 @@ var updateGolden = flag.Bool("update", false, "rewrite testdata/goclient.golden"
 // goldenRoutes are one route of each shape the generator writes.
 var goldenRoutes = []routes.Route{
 	{Method: routes.GET, Path: "/v1/catalog/meters/{key}", Group: routes.CatalogAdmin, Auth: routes.AuthMerchant, Name: "GetMeter", Level: routes.LevelRead,
-		Args: []any{""}, Cache: config.ReadMeters, Doc: "GetMeter reads one meter with its rate card.",
+		Args: []any{""}, Cache: billing.ReadMeters, Doc: "GetMeter reads one meter with its rate card.",
 		Responses: []routes.Reply{{Status: 200, Body: billing.Meter{}}}},
 	{Method: routes.GET, Path: "/v1/admin/customers/{customer_id}/balance", Group: routes.Admin, Auth: routes.AuthMerchant, Name: "GetBalance", Level: routes.LevelRead,
 		Args: []any{billing.CustomerID{}}, Query: billing.GetBalanceParams{}, Doc: "GetBalance reads a customer's balance in params.Currency.",
@@ -27,9 +26,9 @@ var goldenRoutes = []routes.Route{
 		Args: []any{billing.PaymentID{}}, Request: billing.RefundPaymentParams{},
 		Doc:       "RefundPayment refunds a charge through its rail.\n\nA retry with idempotencyKey returns the same refund.",
 		Responses: []routes.Reply{{Status: 201, Body: billing.Payment{}}, {Status: 202, Body: billing.Payment{}}}},
-	{Method: routes.POST, Path: "/v1/app/admissions/release", Group: routes.App, Auth: routes.AuthApplication, Name: "ReleaseAdmissions",
-		Request: billing.ReleaseAdmissionBatchParams{}, Doc: "ReleaseAdmissions frees the holds of admissions whose work failed.",
-		Responses: []routes.Reply{{Status: 200, Body: billing.AdmissionBatchResult{}}}},
+	{Method: routes.POST, Path: "/v1/app/leases/sync", Group: routes.App, Auth: routes.AuthApplication, Name: "SyncLeases",
+		Request: billing.SyncLeasesParams{}, Doc: "SyncLeases settles a lease's usage and answers its views.",
+		Responses: []routes.Reply{{Status: 200, Body: billing.SyncLeasesResult{}}}},
 	{Method: routes.POST, Path: "/v1/catalog/apply", Group: routes.CatalogAdmin, Auth: routes.AuthMerchant, Name: "ApplyCatalog", Level: routes.LevelUpdate,
 		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Doc: "ApplyCatalog applies a catalog document; params.Force overwrites edits.",
 		Responses: []routes.Reply{{Status: 200, Body: billing.CatalogApplicationReceipt{}}}},

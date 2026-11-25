@@ -17,7 +17,7 @@ import (
 
 // openEmbeddedDB wraps the host's pool; Close leaves it open. Callers
 // provide explicit merchant scope.
-func openEmbeddedDB(logger *slog.Logger, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
+func openEmbeddedDB(logger *slog.Logger, cfg *billing.Config, pool *pgxpool.Pool) (*db.DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("a database pool is required")
 	}
@@ -26,12 +26,12 @@ func openEmbeddedDB(logger *slog.Logger, cfg *config.Config, pool *pgxpool.Pool)
 
 // bindMerchantConfig binds the configuration database reads merchant settings
 // through: given (a running app's), else one this process opens.
-func bindMerchantConfig(ctx context.Context, cfg *config.Config, database *db.DB, vault *vaultapi.Client, merchantID billing.MerchantID, given db.MerchantConfig) (func(), error) {
+func bindMerchantConfig(ctx context.Context, cfg *billing.Config, database *db.DB, vault *vaultapi.Client, merchantID billing.MerchantID, given db.MerchantConfig) (func(), error) {
 	if given != nil {
 		database.SetMerchantConfig(given)
 		return func() {}, nil
 	}
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, vault, merchantID, nil, "", nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, vault, merchantID, nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("merchant configuration unavailable: %w", err)
 	}

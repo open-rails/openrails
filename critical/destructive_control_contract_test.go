@@ -76,7 +76,7 @@ func TestDestructiveControls(t *testing.T) {
 		require.Equal(t, grants[5].ID.UUID().String(), target)
 		require.Nil(t, clearedBy)
 		var revoker *string
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT actor FROM "+pgx.Identifier{a.schema, "grants"}.Sanitize()+" WHERE merchant_id = $1 AND supersedes_id = $2 AND event = 'revoke'",
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT actor FROM "+pgx.Identifier{a.schema, "credit_grant_events"}.Sanitize()+" WHERE merchant_id = $1 AND credit_grant_id = $2 AND event = 'revoke'",
 			a.alpha.MerchantID().UUID(), grants[0].ID.UUID()).Scan(&revoker))
 		require.NotNil(t, revoker, "a credit grant's revoke names the staff member who made it")
 		require.NotEmpty(t, *revoker)
@@ -101,7 +101,7 @@ func TestDestructiveControls(t *testing.T) {
 
 		// A deployment's configured lower actor limit holds the third revoke.
 		low := newAuthorityWorld(t, func(w *world) {
-			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ActorPerHour: 2}
+			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 2}
 		})
 		var few []billing.CreateCreditGrantParams
 		for i := range 3 {

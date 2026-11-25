@@ -16,7 +16,7 @@ import (
 var (
 	orderReadErrors   = codes("resource_not_found", "service_unavailable")
 	orderLineErrors   = codes("already_owned", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable")
-	orderPayErrors    = codes("card_attempts_blocked", "card_declined", "customer_action_required", "customer_email_required", "entitlement_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable")
+	orderPayErrors    = codes("billing_details_required", "card_attempts_blocked", "card_declined", "customer_action_required", "customer_email_required", "entitlement_required", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_not_payable", "order_payment_in_progress", "order_total_changed", "payment_failed", "payment_method_stale", "payment_option_unavailable", "payment_provider_rejected", "resource_conflict", "resource_not_found", "service_unavailable")
 	orderCreateErrors = codes(append(append([]billing.ErrorCode{}, orderPayErrors...), "already_owned", "embed_origins_required", "customer_session_required", "insufficient_credits", "pay_url_unavailable", "order_line_unavailable", "quantity_not_allowed")...)
 	usageActionErrors = codes("order_action_not_allowed", "resource_not_found", "service_unavailable")
 )
@@ -32,7 +32,7 @@ var ordersRoutes = []Route{
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetMyOrder)},
 	{Method: GET, Path: "/v1/me/orders/{id}/payment-attempt", Group: Customer, Auth: AuthCustomer, IdempotencyKey: true,
 		Responses: []Reply{{200, billing.OrderPaymentAttempt{}}}, Errors: codes("idempotency_key_required", "invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetMyOrderPaymentAttempt)},
-	{Method: POST, Path: "/v1/me/orders/{id}/pay", Group: Customer, Auth: AuthCustomer, PayURL: PayURLOrder, IdempotencyKey: true,
+	{Method: POST, Path: "/v1/me/orders/{id}/pay", Group: Customer, Auth: AuthCustomer, PayURL: PayURLOrder, IdempotencyKey: true, SubmitsCheckout: true,
 		Request: billing.PayOrderParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: orderPayErrors, Handler: h(handlers.PayMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/confirm", Group: Customer, Auth: AuthCustomer, PayURL: PayURLOrder,
 		Request: billing.ConfirmOrderParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: codes("card_declined", "customer_action_required", "customer_session_required", "invalid_param", "payment_failed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmMyOrder)},

@@ -153,6 +153,8 @@ var merchantCols = map[Family]string{
 	FamRebillCycles:   "cy.merchant_id",
 	FamNMIHistory:     "h.merchant_id",
 	FamFindings:       "f.merchant_id",
+	FamCheckouts:      "o.merchant_id",
+	FamSales:          "o.merchant_id",
 	FamDisputes:       "d.merchant_id",
 	FamFraudReports:   "fr.merchant_id",
 	FamNetwork:        "na.merchant_id",
@@ -231,9 +233,11 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	}
 	// @period_start is the start of the row's bucket, or of the range.
 	if strings.Contains(sql, "@period_start") {
-		start := arg(plan.From) + "::timestamptz"
+		var start string
 		if plan.HasTime {
 			start = bucketExpr(spec, arg(plan.Grain), arg(plan.zone().String()))
+		} else {
+			start = arg(plan.From) + "::timestamptz"
 		}
 		sql = strings.ReplaceAll(sql, "@period_start", start)
 	}

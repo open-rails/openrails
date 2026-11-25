@@ -4,8 +4,9 @@ import { Input } from "#orck/components/ui/input"
 import { Label } from "#orck/components/ui/label"
 import {
   COUNTRY_OPTIONS,
-  isPostalRequired,
   postalField,
+  postalMode,
+  type BillingFields,
   type NMIBilling,
 } from "#orck/lib/billing"
 
@@ -72,16 +73,18 @@ export function CountryField({
   value,
   onChange,
   disabled,
+  required = true,
 }: {
   id: string
   value: string
   onChange: (value: string) => void
   disabled?: boolean
+  required?: boolean
 }) {
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id} className={LABEL}>
-        Country or region
+        {required ? "Country or region" : "Country or region (optional)"}
       </Label>
       <select
         id={id}
@@ -90,7 +93,7 @@ export function CountryField({
         value={value}
         autoComplete="billing country"
         disabled={disabled}
-        required
+        required={required}
         onChange={(event) => onChange(event.target.value)}
       >
         <option value="">Select country</option>
@@ -147,11 +150,13 @@ export function PostalField({
   )
 }
 
-// The card fields (children) sit between the cardholder name and the address.
+// The card fields (children) sit between the cardholder name and the
+// address, whose fields the merchant's billing fields choose.
 export function CardBillingFields({
   idPrefix,
   value,
   onChange,
+  fields,
   disabled,
   postalError,
   children,
@@ -159,13 +164,17 @@ export function CardBillingFields({
   idPrefix: string
   value: NMIBilling
   onChange: (next: NMIBilling) => void
+  fields: BillingFields
   disabled?: boolean
   postalError?: string
   children?: React.ReactNode
 }) {
   const set = (key: keyof NMIBilling) => (next: string) =>
     onChange({ ...value, [key]: next })
-  const postalRequired = isPostalRequired(value.country)
+  const country = fields.country === "hidden" ? "" : value.country
+  const postal = postalMode(fields, country)
+  const shown =
+    Number(fields.country !== "hidden") + Number(postal !== "hidden")
   return (
     <div className="grid gap-3">
       <BillingTextField
@@ -180,23 +189,30 @@ export function CardBillingFields({
         required
       />
       {children}
-      <div className="grid grid-cols-2 gap-3">
-        <CountryField
-          id={`${idPrefix}-country`}
-          value={value.country}
-          onChange={set("country")}
-          disabled={disabled}
-        />
-        <PostalField
-          id={`${idPrefix}-postal-code`}
-          value={value.zip}
-          country={value.country}
-          onChange={set("zip")}
-          disabled={disabled}
-          required={postalRequired}
-          error={postalError}
-        />
-      </div>
+      {shown > 0 ? (
+        <div className={shown > 1 ? "grid grid-cols-2 gap-3" : "grid gap-3"}>
+          {fields.country !== "hidden" ? (
+            <CountryField
+              id={`${idPrefix}-country`}
+              value={value.country}
+              onChange={set("country")}
+              disabled={disabled}
+              required={fields.country === "required"}
+            />
+          ) : null}
+          {postal !== "hidden" ? (
+            <PostalField
+              id={`${idPrefix}-postal-code`}
+              value={value.zip}
+              country={country}
+              onChange={set("zip")}
+              disabled={disabled}
+              required={postal === "required"}
+              error={postalError}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

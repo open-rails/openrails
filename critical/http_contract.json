@@ -248,42 +248,6 @@
       "feature": ""
     },
     {
-      "method": "GET",
-      "path": "/v1/app/admissions",
-      "auth": "application",
-      "feature": ""
-    },
-    {
-      "method": "POST",
-      "path": "/v1/app/admissions",
-      "auth": "application",
-      "feature": ""
-    },
-    {
-      "method": "POST",
-      "path": "/v1/app/admissions/capture",
-      "auth": "application",
-      "feature": ""
-    },
-    {
-      "method": "POST",
-      "path": "/v1/app/admissions/extend",
-      "auth": "application",
-      "feature": ""
-    },
-    {
-      "method": "POST",
-      "path": "/v1/app/admissions/release",
-      "auth": "application",
-      "feature": ""
-    },
-    {
-      "method": "GET",
-      "path": "/v1/app/admissions/{request_id}",
-      "auth": "application",
-      "feature": ""
-    },
-    {
       "method": "POST",
       "path": "/v1/app/entitlements/check",
       "auth": "application",
@@ -564,12 +528,6 @@
       "path": "/v1/config",
       "auth": "public",
       "feature": ""
-    },
-    {
-      "method": "POST",
-      "path": "/v1/console/catalog/ask",
-      "auth": "merchant",
-      "feature": "catalog_copilot"
     },
     {
       "method": "GET",

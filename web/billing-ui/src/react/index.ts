@@ -8,6 +8,7 @@ export {
   type BillingContextValue,
 } from "./context"
 export {
+  useBillingFields,
   useConfig,
   useCurrencyScales,
   useCustomerConfig,

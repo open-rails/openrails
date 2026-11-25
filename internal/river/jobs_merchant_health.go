@@ -11,7 +11,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -51,7 +50,7 @@ func (MerchantHealthArgs) InsertOpts() river.InsertOpts { return periodPass(Merc
 type MerchantHealthWorker struct {
 	WorkerDefaults[MerchantHealthArgs]
 	DB     *db.DB
-	Config *config.Config
+	Config *billing.Config
 	Clock  clockwork.Clock
 	// Alerts sends requires_review findings to the operator. nil = none.
 	Alerts *alerting.Service
@@ -65,7 +64,7 @@ func (w MerchantHealthWorker) Work(ctx context.Context, _ *river.Job[MerchantHea
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts
 	}
-	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	postures := writeposture.View{DB: w.DB}
 	var workErr error
 	after := uuid.Nil
 	for {

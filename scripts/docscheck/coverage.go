@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -47,10 +46,6 @@ var (
 // collapsed are configuration maps keyed by the operator's own names,
 // covered at their parent: rate_limits buckets are named by limiter.
 var collapsed = []string{"rate_limits"}
-
-// hiddenCommands are CLI commands that are no operator's: loopback provider
-// fakes for disposable test stacks.
-var hiddenCommands = map[string]bool{"sandbox": true, "sandbox nmi-gateway": true}
 
 // freeForm are sections whose keys are someone else's or the operator's own
 // names, so a documented key beneath them is not checked: AuthKit's auth
@@ -161,7 +156,7 @@ var (
 	cliUse    = regexp.MustCompile(`(?:^\s*(?:\$\s+)?(?:[A-Z_][A-Z0-9_]*=\S+\s+)*|--\s+|&&\s+|;\s+|\|\s+)openrails((?:[ \t]+[^\s|)&;]+)+)`)
 	cliWord   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	keyPath   = regexp.MustCompile(`^\.?[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`)
-	globalArg = map[string]bool{"--config": true, "-c": true, "--provider-write-mode": true}
+	globalArg = map[string]bool{"--config": true, "-c": true}
 )
 
 // checkStale reports what standalone.md documents that does not exist: an
@@ -335,29 +330,13 @@ func buildCoverage(root, goTxt string) (*Coverage, error) {
 		}
 	}
 
-	keys := map[string]bool{}
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, filepath.Join(root, "server", "internal", "hostconfig", "config.go"), nil, parser.SkipObjectResolution)
+	structs, maps, topKeys, err := configStructPaths(root)
 	if err != nil {
 		return nil, err
 	}
-	ast.Inspect(f, func(n ast.Node) bool {
-		ts, ok := n.(*ast.TypeSpec)
-		if !ok || ts.Name.Name != "fileConfig" {
-			return true
-		}
-		for _, fl := range ts.Type.(*ast.StructType).Fields.List {
-			if fl.Tag != nil {
-				tag, _ := strconv.Unquote(fl.Tag.Value)
-				if k := reflect.StructTag(tag).Get("koanf"); k != "" {
-					keys[k] = true
-				}
-			}
-		}
-		return false
-	})
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("server/internal/hostconfig: no fileConfig koanf keys")
+	keys := map[string]bool{}
+	for k := range topKeys {
+		keys[k] = true
 	}
 	example, err := os.ReadFile(filepath.Join(root, "config.example.yaml"))
 	if err != nil {
@@ -395,10 +374,6 @@ func buildCoverage(root, goTxt string) (*Coverage, error) {
 	for _, k := range keyPaths(example) {
 		cov.ConfigPaths[normPath(k)] = true
 	}
-	structs, maps, err := configStructPaths(root)
-	if err != nil {
-		return nil, err
-	}
 	for k := range structs {
 		cov.ConfigPaths[k] = true
 	}
@@ -426,9 +401,7 @@ func buildCoverage(root, goTxt string) (*Coverage, error) {
 	}
 	for _, c := range cmds {
 		cov.AllCommands[c] = true
-		if !hiddenCommands[c] {
-			cov.Commands = append(cov.Commands, c)
-		}
+		cov.Commands = append(cov.Commands, c)
 	}
 	return cov, nil
 }
@@ -469,17 +442,22 @@ func normKey(k string) string {
 	return strings.ToLower(strings.ReplaceAll(k, "_", ""))
 }
 
-// configStructPaths walks hostconfig's fileConfig and the internal/config
-// types it reaches, as the loader decodes them (a koanf tag, else the field
-// name), and returns every key path, normalized, and the paths of maps,
-// whose keys are the operator's own.
-func configStructPaths(root string) (paths, maps map[string]bool, err error) {
-	types := map[string]map[string]*ast.StructType{"": {}, "billing": {}}
-	for pkg, dir := range map[string]string{"": "server/internal/hostconfig", "billing": "internal/config"} {
+// configPackages are the packages whose types the binary's file decodes
+// into, by the name other packages import them under.
+var configPackages = map[string]string{"hostconfig": "server/internal/hostconfig", "server": "server", "billing": "billing", "openrails": "."}
+
+// configStructPaths walks the file's two decode targets, hostconfig.Config
+// and server.Config (the engine's billing.Config inline), by their yaml
+// tags, and returns every key path, normalized, the paths of maps, whose keys
+// are the operator's own, and the top-level keys.
+func configStructPaths(root string) (paths, maps, top map[string]bool, err error) {
+	types := map[string]map[string]*ast.StructType{}
+	for pkg, dir := range configPackages {
+		types[pkg] = map[string]*ast.StructType{}
 		fset := token.NewFileSet()
 		pkgs, err := parseGoDir(fset, filepath.Join(root, dir))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		for _, files := range pkgs {
 			for _, f := range files {
@@ -494,7 +472,7 @@ func configStructPaths(root string) (paths, maps map[string]bool, err error) {
 			}
 		}
 	}
-	paths, maps = map[string]bool{}, map[string]bool{}
+	paths, maps, top = map[string]bool{}, map[string]bool{}, map[string]bool{}
 	var walk func(prefix, pkg string, st *ast.StructType, depth int)
 	var typ func(path, pkg string, e ast.Expr, depth int)
 	typ = func(path, pkg string, e ast.Expr, depth int) {
@@ -510,9 +488,13 @@ func configStructPaths(root string) (paths, maps map[string]bool, err error) {
 				walk(path, pkg, st, depth+1)
 			}
 		case *ast.SelectorExpr:
-			if x, ok := t.X.(*ast.Ident); ok && x.Name == "billing" {
-				if st := types["billing"][t.Sel.Name]; st != nil {
-					walk(path, "billing", st, depth+1)
+			if x, ok := t.X.(*ast.Ident); ok && types[x.Name] != nil {
+				name := t.Sel.Name
+				if x.Name == "openrails" && name == "Config" {
+					x.Name, name = "billing", "Config" // the alias
+				}
+				if st := types[x.Name][name]; st != nil {
+					walk(path, x.Name, st, depth+1)
 				}
 			}
 		}
@@ -522,42 +504,36 @@ func configStructPaths(root string) (paths, maps map[string]bool, err error) {
 			return
 		}
 		for _, f := range st.Fields.List {
-			names := []string{}
-			if f.Tag != nil {
-				tag, _ := strconv.Unquote(f.Tag.Value)
-				if k := reflect.StructTag(tag).Get("koanf"); k == "-" {
-					continue
-				} else if k != "" {
-					names = []string{k}
-				}
+			if f.Tag == nil || len(f.Names) == 0 {
+				continue
 			}
-			if len(f.Names) == 0 { // embedded: its fields are this level's
+			tag, _ := strconv.Unquote(f.Tag.Value)
+			name, opts, _ := strings.Cut(reflect.StructTag(tag).Get("yaml"), ",")
+			if opts == "inline" {
 				typ(prefix, pkg, f.Type, depth)
 				continue
 			}
-			if len(names) == 0 {
-				for _, n := range f.Names {
-					if n.IsExported() {
-						names = append(names, n.Name)
-					}
-				}
+			if name == "" || name == "-" {
+				continue
 			}
-			for _, n := range names {
-				p := normKey(n)
-				if prefix != "" {
-					p = prefix + "." + p
-				}
-				paths[p] = true
-				typ(p, pkg, f.Type, depth)
+			p := normKey(name)
+			if prefix == "" {
+				top[name] = true
+			} else {
+				p = prefix + "." + p
 			}
+			paths[p] = true
+			typ(p, pkg, f.Type, depth)
 		}
 	}
-	file := types[""]["fileConfig"]
-	if file == nil {
-		return nil, nil, fmt.Errorf("server/internal/hostconfig: no fileConfig")
+	for _, target := range []struct{ pkg, name string }{{"hostconfig", "Config"}, {"server", "Config"}} {
+		st := types[target.pkg][target.name]
+		if st == nil {
+			return nil, nil, nil, fmt.Errorf("%s: no %s", configPackages[target.pkg], target.name)
+		}
+		walk("", target.pkg, st, 0)
 	}
-	walk("", "", file, 0)
-	return paths, maps, nil
+	return paths, maps, top, nil
 }
 
 func normPath(k string) string {

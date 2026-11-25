@@ -104,11 +104,6 @@ spec:
               {{- if .Values.secrets.authKeys }}
               readOnly: true
               {{- end }}
-            {{- if .Values.secrets.merchantOverlays }}
-            - name: overlays
-              mountPath: /vault/overlays
-              readOnly: true
-            {{- end }}
             - name: tmp
               mountPath: /tmp
             {{- with .Values.extraVolumeMounts }}
@@ -116,8 +111,21 @@ spec:
             {{- end }}
       volumes:
         - name: config
-          configMap:
-            name: {{ include "openrails.fullname" . }}
+          projected:
+            sources:
+              - configMap:
+                  name: {{ include "openrails.fullname" . }}
+              {{- with .Values.secrets.merchantManifest }}
+              {{- if hasKey $.Values.files "merchants.yaml" }}
+              {{- fail "secrets.merchantManifest and files.merchants.yaml both name merchants.yaml: keep one" }}
+              {{- end }}
+              - secret:
+                  name: {{ required "secrets.merchantManifest.name is required" .name }}
+                  items:
+                    - key: {{ required "secrets.merchantManifest.key is required" .key }}
+                      path: merchants.yaml
+                      mode: 0440
+              {{- end }}
         {{- with .Values.secrets.files }}
         - name: secret-files
           projected:
@@ -135,18 +143,6 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- with .Values.secrets.merchantOverlays }}
-        - name: overlays
-          projected:
-            sources:
-              {{- range . }}
-              - secret:
-                  name: {{ required "secrets.merchantOverlays[].name is required" .name }}
-                  items:
-                    - key: {{ required "secrets.merchantOverlays[].key is required" .key }}
-                      path: {{ .name }}/{{ .key }}
-              {{- end }}
-        {{- end }}
         - name: tmp
           emptyDir: {}
         {{- with .Values.extraVolumes }}

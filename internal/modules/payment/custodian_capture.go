@@ -28,6 +28,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 var ErrCardCaptureUnavailable = errors.New("custodian capture is unavailable")
@@ -51,24 +53,27 @@ func captureTokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
-func captureScopedID(domain string, owner billing.MerchantID, customer uuid.UUID, key string) uuid.UUID {
+func captureScopedName(domain string, owner billing.MerchantID, customer uuid.UUID, key string) []byte {
 	input := []byte(domain + "\x00")
 	merchantID := owner.UUID()
 	for _, part := range [][]byte{merchantID[:], customer[:], []byte(key)} {
 		input = binary.BigEndian.AppendUint64(input, uint64(len(part)))
 		input = append(input, part...)
 	}
-	return uuid.NewHash(sha256.New(), uuid.NameSpaceURL, input, 8)
+	return input
 }
 func captureMethodID(owner billing.MerchantID, customer uuid.UUID, key string) uuid.UUID {
-	return captureScopedID("openrails/payment-method-setup/v1", owner, customer, key)
+	return uuidutil.DerivedV7(uuidutil.TimeOf(customer), uuid.NameSpaceURL, string(captureScopedName("openrails/payment-method-setup/v1", owner, customer, key)))
 }
+
+// captureCustomerReference is the custodian's customer: the vendor keeps it,
+// so it never changes.
 func captureCustomerReference(owner billing.MerchantID, customer uuid.UUID) string {
-	return captureScopedID("openrails/custody-customer/v1", owner, customer, "").String()
+	return uuid.NewHash(sha256.New(), uuid.NameSpaceURL, captureScopedName("openrails/custody-customer/v1", owner, customer, ""), 8).String()
 }
 func (s *OrderAttemptService) captureBinding(owner billing.MerchantID, psp merchants.PSPScope, custodian merchants.CustodianScope) (models.CardCapture, error) {
 	var empty models.CardCapture
-	if s.config == nil || s.config.HyperSwitch == nil || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != config.EnvironmentClass(psp.Rail, psp.Environment) {
+	if s.config == nil || s.config.HyperSwitch == (billing.HyperSwitchConfig{}) || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != config.EnvironmentClass(psp.Rail, psp.Environment) {
 		return empty, ErrCardCaptureUnavailable
 	}
 	parsed, err := custodians.ParseSettings(custodian.Kind, custodian.Settings)
@@ -101,7 +106,7 @@ func (s *OrderAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUI
 	if err != nil {
 		return state, nil, nil, err
 	}
-	if s.config == nil || s.config.HyperSwitch == nil {
+	if s.config == nil || s.config.HyperSwitch == (billing.HyperSwitchConfig{}) {
 		return state, nil, nil, ErrCardCaptureUnavailable
 	}
 	psp, custodian, err := s.captureAccounts(ctx, owner, pspID)
@@ -115,7 +120,7 @@ func (s *OrderAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUI
 	if err != nil {
 		return state, nil, nil, err
 	}
-	client, err := railresolve.HyperSwitchClient(s.config, owner, custodian)
+	client, err := railresolve.HyperSwitchClient(s.config, owner, custodian, writeposture.View{DB: s.db}.Posture(ctx, owner.UUID()).ReadOnly())
 	return state, client, sealer, err
 }
 func sameCaptureAccount(a, b models.CardCapture) bool {

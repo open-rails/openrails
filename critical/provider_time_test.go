@@ -120,7 +120,7 @@ func liveDataLink(dl *ccbill.DataLinkClient) { dl.DevMode = false }
 func liveCCBillRefresh(t *testing.T, w *world) (uuid.UUID, func() error, func() error) {
 	t.Helper()
 	rt := embedded.Graph(w.engine).Runtime
-	refresh := &riverjobs.ProviderRefreshWorker{DB: rt.DB, Config: rt.Config, Clock: w.clock, Merchants: rt.Merchants, Contacts: rt.Contacts,
+	refresh := &riverjobs.ProviderRefreshWorker{DB: rt.DB, Config: rt.Config, Endpoints: rt.ProviderEndpoints, Clock: w.clock, Merchants: rt.Merchants, Contacts: rt.Contacts,
 		StripeClients: rt.StripeClients, NMIClients: rt.NMIClients, DataLinkPacing: rt.DataLinkPacing(), WireDataLink: liveDataLink, Log: slog.Default()}
 	psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 	require.NoError(t, err)
@@ -228,7 +228,7 @@ func TestProviderTime(t *testing.T) {
 	})
 
 	t.Run("OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch", func(t *testing.T) {
-		a, p := newNMIWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+		a, p := newNMIWorld(t, func(w *world) { w.posture = "full" })
 		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
 		receipts, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
 		require.NoError(t, err)
@@ -567,7 +567,7 @@ func TestProviderTime(t *testing.T) {
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		w := newWorld(t, func(w *world) {
 			declareCCBillAccount(w, account, dataLink.URL())
-			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			w.posture = "full"
 		})
 		// Lifecycle repairs are armed: what keeps the paid period is the
 		// cancellation's meaning, not a held write.
@@ -613,7 +613,7 @@ func TestProviderTime(t *testing.T) {
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		w := newWorld(t, func(w *world) {
 			declareCCBillAccount(w, account, dataLink.URL())
-			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			w.posture = "full"
 		})
 		armWorldDestructive(t, w, true)
 		dataLink.SetClock(w.clock.Now)
@@ -657,7 +657,7 @@ func TestProviderTime(t *testing.T) {
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		w := newWorld(t, func(w *world) {
 			declareCCBillAccount(w, account, dataLink.URL())
-			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			w.posture = "full"
 			// The world runs a day behind the database's clock, which dates
 			// no payment in its future.
 			w.clock.Advance(-24 * time.Hour)
@@ -696,7 +696,7 @@ func TestProviderTime(t *testing.T) {
 		t.Cleanup(dataLink.Close)
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		a, _ := newPSPWorld(t, func(w *world) {
-			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink.URL()}
 		})
 		dataLink.SetClock(a.clock.Now)
 		create := func(client *openrails.Client, subacc string) error {
@@ -722,7 +722,7 @@ func TestProviderTime(t *testing.T) {
 		dataLink.RequireCredentials("critical-datalink", "critical-datalink-password", false)
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		a, _ := newPSPWorld(t, func(w *world) {
-			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink.URL()}
 		})
 		create := func(client *openrails.Client, subacc, username, password string) error {
 			_, err := client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "ccbill", Rail: billing.RailCCBill, Environment: billing.EnvironmentSandbox,
@@ -753,7 +753,7 @@ func TestProviderTime(t *testing.T) {
 		t.Cleanup(dataLink.Close)
 		dataLink.RequireCredentials("critical-datalink", "critical-datalink-password", false)
 		a, _ := newPSPWorld(t, func(w *world) {
-			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink.URL()}
 		})
 		create := func(password string) error {
 			_, err := a.alphaRemote.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "ccbill", Rail: billing.RailCCBill, Environment: billing.EnvironmentSandbox,
@@ -806,7 +806,7 @@ func TestProviderTime(t *testing.T) {
 				t.Cleanup(dataLink.Close)
 				account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 				a, _ := newPSPWorld(t, func(w *world) {
-					w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+					w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink.URL()}
 				})
 				dataLink.SetClock(a.clock.Now)
 				create := func(client *openrails.Client, subacc string) (*billing.PSP, error) {

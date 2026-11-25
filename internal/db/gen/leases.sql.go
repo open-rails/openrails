@@ -201,43 +201,6 @@ func (q *Queries) ListCustomerInFlight(ctx context.Context, arg ListCustomerInFl
 	return items, nil
 }
 
-const listCustomerRunningRates = `-- name: ListCustomerRunningRates :many
-SELECT currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND stopped_at IS NULL
-GROUP BY currency
-`
-
-type ListCustomerRunningRatesParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-type ListCustomerRunningRatesRow struct {
-	Currency    string
-	RatePerHour int64
-}
-
-// What each currency's running charges of a customer accrue per hour.
-func (q *Queries) ListCustomerRunningRates(ctx context.Context, arg ListCustomerRunningRatesParams) ([]ListCustomerRunningRatesRow, error) {
-	rows, err := q.db.Query(ctx, listCustomerRunningRates, arg.MerchantID, arg.CustomerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListCustomerRunningRatesRow
-	for rows.Next() {
-		var i ListCustomerRunningRatesRow
-		if err := rows.Scan(&i.Currency, &i.RatePerHour); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listLeaseInFlight = `-- name: ListLeaseInFlight :many
 SELECT customer_id, limit_key, unit, amount FROM billing.lease_in_flight
 WHERE merchant_id = $1::uuid AND lease_id = $2::uuid
@@ -281,48 +244,34 @@ func (q *Queries) ListLeaseInFlight(ctx context.Context, arg ListLeaseInFlightPa
 	return items, nil
 }
 
-const listLeaseOpenHolds = `-- name: ListLeaseOpenHolds :many
-SELECT id, created_at, request_id, customer_id FROM billing.limit_holds
-WHERE merchant_id = $1::uuid AND lease_id = $2::uuid AND state = 'open'
-  AND created_at >= $3::timestamptz
-  AND ($4::text[] IS NULL OR request_id = ANY($4::text[]))
+const listRunningRatesOf = `-- name: ListRunningRatesOf :many
+SELECT customer_id, currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
+WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[]) AND stopped_at IS NULL
+GROUP BY customer_id, currency
 `
 
-type ListLeaseOpenHoldsParams struct {
-	MerchantID uuid.UUID
-	LeaseID    uuid.UUID
-	HeldSince  time.Time
-	RequestIds []string
+type ListRunningRatesOfParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
 }
 
-type ListLeaseOpenHoldsRow struct {
-	ID         uuid.UUID
-	CreatedAt  time.Time
-	RequestID  string
-	CustomerID uuid.UUID
+type ListRunningRatesOfRow struct {
+	CustomerID  uuid.UUID
+	Currency    string
+	RatePerHour int64
 }
 
-// The open request holds a lease owns, by request id.
-func (q *Queries) ListLeaseOpenHolds(ctx context.Context, arg ListLeaseOpenHoldsParams) ([]ListLeaseOpenHoldsRow, error) {
-	rows, err := q.db.Query(ctx, listLeaseOpenHolds,
-		arg.MerchantID,
-		arg.LeaseID,
-		arg.HeldSince,
-		arg.RequestIds,
-	)
+// What many customers' running charges accrue per hour, by currency.
+func (q *Queries) ListRunningRatesOf(ctx context.Context, arg ListRunningRatesOfParams) ([]ListRunningRatesOfRow, error) {
+	rows, err := q.db.Query(ctx, listRunningRatesOf, arg.MerchantID, arg.CustomerIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListLeaseOpenHoldsRow
+	var items []ListRunningRatesOfRow
 	for rows.Next() {
-		var i ListLeaseOpenHoldsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.CreatedAt,
-			&i.RequestID,
-			&i.CustomerID,
-		); err != nil {
+		var i ListRunningRatesOfRow
+		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.RatePerHour); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -378,6 +327,41 @@ type RenewLeaseParams struct {
 func (q *Queries) RenewLease(ctx context.Context, arg RenewLeaseParams) error {
 	_, err := q.db.Exec(ctx, renewLease, arg.Now, arg.MerchantID, arg.ID)
 	return err
+}
+
+const sumWindowHeld = `-- name: SumWindowHeld :one
+SELECT (CASE WHEN $1::boolean THEN COALESCE((SELECT SUM(f.amount)
+    FROM billing.lease_in_flight f
+    JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+    WHERE f.merchant_id = $2::uuid AND f.customer_id = $3::uuid
+      AND f.limit_key = $4::text
+      AND l.closed_at IS NULL AND l.last_sync_at > $5::timestamptz
+      AND ($6::uuid IS NULL OR f.lease_id <> $6::uuid)), 0) ELSE 0 END)::bigint AS held
+`
+
+type SumWindowHeldParams struct {
+	InFlight       bool
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	LimitKey       string
+	LeaseLiveSince time.Time
+	ExceptLease    *uuid.UUID
+}
+
+// What live gates other than except_lease report in flight of a limit; only
+// a read of its current window counts it (in_flight).
+func (q *Queries) SumWindowHeld(ctx context.Context, arg SumWindowHeldParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumWindowHeld,
+		arg.InFlight,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.LimitKey,
+		arg.LeaseLiveSince,
+		arg.ExceptLease,
+	)
+	var held int64
+	err := row.Scan(&held)
+	return held, err
 }
 
 const syncElapsed = `-- name: SyncElapsed :one

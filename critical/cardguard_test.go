@@ -12,12 +12,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
+
+// paymentLimitOnly limits the payment bucket alone.
+var paymentLimitOnly = billing.RateLimitsConfig{Purchase: &billing.RateLimit{}, Payment: &billing.RateLimit{RequestsPerMinute: 40},
+	Subscribe: &billing.RateLimit{}, Webhook: &billing.RateLimit{}}
 
 func TestCardGuard(t *testing.T) {
 	t.Run("OR-J12-S12/mastercard-length-rule-keeps-real-cards-blocked", func(t *testing.T) {
@@ -55,7 +58,7 @@ func TestCardGuard(t *testing.T) {
 		// Each refusal below is its own purchase request; the purchase limit is
 		// not under test.
 		a, journal := newNMIWorld(t, func(w *world) {
-			w.cfg.RateLimits = openrails.RateLimitsConfig{"payment": {RequestsPerMinute: 40}}
+			w.cfg.RateLimits = paymentLimitOnly
 		})
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
@@ -103,7 +106,7 @@ func TestCardGuard(t *testing.T) {
 			refused("/v1/me/orders", order(billing.OrderPaymentParams{Token: token, BillingDetails: holding(field)}, ptr(false)), "payment.billing_details."+field, map[string]string{"Idempotency-Key": "firewall-" + field})
 		}
 		refused("/v1/me/payment-methods", billing.CreatePaymentMethodParams{PSPID: psp, Token: "4111111111111111"}, "token")
-		refused("/v1/me/orders", order(billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/return?card=4111111111111111"}, nil), "payment.return_url", map[string]string{"Idempotency-Key": "firewall-return-url"})
+		refused("/v1/me/orders", order(billing.OrderPaymentParams{ReturnURL: alphaSite + "/return?card=4111111111111111"}, nil), "payment.return_url", map[string]string{"Idempotency-Key": "firewall-return-url"})
 		refused("/v1/me/orders", order(billing.OrderPaymentParams{TokenSymbol: pan}, nil), "payment.token_symbol", map[string]string{"Idempotency-Key": "firewall-token-symbol"})
 
 		require.Len(t, journal.core.Calls(), calls, "nothing reached NMI")
@@ -119,7 +122,7 @@ func TestCardGuard(t *testing.T) {
 	})
 	t.Run("OR-J12-S16/legitimate-values-pass-the-firewall-on-every-card-route", func(t *testing.T) {
 		a, journal := newNMIWorld(t, func(w *world) {
-			w.cfg.RateLimits = openrails.RateLimitsConfig{"payment": {RequestsPerMinute: 40}}
+			w.cfg.RateLimits = paymentLimitOnly
 		})
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
@@ -181,7 +184,7 @@ func TestCardGuard(t *testing.T) {
 		refused(http.MethodPost, pay, billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token, BillingDetails: &billing.BillingDetails{Phone: ptr("4111111111111111")}}, ExpectedTotal: 10_000_000, Reusable: ptr(false)}, "payment.billing_details.phone", map[string]string{"Idempotency-Key": "firewall-pay-refused"})
 		status, raw = a.request(t, http.MethodPost, pay, a.aliceToken, billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token, BillingDetails: legit}, ExpectedTotal: 10_000_000, Reusable: ptr(false)}, map[string]string{"Idempotency-Key": "firewall-pay"})
 		require.Equal(t, http.StatusOK, status, "legitimate billing details pay: %s", raw)
-		status, raw = a.request(t, http.MethodPost, pay, a.aliceToken, billing.PayOrderParams{Payment: billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/return?order=" + orderRef}, ExpectedTotal: 10_000_000}, map[string]string{"Idempotency-Key": "firewall-pay-return"})
+		status, raw = a.request(t, http.MethodPost, pay, a.aliceToken, billing.PayOrderParams{Payment: billing.OrderPaymentParams{ReturnURL: alphaSite + "/return?order=" + orderRef}, ExpectedTotal: 10_000_000}, map[string]string{"Idempotency-Key": "firewall-pay-return"})
 		passed(status, raw)
 
 		// A card number as an unknown field's name is not echoed, and a test
@@ -191,7 +194,7 @@ func TestCardGuard(t *testing.T) {
 		require.Equal(t, billing.CodeUnknownField, read(raw).Error.Code)
 		require.NotContains(t, string(raw), "4111")
 		status, raw = a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psp,
-			Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4343", Exp: "1235"})}, map[string]string{"X-E2E-Run-ID": "run-4111111111111111"})
+			Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4343", Exp: "1235"}), BillingDetails: legit}, map[string]string{"X-E2E-Run-ID": "run-4111111111111111"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var tagged billing.PaymentMethod
 		require.NoError(t, json.Unmarshal(raw, &tagged))

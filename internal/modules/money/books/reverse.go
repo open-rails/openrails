@@ -22,8 +22,8 @@ const (
 	OpChargeback Operation = "chargeback"
 	// OpDisputeWon restores what a chargeback took from unapplied cash and
 	// from the contra; OpDisputeWonDeferred what it took from deferred
-	// revenue; OpDisputeWonReopened the owed amount a usage order's
-	// chargeback reopened.
+	// revenue; OpDisputeWonReopened the owed a usage order's chargeback
+	// reopened, collected again (ResettleUsage).
 	OpDisputeWon         Operation = "dispute_won"
 	OpDisputeWonDeferred Operation = "dispute_won_deferred"
 	OpDisputeWonReopened Operation = "dispute_won_reopened"
@@ -118,13 +118,14 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 			return w.post(ctx, Ref{Type: Refunds}, w.cash, RefundRecognized, OpRefund, contra, nil)
 		}
 		return nil
+	case usage:
+		// A usage order's chargeback reopens what the customer owes and its
+		// won dispute collects it again: owed.SyncUsageReversals books both
+		// (ReopenUsage, ResettleUsage) before this would.
+		return nil
 	case *r.ReversalKind == "refund" && r.Amount < 0:
 		return w.reverse(ctx, refundReversal, amount, pb)
 	case *r.ReversalKind == "chargeback" && r.Amount < 0:
-		// A usage order's chargeback reopens what the customer owes: the
-		// receivable's usage_reopened at this coordinate is its cash side,
-		// with no contra; until the receivable is booked its money leaves
-		// unapplied cash.
 		return w.reverse(ctx, chargebackReversal, amount, pb)
 	case *r.ReversalKind == "dispute_reversal" && r.Amount > 0:
 		return w.restore(ctx, amount, pb)
@@ -205,8 +206,14 @@ func paymentBooksFrom(payment uuid.UUID, rows []gen.ListPaymentBooksLegsRow) pay
 			l.returned += row.Amount
 		case typ == UsageReopened && row.RevenueScheduleID == nil:
 			l.reopened += row.Amount
-		case typ == DisputeWon && op == OpDisputeWonReopened:
+		case typ == DisputeWon && (op == OpDisputeWonReopened || op == OpDisputeWonRevenue):
 			l.reopened -= row.Amount
+		case typ == DisputeWon && op == OpDisputeWonLoss:
+			// A usage chargeback's loss given back: no unapplied cash moves.
+		case typ == CashApplied && row.RevenueScheduleID == nil:
+			// A credit lot funded from what a usage order payment's won
+			// dispute returned to unapplied cash takes it from there again.
+			l.returned += row.Amount
 		case typ == DisputeWon && row.RevenueScheduleID == nil:
 			l.returned -= row.Amount
 		case row.RevenueScheduleID == nil:
@@ -319,22 +326,15 @@ func (w *reverser) restore(ctx context.Context, amount int64, pb paymentBooks) e
 	}
 	c := pb.chargebackLegs(reversals, rowOf(w.reversal), amount)
 	ids, shares := bySchedule(c.totals())
-	legs := append([]int64{max(c.returned, 0), max(c.reopened, 0)}, shares...)
+	legs := append([]int64{max(c.returned, 0)}, shares...)
 	parts := spread(min(amount, sum(legs)), legs)
-	if parts[1] > 0 {
-		// Owed the chargeback reopened is collected again.
-		customer := w.reversal.CustomerID
-		if err := w.post(ctx, w.cash, Ref{Type: UsageReceivable, Customer: &customer}, DisputeWon, OpDisputeWonReopened, parts[1], nil); err != nil {
-			return err
-		}
-	}
 	if toUnapplied := amount - sum(parts[1:]); toUnapplied > 0 {
 		if err := w.post(ctx, w.cash, Ref{Type: UnappliedCash}, DisputeWon, OpDisputeWon, toUnapplied, nil); err != nil {
 			return err
 		}
 	}
 	for i, id := range ids {
-		part := parts[i+2]
+		part := parts[i+1]
 		if part <= 0 {
 			continue
 		}
@@ -550,31 +550,10 @@ func (w *reverser) adjust(ctx context.Context, id uuid.UUID, delta, contra int64
 			return err
 		}
 	}
-	s := scheduleOf(row)
-	end := s.end()
-	t := maxTime(w.at, s.through)
-	serving := w.now.Before(end) && t.Before(end)
-	var steps []recognition
-	if serving {
-		if steps, _, err = s.progress(ctx, w.loc, t, false); err != nil {
-			return err
-		}
-		more, _ := s.catchUp(t, w.loc)
-		steps = append(steps, more...)
-	} else if steps, _, err = s.progress(ctx, w.loc, w.now, false); err != nil {
+	s, contra, deferred, earned, err := w.b.moveFunding(ctx, row, delta, contra, w.at, w.now, w.loc)
+	if err != nil {
 		return err
 	}
-	if err := w.b.recognize(ctx, row, steps); err != nil {
-		return err
-	}
-
-	var deferred, earned int64
-	if delta < 0 {
-		contra, deferred = s.reduce(-delta, serving)
-	} else {
-		contra, deferred, earned = s.restore(delta, contra, serving, end)
-	}
-
 	if delta < 0 {
 		if contra > 0 {
 			if err := w.post(ctx, Ref{Type: k.contra}, w.cash, k.recognized, k.op, contra, &row); err != nil {
@@ -603,13 +582,49 @@ func (w *reverser) adjust(ctx context.Context, id uuid.UUID, delta, contra int64
 			}
 		}
 	}
-	n, err := w.q.AdjustRevenueSchedule(ctx, gen.AdjustRevenueScheduleParams{
-		MerchantID: w.merchant, ID: id, Funded: s.funded, RecognizedNet: s.recognized, RecognizedThroughAt: s.through,
-		NextRecognitionAt: s.nextDue(w.loc), Reinstatements: int32(s.reinstatements), // #nosec G115 -- one per undone end
+	return w.b.saveSchedule(ctx, id, s, w.loc)
+}
+
+// moveFunding changes a locked schedule's funding by delta: a reversal's
+// share (negative) or a recovery's (positive, contra the part of it that
+// went to recognised revenue). The schedule first recognises what its
+// service earned: up to the change while it serves, else to now. It answers
+// the schedule changed and the change's contra, deferred and earned parts.
+func (b *Books) moveFunding(ctx context.Context, row gen.BillingRevenueSchedule, delta, contra int64, at, now time.Time, loc *time.Location) (s schedule, c, deferred, earned int64, err error) {
+	s = scheduleOf(row)
+	end := s.end()
+	t := maxTime(at, s.through)
+	serving := now.Before(end) && t.Before(end)
+	var steps []recognition
+	if serving {
+		if steps, _, err = s.progress(ctx, loc, t, false); err != nil {
+			return s, 0, 0, 0, err
+		}
+		more, _ := s.catchUp(t, loc)
+		steps = append(steps, more...)
+	} else if steps, _, err = s.progress(ctx, loc, now, false); err != nil {
+		return s, 0, 0, 0, err
+	}
+	if err = b.recognize(ctx, row, steps); err != nil {
+		return s, 0, 0, 0, err
+	}
+	if delta < 0 {
+		c, deferred = s.reduce(-delta, serving)
+	} else {
+		c, deferred, earned = s.restore(delta, contra, serving, end)
+	}
+	return s, c, deferred, earned, nil
+}
+
+// saveSchedule records a schedule's change.
+func (b *Books) saveSchedule(ctx context.Context, id uuid.UUID, s schedule, loc *time.Location) error {
+	n, err := b.q.AdjustRevenueSchedule(ctx, gen.AdjustRevenueScheduleParams{
+		MerchantID: b.merchant, ID: id, Funded: s.funded, RecognizedNet: s.recognized, RecognizedThroughAt: s.through,
+		NextRecognitionAt: s.nextDue(loc), Reinstatements: int32(s.reinstatements), // #nosec G115 -- one per undone end
 		Forfeited: s.forfeited,
 	})
 	if err == nil && n != 1 {
-		err = fmt.Errorf("books: revenue schedule %s did not record its reversal", id)
+		err = fmt.Errorf("books: revenue schedule %s did not record its change", id)
 	}
 	return err
 }

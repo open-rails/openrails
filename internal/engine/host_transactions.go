@@ -4,20 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/service"
 )
 
 // The Tx methods run the same commands as the Client inside tx, a
 // transaction from the host's pool on this engine's database, for running
-// charges and admissions that must commit atomically with host rows.
+// charges that must commit atomically with host rows.
 // OpenRails binds mid, the handle's merchant, to tx and never commits or rolls
 // it back; after an error the host rolls back.
 
@@ -40,65 +37,6 @@ func (e *Engine) StopRunningChargeTx(ctx context.Context, mid billing.MerchantID
 		return nil, err
 	}
 	return e.svc.StopRunningChargeTx(ctx, tx, reference, params)
-}
-
-// AdmitTx admits each request inside tx; commit it with the host's request
-// rows. A refused request is a verdict and writes nothing.
-func (e *Engine) AdmitTx(ctx context.Context, mid billing.MerchantID, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error) {
-	if err := e.App.Runtime.RequireEventStore("an admission"); err != nil {
-		return nil, err
-	}
-	if err := (billing.AdmitBatchParams{Items: requests}).Validate(); err != nil {
-		return nil, err
-	}
-	ctx, err := e.bind(ctx, mid, tx)
-	if err != nil {
-		return nil, err
-	}
-	return handlers.AdmitVerdicts(ctx, e.Log, requests, func(billing.CustomerID) bool { return true },
-		func(ctx context.Context, in service.AdmitInput) (*billing.Admission, error) {
-			return e.svc.AdmitTx(ctx, tx, in)
-		}), nil
-}
-
-// CaptureAdmissionsTx settles each admission inside tx; commit it with the
-// host's record of the finished work.
-func (e *Engine) CaptureAdmissionsTx(ctx context.Context, mid billing.MerchantID, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error) {
-	if err := e.App.Runtime.RequireEventStore("an admission"); err != nil {
-		return nil, err
-	}
-	if err := (billing.CaptureAdmissionBatchParams{Items: items}).Validate(); err != nil {
-		return nil, err
-	}
-	ctx, err := e.bind(ctx, mid, tx)
-	if err != nil {
-		return nil, err
-	}
-	return handlers.CaptureResults(ctx, e.Log, items, nil, func(ctx context.Context, params billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error) {
-		return e.svc.CaptureAdmissionTx(ctx, tx, params)
-	}), nil
-}
-
-// ReleaseAdmissionsTx releases each admission inside tx; commit it with the
-// host's record of the failed work.
-func (e *Engine) ReleaseAdmissionsTx(ctx context.Context, mid billing.MerchantID, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error) {
-	if err := e.App.Runtime.RequireEventStore("an admission"); err != nil {
-		return nil, err
-	}
-	if err := (billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}).Validate(); err != nil {
-		return nil, err
-	}
-	ctx, err := e.bind(ctx, mid, tx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]billing.AdmissionResult, len(requestIDs))
-	for i, id := range requestIDs {
-		out[i] = handlers.ReleaseResult(ctx, e.Log, strings.TrimSpace(id), func(ctx context.Context, requestID string) (*billing.Admission, error) {
-			return e.svc.ReleaseAdmissionTx(ctx, tx, requestID)
-		})
-	}
-	return out, nil
 }
 
 // bind pins mid for a call inside tx, after reading it live through tx: an

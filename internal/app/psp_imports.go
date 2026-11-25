@@ -3,7 +3,6 @@ package app
 import (
 	"time"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/catalog/providerobjects"
 	"github.com/open-rails/openrails/internal/proposals"
@@ -26,7 +25,7 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 		return nil
 	}
 	return &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, Objects: r.ProviderObjects(),
-		CCBillDataLinkURL: config.SandboxCCBillDataLinkURL(r.Config), DataLinkPacing: r.DataLinkPacing(), Directory: r.Contacts,
+		CCBillDataLinkURL: r.ProviderEndpoints.CCBillDataLinkURL, DataLinkPacing: r.DataLinkPacing(), Directory: r.Contacts,
 		Proposals: proposals.New(r.DB, r.Config, r.Clock, r.DestructiveAdmissions), Clock: r.Clock, Log: r.Log}
 }
 

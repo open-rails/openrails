@@ -60,6 +60,10 @@ type MerchantConfiguration struct {
 	// AccountingTimezone is the IANA zone the merchant's books are dated in;
 	// never empty (UTC by default).
 	AccountingTimezone string `json:"accounting_timezone,omitempty"`
+
+	// BillingFields are the billing details a new card needs, defaults
+	// filled in.
+	BillingFields billing.BillingFieldSettings `json:"billing_fields"`
 }
 
 // BalanceNoticeConfiguration is a merchant's validated default low-balance

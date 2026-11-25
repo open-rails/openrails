@@ -226,7 +226,7 @@ func resume(r *httprequest.Request, sub *models.Subscription, origin intents.Ori
 // A resume Stripe could not be told of now is refused before anything
 // commits: provider writes off, or Stripe not configured for its PSP.
 func resumeStripe(ctx context.Context, r *httprequest.Request, sub *models.Subscription, origin intents.Origin) error {
-	if posture := (writeposture.View{Config: r.State.Config, DB: r.State.DB}).Posture(ctx, sub.MerchantID); posture.ReadOnly() {
+	if posture := (writeposture.View{DB: r.State.DB}).Posture(ctx, sub.MerchantID); posture.ReadOnly() {
 		return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "provider writes are off, so Stripe cannot be told of the resume: "+posture.Reason)
 	}
 	_, key, err := subscriptions.RequireStripeSecretKey(ctx, r.State.RailConfigs)

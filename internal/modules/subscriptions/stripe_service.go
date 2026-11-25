@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/railresolve"
 
@@ -57,7 +58,7 @@ type StripeService struct {
 	accountPSPID      uuid.UUID
 	accountID         string
 	accountSecret     string
-	Config            *config.Config
+	Config            *billing.Config
 	Rails             railresolve.Source
 }
 
@@ -90,7 +91,7 @@ func (s *StripeService) CreateCustomer(ctx context.Context, email, appUserID str
 	// and concurrent purchases.
 	req.Header.Set("Idempotency-Key", "customer_create_"+appUserID)
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe customer create failed: %w", err)
@@ -141,7 +142,7 @@ func (s *StripeService) FindCustomerIDByAppUserID(ctx context.Context, appUserID
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe customer search failed: %w", err)
@@ -194,7 +195,7 @@ func (s *StripeService) ListActiveSubscriptionsForCustomer(ctx context.Context, 
 		return nil, errors.New("customer_id is required")
 	}
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	var summaries []StripeSubscriptionSummary
 	for _, status := range []string{"active", "trialing"} {
 		query := url.Values{}
@@ -268,7 +269,7 @@ func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionI
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe subscription fetch failed: %w", err)
@@ -340,7 +341,7 @@ func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptio
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("stripe subscription update failed: %w", err)
@@ -423,7 +424,7 @@ func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID s
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("stripe subscription cancel failed: %w", err)
@@ -460,7 +461,7 @@ func (s *StripeService) EndSubscription(ctx context.Context, subscriptionID stri
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
-	resp, err := s.StripeClients.Client(s.Config, 0).Do(req)
+	resp, err := s.StripeClients.Client(0).Do(req)
 	if err != nil {
 		return fmt.Errorf("stripe subscription end failed: %w", err)
 	}
@@ -485,7 +486,7 @@ func (s *StripeService) EndSubscription(ctx context.Context, subscriptionID stri
 // NewAccountStripeService binds a resolved account and its credentials together.
 // Receipt reads use the captured credentials, even if the general Rails view is
 // changed by a host after construction.
-func NewAccountStripeService(cfg *config.Config, merchantID, pspID uuid.UUID, accountID, secretKey string) *StripeService {
+func NewAccountStripeService(cfg *billing.Config, merchantID, pspID uuid.UUID, accountID, secretKey string) *StripeService {
 	return &StripeService{Config: cfg, accountMerchantID: merchantID, accountPSPID: pspID, accountID: accountID, accountSecret: secretKey, Rails: railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: accountID, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}}
 }
 func (s *StripeService) AccountIdentity() (uuid.UUID, uuid.UUID) {

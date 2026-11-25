@@ -10,11 +10,15 @@ import (
 // expiry, the PSP's webhook_overlap_expires_at setting. Rotation records it; a
 // declared previous secret must carry it too. No expiry, or an unparsable one,
 // means the old secret is refused.
-const (
-	DefaultWebhookSecretOverlap = 24 * time.Hour
-	MaxWebhookSecretOverlap     = 7 * 24 * time.Hour
-	WebhookOverlapExpiresKey    = "webhook_overlap_expires_at"
-)
+const WebhookOverlapExpiresKey = "webhook_overlap_expires_at"
+
+// A rotated-out PSP webhook signing secret keeps verifying for 24 h, so
+// callbacks signed before the rotation don't fail; retire_webhook_overlap
+// ends it early.
+const webhookSecretOverlap = 24 * time.Hour
+
+// A managed Stripe endpoint's outgoing secret keeps verifying for a week.
+const managedEndpointOverlap = 7 * 24 * time.Hour
 
 // WithClock sets the clock that bounds webhook secret overlaps.
 func (s *Service) WithClock(clock clockwork.Clock) *Service {
@@ -24,27 +28,11 @@ func (s *Service) WithClock(clock clockwork.Clock) *Service {
 	return s
 }
 
-// WithWebhookSecretOverlap sets how long a rotated-out webhook secret keeps
-// verifying. Zero keeps the default; values are capped at MaxWebhookSecretOverlap.
-func (s *Service) WithWebhookSecretOverlap(d time.Duration) *Service {
-	if s != nil && d > 0 {
-		s.webhookSecretOverlap = min(d, MaxWebhookSecretOverlap)
-	}
-	return s
-}
-
 func (s *Service) now() time.Time {
 	if s == nil || s.clock == nil {
 		return time.Now().UTC()
 	}
 	return s.clock.Now().UTC()
-}
-
-func (s *Service) overlapWindow() time.Duration {
-	if s == nil || s.webhookSecretOverlap <= 0 {
-		return DefaultWebhookSecretOverlap
-	}
-	return s.webhookSecretOverlap
 }
 
 // overlapOpen reports whether the PSP's rotated-out webhook secret still

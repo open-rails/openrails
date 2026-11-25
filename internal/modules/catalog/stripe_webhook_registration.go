@@ -16,19 +16,23 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/httpx"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 type ManagedStripeWebhookParams struct {
 	Publication *merchants.StripeWebhookPublication
 
 	StripeClients       *stripeapi.Factory
-	Config              *config.Config
+	Config              *billing.Config
 	SecretStore         merchants.MerchantSecretReader
 	MerchantID          billing.MerchantID
 	ProviderEnvironment string
 	PspID               string
 	SecretKey           string
 	EnabledEvents       []string
+	// Posture is the merchant's write posture: below full the pass writes
+	// nothing.
+	Posture writeposture.Posture
 	// Now overrides the rollover clock (tests). Zero = time.Now().
 	Now time.Time
 	// AllowRetire lets this pass DELETE endpoints that a successor replaced
@@ -58,7 +62,7 @@ type ManagedStripeWebhookResult struct {
 // PublicStripeWebhookURL builds the canonical account-specific callback URL.
 // Embedded and standalone hosts publish the same path under their public billing
 // mount. The account resolves the merchant; a slug is never callback authority.
-func PublicStripeWebhookURL(cfg *config.Config, accountID string) (string, bool, error) {
+func PublicStripeWebhookURL(cfg *billing.Config, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {
 		base = strings.TrimSpace(cfg.PublicBillingBaseURL)
@@ -92,8 +96,8 @@ func PublicStripeWebhookURL(cfg *config.Config, accountID string) (string, bool,
 }
 
 func ReconcileManagedStripeWebhook(ctx context.Context, logger *slog.Logger, p ManagedStripeWebhookParams) (ManagedStripeWebhookResult, error) {
-	if p.Config != nil && config.IsLimitedMode(p.Config) {
-		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "provider writes disabled"}, nil
+	if p.Posture.Limited() {
+		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "provider writes held: " + p.Posture.Reason}, nil
 	}
 	webhookURL, ok, err := PublicStripeWebhookURL(p.Config, p.PspID)
 	if err != nil {

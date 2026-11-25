@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 type renewalEffects struct {
@@ -45,7 +46,7 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			sub.ClearRetrySchedule()
 		}
 	}
-	if err := NewSubscriptionRepo(d).Update(ctx, sub); err != nil {
+	if err := NewSubscriptionRepo(d).UpdateAt(ctx, sub, s.now()); err != nil {
 		return nil, fmt.Errorf("update renewed subscription: %w", err)
 	}
 	entitlementsService := s.newLifecycleEntitlementService(d)
@@ -73,10 +74,16 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		data.ToProductID, data.ToProductName = billing.ProductID(sub.ProductID), effects.ProductName
 		data.EffectiveAt = &effects.PeriodStart
 	}
-	key := "renewed:" + effects.PeriodStart.UTC().Format(time.RFC3339Nano) + ":" + effects.PeriodEnd.UTC().Format(time.RFC3339Nano)
-	notification := &models.NotificationEvent{ID: uuid.NewSHA1(sub.ID, []byte(key)), CustomerID: sub.CustomerID, EventType: models.NotificationPremiumRenewed, Data: data}
+	key := renewalNoticeKey(effects.PeriodStart, effects.PeriodEnd)
+	notification := &models.NotificationEvent{ID: uuidutil.DerivedV7(effects.PeriodStart, sub.ID, key), CustomerID: sub.CustomerID, EventType: models.NotificationPremiumRenewed, Data: data}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, notification); err != nil {
 		return nil, fmt.Errorf("queue renewed notification: %w", err)
 	}
 	return notification, nil
+}
+
+// renewalNoticeKey names a period's renewed notice; its id's instant is the
+// period start, so both writers of the notice derive one id.
+func renewalNoticeKey(start, end time.Time) string {
+	return "renewed:" + start.UTC().Format(time.RFC3339Nano) + ":" + end.UTC().Format(time.RFC3339Nano)
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
 // ControlPlane is the standalone server's multi-merchant control plane over
@@ -63,7 +64,7 @@ type Options struct {
 	// JWKS.
 	LocalSignIn bool
 	// Naming is the rename policy for merchant names.
-	Naming config.NamingConfig
+	Naming billing.NamingConfig
 	// MerchantCreation is the hosted policy for merchant names users claim
 	// (or#914); nil for operator-provisioned deployments. With LocalSignIn,
 	// a hosted product may explicitly enable open native registration.
@@ -106,12 +107,9 @@ var ResourceScopes = map[string][]string{
 // AuthKit is the server's AuthKit configuration: the host's auth, passed
 // through, with the product's own settings over it. Its jobs run on
 // OpenRails' River fleet.
-func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Config, error) {
+func AuthKit(cfg *billing.Config, auth authkit.Config, opts Options) (authkit.Config, error) {
 	if cfg == nil || strings.TrimSpace(auth.Token.Issuer) == "" {
 		return authkit.Config{}, errors.New("controlplane: auth.token.issuer is required")
-	}
-	if err := RequireDefaultTenant(auth); err != nil {
-		return authkit.Config{}, err
 	}
 	if err := validate(auth, opts); err != nil {
 		return authkit.Config{}, err
@@ -182,22 +180,19 @@ func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Con
 	return auth, nil
 }
 
-// clientIPPosture derives AuthKit's client-IP posture from the engine's
-// trusted proxies, its one source: the same proxies, or the direct peer when
-// there are none. AuthKit's own proxies may only split the same set (the
-// Cloudflare ones, whose CF-Connecting-IP it takes); direct_peer_ip beside
-// any proxy is refused.
+// clientIPPosture derives AuthKit's client-IP posture from the engine's:
+// trusted_proxies, and Cloudflare's ranges, whose CF-Connecting-IP it takes.
+// AuthKit's own proxies may only restate that set; direct_peer_ip asserts
+// there are no trusted_proxies.
 func clientIPPosture(h *authkit.HTTPConfig, trusted []string) error {
 	own := append(slices.Clone(h.TrustedProxies), h.CloudflareProxies...)
 	switch {
 	case h.DirectPeerIP && (len(trusted) > 0 || len(own) > 0):
-		return errors.New("controlplane: auth.http.direct_peer_ip says no proxy sits in front, but trusted_proxies or cloudflare_proxies names one; set only the proxies")
-	case len(own) == 0:
-		h.TrustedProxies = slices.Clone(trusted)
-		h.DirectPeerIP = len(trusted) == 0
-	case !sameCIDRs(own, trusted):
-		return errors.New("controlplane: auth.http's proxies differ from trusted_proxies and cloudflare_proxies; declare the proxies once, at the top level")
+		return errors.New("controlplane: auth.http.direct_peer_ip says no proxy sits in front, but trusted_proxies or auth.http names one; set only trusted_proxies")
+	case len(own) > 0 && !sameCIDRs(own, append(slices.Clone(trusted), iputil.CloudflareRanges...)):
+		return errors.New("controlplane: auth.http's proxies differ from trusted_proxies and Cloudflare's ranges; declare trusted_proxies once, at the top level")
 	}
+	h.TrustedProxies, h.CloudflareProxies, h.DirectPeerIP = slices.Clone(trusted), slices.Clone(iputil.CloudflareRanges), false
 	return nil
 }
 
@@ -206,15 +201,6 @@ func sameCIDRs(a, b []string) bool {
 	slices.Sort(a)
 	slices.Sort(b)
 	return slices.Equal(slices.Compact(a), slices.Compact(b))
-}
-
-// RequireDefaultTenant refuses an unassigned platform account directory.
-// Merchant ownership is independent; it never supplies this identity.
-func RequireDefaultTenant(auth authkit.Config) error {
-	if auth.DefaultTenantID.IsZero() {
-		return errors.New("standalone: auth.default_tenant_id (AUTH_DEFAULT_TENANT_ID) must name the stable platform account tenant; generate it once and persist it in deployment configuration")
-	}
-	return nil
 }
 
 // defaultResource is the server's resource identifier (RFC 8707) when
@@ -313,7 +299,7 @@ func consoleFrontend(front *authkit.FrontendConfig, publicURL, issuer string) {
 // New is the control plane over client, the AuthKit client built from
 // AuthKit's configuration, and pool, OpenRails' database. Closing it closes
 // client.
-func New(logger *slog.Logger, client *authkit.Client, cfg *config.Config, auth authkit.Config, pool *pgxpool.Pool, opts Options) (*ControlPlane, error) {
+func New(logger *slog.Logger, client *authkit.Client, cfg *billing.Config, auth authkit.Config, pool *pgxpool.Pool, opts Options) (*ControlPlane, error) {
 	switch {
 	case client == nil:
 		return nil, errors.New("controlplane: an AuthKit client is required")

@@ -79,15 +79,19 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.customer_id = sqlc.arg(c
   AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)
 GROUP BY f.limit_key, f.unit;
 
--- name: ListLeaseOpenHolds :many
--- The open request holds a lease owns, by request id.
-SELECT id, created_at, request_id, customer_id FROM billing.limit_holds
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND lease_id = sqlc.arg(lease_id)::uuid AND state = 'open'
-  AND created_at >= sqlc.arg(held_since)::timestamptz
-  AND (sqlc.narg(request_ids)::text[] IS NULL OR request_id = ANY(sqlc.narg(request_ids)::text[]));
+-- name: ListRunningRatesOf :many
+-- What many customers' running charges accrue per hour, by currency.
+SELECT customer_id, currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[]) AND stopped_at IS NULL
+GROUP BY customer_id, currency;
 
--- name: ListCustomerRunningRates :many
--- What each currency's running charges of a customer accrue per hour.
-SELECT currency, SUM(rate_per_hour)::bigint AS rate_per_hour FROM billing.running_charges
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND stopped_at IS NULL
-GROUP BY currency;
+-- name: SumWindowHeld :one
+-- What live gates other than except_lease report in flight of a limit; only
+-- a read of its current window counts it (in_flight).
+SELECT (CASE WHEN sqlc.arg(in_flight)::boolean THEN COALESCE((SELECT SUM(f.amount)
+    FROM billing.lease_in_flight f
+    JOIN billing.leases l ON l.merchant_id = f.merchant_id AND l.id = f.lease_id
+    WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.customer_id = sqlc.arg(customer_id)::uuid
+      AND f.limit_key = sqlc.arg(limit_key)::text
+      AND l.closed_at IS NULL AND l.last_sync_at > sqlc.arg(lease_live_since)::timestamptz
+      AND (sqlc.narg(except_lease)::uuid IS NULL OR f.lease_id <> sqlc.narg(except_lease)::uuid)), 0) ELSE 0 END)::bigint AS held;

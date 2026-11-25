@@ -24,7 +24,7 @@ func mustParseCIDRs(cidrs []string) []*net.IPNet {
 	for _, cidr := range cidrs {
 		_, ipNet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			panic(fmt.Sprintf("invalid CCBill CIDR %q: %v", cidr, err))
+			panic(fmt.Sprintf("invalid CIDR %q: %v", cidr, err))
 		}
 		parsed = append(parsed, ipNet)
 	}

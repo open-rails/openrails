@@ -318,7 +318,7 @@ func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (str
 // sendDirectBody posts an already-encoded form. requestType only labels logs.
 func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body []byte) (_ string, err error) {
 	if c.ReadOnly {
-		c.Log.WarnContext(ctx, "NMI direct request blocked: provider is read-only (mode=readonly)", "provider", c.providerName, "request_type", requestType)
+		c.Log.WarnContext(ctx, "NMI direct request blocked: provider is read-only (readonly write posture)", "provider", c.providerName, "request_type", requestType)
 		return "", errors.Join(ErrNotDispatched, ErrProviderReadOnly)
 	}
 

@@ -8,11 +8,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // newMerchantPurgeCmd purges one merchant: alone it takes and prints the
@@ -72,14 +73,21 @@ func newMerchantPurgeCmd() *cobra.Command {
 }
 
 // withPurgeMerchants opens the merchants service a purge runs on: its
-// configuration, the destructive-action gate and a River producer in the
-// fleet's schema for the cleanup job.
+// configuration, the destructive-action gate, a River producer in the
+// fleet's schema for the cleanup job, and the event store with the usage
+// ledger, which post the merchant's unposted usage and delete its events.
 func withPurgeMerchants(cmd *cobra.Command, run func(context.Context, *db.DB, *merchants.Service) error) error {
 	return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-		cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+		cfg := hostconfig.Engine(ctx)
 		if err := bindCLIRiverProducer(ctx, cfg, database); err != nil {
 			return err
 		}
+		events, err := cliEventStore(ctx)
+		if err != nil {
+			return err
+		}
+		database.SetEventStore(events)
+		database.SetUsageLedger(money.NewMoneyService(database))
 		vault, err := cliVault(ctx)
 		if err != nil {
 			return err

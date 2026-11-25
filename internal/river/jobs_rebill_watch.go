@@ -13,7 +13,6 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -58,7 +57,7 @@ const (
 // recorded.
 type RebillWatchWorker struct {
 	DB          *db.DB
-	Config      *config.Config
+	Config      *billing.Config
 	Clock       clockwork.Clock
 	NMIResolver railresolve.NMIClientResolver
 	Lifecycle   *subscriptions.SubscriptionLifecycleService
@@ -249,7 +248,7 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 	if err != nil {
 		return err
 	}
-	collect := reason == MissProviderSkipped && !(writeposture.View{Config: w.Config, DB: w.DB}).Posture(ctx, sub.MerchantID).ReadOnly()
+	collect := reason == MissProviderSkipped && !(writeposture.View{DB: w.DB}).Posture(ctx, sub.MerchantID).ReadOnly()
 	return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := w.DB.NewWithPgxTx(tx)
 		q := txdb.Gen(ctx)

@@ -1,12 +1,6 @@
 # Customer directory (SCIM)
 
-Who a merchant's customers are: their email, name and username. OpenRails bills
-a customer by id, the subject UUID the host's auth reports, and reads contacts
-only to show customers to staff, to match them in reconciliation and imports, and
-to name the buyer to a provider's own page. Contacts come from the host's
-directory, read in process on every use, or from a copy the merchant's directory
-pushes over SCIM 2.0 (RFC 7643, RFC 7644). Integration guide:
-[customer contacts](../client.md#customers).
+Who a merchant's customers are: their email, name and username. OpenRails bills a customer by id, the subject UUID the host's auth reports, and reads contacts to email customers their billing messages, to show customers to staff, to match them in reconciliation and imports, and to name the buyer to a provider's own page. Contacts come from the host's directory, read in process on every use, or from a copy OpenRails keeps of what the merchant's directory pushes over SCIM 2.0 (RFC 7643, RFC 7644) and what its customers' verified credentials claim. Integration guide: [customer contacts](../client.md#customers).
 
 ## Concepts
 
@@ -14,12 +8,10 @@ pushes over SCIM 2.0 (RFC 7643, RFC 7644). Integration guide:
   issuer's subject UUID, `issuer` NULL the host's own users.
 - **Contact**: `identity.Contact`: email, name, username; `Active` and `SyncedAt`
   only for the kept copy. The API shape is `billing.CustomerContact`.
-- **Directory**: `identity.Directory`, what every reader calls: `Contacts(ctx,
-  merchantID, ids)` and `Search(ctx, merchantID, query, limit)`. A customer
-  without a contact is absent, never an error.
+- **Directory**: `identity.Directory`, what every reader calls: `Contacts(ctx, merchantID, ids)`, `Search(ctx, merchantID, query, limit)` (people the directory holds, customers or not) and `SearchCustomers` (only the merchant's customers). A customer without a contact is absent, never an error.
 - **Live directory**: `identity.Live` over `Deps.UserInfo` (`openrails.UserInfo`,
   AuthKit's `userinfo.Lookup`). Nothing is copied.
-- **Kept copy**: `identity.Kept` over `billing.customer_contacts`, written by SCIM.
+- **Kept copy**: `identity.Kept` over `billing.customer_contacts`, written by SCIM and by the customer gate from a verified credential's claims (`Kept.Record`).
 - **Provisioning token**: a merchant's SCIM bearer secret (`orscim_…`), kept as its
   SHA-256 in `billing.provisioning_tokens`.
 - **Customer scope**: `customerscope.Scope`, the customer a `/v1/me` route acts
@@ -36,20 +28,12 @@ only for the kept copy with `RouteGroups.Programmatic` on
 | Deployment | Directory | Copy |
 |---|---|---|
 | Embedded with `Deps.UserInfo` | `identity.Live` over the host's lookup | none; SCIM routes are 404 |
-| Embedded without | `identity.Kept` | `customer_contacts`, pushed over SCIM |
-| Standalone server | `identity.Live` over `customerDirectory` (`server/server.go`) | in the server's AuthKit |
+| Embedded without | `identity.Kept` | `customer_contacts`, pushed over SCIM and recorded from customers' claims |
+| Standalone server | `identity.Live` over `customerDirectory` (`server/server.go`) | in the server's AuthKit, which records a trusted issuer's token claims itself |
 
-The standalone server refuses a host `Engine.UserInfo` and installs
-`customerDirectory`, an `identity.IssuerLookup`. Its own users are its AuthKit's
-(`ControlPlane.Customers` with issuer `""`); a trusted issuer's are that merchant's
-group directory in AuthKit, which the issuer fills over AuthKit's SCIM
-(`/directory/scim/v2`). OpenRails' own SCIM routes are not mounted there.
+The standalone server refuses a host `Engine.UserInfo` and installs `customerDirectory`, an `identity.IssuerLookup` over `ControlPlane.Customers`. A trusted issuer's customers are that merchant's group directory in AuthKit, which the issuer fills over AuthKit's SCIM (`/directory/scim/v2`) and AuthKit fills from its tokens' claims as it verifies them. The merchant's own customers (issuer `""`) are its AuthKit's users, else the users its applications name in assertions (`CreateCustomerToken`): those customers are the merchant's own, but AuthKit keeps their pushes and claims under the asserting application's issuer, so `ownCustomers` reads every application of the merchant for a customer no AuthKit user is, and a customer two applications hold differently is absent. OpenRails' own SCIM routes are not mounted there.
 
-**Live reads.** `Live.Contacts` reads each id's issuer from `billing.customers`
-(`ListCustomersByIDs`), asks each issuer's directory for its own subjects, 500 at
-a time (`liveBatch`), and keeps an answer only from the customer's own issuer.
-`Live.Search` searches the host's directory, then each issuer the merchant trusts
-(`IssuerLookup.Issuers`).
+**Live reads.** `Live.Contacts` reads each id's issuer from `billing.customers` (`ListCustomersByIDs`), asks each issuer's directory for its own subjects, 500 at a time (`liveBatch`), and keeps an answer only from the customer's own issuer. `Live.Search` searches the host's directory, then each issuer the merchant trusts (`IssuerLookup.Issuers`). A directory knows no merchant, so its first matches can all be people who are not the merchant's customers: `Live.SearchCustomers` matches the contacts of the merchant's own customers, newest first, 500 at a time, when it has at most 5,000 (`customerScan`); a larger merchant keeps the customers among up to 999 matches per issuer (`searchWindow`, asking for one more: AuthKit answers at most 1,000), and a search with more matches that finds fewer than its limit is refused (`ErrSearchTooBroad`, `400 invalid_param` on `search`). `Kept.SearchCustomers` joins the merchant's customers in SQL (`SearchCustomerContactsOfCustomers`). Both rank a contact whose username or email is the query first, then the newest customers, and the list keeps that order. A provider's username or email (the CCBill bridge, PSP import links) names whoever holds it exactly (`Holders`): the merchant's customers holding it when any does, else the people among the directory's matches it reads in full; no one when the merchant's customers cannot all be read (`ErrSearchTooBroad`).
 
 **SCIM writes.** `scim.Server` (`internal/scim`) serves Users only. `externalId`
 must be a UUID; it is the customer id and the SCIM `id`. Each write is one merchant
@@ -67,6 +51,8 @@ and updates go through `write` (`UpdateCustomerContact`).
   `startIndex` and `count` (at most `MaxResults`, 200) with one `eq` filter.
 - `active` is stored and shown, never enforced.
 
+**Claims.** With the kept copy, the customer gate (`customerCheck` in `internal/http/routes/gate.go`) records what an admitted customer's credential claims, `email` (only with `email_verified`) and the username, as its contact (`Kept.Record`, `RecordCustomerContactClaims`), after the customer row is admitted. The Authenticator's `auth.Identity` carries no `name`, `phone_number` or `updated_at`, so these claims are undated. One statement writes only what changed, so a repeated token writes nothing: a new contact at once; a kept one only when the claims are dated no earlier than it, so undated claims replace only undated claims and never a SCIM push or an erasure, both dated; an absent claim keeps the kept value. A username another provisioned contact holds is left out. A failure to record is logged and never refuses the request. A mapped customer (`CustomerRoutes.Resolve`) and a pay URL's customer record nothing: their credential's subject is not the customer.
+
 **Authentication.** `provisioningGate` (`internal/http/routes/gate.go`) admits a provisioning token, resolved by its SHA-256 (`scim.Tokens.Resolve`) and bound to its row's merchant, or else what the programmatic gates admit: an application bound to the merchant holding the route's permission (`merchant:provisioning:read` for reads, `merchant:provisioning:manage` for writes, or their `root:` twins), never a person. The token is the deliberate exception to a permission: it opens only these routes and acts as itself (`provisioningActor`, issuer `ProvisioningIssuer`, its id the subject). Both pass `boundMerchant`, which requires a live merchant. `scimMerchant` takes the merchant from the admitted token's or application's binding, never from the request. A refusal before the SCIM server runs is rewritten as a SCIM error (`scimRefusals`).
 
 **Tokens.** `Tokens.Create` mints `TokenPrefix` plus 32 random bytes and answers it
@@ -80,6 +66,7 @@ minute.
 
 | Reader | Use | Directory down |
 |---|---|---|
+| `messages.Service` (`internal/modules/messages/send.go`) | the recipient of a customer message; none is `no_contact` | the send is retried |
 | `Service.GetCustomer`, `Service.ListCustomers` | `GET /v1/admin/customers/{customer_id}` and `?search=` | `503 service_unavailable` |
 | `customerContacts` (`GetAdminSubscriptions`, `ListOrders`, `writePaymentPage`) | contacts beside staff lists | the list loads without them |
 | `adminChangeCustomer` | email for `POST /v1/admin/subscriptions/{id}/change` | `503 service_unavailable` |
@@ -112,8 +99,7 @@ Checks:
   matching without emails.
 - `Customers.GetUserIDByUsername` answers `ErrUsernameUnknown` unless exactly one
   contact holds the username.
-- `linker.directory` keeps only contacts whose email or username equals the key
-  (`strings.EqualFold`).
+- `linker.directory` keeps only contacts whose email or username equals the key (`Holders`, `strings.EqualFold`), however many others merely contain it (OR-J38-S82 for the username bridge).
 
 ### 3. Exact money
 Does not apply: the directory holds no amounts.
@@ -154,9 +140,7 @@ Checks:
 - `merchantOwnedTables` in `internal/merchants/purge.go` lists both (OR-J32-S06).
 
 ### 7. Work scales with activity
-No job runs: the copy changes only when a directory pushes, and reads are per
-request. Live reads are batched, kept searches capped (`maxSearch`, 1000), and a
-token's `last_used_at` written at most once a minute.
+No job runs: the copy changes only when a directory pushes or a customer's credential claims something it does not hold, and reads are per request. Live reads are batched, a customer search reads at most 5,000 customers or 1,000 matches per issuer, kept searches are capped (`maxSearch`, 1000), and a token's `last_used_at` written at most once a minute.
 
 Checks:
 - `internal/scim` and `internal/identity` register no River job.
@@ -201,6 +185,8 @@ Checks:
   link storage.
 - OR-J38-S41 (console, live directory): staff lists name the customer, still list
   by id with the directory down, and find a customer by name.
+- OR-J07-S10: a search finds the merchant's customer after a dozen people of the host's directory who are not its customers match first. OR-J07-S11: a kept search lists the exact match first, then the newest.
+- OR-J07-S12: a customer's verified email in its token becomes its kept contact and its receipt is sent there. OR-J07-S13: an unverified email is not kept, undated claims replace undated claims, and neither a SCIM push nor an erasure is undone by them. OR-J07-S14: on the standalone server, an asserted customer's verified email is its contact and finds it. `internal/identity` tests the large-merchant path, the refusal and `Holders` against fakes.
 - Gaps: no scenario covers `internal/scim`'s newest-wins dating, PUT, PATCH,
   Bulk, filters, `secrets.scim_token`, or erasure blocking an older replay; nor a
   search across trusted issuers. `internal/scim` and `internal/identity` have no

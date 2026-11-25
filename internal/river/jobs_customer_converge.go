@@ -8,7 +8,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -24,7 +23,7 @@ import (
 type CustomerConvergeWorker struct {
 	WorkerDefaults[convergejob.Args]
 	DB     *db.DB
-	Config *config.Config
+	Config *billing.Config
 	Clock  clockwork.Clock
 	// Alerts sends requires_review findings to the operator. nil = none.
 	Alerts *alerting.Service
@@ -38,7 +37,7 @@ func (w CustomerConvergeWorker) Work(ctx context.Context, job *river.Job[converg
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts
 	}
-	postures := writeposture.View{Config: w.Config, DB: w.DB}
+	postures := writeposture.View{DB: w.DB}
 	return w.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
 		// A readonly merchant is observed, never written.
 		if postures.Posture(ctx, mid.UUID()).ReadOnly() {

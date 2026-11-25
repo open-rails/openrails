@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -48,7 +47,7 @@ func stripeSeatMembership(t *testing.T) *stripeSeats {
 	var accounts *stripeAccounts
 	a := newAuthorityWorld(t, func(w *world) {
 		accounts = newStripeAccounts(t, w, "sk_test_seats")
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"seats": stripePSP("acct_seats", "sk_test_seats", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)

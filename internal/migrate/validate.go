@@ -15,14 +15,13 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
+	"github.com/open-rails/openrails/internal/sqlschema"
 )
 
 // Validate checks existing OpenRails and River ledgers and writes nothing:
 // every migration of the chain is recorded, by the same file and with the
 // content this build carries. Apply settles a difference; Validate only
-// refuses it. Startup does not prepare partitions here; normal runtime
-// maintenance keeps its existing behavior, and explicit Apply prepares
-// initial partitions.
+// refuses it.
 func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if pool == nil {
 		return errors.New("openrails: validating migrations needs a Postgres pool")
@@ -32,7 +31,7 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	}
 	schema := opts.Schema
 	if schema == "" {
-		schema = config.DefaultSchema
+		schema = sqlschema.Authored
 	}
 	chainFS := opts.Chain
 	if chainFS == nil {
@@ -63,7 +62,7 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 		}
 	}
 	if opts.RiverSchema != "" {
-		if err := riverhelpers.ValidateMigrations(ctx, pool, opts.RiverSchema); err != nil {
+		if err := riverhelpers.ValidateMigrations(ctx, pool, riverhelpers.MigrationOptions{Schema: opts.RiverSchema}); err != nil {
 			return validationError(err)
 		}
 	}

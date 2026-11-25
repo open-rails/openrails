@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/riverqueue/river"
@@ -222,20 +223,20 @@ func TestBillingPass(t *testing.T) {
 		lots, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "lapses-at-midnight", ExpiresAt: &midnight}})
 		require.NoError(t, err)
 		fleet := quietFleet(t, w)
+		remaining := func() int64 {
+			out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+			return lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit).Remaining
+		}
 		advanceTo(w, midnight.Add(-time.Second))
 		require.Zero(t, lotExpired(t, w.alpha, lots[0].ID))
-		ok, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "before-midnight", 100)})
-		require.NoError(t, err)
-		require.True(t, ok[0].Allowed(), "the lot is spent before it lapses")
+		require.EqualValues(t, 1000, remaining(), "the lot is spendable before it lapses")
 		advanceTo(w, midnight)
-		denied, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "at-midnight", 100)})
-		require.NoError(t, err)
-		require.False(t, denied[0].Allowed(), "admission never spends a lapsed lot, pass or no pass")
+		require.Zero(t, remaining(), "a view never offers a lapsed lot, pass or no pass")
 		require.False(t, runPass(t, fleet))
 		require.EqualValues(t, 1000, lotExpired(t, w.alpha, lots[0].ID), "the 00:00 pass books the lapse")
 	})
 	t.Run("OR-J04-S45/a-delinquency-grace-ends-on-the-next-pass", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
+		a, _, customer := usageBillingWorld(t, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(1)
 			setCfgMerchant(&w.cfg, "alpha", m)
@@ -253,9 +254,9 @@ func TestBillingPass(t *testing.T) {
 		advanceTo(a.world, nextHour(graceEnds))
 		require.False(t, runPass(t, fleet))
 		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "delinquent at the pass after its grace ends")
-		results, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(a.world, customer, "after-grace", 500)})
-		require.NoError(t, err)
-		require.False(t, results[0].Allowed())
+		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+		require.NotNil(t, out.LimitSets[0].Refusal, "a gate refuses a delinquent customer's requests")
+		require.Equal(t, billing.DenyDelinquentUnpaidOrder, out.LimitSets[0].Refusal.DenyCode)
 		require.Equal(t, graceEnds.Format(time.DateOnly), nextHour(graceEnds).Add(-time.Second).Format(time.DateOnly), "the same day as its grace end")
 	})
 	t.Run("OR-J04-S46/an-order-past-its-expiry-is-tidied-by-the-next-pass", func(t *testing.T) {

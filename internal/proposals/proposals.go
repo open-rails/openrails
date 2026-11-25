@@ -21,7 +21,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -35,17 +34,15 @@ import (
 // Executor approves, dismisses and lists proposals for the merchant on the
 // context.
 type Executor struct {
-	DB *db.DB
-	// Config is the process's: its provider_write_mode bounds the write
-	// posture. Nil reads as readonly.
-	Config     *config.Config
+	DB         *db.DB
+	Config     *billing.Config
 	Clock      clockwork.Clock
 	Admissions *destructive.Admissions
 	Log        *slog.Logger
 }
 
 // New builds an executor.
-func New(database *db.DB, cfg *config.Config, clock clockwork.Clock, admissions *destructive.Admissions) *Executor {
+func New(database *db.DB, cfg *billing.Config, clock clockwork.Clock, admissions *destructive.Admissions) *Executor {
 	return &Executor{DB: database, Config: cfg, Clock: timeutil.FirstClock(clock), Admissions: admissions, Log: database.Log}
 }
 
@@ -484,7 +481,7 @@ func (e *Executor) holdFor(ctx context.Context, d *db.DB, mid uuid.UUID, c *reco
 		}
 	}
 	if c.Effects.MovesMoney || c.Effects.ProviderWrite {
-		if p := (writeposture.View{Config: e.Config, DB: d}).Posture(ctx, mid); p.ReadOnly() {
+		if p := (writeposture.View{DB: d}).Posture(ctx, mid); p.ReadOnly() {
 			return &billing.ProposalError{Code: billing.CodeProviderWritesHeld, Message: p.Reason}
 		}
 	}

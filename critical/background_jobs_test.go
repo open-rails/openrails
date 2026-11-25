@@ -19,7 +19,6 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/retention"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -316,8 +315,12 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err, "the order expiry deletes nothing")
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
-		require.ErrorIs(t, err, billing.ErrNotFound)
+		require.NoError(t, err, "an unpaid closed order is kept 397 days")
 		require.Zero(t, leaseCount(), "a lease 61 days past its last sync is deleted")
+		w.clock.Advance(307 * 24 * time.Hour)
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
+		require.ErrorIs(t, err, billing.ErrNotFound)
 	})
 	t.Run("OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants", func(t *testing.T) {
 		w := newWorld(t)
@@ -347,44 +350,6 @@ func TestBackgroundJobs(t *testing.T) {
 		attempts, err := pgx.CollectRows(rows, pgx.RowTo[int])
 		require.NoError(t, err)
 		require.Equal(t, []int{1}, attempts, "the continuation makes one attempt; the next period's pass retries what it left")
-	})
-	t.Run("OR-J29-S41/a-month-of-holds-past-the-replay-horizon-drops-with-its-parts", func(t *testing.T) {
-		w := newWorld(t)
-		fleet := quietFleet(t, w)
-		meterForCapture(t, w)
-		customer, _ := fundedCustomer(t, w)
-		admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "kept-a-month", 600)})
-		require.NoError(t, err)
-		require.True(t, admitted[0].Allowed())
-		month := retention.MonthStart(w.clock.Now())
-		suffix := month.Format("_y2006m01")
-		partitions := func(table string) []string {
-			rows, err := w.pool.Query(t.Context(), `SELECT c.relname::text FROM pg_inherits i
-				JOIN pg_class c ON c.oid = i.inhrelid JOIN pg_class p ON p.oid = i.inhparent JOIN pg_namespace n ON n.oid = p.relnamespace
-				WHERE n.nspname = $1 AND p.relname = $2 ORDER BY 1`, w.schema, table)
-			require.NoError(t, err)
-			names, err := pgx.CollectRows(rows, pgx.RowTo[string])
-			require.NoError(t, err)
-			return names
-		}
-		rowsIn := func(partition string) int {
-			var n int
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, partition}.Sanitize()).Scan(&n))
-			return n
-		}
-		require.Contains(t, partitions("limit_holds"), "limit_holds"+suffix)
-		require.Contains(t, partitions("limit_hold_parts"), "limit_hold_parts"+suffix)
-		require.Equal(t, 1, rowsIn("limit_holds"+suffix))
-		require.Positive(t, rowsIn("limit_hold_parts"+suffix), "the hold's parts are in its month")
-
-		// Once the whole month is past the replay horizon, one cleanup pass
-		// drops both months: no foreign key ties a partition of parts to one
-		// of holds, so neither drop is refused.
-		w.clock.Advance(month.AddDate(0, 1, 0).Add(retention.Admissions + time.Hour).Sub(w.clock.Now()))
-		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
-		require.NotContains(t, partitions("limit_hold_parts"), "limit_hold_parts"+suffix)
-		require.NotContains(t, partitions("limit_holds"), "limit_holds"+suffix)
-		require.Contains(t, partitions("limit_holds"), "limit_holds"+retention.MonthStart(w.clock.Now()).Format("_y2006m01"), "the current month is kept")
 	})
 	t.Run("OR-J37-S06/a-solana-renewal-whose-pull-is-still-owed-is-not-a-missed-rebill", func(t *testing.T) {
 		s := newSolanaWorld(t, true)
@@ -525,7 +490,7 @@ func declareCCBillAccount(w *world, accnum, dataLink string) {
 	psp := openrails.CCBillPSP{ClientAccnum: accnum, ClientSubacc: "0001", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
 	if dataLink != "" {
 		psp.DatalinkUsername, psp.DatalinkPassword = "critical-datalink", "critical-datalink-password"
-		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink}
+		w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink}
 	}
 	m.PSPs = billing.PSPs{"ccbill": psp.PSPConfig()}
 	setCfgMerchant(&w.cfg, "alpha", m)

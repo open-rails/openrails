@@ -42,16 +42,15 @@ func Declarations(m *BillingConfig) *merchantbootstrap.BillingConfig {
 	return out
 }
 
-// LoadMerchantConfigManifestFiles loads a merchant config YAML file plus
-// optional structured YAML overlays.
-func LoadMerchantConfigManifestFiles(path string, overlays ...string) (*BillingConfig, error) {
-	return merchantbootstrap.LoadManifestFiles(path, overlays, checkManifestEntry)
+// LoadMerchantConfigManifestFile loads and validates the merchant config
+// manifest at path.
+func LoadMerchantConfigManifestFile(path string) (*BillingConfig, error) {
+	return merchantbootstrap.LoadManifestFile(path, checkManifestEntry)
 }
 
-// LoadMerchantConfigManifestWithOverlays merges the manifest with structured
-// YAML overlays (later wins) and validates the result.
-func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error) {
-	return merchantbootstrap.LoadManifest(raw, overlays, checkManifestEntry)
+// LoadMerchantConfigManifest validates a merchant config manifest.
+func LoadMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
+	return merchantbootstrap.LoadManifest(raw, checkManifestEntry)
 }
 
 type MerchantConfig struct {
@@ -122,7 +121,7 @@ type ProvisionMerchantParams struct {
 	// MerchantID is an already resolved, explicit host binding. The outer name
 	// boundary must verify the supplied name before passing this immutable scope.
 	MerchantID   billing.MerchantID
-	Config       *config.Config
+	Config       *billing.Config
 	ControlPlane *controlplane.ControlPlane
 	Database     *db.DB
 	Merchants    *merchants.Service
@@ -140,7 +139,7 @@ type ProvisionMerchantParams struct {
 // manifest names merchants only (slug, remote_application) and is
 // refused when it declares more. Issuer registration is declarative and does
 // not fetch the JWKS.
-func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
+func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg *billing.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return fmt.Errorf("merchant bootstrap manifest configured but control plane is not enabled")
 	}

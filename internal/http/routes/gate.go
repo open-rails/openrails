@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/history"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -519,10 +520,27 @@ func (e *Env) customerCheck(route Route, a billingauth.Authenticator) router.Mid
 			case err != nil:
 				refuse(r, route, a, stepCan, err)
 			default:
+				e.recordContact(r.Request.Context(), target.MerchantID, id, c)
 				bindCustomer(r, c, id, target)
 				next(r)
 			}
 		}
+	}
+}
+
+// recordContact keeps what the admitted customer's credential claims as its
+// contact when OpenRails keeps the merchant's directory (identity.Kept); a
+// live directory is read instead. A failure never refuses the request.
+func (e *Env) recordContact(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, c billingauth.Identity) {
+	kept, ok := e.Runtime.Contacts.(identity.Kept)
+	if !ok {
+		return
+	}
+	// The contract carries no name, phone_number or updated_at: the claims
+	// are undated.
+	claims := identity.Claims{Email: c.Email, EmailVerified: c.EmailVerified, Username: c.Username}
+	if err := kept.Record(ctx, mid, id.UUID(), claims); err != nil && e.Log != nil {
+		e.Log.WarnContext(ctx, "routes: recording a customer's contact claims failed", logx.Err(err))
 	}
 }
 
@@ -960,11 +978,6 @@ func adminAccess(e *Env) router.Handler {
 				}
 			}
 			slices.Sort(access.ApplicationPermissions)
-		}
-		llm := e.Runtime.Config.LLM
-		access.Assistants = billing.AdminAssistants{
-			CatalogCopilot:  access.Catalog != billing.AccessNone && config.LLMCatalogCopilotConfigured(llm),
-			CatalogDrafting: access.Catalog != billing.AccessNone && config.LLMCatalogDraftingConfigured(llm),
 		}
 		if failed != nil {
 			refuse(r, route, e.Auth, stepCan, failed)

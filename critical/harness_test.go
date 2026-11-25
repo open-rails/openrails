@@ -37,6 +37,9 @@ type world struct {
 	local  *openrails.LocalClient
 	cfg    openrails.Config
 	deps   openrails.Deps
+	// posture is the declared merchants' write posture once the engine is
+	// up: readonly unless a scenario sets full (fullWrites) or limited.
+	posture string
 }
 
 func newWorld(t *testing.T, configure ...func(*world)) *world {
@@ -49,7 +52,7 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	pool, err := pgxpool.NewWithConfig(t.Context(), pc)
 	require.NoError(t, err)
 	require.NoError(t, pool.Ping(t.Context()))
-	w := &world{pool: pool, schema: "critical_" + strings.ReplaceAll(uuid.NewString(), "-", ""), clock: clockwork.NewFakeClockAt(time.Now().UTC())}
+	w := &world{pool: pool, schema: "critical_" + strings.ReplaceAll(uuid.NewString(), "-", ""), clock: clockwork.NewFakeClockAt(time.Now().UTC()), posture: "readonly"}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -58,9 +61,7 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 		pool.Close()
 	})
 	w.cfg = openrails.Config{
-		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
-		ProviderWriteMode: openrails.ProviderWritesReadOnly,
-		ReturnOrigins:     []string{"https://critical.invalid"},
+		Database: billing.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		Merchants: []billing.MerchantDeclaration{
 			{MerchantDocument: billing.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
 			{MerchantDocument: billing.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
@@ -80,7 +81,32 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	require.NoError(t, err)
 	w.local, err = w.engine.LocalMerchant(w.alpha.MerchantID())
 	require.NoError(t, err)
+	if w.posture != "full" {
+		var declared []billing.MerchantID
+		for _, m := range w.cfg.Merchants {
+			// A declaration refused (a slug declared twice) has no merchant.
+			if id, err := w.engine.DeclaredMerchant(m.Slug); err == nil {
+				declared = append(declared, id)
+			}
+		}
+		setWritePosture(t, w, w.posture, declared...)
+	}
 	return w
+}
+
+// fullWrites leaves the declared merchants' write posture full.
+func fullWrites(w *world) { w.posture = "full" }
+
+// setWritePosture stores the merchants' write posture as an operator's
+// `openrails merchant hold` would.
+func setWritePosture(t *testing.T, w *world, mode string, merchants ...billing.MerchantID) {
+	t.Helper()
+	for _, id := range merchants {
+		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "merchant_write_posture"}.Sanitize()+
+			" (merchant_id, mode, reason, set_by) VALUES ($1, $2, 'operator', 'critical fixture operator')"+
+			" ON CONFLICT (merchant_id) DO UPDATE SET mode = EXCLUDED.mode, set_at = now()", id.UUID(), mode)
+		require.NoError(t, err)
+	}
 }
 
 // criticalClickHouse is a connection to the owned ClickHouse; the world's
@@ -146,6 +172,19 @@ func (w loopbackWire) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// billedTo is a new card's billing details as its form collects them: the
+// country, and the postal code where it asks for one.
+func billedTo(country, postal string) *billing.BillingDetails {
+	details := &billing.BillingDetails{Name: ptr("Alice Buyer"), Address: &billing.BillingAddress{}}
+	if country != "" {
+		details.Address.Country = ptr(country)
+	}
+	if postal != "" {
+		details.Address.PostalCode = ptr(postal)
+	}
+	return details
+}
 
 // cfgMerchant is a copy of cfg's declaration of slug; the bare slug when it
 // declares none.

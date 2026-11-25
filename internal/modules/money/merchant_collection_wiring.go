@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -22,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Invoice collection arms rail credentials per merchant from the
@@ -37,7 +37,7 @@ import (
 type MerchantCollectionAdapterBuilder struct {
 	BasisTheoryTransport http.RoundTripper
 	StripeClients        *stripeapi.Factory
-	Config               *config.Config
+	Config               *billing.Config
 	DB                   *db.DB
 	MerchantsFn          func() *merchants.Service
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
@@ -67,7 +67,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiFactory() *railresolve.NMIFactory 
 	if b.NMIClients != nil {
 		return b.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: b.Config, Log: b.Log}
+	return &railresolve.NMIFactory{Postures: writeposture.View{DB: b.DB}, Log: b.Log}
 }
 
 // nmiProxyPosture is the posture identity of scope's gateway credential

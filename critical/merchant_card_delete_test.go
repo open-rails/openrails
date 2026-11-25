@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
@@ -44,7 +43,7 @@ func TestMerchantCardRemoval(t *testing.T) {
 				func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
 					return answer(r, http.StatusBadRequest, refusal.envelope), nil
 				})
-			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 			journal.core.ClearIntercepts()
 			require.Equal(t, refusal.status, status, string(raw))
 			require.Contains(t, string(raw), refusal.code)
@@ -54,7 +53,7 @@ func TestMerchantCardRemoval(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, tried.Items, 1, "the attempt records NMI's error code")
 		}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 		require.Equal(t, 201, status, string(raw))
 		var method billing.PaymentMethod
 		require.NoError(t, json.Unmarshal(raw, &method))
@@ -73,15 +72,10 @@ func TestMerchantCardRemoval(t *testing.T) {
 		kept, err := a.alpha.ListPaymentMethods(t.Context(), method.CustomerID, billing.PaymentMethodListParams{})
 		require.NoError(t, err)
 		require.Len(t, kept.Items, 1)
-		readonlyConfig := a.cfg
-		readonlyConfig.ProviderWriteMode = openrails.ProviderWritesReadOnly
-		readonly, err := openrails.New(t.Context(), readonlyConfig, a.deps)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, readonly.Close(t.Context())) })
-		readonlyMerchant, err := readonly.Merchant(a.alpha.MerchantID())
-		require.NoError(t, err)
-		require.Error(t, readonlyMerchant.DeletePaymentMethod(t.Context(), method.CustomerID, method.ID), "an explicit host request never bypasses provider read-only mode")
+		setWritePosture(t, a.world, "readonly", a.alpha.MerchantID())
+		require.Error(t, a.alpha.DeletePaymentMethod(t.Context(), method.CustomerID, method.ID), "an explicit host request never bypasses the merchant's readonly write posture")
 		require.Len(t, journal.core.Vaults(), 1, "read-only removal sends no provider mutation")
+		setWritePosture(t, a.world, "full", a.alpha.MerchantID())
 		status, raw = a.request(t, http.MethodDelete, path, a.alphaKey.Secret, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
 		require.NoError(t, a.alphaRemote.DeletePaymentMethod(t.Context(), method.CustomerID, method.ID))
@@ -101,8 +95,9 @@ func TestMerchantCardRemoval(t *testing.T) {
 
 		for _, failReadBeforeDelete := range []bool{true, false} {
 			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{
-				PSPID: psps.Items[0].ID,
-				Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}),
+				PSPID:          psps.Items[0].ID,
+				Token:          journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}),
+				BillingDetails: billedTo("US", "10001"),
 			})
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var method billing.PaymentMethod
@@ -171,7 +166,7 @@ func TestMerchantCardRemoval(t *testing.T) {
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var method billing.PaymentMethod
 		require.NoError(t, json.Unmarshal(raw, &method))

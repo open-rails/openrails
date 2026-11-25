@@ -5,21 +5,36 @@ package critical_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/stretchr/testify/require"
 )
 
+// meterForCapture prices compute dynamically: a request states its amount.
 func meterForCapture(t *testing.T, w *world) {
 	t.Helper()
 	product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "compute", DisplayName: "Compute"})
 	require.NoError(t, err)
 	_, err = w.alpha.SetMeter(t.Context(), "compute", billing.SetMeterParams{EventType: "compute", ValueProperty: "units", Aggregation: catalog.AggregationSum, RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelDynamic, Currency: "USD"}})})
 	require.NoError(t, err)
+}
+
+// computeSpend is one compute request costing amount (meterForCapture).
+func computeSpend(customer billing.CustomerID, id string, amount int64) billing.AdmitParams {
+	return billing.AdmitParams{RequestID: id, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
+		Usage: &billing.UsageEstimate{EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(amount)}}
+}
+
+// spend settles one compute request of amount through a lease of its own,
+// on OpenRails' clock.
+func spend(t *testing.T, client *openrails.Client, customer billing.CustomerID, id string, amount int64) *billing.SyncLeasesResult {
+	t.Helper()
+	return settleUsage(t, client, newLease(), numbered(1, billing.LeaseUsage{CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer,
+		Currency: "USD", EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(amount), Source: "critical", SourceID: id})...)
 }
 
 func TestHostTransactions(t *testing.T) {
@@ -29,7 +44,6 @@ func TestHostTransactions(t *testing.T) {
 	}{{"OR-J23-S04", true}, {"OR-J23-S05", false}} {
 		t.Run(scenario.id+"/host-transaction-owns-financial-commit", func(t *testing.T) {
 			w := newWorld(t)
-			meterForCapture(t, w)
 			customer := billing.CustomerID(uuid.New())
 			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "host-funding"}})
 			require.NoError(t, err)
@@ -49,13 +63,9 @@ func TestHostTransactions(t *testing.T) {
 			require.NoError(t, err)
 			_, err = tx.Exec(t.Context(), "INSERT INTO work(id) VALUES('before-library-call')")
 			require.NoError(t, err)
-			admitted, err := w.local.AdmitTx(t.Context(), tx, []billing.AdmitParams{{RequestID: "host-work", CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: 600, ExpiresAt: ptr(w.clock.Now().Add(time.Hour))}})
+			started, err := w.local.StartRunningChargeTx(t.Context(), tx, billing.StartRunningChargeParams{Reference: "host-work", CustomerID: customer, Currency: "USD", RatePerHour: 3600})
 			require.NoError(t, err)
-			require.True(t, admitted[0].Allowed())
-			captured, err := w.local.CaptureAdmissionsTx(t.Context(), tx, []billing.CaptureAdmissionParams{{RequestID: "host-work", Amount: ptr(int64(450)), Usage: billing.CaptureUsage{EventType: "compute", Dimensions: map[string]int64{"units": 1}}}})
-			require.NoError(t, err)
-			require.NoError(t, captured[0].Err())
-			require.EqualValues(t, 450, captured[0].Receipt.Amount)
+			require.Equal(t, "host-work", started.Reference)
 			// This is the host's own table. Library calls must restore the caller's
 			// transaction search path and must never commit it implicitly.
 			_, err = tx.Exec(t.Context(), "INSERT INTO work(id) VALUES('after-library-call')")
@@ -67,23 +77,15 @@ func TestHostTransactions(t *testing.T) {
 			}
 			var hostRows int
 			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{hostSchema, "work"}.Sanitize()).Scan(&hostRows))
-			ledger, err := w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
-			require.NoError(t, err)
 			if scenario.commit {
 				require.Equal(t, 2, hostRows)
-				// The capture's accrual committed with the host's work; it
-				// posts once its day ends.
-				balance(t, w.alpha, customer, 550, 450, 1000)
-				require.Len(t, ledger.Items, 1)
-				admission, err := w.alpha.GetAdmission(t.Context(), "host-work")
+				// The charge committed with the host's work.
+				charge, err := w.alpha.GetRunningCharge(t.Context(), "host-work")
 				require.NoError(t, err)
-				require.NotNil(t, admission.State)
-				require.Equal(t, billing.AdmissionCaptured, *admission.State)
+				require.Nil(t, charge.StoppedAt)
 			} else {
 				require.Zero(t, hostRows)
-				balance(t, w.alpha, customer, 1000, 0, 1000)
-				require.Len(t, ledger.Items, 1)
-				_, err := w.alpha.GetAdmission(t.Context(), "host-work")
+				_, err := w.alpha.GetRunningCharge(t.Context(), "host-work")
 				require.ErrorIs(t, err, billing.ErrNotFound)
 				events, err := w.alpha.ListEvents(t.Context(), billing.EventListParams{After: before.NextCursor, Limit: 100})
 				require.NoError(t, err)

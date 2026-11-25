@@ -131,7 +131,7 @@ func NewUnstarted(opts Options) *Mock {
 		products: map[string]Object{}, prices: map[string]Object{}, inline: map[string]bool{}, thinEvents: map[string]Object{}}
 }
 
-// URL is the loopback API root; OpenRails' provider_sandbox.stripe_api_url.
+// URL is the loopback API root: Deps.ProviderEndpoints.StripeAPIURL.
 func (m *Mock) URL() string {
 	if m.server == nil {
 		panic("stripemock: URL of an unstarted mock")

@@ -14,15 +14,14 @@ import (
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
-	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // cliMerchantManifest is the manifest run-server boots with, for a one-off
 // tool: path, else the conventional path when it exists (nil when neither
-// does), with the configured overlays. Keys only the server reads
+// does). Keys only the server reads
 // (remote_application) are read and left out, so every tool takes the
 // server's own file.
-func cliMerchantManifest(ctx context.Context, path string) (*merchantbootstrap.BillingConfig, error) {
+func cliMerchantManifest(path string) (*merchantbootstrap.BillingConfig, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		if _, err := os.Stat(bootstrap.DefaultMerchantConfigManifestPath); errors.Is(err, os.ErrNotExist) {
@@ -30,7 +29,7 @@ func cliMerchantManifest(ctx context.Context, path string) (*merchantbootstrap.B
 		}
 		path = bootstrap.DefaultMerchantConfigManifestPath
 	}
-	manifest, err := bootstrap.LoadMerchantConfigManifestFiles(path, hostconfig.FromContext(ctx).MerchantManifestOverlays...)
+	manifest, err := bootstrap.LoadMerchantConfigManifestFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
@@ -60,7 +59,7 @@ func resolveCLIMerchant(ctx context.Context, database *db.DB, slug string) (bill
 	return selected.ID, nil
 }
 
-func resolveConfiguredCLIMerchant(ctx context.Context, cfg *config.Config, name string) (billing.MerchantID, error) {
+func resolveConfiguredCLIMerchant(ctx context.Context, cfg *billing.Config, name string) (billing.MerchantID, error) {
 	if cfg == nil {
 		return billing.MerchantID{}, fmt.Errorf("config not loaded")
 	}

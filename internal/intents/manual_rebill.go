@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -31,14 +31,14 @@ var errRebillSuperseded = errors.New("accepted rebill is no longer applicable")
 
 type ManualRebillHandler struct {
 	DB          *db.DB
-	Config      *config.Config
+	Config      *billing.Config
 	Resolver    railresolve.NMIClientResolver
 	Clock       clockwork.Clock
 	Policy      BackoffPolicy
 	DeferDelete subscriptions.ProviderCancelScheduler
 }
 
-func NewManualRebillHandler(d *db.DB, cfg *config.Config, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {
+func NewManualRebillHandler(d *db.DB, cfg *billing.Config, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {
 	return &ManualRebillHandler{DB: d, Config: cfg, Resolver: resolver, Clock: timeutil.FirstClock(clock), Policy: DefaultBackoff}
 }
 func (h *ManualRebillHandler) Type() string                         { return subscriptions.TypeManualRebill }
@@ -83,7 +83,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.BillingProvide
 	if h.Config == nil {
 		return Parked("rebill execution mode is not configured")
 	}
-	if blocked, reason := GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
+	if blocked, reason := GateExecution(ctx, writeposture.View{DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
 		return Parked(reason)
 	}
 	client, err := h.railClient(ctx, in)

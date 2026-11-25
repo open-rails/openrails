@@ -88,9 +88,9 @@ func bootImportWorldDeclaring(t *testing.T, declare bool, configure func(*world)
 		return loopbackWire{target: target, wire: wire}
 	}
 	iw.authorityWorld = newAuthorityWorld(t, func(w *world) {
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		declared := billing.PSPs{}
-		sandbox := openrails.ProviderSandboxConfig{}
+		sandbox := openrails.ProviderEndpoints{}
 		for _, key := range psps {
 			switch key {
 			case "nmi":
@@ -117,9 +117,7 @@ func bootImportWorldDeclaring(t *testing.T, declare bool, configure func(*world)
 				continue
 			}
 		}
-		if sandbox.NMIGatewayURL+sandbox.StripeAPIURL+sandbox.SolanaRPCURL+sandbox.CCBillDataLinkURL != "" {
-			w.cfg.ProviderSandbox = &sandbox
-		}
+		w.deps.ProviderEndpoints = sandbox
 		iw.declared = declared
 		if declare {
 			merchant := cfgMerchant(w.cfg, "alpha")

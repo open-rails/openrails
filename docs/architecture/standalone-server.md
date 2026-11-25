@@ -19,7 +19,7 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
   A merchant is an AuthKit group whose id is the merchant id; teams, API keys and
   trusted issuers are AuthKit's, in that group.
 - **Merchant manifest**: the file of merchant declarations (`--merchant-manifest`,
-  default `DefaultMerchantConfigManifestPath`) and its overlays.
+  default `DefaultMerchantConfigManifestPath`), one file.
 - **Operator**: `server/internal/operator`, the operations the CLI and the
   `server.Server` methods share.
 - **Console**: the SPA at `/admin`, built from `web/console` (package `console`,
@@ -31,13 +31,13 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
 
 `server.New` (`server/server.go`):
 
-1. Refuses an empty `Auth.DefaultTenantID` (`controlplane.RequireDefaultTenant`), a
-   declared merchant's `Issuer` (a credential's merchant is its group) and a host
-   `Engine.UserInfo`.
+1. Fills unset settings (`Config.WithDefaults`), and refuses a declared merchant's
+   `Issuer` (a credential's merchant is its group) and a host `Engine.UserInfo`.
 2. Installs `customerDirectory` as the engine's `UserInfo`
    ([customer directory](customer-directory.md)) and calls `openrails.New`, which
    migrates unless `SkipMigrations`.
-3. Builds AuthKit: `controlplane.AuthKit` fixes merchant roles, the API-key prefix,
+3. Builds AuthKit, single-tenant unless `Auth.Tenancy` says otherwise (it creates or
+   adopts its one account directory): `controlplane.AuthKit` fixes merchant roles, the API-key prefix,
    the resource's scopes, the console's client (`ConsoleClientID`), AuthKit's River
    schema and mount, and `SkipMigrations`. AuthKit gets its own pool on the engine's
    database unless one is given.
@@ -46,18 +46,12 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
 
 ### Configuration
 
-`hostconfig.Load` (`server/internal/hostconfig`) layers defaults, `config.yaml`
-(`--config`, `OPENRAILS_CONFIG`), a logged `.env`, the environment (`DB_URL` is
-`db.url`), files under `VAULT_SECRETS_PATH` and flags (`WithOverride`). Unknown keys
-and retired names (`ENV`, `API_URL`, `MERCHANT_CONFIG_SOURCE`, …) refuse boot;
-`Validate` checks the result. `--provider-write-mode` or `provider_write_mode` is
-required. One-off commands load less: `LoadForCommand`, `LoadDatabaseForCommand`,
-`LoadDirectoryForCommand`.
+`hostconfig.Load` (`server/internal/hostconfig`) layers `server.DefaultConfig()` (the engine's `billing.DefaultConfig()` with the server's own), `config.yaml` (`--config`, `OPENRAILS_CONFIG`), a logged `.env`, files under `VAULT_SECRETS_PATH` and the environment (`DATABASE_URL` is `database.url`). It decodes the one tree twice, into `server.Config` (the engine's keys inline) and the binary's own keys (connections, logger, signing key); a key neither reads, and a retired name (`ENV`, `API_URL`, `db`, …), refuses boot. Every command loads the same way. `server.New` takes `server.Config` as decoded and passes its `Engine` to `openrails.New`.
 
 ### Boot merchants
 
 `serverboot.ReconcileBootMerchantManifest` runs on `run-server` and `run-worker`. It
-loads the manifest and overlays (`bootstrap.LoadMerchantConfigManifestWithOverlays`),
+loads the manifest (`bootstrap.LoadMerchantConfigManifest`),
 creates each missing merchant with its AuthKit group and `remote_application` (a
 trusted issuer), and puts file declarations in place
 (`merchantbootstrap.ProvisionMerchant`). Only PostgreSQL or an unreadable manifest
@@ -93,11 +87,12 @@ AuthKit's routes, `/admin`, and the payment page on `CheckoutOrigin` by Host. Ev
 native route passes `wrapHandler`: recovery, request log, security headers, CORS for
 browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing
 credentials (`billingauth.ExplicitCredentials`) and the engine's `RateLimitHTTP`.
-`PrivateHandler` serves `/metrics` on `PrivateAddr`.
+
+`MetricsHandler` is the metrics listener on `MetricsPort`: the operator's Prometheus `GET /metrics` (dependency up/down, abuse-state fallbacks, per-job-kind health), apart from the public handler so it is never public; zero serves none, and the chart sets 9090 with its own ClusterIP Service. It is not the merchant dashboard's business metrics, the `/v1/metrics` route group on the public handler.
 
 `Server.Run` binds job producers (`InitRiver`) before listening on `:3053`, starts the
 workers, and on stop fails `/health/ready` (`Drain`) and keeps serving for
-`DrainDelay`, then finishes within `ShutdownTimeout`. `Serve` runs no workers. A host
+`drainDelay` (5s), then finishes within `shutdownTimeout` (20s). `Serve` runs no workers. A host
 with its own router mounts `Routes` (checked by `embedhttp.ValidateRouteTable`) and
 adds `RiverJobs` to its fleet.
 
@@ -127,13 +122,13 @@ credential's permissions reach. The SPA calls `/v1` with the staff token.
 ## Interfaces
 
 - Go: `server.New`, `Run`, `Serve`, `Start`, `Handler`, `Routes`, `RiverJobs`,
-  `PrivateHandler`, `Engine`, `AuthKit`, and the control-plane methods
+  `MetricsHandler`, `Engine`, `AuthKit`, and the control-plane methods
   ([server package](../standalone.md)), including `ListOpenDestructiveHolds`;
   `admin.FS`.
 - HTTP: the engine's catalog ([routes](../api/routes.md)), AuthKit's routes under its
-  issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` privately.
+  issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` on the metrics port.
 - Configuration: `config.yaml` keys ([configuration](../standalone.md#configuration-reference)), the
-  manifest and `merchant_manifest_overlays`, and the chart's `values.yaml`.
+  manifest, and the chart's `values.yaml`.
 
 ## Guarantees
 
@@ -235,7 +230,7 @@ Checks:
   `/health/ready` passes and `/admin/` serves the console.
 - **Chart.** `scripts/check.sh chart` lints and renders it with `values.yaml` and
   `ci/full-values.yaml`.
-- Gaps: no test runs `run-server` with a merchant manifest or overlays, or
+- Gaps: no test runs `run-server` with a merchant manifest, or
   `hostconfig.Load` beyond the smoke's environment; no browser test drives the
   console (the smoke only fetches `/admin/`), and its `config.json` and
   `/admin/merchants` have no scenario; `server/ci/paymentpage` is run by no script or

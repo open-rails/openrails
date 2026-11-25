@@ -11,13 +11,13 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/vaultconn"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Merchants is a one-off process's merchant configuration: the merchants
@@ -32,7 +32,7 @@ type Merchants struct {
 // OpenMerchants builds the merchant configuration a one-off process reads:
 // Vault, over client, when a KV mount is named, else an empty file source the
 // caller fills. The database handle reads settings through it.
-func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, client *vaultapi.Client) (*Merchants, error) {
+func OpenMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, client *vaultapi.Client) (*Merchants, error) {
 	conn, err := vaultconn.Open(ctx, database.Log, cfg, client)
 	if err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, cli
 		return nil, err
 	}
 	svc.WithPlatformVaultStore(conn.PlatformKV)
-	svc.StripeClients = stripeapi.ConfiguredFactory(cfg)
+	svc.StripeClients = stripeapi.NewFactory(nil, writeposture.View{DB: database})
 	if vault, ok := source.(*merchantdocs.VaultSource); ok {
 		key, err := vault.FingerprintKey(ctx)
 		if err == nil {
@@ -70,18 +70,18 @@ func OpenMerchants(ctx context.Context, cfg *config.Config, database *db.DB, cli
 			return nil, err
 		}
 	}
-	cache.SetSync(oneOffSync(svc, cfg))
+	cache.SetSync(oneOffSync(svc))
 	database.SetMerchantConfig(svc)
 	return &Merchants{Service: svc, SolanaTransit: conn.SolanaTransit, Close: closeAll}, nil
 }
 
-// oneOffSync reconciles a loaded configuration and, unless provider writes
-// are readonly, registers its Stripe PSPs' posture as a server does, so a
-// one-off tool's write waits only for its PSP's first check.
-func oneOffSync(svc *merchants.Service, cfg *config.Config) merchantdocs.SyncFunc {
+// oneOffSync reconciles a loaded configuration and registers its Stripe PSPs'
+// posture as a server does, so a one-off tool's write waits only for its PSP's
+// first check.
+func oneOffSync(svc *merchants.Service) merchantdocs.SyncFunc {
 	return func(ctx context.Context, id billing.MerchantID, previous, loaded merchantdocs.Set) (merchantdocs.Set, error) {
 		set, err := svc.SyncConfig(ctx, id, previous, loaded)
-		if err == nil && !config.IsProviderReadOnly(cfg) {
+		if err == nil {
 			merchants.RegisterStripePosture(svc.StripeClients, id, previous, set)
 		}
 		return set, err
@@ -92,14 +92,14 @@ func oneOffSync(svc *merchants.Service, cfg *config.Config) merchantdocs.SyncFun
 // through: Vault when a KV mount is named; else the merchant's entry in the
 // manifest on disk fills a file source. No manifest and none at the
 // conventional path leaves the merchant without configuration: nothing arms.
-func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, client *vaultapi.Client, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlays []string) (*Merchants, error) {
+func OneOffMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, client *vaultapi.Client, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string) (*Merchants, error) {
 	opened, err := OpenMerchants(ctx, cfg, database, client)
 	if err != nil {
 		return nil, err
 	}
 	svc := opened.Service
 	if _, ok := svc.Config().Source().(*merchantdocs.FileSource); ok {
-		declaration, err := manifestEntry(ctx, database.Log, svc, merchantID, manifest, manifestPath, overlays)
+		declaration, err := manifestEntry(ctx, database.Log, svc, merchantID, manifest, manifestPath)
 		if err != nil {
 			opened.Close()
 			return nil, err
@@ -121,7 +121,7 @@ func OneOffMerchants(ctx context.Context, cfg *config.Config, database *db.DB, c
 
 // manifestEntry is the merchant's declaration in the manifest: the one given,
 // else the file at manifestPath, else the conventional path when it exists.
-func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlayPaths []string) (*billing.MerchantDocument, error) {
+func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string) (*billing.MerchantDocument, error) {
 	if manifest == nil {
 		path := strings.TrimSpace(manifestPath)
 		explicit := path != ""
@@ -136,11 +136,7 @@ func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchant
 		if err != nil {
 			return nil, fmt.Errorf("read merchant manifest %s: %w", path, err)
 		}
-		overlays, err := ReadMerchantManifestOverlays(overlayPaths)
-		if err != nil {
-			return nil, err
-		}
-		if manifest, err = LoadManifest(raw, overlays, CheckManifestDeclaration); err != nil {
+		if manifest, err = LoadManifest(raw, CheckManifestDeclaration); err != nil {
 			return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 		}
 	}

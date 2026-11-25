@@ -25,43 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// Read names a family of Client reads served from memory.
-type Read string
-
-// The cacheable reads. Customer and money reads (orders, payments,
-// subscriptions, entitlements, balances, customers) are never cached.
-const (
-	// ReadCatalog is GetProduct, ListProducts, GetPrice (without Verify) and
-	// ListPrices.
-	ReadCatalog Read = "catalog"
-	// ReadMeters is GetMeter, ListMeters, GetLimit and ListLimits.
-	ReadMeters Read = "meters"
-	// ReadPublicConfig is GetPublicConfig.
-	ReadPublicConfig Read = "public_config"
-	// ReadMerchantConfiguration is GetMerchantConfiguration.
-	ReadMerchantConfiguration Read = "merchant_configuration"
-)
-
-// ReadPolicy is how a read is served from memory: an answer younger than
-// RefreshAfter is served as is; an older one is served while it reloads in
-// the background, and while reloads fail until it is MaxStale old. The zero
-// policy reads live.
-type ReadPolicy struct {
-	RefreshAfter time.Duration
-	MaxStale     time.Duration
-}
-
-// ReadCache is Config.ReadCache and RemoteOptions.ReadCache: the policy of
-// each Read it names, replacing its default. Defaults in process: ReadCatalog
-// and ReadMeters refresh after 1 minute, stale up to 10; the configuration
-// reads are live. Over HTTP: ReadCatalog, ReadMeters and ReadPublicConfig
-// refresh after 10 minutes, stale up to an hour; ReadMerchantConfiguration
-// after 30 seconds, stale up to 10 minutes. A handle's own catalog,
-// configuration or archive write, and any change the embedded engine commits,
-// drops the merchant's cached answers at once; another replica's change shows
-// within RefreshAfter.
-type ReadCache map[Read]ReadPolicy
-
 // transport is how a handle reaches OpenRails, which sets what a read costs.
 type transport string
 
@@ -74,17 +37,17 @@ const (
 // in-process read costs a database query, a remote one an HTTP round trip.
 // A read a transport does not list reads live there. Customer and money
 // reads are never cached.
-var readPolicies = map[transport]ReadCache{
+var readPolicies = map[transport]billing.ReadCache{
 	inProcess: {
-		ReadCatalog: {RefreshAfter: time.Minute, MaxStale: 10 * time.Minute},
-		ReadMeters:  {RefreshAfter: time.Minute, MaxStale: 10 * time.Minute},
+		billing.ReadCatalog: {RefreshAfter: time.Minute, MaxStale: 10 * time.Minute},
+		billing.ReadMeters:  {RefreshAfter: time.Minute, MaxStale: 10 * time.Minute},
 		// The engine already serves public and merchant configuration from memory.
 	},
 	overHTTP: {
-		ReadCatalog:               {RefreshAfter: 10 * time.Minute, MaxStale: time.Hour},
-		ReadMeters:                {RefreshAfter: 10 * time.Minute, MaxStale: time.Hour},
-		ReadPublicConfig:          {RefreshAfter: 10 * time.Minute, MaxStale: time.Hour},
-		ReadMerchantConfiguration: {RefreshAfter: 30 * time.Second, MaxStale: 10 * time.Minute},
+		billing.ReadCatalog:               {RefreshAfter: 10 * time.Minute, MaxStale: time.Hour},
+		billing.ReadMeters:                {RefreshAfter: 10 * time.Minute, MaxStale: time.Hour},
+		billing.ReadPublicConfig:          {RefreshAfter: 10 * time.Minute, MaxStale: time.Hour},
+		billing.ReadMerchantConfiguration: {RefreshAfter: 30 * time.Second, MaxStale: 10 * time.Minute},
 	},
 }
 
@@ -99,7 +62,7 @@ type reads struct {
 	// gens advance on each change to a merchant, so its old answers are
 	// never read again.
 	gens    sync.Map // billing.MerchantID -> *atomic.Uint64
-	answers map[Read]*cache.Cache[readKey, answer]
+	answers map[billing.Read]*cache.Cache[readKey, answer]
 	// products are ListProducts' items by key or id, cached one by one.
 	products *cache.Cache[itemKey, answer]
 }
@@ -136,15 +99,15 @@ func (e loadError) Unwrap() error { return e.err }
 // newReads builds t's caches under overrides; timeout bounds each load (zero:
 // the cache default). An override it cannot serve keeps its read's default
 // and is named in refused.
-func newReads(t transport, overrides ReadCache, timeout time.Duration, handle func(billing.MerchantID) *Client) (_ *reads, refused []config.Degradation, err error) {
+func newReads(t transport, overrides billing.ReadCache, timeout time.Duration, handle func(billing.MerchantID) *Client) (_ *reads, refused []config.Degradation, err error) {
 	policies, refused := readPoliciesFor(t, overrides)
-	r := &reads{handle: handle, answers: map[Read]*cache.Cache[readKey, answer]{}}
+	r := &reads{handle: handle, answers: map[billing.Read]*cache.Cache[readKey, answer]{}}
 	for read, policy := range policies {
 		options := cache.Options{Name: "openrails." + string(read) + "." + string(t), RefreshAfter: policy.RefreshAfter, MaxStale: policy.MaxStale, LoadTimeout: timeout}
 		if r.answers[read], err = cache.New(options, r.loadAnswers); err != nil {
 			return nil, nil, err
 		}
-		if read == ReadCatalog {
+		if read == billing.ReadCatalog {
 			options.Name = "openrails.products." + string(t)
 			if r.products, err = cache.New(options, r.loadProducts); err != nil {
 				return nil, nil, err
@@ -157,8 +120,8 @@ func newReads(t transport, overrides ReadCache, timeout time.Duration, handle fu
 // readPoliciesFor is t's default policies with overrides applied; a zero
 // override turns its read off. An override naming no read, or whose bounds
 // are out of order, is ignored and named in refused.
-func readPoliciesFor(t transport, overrides ReadCache) (ReadCache, []config.Degradation) {
-	out := ReadCache{}
+func readPoliciesFor(t transport, overrides billing.ReadCache) (billing.ReadCache, []config.Degradation) {
+	out := billing.ReadCache{}
 	for read, policy := range readPolicies[t] {
 		out[read] = policy
 	}
@@ -171,7 +134,7 @@ func readPoliciesFor(t transport, overrides ReadCache) (ReadCache, []config.Degr
 			continue
 		}
 		switch {
-		case policy == ReadPolicy{}:
+		case policy == billing.ReadPolicy{}:
 			delete(out, read)
 		case policy.RefreshAfter <= 0 || policy.MaxStale <= policy.RefreshAfter:
 			refused = append(refused, config.Degradation{Field: field, Err: fmt.Errorf("needs 0 < RefreshAfter < MaxStale; the default applies")})
@@ -212,7 +175,7 @@ func (r *reads) forget(id billing.MerchantID) {
 	}
 }
 
-func (r *reads) cacheOf(read Read) *cache.Cache[readKey, answer] {
+func (r *reads) cacheOf(read billing.Read) *cache.Cache[readKey, answer] {
 	if r == nil {
 		return nil
 	}
@@ -220,7 +183,7 @@ func (r *reads) cacheOf(read Read) *cache.Cache[readKey, answer] {
 }
 
 // read is a GET of path that read's policy may answer from memory.
-func (c *Client) read(ctx context.Context, read Read, path string, out any) error {
+func (c *Client) read(ctx context.Context, read billing.Read, path string, out any) error {
 	if c.engine != nil {
 		if err := c.engine.CheckOpen(); err != nil {
 			return err

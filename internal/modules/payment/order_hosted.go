@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // An order paid on Stripe's hosted page (Stripe Checkout): paying opens an
@@ -69,7 +70,7 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 	if returnURL == "" {
 		return OrderCharge{}, fmt.Errorf("%w: return_url is required", ErrOrderAttemptValidation)
 	}
-	if err := s.validateReturnURLs(returnURL); err != nil {
+	if err := s.validateReturnURLs(ctx, returnURL); err != nil {
 		return OrderCharge{}, err
 	}
 	if err := moneyutil.RequireFiatCurrency(order.Currency); err != nil {
@@ -167,9 +168,9 @@ func (s *OrderAttemptService) payOrderHosted(ctx context.Context, in OrderPayInp
 	return OrderCharge{}, err
 }
 
-// CheckReturnURL refuses a return URL off the host's allowed origins.
-func (s *OrderAttemptService) CheckReturnURL(raw string) error {
-	return s.validateReturnURLs(raw)
+// CheckReturnURL refuses a return URL off the merchant's return origins.
+func (s *OrderAttemptService) CheckReturnURL(ctx context.Context, raw string) error {
+	return s.validateReturnURLs(ctx, raw)
 }
 
 // HostedOption is the hosted-page PSP that takes the order: the one named, or
@@ -262,7 +263,7 @@ func (s *OrderAttemptService) SettleOrderHosted(ctx context.Context, attemptID u
 	if transaction == "" {
 		transaction = sessionID
 	}
-	payment := uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:order-payment:"+attemptID.String()+":"+transaction))
+	payment := uuidutil.DerivedV7(uuidutil.TimeOf(attemptID), uuid.NameSpaceURL, "openrails:order-payment:"+attemptID.String()+":"+transaction)
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := s.orders.Paid(db.WithPSPID(ctx, attempt.PspID), s.db.NewWithPgxTx(tx), *attempt.OrderID, orders.Charge{PaymentID: payment, AttemptID: attemptID, PSPID: attempt.PspID,
 			Rail: string(models.RailStripe), TransactionID: transaction, Amount: *attempt.Amount, Currency: *attempt.Currency, PurchasedAt: s.now().UTC(),
@@ -317,7 +318,7 @@ func (s *OrderAttemptService) stripeCheckoutSession(ctx context.Context, id stri
 	if expire {
 		stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey("expire:"+id))
 	}
-	resp, err := purchase.StripeClients.Client(purchase.Config, 0).Do(req)
+	resp, err := purchase.StripeClients.Client(0).Do(req)
 	if err != nil {
 		return stripeCheckoutSession{}, err
 	}

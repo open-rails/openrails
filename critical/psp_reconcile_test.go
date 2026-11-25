@@ -22,7 +22,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -333,6 +332,7 @@ func TestPSPReconcile(t *testing.T) {
 		iw.apply(t, imp.ID)
 		applied, err := iw.alpha.GetFinding(t.Context(), correct.ID)
 		require.NoError(t, err)
+		require.NotNil(t, applied.Resolution, "the apply left the correction unresolved; notes %q, evidence %v", deref(applied.Notes), applied.Evidence)
 		require.Equal(t, "approved", *applied.Resolution, "notes %v, evidence %v", applied.Notes, applied.Evidence["resolution"])
 		row := iw.held(t, schedule)
 		require.Equal(t, prices["current19"].ID.String(), row.Price, "the provider's mapped price")
@@ -668,7 +668,7 @@ func TestPSPReconcile(t *testing.T) {
 
 	t.Run("OR-J38-S71/proposal-cancel-holds-after-the-first-affected-target", func(t *testing.T) {
 		iw := bootImportWorldDeclaring(t, true, func(w *world) {
-			w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ActorPerHour: 1}
+			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 1}
 		}, "nmi")
 		iw.fleet.PeriodicJobs().Clear()
 		iw.start(t)

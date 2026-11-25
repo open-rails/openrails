@@ -2,6 +2,7 @@ package request
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding"
 	"encoding/json"
@@ -12,14 +13,16 @@ import (
 	"mime"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
 
 	"github.com/jonboulle/clockwork"
+	"golang.org/x/text/language"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
@@ -33,6 +36,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Request is the HTTP request a route handler answers and its response
@@ -188,7 +192,7 @@ const maxRequestIDLength = 128
 func EnsureRequestID(r *http.Request) string {
 	requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
 	if requestID == "" || len(requestID) > maxRequestIDLength {
-		requestID = uuid.NewString()
+		requestID = uuidutil.NewV7().String()
 	}
 	r.Header.Set("X-Request-ID", requestID)
 	return requestID
@@ -346,12 +350,69 @@ func (r *Request) Staff() (billingauth.Staff, bool) {
 	return billingauth.StaffFromContext(r.Request.Context())
 }
 
-// ClientCountry is the client's country as a trusted proxy reports it, or "".
+// ClientCountry is the client's country as Cloudflare reports it, or "".
 func (r *Request) ClientCountry() string {
 	if r.Request == nil || r.State == nil {
 		return ""
 	}
 	return r.State.TrustedProxies.Country(r.Request)
+}
+
+// ClientLanguage is the language the request's Accept-Language prefers, or "".
+func (r *Request) ClientLanguage() string {
+	if r.Request == nil {
+		return ""
+	}
+	return PreferredLanguage(r.Request.Header.Get("Accept-Language"))
+}
+
+// PreferredLanguage is an Accept-Language header's first language by weight,
+// as language[-region] (en, pt-BR, es-419), or "" when it names none. An
+// entry that does not parse is skipped, as are "*" and the tags that name no
+// one language (mul, und, zxx).
+func PreferredLanguage(header string) string {
+	if header == "" || len(header) > 1024 {
+		return ""
+	}
+	type entry struct {
+		tag    language.Tag
+		weight float64
+	}
+	var entries []entry
+	for _, part := range strings.Split(header, ",") {
+		name, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		weight := 1.0
+		if q, ok := strings.CutPrefix(strings.TrimSpace(params), "q="); ok {
+			w, err := strconv.ParseFloat(strings.TrimSpace(q), 64)
+			if err != nil || w < 0 || w > 1 {
+				continue
+			}
+			weight = w
+		}
+		tag, err := language.Parse(strings.TrimSpace(name))
+		if err != nil || weight == 0 {
+			continue
+		}
+		base, confidence := tag.Base()
+		if confidence == language.No {
+			continue
+		}
+		switch base.String() {
+		case "mul", "und", "zxx":
+			continue
+		}
+		entries = append(entries, entry{tag, weight})
+	}
+	slices.SortStableFunc(entries, func(a, b entry) int { return cmp.Compare(b.weight, a.weight) })
+	if len(entries) == 0 {
+		return ""
+	}
+	base, _ := entries[0].tag.Base()
+	out := base.String()
+	if region, confidence := entries[0].tag.Region(); confidence == language.Exact {
+		out += "-" + region.String()
+	}
+	return out
 }
 
 // ClientIP is the request's client IP: the socket peer, or, when that peer is

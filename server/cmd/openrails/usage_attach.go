@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/eventstore"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/hostdeps"
 )
@@ -32,7 +33,7 @@ discard is one-way; restore the recorded store's backup instead where one
 exists.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-				store, err := openAttachedStore(ctx)
+				store, err := openAttachedStore(ctx, database)
 				if err != nil {
 					return err
 				}
@@ -52,7 +53,7 @@ exists.`,
 
 // openAttachedStore opens the configured ClickHouse as an event store,
 // creating or upgrading its database.
-func openAttachedStore(ctx context.Context) (*eventstore.Store, error) {
+func openAttachedStore(ctx context.Context, database *db.DB) (*eventstore.Store, error) {
 	h := hostconfig.FromContext(ctx)
 	if h.ClickHouse == nil {
 		return nil, fmt.Errorf("no clickhouse section: there is no event store to attach")
@@ -64,5 +65,6 @@ func openAttachedStore(ctx context.Context) (*eventstore.Store, error) {
 	cli.mu.Lock()
 	cli.closes = append(cli.closes, func() { _ = conn.Close() })
 	cli.mu.Unlock()
-	return eventstore.Open(ctx, conn, config.ClickHouseDatabase(h.Config), eventstore.Options{Logger: slog.Default()})
+	chdb := config.ClickHouseDatabase(&h.Server.Engine)
+	return eventstore.Open(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)})
 }

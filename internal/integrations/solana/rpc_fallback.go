@@ -50,10 +50,10 @@ type RPCClientConfig struct {
 	// URL is the PSP's own endpoint (secrets.rpc_url), tried first; the
 	// network's public endpoint is its fallback.
 	URL string
-	// PublicURL replaces the network's public endpoint: a sandbox run's
-	// loopback node.
+	// PublicURL replaces the network's public endpoint: a loopback fake node
+	// (Deps.ProviderEndpoints).
 	PublicURL string
-	// ReadOnly blocks transaction submission at the wire (mode=readonly).
+	// ReadOnly blocks transaction submission at the wire (readonly write posture).
 	ReadOnly bool
 }
 
@@ -540,7 +540,7 @@ func (c *RPCClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataS
 
 // ErrProviderReadOnly is returned by every transaction-submission method in
 // readonly mode: a hard failure of the operation, never a skip signal.
-var ErrProviderReadOnly = errors.New("solana: transaction submission is blocked (mode=readonly)")
+var ErrProviderReadOnly = errors.New("solana: transaction submission is blocked (readonly write posture)")
 
 // SendTransaction submits a transaction with automatic failover.
 func (c *RPCClient) SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {

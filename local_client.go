@@ -69,36 +69,3 @@ func (c *LocalClient) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, refere
 	}
 	return e.StopRunningChargeTx(ctx, merchant, tx, reference, params)
 }
-
-// AdmitTx is Admit inside tx, a transaction from the host's pool on the
-// engine's database, so an admission and its hold commit with the host's
-// request row, or not at all: no outbox and no orphan hold. OpenRails binds
-// the handle's merchant and never commits or rolls tx back; after an error
-// the host rolls back.
-func (c *LocalClient) AdmitTx(ctx context.Context, tx pgx.Tx, requests []billing.AdmitParams) ([]billing.AdmissionVerdict, error) {
-	e, merchant, err := c.local()
-	if err != nil {
-		return nil, err
-	}
-	return e.AdmitTx(ctx, merchant, tx, requests)
-}
-
-// CaptureAdmissionsTx is CaptureAdmissions inside tx (see AdmitTx), so a
-// capture commits with the host's record of the finished work.
-func (c *LocalClient) CaptureAdmissionsTx(ctx context.Context, tx pgx.Tx, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error) {
-	e, merchant, err := c.local()
-	if err != nil {
-		return nil, err
-	}
-	return e.CaptureAdmissionsTx(ctx, merchant, tx, items)
-}
-
-// ReleaseAdmissionsTx is ReleaseAdmissions inside tx (see AdmitTx), so a
-// release commits with the host's record of the failed work.
-func (c *LocalClient) ReleaseAdmissionsTx(ctx context.Context, tx pgx.Tx, requestIDs []string) ([]billing.AdmissionResult, error) {
-	e, merchant, err := c.local()
-	if err != nil {
-		return nil, err
-	}
-	return e.ReleaseAdmissionsTx(ctx, merchant, tx, requestIDs)
-}

@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 type CreateMembershipParams struct {
@@ -50,6 +51,21 @@ type CreateMembershipParams struct {
 	// Paid is what an order's charge took for this membership, for its
 	// premium_started receipt only: the order records the payment.
 	Paid *Paid
+	// Succeeds is the membership this one replaces (a Solana tier change),
+	// whose checkout it keeps; an engine upgrade names it in
+	// Prepared.Replaces.
+	Succeeds *uuid.UUID
+}
+
+// succeeds is the membership the new one replaces, nil when none.
+func (p *CreateMembershipParams) succeeds() *uuid.UUID {
+	if p.Succeeds != nil {
+		return p.Succeeds
+	}
+	if p.Prepared != nil && p.Prepared.Replaces != nil {
+		return &p.Prepared.Replaces.SubscriptionID
+	}
+	return nil
 }
 
 // Paid is an amount a charge took, in micros of Currency.
@@ -161,11 +177,11 @@ type CancelMembershipParams struct {
 // RenewalFailureID is the FailureID of a renewal that failed for cause
 // before any provider attempt: one per subscription, cause and period.
 func RenewalFailureID(sub *models.Subscription, cause string) uuid.UUID {
-	key := "renewal_failure:" + cause
+	key, at := "renewal_failure:"+cause, uuidutil.TimeOf(sub.ID)
 	if sub.CurrentPeriodEndsAt != nil {
-		key += ":" + sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339Nano)
+		key, at = key+":"+sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339Nano), *sub.CurrentPeriodEndsAt
 	}
-	return uuid.NewSHA1(sub.ID, []byte(key))
+	return uuidutil.DerivedV7(at, sub.ID, key)
 }
 
 // CancelIssuerDeferred is the cancel feedback of a case the issuer's advice

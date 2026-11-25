@@ -129,7 +129,8 @@ that rehearsal in the report.
    isolated database, a dedicated River schema and a separate configuration.
    Use a database backup for the source. `openrails billing export` sets a hold
    on the source merchant. [Archive and restore](standalone.md#backup-and-restore)
-2. **Check the fences.** Configure `provider_write_mode: readonly`. Exclude live
+2. **Check the fences.** Hold the target merchant readonly
+   (`openrails merchant hold --mode readonly`) before importing. Exclude live
    provider credentials from the first phase. Block provider, email and host
    callback egress. Confirm the target database and `openrails book status`
    before importing. [Safety levers](standalone.md#write-safety-and-the-kill-switch)
@@ -161,7 +162,7 @@ and egress receipt. A separate rehearsal from a fresh snapshot gets its own ID.
 <details>
 <summary>Named SQL writes and owned billing tables</summary>
 
-The source scan found 495 named SQL statements in 90 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
+The source scan found 498 named SQL statements in 91 files with an explicit qualified write target. It matches `INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` against `billing.*` targets, including writes inside common table expressions. This index covers the direct statements in the query directory. The source files are the lookup for the exact named queries and their predicates. [SQL query directory](../internal/db/queries)
 
 | Query source | Statements with explicit writes | Targets |
 | --- | ---: | --- |
@@ -189,9 +190,8 @@ The source scan found 495 named SQL statements in 90 files with an explicit qual
 | [grants.sql](../internal/db/queries/grants.sql) | 3 | `grants` |
 | [host_lifecycle_events.sql](../internal/db/queries/host_lifecycle_events.sql) | 2 | `host_outbox` |
 | [idempotency_keys.sql](../internal/db/queries/idempotency_keys.sql) | 6 | `idempotency_keys` |
-| [leases.sql](../internal/db/queries/leases.sql) | 11 | `leases`, `limit_hold_parts`, `limit_holds` |
+| [leases.sql](../internal/db/queries/leases.sql) | 15 | `lease_in_flight`, `leases` |
 | [ledger.sql](../internal/db/queries/ledger.sql) | 3 | `ledger_accounts`, `ledger_transfers`, `ledger_units` |
-| [limit_holds.sql](../internal/db/queries/limit_holds.sql) | 5 | `limit_hold_parts`, `limit_holds` |
 | [limits.sql](../internal/db/queries/limits.sql) | 9 | `catalog_limits`, `catalog_product_limits`, `customer_limit_overrides`, `limit_adjustments`, `limit_windows` |
 | [mandates.sql](../internal/db/queries/mandates.sql) | 8 | `host_outbox`, `mandates` |
 | [merchant_archive.sql](../internal/db/queries/merchant_archive.sql) | 1 | `merchants` |
@@ -240,6 +240,7 @@ The source scan found 495 named SQL statements in 90 files with an explicit qual
 | [reconciliation.sql](../internal/db/queries/reconciliation.sql) | 26 | `nmi_bulk_checkpoints`, `payment_methods`, `reconciliation_findings`, `reconciliation_state`, `subscription_verifications`, `subscriptions` |
 | [refund_access.sql](../internal/db/queries/refund_access.sql) | 1 | `payments` |
 | [retention.sql](../internal/db/queries/retention.sql) | 13 | `host_outbox`, `leases`, `limit_adjustments`, `limit_windows`, `operation_log`, `order_attempts`, `parked_provider_subscriptions`, `periodic_leases`, `provider_intents`, `reconciliation_findings`, `subscription_billing_changes`, `subscription_status_transitions`, `usage_daily`, `usage_minutes`, `webhook_health_daily` |
+| [reversals.sql](../internal/db/queries/reversals.sql) | 3 | `books_starts`, `reconciliation_findings`, `revenue_schedules` |
 | [running_charges.sql](../internal/db/queries/running_charges.sql) | 2 | `running_charges` |
 | [scheduled_changes.sql](../internal/db/queries/scheduled_changes.sql) | 8 | `destructive_actions`, `provider_intents`, `scheduled_changes` |
 | [solana_crankers.sql](../internal/db/queries/solana_crankers.sql) | 1 | `solana_crankers` |
@@ -264,7 +265,7 @@ The migrations declare these 138 billing tables; usage events live in the event 
 - `customers`, `dashboard_configs`, `destructive_action_switch`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`, `disputes`
 - `event_store`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`, `eventlog_streams`, `fraud_reports`, `grants`
 - `host_outbox`, `idempotency_keys`, `lease_in_flight`, `leases`, `ledger_accounts`, `ledger_daily`, `ledger_rollup_pending`
-- `ledger_transfers`, `ledger_type_totals`, `ledger_units`, `limit_adjustments`, `limit_hold_parts`, `limit_holds`, `limit_windows`
+- `ledger_transfers`, `ledger_type_totals`, `ledger_units`, `limit_adjustments`, `limit_windows`
 - `maintenance_runs`, `mandates`, `merchant_destructive_policy`, `merchant_leases`, `merchant_slug_aliases`, `merchant_write_posture`, `merchants`
 - `money_settings`, `mrr_cohort_flows`, `mrr_customer_flows`, `mrr_customer_totals`, `mrr_flows`, `mrr_movement_lines`, `mrr_movements`
 - `mrr_product_flows`, `mrr_product_totals`, `mrr_risk_cases`, `mrr_risk_due`, `mrr_risk_episodes`, `mrr_risk_flows`, `mrr_risk_totals`

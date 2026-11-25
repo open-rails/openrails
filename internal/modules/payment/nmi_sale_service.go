@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -28,7 +28,7 @@ type NMISaleService struct {
 	// state: the only client source; nil fails closed.
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
 	// Config arms the Stripe sale clients.
-	Config *config.Config
+	Config *billing.Config
 	// Posture gates provider writes per merchant; nil parks them.
 	Posture intents.ModeView
 	// StripeEngines arms the accepted Stripe account for saved-card sales.

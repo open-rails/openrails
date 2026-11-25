@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/writeposture"
@@ -17,12 +17,12 @@ import (
 // merchant's writes are readonly; empty when neither holds it. armed reports
 // the first-enforce arming, which each caller weighs itself. ctx must be
 // merchant-scoped.
-func OverwriteHeld(ctx context.Context, database *db.DB, cfg *config.Config, merchantID uuid.UUID) (held string, armed bool) {
+func OverwriteHeld(ctx context.Context, database *db.DB, cfg *billing.Config, merchantID uuid.UUID) (held string, armed bool) {
 	verdict := destructive.New(database).Check(ctx, merchantID)
 	if !verdict.Allowed {
 		return verdict.Reason, false
 	}
-	if posture := (writeposture.View{Config: cfg, DB: database}).Posture(ctx, merchantID); posture.ReadOnly() {
+	if posture := (writeposture.View{DB: database}).Posture(ctx, merchantID); posture.ReadOnly() {
 		return posture.Reason, verdict.EnforceArmed
 	}
 	return "", verdict.EnforceArmed

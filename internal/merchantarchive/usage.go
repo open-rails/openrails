@@ -34,7 +34,7 @@ func exportUsage(ctx context.Context, database *db.DB, q *gen.Queries, id billin
 		}
 		return nil
 	}
-	current := ""
+	current, merchantID := "", id.String()
 	return store.ExportUsage(ctx, func(table string, values []*string) error {
 		name := eventStorePrefix + table
 		if name != current {
@@ -43,11 +43,12 @@ func exportUsage(ctx context.Context, database *db.DB, q *gen.Queries, id billin
 			}
 			current = name
 		}
+		row := append([]*string{&merchantID}, values...)
 		p := contract.EventStoreProfiles[profileIndex(name)]
-		if err := contract.ValidateValues(p, values); err != nil {
+		if err := contract.ValidateValues(p, row); err != nil {
 			return &Error{Code: "unsupported_state", Table: name, Count: 1, Err: err}
 		}
-		return w.Row(values)
+		return w.Row(row)
 	})
 }
 
@@ -101,7 +102,8 @@ func (u *usageRestore) add(ctx context.Context, p contract.Profile, values []*st
 		}
 		u.table = table
 	}
-	u.rows = append(u.rows, values)
+	// The reader checked the leading merchant_id; the store takes the rest.
+	u.rows = append(u.rows, values[1:])
 	return nil
 }
 

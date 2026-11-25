@@ -15,8 +15,9 @@ import (
 // operation/archive policy, and qualifies the concrete deployment contract
 // before granting SDK or PSP access. An archive does not itself revoke an
 // existing obligation's custody.
-func HyperSwitchClient(cfg *config.Config, owner billing.MerchantID, custodian merchants.CustodianScope) (*hyperswitch.Client, error) {
-	if cfg == nil || cfg.HyperSwitch == nil || owner.IsZero() || custodian.ID == uuid.Nil || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment == config.ClassLive && cfg.HyperSwitch.AllowLoopbackHTTP {
+// It writes nothing when readOnly: the owner's write posture is readonly.
+func HyperSwitchClient(cfg *billing.Config, owner billing.MerchantID, custodian merchants.CustodianScope, readOnly bool) (*hyperswitch.Client, error) {
+	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) || owner.IsZero() || custodian.ID == uuid.Nil || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment == config.ClassLive && cfg.HyperSwitch.AllowLoopbackHTTP {
 		return nil, hyperswitch.ErrBinding
 	}
 	parsed, err := custodians.ParseSettings(custodian.Kind, custodian.Settings)
@@ -27,5 +28,5 @@ func HyperSwitchClient(cfg *config.Config, owner billing.MerchantID, custodian m
 	if apiKey == "" {
 		return nil, hyperswitch.ErrUnavailable
 	}
-	return hyperswitch.New(hyperswitch.Config{BaseURL: cfg.HyperSwitch.APIBaseURL, MerchantID: custodian.AccountID, ProfileID: parsed.ProfileID, APIKey: hyperswitch.Secret(apiKey), ReadOnly: config.IsProviderReadOnly(cfg)})
+	return hyperswitch.New(hyperswitch.Config{BaseURL: cfg.HyperSwitch.APIBaseURL, MerchantID: custodian.AccountID, ProfileID: parsed.ProfileID, APIKey: hyperswitch.Secret(apiKey), ReadOnly: readOnly})
 }

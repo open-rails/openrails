@@ -1,6 +1,7 @@
 -- billing.price_migrations: one move of subscribers to another price.
--- Matched and skipped are facts of creation; the per-status counts come from
--- the migration's scheduled changes on read.
+-- Matched is counted at creation and skipped once every subscriber was
+-- reached; the per-status counts come from the migration's scheduled changes
+-- on read, and preparing from its admission, started until then.
 
 -- name: CreatePriceMigration :one
 INSERT INTO billing.price_migrations (
@@ -14,19 +15,32 @@ INSERT INTO billing.price_migrations (
 RETURNING *;
 
 -- name: SetPriceMigrationSkipped :execrows
-UPDATE billing.price_migrations SET subscriptions_skipped = sqlc.arg(subscriptions_skipped)::int
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+-- Once a migration has reached its subscribers: those it made no move for,
+-- skipped or gone from its prices before it reached them.
+UPDATE billing.price_migrations m
+SET subscriptions_skipped = GREATEST(0, m.subscriptions_matched - (
+    SELECT count(*) FROM billing.scheduled_changes sc WHERE sc.merchant_id = m.merchant_id AND sc.price_migration_id = m.id))
+WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.id = sqlc.arg(id)::uuid;
+
+-- name: LockPriceMigration :one
+-- A page of a migration's walk holds its row: a cancel waits for the page,
+-- and the next page sees the cancel.
+SELECT * FROM billing.price_migrations
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+FOR UPDATE;
 
 -- name: CancelPriceMigration :execrows
 UPDATE billing.price_migrations SET canceled_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND canceled_at IS NULL;
 
 -- name: GetPriceMigration :one
-SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
+SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped,
+       coalesce(a.state = 'started', false)::boolean AS preparing
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
+LEFT JOIN billing.destructive_actions a ON a.merchant_id = m.merchant_id AND a.id = m.destructive_action_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,
@@ -39,11 +53,13 @@ CROSS JOIN LATERAL (
 WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.id = sqlc.arg(id)::uuid;
 
 -- name: ListPriceMigrationsByIDs :many
-SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
+SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped,
+       coalesce(a.state = 'started', false)::boolean AS preparing
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
+LEFT JOIN billing.destructive_actions a ON a.merchant_id = m.merchant_id AND a.id = m.destructive_action_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,
@@ -57,11 +73,13 @@ WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.id = ANY(sqlc.arg(ids)::
 ORDER BY m.created_at DESC, m.id DESC;
 
 -- name: ListPriceMigrationsPage :many
-SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped
+SELECT sqlc.embed(m), source.public_id AS from_price_public_id, target.public_id AS to_price_public_id, product.key AS product_key, c.scheduled, c.applied, c.canceled, c.blocked, c.skipped,
+       coalesce(a.state = 'started', false)::boolean AS preparing
 FROM billing.price_migrations m
 LEFT JOIN billing.prices source ON source.merchant_id = m.merchant_id AND source.id = m.from_price_id
 JOIN billing.prices target ON target.merchant_id = m.merchant_id AND target.id = m.to_price_id
 LEFT JOIN billing.products product ON product.merchant_id = m.merchant_id AND product.id = m.from_product_id
+LEFT JOIN billing.destructive_actions a ON a.merchant_id = m.merchant_id AND a.id = m.destructive_action_id
 CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE sc.status = 'scheduled') AS scheduled,
            count(*) FILTER (WHERE sc.status = 'applied') AS applied,

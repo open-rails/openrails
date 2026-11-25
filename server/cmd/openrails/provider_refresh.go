@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 type providerRefreshReceipt struct {
@@ -63,7 +64,7 @@ keeping their history; request replacements with this command.`,
 				if err != nil {
 					return err
 				}
-				cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+				cfg := hostconfig.Engine(ctx)
 				if err := bindCLIRiverProducer(ctx, cfg, database); err != nil {
 					return err
 				}

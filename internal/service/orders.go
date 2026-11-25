@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
 // Orders: a customer previews, buys (one call, or create then pay), confirms
@@ -44,11 +45,35 @@ var (
 )
 
 // OrderActor is the customer acting on their orders, as the request proved
-// them. Principal is the interactive session paying needs.
+// them. Principal is the interactive session paying needs. Present is the
+// customer in person; Country (a trusted proxy's) and Language
+// (Accept-Language) are their request's, recorded on a checkout only then.
 type OrderActor struct {
 	Customer  billing.CustomerID
 	Principal billingauth.Payer
 	ClientIP  string
+	Present   bool
+	Country   string
+	Language  string
+}
+
+// checkout is what the actor's request tells a checkout of its customer.
+func (a OrderActor) checkout() orders.CheckoutFacts {
+	if !a.Present {
+		return orders.CheckoutFacts{}
+	}
+	return orders.CheckoutFacts{IPCountry: a.Country, Language: a.Language}
+}
+
+// attribution is what of given a checkout keeps. A field it leaves out is
+// counted, never the reason to refuse a sale.
+func (s *Service) attribution(ctx context.Context, given *billing.OrderAttribution) billing.OrderAttribution {
+	kept, drops := orders.CheckAttribution(given)
+	for _, drop := range drops {
+		mid, _ := merchant.FromContext(ctx)
+		opsmetric.Emit(ctx, s.Log, opsmetric.MetricAttributionDropped, []any{"merchant_id", mid.String(), "field", drop.Field, "reason", drop.Reason})
+	}
+	return kept
 }
 
 const (
@@ -294,8 +319,10 @@ func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor Ord
 // key, the request's Idempotency-Key, names an order in a merchant's unit,
 // which its balance pays as it is created.
 func (s *Service) placeOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams, key string) (*orders.Order, bool, error) {
+	facts := actor.checkout()
+	facts.Attribution = s.attribution(ctx, params.Attribution)
 	in := orders.CreateInput{CustomerID: actor.Customer.UUID(), Origin: billing.OrderOriginCustomer, Lines: params.Lines, FromCart: params.Cart,
-		ExpectedTotal: params.ExpectedTotal, TTL: orders.CustomerTTL}
+		ExpectedTotal: params.ExpectedTotal, TTL: orders.CustomerTTL, Checkout: facts}
 	if key = strings.TrimSpace(key); key != "" {
 		digest, err := s.orderCreationDigest(ctx, params, params.Lines)
 		if err != nil {
@@ -465,6 +492,16 @@ func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderAct
 	if err != nil {
 		return payment.OrderCharge{}, err
 	}
+	if order.PurchaseNumber != nil {
+		// Asking to pay is recorded before anything may refuse it.
+		var country string
+		if pay.card != nil && pay.card.Billing != nil && pay.card.Billing.Address != nil && pay.card.Billing.Address.Country != nil {
+			country = *pay.card.Billing.Address.Country
+		}
+		if err := rt.Orders.MarkSubmitted(ctx, actor.Customer.UUID(), order.ID, actor.checkout(), country, pay.method); err != nil {
+			s.Log.WarnContext(ctx, "checkout: cannot record its submission", logx.Err(err), "order_id", order.ID.String())
+		}
+	}
 	if err := s.reconsentPaying(ctx, actor.Customer.UUID(), pay.method, key); err != nil {
 		return payment.OrderCharge{}, err
 	}
@@ -559,7 +596,17 @@ func (s *Service) GetOrder(ctx context.Context, actor OrderActor, id billing.Ord
 	if err != nil {
 		return nil, err
 	}
-	return s.orderView(ctx, rt, actor, id.UUID())
+	order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), id.UUID())
+	if err != nil {
+		return nil, err
+	}
+	// The payment form loading it is the checkout opened.
+	if actor.Present && order.PurchaseNumber != nil && order.OpenedAt == nil && order.Status == string(billing.OrderOpen) {
+		if err := rt.Orders.MarkOpened(ctx, actor.Customer.UUID(), order.ID, actor.checkout()); err != nil {
+			s.Log.WarnContext(ctx, "checkout: cannot record its opening", logx.Err(err), "order_id", id.String())
+		}
+	}
+	return s.viewOf(ctx, rt, actor, order)
 }
 
 // ListOrders pages the customer's own orders, newest first. A list carries
@@ -569,12 +616,12 @@ func (s *Service) ListOrders(ctx context.Context, actor OrderActor, params billi
 		return billing.ListPage[billing.Order]{}, orders.ErrNotFound
 	}
 	params.CustomerID = actor.Customer
-	return s.listOrders(ctx, params)
+	return s.listOrders(ctx, params, false)
 }
 
 // ListMerchantOrders pages the merchant's orders for staff, newest first.
 func (s *Service) ListMerchantOrders(ctx context.Context, params billing.OrderListParams) (billing.ListPage[billing.Order], error) {
-	return s.listOrders(ctx, params)
+	return s.listOrders(ctx, params, true)
 }
 
 // GetMerchantOrder reads one order for staff. Staff never pay, so it carries
@@ -594,10 +641,12 @@ func (s *Service) GetMerchantOrder(ctx context.Context, id billing.OrderID) (*bi
 		return nil, err
 	}
 	view := order.AsOf(s.now()).View(nil, nil)
+	view.Checkout = order.Checkout()
 	return &view, s.markDelinquent(ctx, &view)
 }
 
-func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams) (billing.ListPage[billing.Order], error) {
+// listOrders pages orders; merchant reads carry their checkout facts.
+func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams, merchant bool) (billing.ListPage[billing.Order], error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return billing.ListPage[billing.Order]{}, err
@@ -619,7 +668,11 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 		out := billing.ListPage[billing.Order]{Items: make([]billing.Order, 0, len(rows))}
 		for _, o := range rows {
 			if params.CustomerID.IsZero() || o.CustomerID == params.CustomerID.UUID() {
-				out.Items = append(out.Items, o.AsOf(s.now()).View(nil, nil))
+				view := o.AsOf(s.now()).View(nil, nil)
+				if merchant {
+					view.Checkout = o.Checkout()
+				}
+				out.Items = append(out.Items, view)
 			}
 		}
 		return out, s.markDelinquentPage(ctx, out.Items)
@@ -657,6 +710,9 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 	out := billing.ListPage[billing.Order]{Items: make([]billing.Order, len(page.Items)), Next: page.Next}
 	for i, o := range page.Items {
 		out.Items[i] = o.AsOf(s.now()).View(nil, nil)
+		if merchant {
+			out.Items[i].Checkout = o.Checkout()
+		}
 	}
 	return out, s.markDelinquentPage(ctx, out.Items)
 }
@@ -668,6 +724,12 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 	if err != nil {
 		return nil, err
 	}
+	return s.viewOf(ctx, rt, actor, order)
+}
+
+// viewOf is orderView of a loaded order.
+func (s *Service) viewOf(ctx context.Context, rt *orderRuntime, actor OrderActor, order *orders.Order) (*billing.Order, error) {
+	var err error
 	order.AsOf(s.now())
 	var next *billing.NextAction
 	if order.CollectionOwner == string(billing.OrderCollectionEngine) && order.AwaitsCustomer() {
@@ -797,7 +859,11 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 		return err
 	}
 	if pay.card != nil {
-		_, err := payment.NewCardOption(options, pay.card.PSPID)
+		option, err := payment.NewCardOption(options, pay.card.PSPID)
+		if err != nil {
+			return err
+		}
+		_, err = s.rt.OrderAttemptService.NewCardBilling(ctx, *option, pay.card.Billing)
 		return err
 	}
 	if pay.solana != nil {
@@ -805,7 +871,7 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 		return err
 	}
 	if pay.hosted != nil {
-		if err := s.rt.OrderAttemptService.CheckReturnURL(pay.hosted.ReturnURL); err != nil {
+		if err := s.rt.OrderAttemptService.CheckReturnURL(ctx, pay.hosted.ReturnURL); err != nil {
 			return err
 		}
 		_, err := payment.HostedOption(options, pay.hosted.PSPID)
@@ -990,7 +1056,15 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		if origin == "" {
 			return nil, false, apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "this deployment serves no checkout origin").WithParam("pay_url")
 		}
-		plan, err := paymentpage.Plan(*params.PayURL, billing.OrderID{}, now, params.ExpiresAt)
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		allowed, err := s.rt.ReturnOrigins(ctx, mid)
+		if err != nil {
+			return nil, false, err
+		}
+		plan, err := paymentpage.Plan(*params.PayURL, billing.OrderID{}, now, params.ExpiresAt, allowed)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1010,7 +1084,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 			if err != nil {
 				return err
 			}
-			c, err := paymentpage.Plan(*params.PayURL, billing.OrderID(id), now, params.ExpiresAt)
+			c, err := paymentpage.Plan(*params.PayURL, billing.OrderID(id), now, params.ExpiresAt, allowed)
 			if err != nil {
 				return err
 			}
@@ -1019,7 +1093,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		}
 	}
 	order, err := rt.Orders.Create(ctx, orders.CreateInput{CustomerID: params.CustomerID.UUID(), Origin: billing.OrderOriginMerchant, Lines: params.Lines,
-		IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl, Attach: attach})
+		IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl, Attach: attach, Checkout: orders.CheckoutFacts{Attribution: s.attribution(ctx, params.Attribution)}})
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			return nil, false, ErrIdempotencyKeyInUse
@@ -1148,6 +1222,7 @@ func (s *Service) merchantOrderView(ctx context.Context, order *orders.Order) (*
 		return nil, err
 	}
 	view := order.View(nil, options)
+	view.Checkout = order.Checkout()
 	return &view, nil
 }
 

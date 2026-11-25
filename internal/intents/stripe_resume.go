@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -54,7 +54,7 @@ type StripeResumeHandler struct {
 	StripeCancelHandler
 }
 
-func NewStripeResumeHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeResumeHandler {
+func NewStripeResumeHandler(d *db.DB, cfg *billing.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeResumeHandler {
 	return &StripeResumeHandler{StripeCancelHandler{DB: d, Config: cfg, Rails: rails, Clients: clients, Clock: clock, Policy: DefaultBackoff}}
 }
 
@@ -97,7 +97,7 @@ func (h *StripeResumeHandler) Execute(ctx context.Context, intent gen.BillingPro
 	status, _, msg, err := h.write(ctx, key, http.MethodPost, psid, url.Values{"cancel_at_period_end": {"false"}}, intent.IdempotencyKey+":resume")
 	switch {
 	case errors.Is(err, stripeapi.ErrProviderReadOnly):
-		return parkedBeforeEffect("stripe provider writes blocked (mode=readonly)")
+		return parkedBeforeEffect("stripe provider writes blocked (readonly write posture)")
 	case errors.Is(err, providerposture.ErrDisarmed):
 		return parkedBeforeEffect("stripe resume held by sandbox posture gate: " + err.Error())
 	case err != nil:

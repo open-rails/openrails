@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // The pull plane (provider refresh, unknown-cohort resolution, per-sub probes,
@@ -61,16 +62,19 @@ func (c PSPCoverage) Complete() bool { return c.Declared > 0 && c.Pulled >= c.De
 // from the armed rail state (nil Merchants = nothing arms; fail closed).
 type MerchantFetcherBuilder struct {
 	StripeClients *stripeapi.Factory
-	Config        *config.Config
-	Merchants     *merchants.Service
-	DB            *db.DB
+	Config        *billing.Config
+	// Endpoints are the loopback fakes the pull clients reach
+	// (Deps.ProviderEndpoints); zero, the providers.
+	Endpoints config.ProviderEndpoints
+	Merchants *merchants.Service
+	DB        *db.DB
 
 	// AccountIDs optionally pins a rail to one declared account_id (operator
 	// pulls; may target archived accounts for drain).
 	AccountIDs map[Provider]string
 
-	// NMIClients is the runtime's shared NMI client factory; its transport
-	// (the fake-provider seam) carries over to pull clients.
+	// NMIClients is the runtime's shared NMI client factory; its gateway and
+	// transport (the fake-provider seams) carry over to pull clients.
 	NMIClients *railresolve.NMIFactory
 	// DataLinkPacing paces live CCBill accounts' DataLink requests.
 	DataLinkPacing ccbill.Pacing
@@ -142,8 +146,8 @@ func (b MerchantFetcherBuilder) arm(ctx context.Context, mid billing.MerchantID,
 	}
 }
 
-func (b MerchantFetcherBuilder) readOnly() bool {
-	return b.Config != nil && config.IsProviderReadOnly(b.Config)
+func (b MerchantFetcherBuilder) readOnly(ctx context.Context, mid billing.MerchantID) bool {
+	return writeposture.View{DB: b.DB}.Posture(ctx, mid.UUID()).ReadOnly()
 }
 
 // resolveScopeCoverage is resolveScope plus the coverage record: how many PSPs
@@ -252,9 +256,9 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config, Log: b.Log}
+	factory := &railresolve.NMIFactory{Postures: writeposture.View{DB: b.DB}, Log: b.Log}
 	if b.NMIClients != nil {
-		factory.Transport = b.NMIClients.Transport
+		factory.Gateway, factory.Transport = b.NMIClients.Gateway, b.NMIClients.Transport
 	}
 	client, err := factory.Client(ctx, b.Merchants.Secrets(), mid, scope)
 	if err != nil {
@@ -290,10 +294,10 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 		DataLinkPassword: password,
 		Sandbox:          scope.Environment == config.EnvironmentSandbox,
 	})
-	dl.ReadOnly = b.readOnly()
+	dl.ReadOnly = b.readOnly(ctx, mid)
 	dl.Pacing = b.DataLinkPacing
-	if sandbox := config.SandboxCCBillDataLinkURL(b.Config); sandbox != "" {
-		dl.BaseURL = sandbox
+	if fake := b.Endpoints.CCBillDataLinkURL; fake != "" {
+		dl.BaseURL = fake
 		dl.LoopbackFixture = true
 	}
 	if b.WireDataLink != nil {
@@ -329,12 +333,12 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.Mer
 		b.warnScopeError(ctx, mid, ProviderSolana, err)
 		return
 	}
-	// A sandbox run's loopback RPC replaces the public one here as it does
-	// for the runtime's own Solana clients (hermetic CI never reaches devnet).
+	// A loopback fake RPC replaces the public one here as it does for the
+	// runtime's own Solana clients (hermetic CI never reaches devnet).
 	rpc := solanaint.NewRPCClientWithConfig(b.Log, solanaint.RPCClientConfig{
 		Network:   scope.Environment,
 		URL:       rpcURL,
-		PublicURL: config.SandboxSolanaRPCURL(b.Config),
+		PublicURL: b.Endpoints.SolanaRPCURL,
 		ReadOnly:  true,
 	})
 	fetcher := NewSolanaFetcher(b.Log, rpc, SolanaSubscriptionSourceFromDB(b.DB))

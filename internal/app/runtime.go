@@ -35,14 +35,15 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -92,13 +93,16 @@ type Runtime struct {
 	// billing pass and merchant pulls.
 	leaseDB     *db.DB
 	RedisClient redis.UniversalClient
-	Config      *config.Config
+	Config      *billing.Config
+	// ProviderEndpoints are the loopback fakes the provider clients reach
+	// (Deps.ProviderEndpoints); zero, the providers.
+	ProviderEndpoints config.ProviderEndpoints
 
 	// declared are the merchants Config declares (DeclareMerchants).
 	declared atomic.Pointer[declaredMerchants]
 
 	// TrustedProxies is the boot-configured proxy-aware client-IP resolver
-	// (#746), built once from config.Config.TrustedProxies. A nil/empty
+	// (#746), built once from billing.Config.TrustedProxies. A nil/empty
 	// resolver trusts nothing (raw socket peer only). Every consumer that
 	// needs "the request's real client IP" — rate-limit subject keys, abuse
 	// tracking, webhook IPAddress recording, the CCBill IP allowlist —
@@ -153,9 +157,6 @@ type Runtime struct {
 	Disputes *disputes.Service
 	// DashboardService is the merchant's saved dashboard layout.
 	DashboardService *dashboard.Service
-	// CopilotService answers catalog questions and drafts price changes for a
-	// person to review (off without an LLM and its consent).
-	CopilotService *copilot.Service
 	// CheckoutOrigin is where a server serving the payment page
 	// serves it; merchant orders take a purchase only when it is set.
 	checkoutOrigin atomic.Pointer[string]
@@ -329,6 +330,48 @@ func (r *Runtime) IssuerMerchant(issuer string) (billing.MerchantID, bool) {
 	}
 	id, ok := d.issuers[issuer]
 	return id, ok && !id.IsZero()
+}
+
+// MerchantIssuer is the Issuer the merchant declares, "" without one.
+func (r *Runtime) MerchantIssuer(mid billing.MerchantID) string {
+	if r == nil {
+		return ""
+	}
+	if d := r.declared.Load(); d != nil {
+		for issuer, id := range d.issuers {
+			if id == mid {
+				return issuer
+			}
+		}
+	}
+	return ""
+}
+
+// EmbedOrigins are merchant mid's checkout.embed_origins, its own sites.
+func (r *Runtime) EmbedOrigins(ctx context.Context, mid billing.MerchantID) ([]string, error) {
+	if r == nil || r.Merchants == nil {
+		return nil, nil
+	}
+	_, settings, err := r.Merchants.MerchantSettings(merchant.WithID(ctx, mid), mid)
+	if err != nil {
+		return nil, err
+	}
+	return merchantconfig.EmbedOrigins(settings), nil
+}
+
+// ReturnOrigins are the exact origins merchant mid's return URLs may name
+// (config.ReturnOrigins): the billing origin, its declared Issuer's and its
+// checkout.embed_origins.
+func (r *Runtime) ReturnOrigins(ctx context.Context, mid billing.MerchantID) ([]string, error) {
+	embed, err := r.EmbedOrigins(ctx, mid)
+	if err != nil {
+		return nil, err
+	}
+	var cfg *billing.Config
+	if r != nil {
+		cfg = r.Config
+	}
+	return config.ReturnOrigins(cfg, r.MerchantIssuer(mid), embed), nil
 }
 
 // Close gracefully shuts down runtime resources.

@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -26,8 +25,8 @@ func wrapCustomerRoutes(logger *slog.Logger, rt *app.Runtime, mux *router.Table,
 	// OpenRails-native rate-limiting + captcha, matching the base NewRoutes
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
-	var rateLimits config.RateLimitsConfig
-	var captchaCfg *config.CaptchaConfig
+	var rateLimits billing.RateLimitsConfig
+	var captchaCfg billing.CaptchaAccount
 	var resolver *iputil.TrustedProxies
 	var store *captcha.ChallengeStore
 	var state *abusestate.Store

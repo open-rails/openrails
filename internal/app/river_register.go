@@ -10,7 +10,6 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/logx"
@@ -53,7 +52,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
-			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, DataLinkPacing: r.DataLinkPacing(), Log: r.Log},
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Endpoints: r.ProviderEndpoints, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, DataLinkPacing: r.DataLinkPacing(), Log: r.Log},
 			Log:     r.Log,
 		}
 		r.Verifier.Start()
@@ -66,11 +65,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		return fmt.Errorf("add paced provider refresh worker: %w", err)
 	}
 	cleanupConfig := riverjobs.DefaultCleanupConfig()
-	eventRetention, err := config.EventRetentionDuration(r.Config)
-	if err != nil {
-		return err
-	}
-	cleanupConfig.EventRetention = eventRetention
 	if err := addWorker(workers, &riverjobs.CleanupExpiredDataWorker{
 		DB:     r.DB,
 		Clock:  clock,
@@ -199,6 +193,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.ContactErasureWorker{DB: r.DB, Admissions: r.DestructiveAdmissions}); err != nil {
 		return fmt.Errorf("add contact erasure worker: %w", err)
 	}
+	if err := addWorker(workers, &riverjobs.PriceMigrationWorker{Migrations: r.PriceMigrationService}); err != nil {
+		return fmt.Errorf("add price migration worker: %w", err)
+	}
 	// Usage orders: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
 	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
@@ -232,10 +229,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		{Kind: riverjobs.KindOrderExpiry, Run: expiry.Pass, DueBy: expiry.DueBy},
 		{Kind: riverjobs.KindRevenueRecognition, Run: recognition.Pass, DueBy: recognition.DueBy},
 	}
-	if r.declares(riverjobs.WithUsageBilling) {
-		scans = append(scans, riverjobs.Scan{Kind: money.KindUsageOrders, Run: usage.Pass, DueBy: usage.DueBy})
-	}
 	scans = append(scans,
+		riverjobs.Scan{Kind: money.KindUsageOrders, Run: usage.Pass, DueBy: usage.DueBy},
 		riverjobs.Scan{Kind: riverjobs.KindRebillWatch, Run: rebills.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindNMIHistory, Run: nmiHistory.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
@@ -293,8 +288,8 @@ func (w jobLogged[T]) Work(ctx context.Context, job *river.Job[T]) error {
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// Every provider intent arms per merchant at drain time: NMI through
 	// CollectionResolver, CCBill and Stripe through RailConfigs.
-	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // an unarmed rail parks
-	ccbillCancel.DataLinkBaseURL = config.SandboxCCBillDataLinkURL(r.Config)
+	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.RailConfigs, clock) // an unarmed rail parks
+	ccbillCancel.DataLinkBaseURL = r.ProviderEndpoints.CCBillDataLinkURL
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
 	rebill.DeferDelete = newProviderCancelScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
 	registry := intents.NewRegistry(
@@ -382,7 +377,7 @@ func (r *Runtime) StripeEngines() intents.StripeEngineServiceResolver {
 
 // Posture reads merchants' provider write postures.
 func (r *Runtime) Posture() writeposture.View {
-	return writeposture.View{Config: r.Config, DB: r.DB}
+	return writeposture.View{DB: r.DB}
 }
 
 // IntentRunner returns a Runner for synchronous enqueue+execute from request
@@ -447,19 +442,9 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 func (r *Runtime) buildRiverPeriodicJobs(cfg *river.Config) []*river.PeriodicJob {
 	var jobs []*river.PeriodicJob
 	for _, p := range riverjobs.Periodics {
-		if r.declares(p.Gate) {
-			jobs = append(jobs, r.periodicJob(cfg, p))
-		}
+		jobs = append(jobs, r.periodicJob(cfg, p))
 	}
 	return jobs
-}
-
-func (r *Runtime) declares(gate riverjobs.Gate) bool {
-	switch gate {
-	case riverjobs.WithUsageBilling:
-		return r.Config != nil && r.Config.UsageBillingEnabled
-	}
-	return true
 }
 
 // findingNotifier is the alert service as a finding notifier; nil when none.
@@ -486,6 +471,7 @@ func (r *Runtime) refreshWorkers(clock clockwork.Clock) (*riverjobs.ProviderRefr
 		Contacts:       r.Contacts,
 		Alerts:         r.AlertService, // requires_review findings -> operator notifications
 		NMIClients:     r.NMIClients,
+		Endpoints:      r.ProviderEndpoints,
 		DataLinkPacing: r.DataLinkPacing(),
 		Verifier:       r.Verifier,
 		Disputes:       r.Disputes,

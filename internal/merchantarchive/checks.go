@@ -41,7 +41,6 @@ var excludedTables = map[string]string{
 	"event_store":                   "the deployment's event store identity",
 	"merchant_write_posture":        "deployment write posture: export sets the source readonly, restore the destination",
 	"webhook_health":                "telemetry", "webhook_health_daily": "telemetry",
-	"limit_hold_parts":              "what holds set aside of each limit: open holds refuse the archive, and the destination counts windows afresh",
 	"leases":                        "gate leases: a live one refuses the archive, and gates sync new ones at the destination",
 	"lease_in_flight":               "what live gates report in flight: a live lease refuses the archive, and gates report afresh at the destination",
 	"payment_attempts":              "decline analytics, kept 25 months; money is payments and provider_intents",
@@ -101,7 +100,6 @@ var excludedColumns = map[string]string{
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
-	"limit_hold_parts":              "merchant_id hold_id hold_created_at customer_id limit_key unit window_starts_at window_ends_at held",
 	"leases":                        "merchant_id id created_at last_sync_at settled_through_n closed_at receipts",
 	"lease_in_flight":               "merchant_id lease_id customer_id limit_key unit amount updated_at",
 	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at purchase_id purchase_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text mandate_id sent_initial_transaction_id order_id outcome decline_cause advice_code network_advice_code",
@@ -303,9 +301,8 @@ var preflightChecks = []rowCheck{
 	// subscription; restore queues its wake.
 	{"provider_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable') AND NOT (intent_type='solana_pull' AND status='pending' AND attempts=0 AND result_evidence IS NULL)"},
 	{"payments", "status='pending'"},
-	// An open request hold, or a live gate lease (with its holds and
-	// in-flight report), sets capacity aside the archive would drop.
-	{"limit_holds", "state='open' AND lease_id IS NULL"},
+	// A live gate lease's in-flight report sets capacity aside the archive
+	// would drop.
 	{"leases", fmt.Sprintf("closed_at IS NULL AND last_sync_at > now() - make_interval(secs => %d)", int(limits.LeaseLifetime/time.Second))},
 	{"webhook_events", "completed_at IS NULL"},
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','prune','approval','merchant_purge')"},
@@ -316,7 +313,7 @@ var preflightChecks = []rowCheck{
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
-	if err := destructiveArchiveBarrier(ctx, tx, id); err != nil {
+	if err := destructiveArchiveBarrier(ctx, tx, id, nil); err != nil {
 		return err
 	}
 	for _, c := range preflightChecks {
@@ -407,8 +404,9 @@ var referenceChecks = []rowCheck{
                AND m.rail_customer_ref=provider_intents.payload->'instrument'->>'rail_customer_ref'
                AND m.status IN ('removed','closed','replaced')
                AND m.park_reason IS NOT DISTINCT FROM ('removed:' || provider_intents.id::text))))`},
-	// A general-ledger leg of an order in a merchant's unit is in the money of
-	// the lots that paid it.
+	// A general-ledger leg of an order in a merchant's unit is in the paid
+	// currency of a lot that paid it: of the lot it names (a spend, a
+	// reversal's share), else of one that paid its line (a recognition).
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
 	 OR (credit_grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.credit_grants g
    WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND (
@@ -419,7 +417,14 @@ var referenceChecks = []rowCheck{
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
 	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id
 	   AND (o.currency=ledger_transfers.currency
-	     OR ledger_transfers.book='general' AND ledger_transfers.credit_grant_id IS NOT NULL AND o.currency <> ALL(` + registryCurrencies + `))))
+	     OR ledger_transfers.book='general' AND o.currency <> ALL(` + registryCurrencies + `)
+	       AND (ledger_transfers.credit_grant_id IS NOT NULL AND EXISTS(SELECT 1 FROM billing.credit_grants g
+	           JOIN billing.ledger_transfers s ON s.merchant_id=g.merchant_id AND s.credit_grant_id=g.id
+	           WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND g.paid_currency=ledger_transfers.currency AND s.book='units' AND s.order_id=o.id)
+	         OR ledger_transfers.credit_grant_id IS NULL AND EXISTS(SELECT 1 FROM billing.ledger_transfers s
+	           JOIN billing.credit_grants g ON g.merchant_id=s.merchant_id AND g.id=s.credit_grant_id
+	           WHERE s.merchant_id=$1 AND s.source='order_line' AND s.source_id=ledger_transfers.order_line_id::text AND s.book='units'
+	             AND g.paid_currency=ledger_transfers.currency)))))
 	 OR (order_line_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.id=ledger_transfers.order_line_id AND l.order_id=ledger_transfers.order_id))
 	 OR (product_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=ledger_transfers.product_id))
 	 OR (revenue_schedule_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id=$1 AND s.id=ledger_transfers.revenue_schedule_id
@@ -523,15 +528,22 @@ func orderCollectionCanonical(row gen.ListOrderCollectionsForArchiveRow) bool {
 		row.PaymentStatus != nil && *row.PaymentStatus == "succeeded" && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount
 }
 
-// Deployment admission/hold history never travels in a merchant artifact.
-// Refuse moving a book while it could discard live authority or recent budget.
-func destructiveArchiveBarrier(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
-	held, err := gen.New(tx).HasDestructiveArchiveBarrier(ctx, gen.HasDestructiveArchiveBarrierParams{MerchantID: id.UUID(), Since: time.Now().UTC().Add(-24 * time.Hour)})
+// archiveUndoWindow is how long a restore waits after a prune or approval
+// run that can still be undone.
+const archiveUndoWindow = 24 * time.Hour
+
+// destructiveArchiveBarrier refuses moving a merchant's book while a
+// destructive action may still take effect or an incident it would escape is
+// open; deployment admission and hold history never travel with it. A restore
+// (undoSince set) also waits for a run that can still be undone and ran after
+// undoSince.
+func destructiveArchiveBarrier(ctx context.Context, tx pgx.Tx, id billing.MerchantID, undoSince *time.Time) error {
+	table, err := gen.New(tx).DestructiveArchiveBarrier(ctx, gen.DestructiveArchiveBarrierParams{MerchantID: id.UUID(), UndoSince: undoSince})
 	if err != nil {
 		return err
 	}
-	if held {
-		return &Error{Code: "unsupported_state", Table: "destructive_actions", Count: 1}
+	if table != "" {
+		return &Error{Code: "unsupported_state", Table: table, Count: 1}
 	}
 	return nil
 }

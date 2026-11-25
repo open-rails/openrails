@@ -1,0 +1,122 @@
+package hostconfig
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// isolate points the loader at an empty secrets directory and a config path
+// in a fresh directory, so only what the test sets is read.
+func isolate(t *testing.T) (configPath, secrets string) {
+	t.Helper()
+	dir, secrets := t.TempDir(), t.TempDir()
+	t.Setenv("VAULT_SECRETS_PATH", secrets)
+	return filepath.Join(dir, "config.yaml"), secrets
+}
+
+// A retired setting refuses the load and names its replacement, whether a
+// key, the environment or a mounted secret file sets it.
+func TestRetiredSettingsRefuseTheLoad(t *testing.T) {
+	for _, retired := range retiredSettings {
+		want := retired.key + " / " + retired.env + " was removed: " + retired.now
+		variable := strings.Replace(retired.env, "*", "NMI_GATEWAY_URL", 1)
+		yaml := retired.key + ": x\n"
+		if variable != retired.env {
+			yaml = retired.key + ":\n  nmi_gateway_url: x\n"
+		}
+		for source, set := range map[string]func(t *testing.T, configPath, secrets string){
+			"key": func(t *testing.T, configPath, _ string) {
+				if err := os.WriteFile(configPath, []byte(yaml), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			"env": func(t *testing.T, _, _ string) { t.Setenv(variable, "x") },
+			"secret": func(t *testing.T, _, secrets string) {
+				if err := os.WriteFile(filepath.Join(secrets, variable), []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		} {
+			t.Run(retired.key+"/"+source, func(t *testing.T) {
+				configPath, secrets := isolate(t)
+				set(t, configPath, secrets)
+				if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("load: %v, want %q", err, want)
+				}
+			})
+		}
+	}
+}
+
+// One database section holds the connection and the engine's schemas; a key
+// neither reads refuses the load, as does the former db section.
+func TestOneDatabaseSection(t *testing.T) {
+	write := func(t *testing.T, yaml string) string {
+		configPath, _ := isolate(t)
+		if err := os.WriteFile(configPath, []byte(yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return configPath
+	}
+	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\n  lease_conns: 2\nroute_groups:\n  merchant_config: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Server.RouteGroups.MerchantConfig {
+		t.Error("route_groups.merchant_config is read")
+	}
+	if e := cfg.Server.Engine; cfg.Database.URL != "postgres://u:p@db.internal:5432/x" || e.Database.Schema != "shop" || e.Database.RiverSchema != "shop_river" || e.Database.LeaseConns != 2 {
+		t.Fatalf("connection %+v, engine %+v", cfg.Database, e.Database)
+	}
+	for yaml, want := range map[string]string{
+		"database:\n  urll: x\n":        "unknown configuration keys refuse boot: database.urll",
+		"redis:\n  adr: x\n":            "unknown configuration keys refuse boot: redis.adr",
+		"auth:\n  tokn: {}\n":           "unknown configuration keys refuse boot: auth.tokn",
+		"database:\n  sqltrace: true\n": "unknown configuration keys refuse boot: database.sqltrace",
+		"db:\n  url: x\n":               "db was merged into database",
+		"auth:\n  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11\n": "auth.default_tenant_id was removed",
+		"auth:\n  keys:\n    allow_ephemeral_dev_keys: true\n":               "auth.keys.allow_ephemeral_dev_keys was removed",
+	} {
+		if _, err := Load(write(t, yaml)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", yaml, err, want)
+		}
+	}
+	configPath, _ := isolate(t)
+	t.Setenv("DB_URL", "postgres://u:p@db.internal:5432/x")
+	if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), "db was merged into database") {
+		t.Errorf("DB_URL: %v", err)
+	}
+}
+
+// Policy sections are set in config.yaml alone: a rate-limit bucket at 0
+// there is unlimited, and a variable naming one refuses the load.
+func TestPolicySectionsAreFileOnly(t *testing.T) {
+	configPath, _ := isolate(t)
+	if err := os.WriteFile(configPath, []byte("rate_limits:\n  payment:\n    requests_per_minute: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limits := cfg.Server.Engine.RateLimits; limits.Payment.RequestsPerMinute != 0 || limits.Purchase.RequestsPerMinute != 10 {
+		t.Fatalf("payment %+v, purchase %+v", limits.Payment, limits.Purchase)
+	}
+	for env, section := range map[string]string{
+		"RATE_LIMITS_PAYMENT_REQUESTS_PER_MINUTE":          "rate_limits",
+		"DESTRUCTIVE_ACTION_LIMITS_ACTOR_PER_HOUR":         "destructive_action_limits",
+		"USER_ACTION_RATE_LIMIT_MINIMUM_CUSTOMERS_PER_DAY": "user_action_rate_limit",
+		"AUTH_HTTP_RATE_LIMITS":                            "auth.http.rate_limits",
+	} {
+		t.Run(env, func(t *testing.T) {
+			configPath, _ := isolate(t)
+			t.Setenv(env, "1")
+			want := section + " is set in config.yaml, not the environment: unset " + env
+			if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("load: %v, want %q", err, want)
+			}
+		})
+	}
+}

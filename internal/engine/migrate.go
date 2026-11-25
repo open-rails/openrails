@@ -6,16 +6,17 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/migrate"
 )
 
 // Migrate creates or upgrades through pool what New does first: OpenRails'
-// tables in Config.Database.Schema, this month's partitions and River's tables
-// in Config.Database.RiverSchema. It is for operator tooling and fixtures that
+// tables in Config.Database.Schema and River's tables in
+// Config.Database.RiverSchema. It is for operator tooling and fixtures that
 // prepare a schema without running the engine.
-func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
+func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg billing.Config) error {
 	if pool == nil {
 		return fmt.Errorf("openrails: Migrate requires a Postgres pool")
 	}

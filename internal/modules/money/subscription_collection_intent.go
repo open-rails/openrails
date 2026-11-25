@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -37,12 +36,12 @@ var errEngineObligationChanged = errors.New("accepted engine obligation changed 
 type SubscriptionCollectionHandler struct {
 	DB       *db.DB
 	Resolver *MerchantCollectionAdapterBuilder
-	Config   *config.Config
+	Config   *billing.Config
 	Clock    clockwork.Clock
 	Log      *slog.Logger
 }
 
-func NewSubscriptionCollectionHandler(d *db.DB, resolver *MerchantCollectionAdapterBuilder, cfg *config.Config, clock clockwork.Clock) *SubscriptionCollectionHandler {
+func NewSubscriptionCollectionHandler(d *db.DB, resolver *MerchantCollectionAdapterBuilder, cfg *billing.Config, clock clockwork.Clock) *SubscriptionCollectionHandler {
 	return &SubscriptionCollectionHandler{DB: d, Resolver: resolver, Config: cfg, Clock: timeutil.FirstClock(clock), Log: d.Log}
 }
 func (*SubscriptionCollectionHandler) Type() string { return subscriptions.TypeSubscriptionCollection }
@@ -159,7 +158,7 @@ func (h *SubscriptionCollectionHandler) submissionHeld(ctx context.Context, in g
 	if h.Config.EngineAdmissionHold {
 		return "new engine payment submission is held"
 	}
-	if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, in.MerchantID, intents.Origin(in.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(ctx, writeposture.View{DB: h.DB}, in.MerchantID, intents.Origin(in.Origin)); blocked {
 		return reason
 	}
 	if h.Resolver == nil {

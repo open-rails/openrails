@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -376,7 +377,7 @@ func (s *OrderAttemptService) TakesOrders(ctx context.Context) error {
 
 // OrderAttemptID is the attempt a key makes on an order.
 func OrderAttemptID(merchantID, orderID uuid.UUID, key string) uuid.UUID {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:order-attempt:"+merchantID.String()+":"+orderID.String()+":"+key))
+	return uuidutil.DerivedV7(uuidutil.TimeOf(orderID), uuid.NameSpaceURL, "openrails:order-attempt:"+merchantID.String()+":"+orderID.String()+":"+key)
 }
 
 // PayOrder starts (or, for the same key, resumes) one attempt on the order
@@ -653,7 +654,7 @@ func (s *OrderAttemptService) payOrder(ctx context.Context, in OrderPayInput) (O
 				}
 			}
 			if row.Custodian == models.CustodianHyperSwitch {
-				if s.config == nil || s.config.HyperSwitch == nil {
+				if s.config == nil || s.config.HyperSwitch == (billing.HyperSwitchConfig{}) {
 					return errors.New("HyperSwitch custody is not configured")
 				}
 				binding, err := charge.FreezeHyperSwitchBinding(ctx, q, charge.CustodyOf(d), row, chosen.PSPID, s.config.HyperSwitch.APIBaseURL)
@@ -747,16 +748,20 @@ func (s *OrderAttemptService) prepareNewCard(ctx context.Context, purchase *Purc
 	if token == "" || len(token) > 255 || cardguard.ContainsPAN(token) {
 		return nil, apperr.Invalidf("payment.token is a PSP's single-use card token").WithParam("payment.token")
 	}
+	details, err := s.NewCardBilling(ctx, option, in.Card.Billing)
+	if err != nil {
+		return nil, err
+	}
 	var billingCountry string
-	if d := in.Card.Billing; d != nil && d.Address != nil && d.Address.Country != nil {
-		billingCountry = *d.Address.Country
+	if details != nil && details.Address != nil && details.Address.Country != nil {
+		billingCountry = *details.Address.Country
 	}
 	if option.Custodian == models.CustodianBasisTheory || option.Custodian == models.CustodianPlatform {
 		return s.prepareBasisTheoryCard(ctx, purchase, in, option, token, billingCountry)
 	}
 	out := &newCard{instrument: charge.FrozenInstrument{PSPID: option.PSPID, Custodian: models.CustodianPSP}}
 	if models.Rail(option.Rail) != models.RailStripe {
-		out.token, out.billing = token, newCardBilling(in.Card.Billing, in.User)
+		out.token, out.billing = token, newCardBilling(details, in.User)
 		out.reuse = mandates.KeepsNewCard(in.Card.Reusable, billingCountry, "")
 		return out, nil
 	}
@@ -809,6 +814,23 @@ func (s *OrderAttemptService) prepareNewCard(ctx context.Context, purchase *Purc
 	out.card, out.fingerprint = method.Card, method.Fingerprint
 	out.reuse = mandates.KeepsNewCard(in.Card.Reusable, billingCountry, method.CardCountry)
 	return out, nil
+}
+
+// NewCardBilling applies the merchant's billing fields to a new card's
+// details on option (merchantconfig.AdmitBillingDetails): a Stripe card's
+// address is Stripe's Payment Element's to collect, so it is kept as sent.
+func (s *OrderAttemptService) NewCardBilling(ctx context.Context, option OrderOption, details *billing.BillingDetails) (*billing.BillingDetails, error) {
+	if models.Rail(option.Rail) == models.RailStripe {
+		return details, nil
+	}
+	fields := merchantconfig.DefaultBillingFields
+	if s.db != nil {
+		var err error
+		if fields, err = merchantconfig.NewStore(s.db).BillingFields(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return merchantconfig.AdmitBillingDetails(fields, details, "payment.billing_details")
 }
 
 // prepareBasisTheoryCard is a card the page's Basis Theory Elements

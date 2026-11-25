@@ -324,6 +324,40 @@ func (q *Queries) GetScheduledChange(ctx context.Context, arg GetScheduledChange
 	return i, err
 }
 
+const listMigrationMoves = `-- name: ListMigrationMoves :many
+SELECT subscription_id FROM billing.scheduled_changes
+WHERE merchant_id = $1::uuid AND price_migration_id = $2::uuid
+  AND subscription_id = ANY($3::uuid[])
+`
+
+type ListMigrationMovesParams struct {
+	MerchantID       uuid.UUID
+	PriceMigrationID uuid.UUID
+	SubscriptionIds  []uuid.UUID
+}
+
+// The subscriptions among ids a migration already made a move for, of any
+// status: a walk reaches each once.
+func (q *Queries) ListMigrationMoves(ctx context.Context, arg ListMigrationMovesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listMigrationMoves, arg.MerchantID, arg.PriceMigrationID, arg.SubscriptionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var subscription_id uuid.UUID
+		if err := rows.Scan(&subscription_id); err != nil {
+			return nil, err
+		}
+		items = append(items, subscription_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingScheduledChanges = `-- name: ListPendingScheduledChanges :many
 SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason FROM billing.scheduled_changes
 WHERE merchant_id = $1::uuid AND subscription_id = ANY($2::uuid[])

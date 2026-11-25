@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Custodian-held cards: the custodian (Basis Theory) holds the card and the
@@ -37,7 +38,7 @@ type CustodianSaleService struct {
 	DB                   *db.DB
 	Fulfillment          *FulfillmentService
 	Rails                railresolve.Source
-	Config               *config.Config
+	Config               *billing.Config
 	Log                  *slog.Logger
 }
 
@@ -86,10 +87,10 @@ func (s *CustodianSaleService) nmiFactory() *railresolve.NMIFactory {
 	if s.NMIClients != nil {
 		return s.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: s.Config, Log: s.Log}
+	return &railresolve.NMIFactory{Postures: writeposture.View{DB: s.DB}, Log: s.Log}
 }
 
-func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
+func (s *CustodianSaleService) btClient(ctx context.Context, cfg *custodialPSP) (*basistheory.Client, error) {
 	if cfg == nil || cfg.Custody == nil || (cfg.Custody.Custodian != models.CustodianBasisTheory && cfg.Custody.Custodian != models.CustodianPlatform) {
 		return nil, errors.New("this custodian does not support the Basis Theory sale transport")
 	}
@@ -100,13 +101,13 @@ func (s *CustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client,
 		APIKey:        cfg.Custody.APIKey,
 		BaseURL:       cfg.Custody.APIBaseURL,
 		WebhookKeyURL: cfg.Custody.WebhookKeyURL,
-		ReadOnly:      s.Config != nil && config.IsProviderReadOnly(s.Config),
+		ReadOnly:      writeposture.View{DB: s.DB}.Posture(ctx, cfg.MerchantID.UUID()).ReadOnly(),
 		Transport:     s.BasisTheoryTransport,
 	})
 }
 
-func (s *CustodianSaleService) charger(cfg *custodialPSP) (*nmiproxy.Charger, error) {
-	bt, err := s.btClient(cfg)
+func (s *CustodianSaleService) charger(ctx context.Context, cfg *custodialPSP) (*nmiproxy.Charger, error) {
+	bt, err := s.btClient(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -130,11 +131,11 @@ func (s *CustodianSaleService) basisTheory(ctx context.Context, psp uuid.UUID) (
 	if cfg.Scope.ID != psp {
 		return nil, nil, nil, errors.New("the custodian's PSP resolved as another account")
 	}
-	bt, err := s.btClient(cfg)
+	bt, err := s.btClient(ctx, cfg)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	proxy, err := s.charger(cfg)
+	proxy, err := s.charger(ctx, cfg)
 	if err != nil {
 		return nil, nil, nil, err
 	}

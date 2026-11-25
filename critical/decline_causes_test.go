@@ -433,12 +433,13 @@ func TestDeclineCauses(t *testing.T) {
 		dunned := subscriptionState(t, a, sub.ID, "past_due")
 		require.NotNil(t, dunned.Dunning)
 		require.NotNil(t, dunned.Dunning.NextRetryAt)
-		// Nothing ran for a month: the retry runs after the next renewal and
-		// declines with no advice. The case goes on with the attempts left.
-		a.clock.Advance(renewal.Add(24 * time.Hour).Sub(a.clock.Now()))
+		// Nothing ran for four weeks: the retry runs the day before the next
+		// renewal and declines with no advice, so the policy's next retry
+		// falls after the renewal. The case goes on with the attempts left.
+		a.clock.Advance(renewal.Add(-24 * time.Hour).Sub(a.clock.Now()))
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		retry := awaitAttempt(t, a, sub.ID, "dunning_retry")
-		require.True(t, retry.AttemptedAt.After(renewal))
+		require.True(t, retry.AttemptedAt.Before(renewal))
 		late := subscriptionState(t, a, sub.ID, "past_due")
 		require.NotNil(t, late.Dunning)
 		require.NotNil(t, late.Dunning.NextRetryAt, "the policy's next retry stands")
@@ -537,14 +538,31 @@ func TestDeclineCauses(t *testing.T) {
 			require.NoError(t, fleet.Start(t.Context()))
 			runRegistered(t, fleet, "openrails.billing_pass", 1)
 			var rebill []billing.PaymentAttempt
-			require.Eventually(t, func() bool {
-				a.clock.Advance(6 * time.Minute)
-				wakeJobs(t, fleet, "openrails.provider_operation")
+			recorded := func() bool {
 				page, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: sub.ID, Kind: []string{"rebill"}})
 				require.NoError(t, err)
 				rebill = page.Items
 				return len(rebill) > 0
+			}
+			// The charge runs under its claim: the clock moves only once it has
+			// answered or left its outcome for the verifier, whose first look
+			// waits a few minutes.
+			var status string
+			require.Eventually(t, func() bool {
+				if recorded() {
+					return true
+				}
+				err := a.pool.QueryRow(t.Context(), "SELECT status FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+
+					" WHERE subscription_id = $1 AND intent_type = 'subscription_collection'", sub.ID.UUID()).Scan(&status)
+				return err == nil && status != "pending" && status != "in_flight"
 			}, 30*time.Second, 50*time.Millisecond)
+			if len(rebill) == 0 {
+				a.clock.Advance(6 * time.Minute)
+				require.Eventually(t, func() bool {
+					wakeJobs(t, fleet, "openrails.provider_operation")
+					return recorded()
+				}, 30*time.Second, 50*time.Millisecond, "the verifier settles the charge (%s)", status)
+			}
 			require.Len(t, rebill, 1)
 			return a, sub, rebill[0]
 		}
@@ -589,6 +607,8 @@ func TestDeclineCauses(t *testing.T) {
 				due := *sub.CurrentPeriodEndsAt
 				sale := p.core.AddScheduleSale(*sub.RailSubscriptionID, due)
 				p.core.EditSale(sale.TransactionID, func(s *nmimock.Sale) { s.Declined = "202" })
+				// NMI's schedule moves to its next date whatever its charge's answer.
+				p.core.EditSchedule(*sub.RailSubscriptionID, func(s *nmimock.Schedule) { s.NextBilling = due.Add(7 * 24 * time.Hour) })
 				a.clock.Advance(due.Sub(a.clock.Now()) + time.Hour)
 				fleet := hostFleet(t, a.world)
 				fleet.PeriodicJobs().Clear()
@@ -868,7 +888,7 @@ func nmiEngineMembership(t *testing.T) (*authorityWorld, *nmiJournal, *billing.S
 	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-engine-weekly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24)})
 	require.NoError(t, err)
 	token := p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"})
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
+	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token, BillingDetails: billedTo("US", "10001")}}
 	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-engine-membership"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var order billing.Order

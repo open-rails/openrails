@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -66,7 +65,7 @@ type OrderAttemptService struct {
 	solanaMints solanamodule.MintDecimalsSource
 	// solanaMintInfo reads a mint's transfer hook at quote time.
 	solanaMintInfo solanamodule.MintInfoSource
-	config         *config.Config
+	config         *billing.Config
 	rails          railresolve.Source
 	clock          clockwork.Clock
 	// cardFailures is the durable card-testing ledger (SEC-30).
@@ -86,12 +85,19 @@ type OrderAttemptService struct {
 	// checkoutOrigin is the payment page's origin, "" without one: its
 	// pages are return URLs too.
 	checkoutOrigin func() string
-	Log            *slog.Logger
+	// returnOrigins are the origins a merchant's return URLs may name.
+	returnOrigins func(context.Context, billing.MerchantID) ([]string, error)
+	Log           *slog.Logger
 }
 
 // SetCheckoutOrigin wires the payment page's origin, set once it is served.
 func (s *OrderAttemptService) SetCheckoutOrigin(origin func() string) {
 	s.checkoutOrigin = origin
+}
+
+// SetReturnOrigins wires the origins a merchant's return URLs may name.
+func (s *OrderAttemptService) SetReturnOrigins(origins func(context.Context, billing.MerchantID) ([]string, error)) {
+	s.returnOrigins = origins
 }
 
 // SetPSPPosture wires the verdict purchase consults before offering a PSP.
@@ -117,7 +123,7 @@ func NewOrderAttemptService(
 	solanaTransactionService *solanamodule.SolanaTransactionService,
 	fxProvider *fx.Rates,
 	priceProvider solanamodule.TokenPriceProvider,
-	cfg *config.Config,
+	cfg *billing.Config,
 	rails railresolve.Source,
 	clocks ...clockwork.Clock,
 ) *OrderAttemptService {
@@ -165,14 +171,14 @@ func (s *OrderAttemptService) Clock() clockwork.Clock {
 }
 
 func (s *OrderAttemptService) requireProviderWrites(ctx context.Context) error {
-	if s == nil || s.config == nil {
-		return ProviderWritesDisabled("operating mode is unknown (no config wired)")
+	if s == nil {
+		return ProviderWritesDisabled("write posture is unknown (nothing wired)")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	if posture := (writeposture.View{Config: s.config, DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
+	if posture := (writeposture.View{DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
 		return ProviderWritesDisabled(posture.Reason)
 	}
 	return nil

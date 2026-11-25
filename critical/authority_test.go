@@ -50,6 +50,10 @@ type authorityWorld struct {
 	privateSigner           ed25519.PrivateKey
 }
 
+// alphaSite is the origin of alpha's declared issuer: one of its return
+// origins.
+const alphaSite = authtest.Issuer
+
 func newAuthorityWorld(t *testing.T, configure ...func(*world)) *authorityWorld {
 	t.Helper()
 	return newAuthorityWorldWithAuth(t, nil, configure...)
@@ -89,7 +93,8 @@ func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config)
 			require.NoError(t, err)
 		})
 		a.auth, _ = authtest.New(t, authtest.WithConfig(func(c *authkit.Config) {
-			c.DefaultTenantID = a.tenant
+			// Merchants bind one per tenant: this world has several.
+			c.Tenancy, c.DefaultTenantID = authkit.TenancyMulti, a.tenant
 			c.Database.Schema, c.Database.RiverSchema = authSchema, authSchema
 			c.Roles = roles
 			c.TwoFactor.Mode = iam.TwoFactorDisabled
@@ -233,16 +238,14 @@ func TestAuthority(t *testing.T) {
 		require.NoError(t, err)
 		before, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
-		status, raw := a.request(t, "POST", "/v1/app/admissions", a.aliceToken, billing.AdmitBatchParams{Items: []billing.AdmitParams{{RequestID: "not-a-machine", CustomerID: customer, Currency: "USD", InvokerType: billing.InvokerTypeCustomer}}})
+		status, raw := a.request(t, "POST", "/v1/app/leases/sync", a.aliceToken, billing.SyncLeasesParams{LeaseID: newLease(),
+			InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 100}}})
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), `"code":"application_required"`)
 		after, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Equal(t, before.BalanceAmount, after.BalanceAmount)
 		require.Equal(t, before.HeldAmount, after.HeldAmount)
-		admissions, err := a.alpha.ListAdmissions(t.Context(), billing.AdmissionListParams{CustomerID: customer})
-		require.NoError(t, err)
-		require.Empty(t, admissions.Items)
 		status, raw = a.request(t, "GET", "/v1/me", a.alphaKey.Secret, nil)
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), `"code":"invoker_scoped_principal"`)

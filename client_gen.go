@@ -8,7 +8,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 )
 
 // GetPublicConfig reads the deployment's capabilities and public
@@ -18,7 +17,7 @@ import (
 // process, Engine.PublicConfig names the mount the browser reads.
 func (c *Client) GetPublicConfig(ctx context.Context) (*billing.PublicConfig, error) {
 	var out billing.PublicConfig
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/config", cache: config.ReadPublicConfig}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/config", cache: billing.ReadPublicConfig}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -131,7 +130,7 @@ func (c *Client) ApplyCatalog(ctx context.Context, application *catalog.Applicat
 // ListMeters returns one page of the merchant's meters, by key.
 func (c *Client) ListMeters(ctx context.Context, params billing.PageRequest) (*billing.ListPage[billing.Meter], error) {
 	var out billing.ListPage[billing.Meter]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters", query: params, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters", query: params, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -140,7 +139,7 @@ func (c *Client) ListMeters(ctx context.Context, params billing.PageRequest) (*b
 // GetMeter reads one meter with its rate card.
 func (c *Client) GetMeter(ctx context.Context, key string) (*billing.Meter, error) {
 	var out billing.Meter
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -170,7 +169,7 @@ func (c *Client) CreateProduct(ctx context.Context, params billing.CreateProduct
 // GetProduct reads a product with its current prices.
 func (c *Client) GetProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
 	var out billing.Product
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/products/{id}", args: []string{id.String()}, cache: config.ReadCatalog}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/products/{id}", args: []string{id.String()}, cache: billing.ReadCatalog}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -223,7 +222,7 @@ func (c *Client) CreateProviderPrice(ctx context.Context, params billing.CreateP
 // archived.
 func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams) (*billing.ListPage[billing.Price], error) {
 	var out billing.ListPage[billing.Price]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices", query: params, cache: config.ReadCatalog}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices", query: params, cache: billing.ReadCatalog}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -232,7 +231,7 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams)
 // GetPrice reads a price.
 func (c *Client) GetPrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
 	var out billing.Price
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices/{id}", args: []string{id.String()}, cache: config.ReadCatalog}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices/{id}", args: []string{id.String()}, cache: billing.ReadCatalog}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -369,7 +368,9 @@ func (c *Client) SetSubscriptionPaymentMethod(ctx context.Context, id billing.Su
 }
 
 // CreatePriceMigration moves the subscribers of one price, or of every
-// version of a price key, to another price at each one's renewal.
+// version of a price key, to another price at each one's renewal. It admits
+// every subscriber it counts before reading any and reaches them a page at a
+// time: preparing is true until the last page.
 func (c *Client) CreatePriceMigration(ctx context.Context, params billing.CreatePriceMigrationParams) (*billing.PriceMigration, error) {
 	var out billing.PriceMigration
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/catalog/price-migrations", body: params}, &out); err != nil {
@@ -579,71 +580,6 @@ func (c *Client) GetBalance(ctx context.Context, customerID billing.CustomerID, 
 	return &out, nil
 }
 
-// GetAdmission reads an admitted request and its current hold state without
-// replaying admission. Denied or no-longer-retained requests are not found.
-func (c *Client) GetAdmission(ctx context.Context, requestID string) (*billing.Admission, error) {
-	var out billing.Admission
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/app/admissions/{request_id}", args: []string{requestID}}, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ListAdmissions reads a page of retained admitted requests, newest first.
-func (c *Client) ListAdmissions(ctx context.Context, params billing.AdmissionListParams) (*billing.ListPage[billing.Admission], error) {
-	var out billing.ListPage[billing.Admission]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/app/admissions", query: params}, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// Admit decides admissions, one verdict per request in order. A refused
-// request is a verdict, not an error.
-func (c *Client) Admit(ctx context.Context, items []billing.AdmitParams) ([]billing.AdmissionVerdict, error) {
-	var out billing.AdmitBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions", body: billing.AdmitBatchParams{Items: items}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// CaptureAdmissions settles 1 to billing.MaxAdmissionBatchItems admitted
-// requests, one result per item in order: each is captured or refused on its
-// own. A capture that names its usage is priced by the admission's pinned
-// rate cards; above the hold the rest is owed. An exact retry answers the
-// first receipt; changed terms are billing.ErrIdempotencyKeyReused.
-func (c *Client) CaptureAdmissions(ctx context.Context, items []billing.CaptureAdmissionParams) ([]billing.CaptureResult, error) {
-	var out billing.CaptureBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions/capture", body: billing.CaptureAdmissionBatchParams{Items: items}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// ReleaseAdmissions frees the holds of 1 to billing.MaxAdmissionBatchItems
-// admissions whose work failed, one result per request id in order: each is
-// released or refused on its own. Releasing a released admission answers it.
-func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string) ([]billing.AdmissionResult, error) {
-	var out billing.AdmissionBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions/release", body: billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// ExtendAdmissions moves 1 to billing.MaxAdmissionBatchItems open holds'
-// deadlines later, one result per item in order. An item refused with
-// hold_not_found was captured, released or lapsed. New work needs a new
-// request ID; replaying the old request never reopens its hold.
-func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams) ([]billing.AdmissionResult, error) {
-	var out billing.AdmissionBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions/extend", body: billing.ExtendAdmissionBatchParams{Items: items}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
 // StartRunningCharge starts charging a customer at a rate per hour, or
 // answers the charge params.Reference already names. A changed term is
 // billing.ErrIdempotencyKeyReused; a MinimumAmount the customer's capacity
@@ -693,7 +629,7 @@ func (c *Client) ListRunningCharges(ctx context.Context, params billing.RunningC
 // ListLimits returns one page of the merchant's limits, by key.
 func (c *Client) ListLimits(ctx context.Context, params billing.PageRequest) (*billing.ListPage[billing.Limit], error) {
 	var out billing.ListPage[billing.Limit]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/limits", query: params, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/limits", query: params, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -702,7 +638,7 @@ func (c *Client) ListLimits(ctx context.Context, params billing.PageRequest) (*b
 // GetLimit reads one limit with the products that give it capacity.
 func (c *Client) GetLimit(ctx context.Context, key string) (*billing.Limit, error) {
 	var out billing.Limit
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/limits/{key}", args: []string{key}, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/limits/{key}", args: []string{key}, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -730,16 +666,15 @@ func (c *Client) ListCustomerLimits(ctx context.Context, params billing.Customer
 
 // SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate).
 // A sync carries the lease's usage, numbered within the lease, what its gate
-// has had in flight across a sync, the request holds of the lease it
-// releases and the customers whose views it asks for; it answers how far the
-// usage settled (a resend is matched by lease and number), each view (where
-// the customer stands on its limits, reserving nothing), the limit set of
-// each invoker's attributes, the pricing a gate costs requests with, and how
-// many of the merchant's leases are live. The first sync under a new LeaseID
-// creates the lease; a lease answers resends for 61 days after its last
-// sync. Settled usage posts to the ledger at each month's end in the
-// merchant's accounting zone and before any other movement of the customer's
-// balance.
+// has had in flight across a sync and the customers whose views it asks for;
+// it settles all the usage it carries and answers how far the usage settled
+// (a resend is matched by lease and number), each view (where the customer
+// stands on its limits, reserving nothing), the limit set of each invoker's
+// attributes, the pricing a gate costs requests with, and how many of the
+// merchant's leases are live. The first sync under a new LeaseID creates the
+// lease; a lease answers resends for 61 days after its last sync. Settled
+// usage posts to the ledger at each month's end in the merchant's accounting
+// zone and before any other movement of the customer's balance.
 func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
 	var out billing.SyncLeasesResult
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/leases/sync", body: params}, &out); err != nil {
@@ -953,7 +888,7 @@ func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPS
 // credentials, and its revision.
 func (c *Client) GetMerchantConfiguration(ctx context.Context) (*billing.MerchantConfigurationState, error) {
 	var out billing.MerchantConfigurationState
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/configuration", cache: config.ReadMerchantConfiguration}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/configuration", cache: billing.ReadMerchantConfiguration}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

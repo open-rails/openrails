@@ -121,6 +121,76 @@ type CreateMyOrderParams struct {
 	// Order.PayURL on the checkout origin, fresh on every answer (the last
 	// one stops working).
 	PayURL *MyOrderPayURLParams `json:"pay_url,omitempty"`
+	// Attribution is where the host's page says the customer came from.
+	// It comes from the browser, unverified; the customer's open order of
+	// the same lines keeps its first.
+	Attribution *OrderAttribution `json:"attribution,omitempty"`
+}
+
+// OrderAttribution is where the merchant says a checkout came from: the
+// marketing source, medium, campaign, term and content (as utm_*), the
+// referrer and an affiliate. Each is optional, 1 to 100 bytes of printable text without
+// "@" or a card number; Referrer is a URL or host, kept as its lowercase
+// host only.
+type OrderAttribution struct {
+	Source    *string `json:"source"`
+	Medium    *string `json:"medium"`
+	Campaign  *string `json:"campaign"`
+	Term      *string `json:"term"`
+	Content   *string `json:"content"`
+	Referrer  *string `json:"referrer"`
+	Affiliate *string `json:"affiliate"`
+}
+
+// CountrySource is which evidence an order's country came from.
+type CountrySource string
+
+const (
+	// CountrySourceBillingAddress is the billing address the customer gave.
+	CountrySourceBillingAddress CountrySource = "billing_address"
+	// CountrySourceCard is the card's issuing country, as its PSP reports it.
+	CountrySourceCard CountrySource = "card"
+	// CountrySourceIP is the country a trusted proxy reported for the
+	// customer's request; the address itself is never stored.
+	CountrySourceIP CountrySource = "ip"
+)
+
+// CustomerType is who a checkout's customer was when it was created.
+type CustomerType string
+
+const (
+	// CustomerTypeNew is a first purchase by a customer who never
+	// subscribed.
+	CustomerTypeNew CustomerType = "new"
+	// CustomerTypeReturning bought before, or subscribes now.
+	CustomerTypeReturning CustomerType = "returning"
+	// CustomerTypeReactivated subscribed before and subscribes to nothing
+	// now.
+	CustomerTypeReactivated CustomerType = "reactivated"
+)
+
+// OrderCheckout is what OpenRails recorded of a checkout (an order it
+// started for its customer to pay): which purchase it is for the customer,
+// how far they got, where they are, the language they read and the
+// merchant's attribution. Countries are ISO 3166-1 alpha-2; Country is the
+// billing address's, else the card's, else the IP's, as CountrySource says.
+type OrderCheckout struct {
+	CustomerType CustomerType `json:"customer_type"`
+	// PurchaseNumber is 1 + the customer's paid purchases with the merchant
+	// when the checkout was created.
+	PurchaseNumber int `json:"purchase_number"`
+	// OpenedAt is when the customer first read the open checkout in person
+	// (the payment form loaded); SubmittedAt when they first asked to pay it.
+	OpenedAt       *time.Time     `json:"opened_at"`
+	SubmittedAt    *time.Time     `json:"submitted_at"`
+	Country        *string        `json:"country"`
+	CountrySource  *CountrySource `json:"country_source"`
+	BillingCountry *string        `json:"billing_country"`
+	CardCountry    *string        `json:"card_country"`
+	IPCountry      *string        `json:"ip_country"`
+	// Language is what the customer's browser preferred, language[-region].
+	Language    *string          `json:"language"`
+	Attribution OrderAttribution `json:"attribution"`
 }
 
 // PreviewOrderParams prices lines for one customer, as a merchant order
@@ -142,6 +212,8 @@ type CreateOrderParams struct {
 	// PayURL asks for the order's pay URL (Order.PayURL), where the
 	// customer pays. The deployment must serve a checkout origin.
 	PayURL *OrderPayURLParams `json:"pay_url,omitempty"`
+	// Attribution is where the customer came from, as the host knows it.
+	Attribution *OrderAttribution `json:"attribution,omitempty"`
 }
 
 // PayOrderParams pays an open order; Reusable as in CreateMyOrderParams.
@@ -240,6 +312,10 @@ type Order struct {
 	// UncollectibleAt is when a usage order was written off.
 	UncollectibleAt *time.Time `json:"uncollectible_at"`
 	CreatedAt       time.Time  `json:"created_at"`
+	// Checkout is what OpenRails recorded of a checkout, on the merchant's
+	// reads; null on the customer's own and on orders that are not
+	// checkouts.
+	Checkout *OrderCheckout `json:"checkout"`
 }
 
 // OrderProviderBill is a verified provider document attached to an order.
@@ -261,6 +337,10 @@ type OrderRenewal struct {
 	PeriodStartsAt time.Time      `json:"period_starts_at"`
 	PeriodEndsAt   time.Time      `json:"period_ends_at"`
 	DueAt          time.Time      `json:"due_at"`
+	// CheckoutOrderID is the checkout that bought the subscription; null
+	// when none did (imported, started at its provider, or bought before
+	// checkouts were recorded).
+	CheckoutOrderID *OrderID `json:"checkout_order_id"`
 }
 
 // OrderUsage is what a usage order bills and how it is collected: the

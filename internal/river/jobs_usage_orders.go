@@ -7,16 +7,17 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // usagePage bounds one job's due accounts, and its due collections; a full
@@ -27,14 +28,14 @@ const usagePage = 200
 // accounts that are due (money_settings.usage_due_at), then queues the usage
 // orders whose next charge is due (orders.next_collection_attempt_at) as
 // order_collection operations, which their own jobs charge. Both reads are
-// indexed on the due instant, so an idle pass reads no row. Collection waits
-// for limited mode to end. A failed account or order stays due and fails the
+// indexed on the due instant, so an idle pass reads no row. A merchant's
+// collection waits while its write posture is below full. A failed account or order stays due and fails the
 // job once the others are done.
 type UsageOrderWorker struct {
 	WorkerDefaults[money.UsageOrderArgs]
 	DB     *db.DB
 	Money  *money.MoneyService
-	Config *config.Config
+	Config *billing.Config
 	Clock  clockwork.Clock
 	Log    *slog.Logger
 }
@@ -53,7 +54,7 @@ func (w UsageOrderWorker) now() time.Time {
 func (w UsageOrderWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
 	q := w.DB.GenDirectory()
 	accounts, err := q.ListDueUsageAccounts(ctx, gen.ListDueUsageAccountsParams{Now: at, RowLimit: 1})
-	if err != nil || len(accounts) > 0 || config.IsLimitedMode(w.Config) {
+	if err != nil || len(accounts) > 0 {
 		return len(accounts) > 0, err
 	}
 	orders, err := q.ListDueUsageCollections(ctx, gen.ListDueUsageCollectionsParams{Now: at, RowLimit: 1})
@@ -68,7 +69,7 @@ func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[money.UsageOr
 }
 
 func (w UsageOrderWorker) run(ctx context.Context, page money.UsageOrderArgs) error {
-	if w.DB == nil || w.Money == nil || w.Config == nil || !w.Config.UsageBillingEnabled {
+	if w.DB == nil || w.Money == nil {
 		return nil
 	}
 	logger := w.Log.With("worker", money.KindUsageOrders)
@@ -80,9 +81,6 @@ func (w UsageOrderWorker) run(ctx context.Context, page money.UsageOrderArgs) er
 		if next != nil {
 			return errors.Join(failed, continuePass(ctx, money.UsageOrderArgs{Bill: next}))
 		}
-	}
-	if config.IsLimitedMode(w.Config) {
-		return failed
 	}
 	next, err := w.collect(ctx, logger, now, page.Collect)
 	failed = errors.Join(failed, err)
@@ -143,8 +141,18 @@ func (w UsageOrderWorker) collect(ctx context.Context, logger *slog.Logger, now 
 		return nil, fmt.Errorf("list due usage collections: %w", err)
 	}
 	var failed error
+	held := map[uuid.UUID]bool{}
+	postures := writeposture.View{DB: w.DB}
 	for _, row := range due {
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "usage collection", func(ctx context.Context) error {
+			limited, seen := held[row.MerchantID]
+			if !seen {
+				limited = postures.Posture(ctx, row.MerchantID).Limited()
+				held[row.MerchantID] = limited
+			}
+			if limited {
+				return nil
+			}
 			return w.Money.CollectDueUsageOrder(ctx, identity.CustomerID(row.CustomerID), row.ID)
 		})
 		if err != nil {

@@ -31,9 +31,11 @@ through `host-four`; these are placeholders, not customer or repository names.
 ## Branches
 - Feature branch → open RC → master → tag. `OPEN.md` names the one open RC, `rc/X.Y.Z` for the
   version it becomes (cut from master, deleted once merged); branch from it and target it, never master.
-- A ready PR into `rc/**` runs the light CI tier (no `critical/`); the RC → master PR runs everything once.
-  `scripts/ci-scope.py` selects the light suites from the changed paths (a deletion or rename selects
-  all; docs-only runs the guards alone); draft PRs run nothing; `CI Gate` needs every selected job.
+- A ready PR into `rc/**` runs the light CI tier: the suites `scripts/ci-scope.py` selects from its changed paths (a deletion or rename selects all; docs-only runs the guards alone), no `critical/` and no gosec. Draft PRs run nothing; `CI Gate` needs every selected job.
+- `rc/**` merges through GitHub's merge queue: `gh pr merge N --squash` queues a green PR (`--auto --squash` queues it once green). Each group runs the light suites over its combined changes on top of the RC and the groups ahead of it, and merges only if `CI Gate` passes, so sessions no longer coordinate merges. `--admin` skips the gate and the queue when the owner wants a change in fast; the push run then checks it on the RC.
+- Groups also run the whole critical suite once `QUEUE_RUNS_CRITICAL` in `scripts/ci-scope.py` is on. It stays off until a full run of the RC is green: while the RC is red every group would fail, the fixes included.
+- Every push to `rc/**` or master runs the suites the push changed plus gosec, reported as `Post-merge CI` (never `CI Gate`), and saves the Go caches; only pushes save them, so pull requests restore their base's and everything else master's.
+- The RC → master PR, and a `Validate` dispatch with no selection, run everything once: every suite, gosec, and the critical suite on `CRITICAL_SHARDS` runners balanced by `critical/durations.json`; `Critical coverage` proves from the shards' reports that every scenario ran once.
 - No bot opens dependency PRs: `scripts/deps` lists the advisory feed's open alerts; fixes go in one batch per RC.
 - Master takes PRs only from `rc/X.Y.Z` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
   A release is a tag on master; not every master commit is one.
@@ -61,6 +63,12 @@ through `host-four`; these are placeholders, not customer or repository names.
   `requestID(s)` or `idempotencyKey`. Types live in `billing`; the catalog document in `catalog`. Everything
   else is `internal/`. `Config` is plain data; anything that reaches outside the process
   is in `Deps`.
+- Settings are one type: `openrails.Config` is `billing.Config` (the API's one alias),
+  which internal packages use directly; its `yaml` tags are the standalone file's keys.
+  `billing.DefaultConfig()` is the one defaults table (`New` fills zero fields from it);
+  an optional section is a value, on once set. The binary's file decodes one tree into
+  `server.Config` (engine keys inline) and its own connection keys; a key neither reads
+  refuses boot. No mirror config types or converters.
 - The Go client is the admin API, generated into `client_gen.go` from the route catalog
   (`Name`, `Doc`, `Args`, `Query`, `Cache`): one `*Client` method per admin, catalog-edit and
   merchant-config route. `HandWritten` routes and the methods no route has live in
@@ -100,6 +108,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `oat_`, …).
+- Customer messages: OpenRails holds each customer's contact (read live from the host's directory, or the SCIM copy in `customer_contacts`) and emails customers their billing messages (`internal/modules/messages`, through `Deps.Email`); the merchant's `messages` document turns each event type on or off. In-app notices go to AuthKit's inbox (`Deps.Notifications`); OpenRails keeps no inbox. Removing customer email is the owner's call, never a side effect of other work.
 - Vocabulary: customer (not payer or user); subject (the native account acted as), invoker (the party actually acting, may be foreign), credential (how it was proven); `canceled`.
 
 ## Money
@@ -176,7 +185,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   plain strings: the keys of a product's `entitlements_spec`.
 
 ## Schema / DB
-- SQL is authored in `billing` (`config.DefaultSchema`) and runs there verbatim; any
+- SQL is authored in `billing` (`sqlschema.Authored`) and runs there verbatim; any
   other schema is reached by one token-aware rewriter (`internal/sqlschema`) that moves
   schema references only.
 - One hand-written baseline, `internal/migrate/postgres/0001_schema.up.sql`: tables in
@@ -186,7 +195,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   baseline is a deliberate re-squash proven by CI's `scripts/schemaproof` step, because every
   deployed database must then be settled against it; after v1.0.0 it is immutable.
 - `Migrate`/`New` settle a database that recorded a migration with other content: a schema
-  equal to a fresh build, whichever monthly partitions exist, is re-stamped; any other is
+  equal to a fresh build is re-stamped; any other is
   refused with the difference. A `SkipMigrations` start (`migrate.Validate`) only checks, and
   refuses a missing migration or one recorded with other content (`ErrMigrationsRequired`)
   until `Migrate` has run. Only OpenRails' objects live in its schema: the comparison covers
@@ -207,10 +216,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   (`payment_attempts.step`, `nmi_history_months.reason`). No `varchar`.
 - Text + CHECK, never Postgres enums. SQL lives in sqlc queries, and `sqlc vet` prepares
   every one against PostgreSQL.
-- Every table has a retention class (`internal/retention`: permanent, partitioned, rows,
-  state), stated in its table comment; the `retention` package doc lists the periods.
-  `limit_holds` and `limit_hold_parts` are partitioned by month, so every read of
-  them names a time range.
+- Every table has a retention class (`internal/retention`: permanent, rows, state),
+  stated in its table comment; the `retention` package doc lists the periods.
 - External writes are `provider_intents` and their write-ahead `operation_log`; per-PSP state is
   `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
   with its `order_lines`, provider-run renewals included (`billing.Order`'s doc);
@@ -264,14 +271,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   CLI command, and none that does not exist. `docs/architecture/` gets the link check only.
 
 ## Tests
-- The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis, Vault and
-  ClickHouse (`OPENRAILS_CRITICAL_DSN`, `_REDIS_URL`, `_VAULT_ADDR`, `_VAULT_TOKEN`,
-  `_CLICKHOUSE_ADDR`, all owned and disposable; each world creates its own ClickHouse
-  database). `critical/coverage.json` lists the scenarios and
-  `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests
-  registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` (or `--journey Jxx`)
-  runs a selection against disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all. A
-  `Validate` dispatch with `critical: "J24 OR-J04-S80"` runs only those in CI and qualifies nothing.
+- The suite is `critical/`: named end-to-end scenarios over real PostgreSQL, Redis, Vault and ClickHouse (`OPENRAILS_CRITICAL_DSN`, `_REDIS_URL`, `_VAULT_ADDR`, `_VAULT_TOKEN`, `_CLICKHOUSE_ADDR`, all owned and disposable; each world creates its own PostgreSQL schema and ClickHouse database). `critical/coverage.json` lists the scenarios and `critical/executables.json` maps each to the test that runs it; a `t.Run` with subtests registers its parent too. `scripts/critical-tests.sh --case OR-Jxx-Syy` (or `--journey Jxx`) runs a selection against disposable services (`OPENRAILS_CRITICAL_*`); CI runs them all in shards (`--shard K/N`). A `Validate` dispatch with `critical: "J24 OR-J04-S80"` runs only those in CI, on one runner, and qualifies nothing.
+- After a full run, refresh the shard balance: `gh run download RUN -p 'critical-results-*' -D DIR`, then `python3 scripts/critical-results.py critical/coverage.json DIR/*/events.jsonl --write-durations`. A test missing from `critical/durations.json` weighs the median.
 - A behaviour change gets a scenario that fails first, and sweeps `critical/` for the codes,
   constants and statuses it changed. Green-in-my-package is not green.
 - A test that needs PostgreSQL, Redis, Vault or a fixture process is tagged `integration`, like

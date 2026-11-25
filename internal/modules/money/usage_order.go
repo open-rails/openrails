@@ -95,7 +95,15 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		if _, err := postRunningChargesThrough(ctx, q, merchantID, payerID, cur, earlier(pto, now), now); err != nil {
 			return err
 		}
-		existing, err := q.GetUsageOrderByPeriod(ctx, gen.GetUsageOrderByPeriodParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto})
+		// The order bills the window's owed items; its period runs from where
+		// their charges began (a pricing period's start) to the window's end.
+		start, err := q.EarliestPendingOwedCharge(ctx, gen.EarliestPendingOwedChargeParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur,
+			WindowStartsAt: pfrom, WindowEndsAt: pto})
+		if err != nil {
+			return err
+		}
+		existing, err := q.GetUsageOrderOfWindow(ctx, gen.GetUsageOrderOfWindowParams{MerchantID: merchantID, CustomerID: payerID, Currency: cur,
+			PeriodEndsAt: pto, WindowStartsAt: pfrom})
 		if err == nil {
 			out = &existing
 			return nil
@@ -140,7 +148,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		u := usage.Order{CustomerID: payerID, Currency: cur, PeriodStart: pfrom, PeriodEnd: pto, DueAt: now, Paid: receivable - due,
+		u := usage.Order{CustomerID: payerID, Currency: cur, PeriodStart: earlier(start.UTC(), pfrom), PeriodEnd: pto, DueAt: now, Paid: receivable - due,
 			Lines: lines, CollectionMethod: CollectionChargeAutomatically}
 		if profile != nil {
 			if profile.NetTermsDays > 0 {
@@ -166,7 +174,7 @@ func (s *MoneyService) finalizeUsageTx(ctx context.Context, d *db.DB, payer iden
 				return err
 			}
 			if err := q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-				ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, "order_due", merchantID.String(), order.ID.String()),
+				ID:         uuidutil.DerivedV7(uuidutil.TimeOf(order.ID), uuidutil.DeterministicNamespace, uuidutil.Name("order_due", merchantID.String(), order.ID.String())),
 				MerchantID: merchantID, CustomerID: payerID,
 				EventType: string(models.NotificationOrderDue), Data: data, CreatedAt: now,
 			}); err != nil {
@@ -271,8 +279,11 @@ func (s *MoneyService) destructiveUsageOrder(ctx context.Context, id uuid.UUID, 
 			return false, ErrUsageActionNotAllowed
 		}
 		if due > 0 {
-			_, err = s.moneyLedger(q, mid.UUID()).WriteOffOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), due,
-				ledger.Coord{Operation: ledger.OpOrderVoid, Source: "invoice_void", SourceID: id.String()}, &id)
+			if _, err = s.moneyLedger(q, mid.UUID()).WriteOffOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), due,
+				ledger.Coord{Operation: ledger.OpOrderVoid, Source: "invoice_void", SourceID: id.String()}, &id); err != nil {
+				return false, err
+			}
+			err = books.New(q, mid.UUID()).WaiveUsage(ctx, order, due, s.now())
 		}
 		return true, err
 	})
@@ -352,6 +363,10 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		}
 		if tr.Amount != in.Amount || tr.OrderID == nil || *tr.OrderID != in.OrderID {
 			return billing.ErrIdempotencyKeyReused
+		}
+		if e := books.New(q, mid.UUID()).CollectUsage(ctx, books.UsageCollection{Payment: id, Customer: order.CustomerID, Order: &in.OrderID,
+			Currency: order.Currency, Amount: in.Amount, At: paidAt}); e != nil {
+			return e
 		}
 		if e := q.InsertOrderPayment(ctx, gen.InsertOrderPaymentParams{ID: id, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: in.OrderID,
 			LedgerTransferID: tr.ID, Channel: string(models.ChannelManual), TransactionID: in.TransactionID, Amount: in.Amount, Currency: order.Currency, PaidAt: paidAt, Now: now}); e != nil {

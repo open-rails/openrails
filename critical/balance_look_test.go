@@ -115,14 +115,12 @@ func TestBalanceLooks(t *testing.T) {
 		}, 5*time.Second, 20*time.Millisecond, "the event-log fact and the customer's notice land within seconds")
 	}
 	t.Run("OR-J25-S40", func(t *testing.T) {
-		t.Run("a-hold-that-crosses-the-line-commits-its-look", func(t *testing.T) {
+		t.Run("usage-that-crosses-the-line-queues-its-look", func(t *testing.T) {
 			w, fleet := setup(t)
 			customer, _ := watchedCustomer(t, w, fleet, 1000, nil)
 			before := looks(t, fleet, customer)
-			results, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "crossing-hold", 500)})
-			require.NoError(t, err)
-			require.True(t, results[0].Allowed())
-			require.Equal(t, before+1, looks(t, fleet, customer), "the admission committed the look with the hold")
+			spend(t, w.alpha, customer, "crossing-usage", 500)
+			require.Equal(t, before+1, looks(t, fleet, customer), "the sync queued the look before it answered")
 			notified(t, w, customer)
 		})
 		t.Run("a-revocation-that-crosses-the-line-commits-its-look", func(t *testing.T) {
@@ -143,12 +141,12 @@ func TestBalanceLooks(t *testing.T) {
 			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 300, Source: "critical", SourceID: "kept"}})
 			require.NoError(t, err)
 			settled(t, fleet, customer)
-			advanceTo(w, lapse)
+			// A second past it: the look already scheduled for the lapse's
+			// own instant is that instant's one look.
+			advanceTo(w, lapse.Add(time.Second))
 			before := looks(t, fleet, customer)
-			results, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "after-the-lapse", 10)})
-			require.NoError(t, err)
-			require.True(t, results[0].Allowed())
-			require.Greater(t, looks(t, fleet, customer), before, "the lapse admission posted committed its look")
+			spend(t, w.alpha, customer, "after-the-lapse", 10)
+			require.Greater(t, looks(t, fleet, customer), before, "the usage after the lapse queued its look")
 			notified(t, w, customer)
 		})
 	})
@@ -156,14 +154,8 @@ func TestBalanceLooks(t *testing.T) {
 		w, fleet := setup(t)
 		customer, _ := watchedCustomer(t, w, fleet, 1000, nil)
 		require.Eventually(t, func() bool { return lowEvents(t, w, customer) == 0 && looks(t, fleet, customer) == 1 }, 5*time.Second, 20*time.Millisecond)
-		results, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "above-the-line", 400)})
-		require.NoError(t, err)
-		require.True(t, results[0].Allowed())
-		require.Equal(t, 1, looks(t, fleet, customer), "a hold leaving 600 crosses nothing")
-		captured, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("above-the-line", 400)})
-		require.NoError(t, err)
-		require.NoError(t, captured[0].Err())
-		require.Equal(t, 1, looks(t, fleet, customer), "its capture, an accrual leaving 600, crosses nothing")
+		spend(t, w.alpha, customer, "above-the-line", 400)
+		require.Equal(t, 1, looks(t, fleet, customer), "usage leaving 600 crosses nothing")
 		balance(t, w.alpha, customer, 600, 400, 1000)
 		require.Zero(t, lowEvents(t, w, customer))
 	})
@@ -171,9 +163,7 @@ func TestBalanceLooks(t *testing.T) {
 		w, fleet := setup(t)
 		customer, _ := watchedCustomer(t, w, fleet, 1000, nil)
 		restore := storageFault(t, w, w.schema, "notification_events", "NEW.event_type = 'balance_low'")
-		results, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "crossing-while-failing", 500)})
-		require.NoError(t, err)
-		require.True(t, results[0].Allowed())
+		spend(t, w.alpha, customer, "crossing-while-failing", 500)
 		var failed []*rivertype.JobRow
 		require.Eventually(t, func() bool {
 			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.balance_look").States(rivertype.JobStateRetryable))

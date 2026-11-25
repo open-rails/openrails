@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/decline"
@@ -33,12 +33,12 @@ var errConfirmationChanged = errors.New("same-card confirmation is no longer app
 
 type NMIRecurringConfirmationHandler struct {
 	DB       *db.DB
-	Config   *config.Config
+	Config   *billing.Config
 	Resolver railresolve.NMIClientResolver
 	Clock    clockwork.Clock
 }
 
-func NewNMIRecurringConfirmationHandler(d *db.DB, cfg *config.Config, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *NMIRecurringConfirmationHandler {
+func NewNMIRecurringConfirmationHandler(d *db.DB, cfg *billing.Config, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *NMIRecurringConfirmationHandler {
 	return &NMIRecurringConfirmationHandler{d, cfg, resolver, timeutil.FirstClock(clock)}
 }
 func (h *NMIRecurringConfirmationHandler) Type() string { return TypeNMIRecurringConfirmation }
@@ -90,7 +90,7 @@ func (h *NMIRecurringConfirmationHandler) Execute(ctx context.Context, in gen.Bi
 	if h.Config == nil {
 		return Parked("confirmation execution mode is not configured")
 	}
-	if blocked, reason := GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
+	if blocked, reason := GateExecution(ctx, writeposture.View{DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
 		return Parked(reason)
 	}
 	client, err := h.client(ctx, in)

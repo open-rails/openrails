@@ -100,7 +100,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 			require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
 			var order billing.Order
 			require.NoError(t, json.Unmarshal(raw, &order))
-			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(card)}, ExpectedTotal: total, Reusable: ptr(false)}
+			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(card), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: total, Reusable: ptr(false)}
 			status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": key})
 			require.Contains(t, []int{http.StatusOK, http.StatusPaymentRequired}, status, string(raw))
 			current, err := nmi.alpha.GetOrder(t.Context(), order.ID)
@@ -158,7 +158,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, billing.OrderCanceled, replaced.Status, "the unpaid order of the other price is released")
 		in := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: cheap.ID}}, ExpectedTotal: ptr(int64(500_000)), Reusable: ptr(false),
-			Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", AVS: "Z", CVV: "M"})}}
+			Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", AVS: "Z", CVV: "M"}), BillingDetails: billedTo("US", "10001")}}
 		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, in, map[string]string{"Idempotency-Key": "nmi-one-call"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var paid billing.Order
@@ -221,7 +221,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 			require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
 			var order billing.Order
 			require.NoError(t, json.Unmarshal(raw, &order))
-			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(card)}, ExpectedTotal: total, Reusable: ptr(false)}
+			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(card), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: total, Reusable: ptr(false)}
 			status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": key})
 			require.Equal(t, http.StatusOK, status, string(raw))
 			current, err := nmi.alpha.GetOrder(t.Context(), order.ID)
@@ -295,7 +295,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
 		var order billing.Order
 		require.NoError(t, json.Unmarshal(raw, &order))
-		pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"})}, ExpectedTotal: 700_000, Reusable: ptr(false)}
+		pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"}), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: 700_000, Reusable: ptr(false)}
 		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": "nmi-partial-approval"})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		unpaid := func() {

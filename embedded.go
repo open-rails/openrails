@@ -54,25 +54,24 @@ type Engine struct {
 
 // New runs the OpenRails engine in this process. Before anything else touches
 // the database it creates or upgrades OpenRails' tables in
-// Config.Database.Schema, River's in Config.Database.RiverSchema and this
-// month's partitions; the pool's role owns them. That is idempotent, replicas
+// Config.Database.Schema and River's in Config.Database.RiverSchema; the
+// pool's role owns them. That is idempotent, replicas
 // booting together take turns on an advisory lock, and a schema a newer build
 // already migrated is left as it is. It starts no workers: Start does, and
 // jobs queued before it wait in Config.Database.RiverSchema.
 // With Database.SkipMigrations, New validates existing
 // migration ledgers instead; run Migrate explicitly before starting the app.
-// Normal runtime partition maintenance remains active. ctx bounds the
+// ctx bounds the
 // wait for the database; nothing else does. It provisions each merchant
 // Config.Merchants declares and never changes a catalog: a catalog document
 // is an operator's ApplyCatalog. Vault, PSP posture checks and Redis
 // recover in the background and fail only the features that need them (see
 // Probes). It fails only on what the engine cannot serve without: the
-// database (Deps.Postgres) and its migrations, an unknown ProviderWriteMode,
-// an invalid River schema, or a test seam beside a live PSP. Any other setting, merchant
+// database (Deps.Postgres) and its migrations, an invalid River schema, a test seam beside a live PSP, or a provider endpoint that is not loopback. Any other setting, merchant
 // or document that cannot be served is refused alone and reported by Ready
 // and the openrails_configuration probe.
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
-	inner, err := engine.New(ctx, engineConfig(cfg), engineDeps(deps))
+	inner, err := engine.New(ctx, cfg.WithDefaults(), engineDeps(deps))
 	if err != nil {
 		return nil, err
 	}

@@ -38,9 +38,9 @@ type creditShop struct {
 	customer billing.CustomerID
 }
 
-func newCreditShop(t *testing.T) *creditShop {
+func newCreditShop(t *testing.T, configure ...func(*world)) *creditShop {
 	t.Helper()
-	a, p := newPaymentWorld(t)
+	a, p := newPaymentWorld(t, configure...)
 	meterForCapture(t, a.world)
 	return &creditShop{a: a, p: p, customer: billing.CustomerID(uuid.MustParse(a.alice.ID))}
 }
@@ -96,21 +96,12 @@ func (s *creditShop) spend(t *testing.T, amount int64, key string) {
 	}))
 }
 
-// usage captures usage the customer's credit line admits; the next movement
+// usage settles usage on the customer's credit line; the next movement
 // posts it. Time passes, so a movement at the next instant posts it.
 func (s *creditShop) usage(t *testing.T, amount int64, request string) {
 	t.Helper()
-	a := s.a
-	verdicts, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{{
-		RequestID: request, CustomerID: s.customer, Invoker: s.customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
-		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(amount)},
-	}})
-	require.NoError(t, err)
-	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-	captured, err := a.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture(request, amount)})
-	require.NoError(t, err)
-	require.NoError(t, captured[0].Err())
-	a.clock.Advance(time.Second)
+	spend(t, s.a.alpha, s.customer, request, amount)
+	s.a.clock.Advance(time.Second)
 }
 
 // lotMoney is a lot's money deferred and released.
@@ -204,7 +195,9 @@ func packReleasesAtItsRate(t *testing.T) {
 // A lapsed pack's unreleased money is breakage; a revoked pack's is
 // forfeited to breakage, and reinstating it reverses the forfeit.
 func creditBreakageAndReinstatement(t *testing.T) {
-	s := newCreditShop(t)
+	// Begun in the past: the 49 hours it moves on end before now, where a
+	// payment may be taken.
+	s := newCreditShop(t, func(w *world) { w.clock.Advance(-50 * time.Hour) })
 	a, w := s.a, s.a.world
 	_, short := s.buy(t, s.pack(t, "pack-11", 11_000_000, 10_000_000, 1), 10_000_000, "pack-11")
 	s.spend(t, 1_000_000, "before-the-lapse")

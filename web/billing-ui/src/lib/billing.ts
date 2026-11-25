@@ -1,70 +1,18 @@
 import { z } from "zod"
 
+import { postalMode, type BillingFields } from "./billing-fields"
+
+export {
+  DEFAULT_BILLING_FIELDS,
+  postalMode,
+  type BillingFieldMode,
+  type BillingFields,
+} from "./billing-fields"
+
 const ISO_COUNTRY_CODES =
   "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW".split(
     " "
   )
-
-// ISO-3166 alpha-2 projection of the UPU's "List of countries which do not
-// require postal codes" (Universal DataBase, September 2025). Keep a postal
-// code when a customer supplies one, but do not block tokenization when the
-// destination does not require it.
-// https://www.upu.int/UPU/media/upu/documents/PostCode/General-Addressing-Issues.pdf
-const POSTAL_OPTIONAL_COUNTRIES = new Set([
-  "AE",
-  "AG",
-  "AO",
-  "AQ",
-  "AW",
-  "BF",
-  "BI",
-  "BJ",
-  "BO",
-  "BQ",
-  "BS",
-  "BV",
-  "BW",
-  "BZ",
-  "CF",
-  "CG",
-  "CI",
-  "CK",
-  "CM",
-  "CW",
-  "DM",
-  "ER",
-  "FJ",
-  "GA",
-  "GD",
-  "GM",
-  "GQ",
-  "JM",
-  "KM",
-  "KP",
-  "LY",
-  "ML",
-  "MR",
-  "QA",
-  "RW",
-  "SB",
-  "SC",
-  "SL",
-  "SO",
-  "SR",
-  "SS",
-  "ST",
-  "SX",
-  "SY",
-  "TD",
-  "TG",
-  "TK",
-  "TO",
-  "TV",
-  "UM",
-  "VU",
-  "YE",
-  "ZW",
-])
 
 const POSTAL_PLACEHOLDERS: Record<string, string> = {
   AR: "C1000",
@@ -101,11 +49,6 @@ export const countryCodeSchema = z
   .regex(/^[A-Za-z]{2}$/, "Select a country")
   .transform((value) => value.toUpperCase())
 
-export function isPostalRequired(country: string): boolean {
-  const code = country.trim().toUpperCase()
-  return code === "" || !POSTAL_OPTIONAL_COUNTRIES.has(code)
-}
-
 export function postalField(
   country: string,
   required: boolean
@@ -130,34 +73,64 @@ export function postalField(
   }
 }
 
-export const nmiBillingSchema = z
-  .object({
-    name_on_card: nameOnCardSchema,
-    country: countryCodeSchema,
-    zip: z.string().trim().max(32, "Postal code is too long"),
-  })
-  .superRefine((value, context) => {
-    if (isPostalRequired(value.country) && !value.zip) {
-      context.addIssue({
-        code: "custom",
-        message: `${postalField(value.country, true).label} is required`,
-        path: ["zip"],
-      })
-    }
-    if (
-      value.country === "US" &&
-      value.zip &&
-      !/^\d{5}(?:-\d{4})?$/.test(value.zip)
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Enter a valid ZIP code",
-        path: ["zip"],
-      })
-    }
-  })
+/**
+ * A card form's billing fields, as `fields` asks for them: a hidden field, or
+ * an optional one left blank, is left out.
+ */
+export function billingSchema(fields: BillingFields) {
+  return z
+    .object({
+      name_on_card: nameOnCardSchema,
+      country: z.string().trim(),
+      zip: z.string().trim().max(32, "Postal code is too long"),
+    })
+    .superRefine((value, context) => {
+      const country = fields.country === "hidden" ? "" : value.country
+      if (
+        (fields.country === "required" || country) &&
+        !/^[A-Za-z]{2}$/.test(country)
+      )
+        context.addIssue({
+          code: "custom",
+          message: "Select a country",
+          path: ["country"],
+        })
+      const postal = postalMode(fields, country)
+      if (postal === "required" && !value.zip)
+        context.addIssue({
+          code: "custom",
+          message: `${postalField(country, true).label} is required`,
+          path: ["zip"],
+        })
+      if (
+        postal !== "hidden" &&
+        country.toUpperCase() === "US" &&
+        value.zip &&
+        !/^\d{5}(?:-\d{4})?$/.test(value.zip)
+      )
+        context.addIssue({
+          code: "custom",
+          message: "Enter a valid ZIP code",
+          path: ["zip"],
+        })
+    })
+    .transform(({ name_on_card, country, zip }) => {
+      const code = fields.country === "hidden" ? "" : country.toUpperCase()
+      const postal = postalMode(fields, code) === "hidden" ? "" : zip
+      return {
+        name_on_card,
+        ...(code ? { country: code } : {}),
+        ...(postal ? { zip: postal } : {}),
+      }
+    })
+}
 
-export type NMIBilling = z.infer<typeof nmiBillingSchema>
+/** What a card form's billing fields hold while the customer fills them. */
+export interface NMIBilling {
+  name_on_card: string
+  country: string
+  zip: string
+}
 
 /** A card form's billing fields as a saved card's billing details. */
 export function billingDetailsOf(billing: {

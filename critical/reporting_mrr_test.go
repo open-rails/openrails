@@ -4,15 +4,18 @@ package critical_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/archivewire"
@@ -32,6 +35,101 @@ func TestReportingMRR(t *testing.T) {
 	t.Run("OR-J53-S07/the-chargeback-ratio-tile-and-charts-carry-the-dispute-programs-levels", programLevels)
 	t.Run("OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions", mrrOnRollups)
 	t.Run("OR-J42-S31/an-archive-from-before-the-reporting-rollups-restores-them-rebuilt-from-its-movements", rollupsRebuiltOnRestore)
+	t.Run("OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles", mrrLeaves)
+	t.Run("OR-J42-S33/a-refund-that-revokes-access-finalizes-and-takes-the-customer-out-once", mrrRefunded)
+}
+
+// distinctCustomers is the merchant's customers with MRR, as their totals
+// row has it, which agrees with their flows summed.
+func distinctCustomers(t *testing.T, w *world) int64 {
+	t.Helper()
+	mid := w.alpha.MerchantID().UUID()
+	var n int64
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE((SELECT customers FROM "+booksTable(w, "mrr_customer_totals")+" WHERE merchant_id = $1), 0)",
+		mid).Scan(&n))
+	var flows int64
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(logos), 0)::bigint FROM "+booksTable(w, "mrr_customer_flows")+" WHERE merchant_id = $1",
+		mid).Scan(&flows))
+	require.Equal(t, n, flows, "the distinct customers are their flows summed")
+	return n
+}
+
+// A full refund that revokes access ends a subscription whose MRR counted
+// its customer: the refund finalizes, its replay returns it, and the
+// customer leaves the distinct customers once, as one churn.
+func mrrRefunded(t *testing.T) {
+	a, _, sub := purchasedMembershipWith(t, 7*24)
+	require.EqualValues(t, 1, distinctCustomers(t, a.world))
+	a.clock.Advance(time.Hour)
+	paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+	require.NoError(t, err)
+	require.Len(t, paid.Items, 1)
+	params := billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund and end"}
+	refund, err := a.alpha.RefundPayment(t.Context(), "refund-and-leave", paid.Items[0].ID, params)
+	require.NoError(t, err)
+	require.Equal(t, billing.PaymentSucceeded, refund.Status, "the refund finalizes")
+	subscriptionState(t, a, sub.ID, "canceled")
+	replay, err := a.alpha.RefundPayment(t.Context(), "refund-and-leave", paid.Items[0].ID, params)
+	require.NoError(t, err)
+	require.Equal(t, refund.ID, replay.ID)
+	require.Equal(t, billing.PaymentSucceeded, replay.Status)
+
+	require.EqualValues(t, 0, distinctCustomers(t, a.world), "the customer left once")
+	moves := mrrMoves(t, a.world, a.alpha, customerOf(a.alice))
+	require.Equal(t, []string{mrrKind("USD", "new", weeklyTenMRR), mrrKind("USD", "churn", -weeklyTenMRR)}, mrrKinds(moves), "one churn")
+	require.Equal(t, -1, moves[1].Logo)
+	require.Equal(t, [3]int64{0, 0, 0}, mrrTotals(t, a.world, a.alpha, "USD"))
+}
+
+// MRR leaving a product, a currency and a customer settles, each fall moving
+// the product totals and the distinct customers down: Alice's euro plan ends
+// at once while her dollar day plan stays, so she stays a customer; Bob's
+// only plan ends at once; then Alice cancels the day plan and the billing
+// pass's MRR scan churns her at its end. None is left.
+func mrrLeaves(t *testing.T) {
+	a, p := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
+	daily := mrrPlan(t, a.alpha, "s32-daily", billing.CreatePriceParams{UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
+	yearly := func(key string, currency catalog.Currency) billing.PriceID {
+		return mrrPlan(t, a.alpha, key, billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: currency, BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
+	}
+	euro, year := yearly("s32-euro", "EUR"), yearly("s32-year", "USD")
+	day := buyAs(t, a, p, a.aliceToken, daily, 10_000_000, "s32-day")
+	eur := buyAs(t, a, p, a.aliceToken, euro, 120_000_000, "s32-eur")
+	bob := buyAs(t, a, p, a.bobToken, year, 120_000_000, "s32-bob")
+	mid := a.alpha.MerchantID().UUID()
+	customers := func() int64 { return distinctCustomers(t, a.world) }
+	products := func() map[string]int64 {
+		t.Helper()
+		rows, err := a.pool.Query(t.Context(), "SELECT currency || ' ' || mrr::text || ' ' || subscribers::text FROM "+booksTable(a.world, "mrr_product_totals")+
+			" WHERE merchant_id = $1", mid)
+		require.NoError(t, err)
+		listed, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		out := map[string]int64{}
+		for _, row := range listed {
+			out[row]++
+		}
+		return out
+	}
+	require.EqualValues(t, 2, customers())
+	require.Equal(t, map[string]int64{"USD " + strconv.Itoa(dailyTenMRR) + " 1": 1, "EUR 10000000 1": 1, "USD 10000000 1": 1}, products())
+
+	a.clock.Advance(time.Hour)
+	_, err := a.alpha.CancelSubscription(t.Context(), eur.ID, billing.CancelSubscriptionParams{Reason: "Merchant ends the euro plan", RevokeAccess: true})
+	require.NoError(t, err, "a product's MRR falls")
+	require.EqualValues(t, 2, customers(), "Alice keeps MRR in dollars")
+	_, err = a.alpha.CancelSubscription(t.Context(), bob.ID, billing.CancelSubscriptionParams{Reason: "Merchant ends Bob's only plan", RevokeAccess: true})
+	require.NoError(t, err, "a customer's last MRR leaves")
+	require.EqualValues(t, 1, customers())
+
+	customerCancel(t, a, day.ID)
+	a.clock.Advance(day.CurrentPeriodEndsAt.Sub(a.clock.Now()))
+	fleet := startFleet(t, a.world)
+	runRegistered(t, fleet, "openrails.billing_pass", 2)
+	require.Eventually(t, func() bool { return customers() == 0 }, 20*time.Second, 20*time.Millisecond, "the period's end churns Alice")
+	require.Equal(t, map[string]int64{"USD 0 0": 2, "EUR 0 0": 1}, products())
+	require.EqualValues(t, 0, whole(t, only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"subscribers"},
+		Range: &billing.MetricsRange{From: a.clock.Now().AddDate(0, 0, -1).Format(time.DateOnly), To: a.clock.Now().Format(time.DateOnly)}}))["subscribers"]))
 }
 
 // An archive written before the reporting rollups carries none of them, nor
@@ -58,10 +156,22 @@ func rollupsRebuiltOnRestore(t *testing.T) {
 	waitDisputeJobs(t, a)
 
 	mid := a.alpha.MerchantID().UUID()
+	// A row whose measures are all zero carries nothing: a settle leaves one
+	// where a fall met a rise or a product's MRR ended, a rebuild writes none.
+	carries := map[string]string{"mrr_streak_flows": "amount <> 0 OR logos <> 0", "mrr_product_totals": "mrr <> 0 OR subscribers <> 0",
+		"mrr_customer_totals": "customers <> 0", "mrr_customer_flows": "logos <> 0", "mrr_flows": "amount <> 0 OR entries <> 0 OR logos <> 0"}
+	rollup := func(w *world, table string) []string {
+		t.Helper()
+		rows, err := w.pool.Query(t.Context(), "SELECT r::text FROM "+booksTable(w, table)+" r WHERE merchant_id = $1 AND ("+carries[table]+") ORDER BY 1", mid)
+		require.NoError(t, err)
+		out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		require.NoError(t, err)
+		return out
+	}
 	rollups := []string{"mrr_streak_flows", "mrr_product_totals", "mrr_customer_totals", "mrr_customer_flows", "mrr_flows"}
 	kept := map[string][]string{}
 	for _, table := range rollups {
-		kept[table] = booksRollup(t, a.world, table, mid)
+		kept[table] = rollup(a.world, table)
 		require.NotEmpty(t, kept[table], table)
 	}
 	decisions := func(w *world) []string {
@@ -80,7 +190,7 @@ func rollupsRebuiltOnRestore(t *testing.T) {
 	_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 	require.NoError(t, err, "the restore check passes on the rebuilt rollups")
 	for _, table := range rollups {
-		require.Equal(t, kept[table], booksRollup(t, target, table, mid), table)
+		require.Equal(t, kept[table], rollup(target, table), table)
 	}
 	require.Equal(t, decisions(a.world), decisions(target))
 }
@@ -488,13 +598,7 @@ func mrrOnRollups(t *testing.T) {
 					for _, st := range statements {
 						sql, err := sqlschema.Rewrite(st.SQL, a.schema)
 						require.NoError(t, err)
-						tx, err := a.pool.Begin(t.Context())
-						require.NoError(t, err)
-						_, err = tx.Exec(t.Context(), "SET LOCAL enable_seqscan = off")
-						require.NoError(t, err)
-						var explained string
-						require.NoError(t, tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+sql, st.Args...).Scan(&explained), "%s: %s", st.Family, sql)
-						require.NoError(t, tx.Rollback(t.Context()))
+						explained := explainWithoutSeqScan(t, a.pool, sql, st.Args, "%s: %s", st.Family, sql)
 						var plans []struct {
 							Plan planNode `json:"Plan"`
 						}
@@ -523,6 +627,23 @@ func mrrOnRollups(t *testing.T) {
 		}
 	}
 	require.Greater(t, planned, 200)
+}
+
+// explainWithoutSeqScan is the JSON plan of sql with sequential scans off. Its
+// transaction always ends, so a failed plan leaves no connection held for the
+// world's teardown to wait on.
+func explainWithoutSeqScan(t *testing.T, pool *pgxpool.Pool, sql string, args []any, msg ...any) string {
+	t.Helper()
+	tx, err := pool.Begin(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	for _, set := range []string{"SET LOCAL enable_seqscan = off", "SET LOCAL statement_timeout = '30s'", "SET LOCAL lock_timeout = '10s'"} {
+		_, err = tx.Exec(t.Context(), set)
+		require.NoError(t, err)
+	}
+	var explained string
+	require.NoError(t, tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+sql, args...).Scan(&explained), msg...)
+	return explained
 }
 
 // planNode is a node of an EXPLAIN (FORMAT JSON) plan.

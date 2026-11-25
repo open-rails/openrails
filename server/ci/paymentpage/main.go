@@ -30,7 +30,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -104,12 +103,11 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	defer h.stripe.Close()
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{
-			PublicBillingBaseURL: api, RateLimits: openrails.RateLimitsConfig{}, ProviderWriteMode: openrails.ProviderWritesFull,
-			CheckoutOrigin:  payment,
-			ProviderSandbox: &openrails.ProviderSandboxConfig{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()},
+			PublicBillingBaseURL: api, RateLimits: billing.RateLimitsConfig{Purchase: &billing.RateLimit{}, Payment: &billing.RateLimit{}, Subscribe: &billing.RateLimit{}, Webhook: &billing.RateLimit{}},
+			CheckoutOrigin: payment,
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.
-			Captcha: &openrails.CaptchaConfig{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
+			Captcha: billing.CaptchaAccount{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
 			Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{Slug: "shop", DisplayName: "Purchase Shop", // The shop's own site, the API origin, frames its embedded payment pages.
 				MerchantSettings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{api}}}, PSPs: map[string]billing.PSPConfig{
 					"nmi":    openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
@@ -117,15 +115,14 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 				}}}},
 		},
 		Auth: authkit.Config{
-			DefaultTenantID: iam.TenantID(uuid.MustParse("baf3907f-2a73-4e8c-8221-82e9c930e8ed")),
-			Token:           authkit.TokenConfig{Issuer: api},
-			Keys:            authkit.KeysConfig{Path: keys, AllowEphemeralDevKeys: true},
-			Registration:    authkit.RegistrationConfig{AllowMissingSenders: true},
-			HTTP:            &authkit.HTTPConfig{DirectPeerIP: true},
+			Token:        authkit.TokenConfig{Issuer: api},
+			Keys:         authkit.KeysConfig{Path: keys}, // a loopback issuer's development keys
+			Registration: authkit.RegistrationConfig{AllowMissingSenders: true},
+			HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 		},
 		RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
-		Addr:        addr,
-	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets)}})
+	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets),
+		ProviderEndpoints: openrails.ProviderEndpoints{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()}}})
 	if err != nil {
 		return err
 	}
@@ -213,7 +210,7 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	customer := billing.CustomerID(uuid.New())
+	customer := billing.CustomerID(uuid.Must(uuid.NewV7()))
 	if in.CustomerID != "" {
 		if customer, err = billing.ParseCustomerID(in.CustomerID); err != nil {
 			reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -225,7 +222,7 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 	if in.CancelURL != "" {
 		payURL.CancelURL = &in.CancelURL
 	}
-	order, err := h.shop.CreateOrder(ctx, uuid.NewString(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: payURL})
+	order, err := h.shop.CreateOrder(ctx, uuid.Must(uuid.NewV7()).String(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: payURL})
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -43,7 +43,7 @@ func stripePastDueMembership(t *testing.T) (*authorityWorld, *stripeAccounts, *b
 	var accounts *stripeAccounts
 	a := newAuthorityWorld(t, func(w *world) {
 		accounts = newStripeAccounts(t, w, "sk_test_old")
-		w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		w.posture = "full"
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"old": stripePSP("acct_old", "sk_test_old", false)}
 		setCfgMerchant(&w.cfg, "alpha", m)
@@ -212,7 +212,7 @@ func TestDueWork(t *testing.T) {
 		require.Equal(t, 1, customerConvergeJobs(t, w, customer), "the grant queued its customer's convergence with its commit")
 	})
 	t.Run("OR-J29-S71/a-revoked-last-window-tells-the-customer-without-a-sweep", func(t *testing.T) {
-		w := newWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+		w := newWorld(t, func(w *world) { w.posture = "full" })
 		customer := billing.CustomerID(uuid.New())
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "comp", DisplayName: "Comp", Entitlements: []string{"comp:reader"}})
 		require.NoError(t, err)
@@ -227,7 +227,7 @@ func TestDueWork(t *testing.T) {
 			"the revoke's own convergence tells the customer their access ended")
 	})
 	t.Run("OR-J29-S72/a-timed-window-that-lapses-is-told-by-the-health-pass", func(t *testing.T) {
-		w := newWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+		w := newWorld(t, func(w *world) { w.posture = "full" })
 		customer := billing.CustomerID(uuid.New())
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pass", DisplayName: "Day pass", Entitlements: []string{"pass:day"}})
 		require.NoError(t, err)
@@ -388,7 +388,7 @@ func TestDueWork(t *testing.T) {
 	})
 	t.Run("OR-J06-S65/a-psp-whose-webhooks-went-silent-while-pulls-find-its-charges-raises-a-finding", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
-			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
+			w.posture = "full"
 			m := cfgMerchant(w.cfg, "alpha")
 			m.PSPs = billing.PSPs{}
 			for key, subacc := range map[string]string{"silent": "0001", "quiet": "0002", "pulled": "0003"} {

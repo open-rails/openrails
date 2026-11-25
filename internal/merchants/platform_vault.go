@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/vault"
-	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
@@ -87,7 +86,7 @@ func (s *Service) PlatformCustodianConfig(ctx context.Context, id billing.Mercha
 	}
 	prefix := strings.Trim(s.platformPrefix, "/")
 	if prefix == "" {
-		prefix = merchantdocs.DefaultPrefix
+		prefix = billing.DefaultConfig().Vault.ScopePrefix
 	}
 	doc, err := s.platformKV.ReadDocument(ctx, prefix+"/platform_vault/"+s.platformVault.TenantID)
 	if err != nil {

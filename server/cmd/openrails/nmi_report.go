@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // newNMICmd groups read-only NMI tools.
@@ -21,12 +21,12 @@ func newNMICmd() *cobra.Command {
 			"refusal rates of card verifications, one-off sales and NMI-scheduled rebills, and each refusal's reason and " +
 			"decline cause from OpenRails' decline classifier. Nothing is written.",
 		RunE: func(c *cobra.Command, _ []string) error {
-			cfg := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(c.Context())
 			mid, err := resolveConfiguredCLIMerchant(c.Context(), cfg, merchantSlug)
 			if err != nil {
 				return err
 			}
-			manifest, err := cliMerchantManifest(c.Context(), manifestPath)
+			manifest, err := cliMerchantManifest(manifestPath)
 			if err != nil {
 				return err
 			}

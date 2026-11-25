@@ -14,12 +14,40 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/usageerasure"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
 // Recovery from what goes wrong between the event store and PostgreSQL: an
 // intake whose transaction never committed, a store that lost events, an
 // erasure stopped part way.
+
+// erasureEvents starts the world's fleet and follows its job outcomes.
+func erasureEvents(t *testing.T, w *world) <-chan *river.Event {
+	t.Helper()
+	events, unsubscribe := quietFleet(t, w).Subscribe(river.EventKindJobCompleted, river.EventKindJobFailed)
+	t.Cleanup(unsubscribe)
+	return events
+}
+
+// awaitErasure is the outcome of the next run of a usage erasure job.
+func awaitErasure(t *testing.T, events <-chan *river.Event) river.EventKind {
+	t.Helper()
+	deadline := time.NewTimer(60 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case event := <-events:
+			if event != nil && event.Job.Kind == usageerasure.Kind {
+				return event.Kind
+			}
+		case <-deadline.C:
+			t.Fatal("no usage erasure ran")
+		}
+	}
+}
 
 // loseLeaseCommit is the fixture of a sync whose events reached the store
 // and whose transaction never committed: the lease settled nothing and the
@@ -84,38 +112,6 @@ func (c *failingConn) Exec(ctx context.Context, query string, args ...any) error
 
 func TestUsageRecovery(t *testing.T) {
 	t.Run("OR-J24-S58/an-event-keeps-its-identity-across-attempts", func(t *testing.T) {
-		t.Run("a-capture-retried-after-a-lost-commit-charges-once", func(t *testing.T) {
-			w := newWorld(t, earlyInMonth)
-			meterForCapture(t, w)
-			customer, _ := fundedCustomer(t, w)
-			admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "retried", 300)})
-			require.NoError(t, err)
-			require.True(t, admitted[0].Allowed())
-			captured, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("retried", 250)})
-			require.NoError(t, err)
-			require.NoError(t, captured[0].Err())
-			// Fixture: the capture's event reached the store, its transaction
-			// never committed.
-			holds, unposted := pgx.Identifier{w.schema, "limit_holds"}.Sanitize(), pgx.Identifier{w.schema, "usage_unposted"}.Sanitize()
-			_, err = w.pool.Exec(t.Context(), "UPDATE "+holds+" SET state = 'open', capture_terms = NULL, captured_amount = NULL, captured_charges = NULL, captured_at = NULL "+
-				"WHERE merchant_id = $1 AND request_id = $2", w.alpha.MerchantID().UUID(), "retried")
-			require.NoError(t, err)
-			_, err = w.pool.Exec(t.Context(), "DELETE FROM "+unposted+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
-			require.NoError(t, err)
-
-			// The host retries the exact capture a minute later.
-			w.clock.Advance(time.Minute)
-			retried, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("retried", 250)})
-			require.NoError(t, err)
-			require.NoError(t, retried[0].Err())
-			require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "the retry inserts nothing")
-			require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
-			balance(t, w.alpha, customer, 750, 250, 1000)
-			fleet := startFleet(t, w)
-			nextMonth(w)
-			closeMonths(t, fleet)
-			balance(t, w.alpha, customer, 750, 0, 750)
-		})
 		t.Run("a-lease-item-without-occurred-at-resent-after-a-lost-commit-charges-once", func(t *testing.T) {
 			w := newWorld(t, earlyInMonth)
 			usageMeter(t, w.alpha, 100)
@@ -251,6 +247,28 @@ products:
 		})
 	})
 
+	t.Run("OR-J24-S65/a-merchants-configuration-first-read-inside-a-balance-look-loads", func(t *testing.T) {
+		w := newWorld(t, earlyInMonth)
+		usageMeter(t, w.alpha, 1)
+		customer := billing.CustomerID(uuid.New())
+		lapse := w.clock.Now().UTC().Add(time.Hour)
+		grants, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 100,
+			Source: "critical", SourceID: "lapsing", ExpiresAt: &lapse}})
+		require.NoError(t, err)
+		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "before", 30))...)
+		advanceTo(w, lapse.Add(10*time.Minute))
+		fleet := quietFleet(t, w)
+		// The process forgets the merchant's configuration, as one that has
+		// not read it since it started: the look reads it first, inside its
+		// transaction, and the load runs on its own.
+		embedded.Graph(w.engine).Runtime.MerchantConfig.Forget(w.alpha.MerchantID())
+		require.False(t, runPass(t, fleet), "every look of the pass succeeds")
+		grant, err := w.alpha.GetCreditGrant(t.Context(), grants[0].ID)
+		require.NoError(t, err)
+		require.EqualValues(t, 30, grant.SpentAmount, "the lot funds the usage before its lapse")
+		require.EqualValues(t, 70, grant.ExpiredAmount, "the look expired the rest")
+	})
+
 	t.Run("OR-J24-S62/usage-the-store-lost-is-not-a-price-that-fell", func(t *testing.T) {
 		w := newWorld(t, earlyInMonth)
 		usageMeter(t, w.alpha, 100)
@@ -299,14 +317,15 @@ products:
 		settleUsage(t, a.alpha, newLease(), numbered(1, usageInput(customer, "first", 2), usageInput(customer, "second", 3))...)
 		w := a.world
 
-		// The erasure stops between folding the history and deleting its
-		// invokers' rows.
+		// The erasure's job stops between folding the history and deleting
+		// its invokers' rows; River runs it again.
+		events := erasureEvents(t, w)
 		stop := ".usage_history DELETE"
 		conn.fail.Store(&stop)
 		status, raw = a.request(t, "DELETE", "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
-		require.NotEqual(t, http.StatusNoContent, status, string(raw))
-		status, raw = a.request(t, "DELETE", "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
+		require.Equal(t, river.EventKindJobFailed, awaitErasure(t, events), "the first run stops part way")
+		require.Equal(t, river.EventKindJobCompleted, awaitErasure(t, events), "the next finishes")
 
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker != ''"))
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "each event once")

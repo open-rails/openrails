@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -67,14 +67,14 @@ const stripeCancelDenialMaxAttempts = 3
 //   - an uncertain write is resolved by the verifier's read, never resent blind.
 type StripeCancelHandler struct {
 	DB      *db.DB
-	Config  *config.Config
+	Config  *billing.Config
 	Rails   railresolve.Source
 	Clients *stripeapi.Factory
 	Clock   clockwork.Clock
 	Policy  BackoffPolicy
 }
 
-func NewStripeCancelHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeCancelHandler {
+func NewStripeCancelHandler(d *db.DB, cfg *billing.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeCancelHandler {
 	return &StripeCancelHandler{DB: d, Config: cfg, Rails: rails, Clients: clients, Clock: clock, Policy: DefaultBackoff}
 }
 
@@ -127,7 +127,7 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	status, code, msg, err := h.write(ctx, key, method, psid, form, intent.IdempotencyKey+":"+op)
 	switch {
 	case errors.Is(err, stripeapi.ErrProviderReadOnly):
-		return parkedBeforeEffect("stripe provider writes blocked (mode=readonly)")
+		return parkedBeforeEffect("stripe provider writes blocked (readonly write posture)")
 	case errors.Is(err, providerposture.ErrDisarmed):
 		return parkedBeforeEffect("stripe cancel held by sandbox posture gate: " + err.Error())
 	case err != nil:
@@ -227,7 +227,7 @@ func (h *StripeCancelHandler) write(ctx context.Context, key, method, psid strin
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	stripeapi.SetIdempotencyKey(req, idempotencyKey)
-	resp, err := h.Clients.Client(h.Config, 0).Do(req)
+	resp, err := h.Clients.Client(0).Do(req)
 	if err != nil {
 		return 0, "", "", err
 	}

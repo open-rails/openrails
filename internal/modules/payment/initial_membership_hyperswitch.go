@@ -3,8 +3,9 @@ package payment
 import (
 	"context"
 	"errors"
+	"fmt"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
@@ -14,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context, _ gen.BillingProviderIntent, p InitialMembershipPayload, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
@@ -27,13 +29,16 @@ func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context,
 // read and contract check precede the durable fence: they prove the accepted
 // binding and the held card, not a remote lock; Charge rechecks before
 // dispatch.
-func hyperSwitchProxy(ctx context.Context, cfg *config.Config, d *db.DB, accepted charge.HyperSwitchBinding, instrument charge.FrozenInstrument, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
-	if cfg == nil || cfg.HyperSwitch == nil || config.IsProviderReadOnly(cfg) || gateway == nil || gateway.ReadOnly || instrument.CustodianID == nil {
+func hyperSwitchProxy(ctx context.Context, cfg *billing.Config, d *db.DB, accepted charge.HyperSwitchBinding, instrument charge.FrozenInstrument, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
+	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) || gateway == nil || gateway.ReadOnly || instrument.CustodianID == nil {
 		return nil, errors.New("HyperSwitch custody is not armed")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if p := (writeposture.View{DB: d}).Posture(ctx, mid.UUID()); p.ReadOnly() {
+		return nil, fmt.Errorf("HyperSwitch custody is not armed: %s", p.Reason)
 	}
 	custodian, held, err := merchants.Of(d).CustodianScopeByID(ctx, mid, *instrument.CustodianID)
 	if err != nil {
@@ -46,7 +51,7 @@ func hyperSwitchProxy(ctx context.Context, cfg *config.Config, d *db.DB, accepte
 	if err != nil || binding != accepted {
 		return nil, charge.ErrInstrumentChanged
 	}
-	client, err := railresolve.HyperSwitchClient(cfg, mid, custodian)
+	client, err := railresolve.HyperSwitchClient(cfg, mid, custodian, false)
 	if err != nil {
 		return nil, err
 	}

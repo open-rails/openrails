@@ -44,7 +44,7 @@ type RailPaymentMethodService struct {
 	// one from Config.
 	NMIClients      *railresolve.NMIFactory
 	ProviderSecrets *merchants.Service
-	Config          *config.Config
+	Config          *billing.Config
 	DB              *db.DB
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
@@ -165,7 +165,7 @@ func (e *PaymentMethodError) Unwrap() error {
 	return e.Err
 }
 
-func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.DB, cfg *config.Config, clocks ...clockwork.Clock) *RailPaymentMethodService {
+func NewRailPaymentMethodService(pm *PaymentMethodService, sub subscriptionReader, dbx *db.DB, cfg *billing.Config, clocks ...clockwork.Clock) *RailPaymentMethodService {
 	return &RailPaymentMethodService{
 		PaymentMethodService: pm,
 		SubscriptionService:  sub,
@@ -197,7 +197,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	if err != nil {
 		return nil, err
 	}
-	if (writeposture.View{Config: s.Config, DB: s.DB}).Posture(ctx, mid.UUID()).ReadOnly() {
+	if (writeposture.View{DB: s.DB}).Posture(ctx, mid.UUID()).ReadOnly() {
 		return nil, nmi.ErrProviderReadOnly
 	}
 	client, scope, err := s.resolveNMIClientForPSP(ctx, req.PSPID)
@@ -570,7 +570,7 @@ func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context,
 	}
 	factory := s.NMIClients
 	if factory == nil {
-		factory = &railresolve.NMIFactory{Config: s.Config, Log: s.Log}
+		factory = &railresolve.NMIFactory{Postures: writeposture.View{DB: s.DB}, Log: s.Log}
 	}
 	return factory.Client(ctx, s.MerchantSecrets, mid, scope)
 }

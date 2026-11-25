@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -43,13 +43,13 @@ const stripeDomainDenialMaxAttempts = 3
 // is not registered again, and one whose Apple Pay is inactive is validated
 // once. A domain the merchant disabled at Stripe stays disabled.
 type StripePaymentMethodDomainHandler struct {
-	Config  *config.Config
+	Config  *billing.Config
 	Rails   railresolve.Source
 	Clients *stripeapi.Factory
 	Policy  BackoffPolicy
 }
 
-func NewStripePaymentMethodDomainHandler(cfg *config.Config, rails railresolve.Source, clients *stripeapi.Factory) *StripePaymentMethodDomainHandler {
+func NewStripePaymentMethodDomainHandler(cfg *billing.Config, rails railresolve.Source, clients *stripeapi.Factory) *StripePaymentMethodDomainHandler {
 	return &StripePaymentMethodDomainHandler{Config: cfg, Rails: rails, Clients: clients, Policy: DefaultBackoff}
 }
 
@@ -165,7 +165,7 @@ func (h *StripePaymentMethodDomainHandler) classify(intent gen.BillingProviderIn
 	msg := subscriptions.ParseStripeAPIError(raw)
 	switch {
 	case errors.Is(err, stripeapi.ErrProviderReadOnly):
-		return Parked("stripe provider writes blocked (mode=readonly)"), true
+		return Parked("stripe provider writes blocked (readonly write posture)"), true
 	case errors.Is(err, providerposture.ErrDisarmed):
 		return Parked("stripe domain registration held by sandbox posture gate: " + err.Error()), true
 	case err != nil:
@@ -233,7 +233,7 @@ func (h *StripePaymentMethodDomainHandler) post(ctx context.Context, key, path s
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, idempotencyKey)
-	resp, err := h.Clients.Client(h.Config, 0).Do(req)
+	resp, err := h.Clients.Client(0).Do(req)
 	if err != nil {
 		return 0, nil, err
 	}

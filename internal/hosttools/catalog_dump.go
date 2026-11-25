@@ -14,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -30,7 +30,7 @@ import (
 // CatalogDumpOptions exports current, unarchived prices as an editable catalog
 // application. Use the merchant archive for immutable identities and history.
 type CatalogDumpOptions struct {
-	Config   *config.Config
+	Config   *billing.Config
 	PGXPool  *pgxpool.Pool
 	Merchant string
 	Out      io.Writer

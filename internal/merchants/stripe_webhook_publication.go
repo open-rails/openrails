@@ -56,7 +56,7 @@ func (p *StripeWebhookPublication) Revision() (int64, bool) {
 }
 
 // Publish writes the signing secret of the endpoint the provider created; the
-// outgoing secret keeps verifying for MaxWebhookSecretOverlap.
+// outgoing secret keeps verifying for managedEndpointOverlap.
 func (p *StripeWebhookPublication) Publish(ctx context.Context, endpoint, secret string) error {
 	endpoint, secret = strings.TrimSpace(endpoint), strings.TrimSpace(secret)
 	if !p.loaded || endpoint == "" || secret == "" {
@@ -68,7 +68,7 @@ func (p *StripeWebhookPublication) Publish(ctx context.Context, endpoint, secret
 	return p.write(ctx, endpoint, func(next map[string]string, settings map[string]any) {
 		if current := strings.TrimSpace(next["webhook_signing_secret"]); current != "" && current != secret {
 			next["webhook_signing_secret_previous"] = current
-			settings[WebhookOverlapExpiresKey] = p.service.now().Add(MaxWebhookSecretOverlap).Format(time.RFC3339)
+			settings[WebhookOverlapExpiresKey] = p.service.now().Add(managedEndpointOverlap).Format(time.RFC3339)
 		}
 		next["webhook_signing_secret"] = secret
 	})

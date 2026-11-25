@@ -19,7 +19,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -114,8 +113,6 @@ const (
 	// FeatureMerchantConfigManages: Vault holds merchant configuration, so it
 	// can change; a file is read-only.
 	FeatureMerchantConfigManages Feature = "merchant_config_edits"
-	// FeatureCatalogCopilot: llm.api_key and llm.catalog_copilot_enabled.
-	FeatureCatalogCopilot Feature = "catalog_copilot"
 	// FeatureCustomerProvisioning: OpenRails keeps the pushed customer directory.
 	FeatureCustomerProvisioning Feature = "customer_provisioning"
 )
@@ -194,8 +191,7 @@ type Route struct {
 	Group Group
 	// Auth is the tier the route enforces before its handler runs.
 	Auth Tier
-	// Name is the route's Go client method. ConsoleOnly is the explicit
-	// exception for optional console assistance, not a merchant operation.
+	// Name is the route's Go client method.
 	Name string
 	// Doc is a client route's method comment and OpenAPI description: a
 	// sentence beginning with Name.
@@ -204,13 +200,9 @@ type Route struct {
 	// the client method's arguments, each a string or a Stringer.
 	Args []any
 	// Cache is the read cache that may answer a client GET; empty reads live.
-	Cache config.Read
+	Cache billing.Read
 	// Client is how the client method is written: generated, or HandWritten.
 	Client ClientSource
-	// ConsoleOnly marks optional catalog assistance owned by the console UI.
-	// It keeps its ordinary merchant auth, feature and rate-limit gates but
-	// is not a Go Client method; it does not require the bundled console UI.
-	ConsoleOnly bool
 	// Level is an admin route's: read or write.
 	Level Level
 	// Permission is an application or provisioning route's: the pair its
@@ -243,6 +235,9 @@ type Route struct {
 	// PayURL is what a pay URL's secret opens of the route on the
 	// checkout origin; none is not served there.
 	PayURL PayURLAccess
+	// SubmitsCheckout: the customer asks to pay the {id} checkout, which is
+	// recorded before any gate may refuse the request.
+	SubmitsCheckout bool
 
 	// Query is a zero value of the query's type, its parameters the type's
 	// `form` fields (wireform), nil for none; Request is a zero value of the
@@ -280,9 +275,6 @@ func (r Route) Staff() bool {
 // ClientMethod reports a route the Go Client calls: the staff, programmatic
 // and access routes.
 func (r Route) ClientMethod() bool {
-	if r.ConsoleOnly {
-		return false
-	}
 	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn || r.Name == "GetPublicConfig"
 }
 
@@ -326,17 +318,6 @@ func (r Route) clientShape() error {
 	}
 	if stream && r.Client != HandWritten {
 		return fmt.Errorf("a streamed body's client method is HandWritten")
-	}
-	return nil
-}
-
-// consoleOwnership refuses exemptions that could hide ordinary SDK routes.
-func (r Route) consoleOwnership() error {
-	if r.ConsoleOnly != strings.HasPrefix(r.Path, "/v1/console/") {
-		return fmt.Errorf("console-owned routes use /v1/console and declare ConsoleOnly")
-	}
-	if r.ConsoleOnly && (r.Group != CatalogAdmin || r.Auth != AuthMerchant || r.When != FeatureCatalogCopilot || r.Level != LevelRead || r.Name != "") {
-		return fmt.Errorf("ConsoleOnly is optional, read-only catalog assistance behind merchant auth, without a Client name")
 	}
 	return nil
 }
@@ -420,7 +401,6 @@ func (r Route) authority() error {
 // a GET writes.
 var queryRoutes = map[string]bool{
 	"POST /v1/admin/subscriptions/{id}/change/preview": true,
-	"POST /v1/console/catalog/ask":                     true,
 	"POST /v1/catalog/price-migrations/preview":        true,
 	"POST /v1/merchant/psps/routing-preview":           true,
 	"POST /v1/merchant/messages/preview":               true,
@@ -431,9 +411,6 @@ var queryRoutes = map[string]bool{
 // validate is every rule a catalog declaration keeps; the catalog refuses to
 // load with a route that breaks one.
 func (r Route) validate() error {
-	if err := r.consoleOwnership(); err != nil {
-		return err
-	}
 	if _, err := r.QueryParams(); err != nil {
 		return err
 	}

@@ -265,6 +265,53 @@ func (q *Queries) ProvisionedContactsAtLeast(ctx context.Context, arg Provisione
 	return contacts, err
 }
 
+const recordCustomerContactClaims = `-- name: RecordCustomerContactClaims :exec
+WITH kept AS (
+  UPDATE billing.customer_contacts c SET
+    email = COALESCE($3::text, c.email),
+    display_name = COALESCE($4::text, c.display_name),
+    user_name = COALESCE($5::text, c.user_name),
+    directory_updated_at = $6::timestamptz,
+    updated_at = now()
+  WHERE c.merchant_id = $1::uuid AND c.customer_id = $2::uuid
+    AND (c.directory_updated_at IS NULL OR c.directory_updated_at <= $6::timestamptz)
+    AND ROW(c.email, c.display_name, c.user_name) IS DISTINCT FROM ROW(
+      COALESCE($3::text, c.email), COALESCE($4::text, c.display_name),
+      COALESCE($5::text, c.user_name))
+  RETURNING c.customer_id
+)
+INSERT INTO billing.customer_contacts (merchant_id, customer_id, email, display_name, user_name, directory_updated_at)
+SELECT $1::uuid, $2::uuid, $3::text, $4::text,
+  $5::text, $6::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM kept)
+ON CONFLICT (merchant_id, customer_id) DO NOTHING
+`
+
+type RecordCustomerContactClaimsParams struct {
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	Email           *string
+	DisplayName     *string
+	UserName        *string
+	ClaimsUpdatedAt *time.Time
+}
+
+// A verified token's contact claims: a new contact's at once; a kept one's
+// only when dated no earlier than it (undated claims replace only undated
+// ones) and different, so a repeated token writes nothing. An absent claim
+// keeps the kept value.
+func (q *Queries) RecordCustomerContactClaims(ctx context.Context, arg RecordCustomerContactClaimsParams) error {
+	_, err := q.db.Exec(ctx, recordCustomerContactClaims,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Email,
+		arg.DisplayName,
+		arg.UserName,
+		arg.ClaimsUpdatedAt,
+	)
+	return err
+}
+
 const searchCustomerContacts = `-- name: SearchCustomerContacts :many
 SELECT merchant_id, customer_id, email, display_name, user_name, active, provisioned_at, directory_updated_at, created_at, updated_at FROM billing.customer_contacts c
 WHERE c.merchant_id = $1::uuid
@@ -284,6 +331,61 @@ type SearchCustomerContactsParams struct {
 // the username or email come first.
 func (q *Queries) SearchCustomerContacts(ctx context.Context, arg SearchCustomerContactsParams) ([]BillingCustomerContact, error) {
 	rows, err := q.db.Query(ctx, searchCustomerContacts,
+		arg.MerchantID,
+		arg.Pattern,
+		arg.Query,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCustomerContact
+	for rows.Next() {
+		var i BillingCustomerContact
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Email,
+			&i.DisplayName,
+			&i.UserName,
+			&i.Active,
+			&i.ProvisionedAt,
+			&i.DirectoryUpdatedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchCustomerContactsOfCustomers = `-- name: SearchCustomerContactsOfCustomers :many
+SELECT merchant_id, customer_id, email, display_name, user_name, active, provisioned_at, directory_updated_at, created_at, updated_at FROM billing.customer_contacts c
+WHERE c.merchant_id = $1::uuid
+  AND EXISTS (SELECT 1 FROM billing.customers cu WHERE cu.merchant_id = c.merchant_id AND cu.id = c.customer_id)
+  AND (c.email ILIKE $2::text OR c.user_name ILIKE $2::text OR c.display_name ILIKE $2::text)
+ORDER BY (lower(c.user_name) = lower($3::text) OR lower(c.email) = lower($3::text)) DESC NULLS LAST,
+  (SELECT cu.created_at FROM billing.customers cu WHERE cu.merchant_id = c.merchant_id AND cu.id = c.customer_id) DESC, c.customer_id DESC
+LIMIT $4::int
+`
+
+type SearchCustomerContactsOfCustomersParams struct {
+	MerchantID uuid.UUID
+	Pattern    string
+	Query      string
+	RowLimit   int32
+}
+
+// SearchCustomerContacts kept to the merchant's customers: an exact username
+// or email first, then the newest customers.
+func (q *Queries) SearchCustomerContactsOfCustomers(ctx context.Context, arg SearchCustomerContactsOfCustomersParams) ([]BillingCustomerContact, error) {
+	rows, err := q.db.Query(ctx, searchCustomerContactsOfCustomers,
 		arg.MerchantID,
 		arg.Pattern,
 		arg.Query,

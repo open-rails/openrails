@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -311,7 +310,7 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 			return err
 		}
 		return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
-			ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, string(models.NotificationAgreementRevoked), mid.String(), m.ID.String()),
+			ID:         uuidutil.DerivedV7(uuidutil.TimeOf(m.ID), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationAgreementRevoked), mid.String(), m.ID.String())),
 			MerchantID: mid.UUID(), CustomerID: customer.UUID(), EventType: string(models.NotificationAgreementRevoked), Data: raw, CreatedAt: now,
 		})
 	})
@@ -392,7 +391,7 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 	}
 	// A completed cancellation is a domain no-op, including after reservation pruning.
 	if sub.Status != models.StatusCanceled {
-		policy := config.UserActionRateLimitConfig{}
+		policy := billing.UserActionRateLimitConfig{}
 		if rt.Config != nil {
 			policy = rt.Config.UserActionRateLimit
 		}

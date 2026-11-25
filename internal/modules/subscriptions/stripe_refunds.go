@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/railresolve"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -40,7 +40,7 @@ func (e *StripeAPICallError) Error() string { return e.Message }
 
 type StripeRefundService struct {
 	StripeClients *stripeapi.Factory
-	Config        *config.Config
+	Config        *billing.Config
 	Rails         railresolve.Source
 }
 
@@ -113,7 +113,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, idempotencyKey)
 
-	client := s.StripeClients.Client(s.Config, 30*time.Second)
+	client := s.StripeClients.Client(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("stripe refund request failed: %w", err)
@@ -210,7 +210,7 @@ func (s *StripeRefundService) FindRefundByIdempotencyKey(ctx context.Context, ch
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := s.StripeClients.Client(s.Config, 0)
+	client := s.StripeClients.Client(0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, false, fmt.Errorf("stripe refund list failed: %w", err)

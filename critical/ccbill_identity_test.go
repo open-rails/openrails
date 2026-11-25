@@ -45,7 +45,7 @@ const (
 func ccbillWebhookWorld(t *testing.T, configure ...func(*world)) *authorityWorld {
 	t.Helper()
 	return newAuthorityWorld(t, func(w *world) {
-		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
+		w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: billing.EnvironmentSandbox,
 			Salt: "critical-ccbill-salt"}.PSPConfig()}
@@ -226,7 +226,7 @@ func TestCCBillIdentity(t *testing.T) {
 
 		t.Run("an-order-sale-names-the-card-ccbill-billed", func(t *testing.T) {
 			// Selling a FlexForm is a provider write.
-			a := ccbillWebhookWorld(t, func(w *world) { w.cfg.ProviderWriteMode = openrails.ProviderWritesFull })
+			a := ccbillWebhookWorld(t, func(w *world) { w.posture = "full" })
 			price := ccbillMemberPrice(t, a.alpha)
 			erin := authtest.NewUser(t, a.auth)
 			token := authtest.SignIn(t, a.auth, erin).AccessToken
@@ -248,13 +248,13 @@ func TestCCBillIdentity(t *testing.T) {
 			pending := authtest.SignIn(t, a.auth, authtest.User{User: unverified, Password: authtest.Password}).AccessToken
 			require.Equal(t, []string{"verified_email"}, requires(pending))
 			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", pending, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
-				Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}},
+				Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}},
 				map[string]string{"Idempotency-Key": "ccbill-unverified-order"})
 			require.Equal(t, http.StatusBadRequest, status, string(raw))
 			require.Contains(t, string(raw), "customer_email_required")
 			require.Contains(t, string(raw), "Verify your email and set a username to pay with CCBill.")
 			status, raw = a.request(t, http.MethodPost, "/v1/me/orders", token, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
-				Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}},
+				Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}},
 				map[string]string{"Idempotency-Key": "ccbill-card-order"})
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var order billing.Order
@@ -310,6 +310,26 @@ func TestCCBillIdentity(t *testing.T) {
 		})
 	})
 
+	t.Run("OR-J38-S82/a-postback-names-its-customer-by-a-username-many-others-contain", func(t *testing.T) {
+		a := ccbillWebhookWorld(t)
+		name := "member" + uuid.NewString()[:8]
+		user := func(username string) iam.User {
+			t.Helper()
+			u, err := a.auth.CreateUser(t.Context(), iam.NewUser{Email: username + "@example.com", Username: username, Password: authtest.Password, EmailVerified: true})
+			require.NoError(t, err)
+			return u
+		}
+		// More than one search's worth of people whose usernames contain the
+		// buyer's join the host's directory first.
+		for i := range 55 {
+			user(fmt.Sprintf("%sx%02d", name, i))
+		}
+		buyer := billing.CustomerID(uuid.MustParse(user(name).ID))
+		status, body := ccbillNotice(t, a, "NewSaleFailure", map[string]any{"transactionId": "0912233445566778897", "username": name,
+			"flexId": "critical-flex", "billedCurrencyCode": "840", "failureCode": "15", "failureReason": "Insufficient funds"})
+		require.Equal(t, http.StatusOK, status, body)
+		require.True(t, factEmitted(t, a.alpha, "payment_method_failed", buyer), "the decline names the one customer whose username it is")
+	})
 	t.Run("OR-J38-S75/an-end-the-provider-confirmed-is-not-revived-by-a-later-renewal", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
@@ -350,7 +370,10 @@ func TestCCBillIdentity(t *testing.T) {
 			due = w.clock.Now().UTC().Truncate(time.Second).Add(-48 * time.Hour)
 			feed = dataLinkCancellationFeed(t, ccbillProvider, canceled, due)
 			declareCCBill(w, feed.URL)
-			w.cfg.ProviderSandbox.CCBillWebhookSources = []string{"127.0.0.1/32"}
+			w.deps.ProviderEndpoints.CCBillWebhookSources = []string{"127.0.0.1/32"}
+			// Lifecycle repairs need full writes: a readonly merchant's pull
+			// observes, and never reads its unverified rows.
+			w.posture = "full"
 		})
 		price := ccbillMemberPrice(t, a.alpha)
 		alice := customerOf(a.alice)
@@ -579,7 +602,7 @@ func TestCCBillIdentity(t *testing.T) {
 		// A payment is never recorded in the database's future.
 		a, provider := newPaymentWorld(t, func(w *world) {
 			w.clock.Advance(-30 * 24 * time.Hour)
-			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 			m := cfgMerchant(w.cfg, "alpha")
 			m.PSPs["ccbill"] = openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			setCfgMerchant(&w.cfg, "alpha", m)
@@ -607,7 +630,7 @@ func TestCCBillIdentity(t *testing.T) {
 
 		// Alice opens the CCBill page and leaves; once it lapses she pays by card.
 		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
-			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: "https://critical.invalid/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
+			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var order billing.Order
 		require.NoError(t, json.Unmarshal(raw, &order))

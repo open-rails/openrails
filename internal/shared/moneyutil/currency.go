@@ -119,16 +119,6 @@ func FormatBaseUnits(units uint64, currency string) string {
 	return FormatRailMinor(Cents(units), currency) // #nosec G115 -- bounded above
 }
 
-// DescribeNativeScales lists native units per major unit for prose (LLM
-// prompts): "EUR 1000000, JPY 10000, USD 1000000".
-func DescribeNativeScales() string {
-	parts := make([]string, 0, len(currencies))
-	for _, code := range CurrencyCodes() {
-		parts = append(parts, fmt.Sprintf("%s %d", code, pow10(currencies[code].Decimals)))
-	}
-	return strings.Join(parts, ", ")
-}
-
 // NativeToRailMinor converts an internal native amount to the rail minor unit
 // (cents for USD, whole yen for JPY), rounding UP so a charge never
 // under-covers it; amounts <= 0 give 0. Errors on an unregistered currency.

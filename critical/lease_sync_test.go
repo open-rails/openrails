@@ -52,21 +52,6 @@ func lineOf(t *testing.T, v billing.View, limit string) billing.ViewLimit {
 	return billing.ViewLimit{}
 }
 
-// leaseAdmit admits a request as a request hold of a lease, as a gate does
-// near a limit.
-func leaseAdmit(t *testing.T, w *world, lease billing.LeaseID, p billing.AdmitParams) billing.AdmissionVerdict {
-	t.Helper()
-	p.LeaseID, p.ExpiresAt = &lease, nil
-	return admitOne(t, w.alpha, p)
-}
-
-// spentOn reports n compute units of a lease's request hold.
-func spentOn(customer billing.CustomerID, requestID, id string, units int64) billing.LeaseUsage {
-	u := usageInput(customer, id, units)
-	u.RequestID = &requestID
-	return u
-}
-
 func TestLeaseSyncs(t *testing.T) {
 	t.Run("OR-J24-S06/a-lost-reply-resends-a-gap-is-refused", func(t *testing.T) {
 		w := newWorld(t)
@@ -98,18 +83,18 @@ func TestLeaseSyncs(t *testing.T) {
 		usageMeter(t, w.alpha, 100)
 		lease := newLease()
 		outbox := numbered(1, usageInput(customer, "a", 1), usageInput(customer, "b", 2), usageInput(customer, "c", 3))
-		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Views: []billing.ViewParams{computeView(customer)}})
-		require.True(t, leaseAdmit(t, w, lease, usageAdmission(w, customer, "near", "compute", map[string]int64{"units": 1}, nil)).Allowed())
-		settleUsage(t, w.alpha, lease, outbox[:2]...)
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: outbox[:2], Views: []billing.ViewParams{computeView(customer)},
+			InFlight: []billing.InFlight{{CustomerID: customer, Limit: catalog.BalanceLimit, Unit: "USD", Amount: 100}}})
+		require.Empty(t, out.Usage.Refused)
 		balance(t, w.alpha, customer, 600, 400, 1000)
-		// The process dies with item 3 unsent and a request hold open; once
-		// the lease stops syncing the hold counts nowhere.
+		// The process dies with item 3 unsent and a request in flight; once
+		// the lease stops syncing its report counts nowhere.
 		w.clock.Advance(limits.LeaseLifetime + time.Second)
 		balance(t, w.alpha, customer, 700, 300, 1000)
 		// Its successor resends the outbox against the dead lease with close:
 		// the first two answer their receipts, the third settles as late
-		// usage, and the close releases the hold for good.
-		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: outbox, Close: true})
+		// usage, and the close clears the report for good.
+		out = syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: outbox, Close: true})
 		require.EqualValues(t, 3, out.Usage.ThroughN)
 		require.Empty(t, out.Usage.Refused)
 		require.False(t, out.Lease.ExpiresAt.After(w.clock.Now()), "a closed lease has ended")
@@ -117,9 +102,6 @@ func TestLeaseSyncs(t *testing.T) {
 		again := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: outbox})
 		require.Empty(t, again.Usage.Refused)
 		balance(t, w.alpha, customer, 400, 600, 1000)
-		admission, err := w.alpha.GetAdmission(t.Context(), "near")
-		require.NoError(t, err)
-		require.Equal(t, billing.AdmissionReleased, *admission.State)
 	})
 	t.Run("OR-J24-S08/a-batch-job-that-loses-its-first-reply-posts-once", func(t *testing.T) {
 		w := newWorld(t)
@@ -179,21 +161,6 @@ func TestLeaseSyncs(t *testing.T) {
 		current.SourceID, current.OccurredAt = "current", time.Time{}
 		settleUsage(t, w.alpha, newLease(), numbered(1, late, current)...)
 		balance(t, w.alpha, periods, 1000-16, 16, 1000)
-
-		// A lease's request hold pins the cards in force when it was
-		// admitted, and its capture through the lease is priced by them;
-		// other usage by the cards in force when it settles.
-		_, params := usageMeter(t, w.alpha, 100)
-		pinned := billing.CustomerID(uuid.New())
-		fund(t, w.alpha, pinned, "pinned", 1000)
-		lease := newLease()
-		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
-		require.True(t, leaseAdmit(t, w, lease, usageAdmission(w, pinned, "pinned-hold", "compute", map[string]int64{"units": 1}, nil)).Allowed())
-		params.RateCard.Value.Price.PerUnit.UnitAmount = 300
-		_, err = w.alpha.SetMeter(t.Context(), "compute", params)
-		require.NoError(t, err)
-		settleUsage(t, w.alpha, lease, numbered(1, spentOn(pinned, "pinned-hold", "under-the-hold", 1), usageInput(pinned, "without-a-hold", 1))...)
-		balance(t, w.alpha, pinned, 1000-400, 400, 1000)
 	})
 
 	t.Run("OR-J24-S11/a-month-posts-once-and-once-more-before-a-top-up", func(t *testing.T) {
@@ -203,12 +170,10 @@ func TestLeaseSyncs(t *testing.T) {
 		lease := newLease()
 		settleUsage(t, w.alpha, lease, numbered(1, usageInput(customer, "a", 2))...)
 		balance(t, w.alpha, customer, 800, 200, 1000)
-		// Until it posts, the usage is held: the balance refuses as if it had.
-		requireDenied(t, admitOne(t, w.alpha, reservation(w, customer, "too-much", 801)), "insufficient_balance")
-		require.True(t, admitOne(t, w.alpha, reservation(w, customer, "fits", 800)).Allowed())
-		released, err := w.alpha.ReleaseAdmissions(t.Context(), []string{"fits"})
-		require.NoError(t, err)
-		require.NoError(t, released[0].Err())
+		// Until it posts, the usage is held: a view leaves what remains, as if
+		// it had.
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Views: []billing.ViewParams{computeView(customer)}})
+		require.EqualValues(t, 800, lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit).Remaining)
 
 		// A top-up posts the month so far first.
 		w.clock.Advance(time.Minute)
@@ -264,29 +229,24 @@ func TestLeaseSyncs(t *testing.T) {
 			require.EqualValues(t, 4, line.Remaining)
 		}
 	})
-	t.Run("OR-J24-S16/a-closed-lease-settles-releases-its-holds-and-clears-its-report", func(t *testing.T) {
+	t.Run("OR-J24-S16/a-closed-lease-settles-and-clears-its-report", func(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
 		usageMeter(t, w.alpha, 100)
 		lease := newLease()
-		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 100}}})
-		require.True(t, leaseAdmit(t, w, lease, usageAdmission(w, customer, "held", "compute", map[string]int64{"units": 1}, nil)).Allowed())
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 200}}})
 		balance(t, w.alpha, customer, 800, 200, 1000)
 
-		// A sync with close settles its usage, then releases the lease's
-		// holds, clears its report and ends it, long before it would expire.
+		// A sync with close settles its usage, then clears its report and
+		// ends it, long before it would expire.
 		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(1, usageInput(customer, "last", 1)), Close: true})
 		require.EqualValues(t, 1, out.Usage.ThroughN)
 		require.Empty(t, out.Usage.Refused)
 		require.False(t, out.Lease.ExpiresAt.After(w.clock.Now()), "a closed lease has ended")
 		balance(t, w.alpha, customer, 900, 100, 1000)
 
-		// A closed lease owns no new hold; usage against it still settles,
-		// in full, and its report stays clear.
-		v := leaseAdmit(t, w, lease, usageAdmission(w, customer, "after-close", "compute", map[string]int64{"units": 1}, nil))
-		require.NotNil(t, v.Error)
-		require.Equal(t, http.StatusConflict, v.Status)
-		require.Equal(t, billing.CodeLeaseNotHeld, v.Error.Code)
+		// Usage against a closed lease still settles, in full, and its report
+		// stays clear.
 		out = syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(2, usageInput(customer, "late", 1)),
 			InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 100}}})
 		require.EqualValues(t, 2, out.Usage.ThroughN)
@@ -431,23 +391,6 @@ func TestLeaseSyncs(t *testing.T) {
 		require.EqualValues(t, 200, line.Used, "only the item admitted at the end counts in the next window")
 	})
 
-	t.Run("OR-J24-S44/a-hold-made-under-a-lapsed-lease-counts-at-once", func(t *testing.T) {
-		w := newWorld(t)
-		customer, _ := fundedCustomer(t, w)
-		usageMeter(t, w.alpha, 100)
-		lease := newLease()
-		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease})
-		// The gate went idle and its lease lapsed; its next near-zero request
-		// is held on the server before the gate syncs again.
-		w.clock.Advance(limits.LeaseLifetime + time.Second)
-		require.True(t, leaseAdmit(t, w, lease, usageAdmission(w, customer, "lapsed", "compute", map[string]int64{"units": 3}, nil)).Allowed())
-		balance(t, w.alpha, customer, 700, 300, 1000)
-		requireDenied(t, admitOne(t, w.alpha, reservation(w, customer, "other", 800)), billing.DenyInsufficientBalance)
-		// A lease that never syncs again stops holding it.
-		w.clock.Advance(limits.LeaseLifetime + time.Second)
-		balance(t, w.alpha, customer, 1000, 0, 1000)
-	})
-
 	t.Run("OR-J24-S45/a-report-naming-a-customer-another-transaction-spends-does-not-wait", func(t *testing.T) {
 		w := newWorld(t)
 		customer, _ := fundedCustomer(t, w)
@@ -458,9 +401,8 @@ func TestLeaseSyncs(t *testing.T) {
 		tx, err := w.pool.Begin(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback(context.Background()) //nolint:errcheck
-		admitted, err := w.local.AdmitTx(t.Context(), tx, []billing.AdmitParams{reservation(w, customer, "host", 100)})
+		_, err = w.local.StartRunningChargeTx(t.Context(), tx, billing.StartRunningChargeParams{Reference: "host", CustomerID: customer, Currency: "USD", RatePerHour: 3600})
 		require.NoError(t, err)
-		require.True(t, admitted[0].Allowed())
 		// A sync reporting the customer in flight for the first time takes no
 		// lock of the customer and so commits at once.
 		started := time.Now()
@@ -469,25 +411,7 @@ func TestLeaseSyncs(t *testing.T) {
 		require.NoError(t, err)
 		require.Less(t, time.Since(started), time.Second)
 		require.NoError(t, tx.Commit(t.Context()))
-		balance(t, w.alpha, customer, 700, 300, 1000)
-	})
-
-	t.Run("OR-J24-S46/a-captured-request-holds-view-settles-what-it-moved-past-its-estimate", func(t *testing.T) {
-		w := newWorld(t)
-		customer, _ := fundedCustomer(t, w)
-		usageMeter(t, w.alpha, 100)
-		lease := newLease()
-		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Views: []billing.ViewParams{computeView(customer)}})
-		require.True(t, leaseAdmit(t, w, lease, usageAdmission(w, customer, "near", "compute", map[string]int64{"units": 3}, nil)).Allowed())
-		held := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Views: []billing.ViewParams{computeView(customer)}})
-		require.EqualValues(t, 700, lineOf(t, viewOf(t, held, customer), catalog.BalanceLimit).Remaining)
-		// The hold already took 300: capturing 100 moves balance by -200.
-		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: numbered(1, spentOn(customer, "near", "near", 1)),
-			Views: []billing.ViewParams{computeView(customer)}})
-		require.Empty(t, out.Usage.Refused)
-		line := lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit)
-		require.EqualValues(t, 900, line.Remaining)
-		require.EqualValues(t, -200, line.Settled)
+		balance(t, w.alpha, customer, 800, 200, 1000)
 	})
 }
 

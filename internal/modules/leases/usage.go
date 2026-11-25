@@ -8,69 +8,92 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // UsageReader is every read of what usage used that a view makes: the
-// customer's money standing (with its unposted usage), a limit's use in a
-// window, and recent spend. Views read nothing of usage but through it.
+// customer's money standing (with its unposted usage) and a limit's use in a
+// window. Views read nothing of usage but through it.
 type UsageReader interface {
 	// Capacity is the customer's money in a currency: its balance and
-	// everything held against it, other than except's in-flight report.
+	// everything held against it, other than the syncing lease's in-flight
+	// report.
 	Capacity(ctx context.Context, customer uuid.UUID, currency string) (money.AdmissionCapacity, error)
 	// Limit is where a claim's limit stands in its window and, were it
 	// refused now, when it resets.
 	Limit(ctx context.Context, customer uuid.UUID, c limits.Claim) (limits.Standing, *time.Time, error)
-	// RecentSpend is what the customer's usage charged in a currency since
-	// an instant.
-	RecentSpend(ctx context.Context, customer uuid.UUID, currency string, since time.Time) (int64, error)
 }
 
-// storeUsage reads usage from the event store, after the sync's own usage
-// was inserted, and money and window rows from PostgreSQL in the sync's
-// transaction, leaving out the syncing lease's own in-flight report. The
-// limit rows of every customer the sync views are read at once, on the first
-// limit read. A window a read finds at capacity records reached_at.
+// storeUsage answers a sync's views in batches: every viewed customer's
+// money is read at once (prefetch), and their limit rows
+// at once on the first limit read; PostgreSQL in the views' snapshot, then
+// the event store. A window a read finds at capacity is recorded once the
+// snapshot ends (reached).
 type storeUsage struct {
-	run    *syncRun
-	store  *eventstore.Store
-	loaded map[uuid.UUID][]eventstore.LimitRow
+	v       *viewing
+	store   *eventstore.Store
+	caps    map[viewKey]money.AdmissionCapacity
+	failed  map[viewKey]error
+	loaded  map[uuid.UUID][]eventstore.LimitRow
+	reached []reachedWindow
 }
 
-func (r *syncRun) usageReader() *storeUsage {
-	return &storeUsage{run: r, store: r.DB.EventStore()}
+// reachedWindow is a window a view found at capacity.
+type reachedWindow struct {
+	customer uuid.UUID
+	claim    limits.Claim
+	standing limits.Standing
 }
 
-func (u *storeUsage) Capacity(ctx context.Context, customer uuid.UUID, currency string) (money.AdmissionCapacity, error) {
-	r := u.run
-	return r.money.ViewCapacityTx(ctx, r.q, identity.CustomerID(customer), currency, r.lease.ID)
+// prefetch reads the money of every customer and currency the views name.
+func (u *storeUsage) prefetch(ctx context.Context, keys []viewKey) error {
+	u.caps, u.failed = map[viewKey]money.AdmissionCapacity{}, map[viewKey]error{}
+	byCurrency := map[string][]uuid.UUID{}
+	var currencies []string
+	for _, k := range keys {
+		if _, ok := byCurrency[k.currency]; !ok {
+			currencies = append(currencies, k.currency)
+		}
+		byCurrency[k.currency] = append(byCurrency[k.currency], k.customer)
+	}
+	v := u.v
+	for _, currency := range currencies {
+		caps, failed, err := v.money.ViewCapacities(ctx, v.q, byCurrency[currency], currency, &v.run.lease.ID)
+		if err != nil {
+			return err
+		}
+		for c, capacity := range caps {
+			u.caps[viewKey{c, currency}] = capacity
+		}
+		for c, err := range failed {
+			u.failed[viewKey{c, currency}] = err
+		}
+	}
+	return nil
+}
+
+func (u *storeUsage) Capacity(_ context.Context, customer uuid.UUID, currency string) (money.AdmissionCapacity, error) {
+	k := viewKey{customer, currency}
+	return u.caps[k], u.failed[k]
 }
 
 func (u *storeUsage) Limit(ctx context.Context, customer uuid.UUID, c limits.Claim) (limits.Standing, *time.Time, error) {
-	r := u.run
+	v := u.v
 	rows, err := u.rows(ctx, customer)
 	if err != nil {
 		return limits.Standing{}, nil, err
 	}
-	h := limits.Holder{Q: r.q, Events: u.store, Loaded: rows, MerchantID: r.merchant, CustomerID: customer, Now: r.now, ExceptLease: &r.lease.ID}
+	h := limits.Holder{Q: v.q, Events: u.store, Loaded: rows, MerchantID: v.run.merchant, CustomerID: customer, Now: v.run.now, ExceptLease: &v.run.lease.ID}
 	s, row, err := h.Standing(ctx, c)
 	if err != nil {
 		return s, nil, err
 	}
-	if err := h.Reach(ctx, c, s, row); err != nil {
-		return s, nil, err
+	if limits.Reached(c, s, row) {
+		u.reached = append(u.reached, reachedWindow{customer: customer, claim: c, standing: s})
 	}
 	return s, h.ResetsAt(ctx, c, s), nil
-}
-
-func (u *storeUsage) RecentSpend(ctx context.Context, customer uuid.UUID, currency string, since time.Time) (int64, error) {
-	if u.store == nil {
-		return 0, eventstore.Required("a view")
-	}
-	return u.store.MinuteAmount(ctx, billing.CustomerID(customer), currency, since, time.Time{})
 }
 
 // rows are a viewed customer's limit rows: every viewed customer's, read at
@@ -85,13 +108,10 @@ func (u *storeUsage) rows(ctx context.Context, customer uuid.UUID) ([]eventstore
 	if u.store == nil {
 		return nil, eventstore.Required("a view")
 	}
-	r := u.run
-	defs, err := limits.Definitions(ctx, r.q, r.merchant)
-	if err != nil {
-		return nil, err
-	}
+	v := u.v
+	r := v.run
 	since := r.now
-	for _, def := range defs {
+	for _, def := range v.defs {
 		switch def.Reset.Kind {
 		case catalog.ResetRolling:
 			since = earliest(since, limits.RollingFrom(def.Reset.WindowSeconds, r.now))
@@ -100,9 +120,9 @@ func (u *storeUsage) rows(ctx context.Context, customer uuid.UUID) ([]eventstore
 		}
 	}
 	var customers []billing.CustomerID
-	for _, v := range r.p.Views {
-		if !v.CustomerID.IsZero() && (r.Allows == nil || r.Allows(v.CustomerID)) {
-			customers = append(customers, v.CustomerID)
+	for _, vp := range r.p.Views {
+		if !vp.CustomerID.IsZero() && (r.Allows == nil || r.Allows(vp.CustomerID)) {
+			customers = append(customers, vp.CustomerID)
 		}
 	}
 	rows, err := u.store.LimitUsage(ctx, customers, since)

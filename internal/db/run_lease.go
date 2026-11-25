@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // RunLeaseTTL is how long a run's lease outlives its last renewal: a holder
@@ -46,7 +47,7 @@ func (l *RunLease) Release() { l.stop() }
 // TryPassLease takes the deployment-wide lease on a running pass of kind,
 // across every fleet. It is nil while another run holds it.
 func (d *DB) TryPassLease(ctx context.Context, kind string, ttl time.Duration) (*RunLease, error) {
-	key, holder, q := kind+".run", uuid.NewString(), d.GenDirectory()
+	key, holder, q := kind+".run", uuidutil.NewV7().String(), d.GenDirectory()
 	return d.holdRunLease(ctx, ttl, func(ctx context.Context) (bool, error) {
 		n, err := q.ClaimPeriodicLease(ctx, gen.ClaimPeriodicLeaseParams{Kind: key, Holder: holder, TtlSeconds: ttl.Seconds()})
 		return n > 0, err
@@ -58,7 +59,7 @@ func (d *DB) TryPassLease(ctx context.Context, kind string, ttl time.Duration) (
 // TryMerchantLease takes the merchant's lease on kind, across every replica
 // and the operator's CLI. It is nil while another run holds it.
 func (d *DB) TryMerchantLease(ctx context.Context, merchant uuid.UUID, kind MerchantLeaseKind, ttl time.Duration) (*RunLease, error) {
-	holder, q := uuid.New(), d.GenDirectory()
+	holder, q := uuidutil.NewV7(), d.GenDirectory()
 	return d.holdRunLease(ctx, ttl, func(ctx context.Context) (bool, error) {
 		n, err := q.ClaimMerchantLease(ctx, gen.ClaimMerchantLeaseParams{MerchantID: merchant, Kind: string(kind), Holder: holder, TtlSeconds: ttl.Seconds()})
 		return n > 0, err

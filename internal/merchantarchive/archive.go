@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
@@ -19,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents/wake"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
-	"github.com/open-rails/openrails/internal/retention"
 )
 
 type Result struct {
@@ -172,10 +172,13 @@ func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.
 // Restore validates and inserts in one transaction. Footer failure, disconnect,
 // mismatched identity, unsupported state or integrity errors roll back all rows.
 // A matching committed receipt is a no-op even if the target has since advanced.
-func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.Reader) (Result, error) {
+func Restore(ctx context.Context, database *db.DB, clock clockwork.Clock, id billing.MerchantID, in io.Reader) (Result, error) {
 	var result Result
 	if database == nil || id.IsZero() {
 		return result, &Error{Code: "merchant_mismatch"}
+	}
+	if clock == nil {
+		return result, errors.New("merchantarchive: a restore needs the deployment's clock")
 	}
 	header, verified, err := archivewire.ReadHeader(in)
 	if err != nil {
@@ -190,12 +193,7 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 	if err != nil {
 		return result, err
 	}
-	// Archived rows may be older than anything written here: their months need
-	// partitions before the restore transaction, which must not hold DDL locks.
 	restoreNow := time.Now()
-	if _, err := retention.EnsureRetainedPartitions(ctx, database.GenDirectory(), restoreNow); err != nil {
-		return result, classify(err)
-	}
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := scope(ctx, tx, id); err != nil {
 			return err
@@ -226,7 +224,8 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if err := q.SetCatalogBatchMerchant(ctx, id.String()); err != nil {
 				return err
 			}
-			if err := destructiveArchiveBarrier(ctx, tx, id); err != nil {
+			undoSince := clock.Now().UTC().Add(-archiveUndoWindow)
+			if err := destructiveArchiveBarrier(ctx, tx, id, &undoSince); err != nil {
 				return err
 			}
 			receipt, err := q.BeginBillingRestore(ctx, id.UUID())
@@ -254,9 +253,6 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			}
 			if p.Name == contract.PriceKeyMovements.Name {
 				return restoreMove(ctx, tx, args)
-			}
-			if dropBefore, ok := partitionDropBefore[p.Name]; ok {
-				args = append(args, dropBefore(restoreNow))
 			}
 			_, err := tx.Exec(ctx, insertQuery(p), args...)
 			return err
@@ -413,31 +409,15 @@ func scope(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	return nil
 }
 
-// insertQuery inserts one archived row. A partitioned table takes one more
-// parameter, the oldest key it still keeps: a row older than that has no
-// partition, and retention would drop it on the next pass, so it is not
-// restored.
+// insertQuery inserts one archived row.
 func insertQuery(p contract.Profile) string {
 	cols, params := make([]string, len(p.Columns)), make([]string, len(p.Columns))
-	keep := ""
 	for i, c := range p.Columns {
 		cols[i] = pgx.Identifier{c.Name}.Sanitize()
 		params[i] = fmt.Sprintf("$%d::text::%s", i+1, c.Type)
-		if key, ok := partitionKeys[p.Name]; ok && c.Name == key {
-			keep = fmt.Sprintf(" WHERE %s >= $%d::timestamptz", params[i], len(p.Columns)+1)
-		}
 	}
-	return "INSERT INTO billing." + p.Name + " (" + strings.Join(cols, ",") + ") SELECT " + strings.Join(params, ",") + keep
+	return "INSERT INTO billing." + p.Name + " (" + strings.Join(cols, ",") + ") SELECT " + strings.Join(params, ",")
 }
-
-// partitionKeys and partitionDropBefore index retention.Partitioned by table.
-var partitionKeys, partitionDropBefore = func() (map[string]string, map[string]func(time.Time) time.Time) {
-	keys, drops := map[string]string{}, map[string]func(time.Time) time.Time{}
-	for _, p := range retention.Partitioned {
-		keys[p.Table], drops[p.Table] = p.Key, p.DropBefore
-	}
-	return keys, drops
-}()
 
 func countQuery(p contract.Profile) string {
 	return "SELECT count(*) FROM billing." + p.Name + " t WHERE " + exportWhere(p.Name)
@@ -490,10 +470,6 @@ func exportWhere(table string) string {
 	where := "t.merchant_id=$1"
 	if table == "maintenance_runs" {
 		where += " AND t.kind IN ('prune','approval','merchant_purge')"
-	}
-	// A gate's open hold dies with its lease; its settled ones move.
-	if table == "limit_holds" {
-		where += " AND (t.lease_id IS NULL OR t.state <> 'open')"
 	}
 	// Windows still open, and the end-less ones of lifetime and rate
 	// limits, carry their usage and staff adjustments to the destination.

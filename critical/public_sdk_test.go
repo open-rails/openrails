@@ -75,8 +75,8 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 		cards = newAuthorityWorld(t, func(w *world) {
 			vault = nmimock.New(nmimock.Options{Clock: w.clock.Now})
 			t.Cleanup(vault.Close)
-			w.cfg.ProviderWriteMode = openrails.ProviderWritesFull
-			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: vault.URL()}
+			w.posture = "full"
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{NMIGatewayURL: vault.URL()}
 			merchant := cfgMerchant(w.cfg, "alpha")
 			merchant.PSPs = billing.PSPs{"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "sdk-vault", SecurityKey: "critical-sdk-vault", TokenizationKey: "critical-sdk-tokenization"}.PSPConfig()}
 			merchant.CardVault = "nmi"
@@ -252,13 +252,8 @@ func TestPublicSDK(t *testing.T) {
 		// What the client once refused itself the server now answers, in
 		// process and over HTTP alike.
 		for _, client := range []*openrails.Client{a.alpha, a.alphaRemote} {
-			_, err := client.Admit(t.Context(), nil)
 			var refused *billing.StatusError
-			require.ErrorAs(t, err, &refused)
-			require.Equal(t, billing.CodeInvalidParam, refused.Code)
-			require.NotNil(t, refused.Param)
-			require.Equal(t, "items", *refused.Param)
-			_, err = client.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{Amount: 1, Currency: "usd", Source: "probe", SourceID: "probe"}})
+			_, err := client.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{Amount: 1, Currency: "usd", Source: "probe", SourceID: "probe"}})
 			require.ErrorAs(t, err, &refused)
 			require.Equal(t, billing.CodeInvalidParam, refused.Code)
 			// No URL carries an empty path segment: refused before any I/O.

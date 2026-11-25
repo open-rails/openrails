@@ -17,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/logx"
@@ -44,11 +43,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	r.Vault = conn
 	var source merchantdocs.Source = merchantdocs.NewFileSource()
 	if conn.KV != nil {
-		prefix := ""
-		if r.Config.Vault != nil {
-			prefix = r.Config.Vault.ScopePrefix
-		}
-		if source, err = merchantdocs.NewVaultSource(r.Log, conn.KV, prefix); err != nil {
+		if source, err = merchantdocs.NewVaultSource(r.Log, conn.KV, r.Config.Vault.ScopePrefix); err != nil {
 			// vault.scope_prefix is malformed, so Vault is unusable
 			// (vaultconn.Open): the default prefix is never read.
 			source, _ = merchantdocs.NewVaultSource(r.Log, conn.KV, "")
@@ -65,11 +60,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	// The merchant purge answers to the kill switch and per-merchant policy
 	// that hold a mass cancellation, and queues its Vault cleanup with itself.
 	svc.WithDestructivePolicy(destructive.New(r.DB)).WithJobs(r.DB)
-	overlap, err := config.WebhookSecretOverlapDuration(r.Config)
-	if err != nil {
-		overlap = config.DefaultWebhookSecretOverlap
-	}
-	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap).WithDataLinkPacing(r.DataLinkPacing())
+	svc.WithClock(r.Clock).WithDataLinkPacing(r.DataLinkPacing()).WithDataLinkURL(r.ProviderEndpoints.CCBillDataLinkURL)
 	if r.NMIClients != nil {
 		svc.WithNMIWire(r.NMIClients.Wire)
 	}

@@ -3,12 +3,14 @@ package handlers
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 
 	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 )
@@ -56,7 +58,7 @@ func ImportBillingArchive(r *httprequest.Request) {
 		writeMerchantArchiveError(r, nil)
 		return
 	}
-	result, err := merchantarchive.Restore(r.Request.Context(), r.State.DB, mid, r.Request.Body)
+	result, err := merchantarchive.Restore(r.Request.Context(), r.State.DB, r.State.Clock, mid, r.Request.Body)
 	if err != nil {
 		writeMerchantArchiveError(r, err)
 		return
@@ -98,7 +100,19 @@ func writeMerchantArchiveError(r *httprequest.Request, err error) {
 			detail.Metadata = map[string]any{"table": failure.Table, "count": failure.Count}
 		}
 	}
-	// Do not expose PostgreSQL failing-row details or archive/provider bytes.
+	// Do not expose PostgreSQL failing-row details or archive/provider bytes;
+	// the operator's log keeps the cause.
+	if err != nil {
+		cause := err
+		if failure != nil && failure.Err != nil {
+			cause = failure.Err
+		}
+		level, msg := slog.LevelWarn, "billing archive refused"
+		if status >= http.StatusInternalServerError {
+			level, msg = slog.LevelError, "billing archive failed"
+		}
+		r.Log.Log(r.Request.Context(), level, msg, logx.Err(err), "cause", logx.Redact(cause.Error()), "code", detail.Code)
+	}
 	detail.RequestID = r.RequestID()
 	r.JSON(status, map[string]any{"error": detail})
 }

@@ -6,8 +6,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 
 | Code | Status | Type | Meaning |
 |---|---|---|---|
-| `admission_captured` | 409 | `invalid_request_error` | The admission was captured; it can no longer be released. |
-| `admission_not_found` | 404 | `invalid_request_error` | No admission was made under this request id. |
 | `alert_email_required` | 409 | `invalid_request_error` | The merchant has no alert_email to send a test message to. |
 | `already_owned` | 409 | `invalid_request_error` | The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume. |
 | `application_required` | 403 | `authorization_error` | The route is your backend's: it takes an application's credential, never a person's. |
@@ -22,6 +20,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `billing_archive_platform_cards` | 409 | `invalid_request_error` | The merchant holds cards in the platform vault; export or remove them first. |
 | `billing_archive_unavailable` | 500 | `api_error` | The billing archive operation failed. |
 | `billing_archive_unsupported_state` | 409 | `invalid_request_error` | The merchant has state that cannot safely be moved. |
+| `billing_details_required` | 400 | `invalid_request_error` | A billing detail the merchant's checkout.billing_fields require of a new card is missing; param names it. |
 | `billing_policy_not_found` | 404 | `invalid_request_error` | The billing policy does not exist. |
 | `cancel_unsupported_on_rail` | 400 | `invalid_request_error` | This rail has no cancel operation. |
 | `captcha_invalid` | 403 | `invalid_request_error` | The captcha token was rejected. |
@@ -59,11 +58,10 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `embed_origins_required` | 400 | `invalid_request_error` | An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
 | `entitlement_required` | 403 | `invalid_request_error` | A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks. |
 | `event_cursor_expired` | 410 | `invalid_request_error` | The event cursor is no longer retained; resynchronize current state. |
-| `event_store_required` | 409 | `invalid_request_error` | The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off. |
+| `event_store_required` | 409 | `invalid_request_error` | The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `finding_requires_merchant_config` | 409 | `invalid_request_error` | The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config. |
-| `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant, or names an invalid invoker. |
 | `idempotency_key_in_use` | 409 | `invalid_request_error` | The request first sent with this Idempotency-Key is still running; retry once it finishes. |
@@ -82,7 +80,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
 | `lease_not_found` | 404 | `invalid_request_error` | No lease of the merchant has this id, which is older than the replay horizon; start a new lease. |
-| `lease_not_held` | 409 | `invalid_request_error` | The admission names a lease that is closed or never synced, so it cannot own the hold. |
 | `limit_not_found` | 404 | `invalid_request_error` | The catalog declares no limit under this key. |
 | `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
 | `merchant_mismatch` | 412 | `invalid_request_error` | The credential is bound to a different merchant than OpenRails-Expected-Merchant; the operation was not executed. |
@@ -94,7 +91,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `meter_rate_card_conflict` | 409 | `invalid_request_error` | The meter and its rate card disagree. |
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |
 | `metrics_query_invalid` | 400 | `invalid_request_error` | The metrics query is invalid; metadata.errors lists why. |
-| `model_unavailable` | 502 | `api_error` | The language model did not answer; retry, or ask a narrower question. |
 | `order_action_not_allowed` | 409 | `invalid_request_error` | The order's origin or status does not allow this action. |
 | `order_attempt_closed` | 409 | `invalid_request_error` | The order attempt already completed or was canceled. |
 | `order_attempt_expired` | 410 | `invalid_request_error` | The order attempt expired before it was paid. |
@@ -138,6 +134,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `price_increase_notice_too_short` | 422 | `invalid_request_error` | effective_at is inside the merchant's notice window for a price increase. |
 | `price_key_cadence_conflict` | 409 | `invalid_request_error` | The product's default price key is held by a price on another cadence. |
 | `price_key_not_found` | 404 | `invalid_request_error` | No price holds this key. |
+| `price_migration_in_progress` | 409 | `invalid_request_error` | The same price migration is being created by another request; retry once it answers. |
 | `price_migration_not_found` | 404 | `invalid_request_error` | The price migration does not exist. |
 | `price_not_found` | 404 | `invalid_request_error` | The price does not exist. |
 | `price_not_sellable` | 400 | `invalid_request_error` | None of the price's methods can sell it. |
@@ -148,7 +145,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `provider_cancel_held` | 409 | `invalid_request_error` | Cancelling needs a destructive provider action that is not armed for this merchant. |
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
 | `provider_price_unreadable` | 502 | `api_error` | The provider did not answer for the provider price's terms; retry. |
-| `provider_writes_disabled` | 503 | `api_error` | Provider writes are off for the merchant, so it takes no payment; the message names why (provider_write_mode or the merchant's write posture). |
+| `provider_writes_disabled` | 503 | `api_error` | Provider writes are off for the merchant, so it takes no payment; the message names why (the merchant's write posture). |
 | `provider_writes_held` | 409 | `invalid_request_error` | The merchant's readonly write posture holds changes that move money or write to a provider; the proposal stays open. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |
 | `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials, or answered that they are not in the PSP's declared environment. |

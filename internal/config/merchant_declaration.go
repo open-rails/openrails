@@ -208,7 +208,7 @@ var ErrDeclarationBesideVault = errors.New("Vault holds merchant configuration (
 
 // RefuseDeclarationBesideVault refuses m when Vault is the source and m
 // declares configuration, naming its fields.
-func RefuseDeclarationBesideVault(cfg *Config, slug string, m billing.MerchantDocument) error {
+func RefuseDeclarationBesideVault(cfg *billing.Config, slug string, m billing.MerchantDocument) error {
 	if MerchantConfigKVMount(cfg) == "" {
 		return nil
 	}
@@ -224,7 +224,7 @@ func RefuseDeclarationBesideVault(cfg *Config, slug string, m billing.MerchantDo
 // twice refuses every entry declaring it; an Issuer that is not an absolute
 // https URL (http on a loopback host), or that another entry declares too, is
 // bound to no merchant. Each PSP is checked as its merchant is provisioned.
-func DeclaredMerchants(cfg *Config) (out []billing.MerchantDeclaration, refused []Degradation) {
+func DeclaredMerchants(cfg *billing.Config) (out []billing.MerchantDeclaration, refused []Degradation) {
 	bySlug := map[string][]int{}
 	for i, m := range cfg.Merchants {
 		if err := billing.ValidateMerchantSlug(m.Slug); err != nil {

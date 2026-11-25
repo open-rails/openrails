@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -327,7 +328,8 @@ func TestUsageStore(t *testing.T) {
 		nextMonth(w)
 		closeMonths(t, fleet)
 		require.EqualValues(t, 200, owed(t, w.alpha, customer))
-		w.clock.Advance(19 * 24 * time.Hour)
+		// Late, and still within the 35-day ingest window of its occurrence.
+		w.clock.Advance(2 * 24 * time.Hour)
 		late := usageInput(customer, "late", 1)
 		late.OccurredAt = occurred
 		settleUsage(t, w.alpha, lease, numbered(2, late)...)
@@ -374,18 +376,38 @@ products:
 		require.Zero(t, customerLimit(t, w.alpha, customer, "rolling").Used, "the rolling window passed")
 	})
 
-	t.Run("OR-J24-S52/new-refuses-a-database-with-unposted-usage-without-its-store", func(t *testing.T) {
+	t.Run("OR-J24-S52/a-database-with-unposted-usage-starts-without-its-store-and-opens-a-finding", func(t *testing.T) {
 		w := newWorld(t)
 		usageMeter(t, w.alpha, 100)
 		customer, _ := fundedCustomer(t, w)
 		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "unposted", 2))...)
+		other := billing.CustomerID(uuid.New())
+		fund(t, w.alpha, other, "funded", 500)
 		ctx := t.Context()
 		require.NoError(t, w.engine.Close(context.Background()))
+		w.engine = nil
+
+		// Without its store the deployment starts: the merchant's usage is
+		// refused and named in a finding, the customer whose usage waits for
+		// the store cannot read or move its balance, and every other customer
+		// bills as before.
 		without := w.deps
 		without.ClickHouse = nil
-		err := openrailsNewErr(ctx, w.cfg, without)
-		require.ErrorIs(t, err, billing.ErrEventStoreRequired)
-		require.ErrorContains(t, err, w.alpha.MerchantID().String())
+		degraded, err := openrails.New(ctx, w.cfg, without)
+		require.NoError(t, err)
+		client, err := declaredMerchant(degraded, "alpha")
+		require.NoError(t, err)
+		findings, err := client.ListFindings(ctx, billing.FindingListParams{Type: "consistency.unposted_usage"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1, "the merchant's unposted usage is a finding")
+		_, err = client.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usageInput(other, "metered", 1))})
+		requireNoStore(t, err)
+		_, err = client.GetBalance(ctx, customer, billing.GetBalanceParams{Currency: "USD"})
+		requireNoStore(t, err)
+		balance(t, client, other, 500, 0, 500)
+		_, err = client.StartRunningCharge(ctx, billing.StartRunningChargeParams{Reference: "without-the-store", CustomerID: other, Currency: "USD", RatePerHour: 3600})
+		require.NoError(t, err, "running charges need only PostgreSQL")
+		require.NoError(t, degraded.Close(context.Background()))
 
 		// A lost store: an empty one is refused, and attaching it discards the
 		// unposted usage only when told to, on the record.
@@ -405,7 +427,7 @@ products:
 		engine, err := openrails.New(ctx, emptied, w.deps)
 		require.NoError(t, err)
 		w.engine = engine
-		client, err := declaredMerchant(engine, "alpha")
+		client, err = declaredMerchant(engine, "alpha")
 		require.NoError(t, err)
 		balance(t, client, customer, 1000, 0, 1000)
 	})
@@ -426,8 +448,11 @@ products:
 		w := a.world
 		require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND invoker != '' AND metadata != ''"))
 
+		// The store's part is a job River retries until the store answers.
+		events := erasureEvents(t, w)
 		status, raw = a.request(t, "DELETE", "/v1/app/scim/v2/Users/"+id, provisioner.Token, nil)
 		require.Equal(t, http.StatusNoContent, status, string(raw))
+		require.Equal(t, river.EventKindJobCompleted, awaitErasure(t, events))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m} AND (invoker != '' OR metadata != '')"))
 		require.Zero(t, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker != ''"))
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m}"), "quantities stay")
@@ -449,7 +474,7 @@ products:
 		require.Error(t, err, "usage needs an event store")
 
 		occupied, client := archiveTarget(t, source)
-		require.NoError(t, occupied.deps.ClickHouse.Exec(t.Context(), "INSERT INTO `"+occupied.schema+"`.usage_events (merchant_id, event_id, customer_id, currency, event_type, outcome) VALUES (toUUID(?), generateUUIDv4(), toUUID(?), 'USD', 'compute', 'succeeded')",
+		require.NoError(t, occupied.deps.ClickHouse.Exec(t.Context(), "INSERT INTO `"+occupied.schema+"`.usage_events (merchant_id, event_id, customer_id, currency, event_type, outcome, occurred_at, admitted_at, ingested_at) VALUES (toUUID(?), generateUUIDv4(), toUUID(?), 'USD', 'compute', 'succeeded', now64(6), now64(6), now64(6))",
 			source.alpha.MerchantID().String(), customer.String()))
 		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 		require.Error(t, err, "a merchant with usage in the store is not empty")

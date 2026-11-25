@@ -1,12 +1,14 @@
 // Package identity is who a merchant's customers are: their contacts, read
 // from the host's directory in process (Deps.UserInfo), else from the copy
-// OpenRails keeps of what the merchant's directory pushed over SCIM and
-// verified access tokens claimed. Which one is decided at construction.
+// OpenRails keeps (Kept): what the merchant's directory pushed over SCIM, and
+// what the access tokens of the customers it admits claimed (Kept.Record).
+// Which one is decided at construction.
 package identity
 
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,9 +48,27 @@ func (c Contact) Customer() *billing.CustomerContact {
 type Directory interface {
 	Contacts(ctx context.Context, merchantID billing.MerchantID, ids []uuid.UUID) (map[uuid.UUID]Contact, error)
 	// Search returns at most limit contacts whose email, username or name
-	// contains query, ignoring case.
+	// contains query, ignoring case: people the directory holds, customers
+	// of the merchant or not.
 	Search(ctx context.Context, merchantID billing.MerchantID, query string, limit int) ([]Contact, error)
+	// SearchCustomers is Search kept to the merchant's customers: at most
+	// limit, none missed for people who are not its customers, those whose
+	// username or email is query first, then the newest. A search it cannot
+	// answer in full within its bounds is ErrSearchTooBroad.
+	SearchCustomers(ctx context.Context, merchantID billing.MerchantID, query string, limit int) ([]Contact, error)
 }
+
+// ErrSearchTooBroad is a customer search matching more people than one
+// search reads, of a merchant with more customers than one search reads.
+var ErrSearchTooBroad = errors.New("identity: the search matches too many people to search in full")
+
+// Bounds of one customer search: the merchant's customers it reads itself,
+// and the matches of a directory it reads in full. It asks for one more:
+// AuthKit answers at most 1,000, so 999 is the most it can show complete.
+const (
+	customerScan = 5000
+	searchWindow = 999
+)
 
 // Live asks the host's directory on every read. A customer is its issuer's
 // subject (OIDC Core §5.7), so each is asked of its issuer's directory: the
@@ -58,6 +78,59 @@ type Live struct {
 	Lookup userinfo.Lookup
 	// DB holds each customer's issuer.
 	DB *db.DB
+	// rows reads the merchant's customers; nil reads DB.
+	rows customerRows
+}
+
+// customerRow is one of the merchant's customers as a live directory reads it.
+type customerRow struct {
+	id        uuid.UUID
+	issuer    string
+	createdAt time.Time
+}
+
+// customerRows is a live directory's read of the merchant's own customers.
+type customerRows interface {
+	countUpTo(ctx context.Context, mid billing.MerchantID, n int) (int, error)
+	// newest is a page of customers, newest first, after the row given.
+	newest(ctx context.Context, mid billing.MerchantID, after *customerRow, limit int) ([]customerRow, error)
+	byIDs(ctx context.Context, mid billing.MerchantID, ids []uuid.UUID) ([]customerRow, error)
+}
+
+func (l Live) customers() customerRows {
+	if l.rows != nil {
+		return l.rows
+	}
+	return dbCustomers{l.DB}
+}
+
+type dbCustomers struct{ db *db.DB }
+
+func (d dbCustomers) countUpTo(ctx context.Context, mid billing.MerchantID, n int) (int, error) {
+	count, err := d.db.Gen(ctx).CountCustomersUpTo(ctx, gen.CountCustomersUpToParams{MerchantID: mid.UUID(), RowLimit: int32(n)}) // #nosec G115 -- a bound of this package
+	return int(count), err
+}
+
+func (d dbCustomers) newest(ctx context.Context, mid billing.MerchantID, after *customerRow, limit int) ([]customerRow, error) {
+	params := gen.ListCustomersParams{MerchantID: mid.UUID(), RowLimit: int32(limit)} // #nosec G115 -- a bound of this package
+	if after != nil {
+		params.AfterAt, params.AfterID = &after.createdAt, &after.id
+	}
+	rows, err := d.db.Gen(ctx).ListCustomers(ctx, params)
+	return customerRowsOf(rows), err
+}
+
+func (d dbCustomers) byIDs(ctx context.Context, mid billing.MerchantID, ids []uuid.UUID) ([]customerRow, error) {
+	rows, err := d.db.Gen(ctx).ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+	return customerRowsOf(rows), err
+}
+
+func customerRowsOf(rows []gen.BillingCustomer) []customerRow {
+	out := make([]customerRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, customerRow{id: row.ID, issuer: deref(row.Issuer), createdAt: row.CreatedAt})
+	}
+	return out
 }
 
 // IssuerLookup is a directory with a lookup per merchant and issuer: a
@@ -83,15 +156,13 @@ func (l Live) directory(mid billing.MerchantID, issuer string) userinfo.Lookup {
 // issuers is the issuer of each of mid's customers in ids: "" for the host's
 // own users and for ids that are no customer yet.
 func (l Live) issuers(ctx context.Context, mid billing.MerchantID, ids []uuid.UUID) (map[uuid.UUID]string, error) {
-	rows, err := l.DB.Gen(ctx).ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+	rows, err := l.customers().byIDs(ctx, mid, ids)
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[uuid.UUID]string, len(rows))
 	for _, row := range rows {
-		if row.Issuer != nil {
-			out[row.ID] = *row.Issuer
-		}
+		out[row.id] = row.issuer
 	}
 	return out, nil
 }
@@ -173,6 +244,143 @@ func (l Live) Search(ctx context.Context, mid billing.MerchantID, query string, 
 	return out, nil
 }
 
+// SearchCustomers reads the merchant's own customers' contacts when it has
+// few enough, and matches them here; else it filters each directory's
+// matches to its customers. A directory never knows whose customer a person
+// is, so its first limit matches can all be someone else's.
+func (l Live) SearchCustomers(ctx context.Context, mid billing.MerchantID, query string, limit int) ([]Contact, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || limit < 1 {
+		return nil, nil
+	}
+	customers, err := l.customers().countUpTo(ctx, mid, customerScan+1)
+	if err != nil {
+		return nil, err
+	}
+	if customers <= customerScan {
+		return l.scanCustomers(ctx, mid, query, limit)
+	}
+	return l.searchDirectories(ctx, mid, query, limit)
+}
+
+// scanCustomers matches every customer's contact, newest first, a page at a
+// time.
+func (l Live) scanCustomers(ctx context.Context, mid billing.MerchantID, query string, limit int) ([]Contact, error) {
+	var found []Contact
+	created := map[uuid.UUID]time.Time{}
+	var after *customerRow
+	for {
+		rows, err := l.customers().newest(ctx, mid, after, liveBatch)
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		after = &rows[len(rows)-1]
+		ids := make([]uuid.UUID, 0, len(rows))
+		for _, row := range rows {
+			ids, created[row.id] = append(ids, row.id), row.createdAt
+		}
+		contacts, err := l.Contacts(ctx, mid, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			if contact, ok := contacts[id]; ok && contact.matches(query) {
+				found = append(found, contact)
+			}
+		}
+		if len(rows) < liveBatch {
+			break
+		}
+	}
+	return ranked(found, created, query, limit), nil
+}
+
+// searchDirectories keeps each directory's matches that are the merchant's
+// customers of its issuer; a directory with more matches than it reads in
+// full may hide one.
+func (l Live) searchDirectories(ctx context.Context, mid billing.MerchantID, query string, limit int) ([]Contact, error) {
+	searched := []string{""}
+	if m, ok := l.Lookup.(IssuerLookup); ok {
+		more, err := m.Issuers(ctx, mid)
+		if err != nil {
+			return nil, err
+		}
+		searched = append(searched, more...)
+	}
+	var found []Contact
+	created := map[uuid.UUID]time.Time{}
+	truncated := false
+	for _, issuer := range searched {
+		directory := l.directory(mid, issuer)
+		if directory == nil {
+			continue
+		}
+		matches, err := directory.Search(ctx, query, searchWindow+1)
+		if err != nil {
+			return nil, err
+		}
+		truncated = truncated || len(matches) > searchWindow
+		var contacts []Contact
+		var ids []uuid.UUID
+		for _, u := range matches {
+			if contact, ok := liveContact(u); ok {
+				contacts, ids = append(contacts, contact), append(ids, contact.CustomerID)
+			}
+		}
+		rows, err := l.customers().byIDs(ctx, mid, ids)
+		if err != nil {
+			return nil, err
+		}
+		of := make(map[uuid.UUID]string, len(rows))
+		for _, row := range rows {
+			of[row.id], created[row.id] = row.issuer, row.createdAt
+		}
+		for _, contact := range contacts {
+			if customerIssuer, ok := of[contact.CustomerID]; ok && customerIssuer == issuer {
+				found = append(found, contact)
+			}
+		}
+	}
+	if truncated && len(found) < limit {
+		return nil, ErrSearchTooBroad
+	}
+	return ranked(found, created, query, limit), nil
+}
+
+// ranked is found with the contacts whose username or email is query first,
+// then the newest customers, at most limit.
+func ranked(found []Contact, created map[uuid.UUID]time.Time, query string, limit int) []Contact {
+	slices.SortStableFunc(found, func(a, b Contact) int {
+		if ea, eb := a.exact(query), b.exact(query); ea != eb {
+			if ea {
+				return -1
+			}
+			return 1
+		}
+		return created[b.CustomerID].Compare(created[a.CustomerID])
+	})
+	return found[:min(len(found), limit)]
+}
+
+// matches is the directory's search, applied to a contact it answered.
+func (c Contact) matches(query string) bool {
+	query = strings.ToLower(query)
+	for _, v := range []string{c.Email, c.Username, c.Name} {
+		if strings.Contains(strings.ToLower(v), query) {
+			return true
+		}
+	}
+	return false
+}
+
+// exact: the contact's username or email is query, ignoring case.
+func (c Contact) exact(query string) bool {
+	return strings.EqualFold(c.Username, query) || strings.EqualFold(c.Email, query)
+}
+
 // liveContact is a directory user whose id is a customer id: the host's
 // subject UUID.
 func liveContact(u userinfo.User) (Contact, bool) {
@@ -226,6 +434,26 @@ func (k Kept) Search(ctx context.Context, merchantID billing.MerchantID, query s
 	return out, nil
 }
 
+func (k Kept) SearchCustomers(ctx context.Context, merchantID billing.MerchantID, query string, limit int) ([]Contact, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || limit < 1 {
+		return nil, nil
+	}
+	rows, err := k.DB.Gen(ctx).SearchCustomerContactsOfCustomers(ctx, gen.SearchCustomerContactsOfCustomersParams{
+		MerchantID: merchantID.UUID(), Pattern: "%" + likeEscaper.Replace(query) + "%", Query: query, RowLimit: int32(min(limit, maxSearch)), // #nosec G115 -- bounded by maxSearch
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Contact, 0, len(rows))
+	for _, row := range rows {
+		if contact, ok := KeptContact(row); ok {
+			out = append(out, contact)
+		}
+	}
+	return out, nil
+}
+
 // maxSearch bounds one search of the kept copy.
 const maxSearch = 1000
 
@@ -247,14 +475,51 @@ func deref(s *string) string {
 	return *s
 }
 
-// Claims are the contact claims of a verified access token: OIDC's email
-// (when verified), name, preferred_username and updated_at. An empty one is
-// absent and keeps the recorded value.
+// Claims are the contact claims of a verified access token (OpenID Connect
+// Core §5.1): email with email_verified, name, preferred_username and
+// updated_at. An empty or oversized one is absent and keeps the recorded
+// value; an email counts only when verified.
 type Claims struct {
-	Email     string
-	Name      string
-	Username  string
-	UpdatedAt *time.Time
+	Email         string
+	EmailVerified bool
+	Name          string
+	Username      string
+	UpdatedAt     *time.Time
+}
+
+// Record keeps the contact a verified token claims for customer: a new
+// contact at once, a kept one only when the claims are dated no earlier than
+// it and differ, so a repeated token writes nothing. Undated claims replace
+// only an undated contact: never a directory's dated push, nor an erasure. A
+// username another provisioned contact holds is left out.
+func (k Kept) Record(ctx context.Context, merchantID billing.MerchantID, customer uuid.UUID, c Claims) error {
+	params := gen.RecordCustomerContactClaimsParams{
+		MerchantID: merchantID.UUID(), CustomerID: customer,
+		DisplayName: bounded(c.Name, 256), UserName: bounded(c.Username, 256), ClaimsUpdatedAt: c.UpdatedAt,
+	}
+	if email := bounded(c.Email, 320); c.EmailVerified && email != nil && strings.Contains(*email, "@") {
+		params.Email = email
+	}
+	for {
+		if params.Email == nil && params.DisplayName == nil && params.UserName == nil {
+			return nil
+		}
+		err := k.DB.Gen(ctx).RecordCustomerContactClaims(ctx, params)
+		if params.UserName == nil || !db.IsUniqueViolation(err) {
+			return err
+		}
+		params.UserName = nil
+	}
+}
+
+// bounded is a claim the kept copy can hold: trimmed, nil when empty or
+// longer than limit bytes.
+func bounded(v string, limit int) *string {
+	v = strings.TrimSpace(v)
+	if v == "" || len(v) > limit {
+		return nil
+	}
+	return &v
 }
 
 // ErrUsernameUnknown is a username no contact holds, or more than one does.
@@ -287,8 +552,55 @@ func (c Customers) EmailIdentity(ctx context.Context, userID string) (string, st
 	return contact.Username, contact.Email, true, nil
 }
 
-// usernameSearch bounds the candidates a username lookup reads.
-const usernameSearch = 50
+// holderSearch bounds the customers an exact lookup reads: they come
+// ranked, those holding the value first.
+const holderSearch = 50
+
+// Holders are the contacts whose field (its username or email) is value,
+// ignoring case: the merchant's customers holding it when any does, else
+// the people the directory holds among the matches it reads in full; none
+// when the merchant's customers cannot all be read. A search's first
+// matches can all merely contain value.
+func Holders(ctx context.Context, d Directory, mid billing.MerchantID, value string, field func(Contact) string) ([]Contact, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || d == nil {
+		return nil, nil
+	}
+	exact := func(found []Contact) []Contact {
+		var out []Contact
+		seen := map[uuid.UUID]bool{}
+		for _, c := range found {
+			if strings.EqualFold(strings.TrimSpace(field(c)), value) && !seen[c.CustomerID] {
+				seen[c.CustomerID] = true
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	customers, err := d.SearchCustomers(ctx, mid, value, holderSearch)
+	if errors.Is(err, ErrSearchTooBroad) {
+		// Its customers could not all be read: the holder is unknown, not
+		// whoever of the whole directory holds it.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if held := exact(customers); len(held) > 0 {
+		return held, nil
+	}
+	people, err := d.Search(ctx, mid, value, searchWindow+1)
+	if err != nil {
+		return nil, err
+	}
+	return exact(people), nil
+}
+
+// Username is a contact's username, as Holders reads it.
+func Username(c Contact) string { return c.Username }
+
+// Email is a contact's email, as Holders reads it.
+func Email(c Contact) string { return c.Email }
 
 // GetUserIDByUsername is the one customer whose contact holds username
 // (case-insensitively).
@@ -301,18 +613,12 @@ func (c Customers) GetUserIDByUsername(ctx context.Context, username string) (st
 	if err != nil {
 		return "", err
 	}
-	found, err := c.Directory.Search(ctx, mid, username, usernameSearch)
+	held, err := Holders(ctx, c.Directory, mid, username, Username)
 	if err != nil {
 		return "", err
 	}
-	var match []uuid.UUID
-	for _, contact := range found {
-		if strings.EqualFold(contact.Username, username) {
-			match = append(match, contact.CustomerID)
-		}
-	}
-	if len(match) != 1 {
+	if len(held) != 1 {
 		return "", ErrUsernameUnknown
 	}
-	return match[0].String(), nil
+	return held[0].CustomerID.String(), nil
 }

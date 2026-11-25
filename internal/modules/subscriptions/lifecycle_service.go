@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -45,7 +44,7 @@ import (
 // including membership creation, renewal, cancellation, and expiration
 type SubscriptionLifecycleService struct {
 	DB                  *db.DB
-	Config              *config.Config
+	Config              *billing.Config
 	clock               clockwork.Clock
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
@@ -113,7 +112,7 @@ func (s *SubscriptionLifecycleService) Clock() clockwork.Clock {
 }
 
 // SetConfig sets the config for feature flag access
-func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
+func (s *SubscriptionLifecycleService) SetConfig(cfg *billing.Config) {
 	s.Config = cfg
 }
 
@@ -524,6 +523,17 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if err := subService.Create(ctx, subscription); err != nil {
 			return nil, nil, fmt.Errorf("failed to create subscription: %w", err)
 		}
+		// A successor keeps the checkout that won its customer, before any
+		// of its bills is written.
+		if from := params.succeeds(); from != nil {
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := dbb.Gen(ctx).InheritSubscriptionCheckout(ctx, gen.InheritSubscriptionCheckoutParams{MerchantID: mid.UUID(), ID: subscription.ID, PredecessorID: *from}); err != nil {
+				return nil, nil, err
+			}
+		}
 		s.Log.InfoContext(ctx, "Created new subscription record for membership", "subscription_id", subscription.ID, "user_id", subscription.CustomerID.String(), "price_id", subscription.PriceID, "rail", subscription.Rail, "rail_subscription_id", subscription.RailSubscriptionID, "period_start", periodStartsAt, "period_end", periodEndsAt)
 	}
 
@@ -589,7 +599,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			data.Amount, data.Currency = &amount, catalogwire.Currency(currency)
 		}
 		notification := &models.NotificationEvent{
-			ID:         uuid.NewSHA1(subscription.ID, []byte("premium_started")),
+			ID:         uuidutil.ChildV7(subscription.ID, "premium_started"),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumStarted,
 			Data:       data,
@@ -1458,7 +1468,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	// The committed revision identifies this cancellation, including retries
 	// after rollback and a later revoke of a period-end cancellation.
 	notification := &models.NotificationEvent{
-		ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("canceled:%d", subscription.LifecycleRev))),
+		ID:         uuidutil.ChildV7(subscription.ID, fmt.Sprintf("canceled:%d", subscription.LifecycleRev)),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
 		Data:       billing.NotificationData{Reason: string(reason), SubscriptionID: billing.SubscriptionID(subscription.ID), ProductID: billing.ProductID(subscription.ProductID)},
@@ -1835,7 +1845,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		}
 
 		notification := &models.NotificationEvent{
-			ID:         uuid.NewSHA1(subscription.ID, []byte(fmt.Sprintf("expired:%d", subscription.LifecycleRev))),
+			ID:         uuidutil.ChildV7(subscription.ID, fmt.Sprintf("expired:%d", subscription.LifecycleRev)),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumEnded,
 			Data:       billing.NotificationData{Reason: string(PremiumEndReasonExpired), SubscriptionID: billing.SubscriptionID(subscription.ID), ProductID: billing.ProductID(subscription.ProductID)},
@@ -2256,7 +2266,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			data.NextAttemptAt = nil
 		}
 		notification := &models.NotificationEvent{
-			ID:         uuid.NewSHA1(params.FailureID, []byte("payment_failure")),
+			ID:         uuidutil.ChildV7(params.FailureID, "payment_failure"),
 			CustomerID: subscription.CustomerID,
 			EventType:  eventType,
 			Data:       data,

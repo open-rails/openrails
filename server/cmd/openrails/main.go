@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -19,9 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
-	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/hostdeps"
 )
@@ -47,27 +46,10 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to get config flag: %w", err)
 			}
 
-			// Flags are a koanf confmap overlay above env: flag beats env
-			// beats yaml. They never write the process env.
-			var loadOpts []hostconfig.LoadOption
-			if mode, err := cmd.Flags().GetString("provider-write-mode"); err == nil && strings.TrimSpace(mode) != "" {
-				loadOpts = append(loadOpts, hostconfig.WithOverride("provider_write_mode", strings.TrimSpace(mode)))
+			if cmd.Flags().Changed("provider-write-mode") {
+				return fmt.Errorf("--provider-write-mode was removed: %s", hostconfig.WritePostureHint)
 			}
-
-			load := hostconfig.LoadForCommand
-			if cmd.Name() == "run-server" || cmd.Name() == "run-worker" {
-				load = hostconfig.Load
-			}
-			if isDatabaseOnlyBillingCommand(cmd) {
-				load = hostconfig.LoadDatabaseForCommand
-			}
-			if cmd.Name() == "workers" || cmd.Name() == "provider-refresh" || cmd.Name() == "list" && cmd.Parent() != nil && cmd.Parent().Name() == "destructive-holds" {
-				load = hostconfig.LoadDatabaseForCommand
-			}
-			if cmd.Parent() != nil && (cmd.Parent().Name() == "merchants" && (cmd.Name() == "list" || cmd.Name() == "get") || cmd.Parent().Name() == "merchant" && cmd.Name() == "purge") {
-				load = hostconfig.LoadDirectoryForCommand
-			}
-			cfg, err := load(configPath, loadOpts...)
+			cfg, err := hostconfig.Load(configPath)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
@@ -80,7 +62,7 @@ func newRootCmd() *cobra.Command {
 				slog.Info("config: loaded environment overrides", "path", cfg.EnvFile)
 			}
 
-			cmd.SetContext(hostconfig.NewContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config), cfg))
+			cmd.SetContext(hostconfig.NewContext(cmd.Context(), cfg))
 			return nil
 		},
 		Long:    "Standalone OpenRails server for payments, credits, usage, and subscriptions",
@@ -90,8 +72,9 @@ func newRootCmd() *cobra.Command {
 
 	rootCmd.PersistentFlags().
 		StringP("config", "c", "config.yaml", "Path to config file")
-	rootCmd.PersistentFlags().
-		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required to boot)")
+	// Retired: kept only to refuse it by name.
+	rootCmd.PersistentFlags().String("provider-write-mode", "", "")
+	_ = rootCmd.PersistentFlags().MarkHidden("provider-write-mode")
 
 	serverCmd := &cobra.Command{
 		Use:   "run-server",
@@ -145,13 +128,12 @@ func newRootCmd() *cobra.Command {
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, newMigrateStatusCmd())
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newDumpCatalogCmd(), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newNMICmd(), newSolanaPayCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd(), newUsageCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newDumpCatalogCmd(), newCatalogCmd(), newPruneCmd(), newProposalsCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newNMICmd(), newSolanaPayCmd(), newBookCmd(), newMerchantCmd(), newMerchantsCmd(), newWorkersCmd(), newProviderRefreshCmd(), newAdminLockoutsCmd(), newDestructiveHoldsCmd(), newUsageCmd())
 	rootCmd.AddCommand(versionCmd)
 	return rootCmd
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
-	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	noWorkers, err := cmd.Flags().GetBool("no-workers")
 	if err != nil {
 		return fmt.Errorf("failed to read no-workers flag: %w", err)
@@ -161,7 +143,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
 	slog.Default().Info(buildinfo.Get().String())
-	config.LogStartupStatus(slog.Default(), cfg)
 
 	// The boot waits for the database as long as it takes (a failover, a slow
 	// start); only a stop signal ends the wait. Meanwhile the process is not
@@ -191,8 +172,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Provision the manifest's merchants; without Vault the manifest is their
 	// configuration. The conventional file is optional; an explicit manifest
 	// path must exist.
-	listener := hostconfig.FromContext(cmd.Context())
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath); err != nil {
 		return closeOnError(err)
 	}
 	// HTTP never serves webhook and async billing APIs when the workers
@@ -210,8 +190,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 }
 
 func runWorker(cmd *cobra.Command, args []string) error {
-	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	config.LogStartupStatus(slog.Default(), cfg)
 	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
@@ -237,7 +215,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 			slog.Default().ErrorContext(ctx, "Application shutdown encountered issues", logx.Err(err))
 		}
 	}()
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath); err != nil {
 		return err
 	}
 	// Background workers only (no HTTP server); fail fast if River cannot start.
@@ -253,18 +231,15 @@ func runWorker(cmd *cobra.Command, args []string) error {
 // server. Existing single-directory accounts adopt only the explicit platform
 // tenant in configuration, never a generated or inferred merchant identity.
 func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) error {
-	if host == nil || host.Config == nil {
+	if host == nil {
 		return errors.New("standalone config is required")
-	}
-	if err := controlplane.RequireDefaultTenant(host.Auth); err != nil {
-		return err
 	}
 	database, err := openCLIDB(ctx)
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
 	}
 	defer database.Close()
-	if err := engine.Migrate(ctx, database.Pool(), *host.Config); err != nil {
+	if err := engine.Migrate(ctx, database.Pool(), host.Server.Engine); err != nil {
 		return err
 	}
 	if host.ClickHouse != nil {
@@ -273,13 +248,14 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 			return err
 		}
 		defer conn.Close()
-		if err := eventstore.Migrate(ctx, conn, config.ClickHouseDatabase(host.Config), slog.Default()); err != nil {
+		chdb := config.ClickHouseDatabase(&host.Server.Engine)
+		if err := eventstore.Migrate(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)}); err != nil {
 			return err
 		}
 	}
 	// The control plane owns the AuthKit/River schema selection. Preserve its
 	// configuration without building its roles, HTTP handler or job workers.
-	authDatabase := host.Auth.Database
-	authDatabase.RiverSchema = config.RiverSchemaName(host.Config)
-	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{LegacyTenantID: host.Auth.DefaultTenantID})
+	authDatabase := host.Server.Auth.Database
+	authDatabase.RiverSchema = config.RiverSchemaName(&host.Server.Engine)
+	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{Tenancy: host.Server.Auth.Tenancy, Logger: slog.Default()})
 }

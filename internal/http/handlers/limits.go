@@ -122,8 +122,7 @@ func AdjustCustomerLimit(r *httprequest.Request) {
 }
 
 // SyncLeases is a gate's lease sync: its usage settles in order, its
-// in-flight report is replaced, the request holds it releases are released
-// and each view it names is answered. The sync answers 200; each refused item
+// in-flight report is replaced and each view it names is answered. The sync answers 200; each refused item
 // carries its own error.
 func SyncLeases(r *httprequest.Request) {
 	var params billing.SyncLeasesParams

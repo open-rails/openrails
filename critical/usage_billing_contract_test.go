@@ -36,20 +36,19 @@ func runUsageDue(t *testing.T, fleet *river.Client[pgx.Tx]) {
 	}
 }
 
-func usageBillingWorld(t *testing.T, enabled, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
+func usageBillingWorld(t *testing.T, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
 	t.Helper()
-	a, p, customer := usageBillingAccount(t, enabled, manual, configure...)
+	a, p, customer := usageBillingAccount(t, manual, configure...)
 	usageMeter(t, a.alpha, 10_000_000)
 	return a, p, customer
 }
 
 // usageBillingAccount is alice with a saved card and a $30 USD credit line,
-// billed on the 25th.
-func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
+// billed on the 25th: the merchant's usage_billing terms bill it.
+func usageBillingAccount(t *testing.T, manual bool, configure ...func(*world)) (*authorityWorld, *nmiJournal, billing.CustomerID) {
 	t.Helper()
 	changes := append([]func(*world){func(w *world) {
 		w.clock.Advance(time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC).Sub(w.clock.Now()))
-		w.cfg.UsageBillingEnabled = enabled
 		m := cfgMerchant(w.cfg, "alpha")
 		m.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000, DelinquencyFloor: ptr(int64(0))}}}
 		m.ArrearsGraceDays = ptr(0)
@@ -60,7 +59,7 @@ func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*
 	psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
-	status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: p.core.Tokenize(nmimock.Card{Last4: "4242", Exp: "1235"})})
+	status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: p.core.Tokenize(nmimock.Card{Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var saved billing.PaymentMethod
 	require.NoError(t, json.Unmarshal(raw, &saved))
@@ -71,6 +70,15 @@ func usageBillingAccount(t *testing.T, enabled, manual bool, configure ...func(*
 		require.NoError(t, err)
 	}
 	return a, p, customer
+}
+
+// owedAccruedAt is when the earliest owed item an order bills accrued.
+func owedAccruedAt(t *testing.T, w *world, order billing.OrderID) time.Time {
+	t.Helper()
+	var at time.Time
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT min(accrued_at) FROM "+pgx.Identifier{w.schema, "owed_items"}.Sanitize()+" WHERE order_id = $1",
+		order.UUID()).Scan(&at))
+	return at.UTC()
 }
 
 // postUsageMonth ends the month the usage occurred: it posts, and what it
@@ -110,7 +118,7 @@ func TestUsageBillingContracts(t *testing.T) {
 	t.Run("OR-J26-S01", func(t *testing.T) {
 		for _, profile := range []string{"threshold", "monthly-date"} {
 			t.Run(profile, func(t *testing.T) {
-				a, p, customer := usageBillingWorld(t, true, false)
+				a, p, customer := usageBillingWorld(t, false)
 				units, native, cents := int64(3), int64(30_000_000), int64(3000)
 				if profile == "monthly-date" {
 					units, native, cents = 2, 20_000_000, 2000
@@ -142,8 +150,12 @@ func TestUsageBillingContracts(t *testing.T) {
 			})
 		}
 	})
-	t.Run("OR-J26-S02/disabled-host-does-not-collect-automatic-wakeups", func(t *testing.T) {
-		a, p, customer := usageBillingWorld(t, false, false)
+	t.Run("OR-J26-S02/a-merchant-without-usage-terms-bills-no-usage", func(t *testing.T) {
+		a, p, customer := usageBillingWorld(t, false, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.UsageBilling = nil
+			setCfgMerchant(&w.cfg, "alpha", m)
+		})
 		oneUsage(t, a.alpha, usageInput(customer, "debt-without-opt-in", 3))
 		fleet := startFleet(t, a.world)
 		nextMonth(a.world)
@@ -161,7 +173,7 @@ func TestUsageBillingContracts(t *testing.T) {
 	t.Run("OR-J26-S03", func(t *testing.T) {
 		for _, disposition := range []string{"paid", "waived", "uncollectible"} {
 			t.Run(disposition, func(t *testing.T) {
-				a, p, customer := usageBillingWorld(t, true, true)
+				a, p, customer := usageBillingWorld(t, true)
 				oneUsage(t, a.alpha, usageInput(customer, "finished-work", 3))
 				fleet := startFleet(t, a.world)
 				postUsageMonth(t, a.world, fleet)
@@ -213,7 +225,7 @@ func TestUsageBillingContracts(t *testing.T) {
 	t.Run("OR-J26-S04", func(t *testing.T) {
 		for _, disposition := range []string{"paid", "waived"} {
 			t.Run(disposition, func(t *testing.T) {
-				a, p, customer := usageBillingWorld(t, true, true)
+				a, p, customer := usageBillingWorld(t, true)
 				oneUsage(t, a.alpha, usageInput(customer, "overdue-work", 3))
 				fleet := startFleet(t, a.world)
 				postUsageMonth(t, a.world, fleet)
@@ -260,7 +272,7 @@ func TestUsageBillingContracts(t *testing.T) {
 	t.Run("OR-J26-S50", func(t *testing.T) {
 		for _, disposition := range []string{"paid", "waived", "uncollectible"} {
 			t.Run(disposition, func(t *testing.T) {
-				a, p, customer := usageBillingWorld(t, true, true)
+				a, p, customer := usageBillingWorld(t, true)
 				oneUsage(t, a.alpha, usageInput(customer, "settled-at-once", 3))
 				fleet := startFleet(t, a.world)
 				postUsageMonth(t, a.world, fleet)
@@ -291,8 +303,10 @@ func TestUsageBillingContracts(t *testing.T) {
 			})
 		}
 	})
-	t.Run("OR-J26-S51/an-overdue-order-is-told-without-automatic-usage-billing", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, false, false)
+	t.Run("OR-J26-S51/an-overdue-order-is-told-once-by-the-billing-pass", func(t *testing.T) {
+		a, p, customer := usageBillingWorld(t, false)
+		// The card declines, so the order stays unpaid past its due date.
+		p.core.SetDecline("4242", "202")
 		oneUsage(t, a.alpha, usageInput(customer, "billed-on-revocation", 3))
 		// What the revocation bills is owed once the month's usage posts.
 		fleet := startFleet(t, a.world)
@@ -300,20 +314,20 @@ func TestUsageBillingContracts(t *testing.T) {
 		// Revoking the collection agreement bills what is owed so far.
 		status, raw := a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduledAgreement(t, a).ID.String()+"/revoke", a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
-		order := oneUsageOrder(t, a, customer)
-		require.Equal(t, billing.OrderOpen, order.Status)
+		require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderOpen }, 15*time.Second, 50*time.Millisecond,
+			"the declined collection leaves the order open")
 		a.clock.Advance(time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		notices, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order_overdue"}, Limit: 100})
 		require.NoError(t, err)
-		require.Len(t, notices.Events, 1, "the overdue order is told although no usage pass runs")
+		require.Len(t, notices.Events, 1, "the billing pass tells the overdue order")
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		notices, err = a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order_overdue"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, notices.Events, 1, "told once")
 	})
 	t.Run("OR-J26-S40/usage-pass-bills-past-a-full-page-of-due-accounts", func(t *testing.T) {
-		a, p, customer := usageBillingWorld(t, true, false)
+		a, p, customer := usageBillingWorld(t, false)
 		// Two hundred accounts due ahead of Alice's fill the pass's first page.
 		mid := a.alpha.MerchantID().UUID()
 		_, err := a.pool.Exec(t.Context(), `WITH c AS (INSERT INTO `+pgx.Identifier{a.schema, "customers"}.Sanitize()+` (id, merchant_id)
@@ -345,7 +359,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		p.money(t, 1, 3000)
 	})
 	t.Run("OR-J26-S52/an-account-billed-in-full-waits-for-its-next-spend", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, false)
+		a, _, customer := usageBillingWorld(t, false)
 		oneUsage(t, a.alpha, usageInput(customer, "billed-in-full", 2))
 		fleet := startFleet(t, a.world)
 		a.clock.Advance(12 * time.Hour)
@@ -367,7 +381,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.Equal(t, time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC), next.UTC())
 	})
 	t.Run("OR-J26-S53/usage-pass-queues-the-charge-without-waiting-on-the-gateway", func(t *testing.T) {
-		a, p, customer := usageBillingWorld(t, true, false)
+		a, p, customer := usageBillingWorld(t, false)
 		hold := p.core.Hold(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/transact.php") }, nmimock.HoldRequest)
 		defer hold.Release()
 		oneUsage(t, a.alpha, usageInput(customer, "queued-collection", 3))
@@ -395,7 +409,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		p.money(t, 1, 3000)
 	})
 	t.Run("OR-J26-S54/a-running-charge-is-billed-through-the-bill-date-before-its-daily-posting", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true)
+		a, _, customer := usageBillingWorld(t, true)
 		oneUsage(t, a.alpha, usageInput(customer, "before-the-bill-date", 1))
 		_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "through-the-bill-date", CustomerID: customer, Currency: "USD", RatePerHour: 360_000})
 		require.NoError(t, err)
@@ -411,8 +425,27 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.EqualValues(t, 14_321_000, order.Total)
 		require.Equal(t, time.Date(2026, 9, 25, 0, 0, 10, 0, time.UTC), order.Usage.PeriodEndsAt.UTC().Truncate(time.Second))
 	})
+	t.Run("OR-J26-S64/running-charges-bill-on-the-merchants-usage-terms-without-clickhouse", func(t *testing.T) {
+		// No host setting turns usage billing on, and the deployment has no
+		// event store: the merchant's usage_billing terms bill its running
+		// charges from PostgreSQL alone.
+		a, _, customer := usageBillingAccount(t, true, func(w *world) { w.deps.ClickHouse = nil })
+		_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "without-the-store", CustomerID: customer, Currency: "USD", RatePerHour: 360_000})
+		require.NoError(t, err)
+		fleet := hostFleet(t, a.world)
+		fleet.PeriodicJobs().Clear()
+		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
+		require.NoError(t, fleet.Start(t.Context()))
+		// Starting the charge gave the account its bill date, the 25th.
+		a.clock.Advance(12*time.Hour + 10*time.Second)
+		runUsageDue(t, fleet)
+		order := oneUsageOrder(t, a, customer)
+		// 12 h 10 s at 0.36 USD an hour, to the pass.
+		require.EqualValues(t, 4_321_000, order.Total)
+		require.Equal(t, time.Date(2026, 9, 25, 0, 0, 10, 0, time.UTC), order.Usage.PeriodEndsAt.UTC().Truncate(time.Second))
+	})
 	t.Run("OR-J26-S56/usage-reported-after-its-days-order-is-owed-after-that-order", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true)
+		a, _, customer := usageBillingWorld(t, true)
 		oneUsage(t, a.alpha, usageInput(customer, "on-time", 1))
 		fleet := quietFleet(t, a.world)
 		a.clock.Advance(13 * time.Hour)
@@ -436,11 +469,12 @@ func TestUsageBillingContracts(t *testing.T) {
 		}
 		require.NotNil(t, second.Usage)
 		require.EqualValues(t, 30_000_000, second.Total)
-		require.False(t, second.Usage.PeriodStartsAt.Before(first.Usage.PeriodEndsAt), "late usage is owed after the order that billed its day: %s < %s",
-			second.Usage.PeriodStartsAt, first.Usage.PeriodEndsAt)
+		require.False(t, owedAccruedAt(t, a.world, second.ID).Before(first.Usage.PeriodEndsAt), "late usage is owed after the order that billed its day")
+		require.True(t, second.Usage.PeriodEndsAt.After(first.Usage.PeriodEndsAt))
+		require.False(t, second.Usage.PeriodStartsAt.After(late.OccurredAt), "its order's period covers it: %s", second.Usage.PeriodStartsAt)
 	})
 	t.Run("OR-J26-S57/a-period-that-ends-within-a-day-bills-that-days-usage-in-it", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true)
+		a, _, customer := usageBillingWorld(t, true)
 		// The customer's periods turn at 14:00 on the 25th.
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{UsageBilling: []billing.UsageBillingAccountUpdate{{Currency: "USD",
 			BillingAnchor: catalog.Value(time.Date(2026, 1, 25, 14, 0, 0, 0, time.UTC))}}})
@@ -457,8 +491,25 @@ func TestUsageBillingContracts(t *testing.T) {
 		turn := time.Date(2026, 9, 25, 14, 0, 0, 0, time.UTC)
 		require.True(t, order.Usage.PeriodStartsAt.Before(turn), "owed at %s, after its period ended", order.Usage.PeriodStartsAt)
 	})
+	t.Run("OR-J26-S63/a-usage-orders-period-covers-the-usage-it-bills", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, true)
+		occurred := a.clock.Now().UTC()
+		oneUsage(t, a.alpha, usageInput(customer, "in-its-period", 3))
+		fleet := startFleet(t, a.world)
+		// The close owes it at its pricing period's last instant; the order
+		// that bills it states the period its charge came from.
+		postUsageMonth(t, a.world, fleet)
+		runUsageDue(t, fleet)
+		order := oneUsageOrder(t, a, customer)
+		require.EqualValues(t, 30_000_000, order.Total)
+		require.NotNil(t, order.Usage)
+		require.False(t, order.Usage.PeriodStartsAt.After(occurred), "the period %s..%s covers the usage at %s",
+			order.Usage.PeriodStartsAt, order.Usage.PeriodEndsAt, occurred)
+		require.True(t, occurred.Before(order.Usage.PeriodEndsAt))
+		require.False(t, order.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill")
+	})
 	t.Run("OR-J26-S58/revoking-the-agreement-bills-todays-usage", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, false, false)
+		a, _, customer := usageBillingWorld(t, false)
 		oneUsage(t, a.alpha, usageInput(customer, "today", 3))
 		// No day ended and no pass ran: the revocation posts today's usage on
 		// its own clock and bills it.
@@ -473,7 +524,7 @@ func TestUsageBillingContracts(t *testing.T) {
 	})
 	t.Run("OR-J26-S59/a-declined-usage-collection-retries-on-the-merchants-dunning-policy", func(t *testing.T) {
 		// Every tier's first retry differs from the built-in schedule's (1 and 2 days).
-		a, p, customer := usageBillingWorld(t, true, false, dunningPolicy(billing.DunningPolicy{Tiers: []billing.DunningTier{
+		a, p, customer := usageBillingWorld(t, false, dunningPolicy(billing.DunningPolicy{Tiers: []billing.DunningTier{
 			{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{12, 36}}, {RetryAfterHours: []int{36, 84, 132, 204}},
 		}}))
 		p.core.SetDecline("4242", "202")
@@ -501,7 +552,7 @@ func TestUsageBillingContracts(t *testing.T) {
 	})
 	t.Run("OR-J26-S60/a-policys-delinquency-floor-holds-only-debt-in-its-currency", func(t *testing.T) {
 		// The policy's floor is a million euros; the debt is in dollars.
-		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
+		a, _, customer := usageBillingWorld(t, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.BillingPolicies = []billing.BillingPolicy{{Name: "euro-floor", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000,
 				DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(1_000_000_000_000)), PolicyCurrency: "EUR"}}
@@ -520,7 +571,7 @@ func TestUsageBillingContracts(t *testing.T) {
 	t.Run("OR-J26-S61/a-policys-cap-in-another-currency-binds-no-dollar-money", func(t *testing.T) {
 		// A yen policy caps debt at ¥1,000 and collects at ¥1,000; the dollar
 		// account has its own $5,000 line and collects at $30.
-		a, p, customer := usageBillingWorld(t, true, false, func(w *world) {
+		a, p, customer := usageBillingWorld(t, false, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.UsageBilling.Currencies = []billing.UsageBillingCurrency{{Currency: "USD", CreditLimit: 5_000_000_000, MinimumInvoiceAmount: 1_000_000,
 				CollectionThreshold: ptr(int64(30_000_000)), DelinquencyFloor: ptr(int64(0))}}
@@ -543,12 +594,13 @@ func TestUsageBillingContracts(t *testing.T) {
 		p.money(t, 1, 3000)
 		// A $1,500 request is within the dollar line, which the yen cap does
 		// not bind.
-		results, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(a.world, customer, "past-the-yen-cap", 1_500_000_000)})
-		require.NoError(t, err)
-		require.True(t, results[0].Allowed(), "%+v", results[0].Admission)
+		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+		set := out.LimitSets[0]
+		require.Nil(t, set.Refusal)
+		require.GreaterOrEqual(t, lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit).Remaining+set.CreditLine, int64(1_500_000_000))
 	})
-	t.Run("OR-J26-S30/admission-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true, func(w *world) {
+	t.Run("OR-J26-S30/a-view-applies-the-customers-own-delinquency-policy", func(t *testing.T) {
+		a, _, customer := usageBillingWorld(t, true, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			m.ArrearsGraceDays = ptr(30)
 			m.BillingPolicies = []billing.BillingPolicy{{Name: "strict", Kind: "outstanding_cap", OutstandingCapAmount: 1_000_000_000_000, DelinquencyGraceDays: ptr(0), DelinquencyAmountFloor: ptr(int64(0)), PolicyCurrency: "USD"}}
@@ -563,11 +615,8 @@ func TestUsageBillingContracts(t *testing.T) {
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "the customer's policy has no grace")
-		results, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(a.world, customer, "after-strict-grace", 500)})
-		require.NoError(t, err)
-		require.False(t, results[0].Allowed())
-		require.NotNil(t, results[0].Admission)
-		require.NotNil(t, results[0].Admission.DenyCode)
-		require.Equal(t, billing.DenyDelinquentUnpaidOrder, *results[0].Admission.DenyCode)
+		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
+		require.NotNil(t, out.LimitSets[0].Refusal)
+		require.Equal(t, billing.DenyDelinquentUnpaidOrder, out.LimitSets[0].Refusal.DenyCode)
 	})
 }

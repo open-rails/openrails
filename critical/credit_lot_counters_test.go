@@ -75,7 +75,7 @@ func lotViewEqualsLedger(t *testing.T) {
 	require.Equal(t, payment.String(), *pack.SourceID, "a bought lot names its payment")
 
 	expiring, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 3_000_000,
-		Source: "critical", SourceID: "expiring", ExpiresAt: ptr(a.clock.Now().Add(time.Hour))}})
+		Source: "critical", SourceID: "expiring", ExpiresAt: ptr(a.clock.Now().Add(2 * time.Minute))}})
 	require.NoError(t, err)
 	revocable, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 4_000_000,
 		Source: "critical", SourceID: "revocable", FundingSource: billing.CreditGrantFundingPromotion}})
@@ -97,15 +97,7 @@ func lotViewEqualsLedger(t *testing.T) {
 		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: compute.ID, Price: catalog.RatePrice{Model: catalog.ModelDynamic, Currency: "USD"}}),
 	})
 	require.NoError(t, err)
-	verdicts, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{{
-		RequestID: "spend", CustomerID: m.customer, Invoker: m.customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
-		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(int64(2_000_000))},
-	}})
-	require.NoError(t, err)
-	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-	captured, err := a.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{{RequestID: "spend", Amount: ptr(int64(2_000_000)), Usage: billing.CaptureUsage{EventType: "compute", Dimensions: map[string]int64{"units": 1}}}})
-	require.NoError(t, err)
-	require.NoError(t, captured[0].Err())
+	spend(t, a.alpha, m.customer, "spend", 2_000_000)
 	// A deposit posts the accrued usage first.
 	a.clock.Advance(time.Second)
 	topUp, err := a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "post-the-usage"}})
@@ -115,16 +107,11 @@ func lotViewEqualsLedger(t *testing.T) {
 	require.EqualValues(t, 2_000_000, lot.SpentAmount)
 	require.EqualValues(t, 1_000_000, lot.RemainingAmount)
 
-	// Expiry: what is left of the lapsed lot leaves it.
-	a.clock.Advance(2 * time.Hour)
-	verdicts, err = a.alpha.Admit(t.Context(), []billing.AdmitParams{{
-		RequestID: "after-the-lapse", CustomerID: m.customer, Invoker: m.customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
-		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(int64(1))},
-	}})
-	require.NoError(t, err)
-	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-	_, err = a.alpha.ReleaseAdmissions(t.Context(), []string{"after-the-lapse"})
-	require.NoError(t, err)
+	// Expiry: what is left of the lapsed lot leaves it. The clock stays
+	// within the five minutes payments may be dated ahead of the database's,
+	// for the chargeback below.
+	a.clock.Advance(3 * time.Minute)
+	require.False(t, runPass(t, quietFleet(t, w)), "the pass's look at the lapsed lot expires it")
 	lot = lotMatchesLedger(t, w, expiring[0].ID)
 	require.EqualValues(t, 1_000_000, lot.ExpiredAmount)
 	require.Zero(t, lot.RemainingAmount)
@@ -233,7 +220,7 @@ func unpostedDepositNotSpendable(t *testing.T) {
 		" (merchant_id, id, customer_id, account_id, unit, units, funding_source, source, source_id, invoker, starts_at, expires_at)"+
 		" SELECT merchant_id, $3, customer_id, account_id, unit, 5000, 'grant', 'critical', 'unposted', invoker, $4, $5"+
 		" FROM "+pgx.Identifier{w.schema, "credit_grants"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
-		w.alpha.MerchantID().UUID(), posted[0].ID.UUID(), unposted, w.clock.Now().Add(-time.Minute), w.clock.Now().Add(72*time.Hour))
+		w.alpha.MerchantID().UUID(), posted[0].ID.UUID(), unposted, w.clock.Now().Add(-time.Minute), w.clock.Now().AddDate(0, 2, 0))
 	require.NoError(t, err)
 	lot := lotMatchesLedger(t, w, billing.CreditGrantID(unposted))
 	require.Zero(t, lot.RemainingAmount, "no unit of the lot posted")
@@ -242,12 +229,7 @@ func unpostedDepositNotSpendable(t *testing.T) {
 	// The whole posted balance is spent. Read from its face, the unposted lot
 	// would pay it first (it lapses first) and leave the posted lot claiming
 	// 1000 the balance no longer holds.
-	admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "spend", 1000)})
-	require.NoError(t, err)
-	require.True(t, admitted[0].Allowed())
-	spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("spend", 1000)})
-	require.NoError(t, err)
-	require.NoError(t, spent[0].Err())
+	spend(t, w.alpha, customer, "spend", 1000)
 	fleet := startFleet(t, w)
 	nextMonth(w)
 	closeMonths(t, fleet)
@@ -289,21 +271,12 @@ func lapsedLotsExpireWhatTheyHold(t *testing.T) {
 	first := grant("first", 1000, ptr(w.clock.Now().Add(time.Hour)))
 	second := grant("second", 1000, ptr(w.clock.Now().Add(2*time.Hour)))
 	lasting := grant("lasting", 5000, nil)
-	admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "used", 1500)})
-	require.NoError(t, err)
-	require.True(t, admitted[0].Allowed())
-	captured, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("used", 1500)})
-	require.NoError(t, err)
-	require.NoError(t, captured[0].Err())
+	spend(t, w.alpha, customer, "used", 1500)
 	balance(t, w.alpha, customer, 5500, 1500, 7000)
 
-	// Both lapse with the usage unposted; the next admission expires them.
+	// Both lapse with the usage unposted; the pass's look expires them.
 	w.clock.Advance(3 * time.Hour)
-	next, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "after-both-lapsed", 1)})
-	require.NoError(t, err)
-	require.True(t, next[0].Allowed(), "%+v", next[0])
-	_, err = w.alpha.ReleaseAdmissions(t.Context(), []string{"after-both-lapsed"})
-	require.NoError(t, err)
+	require.False(t, runPass(t, quietFleet(t, w)))
 
 	early := lotMatchesLedger(t, w, first)
 	require.EqualValues(t, 1000, early.SpentAmount, "the usage drew the first lot, live just before its lapse")
@@ -321,7 +294,7 @@ func lapsedLotsExpireWhatTheyHold(t *testing.T) {
 // A usage order whose total is not a whole cent is charged the next cent up.
 // The order is paid, and the change is a lot bought at face.
 func usageOrderChangeIsBought(t *testing.T) {
-	a, p, customer := usageBillingWorld(t, true, false)
+	a, p, customer := usageBillingWorld(t, false)
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "fractional-compute", DisplayName: "Fractional compute"})
 	require.NoError(t, err)
 	_, err = a.alpha.SetMeter(t.Context(), "fraction", billing.SetMeterParams{EventType: "fraction", ValueProperty: "units", Aggregation: catalog.AggregationSum,

@@ -70,7 +70,7 @@ func (s session) CheckRecentSignIn(context.Context) error {
 func main() {
  var a auth.Authenticator = ownAuth{}
  routes := openrails.Routes{Auth: a, RouteGroups: openrails.RouteGroups{Admin: true}}
- cfg := openrails.Config{ProviderWriteMode: openrails.ProviderWritesReadOnly}
+ cfg := openrails.Config{Database: billing.DatabaseConfig{Schema: "billing"}}
  _, _ = routes, cfg
 }
 GO

@@ -93,20 +93,21 @@ func Graph(client any) *app.App {
 	return nil
 }
 
-// New builds the engine. It first creates or upgrades OpenRails' tables, this
-// month's partitions and River's tables (Migrate's work); the control plane's
+// New builds the engine. It first creates or upgrades OpenRails' tables and
+// River's tables (Migrate's work); the control plane's
 // AuthKit migrates itself as it is built.
 // Database.SkipMigrations validates existing schemas instead of
-// applying startup schema, partition or River changes. ctx bounds the
+// applying startup schema or River changes. ctx bounds the
 // database; nothing else does. Only the database (Deps.Postgres is required),
 // an unknown provider write mode, an invalid River schema and the
-// money-safety refusal (a test seam beside a live PSP) fail construction.
+// money-safety refusals (a test seam beside a live PSP, a provider endpoint
+// that is not loopback) fail construction.
 // Anything else that cannot be served is refused alone and reported (Ready,
 // Probes' openrails_configuration): an optional setting, a declared merchant,
 // one of its documents, the checkout origin. PSP posture and Redis recover in
 // the background. It never changes a catalog: a catalog document applies by
 // an explicit ApplyCatalog.
-func New(ctx context.Context, cfg config.Config, deps Deps) (*Engine, error) {
+func New(ctx context.Context, cfg billing.Config, deps Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -227,20 +228,14 @@ func (e *Engine) declaredIDs() []billing.MerchantID {
 // validate enforces what embedded construction must declare; it returns
 // Config.Merchants in slug order, and the entries it refused alone. Every
 // fatal refusal happens before any resource opens.
-func validate(cfg *config.Config, deps Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
-	// Unset would run fail-closed readonly: renewals, retries and refunds
-	// would silently never reach a provider. The host states it.
-	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
-	case config.ProviderWriteModeFull, config.ProviderWriteModeLimited, config.ProviderWriteModeReadOnly:
-	case "":
-		return nil, nil, fmt.Errorf("openrails: Config.ProviderWriteMode is required; set full, limited or readonly explicitly (readonly never charges: renewals, retries and refunds wait)")
-	default:
-		return nil, nil, fmt.Errorf("openrails: Config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
-	}
+func validate(cfg *billing.Config, deps Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
 	declarations, refused := config.DeclaredMerchants(cfg)
 	cfg.Database.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.Database.RiverSchema))
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
 		return nil, nil, err
+	}
+	if err := deps.ProviderEndpoints.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("openrails: Deps.ProviderEndpoints: %w", err)
 	}
 	if live := declaredLive(declarations); live != "" {
 		if fakes := fakeProviders(cfg, deps); len(fakes) > 0 {
@@ -260,7 +255,7 @@ func validate(cfg *config.Config, deps Deps) ([]billing.MerchantDeclaration, []c
 
 // fakeProviders names the test seams and fake providers cfg and deps wire:
 // no live PSP is declared beside them.
-func fakeProviders(cfg *config.Config, deps Deps) []string {
+func fakeProviders(cfg *billing.Config, deps Deps) []string {
 	out := append(config.FakeProviders(cfg), seams(deps)...)
 	slices.Sort(out)
 	return out
@@ -277,6 +272,7 @@ func seams(deps Deps) []string {
 			out = append(out, name)
 		}
 	}
+	out = append(out, deps.ProviderEndpoints.Fakes()...)
 	slices.Sort(out)
 	return out
 }

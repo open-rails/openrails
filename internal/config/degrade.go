@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // Degradation is one optional setting boot turned off, or set back to its
 // default, because it cannot be served as written. The engine serves without
 // it and reports it (see Runtime.Refusals); it never fails boot.
 type Degradation struct {
-	// Field names the setting: "captcha", "trusted_proxies", "llm", ...
+	// Field names the setting: "captcha", "trusted_proxies", "hyperswitch", ...
 	Field string
 	Err   error
 }
@@ -23,45 +24,31 @@ func (d Degradation) Error() string { return d.Field + ": " + d.Err.Error() }
 // keeps its valid entries, so a trust or allow list only ever shrinks. What
 // Degrade leaves is what Validate requires: the database schema and the
 // provider write mode.
-func Degrade(cfg *Config) []Degradation {
+func Degrade(cfg *billing.Config) []Degradation {
 	if cfg == nil {
 		return nil
 	}
 	var out []Degradation
 	off := func(field string, err error) { out = append(out, Degradation{Field: field, Err: err}) }
 
-	if _, err := EventRetentionDuration(cfg); err != nil {
-		cfg.EventRetention = ""
-		off("event_retention", fmt.Errorf("%w; the default 90 days applies", err))
-	}
-	if cfg.RateLimits != nil {
-		limits := maps.Clone(cfg.RateLimits)
-		for _, bucket := range slices.Sorted(maps.Keys(limits)) {
-			if !slices.Contains(RateLimitBuckets, bucket) {
-				delete(limits, bucket)
-				off("rate_limits."+bucket, fmt.Errorf("not a bucket (%s); a per-address ceiling belongs to the proxy in front of OpenRails; ignored", strings.Join(RateLimitBuckets, ", ")))
-			}
+	buckets, defaultBuckets := RateLimitBuckets(&cfg.RateLimits), RateLimitBuckets(&defaults.RateLimits)
+	for _, bucket := range slices.Sorted(maps.Keys(buckets)) {
+		if limit := *buckets[bucket]; limit != nil && limit.RequestsPerMinute < 0 {
+			fallback := **defaultBuckets[bucket]
+			*buckets[bucket] = &fallback
+			off("rate_limits."+bucket+".requests_per_minute", fmt.Errorf("%d is negative (0 does not limit); the default %d applies", limit.RequestsPerMinute, (*defaultBuckets[bucket]).RequestsPerMinute))
 		}
-		cfg.RateLimits = limits
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
-		cfg.Captcha = DefaultCaptcha()
+		cfg.Captcha = defaults.Captcha
 		off("captcha", fmt.Errorf("%w; captcha is off", err))
 	}
-	if err := validateLLM(cfg.LLM); err != nil {
-		cfg.LLM = nil
-		off("llm", fmt.Errorf("%w; the catalog copilot is off", err))
-	}
-	if _, err := WebhookSecretOverlapDuration(cfg); err != nil {
-		cfg.WebhookSecretOverlap = ""
-		off("webhook_secret_overlap", fmt.Errorf("%w; the default %s applies", err, DefaultWebhookSecretOverlap))
-	}
 	if err := validateHyperSwitch(cfg); err != nil {
-		cfg.HyperSwitch = nil
+		cfg.HyperSwitch = billing.HyperSwitchConfig{}
 		off("hyperswitch", fmt.Errorf("%w; HyperSwitch is off", err))
 	}
 	if crankers := SolanaCrankers(cfg); len(crankers) > 0 {
-		var kept []SolanaCrankerConfig
+		var kept []billing.SolanaCrankerConfig
 		for i, c := range crankers {
 			if err := validateSolanaCranker(cfg, kept, c); err != nil {
 				next := ""
@@ -73,10 +60,10 @@ func Degrade(cfg *Config) []Degradation {
 			}
 			kept = append(kept, c)
 		}
-		cfg.Solana = &SolanaConfig{Crankers: kept}
+		cfg.Solana = billing.SolanaConfig{Crankers: kept}
 	}
 	if err := validateCardVault(cfg); err != nil {
-		cfg.CardVault = nil
+		cfg.CardVault = billing.CardVaultConfig{}
 		off("card_vault", fmt.Errorf("%w; settings.card_vault platform is refused", err))
 	}
 	keep := func(field string, list []string, check func(string) error) []string {
@@ -90,28 +77,6 @@ func Degrade(cfg *Config) []Degradation {
 		}
 		return kept
 	}
-	if s := cfg.ProviderSandbox; s != nil {
-		sandbox := *s
-		sandbox.CCBillWebhookSources = keep("provider_sandbox.ccbill_webhook_sources", sandbox.CCBillWebhookSources, validateSourceCIDR)
-		for _, gateway := range []struct {
-			key string
-			url *string
-		}{{"nmi_gateway_url", &sandbox.NMIGatewayURL}, {"stripe_api_url", &sandbox.StripeAPIURL}, {"solana_rpc_url", &sandbox.SolanaRPCURL}, {"ccbill_datalink_url", &sandbox.CCBillDataLinkURL}} {
-			if raw := strings.TrimSpace(*gateway.url); raw != "" {
-				if err := ValidateLoopbackGatewayURL(raw); err != nil {
-					*gateway.url = ""
-					off("provider_sandbox."+gateway.key, fmt.Errorf("%w; the provider's own sandbox endpoint applies", err))
-				}
-			}
-		}
-		cfg.ProviderSandbox = &sandbox
-	}
-	cfg.ReturnOrigins = keep("return_origins", cfg.ReturnOrigins, func(raw string) error {
-		if err := ValidatePublicURL(strings.TrimSpace(raw), true, true); err != nil {
-			return fmt.Errorf("%q %w", raw, err)
-		}
-		return nil
-	})
 	cfg.TrustedProxies = keep("trusted_proxies", cfg.TrustedProxies, validateSourceCIDR)
 	return out
 }

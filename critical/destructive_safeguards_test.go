@@ -3,11 +3,13 @@
 package critical_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,7 +22,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/stretchr/testify/require"
@@ -114,7 +119,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		t.Run("staff", func(t *testing.T) {
 			// The merchant's budget is 50 an hour; an actor's stays 5.
 			b := newNMIBook(t, func(w *world) {
-				w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{MerchantPerHour: 50, MerchantPerDay: 100}
+				w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{MerchantPerHour: 50, MerchantPerDay: 100}
 			})
 			armDestructive(t, b.a, true)
 			asOf := b.started.Add(10 * 24 * time.Hour)
@@ -221,31 +226,48 @@ func TestDestructiveSafeguards(t *testing.T) {
 	t.Run("OR-J34-S37/a-merchants-books-land-one-at-a-time", func(t *testing.T) {
 		b := newNMIBook(t)
 		book := b.owed(b.started.Add(10*24*time.Hour), 3, "race")
-		type attempt struct{}
 		// A pauses between its admission and its landing; B lands the same
-		// book and loses its landing.
+		// book and loses its landing. The in-process handle carries no
+		// context value to the engine, so the attempts are told apart by
+		// order: the first admission is A's, a landing while A waits is B's,
+		// and after A resumes its own landing comes first.
 		paused, resume := make(chan struct{}), make(chan struct{})
 		var pause sync.Once
-		remove := failpoint.Set(func(ctx context.Context, site failpoint.Site) error {
-			who, _ := ctx.Value(attempt{}).(string)
+		var mu sync.Mutex
+		resumed, aLanded := false, false
+		lostB := errors.New("B's landing lost before its commit")
+		remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {
 			switch {
-			case who == "A" && site.Point == failpoint.Committed && site.Kind == "destructive_admission":
+			case site.Point == failpoint.Committed && site.Kind == "destructive_admission":
 				pause.Do(func() {
 					close(paused)
 					<-resume
 				})
-			case who == "B" && site.Point == failpoint.BeforeComplete && site.Kind == "billing_import":
-				return errors.New("B's landing lost before its commit")
+			case site.Point == failpoint.BeforeComplete && site.Kind == "billing_import":
+				mu.Lock()
+				defer mu.Unlock()
+				if resumed && !aLanded {
+					aLanded = true
+					return nil
+				}
+				return lostB
 			}
 			return nil
 		})
 		t.Cleanup(remove)
 		var once sync.Once
-		release := func() { once.Do(func() { close(resume) }) }
+		release := func() {
+			once.Do(func() {
+				mu.Lock()
+				resumed = true
+				mu.Unlock()
+				close(resume)
+			})
+		}
 		t.Cleanup(release)
 		errA, errB := make(chan error, 1), make(chan error, 1)
 		go func() {
-			_, err := b.a.alpha.ImportBilling(context.WithValue(t.Context(), attempt{}, "A"), book)
+			_, err := b.a.alpha.ImportBilling(t.Context(), book)
 			errA <- err
 		}()
 		select {
@@ -254,7 +276,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 			t.Fatal("A never reached its landing")
 		}
 		go func() {
-			_, err := b.a.alpha.ImportBilling(context.WithValue(t.Context(), attempt{}, "B"), book)
+			_, err := b.a.alpha.ImportBilling(t.Context(), book)
 			errB <- err
 		}()
 		// B waits for A's book, or (unserialized) runs to its end first.
@@ -350,6 +372,65 @@ func TestDestructiveSafeguards(t *testing.T) {
 		require.Len(t, b.actions(t, "no_effect"), 1, "the abandon finishes once its action is free")
 	})
 
+	t.Run("OR-J34-S41/an-archive-exports-right-after-a-catalog-edit", func(t *testing.T) {
+		w := newWorld(t)
+		usageMeter(t, w.alpha, 100)
+		var edits int
+		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "destructive_actions"}.Sanitize()+
+			" WHERE merchant_id = $1 AND kind IN ('catalog_change', 'configuration_change') AND state = 'succeeded'", w.alpha.MerchantID().UUID()).Scan(&edits))
+		require.Positive(t, edits, "the meter's rate card is an admitted catalog edit")
+		archiveBytes(t, w.alpha)
+	})
+
+	t.Run("OR-J34-S42/an-archive-export-beside-a-pending-destructive-action-is-refused", func(t *testing.T) {
+		b := newNMIBook(t)
+		b.land(b.a.alpha, b.owed(b.started.Add(10*24*time.Hour), 1, "pending"))
+		require.Len(t, b.actions(t, "started"), 1, "the owed stop waits for its provider effect")
+		var out bytes.Buffer
+		err := b.a.alpha.ExportBillingArchive(t.Context(), &out)
+		var refused *billing.StatusError
+		require.ErrorAs(t, err, &refused)
+		require.Equal(t, billing.CodeBillingArchiveUnsupportedState, refused.Code)
+		require.Equal(t, "destructive_actions", refused.Metadata["table"], "its effect may still land")
+	})
+
+	t.Run("OR-J34-S43/a-restore-waits-a-day-after-a-prune-that-can-be-undone", func(t *testing.T) {
+		source := newWorld(t)
+		customer := billing.CustomerID(uuid.New())
+		_, err := source.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "pruned-target"}})
+		require.NoError(t, err)
+		archive := archiveBytes(t, source.alpha)
+		target, client := archiveTarget(t, source)
+		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err)
+
+		// A prune of the restored book ends now, by the target's clock: the
+		// record its undo reads.
+		database, err := db.NewWithPGXPool(slog.Default(), target.pool, target.schema)
+		require.NoError(t, err)
+		mid := client.MerchantID().UUID()
+		require.NoError(t, database.MerchantTx(merchant.WithID(t.Context(), client.MerchantID()), func(ctx context.Context, tx pgx.Tx) error {
+			q := gen.New(tx)
+			run := uuid.New()
+			if _, err := q.CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{ID: run, MerchantID: mid, Kind: "prune", Actor: "critical operator", Coverage: []byte(`{}`)}); err != nil {
+				return err
+			}
+			_, err := q.FinishDestructiveRun(ctx, gen.FinishDestructiveRunParams{MerchantID: mid, ID: run, Status: "completed", Now: target.clock.Now().UTC(), Affected: []byte(`{}`)})
+			return err
+		}))
+
+		// The book's restore, replayed, waits while the prune can be undone.
+		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		var refused *billing.StatusError
+		require.ErrorAs(t, err, &refused)
+		require.Equal(t, billing.CodeBillingArchiveUnsupportedState, refused.Code)
+		require.Equal(t, "maintenance_runs", refused.Metadata["table"])
+		target.clock.Advance(25 * time.Hour)
+		replay, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
+		require.NoError(t, err, "a day on, by the deployment's clock")
+		require.True(t, replay.AlreadyImported)
+	})
+
 	t.Run("OR-J34-S34/a-staff-card-removal-spends-no-customer-action-budget", func(t *testing.T) {
 		a, journal := newNMIWorld(t)
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
@@ -357,7 +438,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		require.Len(t, psps.Items, 1)
 		save := func() billing.PaymentMethod {
 			t.Helper()
-			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var method billing.PaymentMethod
 			require.NoError(t, json.Unmarshal(raw, &method))
@@ -427,7 +508,7 @@ func (b *nmiBook) saveCard(t *testing.T) billing.PaymentMethod {
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
 	status, raw := b.a.request(t, http.MethodPost, "/v1/me/payment-methods", b.a.aliceToken, billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID,
-		Token: b.nmi.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})})
+		Token: b.nmi.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var method billing.PaymentMethod
 	require.NoError(t, json.Unmarshal(raw, &method))

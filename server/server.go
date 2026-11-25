@@ -1,13 +1,17 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +30,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/server/internal/adminconsole"
 	"github.com/open-rails/openrails/server/internal/controlplane"
-	"github.com/open-rails/openrails/server/internal/hostconfig"
 	httpserver "github.com/open-rails/openrails/server/internal/http"
 	"github.com/open-rails/openrails/server/internal/operator"
 	"github.com/open-rails/openrails/web/console"
@@ -56,139 +60,154 @@ type AdminConsole struct {
 	// Disabled omits the console's pages, assets and bootstrap endpoints.
 	// The default keeps the console available; billing and auth APIs are
 	// separate.
-	Disabled bool
+	Disabled bool `yaml:"disabled"`
 	// Issuers are keyed by a merchant id or name, or "root" for operators.
-	Issuers map[string]ConsoleIssuer
+	Issuers map[string]ConsoleIssuer `yaml:"issuers"`
 }
 
 // ConsoleIssuer is an authorization server the console signs staff in at,
 // as an OAuth 2.0 public client (code flow with PKCE).
 type ConsoleIssuer struct {
 	// URL is the issuer: one of AuthKit's trusted issuers.
-	URL string
+	URL string `yaml:"url"`
 	// ClientID is the console's public client there, registered with the
 	// console path plus /callback as a redirect URI.
-	ClientID string
+	ClientID string `yaml:"client_id"`
 	// Name is shown on the sign-in button; empty is the trusted issuer's.
-	Name string
+	Name string `yaml:"name"`
 	// Scope is what the console asks for; empty is "openid profile email
 	// openrails:merchant". An issuer that grants refresh tokens only for
 	// offline_access needs it added.
-	Scope string
+	Scope string `yaml:"scope"`
 }
 
-// NamingConfig is Config.Naming: the rename policy for merchant names,
-// whether a name may change, how often, and how long a former name keeps
-// forwarding. Unset fields take the defaults: renames on, every 72 hours,
-// former names kept 90 days.
-type NamingConfig struct {
-	Enabled        *bool
-	RenameInterval *time.Duration
-	FormerNames    FormerNamesConfig
-}
-
-// FormerNamesConfig is NamingConfig.FormerNames: how long a former name
-// keeps forwarding. Duration applies to FormerNamesFinite only.
-type FormerNamesConfig struct {
-	Mode     FormerNamesMode
-	Duration *time.Duration
-}
-
-// FormerNamesMode is FormerNamesConfig.Mode.
-type FormerNamesMode string
-
-const (
-	// FormerNamesFinite forwards a former name for FormerNamesConfig.Duration.
-	FormerNamesFinite FormerNamesMode = "finite"
-	// FormerNamesForever forwards a former name indefinitely.
-	FormerNamesForever FormerNamesMode = "forever"
-	// FormerNamesImmediate releases a former name at once.
-	FormerNamesImmediate FormerNamesMode = "immediate"
-)
-
-// namingConfig is c as the control plane reads it.
-func namingConfig(c NamingConfig) config.NamingConfig {
-	return config.NamingConfig{Enabled: c.Enabled, RenameInterval: c.RenameInterval,
-		FormerNames: config.FormerNamesConfig{Mode: config.FormerNamesMode(c.FormerNames.Mode), Duration: c.FormerNames.Duration}}
-}
-
-// consoleConfig is c as the HTTP surface reads it.
-func consoleConfig(c *AdminConsole) *hostconfig.ConsoleConfig {
-	if c == nil {
-		return nil
-	}
-	out := &hostconfig.ConsoleConfig{Disabled: c.Disabled}
-	if c.Issuers != nil {
-		out.Issuers = make(map[string]hostconfig.ConsoleIssuer, len(c.Issuers))
-		for key, issuer := range c.Issuers {
-			out.Issuers[key] = hostconfig.ConsoleIssuer(issuer)
-		}
-	}
-	return out
-}
-
-// Config is a standalone deployment: plain data.
+// Config is a standalone deployment: plain data, as the openrails binary's
+// configuration file spells it (the yaml keys). New fills a setting left zero
+// from DefaultConfig.
 type Config struct {
 	// Engine is the engine's configuration, as any host passes to
-	// openrails.New. The server's merchants are provisioned at run time, each
-	// with its AuthKit group, and manage their catalogs through the API or
-	// openrails catalog apply: a declared merchant's Issuer is refused. Its
-	// CheckoutOrigin is served by Host, and must also be apart from AuthKit's
-	// issuer and public URLs.
-	Engine openrails.Config
+	// openrails.New; its keys sit at the file's top level. The server's
+	// merchants are provisioned at run time, each with its AuthKit group, and
+	// manage their catalogs through the API or openrails catalog apply: a
+	// declared merchant's Issuer is refused. Its CheckoutOrigin is served by
+	// Host, and must also be apart from AuthKit's issuer and public URLs.
+	Engine openrails.Config `yaml:",inline"`
 
 	// Auth is the server's AuthKit, as AuthKit documents its configuration:
 	// accounts, sign-in and the tokens it issues (Auth.SignIn.DPoP), the
 	// resource server (Auth.Resource; its ID defaults to
 	// Engine.PublicBillingBaseURL) and its trusted issuers. It decides who
 	// every request is; the server only maps merchants to AuthKit groups.
-	// Auth.Token.Issuer and Auth.DefaultTenantID are required. DefaultTenantID
-	// identifies the persisted platform/operator account directory, not a
-	// merchant's customer tenant. The server sets what is the product's:
+	// Auth.Token.Issuer is required. AuthKit is single-tenant unless
+	// Auth.Tenancy says otherwise: it creates its one account directory on a
+	// fresh database, or adopts the one there. The server sets what is the
+	// product's:
 	// the merchant roles, the API key prefix, the issued audience, the
 	// resource's scopes, the enabled console's OAuth client (openrails-console),
 	// a 15-minute access-token lifetime unless
 	// Auth.AuthorizationServer.AccessTokenTTL sets one, AuthKit's River schema
 	// (the engine's) and its HTTP mount. An empty client-IP posture takes the
 	// engine's TrustedProxies. Hosted account policy belongs to the host.
-	Auth authkit.Config
+	Auth authkit.Config `yaml:"auth"`
 	// LocalSignIn serves sign-in to the server's own accounts (password,
 	// passwordless, registration). Off, the default, people sign in at a
 	// trusted issuer and AuthKit serves only its JWKS.
-	LocalSignIn bool
+	LocalSignIn bool `yaml:"local_sign_in"`
 	// Naming is the rename policy for merchant names; AuthKit's own
 	// (Auth.Username) governs usernames.
-	Naming NamingConfig
+	Naming billing.NamingConfig `yaml:"naming"`
 	// MerchantCreation is the policy for the merchants users create and
 	// rename through a hosted product (ProvisionMerchant with an owner,
 	// RenameUserMerchant); nil for operator-provisioned
 	// deployments. Hosted products with LocalSignIn may explicitly enable
 	// open Auth.Registration; contact verification still defaults to required.
-	MerchantCreation *MerchantCreationConfig
+	// Set in code.
+	MerchantCreation *MerchantCreationConfig `yaml:"-"`
 
 	// RouteGroups turns the merchant route groups on, each off by default:
 	// Admin, Catalog, MerchantConfig and Metrics, and Programmatic, each
 	// route behind the server's own merchant permission (the Merchant*
 	// permissions).
-	RouteGroups openrails.RouteGroups
+	RouteGroups openrails.RouteGroups `yaml:"route_groups"`
 	// AdminConsole controls the console at /admin and declares app sign-in
-	// methods. Nil keeps it on; Disabled omits it. LocalSignIn is independent.
-	// Alert links point at it.
-	AdminConsole *AdminConsole
+	// methods; the zero value keeps it on. LocalSignIn is independent. Alert
+	// links point at it.
+	AdminConsole AdminConsole `yaml:"admin_console"`
 
-	// Addr is where Run and Serve listen; empty is ":3053".
-	Addr string
-	// PrivateAddr is where Run and Serve also serve PrivateHandler, the
-	// operator's /metrics, apart from the public surface. Empty serves none.
-	PrivateAddr string
-	// DrainDelay is how long Run and Serve keep serving once ctx ends, with
-	// /health/ready failing, so load balancers stop routing here before the
-	// listener closes. 0 closes it at once.
-	DrainDelay time.Duration
-	// ShutdownTimeout bounds finishing in-flight requests and closing the
-	// server, background work included, after the drain; 0 is 30s.
-	ShutdownTimeout time.Duration
+	// Host and Port are where Run and Serve listen.
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+	// MetricsPort is where Run and Serve also serve MetricsHandler, the
+	// operator's Prometheus /metrics, on Host, apart from the public surface.
+	// Zero serves none.
+	MetricsPort int `yaml:"metrics_port"`
 }
+
+// DefaultConfig is every setting's default: the engine's (openrails.
+// DefaultConfig) and the server's own. A finite former-names duration left
+// unset is 90 days.
+func DefaultConfig() Config {
+	return Config{
+		Engine: openrails.DefaultConfig(),
+		Naming: billing.NamingConfig{
+			Enabled: new(true), RenameInterval: new(72 * time.Hour),
+			FormerNames: billing.FormerNamesConfig{Mode: billing.FormerNamesFinite},
+		},
+		Host: "0.0.0.0",
+		Port: 3053,
+	}
+}
+
+// WithDefaults is c with every setting left zero at DefaultConfig's, the
+// engine's by openrails.Config's WithDefaults.
+func (c Config) WithDefaults() Config {
+	d := DefaultConfig()
+	c.Engine = c.Engine.WithDefaults()
+	c.Host = cmp.Or(c.Host, d.Host)
+	c.Port = cmp.Or(c.Port, d.Port)
+	c.Naming.Enabled = cmp.Or(c.Naming.Enabled, d.Naming.Enabled)
+	c.Naming.RenameInterval = cmp.Or(c.Naming.RenameInterval, d.Naming.RenameInterval)
+	c.Naming.FormerNames.Mode = cmp.Or(c.Naming.FormerNames.Mode, d.Naming.FormerNames.Mode)
+	c.Naming.FormerNames = formerNamesDuration(c.Naming.FormerNames)
+	return c
+}
+
+// formerNamesDuration is f with a finite mode's unset duration at 90 days.
+func formerNamesDuration(f billing.FormerNamesConfig) billing.FormerNamesConfig {
+	if f.Mode == billing.FormerNamesFinite && f.Duration == nil {
+		f.Duration = new(2160 * time.Hour)
+	}
+	return f
+}
+
+// resolveConsoleIssuers are the console's sign-in choices, by key, for
+// tokens to resource.
+func resolveConsoleIssuers(declared map[string]ConsoleIssuer, resource string) ([]adminconsole.Issuer, error) {
+	out := []adminconsole.Issuer{}
+	for _, key := range slices.Sorted(maps.Keys(declared)) {
+		d := declared[key]
+		issuer, err := adminconsole.NewIssuer(key, d.URL, d.ClientID, d.Name, d.Scope, resource)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, issuer)
+	}
+	return out, nil
+}
+
+// Addr is c's public listener, host:port.
+func (c Config) Addr() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
+
+const (
+	// drainDelay is how long Run and Serve keep serving once ctx ends, with
+	// /health/ready failing, so load balancers stop routing here before the
+	// listener closes.
+	drainDelay = 5 * time.Second
+	// shutdownTimeout bounds finishing in-flight requests and closing the
+	// server, background work included, after the drain. With drainDelay it
+	// fits Kubernetes' default 30s grace period.
+	shutdownTimeout = 20 * time.Second
+)
 
 // Deps is everything a standalone server reaches outside its process.
 type Deps struct {
@@ -198,9 +217,9 @@ type Deps struct {
 	Engine openrails.Deps
 	// Auth is what the server's AuthKit reaches: its email and SMS senders,
 	// its signing key source and the rest of authkit.Deps. Nil Postgres is a
-	// pool of its own on the engine's database, nil Redis the engine's, and
-	// nil Email renders AuthKit's email and sends it through the engine's
-	// sender.
+	// pool of its own on the engine's database, nil Redis the engine's, nil
+	// Logger the engine's, and nil Email renders AuthKit's email and sends it
+	// through the engine's sender.
 	Auth authkit.Deps
 	// CustomerAdmissionPolicy may refuse an otherwise verified ordinary customer
 	// request before automatic customer admission. The original identity and
@@ -247,9 +266,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := controlplane.RequireDefaultTenant(cfg.Auth); err != nil {
-		return nil, err
-	}
+	cfg = cfg.WithDefaults()
 	for _, m := range cfg.Engine.Merchants {
 		if m.Issuer != "" {
 			return nil, fmt.Errorf("server: Engine.Merchants %q's Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", m.Slug)
@@ -279,8 +296,8 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return nil, err
 	}
 
-	consoleEnabled := cfg.AdminConsole == nil || !cfg.AdminConsole.Disabled
-	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: namingConfig(cfg.Naming)}
+	consoleEnabled := !cfg.AdminConsole.Disabled
+	opts := controlplane.Options{LocalSignIn: cfg.LocalSignIn, Naming: cfg.Naming}
 	if cfg.LocalSignIn && consoleEnabled {
 		opts.ConsoleClientID = ConsoleClientID
 	}
@@ -306,6 +323,9 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 			return fail(fmt.Errorf("server: AuthKit pool: %w", err))
 		}
 		akDeps.Postgres = s.pool
+	}
+	if akDeps.Logger == nil {
+		akDeps.Logger = logger
 	}
 	if akDeps.Redis == nil && s.graph.RedisClient != nil {
 		akDeps.Redis = s.graph.RedisClient
@@ -335,6 +355,12 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if consoleEnabled && consoleAssets == nil {
 		consoleAssets = console.FS()
 	}
+	var consoleIssuers []adminconsole.Issuer
+	if consoleEnabled {
+		if consoleIssuers, err = resolveConsoleIssuers(cfg.AdminConsole.Issuers, akCfg.Resource.ID); err != nil {
+			return fail(err)
+		}
+	}
 	checkout, page := eng.CheckoutPage()
 	var admission func(context.Context, auth.Verified, config.CustomerBinding) error
 	if policy := deps.CustomerAdmissionPolicy; policy != nil {
@@ -343,14 +369,14 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		}
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		RouteGroups: config.RouteGroups(cfg.RouteGroups), AdminConsole: consoleConfig(cfg.AdminConsole), Resource: akCfg.Resource.ID,
+		RouteGroups: config.RouteGroups(cfg.RouteGroups), ConsoleDisabled: !consoleEnabled, ConsoleIssuers: consoleIssuers, Resource: akCfg.Resource.ID,
 		CustomerAdmissionPolicy: admission,
 		CheckoutOrigin:          checkout, CheckoutHandler: page, ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
 	}
 	if consoleEnabled {
-		s.graph.Runtime.AlertService.SetConsoleURL(strings.TrimRight(cfg.Engine.PublicBillingBaseURL, "/") + hostconfig.ConsolePath)
+		s.graph.Runtime.AlertService.SetConsoleURL(strings.TrimRight(cfg.Engine.PublicBillingBaseURL, "/") + adminconsole.Path)
 	}
 	return s, nil
 }
@@ -364,7 +390,7 @@ func (s *Server) AuthKit() *authkit.Client { return s.cp.Core() }
 
 // Handler is the whole public surface: health, the engine's routes gated by
 // the server's Auth, AuthKit's and the admin console. The operator's
-// /metrics is PrivateHandler.
+// /metrics is MetricsHandler.
 func (s *Server) Handler() http.Handler { return s.surface.Handler() }
 
 // Routes is the standalone surface without the health routes, for a host's
@@ -394,28 +420,20 @@ func (s *Server) Start(ctx context.Context, opts ...openrails.StartOption) error
 	return s.engine.Start(ctx, opts...)
 }
 
-// Run serves Handler at Config.Addr and runs the background work until ctx
-// ends or serving fails, then drains (Config.DrainDelay), finishes in-flight
-// requests and closes the server.
+// Run serves Handler at Config's Host and Port and runs the background work until ctx
+// ends or serving fails, then drains for 5s, finishes in-flight requests and
+// closes the server within 20s.
 func (s *Server) Run(ctx context.Context) error { return s.run(ctx, true) }
 
 // Serve is Run without the background work, which another process runs.
 func (s *Server) Serve(ctx context.Context) error { return s.run(ctx, false) }
 
-// shutdownTimeout is Config.ShutdownTimeout, defaulted.
-func (s *Server) shutdownTimeout() time.Duration {
-	if s.cfg.ShutdownTimeout > 0 {
-		return s.cfg.ShutdownTimeout
-	}
-	return 30 * time.Second
-}
-
 func (s *Server) run(ctx context.Context, workers bool) (err error) {
-	// One ShutdownTimeout bounds the HTTP shutdown and Close together.
+	// One shutdownTimeout bounds the HTTP shutdown and Close together.
 	var deadline time.Time
 	defer func() {
 		if deadline.IsZero() {
-			deadline = time.Now().Add(s.shutdownTimeout())
+			deadline = time.Now().Add(shutdownTimeout)
 		}
 		closeCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 		defer cancel()
@@ -426,11 +444,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	if err := s.graph.Runtime.InitRiver(ctx); err != nil {
 		return fmt.Errorf("server: bind job producers: %w", err)
 	}
-	addr := s.cfg.Addr
-	if addr == "" {
-		addr = ":3053"
-	}
-	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.cfg.Addr())
 	if err != nil {
 		return err
 	}
@@ -446,16 +460,16 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	served := make(chan error, 2)
 	go func() { served <- hs.Serve(ln) }()
 	s.log.InfoContext(ctx, "OpenRails serving", "addr", ln.Addr().String())
-	var private *http.Server
-	if s.cfg.PrivateAddr != "" {
-		pln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.cfg.PrivateAddr)
+	var metrics *http.Server
+	if s.cfg.MetricsPort != 0 {
+		mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.MetricsPort)))
 		if err != nil {
 			_ = hs.Close()
 			return err
 		}
-		private = &http.Server{Handler: s.PrivateHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
-		go func() { served <- private.Serve(pln) }()
-		s.log.InfoContext(ctx, "OpenRails private listener (metrics)", "addr", pln.Addr().String())
+		metrics = &http.Server{Handler: s.MetricsHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+		go func() { served <- metrics.Serve(mln) }()
+		s.log.InfoContext(ctx, "OpenRails metrics listener", "addr", mln.Addr().String())
 	}
 	if workers {
 		err = s.Start(ctx)
@@ -463,12 +477,12 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	if err == nil {
 		select {
 		case <-ctx.Done():
-			err = drain(s.log, s.surface.Drain, s.cfg.DrainDelay, served, hs)
+			err = drain(s.log, s.surface.Drain, drainDelay, served, hs)
 		case err = <-served:
 		}
 	}
-	deadline = time.Now().Add(s.shutdownTimeout())
-	shutdown(s.log, deadline, hs, private)
+	deadline = time.Now().Add(shutdownTimeout)
+	shutdown(s.log, deadline, hs, metrics)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
 	}
