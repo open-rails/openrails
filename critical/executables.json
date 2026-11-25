@@ -46,6 +46,9 @@
     "OR-J03-S05": [
       "TestHostedCheckout/OR-J03-S05/real-assets-and-config-redact-private-state"
     ],
+    "OR-J03-S06": [
+      "TestHostedCheckout/OR-J03-S06/return-urls-name-only-the-merchants-own-sites"
+    ],
     "OR-J04-S01": [
       "TestPublicSDK/OR-J04-S01/built-client-and-real-HTTP-preserve-domain-outcomes"
     ],

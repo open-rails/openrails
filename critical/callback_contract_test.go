@@ -329,7 +329,7 @@ func TestCallbackContracts(t *testing.T) {
 		passlessFleet(t, a.world)
 		p.core.SendThinEventsTo(a.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_thin")
 		sale := saleInput(t, a, p)
-		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}}
+		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}}
 		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, hosted, map[string]string{"Idempotency-Key": "thin-hosted"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var order billing.Order

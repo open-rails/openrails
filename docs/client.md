@@ -69,11 +69,7 @@ touched billing holds nothing; that is never an error.
 
 ## Credentials
 
-| Path | Backend credential | Browser credential (`/v1/me`) |
-|---|---|---|
-| Embedded | none: the handle is in process | your app's own sign-in, sent as a header to your mount ([embedded.md](embedded.md)) |
-| Standalone | an access token from your issuer (`client_credentials`, scope `openrails:merchant`) or a merchant API key | an `openrails:self` token: token exchange at your issuer, or a customer token |
-| SaaS | the console's API key | a customer token, or a token from your own registered issuer |
+Who presents which credential in each mode, and why, is [authentication](authentication.md). Embedded, the handle is in process and needs none; over HTTP, each merchant's `RemoteCredential` carries one of the following.
 
 **Standalone.** The server trusts your issuer for one merchant
 (`remote_application` in its manifest, [standalone.md](standalone.md)).
@@ -124,19 +120,9 @@ from the `billing.Permission` constants. The standalone server's declared roles
 are `viewer`, `support` and `owner`; custom roles hold any `merchant:`
 permissions ([standalone.md](standalone.md)).
 
-**SaaS.** On the hosted platform, create the merchant, its PSPs and an API key
-in the console; the console documents its own pages and routes. Copy **API URL**
-from **Integration** and the key from **Settings → API keys** (shown once).
-`GetAdminAccess` (`GET /v1/admin/access`) returns the key's `ScopeID`: the
-merchant UUID `NewRemote` files the key under. The PSP webhook URLs to give each
-provider are shown under **Integration**. Keep the key on your server.
+**SaaS.** On the hosted platform, create the merchant, its PSPs and an API key in the console; the console documents its own pages and routes. Copy **API URL** from **Integration** and the key from **API keys** (shown once). `GetAdminAccess` (`GET /v1/admin/access`) returns the key's `ScopeID`: the merchant UUID `NewRemote` files the key under. The PSP webhook URLs to give each provider are shown under **Integration**. Keep the key on your server.
 
-**Customer tokens.** A backend whose signing key is registered as the merchant's
-application (standalone: the manifest's `remote_application`; SaaS:
-**Integration → Customer tokens**) sets `RemoteCredential.Assertion`.
-`CreateCustomerToken` redeems an RFC 7523 assertion for a short `openrails:self` token
-(about 15 minutes); `CreateCustomerAssertion` only signs one, for the browser to redeem
-with its own DPoP key. An API key alone cannot mint customer tokens.
+**Customer tokens.** A backend whose signing key is registered as the merchant's application (standalone: the manifest's `remote_application` or the console's **Access → Signing keys**; SaaS: **Integration → Customer tokens**) sets `RemoteCredential.Assertion`. `CreateCustomerToken` redeems an RFC 7523 assertion for a short `openrails:self` token (about 15 minutes); `CreateCustomerAssertion` only signs one, for the browser to redeem with its own DPoP key. An API key alone cannot mint customer tokens.
 
 The [hosted example](../examples/hosted) files its key as
 `AssertionKey{Issuer, KeyID, Signer, TokenURL}` beside the API key and mints a
@@ -197,7 +183,7 @@ _, err = shop.UpdateCustomer(ctx, c.ID, billing.UpdateCustomerParams{
 return err
 ```
 
-**Contacts.** OpenRails holds each customer's contact (email, username, name), from your directory, and emails its billing messages there. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with a provisioning token, or an application credential holding `merchant:provisioning:read` for reads and `merchant:provisioning:manage` for writes; `externalId` is the user's UUID, and the newest write wins. A `DELETE` erases the contact within the merchant's own erasure budget (`DestructiveActionLimitsConfig.ErasurePerHour` and `ErasurePerDay` in `Config.DestructiveActionLimits`, floors that rise with the directory), which no refund or cancellation shares. The User leaves the directory and its contact's values go at once either way; the customer's message log and notifications, which cannot be restored, are erased within the budget. Past it the erasure is never refused: the answer is still `204`, the rest waits, and the merchant's erasure [hold](#destructive-holds) opens until a person holding `merchant:provisioning:manage` clears it (`ClearErasureHold`), or a root operator holding `root:admin-rate-limits:unlock`. A create dated before the erasure (`meta.lastModified`) is refused `409`. Without `Deps.UserInfo`, a customer's own credential also fills its contact as it is used: the verified email and username your Authenticator reports for it are kept, undated, so they fill a contact your directory never pushed and never replace one it did, nor an erasure. On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used, including the email your backend asserts in `CreateCustomerToken`. OpenRails emails a customer only at an address that was verified.
+**Contacts.** OpenRails holds each customer's contact (email, username, name), from your directory, and emails its billing messages there. Embedded, `Deps.UserInfo` answers each read (AuthKit's `ak.UserInfo()`, or your own `Get` and `Search`). Without it, your directory pushes users over SCIM 2.0 to `{Prefix}/v1/app/scim/v2` with a provisioning token, or an application credential holding `merchant:provisioning:read` for reads and `merchant:provisioning:manage` for writes; `externalId` is the user's UUID, and the newest write wins. A `DELETE` erases the contact within the merchant's own erasure budget (`DestructiveActionLimitsConfig.ErasurePerHour` and `ErasurePerDay` in `Config.DestructiveActionLimits`, floors that rise with the directory), which no refund or cancellation shares. The User leaves the directory and its contact's values go at once either way; the customer's message log, notifications and checkouts' attribution, which cannot be restored, are erased within the budget. Past it the erasure is never refused: the answer is still `204`, the rest waits, and the merchant's erasure [hold](#destructive-holds) opens until a person holding `merchant:provisioning:manage` clears it (`ClearErasureHold`), or a root operator holding `root:admin-rate-limits:unlock`. A create dated before the erasure (`meta.lastModified`) is refused `409`. Without `Deps.UserInfo`, a customer's own credential also fills its contact as it is used: the verified email and username your Authenticator reports for it are kept, undated, so they fill a contact your directory never pushed and never replace one it did, nor an erasure. On a standalone server or the hosted platform, your issuer pushes to the server's directory (`/directory/scim/v2`), and verified contact claims in customer tokens fill in as they are used, including the email your backend asserts in `CreateCustomerToken`. OpenRails emails a customer only at an address that was verified.
 
 ## Merchant configuration and PSPs
 
@@ -261,7 +247,7 @@ psps:
 `openrails.ParseMerchantDocument` reads one. Unknown or duplicate fields,
 several documents, anchors and tags are refused, and so are the retired keys
 `rail_merchant_accounts` and `provider_accounts`. Keep secrets out of the
-committed file: an overlay or Vault supplies them
+committed file: Vault, or a file mounted from a secret, supplies them
 ([standalone.md](standalone.md#configuration-reference)).
 
 **Environments.** Each PSP declares whether it moves real money; omitted, it is the rail's real-money one, so production declares none. NMI: `live`, `test` (an account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`, `testnet`. A merchant may mix them. OpenRails asks the provider before arming a PSP: NMI's `test_mode_status` and Solana's genesis hash on every RPC endpoint, again once that proof is an hour old; Stripe's `api.stripe.com/v1/account` against `account_id`, plus `api.stripe.com/v1/balance` for a test key, once per key and account. A PSP whose answer disagrees stays disarmed: reads work, writes fail before any byte is sent, and the `openrails_psp_posture` probe reports it. CCBill's sandbox has no signal, so its writes are always refused.
@@ -271,7 +257,7 @@ committed file: an overlay or Vault supplies them
 `basistheory`, never a PSP key, and `{account_id}` is the PSP's account fields
 joined with `-`. The account resolves the merchant, its own secret verifies the
 delivery, and the payload's account must agree. Rotating a signing secret keeps
-the old one for `webhook_secret_overlap` (24 h); `retire_webhook_overlap` on
+the old one for 24 hours; `retire_webhook_overlap` on
 `UpdatePSP` refuses it at once.
 
 A card PSP (NMI, Stripe, CCBill) may declare `dispute_ratio_limit`, its
@@ -510,6 +496,8 @@ if err != nil {
 }
 return *order.PayURL, nil // redirect the buyer there
 ```
+
+**Checkout facts.** Pass where the customer came from as `Attribution` (`billing.OrderAttribution`: source, medium, campaign, term and content as your `utm_*`, referrer, affiliate; term and content are kept for your own reads, never metrics dimensions) on `CreateOrder`, or as billing-ui's `attribution` prop on `BuyButton`, `ProductList` and `Cart`. Attribution never refuses an order: a field over 100 bytes, unprintable, or carrying an email address or card number is left out (null on the order); a referrer keeps only its host. Browser-supplied attribution is unverified: set an affiliate you pay on orders your server creates. Staff and application reads of a checkout carry `checkout`: `customer_type` (`new`, `returning`, or `reactivated` for a former subscriber with no subscription now), `purchase_number` (the customer's paid purchases before it, plus one), `opened_at` (the payment form first loaded), `submitted_at` (the first pay request), `billing_country`, `ip_country` (`CF-IPCountry`, read only from Cloudflare's published ranges; the address is never stored), `card_country` (null until cards' issuing countries are recorded), `country` with its `country_source`, `language` and `attribution`. The customer's own reads show `checkout: null`. billing-ui sends its `BillingProvider` `locale` (or the client's `language`) as `Accept-Language`, which the order records. A renewal names the checkout that bought its subscription (`renewal.checkout_order_id`).
 
 Generate the idempotency key when the buyer decides to buy, store it with the
 cart, and resend it on every retry: the same key recovers the same order and URL;
@@ -974,8 +962,8 @@ for {
 
 Process each page idempotently by event id and save the cursor in the same
 transaction as your effects, empty pages included; a reader never skips an
-earlier uncommitted fact. Retention is `event_retention` (default 90 days);
-reading does not extend it. `410 event_cursor_expired` means the cursor predates
+earlier uncommitted fact. The event log keeps 90 days; reading does not extend
+it. `410 event_cursor_expired` means the cursor predates
 retention: rebuild your state, then start a new cursor. `400 invalid_cursor` is
 malformed or another merchant's or filter's cursor; filters are fixed for a
 cursor. `EventReader()` adapts the client to the helpers module's

@@ -119,11 +119,9 @@ an optional section is on once set.
 | `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)); code only. |
 | `PublicBillingBaseURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
-| `ReturnOrigins` | Origins a buyer may return to after a redirect step (`returnUrl`). |
-| `TrustedProxies` | Load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
-| `CloudflareProxies` | Cloudflare's ranges where Cloudflare fronts the origin: trusted like `TrustedProxies`, and the only proxies whose `CF-IPCountry` a checkout records. |
-| `CheckoutOrigin` | The payment page's origin ([checkout page](#checkout-page)). |
-| `RateLimits` | Per-minute buckets on customer routes (`purchase`, `subscribe`, `payment`, `webhook`, `catalog-ask`): nil is the built-in set, empty is none. |
+| `TrustedProxies` | Your own load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Cloudflare's published ranges are built in and trusted too, and only their peers are believed for `CF-IPCountry`. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
+| `CheckoutOrigin` | Needed only to serve OpenRails' own hosted pay page: its separate origin ([checkout page](#checkout-page)). Leave it empty with the embedded checkout or your own card form; pay URLs then answer `pay_url_unavailable`. |
+| `RateLimits` | `billing.RateLimitsConfig`, one `*billing.RateLimit` per bucket: `Purchase` (10 a minute), `Payment` (40), `Subscribe` (20), `Webhook` (1200). Nil takes the default; `&billing.RateLimit{}` (`RequestsPerMinute` 0) leaves the bucket unlimited, so a host fronting billing with its own limiter sets every bucket to it. |
 | `Captcha` | `billing.CaptchaAccount`: `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`); both keys turn it on. It challenges a subject at 3× a bucket's limit. |
 | `UserActionRateLimit` | The merchant-wide budget for customer cancellations and card removals. |
 | `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)), and each merchant's own budget for SCIM contact erasures (`ErasurePerHour`, `ErasurePerDay`). |
@@ -133,17 +131,15 @@ an optional section is on once set.
 | `LLM` | The model behind the console's catalog Q&A and drafting. |
 | `ReadCache` | Overrides how long a handle serves catalog and configuration reads from memory ([caching](client.md#caching)); code only. |
 | `ProviderSandbox` | Fake provider endpoints and CCBill webhook sources for tests; refused beside a live PSP. |
-| `EventRetention` | A `time.Duration`: how long the event log keeps facts (default 90 days). |
-| `WebhookSecretOverlap` | A `time.Duration`: how long a rotated webhook secret still verifies (default 24 h, at most 168 h). |
 
 How much OpenRails writes to a merchant's providers is the merchant's write
 posture, kept in the database: `openrails merchant hold` and
 `openrails merchant arm`, run with the engine's database and schema, change it
 ([write safety](standalone.md#write-safety-and-the-kill-switch)).
 
-Several instances must agree on the schemas, `Merchants`,
-`RateLimits`, `Captcha`, `TrustedProxies`, `ReturnOrigins` and the mounted
-`Routes` (a route some instances lack answers 404 there).
+A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicBillingBaseURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours.
+
+Several instances must agree on the schemas, `Merchants`, `RateLimits`, `Captcha`, `TrustedProxies` and the mounted `Routes` (a route some instances lack answers 404 there).
 
 ## Deps
 
@@ -340,6 +336,8 @@ calls pass through none of this and count against no rate limit. Point each
 PSP's webhooks at `{Prefix}/v1/webhooks/{rail}/{account_id}`.
 
 ## Auth
+
+Embedded, your app's own sign-in is the only one: customers, staff and operators present your app's credential to your mount, and there is no second token and no OpenRails login ([authentication](authentication.md)).
 
 `Routes.Auth` is an `authkit/auth` `Authenticator`: it says who a request is and
 whether they hold a permission in a scope; OpenRails decides what to admit and

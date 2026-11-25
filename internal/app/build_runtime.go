@@ -333,9 +333,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		RedisClient:   redisClient,
 		Config:        cfg,
 		Clock:         clock,
-		// #746: one proxy-aware client-IP resolver, built once from config;
-		// empty yields a resolver that trusts nothing.
-		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies, cfg.CloudflareProxies),
+		// #746: one proxy-aware client-IP resolver, built once from config
+		// and Cloudflare's ranges.
+		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies),
 		RailConfigs:    railConfigs,
 
 		SubscriptionService:      serviceInstances.SubscriptionService,
@@ -394,6 +394,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	runtime.Disputes.Lifecycle = runtime.SubscriptionLifecycleService
 	// Redirect PSPs and bank challenges come back to the payment page itself.
 	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
+	serviceInstances.OrderAttemptService.SetReturnOrigins(runtime.ReturnOrigins)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.AdminSubscriptionService.SetRequestedCancellationLimiter(func(ctx context.Context, sub *models.Subscription) error {
 		return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID)

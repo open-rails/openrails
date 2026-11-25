@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/logx"
-	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/controlplane"
@@ -28,9 +27,8 @@ import (
 // provision is refused alone (Runtime.Refusals) and retried in the
 // background; a document a merchant cannot serve is refused alone. With
 // Vault holding merchant configuration, it is served once Vault answers.
-// Posture is verified in the background. overlays are files in the manifest's
-// shape merged over it in order.
-func ReconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlays []string) error {
+// Posture is verified in the background.
+func ReconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, application *app.App, cp *controlplane.ControlPlane, path string) error {
 	rt := application.Runtime
 	if rt == nil {
 		return fmt.Errorf("merchant startup requires a runtime")
@@ -39,7 +37,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, app
 		return err
 	}
 	pass := &bootPass{rt: rt}
-	slugs, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, pass.refuse)
+	slugs, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, pass.refuse)
 	if err != nil {
 		return err
 	}
@@ -48,7 +46,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, app
 		rt.Go("merchant manifest", func(ctx context.Context) {
 			err := retry.Forever(ctx, func(ctx context.Context) error {
 				next := &bootPass{rt: rt, previous: pass.refused}
-				if _, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, next.refuse); err != nil {
+				if _, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, next.refuse); err != nil {
 					return err
 				}
 				next.settle()
@@ -115,7 +113,7 @@ func (p *bootPass) settle() {
 // reconcileBootMerchantManifest applies the boot manifest, returning the
 // slugs it declares. refuse, when set, takes what a serving process serves
 // without (bootstrap.ReconcileOptions.Refuse).
-func reconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlayPaths []string, refuse func(string, error)) ([]string, error) {
+func reconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, application *app.App, cp *controlplane.ControlPlane, path string, refuse func(string, error)) ([]string, error) {
 	explicit := strings.TrimSpace(path) != ""
 	if !explicit {
 		path = bootstrap.DefaultMerchantConfigManifestPath
@@ -130,12 +128,7 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *billing.Config, app
 	if err != nil {
 		return nil, fmt.Errorf("read merchant manifest %s: %w", path, err)
 	}
-
-	overlays, err := merchantbootstrap.ReadMerchantManifestOverlays(overlayPaths)
-	if err != nil {
-		return nil, err
-	}
-	manifest, err := bootstrap.LoadMerchantConfigManifestWithOverlays(raw, overlays...)
+	manifest, err := bootstrap.LoadMerchantConfigManifest(raw)
 	if err != nil {
 		return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 	}

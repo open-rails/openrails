@@ -1,6 +1,6 @@
 version: 1
 
-# Store real secrets in Hashicorp Vault and overlay them into this manifest.
+# Keep real secrets in Vault (vault.kv_mount), or mount this file from a secret.
 #
 # A PSP's rail decides its fields: everything but `secrets` sits flat on the
 # PSP, and a field its rail does not take is refused. Its `environment` is one

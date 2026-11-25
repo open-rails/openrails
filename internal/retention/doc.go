@@ -1,6 +1,6 @@
 // Package retention holds how long OpenRails keeps each kind of row. The
-// periods are constants: the same for every merchant and not configuration,
-// except the event log's Config.EventRetention. Each table's comment in the
+// periods are constants: the same for every merchant and not configuration.
+// Each table's comment in the
 // baseline states its class (tables.go lists them):
 //   - permanent: the ledger, grants, payments, owed usage, usage postings
 //     and card prints, receipts, operation authorizations, refusals, running charges,
@@ -18,8 +18,8 @@
 // never reached a provider 90 days, and unpaid closed orders with none 397
 // days;
 // parked_provider_subscriptions 90 days after release; carts 30 days idle;
-// notification_events, host_outbox and the event log 90 days, never before
-// EventRetention; webhook_events 90 days after completion; idempotency_keys and
+// notification_events, host_outbox and the event log 90 days; webhook_events
+// 90 days after completion; idempotency_keys and
 // solana_pay_references at expiry (after the 7-day watch);
 // user_destructive_reservations 24 hours; limit_windows 61 days after
 // window_ends_at (lifetime and rate limits stay); leases with their in-flight

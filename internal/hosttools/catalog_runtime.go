@@ -69,7 +69,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 	if err != nil {
 		return fail(fmt.Errorf("resolve catalog merchant %q: %w", opts.Merchant, err))
 	}
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.Vault, selected.ID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.Vault, selected.ID, opts.MerchantManifest, opts.MerchantManifestPath)
 	if err != nil {
 		return fail(fmt.Errorf("catalog runtime merchant configuration: %w", err))
 	}

@@ -1,32 +1,31 @@
 package iputil
 
 import (
-	"net/http"
+	"net/http/httptest"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
-func TestCountryOnlyFromCloudflare(t *testing.T) {
-	tp := ParseTrustedProxies([]string{"10.0.0.0/8"}, []string{"173.245.48.0/20"})
+func TestCloudflarePeersAloneSetTheCountryAndClientIP(t *testing.T) {
+	proxies := ParseTrustedProxies([]string{"10.0.0.0/8"})
 	for name, c := range map[string]struct {
-		peer, forwarded, want string
+		peer, xff, country, clientIP string
 	}{
-		"cloudflare connects":               {"173.245.48.5:443", "203.0.113.9", "FR"},
-		"cloudflare behind the ingress":     {"10.0.0.2:80", "203.0.113.9, 173.245.48.5", "FR"},
-		"another proxy received the client": {"10.0.0.2:80", "203.0.113.9", ""},
-		"a client claims cloudflare":        {"10.0.0.2:80", "173.245.48.5, 203.0.113.9", ""},
-		"an untrusted peer":                 {"198.51.100.7:443", "", ""},
-		"every hop trusted":                 {"10.0.0.2:80", "173.245.48.5", ""},
+		"a Cloudflare peer":                  {"173.245.48.7:443", "203.0.113.9", "DE", "203.0.113.9"},
+		"a Cloudflare IPv6 peer":             {"[2606:4700::1]:443", "203.0.113.9", "DE", "203.0.113.9"},
+		"Cloudflare behind the ingress":      {"10.1.2.3:80", "203.0.113.9, 173.245.48.7", "DE", "203.0.113.9"},
+		"a peer that is not Cloudflare's":    {"198.51.100.4:443", "203.0.113.9", "", "198.51.100.4"},
+		"the ingress, not Cloudflare":        {"10.1.2.3:80", "198.51.100.4", "", "198.51.100.4"},
+		"a client claiming to be Cloudflare": {"10.1.2.3:80", "173.245.48.7, 198.51.100.4", "", "198.51.100.4"},
 	} {
-		r, err := http.NewRequest(http.MethodGet, "http://openrails.invalid/", nil)
-		require.NoError(t, err)
+		r := httptest.NewRequest("GET", "/", nil)
 		r.RemoteAddr = c.peer
-		if c.forwarded != "" {
-			r.Header.Set("X-Forwarded-For", c.forwarded)
+		r.Header.Set("X-Forwarded-For", c.xff)
+		r.Header.Set("CF-IPCountry", "de")
+		if got := proxies.Country(r); got != c.country {
+			t.Errorf("%s: country %q, want %q", name, got, c.country)
 		}
-		r.Header.Set("CF-IPCountry", "fr")
-		require.Equal(t, c.want, tp.Country(r), name)
+		if got := proxies.ClientIP(r); got != c.clientIP {
+			t.Errorf("%s: client IP %q, want %q", name, got, c.clientIP)
+		}
 	}
-	require.Equal(t, "203.0.113.9", tp.ClientIP(&http.Request{RemoteAddr: "10.0.0.2:80", Header: http.Header{"X-Forwarded-For": {"203.0.113.9, 173.245.48.5"}}}), "Cloudflare is a trusted proxy")
 }

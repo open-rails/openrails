@@ -7,42 +7,37 @@ import (
 )
 
 // TrustedProxies is the one proxy-aware client-IP resolver, built from the
-// configured trusted proxies, so rate limits, abuse tracking, request logs,
-// webhook IP recording and the CCBill allowlist all trust proxies identically.
+// configured trusted proxies and CloudflareRanges, so rate limits, abuse
+// tracking, request logs, webhook IP recording and the CCBill allowlist all
+// trust proxies identically.
 //
-// Empty trusts nothing: every resolution returns the socket peer. When the
-// peer is trusted, ClientIP walks X-Forwarded-For right-to-left past trusted
-// hops to the first untrusted address. Cloudflare's proxies are trusted too,
-// and theirs is the only CF-IPCountry read.
+// When the peer is trusted, ClientIP walks X-Forwarded-For right-to-left past
+// trusted hops to the first untrusted address; otherwise it is the peer.
 type TrustedProxies struct {
-	nets       []*net.IPNet
-	cloudflare []*net.IPNet
+	nets []*net.IPNet
 }
 
-// ParseTrustedProxies builds a resolver from the trusted proxies' and
-// Cloudflare's CIDR strings. Malformed entries are skipped: config.Validate
-// rejects them at boot.
-func ParseTrustedProxies(trusted, cloudflare []string) *TrustedProxies {
-	tp := &TrustedProxies{cloudflare: parseCIDRs(cloudflare)}
-	tp.nets = append(parseCIDRs(trusted), tp.cloudflare...)
-	return tp
-}
-
-func parseCIDRs(cidrs []string) []*net.IPNet {
-	var out []*net.IPNet
+// ParseTrustedProxies builds a resolver from CIDR strings. Malformed entries
+// are skipped: config.Validate rejects them at boot.
+func ParseTrustedProxies(cidrs []string) *TrustedProxies {
+	tp := &TrustedProxies{}
 	for _, raw := range cidrs {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
 		}
 		if _, ipNet, err := net.ParseCIDR(raw); err == nil {
-			out = append(out, ipNet)
+			tp.nets = append(tp.nets, ipNet)
 		}
 	}
-	return out
+	return tp
 }
 
-func contains(nets []*net.IPNet, ip net.IP) bool {
+func (t *TrustedProxies) trusts(ip net.IP) bool {
+	return t != nil && (inNets(ip, t.nets) || inNets(ip, cloudflareNets))
+}
+
+func inNets(ip net.IP, nets []*net.IPNet) bool {
 	if ip == nil {
 		return false
 	}
@@ -54,10 +49,6 @@ func contains(nets []*net.IPNet, ip net.IP) bool {
 	return false
 }
 
-func (t *TrustedProxies) trusts(ip net.IP) bool {
-	return t != nil && contains(t.nets, ip)
-}
-
 // ClientIP returns r's real client IP. Every X-Forwarded-For line counts,
 // joined in order as repeated fields combine (RFC 9110 §5.3): a proxy that
 // appends its own line (HAProxy's option forwardfor) must not leave a
@@ -67,11 +58,10 @@ func (t *TrustedProxies) ClientIP(r *http.Request) string {
 	return t.resolve(r.RemoteAddr, strings.Join(r.Header.Values("X-Forwarded-For"), ","))
 }
 
-// Country is the client's ISO country code from the CF-IPCountry header of
-// the Cloudflare proxy the client connected to, or "" when no Cloudflare
-// proxy received the client or the country is unknown.
+// Country is the client's ISO country code from CF-IPCountry, or "" when
+// Cloudflare did not send the request or the country is unknown.
 func (t *TrustedProxies) Country(r *http.Request) string {
-	if t == nil || !contains(t.cloudflare, t.receiver(r.RemoteAddr, strings.Join(r.Header.Values("X-Forwarded-For"), ","))) {
+	if !t.fromCloudflare(r) {
 		return ""
 	}
 	country := strings.ToUpper(strings.TrimSpace(r.Header.Get("CF-IPCountry")))
@@ -97,22 +87,24 @@ func (t *TrustedProxies) ForwardedHTTPS(r *http.Request) bool {
 	return true
 }
 
-// receiver is the trusted proxy the client connected to, walking as resolve
-// does; nil when the peer is the client or every hop is trusted.
-func (t *TrustedProxies) receiver(remoteAddr, forwardedFor string) net.IP {
-	peer := net.ParseIP(hostOnly(remoteAddr))
-	if !t.trusts(peer) {
-		return nil
+// fromCloudflare reports whether the peer, or the nearest hop past the
+// configured proxies, is Cloudflare's. A generic proxy relays CF-* headers
+// verbatim, so only Cloudflare's own are believed.
+func (t *TrustedProxies) fromCloudflare(r *http.Request) bool {
+	if t == nil {
+		return false
 	}
-	hops := splitForwardedFor(forwardedFor)
-	for i := len(hops) - 1; i >= 0; i-- {
-		hop := net.ParseIP(hops[i])
-		if !t.trusts(hop) {
-			return peer
+	hops := splitForwardedFor(strings.Join(r.Header.Values("X-Forwarded-For"), ","))
+	ip := net.ParseIP(hostOnly(r.RemoteAddr))
+	for i := len(hops); ; i-- {
+		switch {
+		case inNets(ip, cloudflareNets):
+			return true
+		case !inNets(ip, t.nets) || i == 0:
+			return false
 		}
-		peer = hop
+		ip = net.ParseIP(hops[i-1])
 	}
-	return nil
 }
 
 // resolve walks forwardedFor, the joined X-Forwarded-For hops, back from

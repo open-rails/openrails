@@ -26,7 +26,7 @@ type billingShop struct {
 func newBillingShop(t *testing.T, fields *billing.BillingFieldSettings) *billingShop {
 	t.Helper()
 	a, journal := newNMIWorld(t, func(w *world) {
-		w.cfg.RateLimits = billing.RateLimitsConfig{"payment": {RequestsPerMinute: 40}}
+		w.cfg.RateLimits = paymentLimitOnly
 		if fields != nil {
 			merchant := cfgMerchant(w.cfg, "alpha")
 			merchant.Checkout = &billing.MerchantCheckoutSettings{BillingFields: fields}

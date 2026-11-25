@@ -464,7 +464,7 @@ func (s *Service) applyCredentials(p *merchantdocs.PSP, credentials map[string]s
 			rotated = true
 			if !retire {
 				p.Secrets["webhook_signing_secret_previous"] = current
-				p.Settings[WebhookOverlapExpiresKey] = s.now().Add(s.overlapWindow()).Format(time.RFC3339)
+				p.Settings[WebhookOverlapExpiresKey] = s.now().Add(webhookSecretOverlap).Format(time.RFC3339)
 			}
 		}
 	}

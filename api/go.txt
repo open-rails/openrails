@@ -1594,11 +1594,9 @@ pkg openrails/billing, type Config struct, Captcha CaptchaAccount `yaml:"captcha
 pkg openrails/billing, type Config struct, CardVault CardVaultConfig `yaml:"card_vault"`
 pkg openrails/billing, type Config struct, CheckoutOrigin string `yaml:"checkout_origin"`
 pkg openrails/billing, type Config struct, ClickHouse ClickHouseConfig `yaml:"clickhouse"`
-pkg openrails/billing, type Config struct, CloudflareProxies []string `yaml:"-"`
 pkg openrails/billing, type Config struct, Database DatabaseConfig `yaml:"database"`
 pkg openrails/billing, type Config struct, DestructiveActionLimits DestructiveActionLimitsConfig `yaml:"destructive_action_limits"`
 pkg openrails/billing, type Config struct, EngineAdmissionHold bool `yaml:"engine_admission_hold"`
-pkg openrails/billing, type Config struct, EventRetention time.Duration `yaml:"event_retention"`
 pkg openrails/billing, type Config struct, HyperSwitch HyperSwitchConfig `yaml:"hyperswitch"`
 pkg openrails/billing, type Config struct, LLM LLMConfig `yaml:"llm"`
 pkg openrails/billing, type Config struct, Merchants []MerchantDeclaration `yaml:"-"`
@@ -1606,12 +1604,10 @@ pkg openrails/billing, type Config struct, ProviderSandbox ProviderSandboxConfig
 pkg openrails/billing, type Config struct, PublicBillingBaseURL string `yaml:"public_billing_base_url"`
 pkg openrails/billing, type Config struct, RateLimits RateLimitsConfig `yaml:"rate_limits"`
 pkg openrails/billing, type Config struct, ReadCache ReadCache `yaml:"-"`
-pkg openrails/billing, type Config struct, ReturnOrigins []string `yaml:"return_origins"`
 pkg openrails/billing, type Config struct, Solana SolanaConfig `yaml:"solana"`
 pkg openrails/billing, type Config struct, TrustedProxies []string `yaml:"trusted_proxies"`
 pkg openrails/billing, type Config struct, UserActionRateLimit UserActionRateLimitConfig `yaml:"user_action_rate_limit"`
 pkg openrails/billing, type Config struct, Vault VaultConfig `yaml:"vault"`
-pkg openrails/billing, type Config struct, WebhookSecretOverlap time.Duration `yaml:"webhook_secret_overlap"`
 pkg openrails/billing, type ConfirmOrderParams struct
 pkg openrails/billing, type ConfirmOrderParams struct, Signature *string `json:"signature,omitempty"`
 pkg openrails/billing, type ConfirmPaymentMethodParams struct
@@ -3748,7 +3744,11 @@ pkg openrails/billing, type RailDefinition struct, Fields []string `json:"fields
 pkg openrails/billing, type RailDefinition struct, Rail Rail `json:"rail"`
 pkg openrails/billing, type RateLimit struct
 pkg openrails/billing, type RateLimit struct, RequestsPerMinute int `yaml:"requests_per_minute"`
-pkg openrails/billing, type RateLimitsConfig map[string]*RateLimit
+pkg openrails/billing, type RateLimitsConfig struct
+pkg openrails/billing, type RateLimitsConfig struct, Payment *RateLimit `yaml:"payment"`
+pkg openrails/billing, type RateLimitsConfig struct, Purchase *RateLimit `yaml:"purchase"`
+pkg openrails/billing, type RateLimitsConfig struct, Subscribe *RateLimit `yaml:"subscribe"`
+pkg openrails/billing, type RateLimitsConfig struct, Webhook *RateLimit `yaml:"webhook"`
 pkg openrails/billing, type Read string
 pkg openrails/billing, type ReadCache map[Read]ReadPolicy
 pkg openrails/billing, type ReadPolicy struct
@@ -4732,7 +4732,7 @@ pkg openrails/server, method (*Server) ListWorkerHealth(context.Context) ([]bill
 pkg openrails/server, method (*Server) MerchantByName(context.Context, string) (billing.MerchantID, string, error)
 pkg openrails/server, method (*Server) MerchantPurgeInventory(context.Context, billing.MerchantID) (*billing.MerchantPurgeInventory, error)
 pkg openrails/server, method (*Server) MerchantScope(context.Context, billing.MerchantID) (auth.Scope, error)
-pkg openrails/server, method (*Server) PrivateHandler() http.Handler
+pkg openrails/server, method (*Server) MetricsHandler() http.Handler
 pkg openrails/server, method (*Server) ProvisionMerchant(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
 pkg openrails/server, method (*Server) PurgeMerchant(context.Context, billing.MerchantID, billing.PurgeMerchantParams) (*billing.MerchantPurge, error)
 pkg openrails/server, method (*Server) RenameMerchant(context.Context, billing.MerchantID, billing.RenameMerchantParams) (*billing.MerchantName, error)
@@ -4758,9 +4758,9 @@ pkg openrails/server, type Config struct, Engine openrails.Config `yaml:",inline
 pkg openrails/server, type Config struct, Host string `yaml:"host"`
 pkg openrails/server, type Config struct, LocalSignIn bool `yaml:"local_sign_in"`
 pkg openrails/server, type Config struct, MerchantCreation *MerchantCreationConfig `yaml:"-"`
+pkg openrails/server, type Config struct, MetricsPort int `yaml:"metrics_port"`
 pkg openrails/server, type Config struct, Naming billing.NamingConfig `yaml:"naming"`
 pkg openrails/server, type Config struct, Port int `yaml:"port"`
-pkg openrails/server, type Config struct, PrivatePort int `yaml:"private_port"`
 pkg openrails/server, type Config struct, RouteGroups openrails.RouteGroups `yaml:"route_groups"`
 pkg openrails/server, type ConsoleIssuer struct
 pkg openrails/server, type ConsoleIssuer struct, ClientID string `yaml:"client_id"`

@@ -50,6 +50,10 @@ type authorityWorld struct {
 	privateSigner           ed25519.PrivateKey
 }
 
+// alphaSite is the origin of alpha's declared issuer: one of its return
+// origins.
+const alphaSite = authtest.Issuer
+
 func newAuthorityWorld(t *testing.T, configure ...func(*world)) *authorityWorld {
 	t.Helper()
 	return newAuthorityWorldWithAuth(t, nil, configure...)

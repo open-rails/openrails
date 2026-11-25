@@ -57,10 +57,18 @@ func payCheckout(t *testing.T, a *authorityWorld, order billing.Order, payment b
 	return status, paid
 }
 
-// cloudflareLoopback makes the test client's own address a Cloudflare proxy.
-func cloudflareLoopback(w *world) {
-	w.cfg.CloudflareProxies = []string{"127.0.0.1/32", "::1/128"}
+// cloudflareEdge is an address in Cloudflare's published egress ranges.
+const cloudflareEdge = "173.245.48.1"
+
+// behindCloudflare puts the test client behind the merchant's own proxy
+// (loopback, a trusted proxy), which Cloudflare fronts.
+func behindCloudflare(w *world) {
+	w.cfg.TrustedProxies = []string{"127.0.0.1/32", "::1/128"}
 }
+
+// viaCloudflare is the X-Forwarded-For of client's request through
+// Cloudflare's edge and the merchant's proxy.
+func viaCloudflare(client string) string { return client + ", " + cloudflareEdge }
 
 // underAttack is the precondition of a card-testing attack on the world's
 // merchant: its captcha challenges every pay request until cleared.
@@ -114,7 +122,7 @@ func TestCheckoutFunnel(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) {
 			w.deps.Redis = criticalRedis(t)
 			w.cfg.Captcha = billing.CaptchaAccount{Provider: "turnstile", SiteKey: "critical-site", SecretKey: "critical-secret"}
-			w.cfg.RateLimits = billing.RateLimitsConfig{"purchase": {RequestsPerMinute: 1000}}
+			w.cfg.RateLimits = billing.RateLimitsConfig{Purchase: &billing.RateLimit{RequestsPerMinute: 1000}}
 		})
 		_, price := publicSale(t, a, "funnel-steps", 9_990_000, nil)
 		created := openCheckout(t, a, price.ID, nil, nil)
@@ -217,14 +225,14 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.NotNil(t, tried.SubmittedAt, "abandoned after a submission")
 	})
 	t.Run("OR-J47-S03/checkout-measures-read-the-funnel-as-it-happened", func(t *testing.T) {
-		a, p := newPaymentWorld(t, cloudflareLoopback)
+		a, p := newPaymentWorld(t, behindCloudflare)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		sale := func(key string) billing.PriceID {
 			_, price := publicSale(t, a, key, 10_000_000, nil)
 			return price.ID
 		}
 		via := func(country string, more map[string]string) map[string]string {
-			out := map[string]string{"CF-IPCountry": country, "X-Forwarded-For": "203.0.113.90"}
+			out := map[string]string{"CF-IPCountry": country, "X-Forwarded-For": viaCloudflare("203.0.113.90")}
 			for k, v := range more {
 				out[k] = v
 			}
@@ -368,12 +376,12 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, 1, other.Checkout.PurchaseNumber, "purchases are counted per customer")
 	})
 	t.Run("OR-J47-S05/the-country-is-the-billing-address-then-the-ip-never-the-address", func(t *testing.T) {
-		a, p := newPaymentWorld(t, cloudflareLoopback)
+		a, p := newPaymentWorld(t, behindCloudflare)
 		_, price := publicSale(t, a, "funnel-country", 9_990_000, nil)
 		_, other := publicSale(t, a, "funnel-country-ip", 9_990_000, nil)
 		// The client's own address reaches OpenRails only in X-Forwarded-For.
 		const client = "203.0.113.77"
-		viaFrance := map[string]string{"CF-IPCountry": "FR", "X-Forwarded-For": client}
+		viaFrance := map[string]string{"CF-IPCountry": "FR", "X-Forwarded-For": viaCloudflare(client)}
 		order := openCheckout(t, a, price.ID, nil, viaFrance)
 		facts := checkoutOf(t, a, order.ID)
 		require.Equal(t, "FR", *facts.IPCountry)
@@ -381,7 +389,7 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, billing.CountrySourceIP, *facts.CountrySource)
 		require.Nil(t, facts.CardCountry, "card country is not recorded yet")
 		billingDE := &billing.BillingDetails{Address: &billing.BillingAddress{Country: ptr("de")}}
-		status, _ := payCheckout(t, a, order, billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"}), BillingDetails: billingDE}, "funnel-country-pay", map[string]string{"CF-IPCountry": "US", "X-Forwarded-For": client})
+		status, _ := payCheckout(t, a, order, billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"}), BillingDetails: billingDE}, "funnel-country-pay", map[string]string{"CF-IPCountry": "US", "X-Forwarded-For": viaCloudflare(client)})
 		require.Equal(t, http.StatusOK, status)
 		facts = checkoutOf(t, a, order.ID)
 		require.Equal(t, "DE", *facts.BillingCountry)
@@ -390,7 +398,7 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, "FR", *facts.IPCountry, "the first request's country is kept")
 
 		// Unknown and malformed countries are no evidence.
-		unknown := openCheckout(t, a, other.ID, nil, map[string]string{"CF-IPCountry": "XX"})
+		unknown := openCheckout(t, a, other.ID, nil, map[string]string{"CF-IPCountry": "XX", "X-Forwarded-For": viaCloudflare(client)})
 		facts = checkoutOf(t, a, unknown.ID)
 		require.Nil(t, facts.IPCountry)
 		require.Nil(t, facts.Country)
@@ -418,11 +426,11 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.NoError(t, err)
 		require.Positive(t, archived)
 
-		// A trusted proxy that is not Cloudflare's is never read for a country.
-		u, _ := newPaymentWorld(t, func(w *world) { w.cfg.TrustedProxies = []string{"127.0.0.1/32", "::1/128"} })
-		_, untrusted := publicSale(t, u, "funnel-untrusted", 9_990_000, nil)
-		spoofed := openCheckout(t, u, untrusted.ID, nil, viaFrance)
-		require.Nil(t, checkoutOf(t, u, spoofed.ID).IPCountry)
+		// A request that did not come through Cloudflare's edge is never read
+		// for a country, though a trusted proxy relays the header.
+		_, untrusted := publicSale(t, a, "funnel-untrusted", 9_990_000, nil)
+		spoofed := openCheckout(t, a, untrusted.ID, nil, map[string]string{"CF-IPCountry": "FR", "X-Forwarded-For": client})
+		require.Nil(t, checkoutOf(t, a, spoofed.ID).IPCountry)
 	})
 	t.Run("OR-J47-S06/the-language-is-the-first-in-person-requests", func(t *testing.T) {
 		a, _ := newPaymentWorld(t)
@@ -519,14 +527,14 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, "50%off", *firstCampaign(t, a, customer, merchantPrice.ID, "50%off"), "a lone % stays as written")
 	})
 	t.Run("OR-J47-S09/an-unpaid-checkout-keeps-its-facts-for-397-days", func(t *testing.T) {
-		a, _ := newPaymentWorld(t, cloudflareLoopback)
+		a, _ := newPaymentWorld(t, behindCloudflare)
 		w := a.world
 		fleet := hostFleet(t, w)
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 		_, price := publicSale(t, a, "funnel-retained", 9_990_000, nil)
-		order := openCheckout(t, a, price.ID, &billing.OrderAttribution{Campaign: ptr("retained")}, map[string]string{"CF-IPCountry": "JP", "X-Forwarded-For": "203.0.113.81", "Accept-Language": "ja"})
+		order := openCheckout(t, a, price.ID, &billing.OrderAttribution{Campaign: ptr("retained")}, map[string]string{"CF-IPCountry": "JP", "X-Forwarded-For": viaCloudflare("203.0.113.81"), "Accept-Language": "ja"})
 		status, raw := a.request(t, http.MethodGet, "/v1/me/orders/"+order.ID.String(), a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		w.clock.Advance(25 * time.Hour)
@@ -551,14 +559,14 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.ErrorIs(t, err, billing.ErrNotFound, "397 days after it closed it is gone")
 	})
 	t.Run("OR-J47-S08/renewals-name-the-checkout-that-bought-their-subscription", func(t *testing.T) {
-		a, p := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) }, cloudflareLoopback)
+		a, p := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) }, behindCloudflare)
 		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "funnel-membership", DisplayName: "Membership", Entitlements: []string{"membership:paid"}})
 		require.NoError(t, err)
 		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "funnel-membership-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
 		require.NoError(t, err)
 		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
 			Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}, Attribution: &billing.OrderAttribution{Campaign: ptr("renewals")}}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "funnel-membership", "CF-IPCountry": "SE", "X-Forwarded-For": "203.0.113.80"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "funnel-membership", "CF-IPCountry": "SE", "X-Forwarded-For": viaCloudflare("203.0.113.80")})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var bought billing.Order
 		require.NoError(t, json.Unmarshal(raw, &bought))

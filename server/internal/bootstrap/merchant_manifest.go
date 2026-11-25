@@ -42,16 +42,15 @@ func Declarations(m *BillingConfig) *merchantbootstrap.BillingConfig {
 	return out
 }
 
-// LoadMerchantConfigManifestFiles loads a merchant config YAML file plus
-// optional structured YAML overlays.
-func LoadMerchantConfigManifestFiles(path string, overlays ...string) (*BillingConfig, error) {
-	return merchantbootstrap.LoadManifestFiles(path, overlays, checkManifestEntry)
+// LoadMerchantConfigManifestFile loads and validates the merchant config
+// manifest at path.
+func LoadMerchantConfigManifestFile(path string) (*BillingConfig, error) {
+	return merchantbootstrap.LoadManifestFile(path, checkManifestEntry)
 }
 
-// LoadMerchantConfigManifestWithOverlays merges the manifest with structured
-// YAML overlays (later wins) and validates the result.
-func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error) {
-	return merchantbootstrap.LoadManifest(raw, overlays, checkManifestEntry)
+// LoadMerchantConfigManifest validates a merchant config manifest.
+func LoadMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
+	return merchantbootstrap.LoadManifest(raw, checkManifestEntry)
 }
 
 type MerchantConfig struct {
