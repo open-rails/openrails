@@ -1,88 +1,42 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import type { AuthClient } from "@openrails/auth-ui/client"
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import {
-  ConsoleSession,
-  createConsoleSession,
-  type ConsoleClient,
-} from "./lib/session"
-import { ISSUER_REDIRECT_KEY, useIdentity } from "./lib/identity"
+import { ConsoleSession, createConsoleSession } from "./lib/session"
+import { useIdentity } from "./lib/identity"
 import { Redirect } from "./lib/redirect"
 import { LoginPage } from "./pages/login"
-import { CallbackPage } from "./pages/callback"
 import { AccountLinkPage, InvitationPage } from "./pages/account-links"
 import { MerchantWorkspace } from "./workspace"
 import type { BootstrapConfig } from "./config"
 
-const METHOD_KEY = "openrails.console.sign-in"
-
 export function ConsoleApp({ config }: { config: BootstrapConfig }) {
-  const location = useLocation()
-  const nativeLink = ["/invite", "/reset", "/verify", "/passwordless"].includes(
-    location.pathname
-  )
-  const [method, setMethod] = useState(
-    () => sessionStorage.getItem(METHOD_KEY) ?? "local"
-  )
-  // The server's own accounts, unless staff chose an issuer it still offers.
-  const issuer = nativeLink
-    ? undefined
-    : config.issuers.find((item) => item.key === method)
-  const session = useMemo(
-    () => createConsoleSession(config, issuer),
-    [config, issuer]
-  )
+  const auth = useMemo(() => createConsoleSession(config), [config])
   const navigate = useNavigate()
-  const choose = (key: string, target?: string) => {
-    sessionStorage.removeItem(ISSUER_REDIRECT_KEY)
-    sessionStorage.setItem(METHOD_KEY, key)
-    setMethod(key)
-    const login =
-      location.pathname === "/login"
-        ? "/login" + location.search
-        : `/login?return_to=${encodeURIComponent(location.pathname + location.search)}`
-    void navigate(target ?? login)
-  }
   return (
-    <ConsoleSession key={issuer?.key ?? "local"} session={session}>
+    <ConsoleSession auth={auth}>
       <Routes>
+        <Route path="/login" element={<LoginPage />} />
         <Route
-          path="/login"
-          element={<LoginPage issuers={config.issuers} choose={choose} />}
+          path="/invite"
+          element={
+            <InvitationPage auth={auth} onDone={() => void navigate("/")} />
+          }
         />
-        {session.kind === "issuer" && (
-          <Route path="/callback" element={<CallbackPage />} />
-        )}
-        {session.kind === "local" && (
-          <>
-            <Route
-              path="/invite"
-              element={
-                <InvitationPage
-                  auth={session.client}
-                  onDone={() => choose("local", "/")}
-                />
-              }
-            />
-            {(["reset", "verify", "passwordless"] as const).map((kind) => (
-              <Route
-                key={kind}
-                path={`/${kind}`}
-                element={
-                  <AccountLinkPage
-                    auth={session.client}
-                    kind={kind}
-                    navigate={(to) => void navigate(to)}
-                    onDone={(to) => choose("local", to ?? "/")}
-                  />
-                }
+        {(["reset", "verify", "passwordless"] as const).map((kind) => (
+          <Route
+            key={kind}
+            path={`/${kind}`}
+            element={
+              <AccountLinkPage
+                auth={auth}
+                kind={kind}
+                navigate={(to) => void navigate(to)}
+                onDone={(to) => void navigate(to ?? "/")}
               />
-            ))}
-          </>
-        )}
-        <Route
-          path="*"
-          element={<SignedIn config={config} session={session} />}
-        />
+            }
+          />
+        ))}
+        <Route path="*" element={<SignedIn config={config} auth={auth} />} />
       </Routes>
     </ConsoleSession>
   )
@@ -90,10 +44,10 @@ export function ConsoleApp({ config }: { config: BootstrapConfig }) {
 
 function SignedIn({
   config,
-  session,
+  auth,
 }: {
   config: BootstrapConfig
-  session: ConsoleClient
+  auth: AuthClient
 }) {
   const identity = useIdentity()
   const location = useLocation()
@@ -119,7 +73,7 @@ function SignedIn({
     <MerchantWorkspace
       key={identity.user.id}
       config={config}
-      session={session}
+      auth={auth}
       subject={identity.user.id}
     />
   )

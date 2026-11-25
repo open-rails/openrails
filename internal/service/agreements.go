@@ -357,8 +357,8 @@ func (s *Service) endAgreement(ctx context.Context, m gen.BillingMandate, curren
 }
 
 // CancelSubscriptionForCustomer is the customer's own cancel at the
-// period's end. A provider-billed schedule that cannot be deleted
-// (destructive actions disarmed) is refused with its operator finding.
+// period's end. Destructive arming never holds it: only the merchant-wide
+// customer budget refuses it.
 func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer billing.CustomerID, sub *models.Subscription, reason string) error {
 	if sub == nil || customer.IsZero() || sub.CustomerID != customer.UUID() {
 		return subscriptions.ErrSubscriptionNotFound
@@ -386,9 +386,6 @@ func (s *Service) CancelSubscriptionForCustomer(ctx context.Context, customer bi
 	}
 
 	ctx = db.WithPSPID(ctx, sub.PspID)
-	if _, err := subscriptions.RequireProviderCancelArmed(ctx, s.rt.SubscriptionService.Database(), sub, false); err != nil {
-		return err
-	}
 	// A completed cancellation is a domain no-op, including after reservation pruning.
 	if sub.Status != models.StatusCanceled {
 		limiter := destructive.NewUserActionLimiter(rt.DB)

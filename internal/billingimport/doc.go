@@ -43,6 +43,6 @@
 // stripe_invoice. For an NMI-owned book: import at a fixed AsOf, start the
 // workers and request one provider refresh, triage the pull.* findings and
 // blocked rows (fix the book and re-import), then arm the destructive switch;
-// until then a member's cancel of an NMI-owned membership is
-// provider_cancel_held.
+// until then a staff cancel of an NMI-owned membership is
+// provider_cancel_held (a customer's own cancel goes through).
 package billingimport

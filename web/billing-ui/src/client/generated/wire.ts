@@ -2407,6 +2407,21 @@ export type ScheduledMRR = {
   effective_at: string
 }
 
+export type ServiceLinks = {
+  api: string
+  config: string
+  console: string | null
+  live: string
+  ready: string
+}
+
+export type ServiceSummary = {
+  service: string
+  version: string
+  status: "not_ready" | "ready"
+  links: ServiceLinks
+}
+
 export type SetCartLineParams = {
   quantity?: number
   amount?: string
