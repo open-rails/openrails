@@ -156,8 +156,7 @@ captcha:
 # an API-only server. Release builds include its assets; `task build` embeds
 # web/console/dist after `task admin-build`. A source build without assets
 # serves build instructions with status 503. Staff sign in with the server's
-# own accounts, at root's trusted issuers, or at their merchant's, found by
-# its name, as the public client openrails-console.
+# own accounts.
 admin_console:
   disabled: false
 

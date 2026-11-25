@@ -12,10 +12,11 @@ Every route of the HTTP API (185), from the API root: a standalone server serves
 
 ## Process
 
-Health and capability discovery. Only the standalone server serves the root paths.
+The service summary, health and capability discovery. Only the standalone server serves the root paths.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
+| GET | `/` | public | — | — | 200 `ServiceSummary` |  |
 | GET | `/health/live` | public | — | — | 200 `Health` |  |
 | GET | `/health/ready` | public | — | — | 200 `Health` |  |
 | GET | `/v1/config` | public | — | — | 200 `PublicConfig` |  |

@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -12,8 +11,8 @@ import (
 )
 
 // The standalone product serves its enabled console at /admin. Its JSON
-// directory is authenticated separately; static assets and the sign-in
-// buttons contain no credentials or private directory data.
+// directory is authenticated separately; static assets and config.json
+// contain no credentials or private directory data.
 func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	if s.consoleOff {
 		return nil
@@ -28,21 +27,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		AuthBaseURL: s.controlPlane.AuthAPIBase(), APIBaseURL: StandaloneV1Prefix,
 		Exchange: &adminconsole.Exchange{TokenEndpoint: s.controlPlane.TokenEndpoint(), ClientID: s.controlPlane.ConsoleClientID(), Resource: s.resource, Scope: billing.ScopeMerchant},
 	}
-	var issuers *adminconsole.Directory
-	if !s.consoleOwnOnly {
-		// An issuer whose sign-in does not work is hidden and reported where
-		// the configuration's other refusals are (readiness, metrics, logs).
-		report := func(issuer string, err error) {
-			if err != nil {
-				s.runtime.Refuse(consoleIssuerSubject+issuer, err)
-			} else {
-				s.runtime.Unrefuse(consoleIssuerSubject + issuer)
-			}
-		}
-		callback := publicOrigin(s.cfg.PublicURL) + path + adminconsole.CallbackPath
-		issuers = adminconsole.NewDirectory(s.Log, s.controlPlane.RootConsoleSources, s.resource, callback, report)
-	}
-	console, err := adminconsole.Handler(s.Log, path, cfg, issuers, s.consoleAssets)
+	console, err := adminconsole.Handler(s.Log, path, cfg, s.consoleAssets)
 	if err != nil {
 		return err
 	}
@@ -58,17 +43,4 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	s.handle(mux, http.MethodGet+" "+path, consoleTree)
 	s.handle(mux, http.MethodGet+" "+path+"/{asset...}", consoleTree)
 	return nil
-}
-
-// consoleIssuerSubject prefixes a trusted issuer the console's sign-in does
-// not offer, among the configuration's refusals.
-const consoleIssuerSubject = "console.issuers."
-
-// publicOrigin is raw's scheme and host: where browsers reach the console.
-func publicOrigin(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host
 }

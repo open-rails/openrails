@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react"
 import type { BillingAdminMerchant } from "@openrails/billing-ui/admin"
 import type { MerchantPage } from "../config"
-import type { ConsoleClient } from "./session"
+import type { AuthClient } from "@openrails/auth-ui/client"
 import { consoleURL } from "./session"
 
-export function useMerchantDirectory(session: ConsoleClient, subject: string) {
+export function useMerchantDirectory(auth: AuthClient, subject: string) {
   const [attempt, setAttempt] = useState(0)
   const [result, setResult] = useState<{
-    session: ConsoleClient
+    auth: AuthClient
     subject: string
     attempt: number
     merchants: BillingAdminMerchant[]
@@ -24,7 +24,7 @@ export function useMerchantDirectory(session: ConsoleClient, subject: string) {
       do {
         const url = new URL(consoleURL("/merchants"))
         if (cursor) url.searchParams.set("cursor", cursor)
-        const response = await session.client.authFetch(url.href, {
+        const response = await auth.authFetch(url.href, {
           signal: abort.signal,
         })
         if (!response.ok)
@@ -38,12 +38,12 @@ export function useMerchantDirectory(session: ConsoleClient, subject: string) {
         if (cursor) cursors.add(cursor)
       } while (cursor)
       if (!abort.signal.aborted)
-        setResult({ session, subject, attempt, merchants, root })
+        setResult({ auth, subject, attempt, merchants, root })
     }
     void read().catch((error: unknown) => {
       if (!abort.signal.aborted)
         setResult({
-          session,
+          auth,
           subject,
           attempt,
           merchants: [],
@@ -52,9 +52,9 @@ export function useMerchantDirectory(session: ConsoleClient, subject: string) {
         })
     })
     return () => abort.abort()
-  }, [session, subject, attempt])
+  }, [auth, subject, attempt])
   const current =
-    result?.session === session &&
+    result?.auth === auth &&
     result.subject === subject &&
     result.attempt === attempt
       ? result

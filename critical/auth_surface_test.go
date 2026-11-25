@@ -13,13 +13,17 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -172,73 +176,22 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.Contains(t, string(raw), string(billing.CodeMerchantMismatch))
 	})
 
-	t.Run("OR-J01-S32/the-console-offers-only-trusted-issuers-whose-sign-in-works", func(t *testing.T) {
+	t.Run("OR-J01-S32/the-console-signs-staff-in-only-with-the-servers-own-accounts", func(t *testing.T) {
 		w := newStandaloneWorld(t, func(c map[string]any) { c["Console"] = true })
-		type button struct {
-			Key, URL, Name, Resource, Scope string
-			ClientID                        string `json:"client_id"`
-			RedirectURI                     string `json:"redirect_uri"`
-		}
-		read := func() (map[string]json.RawMessage, []button) {
-			status, raw := w.request(t, http.MethodGet, "/admin/config.json", "", nil)
-			require.Equal(t, http.StatusOK, status, string(raw))
-			var cfg map[string]json.RawMessage
-			require.NoError(t, json.Unmarshal(raw, &cfg))
-			var buttons []button
-			require.NoError(t, json.Unmarshal(cfg["issuers"], &buttons))
-			return cfg, buttons
-		}
-		// Nothing configured: the server's own accounts alone, and no
-		// merchant's app to look up.
-		cfg, buttons := read()
-		require.NotNil(t, buttons)
-		require.Empty(t, buttons)
+		// Root trusts applications, one working and one not: the console
+		// offers neither and the server probes neither.
+		trustApplication(t, w, "root", oidcIssuer(t, nil))
+		trustApplication(t, w, "root", oidcIssuer(t, func(m map[string]any) { m["issuer"] = "https://elsewhere.critical.invalid" }))
+		status, raw := w.request(t, http.MethodGet, "/admin/config.json", "", nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var cfg map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &cfg))
+		require.NotContains(t, cfg, "issuers")
 		require.NotContains(t, cfg, "app_sign_in")
 		require.Contains(t, string(cfg["exchange"]), `"openrails-console"`)
-		// Root's issuers: two that work, and four that would not.
-		working, second := oidcIssuer(t, nil), oidcIssuer(t, nil)
-		mismatched := oidcIssuer(t, func(m map[string]any) { m["issuer"] = "https://elsewhere.critical.invalid" })
-		plain := oidcIssuer(t, func(m map[string]any) { m["code_challenge_methods_supported"] = []string{"plain"} })
-		keyless := oidcIssuer(t, func(m map[string]any) { m["jwks_uri"] = m["issuer"].(string) + "/empty-jwks.json" })
-		gone := httptest.NewServer(http.NotFoundHandler())
-		unreachable := gone.URL
-		gone.Close()
-		for _, issuer := range []string{working, second, mismatched, plain, keyless, unreachable} {
-			trustApplication(t, w, "root", issuer)
-		}
-		// A merchant's own app is never a console button.
-		trustApplication(t, w, w.Merchants["beta"].ID.String(), oidcIssuer(t, nil))
-		require.Eventually(t, func() bool {
-			_, buttons = read()
-			return len(buttons) == 2
-		}, 30*time.Second, 200*time.Millisecond)
-		got := []string{buttons[0].URL, buttons[1].URL}
-		require.ElementsMatch(t, []string{working, second}, got)
-		for _, b := range buttons {
-			require.Equal(t, b.URL, b.Key)
-			require.Equal(t, strings.TrimPrefix(b.URL, "http://"), b.Name)
-			require.Equal(t, "openrails-console", b.ClientID)
-			require.Equal(t, w.URL, b.Resource)
-			require.Equal(t, "openid profile email openrails:merchant", b.Scope)
-			require.Equal(t, w.URL+"/admin/callback", b.RedirectURI)
-		}
-		// Each hidden issuer is a refusal the operator sees, with why.
 		var refusals map[string]string
 		w.command(t, map[string]any{"Op": "refusals"}, &refusals)
-		for issuer, why := range map[string]string{
-			mismatched:  `names the issuer "https://elsewhere.critical.invalid"`,
-			plain:       "PKCE S256",
-			keyless:     "has no keys",
-			unreachable: "OpenID Connect discovery",
-		} {
-			subject := "console.issuers." + issuer + ": "
-			at := strings.Index(refusals["configuration"], subject)
-			require.GreaterOrEqual(t, at, 0, "%s: %s", issuer, refusals["configuration"])
-			refusal, _, _ := strings.Cut(refusals["configuration"][at:], "; ")
-			require.Contains(t, refusal, why)
-		}
-		require.NotContains(t, refusals["configuration"], "console.issuers."+working+":")
-		require.NotContains(t, refusals["configuration"], "console.issuers."+second+":")
+		require.NotContains(t, refusals["configuration"], "console.issuers.")
 	})
 
 	t.Run("OR-J01-S30/run-time-applications-name-only-public-key-urls", func(t *testing.T) {
@@ -280,7 +233,7 @@ func TestStandaloneAuthSurface(t *testing.T) {
 			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", []string{"auth.token_issuer (AUTH_TOKEN_ISSUER)", derived}},
 			{"private", nil, "AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS=true", []string{"auth.token_allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)", derived}},
 			{"local", map[string]any{"local_sign_in": true}, "", []string{"local_sign_in / LOCAL_SIGN_IN was removed"}},
-			{"console", map[string]any{"admin_console": map[string]any{"issuers": map[string]any{}}}, "", []string{"admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed", "openrails-console"}},
+			{"console", map[string]any{"admin_console": map[string]any{"issuers": map[string]any{}}}, "", []string{"admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed", "the server's own accounts"}},
 		} {
 			cmd := hostCLICommand(t, w, c.extra, "book", "status")
 			if c.env != "" {
@@ -299,36 +252,22 @@ func TestStandaloneAuthSurface(t *testing.T) {
 
 	t.Run("OR-J06-S85/a-server-whose-staff-cannot-enroll-a-second-factor-is-not-ready", func(t *testing.T) {
 		w := newWorld(t)
-		t.Cleanup(func() {
-			for _, schema := range []string{w.schema + "_auth", w.schema + "_river"} {
-				_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
-			}
-		})
 		keys := t.TempDir()
 		writeSigningKeys(t, keys)
 		const missing = "authenticator apps are unavailable"
-		// boot runs the binary on the world's database, a public issuer and
-		// keys; ready asks /health/ready, and returns what it logged.
+		// boot runs the binary; ready asks /health/ready, and returns what it
+		// logged.
 		boot := func() (ready func() (int, string), stop func()) {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			require.NoError(t, err)
-			port := listener.Addr().(*net.TCPAddr).Port
-			require.NoError(t, listener.Close())
-			cmd := hostCLICommand(t, w, map[string]any{"port": port, "public_url": "https://billing.critical.invalid", "auth": map[string]any{"keys": map[string]any{"path": keys}}}, "run-server")
-			log := &lockedBuffer{}
-			cmd.Stdout, cmd.Stderr = log, log
-			require.NoError(t, cmd.Start())
-			stop = func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }
-			t.Cleanup(stop)
+			base, log, cmd := runServer(t, w, keys)
 			return func() (int, string) {
-				response, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health/ready", port))
+				response, err := http.Get(base + "/health/ready")
 				if err != nil {
 					return 0, log.String()
 				}
 				defer response.Body.Close()
 				_, _ = io.Copy(io.Discard, response.Body)
 				return response.StatusCode, log.String()
-			}, stop
+			}, func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }
 		}
 		ready, stop := boot()
 		require.Eventually(t, func() bool {
@@ -336,16 +275,115 @@ func TestStandaloneAuthSurface(t *testing.T) {
 			return status == http.StatusServiceUnavailable && strings.Contains(log, missing)
 		}, 90*time.Second, 500*time.Millisecond, "without totp.key staff can enroll no authenticator app")
 		stop()
-		key := make([]byte, 32)
-		_, err := rand.Read(key)
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(filepath.Join(keys, "totp.key"), []byte(base64.StdEncoding.EncodeToString(key)), 0o600))
+		writeTOTPKey(t, keys)
 		ready, _ = boot()
 		require.Eventually(t, func() bool {
 			status, _ := ready()
 			return status == http.StatusOK
 		}, 90*time.Second, 500*time.Millisecond, "with its key mounted the server is ready")
 	})
+
+	t.Run("OR-J06-S86/the-servers-root-summarizes-it", func(t *testing.T) {
+		w := newWorld(t)
+		keys := t.TempDir()
+		writeSigningKeys(t, keys)
+		writeTOTPKey(t, keys)
+		base, log, cmd := runServer(t, w, keys)
+		call := func(method, path string) (int, http.Header, []byte) {
+			req, err := http.NewRequestWithContext(t.Context(), method, base+path, nil)
+			require.NoError(t, err)
+			response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+			if err != nil {
+				return 0, nil, nil
+			}
+			defer response.Body.Close()
+			raw, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			return response.StatusCode, response.Header, raw
+		}
+		require.Eventually(t, func() bool {
+			status, _, _ := call(http.MethodGet, "/health/ready")
+			return status == http.StatusOK
+		}, 90*time.Second, 500*time.Millisecond, "the server becomes ready: %s", log)
+
+		status, header, raw := call(http.MethodGet, "/")
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Equal(t, "application/json", header.Get("Content-Type"))
+		var fields map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &fields))
+		require.ElementsMatch(t, []string{"service", "version", "status", "links"}, slices.Collect(maps.Keys(fields)), string(raw))
+		var summary struct {
+			Service, Version, Status string
+			Links                    map[string]any
+		}
+		require.NoError(t, json.Unmarshal(raw, &summary))
+		require.Equal(t, "openrails", summary.Service)
+		require.Equal(t, "ready", summary.Status, "the root says what /health/ready says")
+		// The version is the binary's own.
+		version, err := exec.CommandContext(t.Context(), os.Getenv("OPENRAILS_CRITICAL_CLI_BINARY"), "version").Output()
+		require.NoError(t, err)
+		require.Equal(t, strings.Fields(string(version))[1], summary.Version)
+		require.Equal(t, map[string]any{"api": "/v1", "config": "/v1/config", "console": "/admin/", "live": "/health/live", "ready": "/health/ready"}, summary.Links)
+		// The public summary names no host, database or dependency.
+		require.NotContains(t, string(raw), "critical.invalid")
+		require.NotContains(t, string(raw), w.schema)
+		for _, path := range []string{"/v1/config", "/health/live", "/health/ready"} {
+			status, _, raw := call(http.MethodGet, path)
+			require.Equal(t, http.StatusOK, status, "%s: %s", path, raw)
+		}
+		status, _, raw = call(http.MethodGet, "/admin/")
+		require.NotEqual(t, http.StatusNotFound, status, "the console is mounted: %s", raw)
+
+		status, _, raw = call(http.MethodHead, "/")
+		require.Equal(t, http.StatusOK, status)
+		require.Empty(t, raw)
+		// Only / itself: every other unknown path is still not found.
+		for _, path := range []string{"/nope", "/health", "/v1"} {
+			status, _, raw := call(http.MethodGet, path)
+			require.Equal(t, http.StatusNotFound, status, "%s: %s", path, raw)
+			require.Contains(t, string(raw), string(billing.CodeRouteNotFound), path)
+		}
+		status, _, raw = call(http.MethodPost, "/")
+		require.Equal(t, http.StatusMethodNotAllowed, status, string(raw))
+
+		// A draining server's root says it is not ready, still answering 200.
+		require.NoError(t, cmd.Process.Signal(syscall.SIGTERM))
+		require.Eventually(t, func() bool {
+			status, _, raw := call(http.MethodGet, "/")
+			return status == http.StatusOK && json.Unmarshal(raw, &summary) == nil && summary.Status == "not_ready"
+		}, 5*time.Second, 20*time.Millisecond, "draining: %s", log)
+	})
+}
+
+// runServer runs the binary's run-server on w's database with a public issuer
+// and the AuthKit keys in keys: its URL, what it logs, and its process, which
+// cleanup kills before dropping the AuthKit and River schemas it made.
+func runServer(t *testing.T, w *world, keys string) (string, *lockedBuffer, *exec.Cmd) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, schema := range []string{w.schema + "_auth", w.schema + "_river"} {
+			_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		}
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := listener.Addr().(*net.TCPAddr).Port
+	require.NoError(t, listener.Close())
+	cmd := hostCLICommand(t, w, map[string]any{"port": port, "public_url": "https://billing.critical.invalid", "auth": map[string]any{"keys": map[string]any{"path": keys}}}, "run-server")
+	log := &lockedBuffer{}
+	cmd.Stdout, cmd.Stderr = log, log
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	return fmt.Sprintf("http://127.0.0.1:%d", port), log, cmd
+}
+
+// writeTOTPKey mounts the staff second factor's key, totp.key, in keys.
+func writeTOTPKey(t *testing.T, keys string) {
+	t.Helper()
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(keys, "totp.key"), []byte(base64.StdEncoding.EncodeToString(key)), 0o600))
 }
 
 // lockedBuffer is a child process's output, read while it writes.
