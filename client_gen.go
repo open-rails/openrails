@@ -8,7 +8,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 )
 
 // GetPublicConfig reads the deployment's capabilities and public
@@ -18,7 +17,7 @@ import (
 // process, Engine.PublicConfig names the mount the browser reads.
 func (c *Client) GetPublicConfig(ctx context.Context) (*billing.PublicConfig, error) {
 	var out billing.PublicConfig
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/config", cache: config.ReadPublicConfig}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/config", cache: billing.ReadPublicConfig}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -129,7 +128,7 @@ func (c *Client) ApplyCatalog(ctx context.Context, application *catalog.Applicat
 // ListMeters returns one page of the merchant's meters, by key.
 func (c *Client) ListMeters(ctx context.Context, params billing.PageRequest) (*billing.ListPage[billing.Meter], error) {
 	var out billing.ListPage[billing.Meter]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters", query: params, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters", query: params, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -138,7 +137,7 @@ func (c *Client) ListMeters(ctx context.Context, params billing.PageRequest) (*b
 // GetMeter reads one meter with its rate card.
 func (c *Client) GetMeter(ctx context.Context, key string) (*billing.Meter, error) {
 	var out billing.Meter
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -168,7 +167,7 @@ func (c *Client) CreateProduct(ctx context.Context, params billing.CreateProduct
 // GetProduct reads a product with its current prices.
 func (c *Client) GetProduct(ctx context.Context, id billing.ProductID) (*billing.Product, error) {
 	var out billing.Product
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/products/{id}", args: []string{id.String()}, cache: config.ReadCatalog}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/products/{id}", args: []string{id.String()}, cache: billing.ReadCatalog}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -221,7 +220,7 @@ func (c *Client) CreateProviderPrice(ctx context.Context, params billing.CreateP
 // archived.
 func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams) (*billing.ListPage[billing.Price], error) {
 	var out billing.ListPage[billing.Price]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices", query: params, cache: config.ReadCatalog}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices", query: params, cache: billing.ReadCatalog}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -230,7 +229,7 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams)
 // GetPrice reads a price.
 func (c *Client) GetPrice(ctx context.Context, id billing.PriceID) (*billing.Price, error) {
 	var out billing.Price
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices/{id}", args: []string{id.String()}, cache: config.ReadCatalog}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/prices/{id}", args: []string{id.String()}, cache: billing.ReadCatalog}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -693,7 +692,7 @@ func (c *Client) ListRunningCharges(ctx context.Context, params billing.RunningC
 // ListLimits returns one page of the merchant's limits, by key.
 func (c *Client) ListLimits(ctx context.Context, params billing.PageRequest) (*billing.ListPage[billing.Limit], error) {
 	var out billing.ListPage[billing.Limit]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/limits", query: params, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/limits", query: params, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -702,7 +701,7 @@ func (c *Client) ListLimits(ctx context.Context, params billing.PageRequest) (*b
 // GetLimit reads one limit with the products that give it capacity.
 func (c *Client) GetLimit(ctx context.Context, key string) (*billing.Limit, error) {
 	var out billing.Limit
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/limits/{key}", args: []string{key}, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/limits/{key}", args: []string{key}, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -953,7 +952,7 @@ func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPS
 // credentials, and its revision.
 func (c *Client) GetMerchantConfiguration(ctx context.Context) (*billing.MerchantConfigurationState, error) {
 	var out billing.MerchantConfigurationState
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/configuration", cache: config.ReadMerchantConfiguration}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/merchant/configuration", cache: billing.ReadMerchantConfiguration}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

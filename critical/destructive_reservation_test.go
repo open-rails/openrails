@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/stretchr/testify/require"
@@ -34,7 +33,7 @@ const reservationReason = "operator correction"
 func newReservationWorld(t *testing.T) *reservationWorld {
 	t.Helper()
 	a := newAuthorityWorld(t, func(w *world) {
-		w.cfg.DestructiveActionLimits = openrails.DestructiveActionLimitsConfig{ActorPerHour: 2}
+		w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 2}
 	})
 	var in []billing.CreateCreditGrantParams
 	for i := range 4 {

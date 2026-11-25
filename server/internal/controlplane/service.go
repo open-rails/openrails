@@ -63,7 +63,7 @@ type Options struct {
 	// JWKS.
 	LocalSignIn bool
 	// Naming is the rename policy for merchant names.
-	Naming config.NamingConfig
+	Naming billing.NamingConfig
 	// MerchantCreation is the hosted policy for merchant names users claim
 	// (or#914); nil for operator-provisioned deployments. With LocalSignIn,
 	// a hosted product may explicitly enable open native registration.
@@ -106,7 +106,7 @@ var ResourceScopes = map[string][]string{
 // AuthKit is the server's AuthKit configuration: the host's auth, passed
 // through, with the product's own settings over it. Its jobs run on
 // OpenRails' River fleet.
-func AuthKit(cfg *config.Config, auth authkit.Config, opts Options) (authkit.Config, error) {
+func AuthKit(cfg *billing.Config, auth authkit.Config, opts Options) (authkit.Config, error) {
 	if cfg == nil || strings.TrimSpace(auth.Token.Issuer) == "" {
 		return authkit.Config{}, errors.New("controlplane: auth.token.issuer is required")
 	}
@@ -313,7 +313,7 @@ func consoleFrontend(front *authkit.FrontendConfig, publicURL, issuer string) {
 // New is the control plane over client, the AuthKit client built from
 // AuthKit's configuration, and pool, OpenRails' database. Closing it closes
 // client.
-func New(logger *slog.Logger, client *authkit.Client, cfg *config.Config, auth authkit.Config, pool *pgxpool.Pool, opts Options) (*ControlPlane, error) {
+func New(logger *slog.Logger, client *authkit.Client, cfg *billing.Config, auth authkit.Config, pool *pgxpool.Pool, opts Options) (*ControlPlane, error) {
 	switch {
 	case client == nil:
 		return nil, errors.New("controlplane: an AuthKit client is required")

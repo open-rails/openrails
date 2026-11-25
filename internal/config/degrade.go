@@ -5,6 +5,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // Degradation is one optional setting boot turned off, or set back to its
@@ -23,7 +25,7 @@ func (d Degradation) Error() string { return d.Field + ": " + d.Err.Error() }
 // keeps its valid entries, so a trust or allow list only ever shrinks. What
 // Degrade leaves is what Validate requires: the database schema and the
 // provider write mode.
-func Degrade(cfg *Config) []Degradation {
+func Degrade(cfg *billing.Config) []Degradation {
 	if cfg == nil {
 		return nil
 	}
@@ -31,7 +33,7 @@ func Degrade(cfg *Config) []Degradation {
 	off := func(field string, err error) { out = append(out, Degradation{Field: field, Err: err}) }
 
 	if _, err := EventRetentionDuration(cfg); err != nil {
-		cfg.EventRetention = ""
+		cfg.EventRetention = defaults.EventRetention
 		off("event_retention", fmt.Errorf("%w; the default 90 days applies", err))
 	}
 	if cfg.RateLimits != nil {
@@ -45,23 +47,23 @@ func Degrade(cfg *Config) []Degradation {
 		cfg.RateLimits = limits
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
-		cfg.Captcha = DefaultCaptcha()
+		cfg.Captcha = defaults.Captcha
 		off("captcha", fmt.Errorf("%w; captcha is off", err))
 	}
 	if err := validateLLM(cfg.LLM); err != nil {
-		cfg.LLM = nil
+		cfg.LLM = billing.LLMConfig{}
 		off("llm", fmt.Errorf("%w; the catalog copilot is off", err))
 	}
 	if _, err := WebhookSecretOverlapDuration(cfg); err != nil {
-		cfg.WebhookSecretOverlap = ""
-		off("webhook_secret_overlap", fmt.Errorf("%w; the default %s applies", err, DefaultWebhookSecretOverlap))
+		cfg.WebhookSecretOverlap = defaults.WebhookSecretOverlap
+		off("webhook_secret_overlap", fmt.Errorf("%w; the default %s applies", err, defaults.WebhookSecretOverlap))
 	}
 	if err := validateHyperSwitch(cfg); err != nil {
-		cfg.HyperSwitch = nil
+		cfg.HyperSwitch = billing.HyperSwitchConfig{}
 		off("hyperswitch", fmt.Errorf("%w; HyperSwitch is off", err))
 	}
 	if crankers := SolanaCrankers(cfg); len(crankers) > 0 {
-		var kept []SolanaCrankerConfig
+		var kept []billing.SolanaCrankerConfig
 		for i, c := range crankers {
 			if err := validateSolanaCranker(cfg, kept, c); err != nil {
 				next := ""
@@ -73,10 +75,10 @@ func Degrade(cfg *Config) []Degradation {
 			}
 			kept = append(kept, c)
 		}
-		cfg.Solana = &SolanaConfig{Crankers: kept}
+		cfg.Solana = billing.SolanaConfig{Crankers: kept}
 	}
 	if err := validateCardVault(cfg); err != nil {
-		cfg.CardVault = nil
+		cfg.CardVault = billing.CardVaultConfig{}
 		off("card_vault", fmt.Errorf("%w; settings.card_vault platform is refused", err))
 	}
 	keep := func(field string, list []string, check func(string) error) []string {
@@ -90,8 +92,8 @@ func Degrade(cfg *Config) []Degradation {
 		}
 		return kept
 	}
-	if s := cfg.ProviderSandbox; s != nil {
-		sandbox := *s
+	{
+		sandbox := &cfg.ProviderSandbox
 		sandbox.CCBillWebhookSources = keep("provider_sandbox.ccbill_webhook_sources", sandbox.CCBillWebhookSources, validateSourceCIDR)
 		for _, gateway := range []struct {
 			key string
@@ -104,7 +106,6 @@ func Degrade(cfg *Config) []Degradation {
 				}
 			}
 		}
-		cfg.ProviderSandbox = &sandbox
 	}
 	cfg.ReturnOrigins = keep("return_origins", cfg.ReturnOrigins, func(raw string) error {
 		if err := ValidatePublicURL(strings.TrimSpace(raw), true, true); err != nil {

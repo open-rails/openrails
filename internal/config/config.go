@@ -18,153 +18,38 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
-// configContextKey is a distinct type so this key cannot collide with another
-// package storing "config" in the same context.
-type configContextKey string
-
-// ConfigContextKey is the context key the CLI stores the loaded *Config under.
-const ConfigContextKey configContextKey = "config"
-
-// Config is the engine's configuration: plain data. Everything that reaches
-// outside the process is in Deps. Whether money is real is each PSP's
-// declared environment, never the deployment's; how much it may write to
-// providers is each merchant's write posture.
-type Config struct {
-	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
-	EngineAdmissionHold bool
-	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
-	UsageBillingEnabled bool
-
-	// Database names the Postgres schemas New creates or upgrades.
-	Database DatabaseConfig
-	// ClickHouse names the database of the event store (Deps.ClickHouse).
-	ClickHouse ClickHouseConfig
-	// Merchants declares the merchants an embedded engine provisions on
-	// start; none leaves that to run time (a standalone server's are
-	// provisioned through its API). A slug declared twice provisions neither
-	// entry. Without a Vault KV mount a declaration is the merchant's
-	// configuration, read-only; with one it seeds Vault once, when Vault
-	// holds nothing for the merchant. A request acts on the merchant its
-	// credential is bound to: see MerchantDeclaration.Issuer.
-	Merchants []billing.MerchantDeclaration
-
-	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
-	// used only to build provider callbacks and customer billing links.
-	PublicBillingBaseURL string
-	// ReturnOrigins are the exact origins (scheme://host[:port]) that purchase
-	// and billing-portal return URLs may name. Empty allows only the origin of
-	// PublicBillingBaseURL.
-	ReturnOrigins []string
-	// TrustedProxies are the CIDRs whose X-Forwarded-For is trusted when
-	// resolving a client's address. Empty trusts none: the socket peer is the
-	// client.
-	TrustedProxies []string
-	// CloudflareProxies are Cloudflare's ranges where Cloudflare fronts the
-	// origin: trusted like TrustedProxies, and the only proxies whose
-	// CF-IPCountry header is read.
-	CloudflareProxies []string
-	// CheckoutOrigin is the origin (https://pay.example.com) of the payment
-	// page, which Engine.CheckoutPage serves from Deps.CheckoutAssets. It is
-	// an origin of its own, apart from PublicBillingBaseURL and every
-	// declared Issuer; one that is not is refused and reported. Empty serves
-	// none.
-	CheckoutOrigin string
-
-	// RateLimits are the per-bucket request limits: nil takes the built-in
-	// limits, an empty map limits nothing (a host that fronts billing with its
-	// own limiter).
-	RateLimits RateLimitsConfig
-	// Captcha challenges a client that keeps hitting a rate limit.
-	Captcha *CaptchaConfig
-	// UserActionRateLimit bounds customer card deletes and soft cancellations
-	// across this merchant's users, actors and processes. Always enabled,
-	// including when the host owns ordinary HTTP rate limits.
-	UserActionRateLimit UserActionRateLimitConfig
-	// DestructiveActionLimits are the staff limits on refunds, revokes,
-	// cancels and the other held destructive actions. Zero fields keep the
-	// defaults.
-	DestructiveActionLimits DestructiveActionLimitsConfig
-
-	// Vault names the mounts of Deps.Vault: a KV mount makes Vault hold
-	// merchant configuration.
-	Vault *VaultConfig
-	// CardVault is the operator's card vault; nil refuses
-	// settings.card_vault platform.
-	CardVault *CardVaultConfig
-	// HyperSwitch is the host's trusted HyperSwitch deployment.
-	HyperSwitch *HyperSwitchConfig
-	// Solana is the deployment's Solana configuration: its crankers.
-	Solana *SolanaConfig
-	// LLM is the model behind the console's catalog questions.
-	// Without an API key those features are off.
-	LLM *LLMConfig
-
-	// ProviderSandbox points non-live PSPs' provider clients at loopback
-	// gateways, to qualify a process against fake providers, and accepts
-	// extra CCBill webhook sources for sandbox accounts. A gateway is refused
-	// beside a live PSP and for anything but a literal loopback address.
-	ProviderSandbox *ProviderSandboxConfig
-
-	// EventRetention is the retained event-log lifetime, as a Go duration.
-	// Empty is 90 days. Reader progress never extends retention.
-	EventRetention string
-	// WebhookSecretOverlap is how long a rotated-out webhook signing secret
-	// keeps verifying: a Go duration between 1m and 168h. Empty is 24h.
-	WebhookSecretOverlap string
-}
-
-// ProviderSandboxConfig names loopback provider gateways for sandbox runs.
-// Each is an absolute http(s) URL whose host is a loopback IP literal, with no
-// userinfo; hostnames, even "localhost", are refused.
-type ProviderSandboxConfig struct {
-	// NMIGatewayURL replaces the NMI sandbox endpoints.
-	NMIGatewayURL string
-	// StripeAPIURL replaces the Stripe API root. The readonly guard and the
-	// pinned API version still apply.
-	StripeAPIURL string
-	// SolanaRPCURL replaces every merchant's Solana RPC endpoint.
-	SolanaRPCURL string
-	// CCBillDataLinkURL replaces the CCBill DataLink endpoint.
-	CCBillDataLinkURL string
-	// CCBillWebhookSources are extra source CIDRs accepted as a sandbox
-	// CCBill account's webhook origins. CCBill signs nothing, so the source
-	// address is the authentication: a live account accepts CCBill's own
-	// ranges alone.
-	CCBillWebhookSources []string
-}
-
 // ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
 // gateway declaration whose destination is not a literal loopback address.
 var ErrProviderSandboxGateway = errors.New("provider_sandbox gateway refused")
 
 // SandboxNMIGatewayURL is the loopback NMI gateway declared for this sandbox
 // run, or "" for the real sandbox endpoints.
-func SandboxNMIGatewayURL(cfg *Config) string {
-	if cfg == nil || cfg.ProviderSandbox == nil {
+func SandboxNMIGatewayURL(cfg *billing.Config) string {
+	if cfg == nil {
 		return ""
 	}
 	return strings.TrimSpace(cfg.ProviderSandbox.NMIGatewayURL)
 }
 
 // SandboxStripeAPIURL is the configured loopback API, or empty for Stripe.
-func SandboxStripeAPIURL(cfg *Config) string {
-	if cfg == nil || cfg.ProviderSandbox == nil {
+func SandboxStripeAPIURL(cfg *billing.Config) string {
+	if cfg == nil {
 		return ""
 	}
 	return strings.TrimSpace(cfg.ProviderSandbox.StripeAPIURL)
 }
 
 // SandboxSolanaRPCURL is the configured loopback Solana RPC, or empty.
-func SandboxSolanaRPCURL(cfg *Config) string {
-	if cfg == nil || cfg.ProviderSandbox == nil {
+func SandboxSolanaRPCURL(cfg *billing.Config) string {
+	if cfg == nil {
 		return ""
 	}
 	return strings.TrimSpace(cfg.ProviderSandbox.SolanaRPCURL)
 }
 
 // SandboxCCBillDataLinkURL is the configured loopback DataLink, or empty.
-func SandboxCCBillDataLinkURL(cfg *Config) string {
-	if cfg == nil || cfg.ProviderSandbox == nil {
+func SandboxCCBillDataLinkURL(cfg *billing.Config) string {
+	if cfg == nil {
 		return ""
 	}
 	return strings.TrimSpace(cfg.ProviderSandbox.CCBillDataLinkURL)
@@ -172,8 +57,8 @@ func SandboxCCBillDataLinkURL(cfg *Config) string {
 
 // SandboxCCBillWebhookSources are the extra CCBill webhook source CIDRs
 // declared for sandbox accounts.
-func SandboxCCBillWebhookSources(cfg *Config) []string {
-	if cfg == nil || cfg.ProviderSandbox == nil {
+func SandboxCCBillWebhookSources(cfg *billing.Config) []string {
+	if cfg == nil {
 		return nil
 	}
 	return cfg.ProviderSandbox.CCBillWebhookSources
@@ -202,25 +87,11 @@ func ValidateLoopbackGatewayURL(raw string) error {
 
 // MerchantConfigKVMount is the KV v2 mount that holds merchant
 // configuration; "" when none is named and a file holds it.
-func MerchantConfigKVMount(cfg *Config) string {
-	if cfg == nil || cfg.Vault == nil {
+func MerchantConfigKVMount(cfg *billing.Config) string {
+	if cfg == nil {
 		return ""
 	}
 	return strings.Trim(strings.TrimSpace(cfg.Vault.KVMount), "/")
-}
-
-// VaultConfig names the mounts OpenRails uses on Deps.Vault. A KV mount
-// makes Vault hold merchant configuration; CardVault.KVMount can read card
-// credentials separately.
-type VaultConfig struct {
-	// KVMount is the KV v2 mount merchant configuration lives in, under
-	// ScopePrefix. Empty: Config.Merchants holds it.
-	KVMount string
-	// ScopePrefix is the path under KVMount; empty is "openrails".
-	ScopePrefix string
-	// TransitMount is the Transit mount Solana signing keys live under; empty
-	// is "transit".
-	TransitMount string
 }
 
 var mountPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
@@ -256,56 +127,34 @@ const (
 	LLMDefaultModelOpenAI = "gpt-5.4-nano"
 )
 
-// LLMConfig configures the model behind the console's catalog
-// questions.
-type LLMConfig struct {
-	// Provider selects the API dialect: "anthropic" (the default) or
-	// "openai". Any other value is refused.
-	Provider string
-	// Model is the provider's model ID; empty is the provider's default.
-	Model string
-	// BaseURL replaces the provider's public endpoint: an absolute https URL.
-	// With openai it includes the version segment
-	// (https://host/v1); with anthropic it is the origin.
-	BaseURL string
-	// APIKey is the provider credential. Empty turns the features off.
-	APIKey string
-	// CatalogCopilotEnabled turns on read-only questions about the catalog,
-	// which send aggregate catalog and subscriber counts to the provider.
-	CatalogCopilotEnabled bool
-	// CatalogDraftingEnabled lets the catalog copilot draft price and catalog
-	// changes. Drafts are proposals; nothing is applied.
-	CatalogDraftingEnabled bool
-}
-
 // LLMConfigured reports whether a model backend is configured (fail-closed on a
 // missing key).
-func LLMConfigured(c *LLMConfig) bool { return c != nil && strings.TrimSpace(c.APIKey) != "" }
+func LLMConfigured(c billing.LLMConfig) bool { return strings.TrimSpace(c.APIKey) != "" }
 
 // LLMCatalogCopilotConfigured reports whether catalog Q&A (#779 Phase 1) can
 // run: a key AND the explicit catalog_copilot_enabled consent.
-func LLMCatalogCopilotConfigured(c *LLMConfig) bool {
+func LLMCatalogCopilotConfigured(c billing.LLMConfig) bool {
 	return LLMConfigured(c) && c.CatalogCopilotEnabled
 }
 
 // LLMCatalogDraftingConfigured reports whether the #779 Phase 2 draft_* tools
 // are armed: catalog Q&A configured and explicit catalog_drafting_enabled
 // consent.
-func LLMCatalogDraftingConfigured(c *LLMConfig) bool {
+func LLMCatalogDraftingConfigured(c billing.LLMConfig) bool {
 	return LLMCatalogCopilotConfigured(c) && c.CatalogDraftingEnabled
 }
 
 // LLMProvider returns the effective provider name.
-func LLMProvider(c *LLMConfig) string {
-	if c == nil || strings.TrimSpace(c.Provider) == "" {
+func LLMProvider(c billing.LLMConfig) string {
+	if strings.TrimSpace(c.Provider) == "" {
 		return LLMProviderAnthropic
 	}
 	return strings.ToLower(strings.TrimSpace(c.Provider))
 }
 
 // LLMModel returns the effective model id (per-provider default).
-func LLMModel(c *LLMConfig) string {
-	if c != nil && strings.TrimSpace(c.Model) != "" {
+func LLMModel(c billing.LLMConfig) string {
+	if strings.TrimSpace(c.Model) != "" {
 		return strings.TrimSpace(c.Model)
 	}
 	if LLMProvider(c) == LLMProviderOpenAI {
@@ -314,44 +163,15 @@ func LLMModel(c *LLMConfig) string {
 	return LLMDefaultModelAnthropic
 }
 
-// DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
-// The role of the pool New runs with owns every object in them.
-type DatabaseConfig struct {
-	// Schema holds OpenRails' tables. Empty is "billing".
-	Schema string
-	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
-	// Schema plus "_river" ("billing_river"), apart from AuthKit's and the
-	// host's River. Start runs OpenRails' own River client there, and a host
-	// fleet passed to Start with WithRiverClient must use the same schema.
-	RiverSchema string
-	// SkipMigrations makes New validate existing schemas without applying
-	// migrations or preparing startup partitions: a migration that is missing,
-	// or was applied with other content, is billing.ErrMigrationsRequired. Call
-	// openrails.Migrate first.
-	// Normal request-time and scheduled partition maintenance is unchanged.
-	SkipMigrations bool
-	// LeaseConns caps the separate pool, copied from Deps.Postgres's
-	// configuration, that renews leases: idempotency claims, the billing pass
-	// and merchant pulls. Zero is four connections.
-	LeaseConns int
-}
-
-// ClickHouseConfig names the ClickHouse database the event store keeps its
-// tables in; New creates or upgrades it.
-type ClickHouseConfig struct {
-	// Database holds the event store's tables. Empty is "openrails".
-	Database string
-}
-
 // ClickHouseDatabase is the event store's database: ClickHouse.Database, or
-// DefaultClickHouseDatabase.
-func ClickHouseDatabase(c *Config) string {
+// the default.
+func ClickHouseDatabase(c *billing.Config) string {
 	if c != nil {
 		if d := strings.ToLower(strings.TrimSpace(c.ClickHouse.Database)); d != "" {
 			return d
 		}
 	}
-	return DefaultClickHouseDatabase
+	return defaults.ClickHouse.Database
 }
 
 // MigratekitApp is the migratekit app/tracking key written to
@@ -364,13 +184,13 @@ const MigratekitApp = "openrails"
 
 // RiverSchemaName is the schema of the River client Engine.Start runs:
 // Database.RiverSchema, or the schema plus "_river".
-func RiverSchemaName(c *Config) string {
+func RiverSchemaName(c *billing.Config) string {
 	if c != nil {
 		if s := strings.ToLower(strings.TrimSpace(c.Database.RiverSchema)); s != "" {
 			return s
 		}
 	}
-	return RiverSchemaFor(SchemaName(c))
+	return billing.Config{Database: billing.DatabaseConfig{Schema: SchemaName(c)}}.WithDefaults().Database.RiverSchema
 }
 
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
@@ -382,9 +202,9 @@ var schemaIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // SchemaName returns the effective OpenRails Postgres schema (#165, #471):
 // Database.Schema trimmed and lower-cased, default billing. Code that needs
 // the schema reads it here, never Database.Schema directly.
-func SchemaName(c *Config) string {
+func SchemaName(c *billing.Config) string {
 	if c == nil {
-		return DefaultSchema
+		return defaults.Database.Schema
 	}
 	return normalizeSchema(c.Database.Schema)
 }
@@ -395,7 +215,7 @@ func SchemaName(c *Config) string {
 func normalizeSchema(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	if s == "" {
-		return DefaultSchema
+		return defaults.Database.Schema
 	}
 	return s
 }
@@ -695,90 +515,23 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	return nil
 }
 
-// UserActionRateLimitConfig bounds distinct customers affected by manual card
-// removals and cancellations in rolling hour/day windows. Zero fields select defaults.
-//
-// The budget is merchant-wide across replicas and always enforced: per
-// rolling day the larger of MinimumCustomersPerDay (10) or one per
-// PaidCustomersPerDailyCustomer (100) customers who paid in the last 30 days,
-// per rolling hour the larger of 5 or one per 400. A customer counts once a
-// day. Admission is atomic in user_destructive_reservations before any
-// change; a refusal answers 429, records a finding and opens no hold.
-// Renewals, expiry and provider-side cancellation spend nothing.
-type UserActionRateLimitConfig struct {
-	MinimumCustomersPerHour        int64
-	PaidCustomersPerHourlyCustomer int64
-	MinimumCustomersPerDay         int64
-	PaidCustomersPerDailyCustomer  int64
-}
-
-func NormalizeUserActionRateLimit(c UserActionRateLimitConfig) (UserActionRateLimitConfig, error) {
-	if c.MinimumCustomersPerHour == 0 {
-		c.MinimumCustomersPerHour = 5
-	}
-	if c.PaidCustomersPerHourlyCustomer == 0 {
-		c.PaidCustomersPerHourlyCustomer = 400
-	}
-	if c.MinimumCustomersPerDay == 0 {
-		c.MinimumCustomersPerDay = 10
-	}
-	if c.PaidCustomersPerDailyCustomer == 0 {
-		c.PaidCustomersPerDailyCustomer = 100
-	}
+// NormalizeUserActionRateLimit fills c's zero fields from the defaults and
+// refuses a limit that is not positive.
+func NormalizeUserActionRateLimit(c billing.UserActionRateLimitConfig) (billing.UserActionRateLimitConfig, error) {
+	c = billing.Config{UserActionRateLimit: c}.WithDefaults().UserActionRateLimit
 	if c.MinimumCustomersPerHour < 1 || c.PaidCustomersPerHourlyCustomer < 1 || c.MinimumCustomersPerDay < 1 || c.PaidCustomersPerDailyCustomer < 1 {
 		return c, fmt.Errorf("user_action_rate_limit fields must be positive")
 	}
 	return c, nil
 }
 
-// DestructiveActionLimitsConfig is how many destructive actions staff may
-// take in a rolling hour and day before a hold stops them: each actor's, each
-// merchant's and the deployment's. The merchant and deployment limits are
-// floors that rise with active customers. Zero fields select the defaults
-// (actor 5/15, merchant 15/25, deployment 50/100).
-//
-// Counted actions are refunds, cancellations, payment-method removal, access
-// and credit revocation, write-offs, and changes that archive or remove an
-// existing catalog object's billable, access or routing terms; creating an
-// object spends nothing, nor do replays and proven no-ops. A batch counts its
-// targets. The actor is the verified issuer and invoker, so a rotated
-// credential gets no new allowance. The merchant and deployment floors rise
-// by one per 400 (hour) and 100 (day) customers active in the last 30 days. An
-// in-process call that names no invoker is the host's own work: audited with
-// origin host, it spends nothing and no hold stops it. A catalog file applied
-// by the operator spends the merchant's autonomous budget. Customer
-// self-service is UserActionRateLimit's.
-//
-// A breach answers 429 and opens a hold that persists until a person clears it
-// (see `openrails destructive-holds`); its host events are
-// destructive.hold_opened and destructive.hold_cleared, and operator alerts
-// are delivered at least once. Holds and the action audit belong to the
-// deployment: keep them in full backups; a merchant archive cannot reset them.
-type DestructiveActionLimitsConfig struct {
-	ActorPerHour      int64
-	ActorPerDay       int64
-	MerchantPerHour   int64
-	MerchantPerDay    int64
-	DeploymentPerHour int64
-	DeploymentPerDay  int64
-	// ErasurePerHour and ErasurePerDay are the floors of a merchant's own
-	// contact-erasure budget, which rises with its directory.
-	ErasurePerHour int64
-	ErasurePerDay  int64
-}
-
-// NormalizeDestructiveActionLimits fills the defaults and refuses limits that
-// could never apply: a negative one, an hour above its day, an actor above
-// its merchant, or a merchant above the deployment.
-func NormalizeDestructiveActionLimits(c DestructiveActionLimitsConfig) (DestructiveActionLimitsConfig, error) {
-	for _, f := range []struct {
-		v   *int64
-		def int64
-	}{{&c.ActorPerHour, 5}, {&c.ActorPerDay, 15}, {&c.MerchantPerHour, 15}, {&c.MerchantPerDay, 25}, {&c.DeploymentPerHour, 50}, {&c.DeploymentPerDay, 100}, {&c.ErasurePerHour, 100}, {&c.ErasurePerDay, 1000}} {
-		if *f.v == 0 {
-			*f.v = f.def
-		}
-		if *f.v < 0 {
+// NormalizeDestructiveActionLimits fills c's zero fields from the defaults and
+// refuses limits that could never apply: a negative one, an hour above its
+// day, an actor above its merchant, or a merchant above the deployment.
+func NormalizeDestructiveActionLimits(c billing.DestructiveActionLimitsConfig) (billing.DestructiveActionLimitsConfig, error) {
+	c = billing.Config{DestructiveActionLimits: c}.WithDefaults().DestructiveActionLimits
+	for _, v := range []int64{c.ActorPerHour, c.ActorPerDay, c.MerchantPerHour, c.MerchantPerDay, c.DeploymentPerHour, c.DeploymentPerDay, c.ErasurePerHour, c.ErasurePerDay} {
+		if v < 0 {
 			return c, fmt.Errorf("destructive_action_limits fields must be positive")
 		}
 	}
@@ -793,42 +546,8 @@ func NormalizeDestructiveActionLimits(c DestructiveActionLimitsConfig) (Destruct
 	return c, nil
 }
 
-// RateLimitsConfig maps a feature bucket to its request limit.
-// A bucket left out is not limited; other routes never are (a
-// per-address ceiling belongs to the proxy in front of OpenRails).
-//
-// Buckets and built-in limits per minute: purchase 10 (creating, paying and
-// confirming orders, Solana Pay), subscribe 20 (/v1/me/subscriptions
-// writes), payment 40 (/v1/me/payment-methods), webhook 1200 (a rail's
-// webhooks share its source addresses) and catalog-ask 10. Counting is per
-// one-minute window, bucket and subject (the client address, plus the user
-// when authenticated); any subject tripping refuses the request with 429,
-// and the X-RateLimit-* headers report the strictest. An unknown key is
-// reported and ignored; a limit of 0 or less means 60. A pay URL is also
-// limited per order (120 reads and 10 pays a minute). In-process Client
-// calls count nothing. The client address is the socket peer unless
-// TrustedProxies lists the proxy, so set it behind a load balancer. A
-// declared Content-Length over the bucket's ceiling is 413 before counting
-// (64 KiB for purchase, subscribe and payment, 1 MiB elsewhere; webhooks use
-// per-rail caps). Counters, captcha challenges, card-testing declines and
-// admin lockouts live in Redis when configured, else in process memory (one
-// instance); never in PostgreSQL.
-//
-// Card saves and purchase payments are also refused before any provider call
-// with 429 card_attempts_blocked after 6 declines in 15 minutes or 10 in 24
-// hours per customer or client address (IPv6 /64). 100 declines in 24 hours
-// from at least 25 customers and 25 addresses puts the merchant in attack
-// mode: subjects with a recent decline are blocked and captcha buckets
-// challenge everyone.
-type RateLimitsConfig map[string]*RateLimit
-
-// RateLimitBuckets are the buckets RateLimitsConfig may name.
+// RateLimitBuckets are the buckets billing.RateLimitsConfig may name.
 var RateLimitBuckets = []string{"purchase", "payment", "subscribe", "webhook", "catalog-ask"}
-
-// RateLimit is one bucket's limit over a fixed one-minute window.
-type RateLimit struct {
-	RequestsPerMinute int
-}
 
 const (
 	CaptchaProviderTurnstile   = "turnstile"
@@ -836,38 +555,22 @@ const (
 	CaptchaProviderHCaptcha    = "hcaptcha"
 )
 
-// CaptchaConfig is the captcha account. Setting both keys enables the
-// challenge, which is asked only of a client that keeps hitting a rate limit
-// on purchase, payment methods or subscriptions.
-//
-// A subject reaching three times a bucket's limit in a window is challenged
-// for 15 minutes: 403 captcha_required with X-Captcha-Required until it sends
-// a valid X-Captcha-Token, which clears the challenge and its counters.
-// Staff, console and server-to-server routes never see one. Clients render it
-// from GET /v1/config's captcha block or the error's metadata.
-type CaptchaConfig struct {
-	// Provider is "turnstile" (the default), "recaptcha-v3" or "hcaptcha".
-	Provider  string
-	SiteKey   string
-	SecretKey string
-}
-
 // CaptchaEnabled reports whether captcha challenges are active. There is no
 // enabled knob (#353): configuring the credentials IS the enablement signal —
 // the system already applies captcha selectively (only after extreme
 // rate-limit escalation, only on the challenged buckets).
-func CaptchaEnabled(c *CaptchaConfig) bool {
-	return c != nil && strings.TrimSpace(c.SiteKey) != "" && strings.TrimSpace(c.SecretKey) != ""
+func CaptchaEnabled(c billing.CaptchaAccount) bool {
+	return strings.TrimSpace(c.SiteKey) != "" && strings.TrimSpace(c.SecretKey) != ""
 }
 
-func CaptchaProvider(c *CaptchaConfig) string {
-	if c == nil || strings.TrimSpace(c.Provider) == "" {
+func CaptchaProvider(c billing.CaptchaAccount) string {
+	if strings.TrimSpace(c.Provider) == "" {
 		return CaptchaProviderTurnstile
 	}
 	return strings.ToLower(strings.TrimSpace(c.Provider))
 }
 
-func CaptchaVerifyURL(c *CaptchaConfig) string {
+func CaptchaVerifyURL(c billing.CaptchaAccount) string {
 	switch CaptchaProvider(c) {
 	case CaptchaProviderRecaptchaV3:
 		return "https://www.google.com/recaptcha/api/siteverify"
@@ -878,14 +581,10 @@ func CaptchaVerifyURL(c *CaptchaConfig) string {
 	}
 }
 
-func CaptchaScriptURL(c *CaptchaConfig) string {
+func CaptchaScriptURL(c billing.CaptchaAccount) string {
 	switch CaptchaProvider(c) {
 	case CaptchaProviderRecaptchaV3:
-		siteKey := ""
-		if c != nil {
-			siteKey = strings.TrimSpace(c.SiteKey)
-		}
-		return "https://www.google.com/recaptcha/api.js?render=" + url.QueryEscape(siteKey)
+		return "https://www.google.com/recaptcha/api.js?render=" + url.QueryEscape(strings.TrimSpace(c.SiteKey))
 	case CaptchaProviderHCaptcha:
 		return "https://js.hcaptcha.com/1/api.js?render=explicit"
 	default:
@@ -910,7 +609,7 @@ func CaptchaChallengeBuckets() []string {
 // write mode (#346), impossible limits and the database schema. Every
 // optional setting is Degrade's: it is turned off with a reason, never
 // refused.
-func Validate(cfg *Config) error {
+func Validate(cfg *billing.Config) error {
 	if _, err := NormalizeUserActionRateLimit(cfg.UserActionRateLimit); err != nil {
 		return err
 	}
@@ -925,8 +624,8 @@ func Validate(cfg *Config) error {
 }
 
 // ValidateClickHouse refuses a database name that is not a plain identifier.
-func ValidateClickHouse(c ClickHouseConfig) error {
-	if d := ClickHouseDatabase(&Config{ClickHouse: c}); !schemaIdentRe.MatchString(d) {
+func ValidateClickHouse(c billing.ClickHouseConfig) error {
+	if d := ClickHouseDatabase(&billing.Config{ClickHouse: c}); !schemaIdentRe.MatchString(d) {
 		return fmt.Errorf("clickhouse database %q is not a valid identifier (letters, digits, underscore only; must start with a letter or underscore)", d)
 	}
 	return nil
@@ -934,10 +633,7 @@ func ValidateClickHouse(c ClickHouseConfig) error {
 
 // validateLLM refuses an unknown provider (#741/#761: one vendor's dialect
 // pointed at another's key) and a model endpoint over plaintext HTTP.
-func validateLLM(llm *LLMConfig) error {
-	if llm == nil {
-		return nil
-	}
+func validateLLM(llm billing.LLMConfig) error {
 	switch LLMProvider(llm) {
 	case LLMProviderAnthropic, LLMProviderOpenAI:
 	default:
@@ -974,10 +670,7 @@ func validateSourceCIDR(raw string) error {
 
 // ValidateVault refuses a mount path that is not a plain Vault path: Vault
 // is then unusable (vaultconn.Open), never a boot failure.
-func ValidateVault(vc *VaultConfig) error {
-	if vc == nil {
-		return nil
-	}
+func ValidateVault(vc billing.VaultConfig) error {
 	for name, raw := range map[string]string{"vault.kv_mount": vc.KVMount, "vault.scope_prefix": vc.ScopePrefix, "vault.transit_mount": vc.TransitMount} {
 		p := strings.Trim(strings.TrimSpace(raw), "/")
 		if p != "" && (path.Clean(p) != p || strings.Contains(p, "..")) {
@@ -987,11 +680,7 @@ func ValidateVault(vc *VaultConfig) error {
 	return nil
 }
 
-func validateCaptcha(cfg *CaptchaConfig) error {
-	if cfg == nil {
-		return nil
-	}
-
+func validateCaptcha(cfg billing.CaptchaAccount) error {
 	switch CaptchaProvider(cfg) {
 	case CaptchaProviderTurnstile, CaptchaProviderRecaptchaV3, CaptchaProviderHCaptcha:
 	default:
@@ -1099,7 +788,7 @@ func ValidatePublicURL(raw string, allowLoopback, originOnly bool) error {
 
 // ValidateDatabase refuses a schema that is not a safe identifier and a
 // negative lease pool.
-func ValidateDatabase(d DatabaseConfig) error {
+func ValidateDatabase(d billing.DatabaseConfig) error {
 	if d.LeaseConns < 0 {
 		return fmt.Errorf("database.lease_conns %d is negative", d.LeaseConns)
 	}
@@ -1107,24 +796,5 @@ func ValidateDatabase(d DatabaseConfig) error {
 	return validateSchema(d.Schema)
 }
 
-// DefaultRateLimits are the built-in per-bucket limits, applied whenever
-// Config.RateLimits is nil.
-func DefaultRateLimits() RateLimitsConfig {
-	return RateLimitsConfig{
-		// Mutation endpoint; the per-user limit is the real fraud control.
-		"subscribe": &RateLimit{RequestsPerMinute: 20},
-		// Kept tight to deter card testing.
-		"purchase": &RateLimit{RequestsPerMinute: 10},
-		// Per source IP. All webhooks from a rail share one bucket (fixed rail
-		// IPs), so this must absorb rebill runs without refusing legitimate
-		// payment events. Webhooks are already authenticated; this is a DoS
-		// floor, not the primary control.
-		"webhook":     &RateLimit{RequestsPerMinute: 1200},
-		"payment":     &RateLimit{RequestsPerMinute: 40},
-		"catalog-ask": &RateLimit{RequestsPerMinute: 10},
-	}
-}
-
-// DefaultCaptcha is the captcha configuration applied when Config.Captcha is
-// nil: no account, so no challenge.
-func DefaultCaptcha() *CaptchaConfig { return &CaptchaConfig{Provider: CaptchaProviderTurnstile} }
+// defaults are the engine's defaults, for settings read without New.
+var defaults = billing.DefaultConfig()

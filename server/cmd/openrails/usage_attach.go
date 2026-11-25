@@ -64,5 +64,5 @@ func openAttachedStore(ctx context.Context) (*eventstore.Store, error) {
 	cli.mu.Lock()
 	cli.closes = append(cli.closes, func() { _ = conn.Close() })
 	cli.mu.Unlock()
-	return eventstore.Open(ctx, conn, config.ClickHouseDatabase(h.Config), eventstore.Options{Logger: slog.Default()})
+	return eventstore.Open(ctx, conn, config.ClickHouseDatabase(&h.Server.Engine), eventstore.Options{Logger: slog.Default()})
 }

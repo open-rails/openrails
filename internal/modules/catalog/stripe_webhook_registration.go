@@ -23,7 +23,7 @@ type ManagedStripeWebhookParams struct {
 	Publication *merchants.StripeWebhookPublication
 
 	StripeClients       *stripeapi.Factory
-	Config              *config.Config
+	Config              *billing.Config
 	SecretStore         merchants.MerchantSecretReader
 	MerchantID          billing.MerchantID
 	ProviderEnvironment string
@@ -62,7 +62,7 @@ type ManagedStripeWebhookResult struct {
 // PublicStripeWebhookURL builds the canonical account-specific callback URL.
 // Embedded and standalone hosts publish the same path under their public billing
 // mount. The account resolves the merchant; a slug is never callback authority.
-func PublicStripeWebhookURL(cfg *config.Config, accountID string) (string, bool, error) {
+func PublicStripeWebhookURL(cfg *billing.Config, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {
 		base = strings.TrimSpace(cfg.PublicBillingBaseURL)

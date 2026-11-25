@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -32,7 +33,7 @@ type Options struct {
 
 // Assembler builds the embedded billing surface from the application graph.
 type Assembler struct {
-	Cfg          *config.Config
+	Cfg          *billing.Config
 	Runtime      *app.Runtime
 	CaptchaStore *captcha.ChallengeStore
 	AdminLimiter *middleware.AdminOperationLimiter
@@ -102,8 +103,8 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 
 	// Nothing here knows a request's merchant: each route's gate binds it
 	// from the credential, and limits ahead of the gate key on the address.
-	var rateLimits config.RateLimitsConfig
-	var captchaCfg *config.CaptchaConfig
+	var rateLimits billing.RateLimitsConfig
+	var captchaCfg billing.CaptchaAccount
 	var resolver *iputil.TrustedProxies
 	var state *abusestate.Store
 	if s.Cfg != nil {

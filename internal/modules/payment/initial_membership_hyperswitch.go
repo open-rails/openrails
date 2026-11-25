@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
@@ -29,8 +29,8 @@ func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context,
 // read and contract check precede the durable fence: they prove the accepted
 // binding and the held card, not a remote lock; Charge rechecks before
 // dispatch.
-func hyperSwitchProxy(ctx context.Context, cfg *config.Config, d *db.DB, accepted charge.HyperSwitchBinding, instrument charge.FrozenInstrument, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
-	if cfg == nil || cfg.HyperSwitch == nil || gateway == nil || gateway.ReadOnly || instrument.CustodianID == nil {
+func hyperSwitchProxy(ctx context.Context, cfg *billing.Config, d *db.DB, accepted charge.HyperSwitchBinding, instrument charge.FrozenInstrument, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
+	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) || gateway == nil || gateway.ReadOnly || instrument.CustodianID == nil {
 		return nil, errors.New("HyperSwitch custody is not armed")
 	}
 	mid, err := merchant.Require(ctx)

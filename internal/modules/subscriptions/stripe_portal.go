@@ -10,15 +10,14 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/railresolve"
-
-	"github.com/open-rails/openrails/internal/config"
 )
 
 type StripePortalService struct {
 	StripeClients *stripeapi.Factory
-	Config        *config.Config
+	Config        *billing.Config
 	Rails         railresolve.Source
 }
 

@@ -173,7 +173,7 @@ func (s *SubscriptionLifecycleService) engineCard(ctx context.Context, d *db.DB,
 	}
 	var binding *charge.HyperSwitchBinding
 	if method.Custodian == models.CustodianHyperSwitch {
-		if s.Config == nil || s.Config.HyperSwitch == nil {
+		if s.Config == nil || s.Config.HyperSwitch == (billing.HyperSwitchConfig{}) {
 			return method, errors.New("HyperSwitch deployment is unavailable")
 		}
 		frozen, err := charge.FreezeHyperSwitchBinding(ctx, q, configuration, method, sub.PspID, s.Config.HyperSwitch.APIBaseURL)

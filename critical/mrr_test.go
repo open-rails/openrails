@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -186,12 +187,39 @@ func ccbillBook(price billing.PriceID, asOf time.Time, from, n int) billing.Decl
 	book := billing.DeclaredBilling{AsOf: asOf, DefaultPSP: billing.PSPRef{Key: "ccbill"}}
 	for i := from; i < from+n; i++ {
 		customer := billing.CustomerID(uuid.New())
-		sub, sale := legacyCCBillMember(customer, price, fmt.Sprintf("4%017d", i), fmt.Sprintf("08%017d", i), asOf.Add(5*24*time.Hour))
+		// No issuer's range starts with 9 or 0: no id reads as a card number.
+		sub, sale := legacyCCBillMember(customer, price, fmt.Sprintf("9%017d", i), fmt.Sprintf("08%017d", i), asOf.Add(5*24*time.Hour))
 		book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customer})
 		book.Subscriptions = append(book.Subscriptions, sub)
 		book.Transactions = append(book.Transactions, sale)
 	}
 	return book
+}
+
+// ghostCCBillMembership writes the customer a CCBill membership, opened as
+// an import opens one, that a legacy book left behind without its access: no
+// grant came of it, so a prune may remove it (a subscription that granted
+// access is surfaced, never pruned). It is canceled at its paid end.
+func ghostCCBillMembership(t *testing.T, w *world, customer billing.CustomerID, psp uuid.UUID, ref string, start, paid, canceled time.Time) {
+	t.Helper()
+	var product, price uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT product_id, id FROM "+pgx.Identifier{w.schema, "prices"}.Sanitize()+" WHERE merchant_id = $1",
+		w.alpha.MerchantID().UUID()).Scan(&product, &price))
+	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
+	require.NoError(t, err)
+	require.NoError(t, database.MerchantTx(merchant.WithID(t.Context(), w.alpha.MerchantID()), func(ctx context.Context, tx pgx.Tx) error {
+		if err := db.SetMRRCause(ctx, gen.New(tx), db.MRRCauseImport); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2) ON CONFLICT DO NOTHING", w.alpha.MerchantID().UUID(), customer.UUID()); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, collection_policy, rail_subscription_id, psp_id,"+
+			" started_at, current_period_starts_at, current_period_ends_at, canceled_at, ended_at, cancel_type, created_at, updated_at)"+
+			" VALUES ($1, $2, $3, $4, 'canceled', 'ccbill', 'provider', $5, $6, $7, $7, $8, $9, $8, 'user', $10, $10)",
+			w.alpha.MerchantID().UUID(), customer.UUID(), product, price, ref, psp, start, paid, canceled, w.clock.Now())
+		return err
+	}))
 }
 
 // subscriptionMRRReads is the rows and index entries reads of
@@ -454,8 +482,10 @@ func TestMRR(t *testing.T) {
 			" WHERE merchant_id = $1 AND customer_id = $2 AND currency = 'USD'", a.alpha.MerchantID().UUID(), bob.UUID()).Scan(&cohort))
 		require.True(t, cohort.Equal(started), "the adopted cohort is when it started, %s", cohort)
 
-		// CCBill replaces its subscription with the upgrade's; OpenRails
-		// keeps the row and moves it onto the new price in one transaction.
+		// A minute later CCBill replaces its subscription with the upgrade's;
+		// OpenRails keeps the row and moves it onto the new price in one
+		// transaction. (The import's row is dated by the database's clock.)
+		a.clock.Advance(time.Minute)
 		next := a.clock.Now().UTC().Add(720 * time.Hour)
 		status, body := ccbillNotice(t, a, "UpgradeSuccess", map[string]any{"originalSubscriptionId": "0223344556677889900", "subscriptionId": "0667788990011223344",
 			"transactionId": "0812233445566778810", "flexId": "critical-plus-flex", "billedInitialPrice": "20.00", "billedRecurringPrice": "20.00", "recurringPeriod": "30",
@@ -563,15 +593,18 @@ func TestMRR(t *testing.T) {
 			{resolved, month, "mrr_scheduled_resolved_at_idx"},
 			{atRisk, []any{a.alpha.MerchantID().UUID(), a.clock.Now().AddDate(0, 1, 0)}, "mrr_scheduled_effective_at_idx"},
 		} {
-			tx, err := a.pool.Begin(t.Context())
-			require.NoError(t, err)
-			_, err = tx.Exec(t.Context(), "SET LOCAL enable_seqscan = off")
-			require.NoError(t, err)
-			rows, err := tx.Query(t.Context(), "EXPLAIN "+read.sql, read.args...)
-			require.NoError(t, err)
-			plan, err := pgx.CollectRows(rows, pgx.RowTo[string])
-			require.NoError(t, err)
-			require.NoError(t, tx.Rollback(t.Context()))
+			plan := func() []string {
+				tx, err := a.pool.Begin(t.Context())
+				require.NoError(t, err)
+				defer func() { _ = tx.Rollback(context.Background()) }()
+				_, err = tx.Exec(t.Context(), "SET LOCAL enable_seqscan = off")
+				require.NoError(t, err)
+				rows, err := tx.Query(t.Context(), "EXPLAIN "+read.sql, read.args...)
+				require.NoError(t, err)
+				plan, err := pgx.CollectRows(rows, pgx.RowTo[string])
+				require.NoError(t, err)
+				return plan
+			}()
 			text := strings.Join(plan, "\n")
 			require.NotContains(t, text, "Seq Scan", text)
 			require.Contains(t, text, read.uses, text)
@@ -615,23 +648,23 @@ func TestMRR(t *testing.T) {
 		price := ccbillMemberPrice(t, w.alpha)
 		kept, gone := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 		start, paid := rebill.Add(-720*time.Hour), rebill.Add(720*time.Hour)
-		const goneRef = "223344556677889900"
 		res, err := w.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"},
-			Customers: []billing.DeclaredCustomer{{Customer: kept}, {Customer: gone}},
+			Customers: []billing.DeclaredCustomer{{Customer: kept}},
 			Subscriptions: []billing.DeclaredSubscription{
 				{SourceID: "kept", Customer: kept, Price: price, Rail: "ccbill", RailSubscriptionID: ccbillStored, StartedAt: start, PaidThrough: &paid,
 					AcceptedSchedule: &billing.DeclaredProviderSchedule{SourceReference: ccbillStored, Amount: 10_000_000, Currency: "USD", IntervalHours: 720, FirstDueAt: paid}},
-				// Canceled at the end of its paid period, which is ahead.
-				{SourceID: "gone", Customer: gone, Price: price, Rail: "ccbill", RailSubscriptionID: goneRef, StartedAt: start, PaidThrough: &paid,
-					Cancel: billing.CancelEvidence{Kind: "user_canceled", At: rebill.Add(24 * time.Hour)}},
 			},
 			Transactions: []billing.DeclaredTransaction{
 				{RailSubscriptionID: ccbillStored, TransactionID: "0812233445566778801", Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start},
 				{RailSubscriptionID: ccbillStored, TransactionID: "0912233445566778801", Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: rebill},
-				{RailSubscriptionID: goneRef, TransactionID: "0812233445566778802", Type: "sale", Success: true, Amount: 10_000_000, Currency: "USD", OccurredAt: start},
 			}})
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"kept", "gone"}, res.Imported, "%v", res.Reasons)
+		require.Equal(t, []string{"kept"}, res.Imported, "%v", res.Reasons)
+		psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
+		require.NoError(t, err)
+		require.Len(t, psps.Items, 1)
+		// Canceled at the end of its paid period, which is ahead.
+		ghostCCBillMembership(t, w, gone, psps.Items[0].ID.UUID(), "223344556677889900", start, paid, rebill.Add(24*time.Hour))
 		pruned := onlySubscription(t, w.alpha, gone)
 		require.Equal(t, billing.SubscriptionCanceled, pruned.Status)
 		require.Equal(t, []string{"churn scheduled"}, mrrEntries(t, w, w.alpha, pruned.ID))
@@ -643,9 +676,6 @@ func TestMRR(t *testing.T) {
 		dl := ccbill.NewDataLinkClient(slog.Default(), &config.CCBillConfig{ClientAccNum: "945280", ClientSubAcc: "0001", Sandbox: true,
 			DataLinkUsername: "critical-datalink", DataLinkPassword: "critical-datalink-password"})
 		dl.BaseURL = feed.URL
-		psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
-		require.NoError(t, err)
-		require.Len(t, psps.Items, 1)
 		binding := reconcile.PSPBinding{ID: psps.Items[0].ID.UUID(), Rail: "ccbill", AccountID: "945280-0001"}
 		one := 1
 		var run reconcile.PruneResult
@@ -685,7 +715,8 @@ func TestMRR(t *testing.T) {
 	t.Run("OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
-		const members = 2000
+		// The book's request body stays under the 1 MiB cap: some 700 bytes a member.
+		const members = 1200
 		before := subscriptionMRRReads(t, a.world, a.pool, false)
 		res, err := a.alpha.ImportBilling(t.Context(), ccbillBook(price, a.clock.Now().UTC().Truncate(time.Second), 0, members))
 		require.NoError(t, err)
@@ -706,7 +737,8 @@ func TestMRR(t *testing.T) {
 	t.Run("OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		price := ccbillMemberPrice(t, a.alpha)
-		const members = 2000
+		// The book's request body stays under the 1 MiB cap: some 700 bytes a member.
+		const members = 1200
 		subscriptions := pgx.Identifier{a.schema, "subscriptions"}.Sanitize()
 		// A book written before MRR existed: no trigger recorded it.
 		_, err := a.pool.Exec(t.Context(), "ALTER TABLE "+subscriptions+" DISABLE TRIGGER trg_subscriptions_track_mrr")

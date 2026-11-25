@@ -66,14 +66,14 @@ func Verify(ctx context.Context, q *gen.Queries, reader billing.MerchantGroupRea
 // Bind locks an existing merchant, lets the authentication adapter ensure its
 // group in the same transaction, and records the immutable one-to-one binding.
 // It never creates a billing identity, changes its name or assigns a role.
-func Bind(ctx context.Context, pool *pgxpool.Pool, database config.DatabaseConfig, binding billing.MerchantBinding, ensureGroup func(context.Context, pgx.Tx) error) error {
+func Bind(ctx context.Context, pool *pgxpool.Pool, database billing.DatabaseConfig, binding billing.MerchantBinding, ensureGroup func(context.Context, pgx.Tx) error) error {
 	if err := Validate(binding); err != nil {
 		return err
 	}
 	if pool == nil || ensureGroup == nil {
 		return errors.New("merchant binding requires a pool and group provisioner")
 	}
-	tx, err := db.WrapPool(pool, config.SchemaName(&config.Config{Database: database})).Begin(ctx)
+	tx, err := db.WrapPool(pool, config.SchemaName(&billing.Config{Database: database})).Begin(ctx)
 	if err != nil {
 		return err
 	}

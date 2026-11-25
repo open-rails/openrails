@@ -149,7 +149,7 @@ func TestTransactionPooler(t *testing.T) {
 			require.NoError(t, err)
 		}()
 		cfg := openrails.Config{
-			Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema},
+			Database: billing.DatabaseConfig{Schema: schema, RiverSchema: schema},
 			Merchants: []billing.MerchantDeclaration{
 				{MerchantDocument: billing.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
 				{MerchantDocument: billing.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},

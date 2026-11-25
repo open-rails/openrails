@@ -113,8 +113,8 @@ func TestCheckoutFunnel(t *testing.T) {
 	t.Run("OR-J47-S01/steps-are-recorded-where-the-customer-takes-them", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) {
 			w.deps.Redis = criticalRedis(t)
-			w.cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "critical-site", SecretKey: "critical-secret"}
-			w.cfg.RateLimits = openrails.RateLimitsConfig{"purchase": {RequestsPerMinute: 1000}}
+			w.cfg.Captcha = billing.CaptchaAccount{Provider: "turnstile", SiteKey: "critical-site", SecretKey: "critical-secret"}
+			w.cfg.RateLimits = billing.RateLimitsConfig{"purchase": {RequestsPerMinute: 1000}}
 		})
 		_, price := publicSale(t, a, "funnel-steps", 9_990_000, nil)
 		created := openCheckout(t, a, price.ID, nil, nil)

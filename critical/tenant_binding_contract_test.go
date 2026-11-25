@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantbinding"
 	"github.com/stretchr/testify/require"
 )
@@ -55,7 +54,7 @@ func bindMerchant(ctx context.Context, a *authorityWorld, binding billing.Mercha
 	if err != nil {
 		return err
 	}
-	return merchantbinding.Bind(ctx, a.pool, config.DatabaseConfig(a.cfg.Database), binding, func(ctx context.Context, tx pgx.Tx) error {
+	return merchantbinding.Bind(ctx, a.pool, billing.DatabaseConfig(a.cfg.Database), binding, func(ctx context.Context, tx pgx.Tx) error {
 		group, err := view.CreateGroup(ctx, iam.NewGroup{ID: binding.ID.String(), TenantID: tenant, Persona: a.merchant.Persona}, authkit.InTx(tx))
 		if err != nil {
 			return err
@@ -111,7 +110,7 @@ func TestTenantBinding(t *testing.T) {
 
 		// Another tenant is refused before any group is made.
 		other := billing.MerchantBinding{ID: gamma.MerchantID(), TenantID: iam.NewTenantID().String()}
-		err = merchantbinding.Bind(t.Context(), a.pool, config.DatabaseConfig(a.cfg.Database), other, func(context.Context, pgx.Tx) error {
+		err = merchantbinding.Bind(t.Context(), a.pool, billing.DatabaseConfig(a.cfg.Database), other, func(context.Context, pgx.Tx) error {
 			t.Error("a conflicting binding ensured a group")
 			return nil
 		})

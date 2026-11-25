@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/vaulttest"
@@ -310,7 +309,7 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 				w.cfg.Vault = vault.Config()
 				w.deps.Vault = vault.Client()
 				if profile == "hosted-isolated-vault" {
-					w.cfg.CardVault = &openrails.CardVaultConfig{Kind: "basis_theory", TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
+					w.cfg.CardVault = billing.CardVaultConfig{Kind: "basis_theory", TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
 				}
 				vendor.gateway = w.deps.NMITransport
 				target, err := url.Parse(vendor.server.URL)

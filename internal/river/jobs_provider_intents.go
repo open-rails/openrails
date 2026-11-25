@@ -13,7 +13,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/intents/wake"
@@ -33,7 +32,7 @@ func workerNow(c clockwork.Clock) time.Time {
 type ProviderOperationWorker struct {
 	WorkerDefaults[wake.Args]
 	DB     *db.DB
-	Config *config.Config
+	Config *billing.Config
 	Clock  clockwork.Clock
 	// Runner is the runtime's shared intent runner: the registry, gates and
 	// card-abuse accounting every executor uses. Each job runs a copy that

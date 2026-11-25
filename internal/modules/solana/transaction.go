@@ -11,7 +11,7 @@ import (
 	chainrpc "github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
@@ -26,7 +26,7 @@ type SolanaTransactionService struct {
 	db           *db.DB
 	rpc          *solanarpc.RPCClient
 	rpcBuilder   *MerchantRPCBuilder
-	cfg          *config.Config
+	cfg          *billing.Config
 	priceService *catalog.PriceService
 	fxProvider   *fx.Rates
 	clock        clockwork.Clock
@@ -42,7 +42,7 @@ func (s *SolanaTransactionService) now() time.Time {
 }
 
 // NewSolanaTransactionService creates a new transaction service.
-func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *config.Config, price *catalog.PriceService, fxProvider *fx.Rates, clocks ...clockwork.Clock) *SolanaTransactionService {
+func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *billing.Config, price *catalog.PriceService, fxProvider *fx.Rates, clocks ...clockwork.Clock) *SolanaTransactionService {
 	return &SolanaTransactionService{
 		db:           db,
 		rpc:          rpc,

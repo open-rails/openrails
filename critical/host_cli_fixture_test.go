@@ -36,7 +36,7 @@ func hostCLICommand(t *testing.T, w *world, extra map[string]any, args ...string
 	require.NoError(t, err)
 	require.NotZero(t, info.Mode()&0111, "operator CLI must be executable")
 	config := filepath.Join(t.TempDir(), "config.yaml")
-	settings := map[string]any{"db": map[string]string{"url": os.Getenv("OPENRAILS_CRITICAL_DSN")}, "database": map[string]string{"schema": w.schema, "river_schema": w.schema}}
+	settings := map[string]any{"database": map[string]string{"url": os.Getenv("OPENRAILS_CRITICAL_DSN"), "schema": w.schema, "river_schema": w.schema}}
 	for key, value := range extra {
 		settings[key] = value
 	}

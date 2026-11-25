@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 753,
+  "scenario_count": 754,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -2711,7 +2711,7 @@
     {
       "id": "OR-J42-S09",
       "journey": "J42",
-      "name": "A bulk import of thousands of subscriptions in one transaction settles once: reads of subscription_mrr grow with the book, not its square"
+      "name": "A bulk import of over a thousand subscriptions in one transaction settles once: reads of subscription_mrr grow with the book, not its square"
     },
     {
       "id": "OR-J42-S10",
@@ -2787,6 +2787,11 @@
       "id": "OR-J42-S31",
       "journey": "J42",
       "name": "An archive written before the reporting rollups (no streak flows, product totals, distinct customers, cancel decisions or chargeback churn flows) restores them rebuilt from its movements, product flows, customer MRR and status transitions, row for row as the source kept them, and the restore check proves they agree"
+    },
+    {
+      "id": "OR-J42-S32",
+      "journey": "J42",
+      "name": "MRR leaving a product, a currency and a customer settles: a customer's euro plan ends while its dollar plan stays (it stays one customer), another's only plan ends at once, and the first's last plan churns at its period's end through the billing pass's MRR scan; the product totals and the distinct customers fall to none and agree with their flows"
     },
     {
       "id": "OR-J28-S09",

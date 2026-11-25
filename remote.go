@@ -111,7 +111,7 @@ type RemoteOptions struct {
 	Timeout time.Duration
 	// ReadCache overrides how long catalog and configuration reads are
 	// served from memory; nil keeps the defaults.
-	ReadCache ReadCache
+	ReadCache billing.ReadCache
 	// EntitlementCheckCache configures the entitlement check cache, on by
 	// default for APIKey credentials.
 	EntitlementCheckCache EntitlementCheckCacheOptions
@@ -546,7 +546,7 @@ type routeCall struct {
 	idempotencyKey string
 	body, query    any
 	// cache is the read that may answer it from memory.
-	cache config.Read
+	cache billing.Read
 }
 
 // send makes call and decodes its answer into out, nil for none.
@@ -565,7 +565,7 @@ func (c *Client) send(ctx context.Context, call routeCall, out any) error {
 		}
 	}
 	if call.cache != "" {
-		return c.read(ctx, Read(call.cache), path, out)
+		return c.read(ctx, call.cache, path, out)
 	}
 	return c.doWithHeaders(ctx, call.method, path, call.body, out, idempotent(call.idempotencyKey))
 }

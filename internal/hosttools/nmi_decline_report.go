@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	vaultapi "github.com/hashicorp/vault/api"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,11 +14,12 @@ import (
 	"text/tabwriter"
 	"time"
 
+	vaultapi "github.com/hashicorp/vault/api"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
@@ -28,7 +28,7 @@ import (
 
 // NMIDeclineReportOptions mirrors `openrails nmi decline-report`.
 type NMIDeclineReportOptions struct {
-	Config     *config.Config
+	Config     *billing.Config
 	PGXPool    *pgxpool.Pool
 	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID

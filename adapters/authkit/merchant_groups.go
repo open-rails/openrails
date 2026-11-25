@@ -10,9 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	native "github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantbinding"
 )
 
@@ -41,7 +39,7 @@ func (r groupReader) LookupMerchantGroup(ctx context.Context, binding billing.Me
 // tenant. Its group ID remains its billing ID. Group creation and the billing
 // binding commit together on pool; client must use that same database.
 // No owner, role assignment, key or provider operation is created.
-func BindMerchant(ctx context.Context, pool *pgxpool.Pool, database openrails.DatabaseConfig, client *native.Client, binding billing.MerchantBinding) error {
+func BindMerchant(ctx context.Context, pool *pgxpool.Pool, database billing.DatabaseConfig, client *native.Client, binding billing.MerchantBinding) error {
 	view, err := tenantClient(ctx, client, binding)
 	if err != nil {
 		return err
@@ -54,7 +52,7 @@ func BindMerchant(ctx context.Context, pool *pgxpool.Pool, database openrails.Da
 	if err != nil {
 		return err
 	}
-	return merchantbinding.Bind(ctx, pool, config.DatabaseConfig(database), binding, func(ctx context.Context, tx pgx.Tx) error {
+	return merchantbinding.Bind(ctx, pool, database, binding, func(ctx context.Context, tx pgx.Tx) error {
 		group, err := view.CreateGroup(ctx, iam.NewGroup{
 			ID: binding.ID.String(), TenantID: tenant, Persona: persona,
 		}, native.InTx(tx))
