@@ -93,11 +93,11 @@ func Graph(client any) *app.App {
 	return nil
 }
 
-// New builds the engine. It first creates or upgrades OpenRails' tables, this
-// month's partitions and River's tables (Migrate's work); the control plane's
+// New builds the engine. It first creates or upgrades OpenRails' tables and
+// River's tables (Migrate's work); the control plane's
 // AuthKit migrates itself as it is built.
 // Database.SkipMigrations validates existing schemas instead of
-// applying startup schema, partition or River changes. ctx bounds the
+// applying startup schema or River changes. ctx bounds the
 // database; nothing else does. Only the database (Deps.Postgres is required),
 // an unknown provider write mode, an invalid River schema and the
 // money-safety refusal (a test seam beside a live PSP) fail construction.

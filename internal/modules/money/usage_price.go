@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/eventstore"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // A period's usage is priced from its total: each meter cell is priced card
@@ -33,6 +36,26 @@ type printCard struct {
 
 // usagePrints are the merchant's card prints, by print.
 type usagePrints map[string]printCard
+
+// CardsInForce are the rate cards in force for an event type in a currency,
+// as a gate's view prices with them; nil when none prices it.
+func (s *MoneyService) CardsInForce(ctx context.Context, q *gen.Queries, eventType, currency string) ([]byte, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cards, err := usageCards(ctx, q, mid.UUID(), strings.TrimSpace(eventType), normalizeCurrency(currency))
+	var coded *apperr.Error
+	switch {
+	case errors.As(err, &coded):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case len(cards) == 0:
+		return nil, nil
+	}
+	return json.Marshal(cards)
+}
 
 // loadPrints reads the cards of prints; a print not yet committed is absent.
 func loadPrints(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, prints []string) (usagePrints, error) {

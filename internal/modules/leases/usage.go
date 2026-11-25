@@ -14,8 +14,8 @@ import (
 )
 
 // UsageReader is every read of what usage used that a view makes: the
-// customer's money standing (with its unposted usage), a limit's use in a
-// window, and recent spend. Views read nothing of usage but through it.
+// customer's money standing (with its unposted usage) and a limit's use in a
+// window. Views read nothing of usage but through it.
 type UsageReader interface {
 	// Capacity is the customer's money in a currency: its balance and
 	// everything held against it, other than the syncing lease's in-flight
@@ -24,13 +24,10 @@ type UsageReader interface {
 	// Limit is where a claim's limit stands in its window and, were it
 	// refused now, when it resets.
 	Limit(ctx context.Context, customer uuid.UUID, c limits.Claim) (limits.Standing, *time.Time, error)
-	// RecentSpend is what the customer's usage charged in a currency in the
-	// last recentWindow.
-	RecentSpend(ctx context.Context, customer uuid.UUID, currency string) (int64, error)
 }
 
 // storeUsage answers a sync's views in batches: every viewed customer's
-// money and recent spend are read at once (prefetch), and their limit rows
+// money is read at once (prefetch), and their limit rows
 // at once on the first limit read; PostgreSQL in the views' snapshot, then
 // the event store. A window a read finds at capacity is recorded once the
 // snapshot ends (reached).
@@ -39,7 +36,6 @@ type storeUsage struct {
 	store   *eventstore.Store
 	caps    map[viewKey]money.AdmissionCapacity
 	failed  map[viewKey]error
-	recent  map[viewKey]int64
 	loaded  map[uuid.UUID][]eventstore.LimitRow
 	reached []reachedWindow
 }
@@ -51,10 +47,9 @@ type reachedWindow struct {
 	standing limits.Standing
 }
 
-// prefetch reads the money and recent spend of every customer and currency
-// the views name.
+// prefetch reads the money of every customer and currency the views name.
 func (u *storeUsage) prefetch(ctx context.Context, keys []viewKey) error {
-	u.caps, u.failed, u.recent = map[viewKey]money.AdmissionCapacity{}, map[viewKey]error{}, map[viewKey]int64{}
+	u.caps, u.failed = map[viewKey]money.AdmissionCapacity{}, map[viewKey]error{}
 	byCurrency := map[string][]uuid.UUID{}
 	var currencies []string
 	for _, k := range keys {
@@ -76,32 +71,12 @@ func (u *storeUsage) prefetch(ctx context.Context, keys []viewKey) error {
 			u.failed[viewKey{c, currency}] = err
 		}
 	}
-	if u.store == nil {
-		return eventstore.Required("a view")
-	}
-	for _, currency := range currencies {
-		customers := make([]billing.CustomerID, 0, len(byCurrency[currency]))
-		for _, c := range byCurrency[currency] {
-			customers = append(customers, billing.CustomerID(c))
-		}
-		recent, err := u.store.MinuteAmounts(ctx, customers, currency, v.run.now.Add(-recentWindow))
-		if err != nil {
-			return err
-		}
-		for c, amount := range recent {
-			u.recent[viewKey{c.UUID(), currency}] = amount
-		}
-	}
 	return nil
 }
 
 func (u *storeUsage) Capacity(_ context.Context, customer uuid.UUID, currency string) (money.AdmissionCapacity, error) {
 	k := viewKey{customer, currency}
 	return u.caps[k], u.failed[k]
-}
-
-func (u *storeUsage) RecentSpend(_ context.Context, customer uuid.UUID, currency string) (int64, error) {
-	return u.recent[viewKey{customer, currency}], nil
 }
 
 func (u *storeUsage) Limit(ctx context.Context, customer uuid.UUID, c limits.Claim) (limits.Standing, *time.Time, error) {

@@ -206,10 +206,6 @@ func ValidateValues(p Profile, values []*string) error {
 			if v != "succeeded" && v != "failed" && v != "expired" && v != "canceled" {
 				return bad()
 			}
-		case "limit_holds.state":
-			if v != "released" && v != "captured" {
-				return bad()
-			}
 		case "provider_intents.status":
 			if v != "succeeded" && v != "failed_terminal" && v != "expired" && v != "superseded" && !(v == "pending" && unattemptedSolanaPull(p, values)) {
 				return bad()

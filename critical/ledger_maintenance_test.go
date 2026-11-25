@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -91,21 +92,15 @@ func TestLedgerMaintenance(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, ledger.Items, 1)
 		meterForCapture(t, w)
-		admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "deplete", 1000)})
-		require.NoError(t, err)
-		require.True(t, admitted[0].Allowed())
-		spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("deplete", 1000)})
-		require.NoError(t, err)
-		require.NoError(t, spent[0].Err())
+		lease := newLease()
+		deplete := numbered(1, billing.LeaseUsage{CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
+			EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(int64(1000)), Source: "critical", SourceID: "deplete"})
+		settleUsage(t, w.alpha, lease, deplete...)
 		balance(t, w.alpha, customer, 0, 1000, 1000)
-		replay, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("deplete", 1000)})
-		require.NoError(t, err)
-		require.NoError(t, replay[0].Err())
-		require.True(t, replay[0].Receipt.Replayed)
-		require.Equal(t, spent[0].Receipt.Amount, replay[0].Receipt.Amount)
-		denied, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "insufficient", 1)})
-		require.NoError(t, err)
-		require.False(t, denied[0].Allowed(), "the unposted accrual is held as if posted")
+		replay := settleUsage(t, w.alpha, lease, deplete...)
+		require.EqualValues(t, 1, replay.Usage.ThroughN, "a resend answers its receipt")
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Views: []billing.ViewParams{computeView(customer)}})
+		require.Zero(t, lineOf(t, viewOf(t, out, customer), catalog.BalanceLimit).Remaining, "the unposted usage is held as if posted")
 		balance(t, w.alpha, customer, 0, 1000, 1000)
 		fleet := startFleet(t, w)
 		nextMonth(w)
@@ -113,7 +108,7 @@ func TestLedgerMaintenance(t *testing.T) {
 		balance(t, w.alpha, customer, 0, 0, 0)
 		ledger, err = w.alpha.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
-		require.Len(t, ledger.Items, 2, "replay and insufficient funds leave no extra transfer")
+		require.Len(t, ledger.Items, 2, "the resend leaves no extra transfer")
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 
 		// Privileged corruption is fixture injection, not a supported money API.

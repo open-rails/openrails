@@ -7,7 +7,7 @@ import {
   createBillingClient,
   type PaymentFallbacks,
 } from "@openrails/billing-ui"
-import { isBillingError, type Order, type PublicConfig, type PublicMerchant } from "@openrails/billing-ui/client"
+import { isBillingError, type CustomerConfig, type Order, type PublicConfig } from "@openrails/billing-ui/client"
 
 import { paymentPageFetch } from "./api"
 import { CaptchaPrompt, captchaFetch } from "./captcha"
@@ -17,7 +17,7 @@ type Ended = "not_found" | "expired" | "canceled" | "unavailable"
 type State =
   | { kind: "loading" }
   | { kind: "ended"; reason: Ended }
-  | { kind: "ready"; config: PublicConfig; merchant: PublicMerchant; order: Order }
+  | { kind: "ready"; config: PublicConfig; customer: CustomerConfig; order: Order }
 
 // Paid, or with the provider (Stripe redirects on a complete session even
 // while an asynchronous payment settles): the customer goes back to the
@@ -50,11 +50,11 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
     if (!client) return
     const abort = new AbortController()
     // The deployment's configuration, and the order's merchant's: the secret
-    // reads both.
+    // reads both, once, for the page and the payment form.
     Promise.all([client.getConfig(abort.signal), client.getCustomerConfig(abort.signal), client.getOrder(orderId, abort.signal)]).then(
       ([loaded, customer, order]) => {
         config.current = loaded
-        setState({ kind: "ready", config: loaded, merchant: customer.merchant, order })
+        setState({ kind: "ready", config: loaded, customer, order })
       },
       (err: unknown) => {
         if (abort.signal.aborted) return
@@ -70,7 +70,7 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
   useEffect(() => {
     document.documentElement.classList.toggle("framed", embedded)
   }, [embedded])
-  const origins = state.kind === "ready" ? state.merchant.embed_origins : []
+  const origins = state.kind === "ready" ? state.customer.merchant.embed_origins : []
   // The order as it settled in the frame.
   const [finished, setFinished] = useState<Order>()
   const done = (order: Order) => {
@@ -100,7 +100,8 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
   if (state.kind === "loading") return <Shell><p className="muted">Loading…</p></Shell>
   if (state.kind === "ended") return <Shell><Notice reason={state.reason} /></Shell>
 
-  const { merchant, order } = state
+  const { customer, order } = state
+  const merchant = customer.merchant
   const leaving = !embedded && !!order.success_url
   return (
     <Shell
@@ -119,7 +120,7 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
               : "Payment complete."}
         </p>
       ) : (
-        <BillingProvider client={client!}>
+        <BillingProvider client={client!} config={state.config} customerConfig={customer}>
           <OrderPayment
             orderId={order.id}
             client={client!}

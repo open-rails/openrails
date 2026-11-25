@@ -13,9 +13,7 @@ import (
 
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
-	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/sqlschema"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -35,8 +33,8 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-// Apply creates or upgrades OpenRails' tables in Schema, this month's
-// partitions, and River's tables in RiverSchema. The pool's role owns every
+// Apply creates or upgrades OpenRails' tables in Schema and River's tables
+// in RiverSchema. The pool's role owns every
 // object it creates. It is idempotent: concurrent callers serialize on
 // advisory locks, and a migration already applied that Chain does not carry (a
 // newer build's) is left as it is.
@@ -90,15 +88,6 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	}
 	if len(others) > 0 {
 		logger.InfoContext(ctx, "OpenRails schema carries migrations from a newer build", "schema", schema, "migrations", strings.Join(others, ", "))
-	}
-	// Partitions follow the calendar, not the migration chain: a database
-	// migrated months ago still needs this month's.
-	data, err := db.NewWithPGXPool(logger, pool, schema)
-	if err != nil {
-		return err
-	}
-	if _, err := retention.EnsurePartitions(ctx, data.GenDirectory(), time.Now()); err != nil {
-		return fmt.Errorf("openrails: %w", err)
 	}
 	if opts.RiverSchema != "" {
 		if err := applyRiver(ctx, logger, pool, opts.RiverSchema); err != nil {

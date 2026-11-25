@@ -618,13 +618,7 @@ func TestBooks(t *testing.T) {
 			used, plain := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 			_, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: used, Currency: "USD", Amount: 1000, Source: "critical", SourceID: fmt.Sprintf("fund-%d", round)}})
 			require.NoError(t, err)
-			request := fmt.Sprintf("use-%d", round)
-			admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, used, request, 400)})
-			require.NoError(t, err)
-			require.True(t, admitted[0].Allowed())
-			spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture(request, 400)})
-			require.NoError(t, err)
-			require.NoError(t, spent[0].Err())
+			spend(t, w.alpha, used, fmt.Sprintf("use-%d", round), 400)
 			w.clock.Advance(time.Second)
 			var errs [2]error
 			var group sync.WaitGroup

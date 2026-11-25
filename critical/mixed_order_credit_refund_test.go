@@ -122,23 +122,10 @@ func mixedPendingRefund(t *testing.T) {
 		RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: compute.ID, Price: catalog.RatePrice{Model: catalog.ModelDynamic, Currency: "USD"}}),
 	})
 	require.NoError(t, err)
-	admit := func(request string, amount int64) billing.AdmissionVerdict {
-		verdicts, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{{
-			RequestID: request, CustomerID: m.customer, Invoker: m.customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
-			ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(amount)},
-		}})
-		require.NoError(t, err)
-		require.Len(t, verdicts, 1)
-		return verdicts[0]
-	}
-	require.False(t, admit("beyond-unheld", 6_000_000).Allowed(), "held credit cannot be admitted")
-	verdict := admit("unheld", 5_000_000)
-	require.True(t, verdict.Allowed(), "%+v", verdict)
-	captured, err := a.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{{RequestID: "unheld", Amount: ptr(int64(5_000_000)), Usage: billing.CaptureUsage{EventType: "compute", Dimensions: map[string]int64{"units": 1}}}})
-	require.NoError(t, err)
-	require.Len(t, captured, 1)
-	require.NoError(t, captured[0].Err())
-	// The capture accrues; a top-up posts it first, while the refund is
+	out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(m.customer)}})
+	require.EqualValues(t, 5_000_000, lineOf(t, viewOf(t, out, m.customer), catalog.BalanceLimit).Remaining, "held credit is not offered")
+	spend(t, a.alpha, m.customer, "unheld", 5_000_000)
+	// The usage accrues; a top-up posts it first, while the refund is
 	// still pending.
 	a.clock.Advance(time.Second)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: m.customer, Currency: "USD", Amount: 1_000_000, Source: "critical", SourceID: "post-the-usage"}})

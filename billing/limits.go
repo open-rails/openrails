@@ -49,7 +49,8 @@ type CustomerLimitListParams struct {
 
 // CustomerLimit is where one customer stands on one limit in its current
 // window. Capacity is its products' sum (or its override) plus the window's
-// adjustments; Used is settled usage and Held what open holds set aside;
+// adjustments; Used is settled usage and Held what live gates report in
+// flight;
 // Remaining is Capacity - Used - Held and may be negative. A window not yet
 // opened (a session or first-use window before its first use), a rate limit
 // and a lifetime limit have no WindowStartsAt; ResetsAt is null when nothing
