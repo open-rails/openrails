@@ -217,7 +217,7 @@ func (a Application) Validate() error {
 	count := len(a.Products) + len(a.Meters) + len(a.Limits) + len(a.EntitlementReplacements)
 	for _, key := range slices.Sorted(maps.Keys(a.Products)) {
 		p := a.Products[key]
-		if err := validApplicationKey(key, "product"); err != nil {
+		if err := syntax.ValidateApplicationKey(key, "product"); err != nil {
 			return err
 		}
 		if err := validateApplicationFields(p); err != nil {
@@ -249,7 +249,7 @@ func (a Application) Validate() error {
 		}
 		count += len(p.Prices) + len(p.ProviderPrices) + len(p.RateCards.Value) + len(p.Limits.Value)
 		for _, priceKey := range slices.Sorted(maps.Keys(p.ProviderPrices)) {
-			if err := validApplicationKey(priceKey, "provider price"); err != nil {
+			if err := syntax.ValidateApplicationKey(priceKey, "provider price"); err != nil {
 				return fmt.Errorf("product %q: %w", key, err)
 			}
 			if _, ours := p.Prices[priceKey]; ours {
@@ -261,7 +261,7 @@ func (a Application) Validate() error {
 		}
 		for _, priceKey := range slices.Sorted(maps.Keys(p.Prices)) {
 			price := p.Prices[priceKey]
-			if err := validApplicationKey(priceKey, "price"); err != nil {
+			if err := syntax.ValidateApplicationKey(priceKey, "price"); err != nil {
 				return fmt.Errorf("product %q: %w", key, err)
 			}
 			if err := validateApplicationFields(price); err != nil {
@@ -299,7 +299,7 @@ func (a Application) Validate() error {
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(a.Meters)) {
-		if err := validApplicationKey(key, "meter"); err != nil {
+		if err := syntax.ValidateApplicationKey(key, "meter"); err != nil {
 			return err
 		}
 		if err := validateApplicationFields(a.Meters[key]); err != nil {
@@ -339,14 +339,6 @@ func validateApplicationFields(value any) error {
 				return fmt.Errorf("%s: %w", v.Type().Field(i).Name, err)
 			}
 		}
-	}
-	return nil
-}
-
-// A map key is the record's key: duplicates are refused while decoding.
-func validApplicationKey(key, kind string) error {
-	if key == "" || len(key) > 255 || strings.TrimSpace(key) != key {
-		return fmt.Errorf("%s key %q must be a nonempty identifier of at most 255 bytes", kind, key)
 	}
 	return nil
 }

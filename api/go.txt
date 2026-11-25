@@ -1515,6 +1515,7 @@ pkg openrails/billing, type CatalogApplicationReceipt struct, ProductsChanged in
 pkg openrails/billing, type CatalogApplicationReceipt struct, Replayed bool `json:"replayed"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, Warnings []CatalogWarning `json:"warnings"`
 pkg openrails/billing, type CatalogChange struct
+pkg openrails/billing, type CatalogChange struct, Deleted bool `json:"deleted"`
 pkg openrails/billing, type CatalogChange struct, Fields []string `json:"fields"`
 pkg openrails/billing, type CatalogChange struct, Key string `json:"key"`
 pkg openrails/billing, type CatalogChange struct, Object CatalogObjectKind `json:"object"`

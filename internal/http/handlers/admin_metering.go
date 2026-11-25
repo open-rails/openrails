@@ -7,6 +7,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -44,13 +45,13 @@ func SetMeter(r *httprequest.Request) {
 	if !r.BindJSON(&params) {
 		return
 	}
-	meter := catalogrules.Meter{Key: r.Param("key"), EventType: params.EventType, ValueProperty: params.ValueProperty, Aggregation: params.Aggregation, Unit: params.Unit, GroupBy: params.GroupBy}
-	if err := catalogrules.ValidateMeter("meter", &meter); err != nil {
-		writeMeteringValidationError(r, billing.CodeUsageMeterInvalid, err)
+	key, ok := meterKeyParam(r, "key")
+	if !ok {
 		return
 	}
-	if !catalogrules.BillingSupported(meter.Aggregation) {
-		writeMeteringValidationError(r, billing.CodeUsageMeterInvalid, errors.New("meter aggregation must be sum or count"))
+	meter := catalogrules.Meter{Key: key, EventType: params.EventType, ValueProperty: params.ValueProperty, Aggregation: params.Aggregation, Unit: params.Unit, GroupBy: params.GroupBy}
+	if err := catalogrules.ValidateMeter("meter", &meter); err != nil {
+		writeMeteringValidationError(r, billing.CodeUsageMeterInvalid, err)
 		return
 	}
 	var card *billingservice.UsageRateCardInput
@@ -87,9 +88,9 @@ func SetMeter(r *httprequest.Request) {
 }
 
 func meterKeyParam(r *httprequest.Request, name string) (string, bool) {
-	key := catalogrules.NormalizeKey(r.Param(name))
-	if key == "" {
-		r.APIError(invalidParam(name, "meter key required"))
+	key := r.Param(name)
+	if err := syntax.ValidateApplicationKey(key, "meter"); err != nil {
+		r.APIError(invalidParam(name, err.Error()))
 		return "", false
 	}
 	return key, true

@@ -9,10 +9,13 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
@@ -46,6 +49,168 @@ func publicPurchase(t *testing.T, a *authorityWorld, p *providerLedger, price bi
 }
 
 func TestPublicCatalog(t *testing.T) {
+	t.Run("OR-J05-S15/product-creates-retry-by-content-including-concurrently", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		const path = "/v1/catalog/products"
+		input := billing.CreateProductParams{Key: "retry-prod", DisplayName: "Retry"}
+		status, raw := a.request(t, http.MethodPost, path, a.alphaKey.Secret, input)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var first billing.Product
+		require.NoError(t, json.Unmarshal(raw, &first))
+		require.False(t, first.ID.IsZero())
+		for _, headers := range []map[string]string{nil, {"Idempotency-Key": "product-retry"}, {"Idempotency-Key": "product-retry"}} {
+			status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, input, headers)
+			require.Equal(t, http.StatusCreated, status, string(raw))
+			var replay billing.Product
+			require.NoError(t, json.Unmarshal(raw, &replay))
+			require.Equal(t, first, replay)
+		}
+		input.DisplayName = "Different"
+		status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, input)
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), `"code":"resource_conflict"`)
+
+		// Match the stored create definition after trimming, sorting, currency
+		// normalization, credit expiry defaults and the empty tier group's NULL.
+		full := billing.CreateProductParams{
+			Key: " retry-full ", DisplayName: " Retry full ", Description: " Description ",
+			Entitlements: []string{"z:read", "a:read"}, RequiredEntitlements: []string{"z:owned", "a:owned"},
+			CreditGrant: &catalog.CreditGrantSpec{Currency: "usd", Amount: ptr(int64(1_000_000))},
+			TierGroup:   ptr(""), TierRank: 2, Ownership: catalog.OwnershipConsumable, Archived: true,
+		}
+		status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, full)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var stored billing.Product
+		require.NoError(t, json.Unmarshal(raw, &stored))
+		full.Key, full.DisplayName, full.Description = "retry-full", "Retry full", "Description"
+		full.Entitlements, full.RequiredEntitlements = []string{"a:read", "z:read"}, []string{"a:owned", "z:owned"}
+		full.CreditGrant = &catalog.CreditGrantSpec{Currency: "USD", Amount: ptr(int64(1_000_000)), ExpiresAfterDays: ptr(365)}
+		full.TierGroup = nil
+		status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, full)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var normalized billing.Product
+		require.NoError(t, json.Unmarshal(raw, &normalized))
+		require.Equal(t, stored, normalized)
+		for _, change := range []func(*billing.CreateProductParams){
+			func(p *billing.CreateProductParams) { p.DisplayName = "Different" },
+			func(p *billing.CreateProductParams) { p.Description = "Different" },
+			func(p *billing.CreateProductParams) { p.Entitlements = []string{"other:read"} },
+			func(p *billing.CreateProductParams) { p.RequiredEntitlements = []string{"other:owned"} },
+			func(p *billing.CreateProductParams) { p.CreditGrant = nil },
+			func(p *billing.CreateProductParams) { p.TierGroup = ptr("other") },
+			func(p *billing.CreateProductParams) { p.TierRank++ },
+			func(p *billing.CreateProductParams) { p.Ownership = catalog.OwnershipUnique },
+			func(p *billing.CreateProductParams) { p.Archived = false },
+		} {
+			conflict := full
+			change(&conflict)
+			status, raw = a.request(t, http.MethodPost, path, a.alphaKey.Secret, conflict)
+			require.Equal(t, http.StatusConflict, status, string(raw))
+			require.Contains(t, string(raw), `"code":"resource_conflict"`)
+		}
+
+		input = billing.CreateProductParams{Key: "retry-concurrent", DisplayName: "Concurrent retry"}
+		type result struct {
+			status int
+			raw    []byte
+			err    error
+		}
+		start := make(chan struct{})
+		results := make(chan result, 2)
+		for range 2 {
+			go func() {
+				<-start
+				s, b, err := a.do(t.Context(), http.MethodPost, path, a.alphaKey.Secret, input)
+				results <- result{s, b, err}
+			}()
+		}
+		close(start)
+		observed := []result{<-results, <-results}
+		var concurrent [2]billing.Product
+		for i, r := range observed {
+			require.NoError(t, r.err)
+			require.Equal(t, http.StatusCreated, r.status, string(r.raw))
+			require.NoError(t, json.Unmarshal(r.raw, &concurrent[i]))
+			require.False(t, concurrent[i].ID.IsZero())
+		}
+		require.Equal(t, concurrent[0], concurrent[1])
+	})
+	t.Run("OR-J05-S14/meter-edits-preserve-document-keys-and-aggregations", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"meters":{"Mixed Case":{"event_type":"x","aggregation":"count"},"maximum":{"event_type":"x","value_property":"units","aggregation":"max"}}}`))
+		require.NoError(t, err)
+		receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Len(t, receipt.Changes, 2)
+		require.Empty(t, receipt.Conflicts)
+
+		path := "/v1/catalog/meters/" + url.PathEscape("Mixed Case")
+		status, raw := a.request(t, http.MethodGet, path, a.alphaKey.Secret, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var meter billing.Meter
+		require.NoError(t, json.Unmarshal(raw, &meter))
+		require.Equal(t, "Mixed Case", meter.Key)
+		require.True(t, meter.BillingSupported)
+		originalRevision := meter.Revision
+		params := billing.SetMeterParams{EventType: "edited", Aggregation: catalog.AggregationCount, ExpectedRevision: &originalRevision}
+		status, raw = a.request(t, http.MethodPut, path, a.alphaKey.Secret, params)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.NoError(t, json.Unmarshal(raw, &meter))
+		require.Equal(t, "Mixed Case", meter.Key)
+		require.Equal(t, "edited", meter.EventType)
+		require.Greater(t, meter.Revision, originalRevision)
+		read, err := a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.Equal(t, meter, *read)
+		_, err = a.alphaRemote.GetMeter(t.Context(), "mixed-case")
+		require.ErrorIs(t, err, billing.ErrNotFound, "editing must not create a normalized alias")
+
+		// The optional card operations use the same exact meter key.
+		product, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "meter-card", DisplayName: "Meter card"})
+		require.NoError(t, err)
+		params.ExpectedRevision = nil
+		params.RateCard = catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 1, DivideBy: 1}}})
+		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		require.NoError(t, err)
+		require.NotNil(t, read.RateCard)
+		params.RateCard = catalog.Null[billing.MeterRateCardParams]()
+		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		require.NoError(t, err)
+		require.Nil(t, read.RateCard)
+
+		for _, key := range []string{strings.Repeat("m", 300), strings.Repeat("é", 128), " padded "} {
+			_, err := catalog.ParseApplicationJSON([]byte(fmt.Sprintf(`{"schema_version":1,"meters":{%q:{"event_type":"x","aggregation":"count"}}}`, key)))
+			require.Error(t, err)
+			for _, method := range []string{http.MethodGet, http.MethodPut} {
+				status, raw := a.request(t, method, "/v1/catalog/meters/"+url.PathEscape(key), a.alphaKey.Secret, billing.SetMeterParams{EventType: "x", Aggregation: catalog.AggregationCount})
+				require.Equal(t, http.StatusBadRequest, status, string(raw))
+				var failure struct {
+					Error billing.ErrorDetails `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(raw, &failure))
+				require.Equal(t, billing.CodeInvalidParam, failure.Error.Code)
+				require.Equal(t, ptr("key"), failure.Error.Param)
+			}
+		}
+		read, err = a.alphaRemote.SetMeter(t.Context(), "has space", billing.SetMeterParams{EventType: "x", Aggregation: catalog.AggregationCount})
+		require.NoError(t, err)
+		require.Equal(t, "has space", read.Key)
+
+		read, err = a.alphaRemote.GetMeter(t.Context(), "maximum")
+		require.NoError(t, err)
+		require.False(t, read.BillingSupported)
+		read, err = a.alphaRemote.SetMeter(t.Context(), "maximum", billing.SetMeterParams{EventType: "edited", ValueProperty: "units", Aggregation: catalog.AggregationMax})
+		require.NoError(t, err)
+		require.Equal(t, catalog.AggregationMax, read.Aggregation)
+		require.False(t, read.BillingSupported)
+		read, err = a.alphaRemote.GetMeter(t.Context(), "maximum")
+		require.NoError(t, err)
+		require.Equal(t, "edited", read.EventType)
+		require.False(t, read.BillingSupported)
+		meters, err := a.alphaRemote.ListMeters(t.Context(), billing.PageRequest{})
+		require.NoError(t, err)
+		require.Len(t, meters.Items, 3, "invalid keys and aliases must leave no extra meters")
+	})
 	t.Run("OR-J05-S01/exact-price-quantity-and-provider-settlement", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)
 		product, price := publicSale(t, a, "exact-usd", 9_990_000, nil)
@@ -265,5 +430,53 @@ func TestPublicCatalog(t *testing.T) {
 		effects := p.effects(t)
 		require.Len(t, effects, 1)
 		require.EqualValues(t, 2997, effects[0].Amount)
+	})
+	t.Run("OR-J05-S13/prune-keeps-a-refused-price-and-its-ownership", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"pro":{"display_name":"Pro","prices":{"monthly":{"amount":"10.00 USD","billing_interval":"30 days"},"omitted":{"amount":"2.00 USD"}}}}}`))
+		require.NoError(t, err)
+		first, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, first.Warnings)
+		prices, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "pro", Key: "monthly"})
+		require.NoError(t, err)
+		require.Len(t, prices.Items, 1)
+		price := prices.Items[0]
+		require.EqualValues(t, 1, price.Version)
+		require.False(t, price.Archived)
+		omitted, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "pro", Key: "omitted"})
+		require.NoError(t, err)
+		require.Len(t, omitted.Items, 1)
+		ownersQuery := "SELECT jsonb_agg(o ORDER BY field, manager) FROM " + pgx.Identifier{a.schema, "catalog_field_owners"}.Sanitize() + " o WHERE merchant_id = $1 AND object = 'price' AND key = 'pro' AND price_key = 'monthly'"
+		var ownersBefore, ownersAfter []byte
+		require.NoError(t, a.pool.QueryRow(t.Context(), ownersQuery, a.alpha.MerchantID().UUID()).Scan(&ownersBefore))
+		require.NotEmpty(t, ownersBefore)
+
+		prune, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"prune":true,"products":{"pro":{"display_name":"Pro","prices":{"monthly":{"amount":"10.00 USD","billing_interval":"30 days","sell_via":["solana"]}}}}}`))
+		require.NoError(t, err)
+		receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), prune, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Equal(t, []billing.CatalogChange{{Object: billing.CatalogObjectPrice, Key: "omitted", ProductKey: ptr("pro"), Fields: []string{}, Revision: omitted.Items[0].Revision, Deleted: true}}, receipt.Changes)
+		require.Equal(t, 0, receipt.ProductsChanged)
+		require.Equal(t, 1, receipt.PricesChanged)
+		require.Empty(t, receipt.Conflicts)
+		require.Len(t, receipt.Warnings, 1)
+		require.True(t, receipt.Warnings[0].Refused)
+		require.Equal(t, "pro", receipt.Warnings[0].ProductKey)
+		require.Equal(t, "monthly", receipt.Warnings[0].Key)
+		require.Contains(t, receipt.Warnings[0].Message, "Solana")
+		kept, err := a.alphaRemote.GetPrice(t.Context(), price.ID)
+		require.NoError(t, err)
+		require.Equal(t, price, *kept)
+		live, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "pro", Archived: ptr(false)})
+		require.NoError(t, err)
+		require.Equal(t, []billing.Price{price}, live.Items)
+		require.NoError(t, a.pool.QueryRow(t.Context(), ownersQuery, a.alpha.MerchantID().UUID()).Scan(&ownersAfter))
+		require.Equal(t, ownersBefore, ownersAfter)
+		_, err = a.alphaRemote.GetPrice(t.Context(), omitted.Items[0].ID)
+		require.ErrorIs(t, err, billing.ErrNotFound)
+		var recorded bool
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT EXISTS (SELECT 1 FROM "+pgx.Identifier{a.schema, "catalog_applications"}.Sanitize()+" WHERE merchant_id = $1 AND application_id = $2)", a.alpha.MerchantID().UUID(), receipt.ApplicationID).Scan(&recorded))
+		require.False(t, recorded)
 	})
 }
