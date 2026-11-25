@@ -600,7 +600,7 @@ Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' 
 
 ## Event store
 
-Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 100 days), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and 15-minute UTC history buckets kept 25 months, which readers fold into the merchant's `accounting.timezone` days). PostgreSQL keeps what the ledger took (`usage_postings`), who has usage it has not taken yet (`usage_unposted`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_close`), and before any other movement of a customer's balance, so up to a month of usage is only in ClickHouse: back it up nightly ([backup and restore](#backup-and-restore)).
+Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 80 days: what was reported, its identity and its priced meter cells), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and history in 15-minute UTC buckets for 35 days, which readers fold into the merchant's `accounting.timezone` days, then one row a day of that zone until 25 months). PostgreSQL keeps what the ledger took (`usage_postings`), who has usage it has not taken yet (`usage_unposted`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_close`), and before any other movement of a customer's balance, so up to a month of usage is only in ClickHouse: back it up nightly ([backup and restore](#backup-and-restore)).
 
 Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.unposted_usage` finding, and the customers it belongs to can neither read nor move their balances (`event_store_required`) until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
 
@@ -929,7 +929,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 | `webhook_health_daily` | 13 months |
 | `periodic_leases` | a kind unscheduled for 30 days |
 
-The event store's tables expire by their own TTLs: raw usage events 100 days after they occurred, a pricing period's quantities 100 days after it starts, minutes after 2 days, usage history after 25 months, and a limit window's usage 61 days after it ends (a lifetime limit's stays).
+The event store's tables expire by their own TTLs: raw usage events 80 days after they occurred, a pricing period's quantities 100 days after it starts, minutes after 2 days, usage history's 15-minute buckets after 35 days (folded into a row a day of the merchant's `accounting.timezone`) and that row after 25 months, and a limit window's usage 61 days after it ends (a lifetime limit's stays).
 
 The hourly cleanup deletes 1,000 rows per statement and at most 50,000 per merchant per pass. `subscription_status_transitions` and `subscription_billing_changes` refuse other deletes (`billing.guard_retention_delete`). What integrators see: usage may be dated up to 35 days back; a lease answers resends for 61 days after its last sync; usage reports reach back about 26 months.
 
@@ -958,8 +958,8 @@ readonly. `openrails billing prepare-target` provisions the exact merchant
 identity at the destination; `openrails billing import --target-stopped` restores
 into it and lands readonly and disarmed until `openrails merchant writes full`. Over HTTP the same
 archive is `GET` and `POST /v1/merchant/billing-archive`. With an event store the
-archive carries the merchant's usage from it: raw events within their 100 days,
-and the history and limit usage older events no longer rebuild. Restoring one
+archive carries the merchant's usage from it, each table as stored: raw events
+within their 80 days and every rollup. Restoring one
 with usage needs an event store holding none of the merchant's; without a store
 an export refuses a merchant with unposted usage. The event log, active
 destructive incidents and pending actions are not in an archive.

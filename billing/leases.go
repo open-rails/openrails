@@ -37,6 +37,10 @@ const (
 	MaxSyncInFlight   = 10_000
 )
 
+// MaxUsageMetadataBytes bounds a usage item's metadata, as compact JSON: a
+// longer one is refused (invalid_param, metadata).
+const MaxUsageMetadataBytes = 1024
+
 // SyncLeasesParams is one sync of a lease: the usage it settles, what its
 // gate has in flight beyond it, and the views it asks for. The first sync
 // under a new LeaseID creates the lease (its id must be a UUIDv7 no older

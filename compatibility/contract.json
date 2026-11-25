@@ -372,6 +372,7 @@
       "const MaxMerchantConfigurationBytes = 1 \u003c\u003c 20",
       "const MaxOrderLines = 100",
       "const MaxRunningChargeRatePerHour = 1_000_000_000_000",
+      "const MaxUsageMetadataBytes = 1024",
       "const MessageDataVersion = 1",
       "const MessageEmail MessageChannel = \"email\"",
       "const PSPTemporarilyUnavailable PSPPaymentStatus = \"temporarily_unavailable\"",
@@ -1597,8 +1598,7 @@
     ],
     "internal/eventstore": [
       "type UsageCharge struct {\n\tMeter    string `json:\"meter\"`\n\tCell     string `json:\"cell\"`\n\tPrint    string `json:\"print\"`\n\tQuantity int64  `json:\"quantity\"`\n\tStated   int64  `json:\"stated\"`\n}",
-      "type UsageEvent struct {\n\tEventID     uuid.UUID          `json:\"event_id\"`\n\tCustomerID  billing.CustomerID `json:\"customer_id\"`\n\tCurrency    string             `json:\"currency\"`\n\tEventType   string             `json:\"event_type\"`\n\tInvoker     string             `json:\"invoker\"`\n\tInvokerType string             `json:\"invoker_type\"`\n\tOutcome     UsageOutcome       `json:\"outcome\"`\n\tSource      string             `json:\"source\"`\n\tSourceID    string             `json:\"source_id\"`\n\n\tLeaseID        uuid.UUID        `json:\"lease_id\"`\n\tN              uint64           `json:\"n\"`\n\tOccurredAt     time.Time        `json:\"occurred_at\"`\n\tAdmittedAt     time.Time        `json:\"admitted_at\"`\n\tIngestedAt     time.Time        `json:\"ingested_at\"`\n\tPeriodStartsAt time.Time        `json:\"period_starts_at\"`\n\tDimensions     map[string]int64 `json:\"dimensions\"`\n\tMetadata       string           `json:\"metadata\"`\n\n\tAmount int64 `json:\"amount\"`\n\n\tStated   *int64        `json:\"stated\"`\n\tCharged  int64         `json:\"charged\"`\n\tForgiven int64         `json:\"forgiven\"`\n\tCharges  []UsageCharge `json:\"charges\"`\n\tLimits   []UsageLimit  `json:\"limits\"`\n}",
-      "type UsageLimit struct {\n\tKey            string     `json:\"key\"`\n\tWindowStartsAt time.Time  `json:\"window_starts_at\"`\n\tWindowEndsAt   *time.Time `json:\"window_ends_at\"`\n\tUnits          int64      `json:\"units\"`\n}"
+      "type archivedEvent struct {\n\tEventID        uuid.UUID        `json:\"event_id\"`\n\tCustomerID     uuid.UUID        `json:\"customer_id\"`\n\tCurrency       string           `json:\"currency\"`\n\tEventType      string           `json:\"event_type\"`\n\tInvoker        string           `json:\"invoker\"`\n\tInvokerType    string           `json:\"invoker_type\"`\n\tOutcome        string           `json:\"outcome\"`\n\tSource         string           `json:\"source\"`\n\tSourceID       string           `json:\"source_id\"`\n\tLeaseID        uuid.UUID        `json:\"lease_id\"`\n\tN              uint64           `json:\"n\"`\n\tOccurredAt     time.Time        `json:\"occurred_at\"`\n\tAdmittedAt     time.Time        `json:\"admitted_at\"`\n\tIngestedAt     time.Time        `json:\"ingested_at\"`\n\tPeriodStartsAt time.Time        `json:\"period_starts_at\"`\n\tDimensions     map[string]int64 `json:\"dimensions\"`\n\tMetadata       string           `json:\"metadata\"`\n\tStated         *int64           `json:\"stated\"`\n\tCharged        int64            `json:\"charged\"`\n\tForgiven       int64            `json:\"forgiven\"`\n\tCharges        []UsageCharge    `json:\"charges\"`\n}"
     ],
     "internal/history": [
       "func (f *FieldChange) UnmarshalJSON(raw []byte) error {\n\tif bytes.Equal(bytes.TrimSpace(raw), []byte(changed)) {\n\t\t*f = Changed()\n\t\treturn nil\n\t}\n\tvar sides struct {\n\t\tBefore json.RawMessage `json:\"before\"`\n\t\tAfter  json.RawMessage `json:\"after\"`\n\t}\n\tif err := json.Unmarshal(raw, \u0026sides); err != nil {\n\t\treturn fmt.Errorf(\"history: field change: %w\", err)\n\t}\n\t*f = FieldChange{Before: sides.Before, After: sides.After}\n\treturn nil\n}",
@@ -2809,6 +2809,15 @@
       "uuid": "github.com/google/uuid",
       "v2": "github.com/ccoveille/go-safecast/v2",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/eventstore/archive.go": {
+      "context": "context",
+      "fmt": "fmt",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "strconv": "strconv",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/eventstore/usage.go": {
       "billing": "github.com/open-rails/openrails/billing",

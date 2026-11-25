@@ -23,36 +23,42 @@ const (
 	UsageFailed    UsageOutcome = "failed"
 )
 
-// UsageEvent is one settled usage item; its merchant is the context's.
+// UsageEvent is one settled usage item as intake takes it in; its merchant is
+// the context's. usage_events keeps what was reported, its identity, its
+// pricing and what a resend reads; Amount, DayAt and Limits only feed the
+// rollups.
 type UsageEvent struct {
 	// EventID is the intake identity: LeaseEventID of (merchant, lease, n), or
 	// RequestEventID of the request id.
-	EventID     uuid.UUID          `json:"event_id"`
-	CustomerID  billing.CustomerID `json:"customer_id"`
-	Currency    string             `json:"currency"`
-	EventType   string             `json:"event_type"`
-	Invoker     string             `json:"invoker"`
-	InvokerType string             `json:"invoker_type"`
-	Outcome     UsageOutcome       `json:"outcome"`
-	Source      string             `json:"source"`
-	SourceID    string             `json:"source_id"`
+	EventID     uuid.UUID
+	CustomerID  billing.CustomerID
+	Currency    string
+	EventType   string
+	Invoker     string
+	InvokerType string
+	Outcome     UsageOutcome
+	Source      string
+	SourceID    string
 	// LeaseID and N number a synced item; zero for a direct capture.
-	LeaseID        uuid.UUID        `json:"lease_id"`
-	N              uint64           `json:"n"`
-	OccurredAt     time.Time        `json:"occurred_at"`
-	AdmittedAt     time.Time        `json:"admitted_at"`
-	IngestedAt     time.Time        `json:"ingested_at"`
-	PeriodStartsAt time.Time        `json:"period_starts_at"`
-	Dimensions     map[string]int64 `json:"dimensions"`
-	Metadata       string           `json:"metadata"`
+	LeaseID        uuid.UUID
+	N              uint64
+	OccurredAt     time.Time
+	AdmittedAt     time.Time
+	IngestedAt     time.Time
+	PeriodStartsAt time.Time
+	// DayAt starts the day of OccurredAt in the merchant's accounting zone:
+	// the day its usage history folds into once it is 35 days old.
+	DayAt      time.Time
+	Dimensions map[string]int64
+	Metadata   string
 	// Amount is the provisional price limits and the accrual-rate cap count.
-	Amount int64 `json:"amount"`
+	Amount int64
 	// Stated is a host-stated amount; Charged and Forgiven split failed usage.
-	Stated   *int64        `json:"stated"`
-	Charged  int64         `json:"charged"`
-	Forgiven int64         `json:"forgiven"`
-	Charges  []UsageCharge `json:"charges"`
-	Limits   []UsageLimit  `json:"limits"`
+	Stated   *int64
+	Charged  int64
+	Forgiven int64
+	Charges  []UsageCharge
+	Limits   []UsageLimit
 }
 
 // UsageCharge is a priced meter cell of an item, under the card print in force.
@@ -66,25 +72,26 @@ type UsageCharge struct {
 
 // UsageLimit is a limit window that counts an item, located at admission.
 type UsageLimit struct {
-	Key            string     `json:"key"`
-	WindowStartsAt time.Time  `json:"window_starts_at"`
-	WindowEndsAt   *time.Time `json:"window_ends_at"`
-	Units          int64      `json:"units"`
+	Key            string
+	WindowStartsAt time.Time
+	WindowEndsAt   *time.Time
+	Units          int64
 }
 
-const insertUsage = "INSERT INTO {database}.usage_events (merchant_id, event_id, customer_id, currency, event_type, invoker, " +
-	"invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, " +
+const insertUsage = "INSERT INTO {database}.usage_intake (merchant_id, event_id, customer_id, currency, event_type, invoker, " +
+	"invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, day_at, " +
 	"dimensions, metadata, amount, stated, charged, forgiven, `charges.meter`, `charges.cell`, `charges.print`, " +
 	"`charges.quantity`, `charges.stated`, `limits.key`, `limits.window_starts_at`, `limits.window_ends_at`, `limits.units`)"
 
 // insertWait bounds an insert's wait for its flush once its caller has gone.
 const insertWait = 30 * time.Second
 
-// InsertUsage stores events as one asynchronous insert and returns once
-// ClickHouse has written them, rollups included: what it acknowledged reads
-// back. The caller's cancellation does not cut the wait short: an intake
-// learns its insert's outcome before it releases the locks a resend waits on,
-// so no flush of an abandoned attempt lands after the resend looked.
+// InsertUsage takes events in as one asynchronous insert into usage_intake
+// and returns once ClickHouse has written them, raw and rollups: what it
+// acknowledged reads back. The caller's cancellation does not cut the wait
+// short: an intake learns its insert's outcome before it releases the locks a
+// resend waits on, so no flush of an abandoned attempt lands after the resend
+// looked.
 func (s *Store) InsertUsage(ctx context.Context, events []UsageEvent) error {
 	if len(events) == 0 {
 		return nil
@@ -109,7 +116,7 @@ func (s *Store) InsertUsage(ctx context.Context, events []UsageEvent) error {
 		}
 		if err := batch.Append(uuid.UUID(mid), e.EventID, uuid.UUID(e.CustomerID), e.Currency, e.EventType, e.Invoker,
 			e.InvokerType, string(e.Outcome), e.Source, e.SourceID, e.LeaseID, e.N, e.OccurredAt.UTC(), e.AdmittedAt.UTC(),
-			e.IngestedAt.UTC(), e.PeriodStartsAt.UTC(), dimensions, e.Metadata, e.Amount, e.Stated, e.Charged, e.Forgiven,
+			e.IngestedAt.UTC(), e.PeriodStartsAt.UTC(), e.DayAt.UTC(), dimensions, e.Metadata, e.Amount, e.Stated, e.Charged, e.Forgiven,
 			c.meter, c.cell, c.print, c.quantity, c.stated, l.key, l.startsAt, l.endsAt, l.units); err != nil {
 			return fmt.Errorf("eventstore: usage event %s: %w", e.EventID, err)
 		}

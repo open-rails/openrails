@@ -96,15 +96,17 @@ func (e *env) checkWorld(ctx context.Context, w *WorldResult, schema string, see
 	}
 	type stored struct{ n, amount int64 }
 	final := map[string]map[string]stored{}
-	rows, err := e.ch.Query(ctx, "SELECT toString(merchant_id), toString(customer_id), count(), sum(amount) FROM `"+schema+"`.usage_events FINAL GROUP BY merchant_id, customer_id")
+	// Raw events keep their priced quantities: at a per-unit price, the
+	// amount a gate captured is the quantity times it.
+	rows, err := e.ch.Query(ctx, "SELECT toString(merchant_id), toString(customer_id), count(), toInt64(sum(arraySum(charges.quantity))) FROM `"+schema+"`.usage_events FINAL GROUP BY merchant_id, customer_id")
 	if err != nil {
 		w.fail("final counts: %v", err)
 	} else {
 		for rows.Next() {
 			var m, c string
 			var n uint64
-			var amount int64
-			if err := rows.Scan(&m, &c, &n, &amount); err != nil {
+			var quantity int64
+			if err := rows.Scan(&m, &c, &n, &quantity); err != nil {
 				w.fail("final counts: %v", err)
 				break
 			}
@@ -112,7 +114,7 @@ func (e *env) checkWorld(ctx context.Context, w *WorldResult, schema string, see
 			if final[slug] == nil {
 				final[slug] = map[string]stored{}
 			}
-			final[slug][c] = stored{int64(n), amount}
+			final[slug][c] = stored{int64(n), quantity * e.plan.UnitPrice}
 		}
 		_ = rows.Close()
 	}
@@ -348,7 +350,7 @@ type QueryStats struct {
 }
 
 const queryKinds = `multiIf(
-  query_kind = 'Insert' AND query ILIKE '%usage_events%', 'insert_usage_events',
+  query_kind = 'Insert' AND query ILIKE '%usage_intake%', 'insert_usage',
   query ILIKE '%usage_events FINAL ARRAY JOIN%', 'posting_final_scan',
   query ILIKE '%usage_events ARRAY JOIN%', 'print_sources',
   query ILIKE '%usage_events%', 'dedup_lookup',

@@ -300,7 +300,9 @@ const HistoryBucket = 15 * time.Minute
 
 // UsageBucket is one row of usage history: a 15-minute UTC bucket's events of
 // one type, invoker and outcome (Meter ""), or what they took of one meter
-// cell under one card print in one pricing period.
+// cell under one card print in one pricing period. Past 35 days the buckets
+// of one day of the accounting zone the usage was taken in under are one row,
+// at the day's first bucket: they regroup into that zone's days only.
 type UsageBucket struct {
 	CustomerID         billing.CustomerID
 	BucketAt           time.Time
@@ -325,8 +327,13 @@ type HistoryFilter struct {
 	PeriodsFrom *time.Time
 }
 
+// historyDaySpan bounds a history row's day before its bucket: a local day
+// is at most 25 hours long.
+const historyDaySpan = 25 * time.Hour
+
 func (f HistoryFilter) where(mid string) string {
-	w := []string{"merchant_id = " + mid, "bucket_at >= " + timeLiteral(f.From), "bucket_at < " + timeLiteral(f.To)}
+	w := []string{"merchant_id = " + mid, "day_at > " + timeLiteral(f.From.Add(-historyDaySpan)), "day_at < " + timeLiteral(f.To),
+		"bucket_at >= " + timeLiteral(f.From), "bucket_at < " + timeLiteral(f.To)}
 	if !f.CustomerID.IsZero() {
 		w = append(w, "customer_id = "+uuidLiteral(uuid.UUID(f.CustomerID)))
 	}

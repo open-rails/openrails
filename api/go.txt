@@ -813,6 +813,7 @@ pkg openrails/billing, const MaxRunningChargeRatePerHour untyped int = 100000000
 pkg openrails/billing, const MaxSyncInFlight untyped int = 10000
 pkg openrails/billing, const MaxSyncUsageItems untyped int = 1000
 pkg openrails/billing, const MaxSyncViews untyped int = 1000
+pkg openrails/billing, const MaxUsageMetadataBytes untyped int = 1024
 pkg openrails/billing, const MaxUsagePageLimit untyped int = 1000
 pkg openrails/billing, const MerchantActive MerchantStatus = "active"
 pkg openrails/billing, const MerchantCatalogManage Permission = "merchant:catalog:manage"

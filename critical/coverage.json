@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 782,
+  "scenario_count": 784,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3822,6 +3822,16 @@
       "id": "OR-J24-S66",
       "journey": "J24",
       "name": "Two engines starting together on a fresh schema and a fresh ClickHouse database take turns migrating it: each migration is recorded once, one store identity, and both serve usage"
+    },
+    {
+      "id": "OR-J24-S67",
+      "journey": "J24",
+      "name": "Usage history past 35 days keeps one row a day of the accounting zone per invoker and meter cell, at the day's first bucket, and the zone's days read the same"
+    },
+    {
+      "id": "OR-J24-S68",
+      "journey": "J24",
+      "name": "A usage item whose metadata is longer than 1,024 bytes of compact JSON is refused alone with invalid_param metadata; the rest of the sync settles"
     },
     {
       "id": "OR-J40-S20",

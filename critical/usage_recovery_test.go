@@ -72,7 +72,7 @@ type abandoningConn struct {
 
 func (c *abandoningConn) PrepareBatch(ctx context.Context, query string, opts ...driver.PrepareBatchOption) (driver.Batch, error) {
 	batch, err := c.Conn.PrepareBatch(ctx, query, opts...)
-	if err != nil || !strings.Contains(query, "usage_events") {
+	if err != nil || !strings.Contains(query, "usage_intake") {
 		return batch, err
 	}
 	if cancel := c.abandon.Swap(nil); cancel != nil {

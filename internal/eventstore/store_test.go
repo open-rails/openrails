@@ -13,25 +13,27 @@ func TestMigrationsSplitIntoDatabaseQualifiedStatements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) == 0 || migrations[0].Version != 1 || migrations[0].Name != "0001_usage.sql" {
+	if len(migrations) != 2 || migrations[0].Name != "0001_usage.sql" || migrations[1].Version != 2 || migrations[1].Name != "0002_usage_intake.sql" {
 		t.Fatalf("migrations = %+v", migrations)
 	}
 	s := &Store{database: "critical_x"}
 	created := map[string]bool{}
-	for _, stmt := range migrations[0].Statements {
-		if strings.Contains(stmt, "--") {
-			t.Fatalf("a comment reached a statement: %s", stmt)
-		}
-		resolved := s.resolve(stmt)
-		if strings.Contains(resolved, databaseToken) || !strings.Contains(resolved, "`critical_x`.") {
-			t.Fatalf("statement does not name the database: %s", resolved)
-		}
-		fields := strings.Fields(stmt)
-		if len(fields) > 5 && fields[1] == "TABLE" {
-			created[fields[5]] = true
+	for _, m := range migrations {
+		for _, stmt := range m.Statements {
+			if strings.Contains(stmt, "--") {
+				t.Fatalf("a comment reached a statement: %s", stmt)
+			}
+			resolved := s.resolve(stmt)
+			if strings.Contains(resolved, databaseToken) || !strings.Contains(resolved, "`critical_x`.") {
+				t.Fatalf("statement does not name the database: %s", resolved)
+			}
+			fields := strings.Fields(stmt)
+			if len(fields) > 5 && fields[0] == "CREATE" && fields[1] == "TABLE" {
+				created[fields[5]] = true
+			}
 		}
 	}
-	for _, name := range []string{"{database}.usage_events", "{database}.limit_usage", "{database}.usage_quantities", "{database}.usage_minutes", "{database}.usage_history"} {
+	for _, name := range []string{"{database}.usage_intake", "{database}.usage_events", "{database}.limit_usage", "{database}.usage_quantities", "{database}.usage_minutes", "{database}.usage_history"} {
 		if !created[name] {
 			t.Errorf("no CREATE TABLE %s in %v", name, created)
 		}

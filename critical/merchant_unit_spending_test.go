@@ -651,7 +651,7 @@ func unitExpiry(t *testing.T) {
 
 	// Usage captured while a lot lived posts before it lapses: the lot pays
 	// it, and only what is left expires. Usage is recent: the event store
-	// keeps 100 days of it, so this world's clock starts two days back.
+	// keeps 80 days of it, so this world's clock starts two days back.
 	u, _ := unitPaymentWorld(t, 48*time.Hour)
 	b := u.a
 	imageMeter(t, b)

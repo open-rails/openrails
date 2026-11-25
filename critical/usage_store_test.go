@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -483,7 +484,19 @@ products:
 		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 		require.NoError(t, err)
 		balance(t, client, customer, 700, 300, 1000)
-		require.EqualValues(t, 1, storeCount(t, target, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = toUUID('"+source.alpha.MerchantID().String()+"')"))
+		merchant := "toUUID('" + source.alpha.MerchantID().String() + "')"
+		require.EqualValues(t, 1, storeCount(t, target, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = "+merchant))
+		// The rollups arrive as the source held them, not derived again.
+		for _, q := range []string{
+			"SELECT toUInt64(sum(requests)) FROM {db}.usage_history WHERE meter = '' AND merchant_id = ",
+			"SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = ",
+			"SELECT toUInt64(sum(quantity)) FROM {db}.usage_quantities WHERE merchant_id = ",
+			"SELECT toUInt64(sum(amount)) FROM {db}.usage_minutes WHERE merchant_id = ",
+			"SELECT toUInt64(sum(units)) FROM {db}.limit_usage WHERE merchant_id = ",
+		} {
+			require.Equal(t, storeCount(t, source, q+merchant), storeCount(t, target, q+merchant), q)
+		}
+		require.EqualValues(t, 3, storeCount(t, target, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_quantities WHERE merchant_id = "+merchant))
 	})
 
 	t.Run("OR-J24-S55/equal-lease-ids-and-numbers-under-two-merchants-stay-apart", func(t *testing.T) {
@@ -501,5 +514,87 @@ products:
 		balance(t, w.beta, customer, 700, 300, 1000)
 		require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
 		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL"), "each merchant's item is its own event")
+	})
+
+	t.Run("OR-J24-S67/history-past-35-days-keeps-a-row-a-day-of-the-accounting-zone-and-reads-the-same", func(t *testing.T) {
+		kolkata, err := time.LoadLocation("Asia/Kolkata")
+		require.NoError(t, err)
+		// A Kolkata day 40 days back by the store's clock: its history is past
+		// the age at which a day's buckets fold into one row.
+		back := time.Now().In(kolkata).AddDate(0, 0, -40)
+		day := time.Date(back.Year(), back.Month(), back.Day(), 0, 0, 0, 0, kolkata)
+		w := newWorld(t, func(w *world) {
+			m := cfgMerchant(w.cfg, "alpha")
+			m.Accounting = &billing.AccountingSettings{Timezone: "Asia/Kolkata"}
+			setCfgMerchant(&w.cfg, "alpha", m)
+			w.clock.Advance(day.Add(24*time.Hour + 20*time.Minute).Sub(w.clock.Now()))
+		})
+		usageMeter(t, w.alpha, 100)
+		customer, _ := fundedCustomer(t, w)
+		report := func(id, invoker string, units int64, at time.Duration) billing.LeaseUsage {
+			u := usageInput(customer, id, units)
+			u.Invoker, u.OccurredAt = invoker, day.Add(at)
+			return u
+		}
+		// Three buckets of the day, from the customer and its key, and the next
+		// day's first minutes.
+		settleUsage(t, w.alpha, newLease(), numbered(1,
+			report("first", customer.String(), 1, 10*time.Minute),
+			report("morning", "key_a", 2, 9*time.Hour),
+			report("last", customer.String(), 3, 23*time.Hour+50*time.Minute),
+			report("next-day", "key_a", 4, 24*time.Hour+5*time.Minute))...)
+		days := func() map[string]int64 {
+			t.Helper()
+			out := map[string]int64{}
+			q := billing.QueryMetricsParams{Measures: []string{"usage_units", "usage_charged"}, By: []string{"time", "invoker"}, Grain: "day",
+				Range: &billing.MetricsRange{From: day.Format(time.DateOnly), To: day.AddDate(0, 0, 2).Format(time.DateOnly)}}
+			for _, row := range metricTable(t, w.alpha, q) {
+				for _, measure := range q.Measures {
+					if v := whole(t, row[measure]); v != 0 {
+						out[fmt.Sprint(row["time"], " ", row["invoker"], " ", measure)] = v
+					}
+				}
+			}
+			return out
+		}
+		first, second := day.UTC().Format(time.RFC3339), day.AddDate(0, 0, 1).UTC().Format(time.RFC3339)
+		want := map[string]int64{
+			first + " " + customer.String() + " usage_units": 2, first + " " + customer.String() + " usage_charged": 400,
+			first + " key_a usage_units": 1, first + " key_a usage_charged": 200,
+			second + " key_a usage_units": 1, second + " key_a usage_charged": 400,
+		}
+		require.Equal(t, want, days())
+
+		// The store folds what is past the age as it merges.
+		for _, stmt := range []string{"ALTER TABLE {db}.usage_history MATERIALIZE TTL SETTINGS mutations_sync = 2", "OPTIMIZE TABLE {db}.usage_history FINAL"} {
+			require.NoError(t, w.deps.ClickHouse.Exec(t.Context(), strings.ReplaceAll(stmt, "{db}", "`"+w.schema+"`")))
+		}
+		at := func(t time.Time) string { return "toDateTime('" + t.UTC().Format(time.DateTime) + "', 'UTC')" }
+		require.EqualValues(t, 6, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m}"),
+			"an event row and a charge row a day for each invoker")
+		require.EqualValues(t, 2, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND invoker = '"+customer.String()+
+			"' AND day_at = "+at(day)+" AND bucket_at = "+at(day)), "the customer's three buckets became one at the day's first")
+		require.EqualValues(t, 6, storeCount(t, w, "SELECT toUInt64(sum(quantity)) FROM {db}.usage_history WHERE merchant_id = {m} AND day_at = "+at(day)), "the day's units")
+		require.Equal(t, want, days(), "the Kolkata days read the same")
+	})
+
+	t.Run("OR-J24-S68/usage-metadata-past-1024-bytes-of-compact-json-is-refused-alone", func(t *testing.T) {
+		w := newWorld(t)
+		usageMeter(t, w.alpha, 100)
+		customer, _ := fundedCustomer(t, w)
+		room := billing.MaxUsageMetadataBytes - len(`{"note":""}`)
+		fits, over := usageInput(customer, "fits", 1), usageInput(customer, "over", 2)
+		fits.Metadata, over.Metadata = map[string]any{"note": strings.Repeat("a", room)}, map[string]any{"note": strings.Repeat("a", room+1)}
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, fits, over)})
+		require.EqualValues(t, 2, out.Usage.ThroughN)
+		require.Len(t, out.Usage.Refused, 1)
+		refused := out.Usage.Refused[0]
+		require.EqualValues(t, 2, refused.N)
+		require.Equal(t, http.StatusBadRequest, refused.Status)
+		require.Equal(t, billing.CodeInvalidParam, refused.Error.Code)
+		require.Equal(t, "usage[1].metadata", *refused.Error.Param)
+		require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "the item that fits settles")
+		require.EqualValues(t, billing.MaxUsageMetadataBytes, storeCount(t, w, "SELECT toUInt64(max(length(metadata))) FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
+		balance(t, w.alpha, customer, 900, 100, 1000)
 	})
 }

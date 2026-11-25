@@ -9,95 +9,132 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// A merchant archive carries its usage in three tables of text values: the
-// raw events (FINAL, as long as their TTL keeps them), then the usage
-// history and limit usage the expired events no longer rebuild. A restore
-// inserts the events, whose views rebuild the rollups, then those remainders.
+// A merchant archive carries its usage as the event store holds it, one
+// archive table per store table: the raw events (FINAL, as long as their TTL
+// keeps them) and every rollup's rows. Nothing is derived again: a restore
+// inserts each table's rows into that table, the events straight into
+// usage_events.
 
-// Archive tables.
+// Archive tables, in archive order.
 const (
-	ArchiveEvents  = "usage_events"
-	ArchiveHistory = "usage_history"
-	ArchiveLimits  = "limit_usage"
+	ArchiveEvents     = "usage_events"
+	ArchiveHistory    = "usage_history"
+	ArchiveLimits     = "limit_usage"
+	ArchiveQuantities = "usage_quantities"
+	ArchiveMinutes    = "usage_minutes"
 )
-
-// ArchiveColumns are each archive table's columns.
-var ArchiveColumns = map[string][]string{
-	ArchiveEvents: {"event"},
-	ArchiveHistory: {"customer_id", "bucket_at", "currency", "event_type", "meter", "cell", "print", "period_starts_at", "invoker", "outcome",
-		"requests", "quantity", "stated", "charged", "forgiven"},
-	ArchiveLimits: {"customer_id", "limit_key", "window_starts_at", "window_ends_at", "units"},
-}
 
 // archiveTime is PostgreSQL's text form of a UTC instant, as the archive
 // carries every instant.
 const archiveTime = "2006-01-02 15:04:05.999999-07"
 
-type bucketKey struct {
-	customer                                billing.CustomerID
-	bucket                                  time.Time
-	currency, eventType, meter, cell, print string
-	period                                  time.Time
-	invoker                                 string
-	outcome                                 UsageOutcome
+// A column's kind: how it is scanned from the store, written to the archive
+// and appended back.
+type kind int
+
+const (
+	kindUUID kind = iota
+	kindTime
+	kindNullTime
+	kindText
+	kindInt
+	kindUint
+)
+
+// rollup is an archived rollup table: its columns after merchant_id and the
+// select that reads one merchant's rows of them, summed by key.
+type rollup struct {
+	table   string
+	columns []string
+	kinds   []kind
+	query   string
 }
 
-type bucketTotal struct{ requests, quantity, stated, charged, forgiven int64 }
-
-type limitKey struct {
-	customer billing.CustomerID
-	key      string
-	start    time.Time
+var rollups = []rollup{
+	{ArchiveHistory, []string{"customer_id", "day_at", "bucket_at", "currency", "event_type", "meter", "cell", "print", "period_starts_at", "invoker", "outcome",
+		"requests", "quantity", "stated", "charged", "forgiven"},
+		[]kind{kindUUID, kindTime, kindTime, kindText, kindText, kindText, kindText, kindText, kindTime, kindText, kindText, kindInt, kindInt, kindInt, kindInt, kindInt},
+		`SELECT customer_id, day_at, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, toString(outcome),
+       sum(requests) AS r, sum(quantity) AS q, sum(stated) AS st, sum(charged) AS c, sum(forgiven) AS f
+FROM {database}.usage_history WHERE merchant_id = %s
+GROUP BY customer_id, day_at, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome
+HAVING r != 0 OR q != 0 OR st != 0 OR c != 0 OR f != 0
+ORDER BY customer_id, day_at, bucket_at, currency, event_type, meter, cell, print, period_starts_at, invoker, outcome`},
+	{ArchiveLimits, []string{"customer_id", "limit_key", "window_starts_at", "window_ends_at", "units"},
+		[]kind{kindUUID, kindText, kindTime, kindNullTime, kindInt},
+		`SELECT customer_id, limit_key, window_starts_at, any(window_ends_at), sum(units) AS u
+FROM {database}.limit_usage WHERE merchant_id = %s
+GROUP BY customer_id, limit_key, window_starts_at HAVING u != 0 ORDER BY customer_id, limit_key, window_starts_at`},
+	{ArchiveQuantities, []string{"customer_id", "currency", "period_starts_at", "meter", "cell", "print", "quantity", "stated", "requests"},
+		[]kind{kindUUID, kindText, kindTime, kindText, kindText, kindText, kindInt, kindInt, kindUint},
+		`SELECT customer_id, currency, period_starts_at, meter, cell, print, sum(quantity) AS q, sum(stated) AS st, sum(requests) AS r
+FROM {database}.usage_quantities WHERE merchant_id = %s
+GROUP BY customer_id, currency, period_starts_at, meter, cell, print HAVING q != 0 OR st != 0 OR r != 0
+ORDER BY customer_id, currency, period_starts_at, meter, cell, print`},
+	{ArchiveMinutes, []string{"customer_id", "currency", "minute", "amount"},
+		[]kind{kindUUID, kindText, kindTime, kindInt},
+		`SELECT customer_id, currency, minute, sum(amount) AS a FROM {database}.usage_minutes WHERE merchant_id = %s
+GROUP BY customer_id, currency, minute HAVING a != 0 ORDER BY customer_id, currency, minute`},
 }
 
-type limitTotal struct {
-	ends  *time.Time
-	units int64
+// archivedEvent is a usage_events row as the archive carries it.
+type archivedEvent struct {
+	EventID        uuid.UUID        `json:"event_id"`
+	CustomerID     uuid.UUID        `json:"customer_id"`
+	Currency       string           `json:"currency"`
+	EventType      string           `json:"event_type"`
+	Invoker        string           `json:"invoker"`
+	InvokerType    string           `json:"invoker_type"`
+	Outcome        string           `json:"outcome"`
+	Source         string           `json:"source"`
+	SourceID       string           `json:"source_id"`
+	LeaseID        uuid.UUID        `json:"lease_id"`
+	N              uint64           `json:"n"`
+	OccurredAt     time.Time        `json:"occurred_at"`
+	AdmittedAt     time.Time        `json:"admitted_at"`
+	IngestedAt     time.Time        `json:"ingested_at"`
+	PeriodStartsAt time.Time        `json:"period_starts_at"`
+	Dimensions     map[string]int64 `json:"dimensions"`
+	Metadata       string           `json:"metadata"`
+	Stated         *int64           `json:"stated"`
+	Charged        int64            `json:"charged"`
+	Forgiven       int64            `json:"forgiven"`
+	Charges        []UsageCharge    `json:"charges"`
 }
+
+const eventColumns = "event_id, customer_id, currency, event_type, invoker, invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, " +
+	"ingested_at, period_starts_at, dimensions, metadata, stated, charged, forgiven, `charges.meter`, `charges.cell`, `charges.print`, `charges.quantity`, `charges.stated`"
 
 // ExportUsage streams the context's merchant's usage to emit, table by
-// table.
+// table in archive order.
 func (s *Store) ExportUsage(ctx context.Context, emit func(table string, values []*string) error) error {
 	mid, err := s.merchant(ctx)
 	if err != nil {
 		return err
 	}
-	buckets := map[bucketKey]bucketTotal{}
-	limits := map[limitKey]limitTotal{}
 	rows, err := s.conn.Query(ctx, s.resolve(`SELECT event_id, customer_id, currency, event_type, invoker, invoker_type, toString(outcome), source, source_id,
-       lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, dimensions, metadata, amount, stated, charged, forgiven,
-       charges.meter, charges.cell, charges.print, charges.quantity, charges.stated,
-       limits.key, limits.window_starts_at, limits.window_ends_at, limits.units
+       lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, dimensions, metadata, stated, charged, forgiven,
+       charges.meter, charges.cell, charges.print, charges.quantity, charges.stated
 FROM {database}.usage_events FINAL WHERE merchant_id = `+mid+` ORDER BY customer_id, occurred_at, event_id`))
 	if err != nil {
 		return fail("export usage", err)
 	}
 	for rows.Next() {
-		var e UsageEvent
-		var customer uuid.UUID
-		var outcome string
-		var meter, cell, print, keys []string
-		var quantity, stated, units []int64
-		var starts []time.Time
-		var ends []*time.Time
-		if err := rows.Scan(&e.EventID, &customer, &e.Currency, &e.EventType, &e.Invoker, &e.InvokerType, &outcome, &e.Source, &e.SourceID,
-			&e.LeaseID, &e.N, &e.OccurredAt, &e.AdmittedAt, &e.IngestedAt, &e.PeriodStartsAt, &e.Dimensions, &e.Metadata, &e.Amount, &e.Stated,
-			&e.Charged, &e.Forgiven, &meter, &cell, &print, &quantity, &stated, &keys, &starts, &ends, &units); err != nil {
+		var e archivedEvent
+		var meter, cell, print []string
+		var quantity, stated []int64
+		if err := rows.Scan(&e.EventID, &e.CustomerID, &e.Currency, &e.EventType, &e.Invoker, &e.InvokerType, &e.Outcome, &e.Source, &e.SourceID,
+			&e.LeaseID, &e.N, &e.OccurredAt, &e.AdmittedAt, &e.IngestedAt, &e.PeriodStartsAt, &e.Dimensions, &e.Metadata, &e.Stated,
+			&e.Charged, &e.Forgiven, &meter, &cell, &print, &quantity, &stated); err != nil {
 			rows.Close()
 			return fail("export usage", err)
 		}
-		e.CustomerID, e.Outcome = billing.CustomerID(customer), UsageOutcome(outcome)
 		for i := range meter {
 			e.Charges = append(e.Charges, UsageCharge{Meter: meter[i], Cell: cell[i], Print: print[i], Quantity: quantity[i], Stated: stated[i]})
 		}
-		for i := range keys {
-			e.Limits = append(e.Limits, UsageLimit{Key: keys[i], WindowStartsAt: starts[i].UTC(), WindowEndsAt: ends[i], Units: units[i]})
-		}
-		rebuilt(e, buckets, limits)
 		raw, err := json.Marshal(e)
 		if err != nil {
 			rows.Close()
@@ -113,100 +150,68 @@ FROM {database}.usage_events FINAL WHERE merchant_id = `+mid+` ORDER BY customer
 	if err := fail("export usage", rows.Err()); err != nil {
 		return err
 	}
-	history, err := s.UsageHistory(ctx, HistoryFilter{From: time.Unix(0, 0).UTC(), To: time.Now().UTC().AddDate(1, 0, 0)})
-	if err != nil {
-		return err
-	}
-	for _, d := range history {
-		k := bucketKey{d.CustomerID, d.BucketAt, d.Currency, d.EventType, d.Meter, d.Cell, d.Print, d.PeriodStartsAt, d.Invoker, d.Outcome}
-		have := buckets[k]
-		left := bucketTotal{d.Requests - have.requests, d.Quantity - have.quantity, d.Stated - have.stated, d.Charged - have.charged, d.Forgiven - have.forgiven}
-		if left == (bucketTotal{}) {
-			continue
-		}
-		values := []string{d.CustomerID.String(), d.BucketAt.UTC().Format(archiveTime), d.Currency, d.EventType, d.Meter, d.Cell, d.Print,
-			d.PeriodStartsAt.UTC().Format(archiveTime), d.Invoker, string(d.Outcome), strconv.FormatInt(left.requests, 10),
-			strconv.FormatInt(left.quantity, 10), strconv.FormatInt(left.stated, 10), strconv.FormatInt(left.charged, 10), strconv.FormatInt(left.forgiven, 10)}
-		if err := emit(ArchiveHistory, texts(values)); err != nil {
-			return err
-		}
-	}
-	var stored []struct {
-		key   limitKey
-		total limitTotal
-	}
-	err = s.query(ctx, "export limit usage", `SELECT customer_id, limit_key, window_starts_at, any(window_ends_at), sum(units) FROM {database}.limit_usage
-WHERE merchant_id = `+mid+` GROUP BY customer_id, limit_key, window_starts_at ORDER BY customer_id, limit_key, window_starts_at`,
-		func(rows interface{ Scan(...any) error }) error {
-			var customer uuid.UUID
-			var k limitKey
-			var t limitTotal
-			if err := rows.Scan(&customer, &k.key, &k.start, &t.ends, &t.units); err != nil {
-				return err
-			}
-			k.customer, k.start = billing.CustomerID(customer), k.start.UTC()
-			stored = append(stored, struct {
-				key   limitKey
-				total limitTotal
-			}{k, t})
-			return nil
-		})
-	if err != nil {
-		return err
-	}
-	for _, r := range stored {
-		left := r.total.units - limits[r.key].units
-		if left == 0 {
-			continue
-		}
-		var ends *string
-		if r.total.ends != nil {
-			v := r.total.ends.UTC().Format(archiveTime)
-			ends = &v
-		}
-		start, units := r.key.start.Format(archiveTime), strconv.FormatInt(left, 10)
-		customer, key := r.key.customer.String(), r.key.key
-		if err := emit(ArchiveLimits, []*string{&customer, &key, &start, ends, &units}); err != nil {
+	for _, r := range rollups {
+		if err := s.exportRollup(ctx, mid, r, emit); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// rebuilt adds what an event's views write to the rollups.
-func rebuilt(e UsageEvent, buckets map[bucketKey]bucketTotal, limits map[limitKey]limitTotal) {
-	base := bucketKey{e.CustomerID, e.OccurredAt.UTC().Truncate(HistoryBucket), e.Currency, e.EventType, "", "", "", e.PeriodStartsAt.UTC(), e.Invoker, e.Outcome}
-	t := buckets[base]
-	t.requests++
-	if e.Stated != nil {
-		t.stated += *e.Stated
+func (s *Store) exportRollup(ctx context.Context, mid string, r rollup, emit func(table string, values []*string) error) error {
+	rows, err := s.conn.Query(ctx, s.resolve(fmt.Sprintf(r.query, mid)))
+	if err != nil {
+		return fail("export "+r.table, err)
 	}
-	t.charged += e.Charged
-	t.forgiven += e.Forgiven
-	buckets[base] = t
-	for _, c := range e.Charges {
-		k := base
-		k.meter, k.cell, k.print = c.Meter, c.Cell, c.Print
-		t := buckets[k]
-		t.requests++
-		t.quantity += c.Quantity
-		t.stated += c.Stated
-		buckets[k] = t
+	defer rows.Close()
+	for rows.Next() {
+		dest := make([]any, len(r.kinds))
+		for i, k := range r.kinds {
+			switch k {
+			case kindUUID:
+				dest[i] = new(uuid.UUID)
+			case kindTime:
+				dest[i] = new(time.Time)
+			case kindNullTime:
+				dest[i] = new(*time.Time)
+			case kindText:
+				dest[i] = new(string)
+			case kindInt:
+				dest[i] = new(int64)
+			case kindUint:
+				dest[i] = new(uint64)
+			}
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return fail("export "+r.table, err)
+		}
+		values := make([]*string, len(dest))
+		for i, d := range dest {
+			var v string
+			switch d := d.(type) {
+			case *uuid.UUID:
+				v = d.String()
+			case *time.Time:
+				v = d.UTC().Format(archiveTime)
+			case **time.Time:
+				if *d == nil {
+					continue
+				}
+				v = (*d).UTC().Format(archiveTime)
+			case *string:
+				v = *d
+			case *int64:
+				v = strconv.FormatInt(*d, 10)
+			case *uint64:
+				v = strconv.FormatUint(*d, 10)
+			}
+			values[i] = &v
+		}
+		if err := emit(r.table, values); err != nil {
+			return err
+		}
 	}
-	for _, l := range e.Limits {
-		k := limitKey{e.CustomerID, l.Key, l.WindowStartsAt.UTC()}
-		t := limits[k]
-		t.units += l.Units
-		limits[k] = t
-	}
-}
-
-func texts(values []string) []*string {
-	out := make([]*string, len(values))
-	for i := range values {
-		out[i] = &values[i]
-	}
-	return out
+	return fail("export "+r.table, rows.Err())
 }
 
 // ImportUsage inserts one table's archived rows for the context's merchant.
@@ -219,101 +224,95 @@ func (s *Store) ImportUsage(ctx context.Context, table string, rows [][]*string)
 		return err
 	}
 	merchant := uuid.UUID(mid)
-	switch table {
-	case ArchiveEvents:
-		events := make([]UsageEvent, 0, len(rows))
+	if table == ArchiveEvents {
+		batch, err := s.conn.PrepareBatch(ctx, s.resolve("INSERT INTO {database}.usage_events (merchant_id, "+eventColumns+")"))
+		if err != nil {
+			return fail("restore usage", err)
+		}
+		defer func() { _ = batch.Abort() }()
 		for _, r := range rows {
-			var e UsageEvent
+			var e archivedEvent
 			if len(r) != 1 || r[0] == nil || json.Unmarshal([]byte(*r[0]), &e) != nil {
 				return fmt.Errorf("eventstore: invalid archived usage event")
 			}
-			events = append(events, e)
+			c := chargeColumns(e.Charges)
+			dimensions := e.Dimensions
+			if dimensions == nil {
+				dimensions = map[string]int64{}
+			}
+			if err := batch.Append(merchant, e.EventID, e.CustomerID, e.Currency, e.EventType, e.Invoker, e.InvokerType, e.Outcome, e.Source, e.SourceID,
+				e.LeaseID, e.N, e.OccurredAt.UTC(), e.AdmittedAt.UTC(), e.IngestedAt.UTC(), e.PeriodStartsAt.UTC(), dimensions, e.Metadata, e.Stated,
+				e.Charged, e.Forgiven, c.meter, c.cell, c.print, c.quantity, c.stated); err != nil {
+				return fail("restore usage", err)
+			}
 		}
-		return s.InsertUsage(ctx, events)
-	case ArchiveHistory:
-		batch, err := s.conn.PrepareBatch(ctx, s.resolve(`INSERT INTO {database}.usage_history (merchant_id, customer_id, bucket_at, currency, event_type, meter, cell,
-    print, period_starts_at, invoker, outcome, requests, quantity, stated, charged, forgiven)`))
+		return fail("restore usage", batch.Send())
+	}
+	for _, t := range rollups {
+		if t.table != table {
+			continue
+		}
+		cols := "merchant_id"
+		for _, c := range t.columns {
+			cols += ", " + c
+		}
+		batch, err := s.conn.PrepareBatch(ctx, s.resolve("INSERT INTO {database}."+t.table+" ("+cols+")"))
 		if err != nil {
-			return fail("restore usage history", err)
+			return fail("restore "+t.table, err)
 		}
 		defer func() { _ = batch.Abort() }()
 		for _, r := range rows {
-			v, err := archived(r, 15)
+			values, err := archived(t, r)
 			if err != nil {
 				return err
 			}
-			customer, err := uuid.Parse(v[0])
-			if err != nil {
-				return err
-			}
-			bucket, err := time.Parse(archiveTime, v[1])
-			if err != nil {
-				return err
-			}
-			period, err := time.Parse(archiveTime, v[7])
-			if err != nil {
-				return err
-			}
-			n := make([]int64, 5)
-			for i := range n {
-				if n[i], err = strconv.ParseInt(v[10+i], 10, 64); err != nil {
-					return err
-				}
-			}
-			if err := batch.Append(merchant, customer, bucket.UTC(), v[2], v[3], v[4], v[5], v[6], period.UTC(), v[8], v[9], n[0], n[1], n[2], n[3], n[4]); err != nil {
-				return fail("restore usage history", err)
+			if err := batch.Append(append([]any{merchant}, values...)...); err != nil {
+				return fail("restore "+t.table, err)
 			}
 		}
-		return fail("restore usage history", batch.Send())
-	case ArchiveLimits:
-		batch, err := s.conn.PrepareBatch(ctx, s.resolve(`INSERT INTO {database}.limit_usage (merchant_id, customer_id, limit_key, window_starts_at, window_ends_at, units)`))
-		if err != nil {
-			return fail("restore limit usage", err)
-		}
-		defer func() { _ = batch.Abort() }()
-		for _, r := range rows {
-			if len(r) != 5 || r[0] == nil || r[1] == nil || r[2] == nil || r[4] == nil {
-				return fmt.Errorf("eventstore: invalid archived limit usage")
-			}
-			customer, err := uuid.Parse(*r[0])
-			if err != nil {
-				return err
-			}
-			start, err := time.Parse(archiveTime, *r[2])
-			if err != nil {
-				return err
-			}
-			var ends *time.Time
-			if r[3] != nil {
-				t, err := time.Parse(archiveTime, *r[3])
-				if err != nil {
-					return err
-				}
-				ends = &t
-			}
-			units, err := strconv.ParseInt(*r[4], 10, 64)
-			if err != nil {
-				return err
-			}
-			if err := batch.Append(merchant, customer, *r[1], start.UTC(), ends, units); err != nil {
-				return fail("restore limit usage", err)
-			}
-		}
-		return fail("restore limit usage", batch.Send())
+		return fail("restore "+t.table, batch.Send())
 	}
 	return fmt.Errorf("eventstore: no archive table %q", table)
 }
 
-func archived(r []*string, width int) ([]string, error) {
-	if len(r) != width {
-		return nil, fmt.Errorf("eventstore: archived row has %d values, want %d", len(r), width)
+// archived parses an archived rollup row into the values its insert takes.
+func archived(t rollup, r []*string) ([]any, error) {
+	if len(r) != len(t.kinds) {
+		return nil, fmt.Errorf("eventstore: archived %s row has %d values, want %d", t.table, len(r), len(t.kinds))
 	}
-	out := make([]string, width)
-	for i, v := range r {
-		if v == nil {
-			return nil, fmt.Errorf("eventstore: archived row lacks a value")
+	out := make([]any, len(r))
+	for i, k := range t.kinds {
+		if r[i] == nil {
+			if k != kindNullTime {
+				return nil, fmt.Errorf("eventstore: archived %s row lacks %s", t.table, t.columns[i])
+			}
+			out[i] = (*time.Time)(nil)
+			continue
 		}
-		out[i] = *v
+		v := *r[i]
+		var err error
+		switch k {
+		case kindUUID:
+			out[i], err = uuid.Parse(v)
+		case kindTime, kindNullTime:
+			var at time.Time
+			at, err = time.Parse(archiveTime, v)
+			at = at.UTC()
+			if k == kindNullTime {
+				out[i] = &at
+			} else {
+				out[i] = at
+			}
+		case kindText:
+			out[i] = v
+		case kindInt:
+			out[i], err = strconv.ParseInt(v, 10, 64)
+		case kindUint:
+			out[i], err = strconv.ParseUint(v, 10, 64)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("eventstore: archived %s.%s: %w", t.table, t.columns[i], err)
+		}
 	}
 	return out, nil
 }

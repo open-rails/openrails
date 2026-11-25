@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -255,11 +255,12 @@ func (e *env) syncAll(ctx context.Context, c *openrails.Client, lease billing.Le
 
 // cloneHeavy copies the customer's one event n times in ClickHouse, spread
 // back over the month so far: a month of a heavy customer's usage, which
-// every posting of the customer scans under FINAL. Each copy keeps the
-// event's pricing period, so it is spread back no further than that period's
-// start: intake never dates an event before its period (an earlier copy
-// would be usage of the previous period filed under this one, which no
-// posting of either period reads).
+// every posting of the customer scans under FINAL. The copies go in as
+// intake inserts them, so every rollup counts them, priced per unit. Each
+// copy keeps the event's pricing period, so it is spread back no further
+// than that period's start: intake never dates an event before its period
+// (an earlier copy would be usage of the previous period filed under this
+// one, which no posting of either period reads).
 func (e *env) cloneHeavy(ctx context.Context, database string, merchant billing.MerchantID, customer billing.CustomerID, n int64, now time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
@@ -273,17 +274,16 @@ func (e *env) cloneHeavy(ctx context.Context, database string, merchant billing.
 		from = period
 	}
 	spread := max(int64(now.Sub(from).Seconds())-60, 1)
-	cols := "merchant_id, event_id, customer_id, currency, event_type, invoker, invoker_type, outcome, source, source_id, lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, " +
-		"dimensions, metadata, amount, stated, charged, forgiven, `charges.meter`, `charges.cell`, `charges.print`, `charges.quantity`, `charges.stated`, `limits.key`, `limits.window_starts_at`, `limits.window_ends_at`, `limits.units`"
-	exprs := strings.NewReplacer(
-		"event_id,", "generateUUIDv4(number),",
-		"source_id,", "concat(source_id, '-', toString(number)),",
-		" n,", " n + 1000000 + number,",
-		"occurred_at,", fmt.Sprintf("occurred_at - toIntervalSecond(number %% %d),", spread),
-		"admitted_at,", fmt.Sprintf("admitted_at - toIntervalSecond(number %% %d),", spread),
-	).Replace(cols)
-	q := fmt.Sprintf("INSERT INTO `%s`.usage_events (%s) SELECT %s FROM `%s`.usage_events AS src CROSS JOIN numbers(%d) AS num WHERE src.merchant_id = toUUID('%s') AND src.customer_id = toUUID('%s')",
-		database, cols, exprs, database, n, merchant, customer)
+	back := fmt.Sprintf("toIntervalSecond(number %% %d)", spread)
+	q := fmt.Sprintf("INSERT INTO `%[1]s`.usage_intake (merchant_id, event_id, customer_id, currency, event_type, invoker, invoker_type, outcome, source, source_id, "+
+		"lease_id, n, occurred_at, admitted_at, ingested_at, period_starts_at, day_at, dimensions, metadata, amount, stated, charged, forgiven, "+
+		"`charges.meter`, `charges.cell`, `charges.print`, `charges.quantity`, `charges.stated`) "+
+		"SELECT merchant_id, generateUUIDv4(number), customer_id, currency, event_type, invoker, invoker_type, outcome, source, concat(source_id, '-', toString(number)), "+
+		"lease_id, n + 1000000 + number, occurred_at - %[2]s, admitted_at - %[2]s, ingested_at, period_starts_at, toStartOfDay(toDateTime(occurred_at - %[2]s, 'UTC')), "+
+		"dimensions, metadata, toInt64(arraySum(charges.quantity)) * %[3]d, stated, charged, forgiven, "+
+		"charges.meter, charges.cell, charges.print, charges.quantity, charges.stated "+
+		"FROM `%[1]s`.usage_events AS src CROSS JOIN numbers(%[4]d) AS num WHERE src.merchant_id = toUUID('%[5]s') AND src.customer_id = toUUID('%[6]s')",
+		database, back, e.plan.UnitPrice, n, merchant, customer)
 	return e.ch.Exec(ctx, q)
 }
 
@@ -337,7 +337,8 @@ func (e *env) checkPostedOnce(ctx context.Context, r *PostingResult, schema stri
 		}
 	}
 	rows.Close()
-	crows, err := e.ch.Query(ctx, "SELECT toString(customer_id), sum(amount) FROM `"+schema+"`.usage_events FINAL WHERE merchant_id = "+uuidLit(merchant.UUID())+" GROUP BY customer_id")
+	crows, err := e.ch.Query(ctx, "SELECT toString(customer_id), toInt64(sum(arraySum(charges.quantity))) * "+strconv.FormatInt(e.plan.UnitPrice, 10)+
+		" FROM `"+schema+"`.usage_events FINAL WHERE merchant_id = "+uuidLit(merchant.UUID())+" GROUP BY customer_id")
 	if err != nil {
 		r.fail("final totals: %v", err)
 		return

@@ -1,6 +1,7 @@
 package money
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -29,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/calendarutil"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -57,6 +59,29 @@ import (
 // ErrUsageOutsideIngestWindow refuses usage dated before the ingest window or
 // ahead of the clock.
 var ErrUsageOutsideIngestWindow = apperr.Invalidf("occurred_at must be within the last %d days and not in the future", int(retention.UsageIngestWindow/retention.Day)).WithParam("occurred_at")
+
+// ErrUsageMetadataTooLarge refuses usage whose metadata, as compact JSON, is
+// longer than billing.MaxUsageMetadataBytes.
+var ErrUsageMetadataTooLarge = apperr.Invalidf("metadata must be at most %d bytes as compact JSON", billing.MaxUsageMetadataBytes).WithParam("metadata")
+
+// usageMetadata is an item's metadata as the event store keeps it: compact
+// JSON, refused past billing.MaxUsageMetadataBytes.
+func usageMetadata(m map[string]any) (string, error) {
+	if len(m) == 0 {
+		return "", nil
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(m); err != nil {
+		return "", apperr.Invalidf("metadata must be a JSON object").WithParam("metadata")
+	}
+	raw := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	if len(raw) > billing.MaxUsageMetadataBytes {
+		return "", ErrUsageMetadataTooLarge
+	}
+	return string(raw), nil
+}
 
 // UsageItem is one usage report to take in.
 type UsageItem struct {
@@ -87,6 +112,8 @@ type UsageItem struct {
 	FailedWindows []FailedUsageWindow
 	// FailedKey is where a charged failure posts.
 	FailedKey IdempotencyKey
+	// metadata is Metadata as stored, set by PrepareUsageTx.
+	metadata string
 }
 
 // UsageResult is what taking in one item did. Err refuses the item, which
@@ -118,6 +145,8 @@ type UsageIntake struct {
 	failed  []failedCharge
 	changed []UsageAccount
 	now     time.Time
+	// zone is the merchant's accounting zone, whose days history folds into.
+	zone *time.Location
 }
 
 // limitOpening is a session or first-use window a batch opens, or a granted
@@ -166,8 +195,12 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	}
 	merchantID := mid.UUID()
 	now := instant(s.now())
+	zone, err := s.accountingZone(ctx)
+	if err != nil {
+		return nil, err
+	}
 	b := &UsageIntake{store: store, merchant: merchantID, items: items, Results: make([]UsageResult, len(items)),
-		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, opened: map[uuid.UUID]bool{}, now: now}
+		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, opened: map[uuid.UUID]bool{}, now: now, zone: zone}
 	from, to := now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 	var eventTypes []string
 	currencies := s.UsageCurrencies()
@@ -180,6 +213,8 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 			it.OccurredAt = now
 		}
 		it.OccurredAt = instant(it.OccurredAt)
+		metadata, metadataErr := usageMetadata(it.Metadata)
+		it.metadata = metadata
 		switch {
 		case it.EventID == uuid.Nil:
 			return nil, fmt.Errorf("usage item %d has no intake identity", i)
@@ -197,6 +232,8 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 			b.Results[i].Err = apperr.Invalidf("invoker must be at most 255 bytes").WithParam("invoker")
 		case it.Delegated && (!it.Failed || it.Invoker == ""):
 			b.Results[i].Err = apperr.Invalidf("a delegated invoker reports only failed usage, and names its invoker").WithParam("invoker_type")
+		case metadataErr != nil:
+			b.Results[i].Err = metadataErr
 		case it.OccurredAt.Before(from) || it.OccurredAt.After(to):
 			b.Results[i].Err = ErrUsageOutsideIngestWindow
 		}
@@ -796,12 +833,6 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 		outcome, charged, forgiven, amount = eventstore.UsageFailed, res.Amount, res.Forgiven, res.Amount
 	}
 	admitted := admittedAt(it, b.now)
-	metadata := ""
-	if len(it.Metadata) > 0 {
-		if raw, err := json.Marshal(it.Metadata); err == nil {
-			metadata = string(raw)
-		}
-	}
 	invokerType := string(billing.InvokerTypeCustomer)
 	if it.Delegated {
 		invokerType = string(billing.InvokerTypeDelegated)
@@ -813,7 +844,8 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 	e := &eventstore.UsageEvent{EventID: it.EventID, CustomerID: billing.CustomerID(it.Customer.UUID()), Currency: it.Currency, EventType: it.EventType,
 		Invoker: it.Invoker, InvokerType: invokerType, Outcome: outcome, Source: it.Source, SourceID: it.SourceID, LeaseID: it.LeaseID,
 		N: uint64(max(it.N, 0)), OccurredAt: it.OccurredAt, AdmittedAt: admitted, IngestedAt: b.now, PeriodStartsAt: period,
-		Dimensions: it.Dimensions, Metadata: metadata, Amount: amount, Stated: it.Amount, Charged: charged, Forgiven: forgiven, Limits: p.limits}
+		DayAt: calendarutil.DateStart(it.OccurredAt, b.zone).UTC(), Dimensions: it.Dimensions, Metadata: it.metadata, Amount: amount, Stated: it.Amount,
+		Charged: charged, Forgiven: forgiven, Limits: p.limits}
 	for _, c := range p.charges {
 		e.Charges = append(e.Charges, eventstore.UsageCharge{Meter: c.meter, Cell: c.cell, Print: c.print, Quantity: c.quantity, Stated: c.stated})
 	}

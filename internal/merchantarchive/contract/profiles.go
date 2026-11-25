@@ -105,11 +105,13 @@ var Profiles = []Profile{
 var PriceKeyMovements = Profile{Name: "price_key_movements", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"key", "text"}, {"price_id", "uuid"}, {"effective_at", "timestamp with time zone"}, {"created_at", "timestamp with time zone"}, {"archived", "boolean"}}}
 
 // EventStoreProfiles are the archive's event store section, after every
-// table above: the merchant's usage (eventstore.ArchiveColumns), read from
-// and restored to ClickHouse, each row led by merchant_id as every archive
-// row is.
+// table above: the merchant's usage as each ClickHouse table holds it
+// (eventstore's archive tables), each row led by merchant_id as every
+// archive row is.
 var EventStoreProfiles = []Profile{
 	{Name: "event_store.usage_events", Columns: []Column{{"merchant_id", "uuid"}, {"event", "jsonb"}}},
-	{Name: "event_store.usage_history", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"bucket_at", "timestamp with time zone"}, {"currency", "text"}, {"event_type", "text"}, {"meter", "text"}, {"cell", "text"}, {"print", "text"}, {"period_starts_at", "timestamp with time zone"}, {"invoker", "text"}, {"outcome", "text"}, {"requests", "bigint"}, {"quantity", "bigint"}, {"stated", "bigint"}, {"charged", "bigint"}, {"forgiven", "bigint"}}},
+	{Name: "event_store.usage_history", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"day_at", "timestamp with time zone"}, {"bucket_at", "timestamp with time zone"}, {"currency", "text"}, {"event_type", "text"}, {"meter", "text"}, {"cell", "text"}, {"print", "text"}, {"period_starts_at", "timestamp with time zone"}, {"invoker", "text"}, {"outcome", "text"}, {"requests", "bigint"}, {"quantity", "bigint"}, {"stated", "bigint"}, {"charged", "bigint"}, {"forgiven", "bigint"}}},
 	{Name: "event_store.limit_usage", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"limit_key", "text"}, {"window_starts_at", "timestamp with time zone"}, {"window_ends_at", "timestamp with time zone"}, {"units", "bigint"}}},
+	{Name: "event_store.usage_quantities", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"currency", "text"}, {"period_starts_at", "timestamp with time zone"}, {"meter", "text"}, {"cell", "text"}, {"print", "text"}, {"quantity", "bigint"}, {"stated", "bigint"}, {"requests", "bigint"}}},
+	{Name: "event_store.usage_minutes", Columns: []Column{{"merchant_id", "uuid"}, {"customer_id", "uuid"}, {"currency", "text"}, {"minute", "timestamp with time zone"}, {"amount", "bigint"}}},
 }

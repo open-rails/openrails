@@ -17,8 +17,8 @@ import (
 // writes it from the deployment's store; a deployment without one exports
 // none, and refuses a merchant with usage the ledger has not taken. Restore
 // needs a store, refuses a merchant that already has usage there, inserts
-// the events and then the rollup rows they do not rebuild, and deletes them
-// again when the restore fails.
+// each table's rows as archived, and deletes them again when the restore
+// fails.
 
 const eventStorePrefix = "event_store."
 
