@@ -9,12 +9,12 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 var _ paymentmethods.AccountUpdaters = (*MerchantCollectionAdapterBuilder)(nil)
@@ -44,7 +44,7 @@ func (b *MerchantCollectionAdapterBuilder) AccountUpdater(ctx context.Context, m
 	if custody.Custodian != m.Custodian || b.BasisTheoryTransport != nil && custody.Environment != config.ClassTest {
 		return nil, false, errors.New("account updater: card custody identity changed")
 	}
-	client, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: custody.APIBaseURL, ReadOnly: writeposture.View{DB: b.DB}.Posture(ctx, m.MerchantID).ReadOnly(), Transport: b.BasisTheoryTransport})
+	client, err := basistheory.New(basistheory.Config{APIKey: custody.APIKey, BaseURL: custody.APIBaseURL, ReadOnly: controls.View{DB: b.DB}.Posture(ctx, m.MerchantID).ReadOnly(), Transport: b.BasisTheoryTransport})
 	if err != nil {
 		return nil, false, err
 	}

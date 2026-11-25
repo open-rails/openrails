@@ -844,16 +844,15 @@ func DueDunningCursorOf(sub *models.Subscription) DueDunningCursor {
 
 // ListDueDunningSubscriptions returns one page of the merchant's due dunning
 // work after the cursor (nil: from the start), with Price and PaymentMethod
-// attached. includeEngine adds engine memberships whose wait for a card ended;
-// admitEngine adds engine renewals due for admission.
-func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time, includeEngine, admitEngine bool, after *DueDunningCursor) ([]models.Subscription, error) {
+// attached. includeEngine adds engine memberships whose wait for a card ended
+// and engine renewals due for admission.
+func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time, includeEngine bool, after *DueDunningCursor) ([]models.Subscription, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
 	params := gen.ListDueDunningSubscriptionsParams{
 		IncludeEngine: includeEngine,
-		AdmitEngine:   admitEngine,
 		MerchantID:    scopeMerchantID.UUID(),
 		Rails:         rails,
 		Now:           now,

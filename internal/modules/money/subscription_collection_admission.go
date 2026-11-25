@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -130,8 +131,16 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if s.EngineAdmissionHold {
-			return fmt.Errorf("%w: new engine payment admission is held", intents.ErrRebillNotRetryable)
+		// A renewal or retry OpenRails initiates waits while the merchant's
+		// rebills are held; one its customer pays now never does.
+		if payer == uuid.Nil {
+			c, err := controls.Load(ctx, q, mid.UUID())
+			if err != nil {
+				return err
+			}
+			if c.RebillsHeld {
+				return fmt.Errorf("%w: %w", intents.ErrRebillNotRetryable, controls.ErrRebillsHeld)
+			}
 		}
 		if !subscriptions.EngineCollectionDue(sub, admittedAt, payer != uuid.Nil) {
 			return ErrEngineCollectionNotDue

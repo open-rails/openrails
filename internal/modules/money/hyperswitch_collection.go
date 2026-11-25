@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
@@ -17,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 type hyperSwitchCollectionAdapter struct {
@@ -83,7 +83,7 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 	if b.Config == nil || b.Config.HyperSwitch == (billing.HyperSwitchConfig{}) || scope.CustodianID == nil {
 		return nil, fmt.Errorf("HyperSwitch usage collection is not armed")
 	}
-	if p := (writeposture.View{DB: b.DB}).Posture(ctx, mid.UUID()); p.ReadOnly() {
+	if p := (controls.View{DB: b.DB}).Posture(ctx, mid.UUID()); p.ReadOnly() {
 		return nil, fmt.Errorf("HyperSwitch usage collection is not armed: %s", p.Reason)
 	}
 	custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *scope.CustodianID)

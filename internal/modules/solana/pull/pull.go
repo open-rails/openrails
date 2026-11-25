@@ -17,6 +17,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -183,8 +184,12 @@ func (h *Handler) Execute(ctx context.Context, intent gen.BillingProviderIntent)
 		}
 	}
 
-	// Nothing signed is pending: freeze what this attempt pulls from the
+	// Nothing signed is pending. A renewal pull waits while the merchant's
+	// rebills are held; otherwise freeze what this attempt pulls from the
 	// subscription as it stands now.
+	if reason := intents.RebillHold(ctx, controls.View{DB: h.DB}, intent); reason != "" {
+		return intents.Parked(reason)
+	}
 	p.Agreement, err = h.freezeAgreement(ctx, intent, p, row)
 	switch {
 	case errors.Is(err, errPullEpisodeOver):

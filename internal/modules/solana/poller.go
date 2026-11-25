@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -20,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -82,7 +82,7 @@ type SolanaPayPoller struct {
 }
 
 func NewSolanaPayPoller(database *db.DB, settler OrderSettler, clocks ...clockwork.Clock) *SolanaPayPoller {
-	return &SolanaPayPoller{db: database, settler: settler, rpcBuilder: &MerchantRPCBuilder{Postures: writeposture.View{DB: database}, Log: database.Log}, clock: timeutil.FirstClock(clocks...), Log: database.Log}
+	return &SolanaPayPoller{db: database, settler: settler, rpcBuilder: &MerchantRPCBuilder{Postures: controls.View{DB: database}, Log: database.Log}, clock: timeutil.FirstClock(clocks...), Log: database.Log}
 }
 
 // SetMerchantRPC installs the store-aware per-merchant RPC builder.

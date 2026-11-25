@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/stripemock"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // stripeLoad is one process loading a merchant's Stripe PSPs over the Stripe
@@ -31,7 +31,7 @@ type stripeLoad struct {
 func newStripeLoad() *stripeLoad {
 	stripe := stripemock.NewUnstarted(stripemock.Options{})
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
-	return &stripeLoad{stripe: stripe, factory: stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full)), merchant: billing.MerchantID(uuid.New()), name: name, key: "sk_test_acct_" + name}
+	return &stripeLoad{stripe: stripe, factory: stripeapi.NewWiredFactory(stripe, controls.Fixed(controls.Full)), merchant: billing.MerchantID(uuid.New()), name: name, key: "sk_test_acct_" + name}
 }
 
 func (l *stripeLoad) set(psps map[string]merchantdocs.PSP) merchantdocs.Set {

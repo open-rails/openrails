@@ -606,7 +606,7 @@ return nil
   linked plan on the target (`409 subscription_change_requires_linked_plan`).
   CCBill upgrades redirect; downgrades are refused.
 - **Cancels.** An NMI or CCBill schedule is refused `409 provider_cancel_held`
-  while the merchant's destructive switch is off: OpenRails will not cancel
+  while the merchant's destructive actions are disarmed: OpenRails will not cancel
   locally while the provider keeps charging. A renewal in flight refuses a cancel
   (`409 payment_in_progress`). A Solana cancel needs no signature.
 - **Dunning.** OpenRails retries the renewals it collects on a schedule sized to
@@ -1090,7 +1090,7 @@ Payment health findings stay open while their condition holds:
 `life.payments.new_card_decline_spike`, `life.payments.rebill_failure_spike`,
 `life.payments.system_errors`, `life.decline.unmapped` and `life.webhooks.silent`.
 A proposal whose basis moved is superseded; one that ends access waits for the
-destructive switch ([standalone.md](standalone.md#write-safety-and-the-kill-switch)).
+merchant's destructive actions to be armed ([standalone.md](standalone.md#merchant-controls)).
 
 ## Metrics
 

@@ -43,6 +43,7 @@ sql:
       - "internal/migrate/postgres/0046_mrr_keyed_reads.up.sql"
       - "internal/migrate/postgres/0047_usage_receivable.up.sql"
       - "internal/migrate/postgres/0048_checkout_analytics.up.sql"
+      - "internal/migrate/postgres/0049_merchant_controls.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

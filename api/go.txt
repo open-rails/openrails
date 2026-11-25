@@ -759,6 +759,7 @@ pkg openrails/billing, const LogActionUpdate LogAction = "update"
 pkg openrails/billing, const LogActorFile LogActor = "file"
 pkg openrails/billing, const LogActorSystem LogActor = "system"
 pkg openrails/billing, const LogActorVault LogActor = "vault"
+pkg openrails/billing, const LogObjectControls LogObjectType = "controls"
 pkg openrails/billing, const LogObjectCustodian LogObjectType = "custodian"
 pkg openrails/billing, const LogObjectLimit LogObjectType = "limit"
 pkg openrails/billing, const LogObjectMerchant LogObjectType = "merchant"
@@ -1577,7 +1578,6 @@ pkg openrails/billing, type Config struct, CheckoutOrigin string `yaml:"checkout
 pkg openrails/billing, type Config struct, ClickHouse ClickHouseConfig `yaml:"clickhouse"`
 pkg openrails/billing, type Config struct, Database DatabaseConfig `yaml:"database"`
 pkg openrails/billing, type Config struct, DestructiveActionLimits DestructiveActionLimitsConfig `yaml:"destructive_action_limits"`
-pkg openrails/billing, type Config struct, EngineAdmissionHold bool `yaml:"engine_admission_hold"`
 pkg openrails/billing, type Config struct, HyperSwitch HyperSwitchConfig `yaml:"hyperswitch"`
 pkg openrails/billing, type Config struct, Merchants []MerchantDeclaration `yaml:"-"`
 pkg openrails/billing, type Config struct, PublicBillingBaseURL string `yaml:"public_billing_base_url"`

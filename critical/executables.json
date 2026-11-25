@@ -1820,7 +1820,6 @@
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/unactionable-stays-so",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-held-response-waits-and-wakes",
-      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/the-merchant-stop-holds-it",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/nothing-to-refund-still-ends",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
     ],
@@ -2343,6 +2342,33 @@
     ],
     "OR-J06-S73": [
       "TestRetiredRuntimeSettings/OR-J06-S73/a-provider-sandbox-setting-refuses-boot"
+    ],
+    "OR-J06-S74": [
+      "TestMerchantControls/OR-J06-S74/a-signup-under-a-rebill-hold-charges-and-its-first-renewal-waits-for-the-release"
+    ],
+    "OR-J06-S75": [
+      "TestMerchantControls/OR-J06-S75/a-dunning-retry-waits-under-a-rebill-hold-and-retries-after-the-release"
+    ],
+    "OR-J06-S76": [
+      "TestMerchantControls/OR-J06-S76/scheduled-usage-collection-waits-under-a-rebill-hold-and-collects-after-the-release"
+    ],
+    "OR-J06-S77": [
+      "TestMerchantControls/OR-J06-S77/a-rebill-hold-never-holds-what-a-person-asks-for"
+    ],
+    "OR-J06-S78": [
+      "TestMerchantControls/OR-J06-S78/all-merchants-sets-every-merchant-and-each-change-is-history"
+    ],
+    "OR-J06-S79": [
+      "TestMerchantControls/OR-J06-S79/destructive-arming-is-each-merchants-own"
+    ],
+    "OR-J06-S80": [
+      "TestMerchantControls/OR-J06-S80/export-and-restore-set-writes-readonly-and-an-armed-destination-is-refused"
+    ],
+    "OR-J06-S81": [
+      "TestMerchantControls/OR-J06-S81/unreadable-controls-deny-writes-rebills-and-destructive-actions"
+    ],
+    "OR-J06-S82": [
+      "TestMerchantControls/OR-J06-S82/the-migration-carries-postures-the-switch-and-policies-into-controls"
     ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"

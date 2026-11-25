@@ -1544,6 +1544,7 @@ FROM (
               WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
                 AND i.intent_type = 'manual_rebill'
                 AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
+       AND NOT EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.rebills_held)
     UNION ALL
     SELECT s.merchant_id
       FROM billing.subscriptions s
@@ -1567,7 +1568,7 @@ FROM (
     UNION ALL
     SELECT s.merchant_id
       FROM billing.subscriptions s
-     WHERE $4::boolean
+     WHERE $3::boolean
        AND s.collection_policy = 'engine' AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL
        AND s.current_period_ends_at <= $1::timestamptz
        AND (s.status = 'active' OR s.next_retry_at <= $1::timestamptz)
@@ -1578,18 +1579,18 @@ FROM (
               WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
                 AND i.intent_type = 'subscription_collection'
                 AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
+       AND NOT EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.rebills_held)
 ) d
-WHERE d.merchant_id > $5::uuid
+WHERE d.merchant_id > $4::uuid
 GROUP BY d.merchant_id
 ORDER BY d.merchant_id
-LIMIT $6::int
+LIMIT $5::int
 `
 
 type ListDueDunningMerchantsParams struct {
 	Now             time.Time
 	Rails           []string
 	IncludeEngine   bool
-	AdmitEngine     bool
 	AfterMerchantID uuid.UUID
 	MerchantLimit   int32
 }
@@ -1600,15 +1601,14 @@ type ListDueDunningMerchantsParams struct {
 // past_due rows whose grace ended with no retry scheduled (provider-billed,
 // any rail: the provider never said renewed or canceled; or a case network
 // advice deferred to its next renewal), and engine
-// collections due (admit_engine false while admissions are held). A row the
-// pass left unchanged waits for its due_recheck_at. Ids only, in id order
+// collections due. A merchant whose rebills are held has no retry or engine
+// collection due. A row the pass left unchanged waits for its due_recheck_at. Ids only, in id order
 // after a cursor, so a pass reaches every merchant; due rows run per merchant.
 func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunningMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listDueDunningMerchants,
 		arg.Now,
 		arg.Rails,
 		arg.IncludeEngine,
-		arg.AdmitEngine,
 		arg.AfterMerchantID,
 		arg.MerchantLimit,
 	)
@@ -1639,15 +1639,19 @@ WHERE sub.merchant_id = $1::uuid
        OR (sub.status='awaiting_method' AND sub.grace_ends_at <= $2::timestamptz AND sub.rail = ANY($3::text[])
            AND (($4::boolean AND sub.collection_policy='engine') OR (sub.collection_policy='nmi_schedule' AND sub.rail='nmi')))
        OR ((sub.collection_policy <> 'engine' OR ($4::boolean AND sub.retry_advised_at IS NOT NULL)) AND sub.status='past_due' AND sub.next_retry_at IS NULL AND sub.grace_ends_at <= $2::timestamptz)
-       OR ($5::boolean AND sub.collection_policy='engine' AND sub.rail = ANY($3::text[]) AND sub.current_period_ends_at <= $2::timestamptz
+       OR ($4::boolean AND sub.collection_policy='engine' AND sub.rail = ANY($3::text[]) AND sub.current_period_ends_at <= $2::timestamptz
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= $2::timestamptz))
            AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
-  AND ($6::timestamptz IS NULL
+  -- A merchant's held rebills wait: neither its retries nor its engine
+  -- renewals are due.
+  AND NOT (((sub.status='past_due' AND sub.next_retry_at IS NOT NULL) OR (sub.collection_policy='engine' AND sub.status='active'))
+           AND EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = sub.merchant_id AND c.rebills_held))
+  AND ($5::timestamptz IS NULL
        OR (CASE WHEN sub.status='awaiting_method' OR (sub.status='past_due' AND sub.next_retry_at IS NULL) THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id)
-          > ($6::timestamptz, $7::uuid))
+          > ($5::timestamptz, $6::uuid))
 ORDER BY CASE WHEN sub.status='awaiting_method' OR (sub.status='past_due' AND sub.next_retry_at IS NULL) THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
-LIMIT $8::int
+LIMIT $7::int
 `
 
 type ListDueDunningSubscriptionsParams struct {
@@ -1655,7 +1659,6 @@ type ListDueDunningSubscriptionsParams struct {
 	Now           time.Time
 	Rails         []string
 	IncludeEngine bool
-	AdmitEngine   bool
 	AfterDueAt    *time.Time
 	AfterID       uuid.UUID
 	RowLimit      int32
@@ -1675,7 +1678,6 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 		arg.Now,
 		arg.Rails,
 		arg.IncludeEngine,
-		arg.AdmitEngine,
 		arg.AfterDueAt,
 		arg.AfterID,
 		arg.RowLimit,

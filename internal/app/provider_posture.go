@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -21,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/retry"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // StartProviderPosture verifies, in the background, every PSP credential set
@@ -346,7 +346,7 @@ func (r *Runtime) CheckBookIdentity(ctx context.Context) {
 	if r == nil || r.DB == nil {
 		return
 	}
-	armed, err := writeposture.BookArmed(ctx, r.DB.GenDirectory())
+	armed, err := controls.BookArmed(ctx, r.DB.GenDirectory())
 	switch {
 	case err != nil:
 		r.Log.ErrorContext(ctx, "billing book identity unreadable: provider writes stay readonly", logx.Err(err))

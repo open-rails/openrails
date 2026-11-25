@@ -429,15 +429,6 @@ type BillingDestructiveAction struct {
 	Result             *string
 }
 
-// Global by design: instance-level operator kill switch for destructive convergence, not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
-type BillingDestructiveActionSwitch struct {
-	Singleton bool
-	Enabled   bool
-	UpdatedBy *string
-	Reason    *string
-	UpdatedAt time.Time
-}
-
 // Deployment-authoritative destructive incident episodes. Merchant_id identifies only the triggering tenant; actor/deployment holds span tenants. An audited clear ends one episode, never an ordinary finding resolution. Retention: permanent, never pruned.
 type BillingDestructiveHold struct {
 	MerchantID           uuid.UUID
@@ -945,16 +936,21 @@ type BillingMerchant struct {
 	TenantID *uuid.UUID
 }
 
-// Per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.
-type BillingMerchantDestructivePolicy struct {
-	MerchantID                uuid.UUID
-	DestructiveActionsEnabled bool
-	// NULL = advisory-only pulls for this merchant. Absence of a row is the same as NULL, so a newly onboarded merchant is surveyed before it is enforced.
-	EnforceArmedAt       *time.Time
+// One merchant's operator controls; no row is writes full, rebills released, destructive actions disarmed. A copy of the billing book writes nothing whatever writes says. Export sets the source's writes readonly and restore the destination's; each change is a change_log entry (object_type controls).
+type BillingMerchantControl struct {
+	MerchantID uuid.UUID
+	// Provider writes: full, limited (what the system initiates waits) or readonly (nothing reaches a provider).
+	Writes string
+	// The rebill brake: merchant-initiated charges (renewals and rebills OpenRails charges, dunning retries, scheduled usage collection) wait until it is released; customer-initiated charges never wait.
+	RebillsHeld bool
+	// Destructive convergence (cancellation, revocation, provider deletes, pull overwrites) runs only when armed; arm once the merchant's first pull has been reviewed.
+	DestructiveArmed bool
+	// When a completed pull first surveyed the merchant, so its findings are ready to review; a destructive decision rests on no older evidence. Stamped once, never a control.
 	FirstPullCompletedAt *time.Time
-	UpdatedBy            *string
-	Reason               *string
-	UpdatedAt            time.Time
+	// Who made the last change, with its reason and instant; NULL until a control changes.
+	ChangedBy *string
+	Reason    *string
+	ChangedAt *time.Time
 }
 
 // A merchant's exclusive work while it runs, one row per kind: pull is one mutating provider pull at a time (a provider refresh or a prune), across every replica and the operator's CLI. Its holder renews expires_at while the work runs and deletes the row when it ends; a holder that stops renewing loses it at expires_at.
@@ -975,15 +971,6 @@ type BillingMerchantSlugAlias struct {
 	MerchantID uuid.UUID
 	ExpiresAt  *time.Time
 	CreatedAt  time.Time
-}
-
-// One merchant's provider write posture; no row is full. A copy of the billing book is readonly whatever it says. Export sets the source readonly and restore the destination; an operator arms it back to full.
-type BillingMerchantWritePosture struct {
-	MerchantID uuid.UUID
-	Mode       string
-	Reason     string
-	SetBy      string
-	SetAt      time.Time
 }
 
 // Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; arrears owed exposure is derived from open invoices.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -17,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // SetMerchantSecretStore wires the dynamic OpenRails merchant-secret store into
@@ -309,7 +309,7 @@ func (s *PurchaseService) nmiFactory() *railresolve.NMIFactory {
 	if s.SubscriptionService != nil {
 		d = s.SubscriptionService.Database()
 	}
-	return &railresolve.NMIFactory{Postures: writeposture.View{DB: d}, Log: s.Log}
+	return &railresolve.NMIFactory{Postures: controls.View{DB: d}, Log: s.Log}
 }
 
 func (s *PurchaseService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBillClient, error) {
