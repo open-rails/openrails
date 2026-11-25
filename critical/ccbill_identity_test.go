@@ -371,6 +371,9 @@ func TestCCBillIdentity(t *testing.T) {
 			feed = dataLinkCancellationFeed(t, ccbillProvider, canceled, due)
 			declareCCBill(w, feed.URL)
 			w.cfg.ProviderSandbox.CCBillWebhookSources = []string{"127.0.0.1/32"}
+			// Lifecycle repairs need full writes: a readonly merchant's pull
+			// observes, and never reads its unverified rows.
+			w.posture = "full"
 		})
 		price := ccbillMemberPrice(t, a.alpha)
 		alice := customerOf(a.alice)

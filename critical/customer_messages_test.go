@@ -757,7 +757,9 @@ func TestCustomerMessages(t *testing.T) {
 	})
 	t.Run("OR-J39-S25/a-staff-refund-completed-a-week-late-sends-its-receipt", func(t *testing.T) {
 		mail := &alertMailbox{}
-		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
+		// Begun nine days ago: the refund settles eight days on, never in
+		// the future.
+		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail; w.clock.Advance(-9 * 24 * time.Hour) })
 		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-late-by-staff"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var order billing.Order

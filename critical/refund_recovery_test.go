@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func purchasedSale(t *testing.T) (*authorityWorld, *providerLedger, billing.Order) {
+func purchasedSale(t *testing.T, configure ...func(*world)) (*authorityWorld, *providerLedger, billing.Order) {
 	t.Helper()
-	a, p := newPaymentWorld(t)
+	a, p := newPaymentWorld(t, configure...)
 	input := saleInput(t, a, p)
 	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "sale-for-refund"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
@@ -81,7 +81,9 @@ func TestRefundRecovery(t *testing.T) {
 		require.EqualValues(t, 30_000_000, read.AmountRefunded)
 	})
 	t.Run("OR-J20-S03/lost-refund-response-resolves-original-provider-refund", func(t *testing.T) {
-		a, p, order := purchasedSale(t)
+		// Begun an hour ago: the refund settles when the retry finds it,
+		// twenty minutes on, and a payment is never dated in the future.
+		a, p, order := purchasedSale(t, func(w *world) { w.clock.Advance(-time.Hour) })
 		payment := *order.Payment.PaymentID
 		p.mu.Lock()
 		p.lostRefundResponse = true

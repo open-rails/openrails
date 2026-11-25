@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 750,
+  "scenario_count": 753,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1932,6 +1932,21 @@
       "id": "OR-J34-S40",
       "journey": "J34",
       "name": "A billing import, by the host or staff, cancels only through the destructive switch, the PSP cancellation cap and an admission on the merchant's budget recording its actor"
+    },
+    {
+      "id": "OR-J34-S41",
+      "journey": "J34",
+      "name": "An archive exports right after a catalog edit: a completed action or an ordinary edit never bars it"
+    },
+    {
+      "id": "OR-J34-S42",
+      "journey": "J34",
+      "name": "An archive export beside a destructive action whose effect may still land is refused"
+    },
+    {
+      "id": "OR-J34-S43",
+      "journey": "J34",
+      "name": "A restore waits a day, by the deployment's clock, after a prune that can still be undone"
     },
     {
       "id": "OR-J34-S34",
