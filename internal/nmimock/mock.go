@@ -99,7 +99,7 @@ func NewUnstarted(opts Options) *Mock {
 		schedules: map[string]*Schedule{}, reads: map[string]int{}, probes: map[string]bool{}, partials: map[string]string{}, issuers: map[string]string{}}
 }
 
-// URL is the loopback gateway root; OpenRails' provider_sandbox.nmi_gateway_url.
+// URL is the loopback gateway root: Deps.ProviderEndpoints.NMIGatewayURL.
 func (m *Mock) URL() string {
 	if m.server == nil {
 		panic("nmimock: URL of an unstarted mock")

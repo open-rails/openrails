@@ -626,6 +626,9 @@ func TestGateDecidesOneRequestOnAStaleView(t *testing.T) {
 		if idle != 0 {
 			t.Fatalf("an idle gate synced %d times", idle)
 		}
+		// Answers take a second, so a sync the probe starts cannot land
+		// before it is counted.
+		f.set(func(f *fakeViews) { f.slow = time.Second })
 		mustAdmit(t, g, work(customer, "probe", 1))
 		f.mu.Lock()
 		after := len(f.syncs)
@@ -845,6 +848,12 @@ func TestGateGivesUpOnAViewNoSyncAnswers(t *testing.T) {
 		_, err := g.Admit(ctx, work(customer, "deferred", 1))
 		if !errors.Is(err, ErrUnavailable) || ctx.Err() != nil {
 			t.Fatalf("a view every sync defers: %v (ctx %v)", err, ctx.Err())
+		}
+		// The deferred view is asked again each interval, not back to back.
+		before := syncCount(f)
+		time.Sleep(3 * time.Second)
+		if n := syncCount(f) - before; n > 4 {
+			t.Fatalf("the gate synced %d times in three intervals for a deferred view", n)
 		}
 	})
 }
@@ -1150,6 +1159,64 @@ func TestGateOfflineShare(t *testing.T) {
 		late := outage{since: t0.Add(8 * time.Minute), gates: 1}
 		if d := v.decide(set, []int64{1}, t0.Add(8*time.Minute+time.Second), late); d.verdict != verdictShort {
 			t.Fatalf("an eight-minute-old view decided offline: verdict %d", d.verdict)
+		}
+	})
+}
+
+func TestGateAnswersAFirstViewInASyncWithoutUsage(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		warm(t, g, billing.CustomerID(uuid.New()))
+		// Usage waits to be sent when a new customer's first request comes.
+		busy := billing.CustomerID(uuid.New())
+		warm(t, g, busy)
+		if err := mustAdmit(t, g, work(busy, "queued", 3)).Capture(t.Context(), capture(3)); err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		before := len(f.syncs)
+		f.mu.Unlock()
+		cold := billing.CustomerID(uuid.New())
+		mustAdmit(t, g, work(cold, "first", 1)).Release(t.Context())
+		flush(t, g)
+		f.mu.Lock()
+		syncs := slices.Clone(f.syncs[before:])
+		f.mu.Unlock()
+		answered, carried := -1, -1
+		for i, p := range syncs {
+			for _, v := range p.Views {
+				if v.CustomerID == cold && answered < 0 {
+					answered = i
+					if len(p.Usage) > 0 {
+						t.Fatalf("the sync answering the first view carried %d usage items", len(p.Usage))
+					}
+				}
+			}
+			for _, u := range p.Usage {
+				if u.SourceID == "queued" && carried < 0 {
+					carried = i
+				}
+			}
+		}
+		if answered < 0 || carried < 0 {
+			t.Fatalf("first view in sync %d, queued usage in sync %d", answered, carried)
+		}
+		if carried != answered+1 {
+			t.Fatalf("the queued usage went in sync %d, want the one after the first view's (%d)", carried, answered+1)
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		var units int64
+		for k, v := range f.settled {
+			if k.customer == busy {
+				units += v
+			}
+		}
+		if units != 4 {
+			t.Fatalf("settled %d units of the busy customer, want 4 once", units)
 		}
 	})
 }

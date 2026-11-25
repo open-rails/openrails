@@ -279,9 +279,11 @@ func Load(configPath string) (*Config, error) {
 	// Settings that left the file: an environment variable or a mounted
 	// secret file names one as surely as a key does.
 	for _, retired := range retiredSettings {
-		_, inEnv := os.LookupEnv(retired.env)
-		_, inSecrets := secretFiles[retired.env]
-		if k.Exists(retired.key) || inEnv || inSecrets {
+		inSecrets := false
+		for name := range secretFiles {
+			inSecrets = inSecrets || retired.names(name)
+		}
+		if k.Exists(retired.key) || retired.inEnv() || inSecrets {
 			return nil, fmt.Errorf("%s / %s was removed: %s", retired.key, retired.env, retired.now)
 		}
 	}
@@ -306,7 +308,7 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("dashboard_base_url was removed: alert links point at the server's console")
 	}
 	if k.Exists("ccbill_webhook_ip_allowlist") {
-		return nil, fmt.Errorf("ccbill_webhook_ip_allowlist was renamed: set provider_sandbox.ccbill_webhook_sources")
+		return nil, fmt.Errorf("ccbill_webhook_ip_allowlist was removed: CCBill webhooks are accepted from CCBill's published ranges")
 	}
 	if k.Exists("merchant_cors") {
 		return nil, fmt.Errorf("merchant_cors was removed: browser CORS belongs to the host app, not OpenRails merchant config")
@@ -468,8 +470,8 @@ const WritePostureHint = "each merchant's write posture decides its provider wri
 // retiredDBEnv are the db section's environment variables.
 var retiredDBEnv = []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "DB_SSLROOTCERT", "DB_SQL_TRACE", "DB_LEASE_CONNS"}
 
-// retiredSettings are former settings: a key, its environment variable and
-// what replaced it.
+// retiredSettings are former settings: a key, its environment variable (a
+// section's ends in "_*") and what replaced it.
 type retiredSetting struct{ key, env, now string }
 
 var retiredSettings = []retiredSetting{
@@ -485,6 +487,32 @@ var retiredSettings = []retiredSetting{
 	{"return_origins", "RETURN_ORIGINS", "return URLs may name the billing origin, the merchant's issuer and its checkout.embed_origins"},
 	{"event_retention", "EVENT_RETENTION", "the event log keeps 90 days"},
 	{"local_sign_in", "LOCAL_SIGN_IN", "the server's own accounts always sign staff in to the console, by invitation"},
-	{"admin_console.issuers", "ADMIN_CONSOLE_ISSUERS", "the console's sign-in buttons are the merchants' trusted issuers (and root's, from bootstrap.yaml) that sign people in, at the client id openrails-console"},
+	{"admin_console.issuers", "ADMIN_CONSOLE_ISSUERS", "staff sign in at root's trusted issuers (bootstrap.yaml) or at their merchant's, found by its name, as the client openrails-console"},
 	{"resource_server", "RESOURCE_SERVER", "the server's resource is public_billing_base_url, and each merchant's trusted issuers are its applications in AuthKit"},
+	{"llm.provider", "LLM_PROVIDER", noCatalogAssistant},
+	{"llm.model", "LLM_MODEL", noCatalogAssistant},
+	{"llm.base_url", "LLM_BASE_URL", noCatalogAssistant},
+	{"llm.api_key", "LLM_API_KEY", noCatalogAssistant},
+	{"llm.catalog_copilot_enabled", "LLM_CATALOG_COPILOT_ENABLED", noCatalogAssistant},
+	{"llm.catalog_drafting_enabled", "LLM_CATALOG_DRAFTING_ENABLED", noCatalogAssistant},
+	{"provider_sandbox", "PROVIDER_SANDBOX_*", "no setting redirects a provider: a PSP's environment (test or sandbox) and its test credentials reach the provider's own test system; tests wire fakes in Go (Deps.ProviderEndpoints)"},
 }
+
+// names reports whether an environment variable or secret file is the
+// setting's.
+func (r retiredSetting) names(name string) bool {
+	if prefix, section := strings.CutSuffix(r.env, "*"); section {
+		return strings.HasPrefix(name, prefix)
+	}
+	return name == r.env
+}
+
+func (r retiredSetting) inEnv() bool {
+	if prefix, section := strings.CutSuffix(r.env, "*"); section {
+		return hasEnvPrefix(prefix)
+	}
+	_, present := os.LookupEnv(r.env)
+	return present
+}
+
+const noCatalogAssistant = "the catalog assistant was removed; OpenRails calls no language model"

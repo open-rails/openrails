@@ -279,8 +279,11 @@ func (s *MoneyService) destructiveUsageOrder(ctx context.Context, id uuid.UUID, 
 			return false, ErrUsageActionNotAllowed
 		}
 		if due > 0 {
-			_, err = s.moneyLedger(q, mid.UUID()).WriteOffOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), due,
-				ledger.Coord{Operation: ledger.OpOrderVoid, Source: "invoice_void", SourceID: id.String()}, &id)
+			if _, err = s.moneyLedger(q, mid.UUID()).WriteOffOwed(ctx, order.CustomerID, normalizeCurrency(order.Currency), due,
+				ledger.Coord{Operation: ledger.OpOrderVoid, Source: "invoice_void", SourceID: id.String()}, &id); err != nil {
+				return false, err
+			}
+			err = books.New(q, mid.UUID()).WaiveUsage(ctx, order, due, s.now())
 		}
 		return true, err
 	})
@@ -360,6 +363,10 @@ func (s *MoneyService) RecordUsageRemittance(ctx context.Context, in UsageRemitt
 		}
 		if tr.Amount != in.Amount || tr.OrderID == nil || *tr.OrderID != in.OrderID {
 			return billing.ErrIdempotencyKeyReused
+		}
+		if e := books.New(q, mid.UUID()).CollectUsage(ctx, books.UsageCollection{Payment: id, Customer: order.CustomerID, Order: &in.OrderID,
+			Currency: order.Currency, Amount: in.Amount, At: paidAt}); e != nil {
+			return e
 		}
 		if e := q.InsertOrderPayment(ctx, gen.InsertOrderPaymentParams{ID: id, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: in.OrderID,
 			LedgerTransferID: tr.ID, Channel: string(models.ChannelManual), TransactionID: in.TransactionID, Amount: in.Amount, Currency: order.Currency, PaidAt: paidAt, Now: now}); e != nil {

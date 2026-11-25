@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conservative OpenRails suite selection for an already-verified Git comparison."""
+"""Each CI tier's plan: conservative suite selection over a verified Git comparison, and the critical runs."""
 import argparse
 import json
 from pathlib import Path
@@ -8,6 +8,12 @@ import subprocess
 
 SOURCE = ("core", "runtime", "browser", "chart", "security")
 ALL = (*SOURCE, "artifacts")
+# The whole critical suite runs on this many runners (scripts/critical-results.py --shard).
+CRITICAL_SHARDS = 8
+# Merge groups run the whole critical suite once a full run of the open RC is green. While the RC
+# is red every group would fail, the fixes included.
+QUEUE_RUNS_CRITICAL = False
+TIERS = ("light", "queue", "push", "full", "focused")
 
 
 def full():
@@ -87,35 +93,67 @@ def read_changes(base, head):
     return changes
 
 
+def critical_runs(tier, selection):
+    """The critical selection (all, a focused list or none) and the runners it takes."""
+    if tier == "focused":
+        return " ".join(selection), ["selected"]
+    if tier == "full" or (tier == "queue" and QUEUE_RUNS_CRITICAL):
+        return "all", [f"{shard}/{CRITICAL_SHARDS}" for shard in range(1, CRITICAL_SHARDS + 1)]
+    # A matrix needs a value even when its job is skipped.
+    return "", ["none"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base")
+    parser.add_argument("--tier", choices=TIERS, required=True)
+    parser.add_argument("--base", help="light, queue, push: the tested base; a push without one selects every suite")
     parser.add_argument("--head")
-    parser.add_argument("--full", action="store_true")
+    parser.add_argument("--critical", default="", help="focused: journeys and scenarios (J24 OR-J04-S80)")
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
-    if args.full:
+    selection = args.critical.split()
+    if args.tier == "focused":
+        if not selection:
+            parser.error("a focused run names journeys or scenarios")
+        for item in selection:
+            if not re.fullmatch(r"J[0-9]{2}|OR-J[0-9]{2}-S[0-9]{2}", item):
+                parser.error(f"not a journey or scenario: {item}")
+    elif selection:
+        parser.error("only a focused run takes --critical")
+    compared = args.tier in ("light", "queue", "push") and (bool(args.base) or args.tier != "push")
+    if compared and not all(re.fullmatch(r"[0-9a-f]{40}", value or "") for value in (args.base, args.head)):
+        parser.error("base and head must be full commit SHAs")
+    if args.tier == "full":
         selected, reasons = full(), ["explicit full qualification"]
-    else:
-        if not all(re.fullmatch(r"[0-9a-f]{40}", value or "") for value in (args.base, args.head)):
-            parser.error("base and head must be full commit SHAs")
+    elif args.tier == "focused":
+        selected, reasons = {key: False for key in ALL}, ["focused critical run: " + " ".join(selection)]
+    elif compared:
         selected, reasons = select(read_changes(args.base, args.head))
+    else:
+        selected, reasons = full(), ["push with no previous commit on the branch: every suite"]
+    if args.tier == "push":
+        # release.yaml and docker-publish.yaml publish on a push event; a push never calls them.
+        selected["artifacts"] = False
+    critical, shards = critical_runs(args.tier, selection)
     if args.github_output:
         with args.github_output.open("a") as output:
+            output.write(f"tier={args.tier}\n")
             for key, value in selected.items():
                 output.write(f"{key}={str(value).lower()}\n")
+            output.write(f"critical={critical}\nshards={json.dumps(shards)}\n")
     explanations = {}
     for suite, enabled in selected.items():
         if not enabled:
             explanations[suite] = {"selected": False, "reason": "No changed input reaches this suite under the explicit isolation rules."}
-        elif args.full:
-            explanations[suite] = {"selected": True, "reason": "Explicit full qualification."}
+        elif not compared:
+            explanations[suite] = {"selected": True, "reason": reasons[0]}
         else:
             inputs = [reason for change in read_changes(args.base, args.head)
                       for flags, why in [select([change])] if flags[suite] for reason in why]
             explanations[suite] = {"selected": True, "affected_inputs": len(inputs),
                                    "examples": inputs[:8] or reasons}
-    print(json.dumps({"suites": selected, "reasons": reasons, "suite_explanations": explanations}, indent=2))
+    print(json.dumps({"tier": args.tier, "suites": selected, "critical": critical or None, "critical_runners": len(shards) if critical else 0,
+                      "reasons": reasons, "suite_explanations": explanations}, indent=2))
 
 
 if __name__ == "__main__":

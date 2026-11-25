@@ -104,8 +104,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{
 			PublicBillingBaseURL: api, RateLimits: billing.RateLimitsConfig{Purchase: &billing.RateLimit{}, Payment: &billing.RateLimit{}, Subscribe: &billing.RateLimit{}, Webhook: &billing.RateLimit{}},
-			CheckoutOrigin:  payment,
-			ProviderSandbox: billing.ProviderSandboxConfig{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()},
+			CheckoutOrigin: payment,
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.
 			Captcha: billing.CaptchaAccount{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
@@ -118,7 +117,8 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 		Auth:        server.AuthConfig{Keys: server.AuthKeys{Path: keys}}, // a loopback issuer's development keys
 		AuthKit:     func(c *authkit.Config) { c.Registration.AllowMissingSenders = true },
 		RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
-	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets)}})
+	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets),
+		ProviderEndpoints: openrails.ProviderEndpoints{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()}}})
 	if err != nil {
 		return err
 	}

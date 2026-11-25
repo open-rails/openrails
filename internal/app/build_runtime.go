@@ -49,7 +49,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -91,6 +90,7 @@ type runtimeOverrides struct {
 	BasisTheoryTransport http.RoundTripper
 	NMITransport         http.RoundTripper
 	FXTransport          http.RoundTripper
+	ProviderEndpoints    config.ProviderEndpoints
 	DB                   *db.DB
 	Redis                redis.UniversalClient
 	Clock                clockwork.Clock
@@ -221,8 +221,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		return runtimeRef.Merchants
 	}
 	railConfigs := railresolve.NewMerchantsSource(cfg, merchantsFn)
+	var endpoints config.ProviderEndpoints
+	if overrides != nil {
+		endpoints = overrides.ProviderEndpoints
+	}
 	var stripeTransport http.RoundTripper
-	if api := config.SandboxStripeAPIURL(cfg); api != "" {
+	if api := endpoints.StripeAPIURL; api != "" {
 		stripeTransport = stripeapi.HostRewriteTransport(api)
 	}
 	if overrides != nil && overrides.StripeTransport != nil {
@@ -232,7 +236,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	postures := writeposture.View{DB: database}
 	stripeClients := stripeapi.NewFactory(stripeTransport, postures)
 	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
-	nmiClients := &railresolve.NMIFactory{Config: cfg, Postures: postures, Log: logger}
+	nmiClients := &railresolve.NMIFactory{Gateway: endpoints.NMIGatewayURL, Postures: postures, Log: logger}
 	if overrides != nil {
 		nmiClients.Transport = overrides.NMITransport
 	}
@@ -253,7 +257,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	// request-plane transaction builds).
 	solanaRPCResolver := &solanamodule.MerchantRPCBuilder{
 		MerchantsFn: merchantsFn,
-		Endpoint:    config.SandboxSolanaRPCURL(cfg),
+		Endpoint:    endpoints.SolanaRPCURL,
 		Postures:    postures,
 		Log:         logger,
 	}
@@ -333,6 +337,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		RedisClient:   redisClient,
 		Config:        cfg,
 		Clock:         clock,
+
+		ProviderEndpoints: endpoints,
 		// #746: one proxy-aware client-IP resolver, built once from config
 		// and Cloudflare's ranges.
 		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies),
@@ -373,7 +379,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		MoneyService:        serviceInstances.MoneyService,
 		MetricsService:      serviceInstances.MetricsService,
 		DashboardService:    serviceInstances.DashboardService,
-		CopilotService:      serviceInstances.CopilotService,
 		AlertService:        alertService,
 		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock, Log: logger},
 		MoneyCharger:        moneyCharger,
@@ -409,8 +414,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	runtime.CollectionResolver = collectionResolver
 	runtime.MoneyService.SetUsageRecoveryResolver(collectionResolver)
 	moneyCharger.SetAdapterResolver(collectionResolver)
-	// A declared loopback NMI gateway (config.ProviderSandbox) reaches every
-	// NMI client through the shared factory.
+	// A loopback NMI gateway (Deps.ProviderEndpoints) reaches every NMI
+	// client through the shared factory.
 	runtime.NMIClients = nmiClients
 	if serviceInstances.PurchaseService != nil {
 		serviceInstances.PurchaseService.NMIClients = nmiClients
@@ -599,7 +604,6 @@ type servicesInstances struct {
 	MoneyService        *money.MoneyService
 	MetricsService      *metrics.Service
 	DashboardService    *dashboard.Service
-	CopilotService      *copilot.Service
 	RailCustomerService *payments.RailCustomerService
 }
 
@@ -621,18 +625,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		}
 	}
 	metricsService := metrics.NewService(database)
-	// The catalog copilot needs an LLM key and explicit consent to send
-	// catalog data to the provider.
-	var catalogLLM copilot.LLM
-	if config.LLMConfigured(cfg.LLM) {
-		llmBaseURL := strings.TrimSpace(cfg.LLM.BaseURL)
-		switch config.LLMProvider(cfg.LLM) {
-		case config.LLMProviderOpenAI:
-			catalogLLM = copilot.NewOpenAILLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
-		default: // anthropic — unknown providers refuse boot in config.Validate
-			catalogLLM = copilot.NewAnthropicLLM(cfg.LLM.APIKey, config.LLMModel(cfg.LLM), llmBaseURL)
-		}
-	}
 	dashboardService := dashboard.NewService(database)
 	railCustomerService := payments.NewRailCustomerService(database)
 	// FX for Solana token quotes and policy-currency admission: live rates
@@ -668,19 +660,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	// the per-merchant client resolver.
 	priceMigrationService := subscriptions.NewPriceMigrationService(database, priceService, subscriptionService, merchantconfig.NewStore(database),
 		&subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), clock)
-
-	// Catalog Q&A and drafting are independently opt-in. Draft tools only
-	// propose changes; the price-migration API enforces notice windows.
-	copilotService := copilot.NewService(copilot.Deps{
-		Products: productService,
-		Prices:   priceService,
-		Subs:     subscriptionService,
-		Reprices: priceMigrationService,
-		LLM:      catalogLLM,
-		Enabled:  cfg.LLM.CatalogCopilotEnabled,
-		Drafting: cfg.LLM.CatalogDraftingEnabled,
-		Clock:    clock,
-	})
 
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
@@ -810,7 +789,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		MoneyService:                 moneyService,
 		MetricsService:               metricsService,
 		DashboardService:             dashboardService,
-		CopilotService:               copilotService,
 		RailCustomerService:          railCustomerService,
 	}, nil
 }

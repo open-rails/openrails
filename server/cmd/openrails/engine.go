@@ -29,7 +29,7 @@ func openServer(ctx context.Context, merchantManifest string) (_ *server.Server,
 		return nil, nil, nil, nil, err
 	}
 	cfg := h.Server
-	private, err := bootstrap.PrivateNetworkApplications(merchantManifest)
+	private, err := bootstrap.PrivateNetworkApplications(merchantManifest, slog.Default())
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

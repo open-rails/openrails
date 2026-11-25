@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -13,7 +12,7 @@ import (
 // default, because it cannot be served as written. The engine serves without
 // it and reports it (see Runtime.Refusals); it never fails boot.
 type Degradation struct {
-	// Field names the setting: "captcha", "trusted_proxies", "llm", ...
+	// Field names the setting: "captcha", "trusted_proxies", "hyperswitch", ...
 	Field string
 	Err   error
 }
@@ -43,10 +42,6 @@ func Degrade(cfg *billing.Config) []Degradation {
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		cfg.Captcha = defaults.Captcha
 		off("captcha", fmt.Errorf("%w; captcha is off", err))
-	}
-	if err := validateLLM(cfg.LLM); err != nil {
-		cfg.LLM = billing.LLMConfig{}
-		off("llm", fmt.Errorf("%w; the catalog copilot is off", err))
 	}
 	if err := validateHyperSwitch(cfg); err != nil {
 		cfg.HyperSwitch = billing.HyperSwitchConfig{}
@@ -81,21 +76,6 @@ func Degrade(cfg *billing.Config) []Degradation {
 			kept = append(kept, raw)
 		}
 		return kept
-	}
-	{
-		sandbox := &cfg.ProviderSandbox
-		sandbox.CCBillWebhookSources = keep("provider_sandbox.ccbill_webhook_sources", sandbox.CCBillWebhookSources, validateSourceCIDR)
-		for _, gateway := range []struct {
-			key string
-			url *string
-		}{{"nmi_gateway_url", &sandbox.NMIGatewayURL}, {"stripe_api_url", &sandbox.StripeAPIURL}, {"solana_rpc_url", &sandbox.SolanaRPCURL}, {"ccbill_datalink_url", &sandbox.CCBillDataLinkURL}} {
-			if raw := strings.TrimSpace(*gateway.url); raw != "" {
-				if err := ValidateLoopbackGatewayURL(raw); err != nil {
-					*gateway.url = ""
-					off("provider_sandbox."+gateway.key, fmt.Errorf("%w; the provider's own sandbox endpoint applies", err))
-				}
-			}
-		}
 	}
 	cfg.TrustedProxies = keep("trusted_proxies", cfg.TrustedProxies, validateSourceCIDR)
 	return out

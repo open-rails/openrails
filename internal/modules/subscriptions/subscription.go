@@ -286,18 +286,6 @@ func subscriptionSortKey(sort billing.SubscriptionSort) func(*models.Subscriptio
 	return nil
 }
 
-// CountSubscribers is how many of the merchant's subscriptions match f.
-func (s *SubscriptionService) CountSubscribers(ctx context.Context, f GetSubscriptionsFilters) (int64, error) {
-	filter, err := s.filters(ctx, f)
-	if db.IsNotFound(err) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return s.subscriptionRepo.Count(ctx, filter)
-}
-
 func (s *SubscriptionService) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]models.Subscription, int, error) {
 	return s.subscriptionRepo.GetPaginatedByUserID(ctx, userID, page, pageSize)
 }

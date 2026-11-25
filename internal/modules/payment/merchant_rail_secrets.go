@@ -309,7 +309,7 @@ func (s *PurchaseService) nmiFactory() *railresolve.NMIFactory {
 	if s.SubscriptionService != nil {
 		d = s.SubscriptionService.Database()
 	}
-	return &railresolve.NMIFactory{Config: s.Config, Postures: writeposture.View{DB: d}, Log: s.Log}
+	return &railresolve.NMIFactory{Postures: writeposture.View{DB: d}, Log: s.Log}
 }
 
 func (s *PurchaseService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBillClient, error) {

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 747,
+  "scenario_count": 757,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1112,6 +1112,11 @@
       "id": "OR-J31-S16",
       "journey": "J31",
       "name": "Stored limit rate cards migrate to counts: a per-unit card becomes one count and a matrix one per priced cell with its filter, the limit's field owner renames, and a card counts cannot express refuses the migration with nothing changed"
+    },
+    {
+      "id": "OR-J31-S17",
+      "journey": "J31",
+      "name": "A database written before the reporting rollups, holding a cancel of every kind a subscription records (user, merchant, expired, chargeback, upgrade, provider, abandoned), upgrades through them and adopts one cancel decision of each kind"
     },
     {
       "id": "OR-J31-S09",
@@ -2784,6 +2789,11 @@
       "name": "MRR leaving a product, a currency and a customer settles: a customer's euro plan ends while its dollar plan stays (it stays one customer), another's only plan ends at once, and the first's last plan churns at its period's end through the billing pass's MRR scan; the product totals and the distinct customers fall to none and agree with their flows"
     },
     {
+      "id": "OR-J42-S33",
+      "journey": "J42",
+      "name": "A full refund that revokes access ends a subscription whose MRR counted its customer: the refund finalizes, its replay returns the same refund, and the customer leaves the distinct customers once, as one churn, with nothing below zero"
+    },
+    {
       "id": "OR-J28-S09",
       "journey": "J28",
       "name": "An NMI delivery signed under any nonce is accepted, with no replay window; a replay or retry of its event applies nothing"
@@ -3386,7 +3396,7 @@
     {
       "id": "OR-J41-S09",
       "journey": "J41",
-      "name": "A usage order's card and remitted payments book their cash and leave it for the receivable"
+      "name": "A usage order's card and remitted payments book their cash and apply it to the usage receivable"
     },
     {
       "id": "OR-J41-S10",
@@ -3461,7 +3471,7 @@
     {
       "id": "OR-J41-S24",
       "journey": "J41",
-      "name": "A usage order's refund takes what its payment left unapplied first, contra beyond; its chargeback posts the cash side alone"
+      "name": "A usage order's refund is contra revenue, its payment's cash having settled the receivable; its chargeback reopens the owed, receivable again, with no contra"
     },
     {
       "id": "OR-J41-S25",
@@ -3599,6 +3609,11 @@
       "name": "A billing pass whose holder died leaves a lease that lapses on its own; a pass started meanwhile exits, and the next takes what is due"
     },
     {
+      "id": "OR-J04-S82",
+      "journey": "J04",
+      "name": "Deps.ProviderEndpoints sends provider clients only to loopback fakes: a hostname, a non-loopback address, userinfo or a source matching every address refuses New, and so does any endpoint beside a live PSP"
+    },
+    {
       "id": "OR-J38-S83",
       "journey": "J38",
       "name": "Of concurrent pulls of one merchant one runs and the others skip, another merchant's pull runs beside it, and a provider refresh waits for the running pull; the pull holds a lease row, not a database session"
@@ -3616,10 +3631,15 @@
     {
       "id": "OR-J06-S73",
       "journey": "J06",
-      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and say what OpenRails derives instead; the key path alone loads"
+      "name": "A provider_sandbox section or PROVIDER_SANDBOX_* variable refuses boot and names its replacement: no setting redirects a provider"
     },
     {
       "id": "OR-J06-S74",
+      "journey": "J06",
+      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and say what OpenRails derives instead; the key path alone loads"
+    },
+    {
+      "id": "OR-J06-S75",
       "journey": "J06",
       "name": "A server whose staff cannot enroll a second factor, a public issuer with no totp.key, is not ready and logs the key to mount; with it mounted the server is ready"
     },
@@ -3737,6 +3757,36 @@
       "id": "OR-J24-S66",
       "journey": "J24",
       "name": "Two engines starting together on a fresh schema and a fresh ClickHouse database take turns migrating it: each migration is recorded once, one store identity, and both serve usage"
+    },
+    {
+      "id": "OR-J40-S20",
+      "journey": "J40",
+      "name": "Usage owed beyond the balance is usage revenue receivable as it posts; a card collection and remittances settle the receivable in the general ledger"
+    },
+    {
+      "id": "OR-J40-S21",
+      "journey": "J40",
+      "name": "A waived usage order takes its revenue back; an uncollectible one carries an allowance for doubtful accounts that comes back as it is collected, or is written off when it is waived"
+    },
+    {
+      "id": "OR-J40-S22",
+      "journey": "J40",
+      "name": "Units owed equal the general-ledger usage receivable after a usage posting, a running charge, a remittance, a gift's repayment, an allowance and a waiver, and after a chargeback whose reopened owed is billed at once and collected again, even once usage terms are withdrawn"
+    },
+    {
+      "id": "OR-J40-S27",
+      "journey": "J40",
+      "name": "A running charge's owed is receivable as it posts and credit repays it at face; a collection settles the receivable and counts owed from before the books as revenue, which ledger-audit warns of until then"
+    },
+    {
+      "id": "OR-J40-S28",
+      "journey": "J40",
+      "name": "A chargeback of a usage order's payment owes again what it paid, in both books, once, and its card's rounding change is a loss; the reopened owed is billed and collected again, and the dispute won after that gives the loss back and is the customer's credit at face for the rest, with nothing left unapplied"
+    },
+    {
+      "id": "OR-J40-S29",
+      "journey": "J40",
+      "name": "A merchant's refund of a usage order's payment, made through OpenRails or observed from the provider, records and leaves its owed settled; a chargeback after a refund owes again only what the refund left, keeps it if the refund settles later, and its won dispute settles it and gives the loss back"
     }
   ]
 }

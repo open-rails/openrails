@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
@@ -153,7 +154,7 @@ func postRunningChargesThrough(ctx context.Context, q *gen.Queries, merchantID, 
 	if _, bound := merchant.FromContext(ctx); !bound {
 		ctx = merchant.WithID(ctx, billing.MerchantID(merchantID))
 	}
-	svc := &MoneyService{clock: clockwork.NewFakeClockAt(now), usagePosted: true}
+	svc := &MoneyService{db: db.TxOf(q), clock: clockwork.NewFakeClockAt(now), usagePosted: true}
 	payer := identity.CustomerID(customer)
 	if _, err := svc.lockBalance(ctx, q, payer, customer.String(), currency); err != nil {
 		return false, err

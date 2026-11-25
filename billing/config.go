@@ -69,20 +69,10 @@ type Config struct {
 	HyperSwitch HyperSwitchConfig `yaml:"hyperswitch"`
 	// Solana is the deployment's Solana configuration: its crankers.
 	Solana SolanaConfig `yaml:"solana"`
-	// LLM is the model behind the console's catalog questions.
-	// Without an API key those features are off.
-	LLM LLMConfig `yaml:"llm"`
 	// ReadCache overrides how long the engine's handles serve catalog and
 	// configuration reads from memory. Set in code: the standalone server
 	// reads through no handle.
 	ReadCache ReadCache `yaml:"-"`
-
-	// ProviderSandbox points non-live PSPs' provider clients at loopback
-	// gateways, to qualify a process against fake providers, and accepts
-	// extra CCBill webhook sources for sandbox accounts; unset, none. A
-	// gateway is refused beside a live PSP and for anything but a literal
-	// loopback address.
-	ProviderSandbox ProviderSandboxConfig `yaml:"provider_sandbox"`
 }
 
 // DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
@@ -267,47 +257,6 @@ type SolanaCrankerConfig struct {
 	Key string `yaml:"key"`
 	// PrivateKey is the base58 keypair (local_keypair). A secret.
 	PrivateKey string `yaml:"private_key"`
-}
-
-// LLMConfig configures the model behind the console's catalog questions.
-type LLMConfig struct {
-	// Provider selects the API dialect: "anthropic" (when empty) or
-	// "openai". Any other value is refused.
-	Provider string `yaml:"provider"`
-	// Model is the provider's model ID; empty is the provider's default.
-	Model string `yaml:"model"`
-	// BaseURL replaces the provider's public endpoint: an absolute https URL.
-	// With openai it includes the version segment (https://host/v1); with
-	// anthropic it is the origin.
-	BaseURL string `yaml:"base_url"`
-	// APIKey is the provider credential. Empty turns the features off.
-	APIKey string `yaml:"api_key"`
-	// CatalogCopilotEnabled turns on read-only questions about the catalog,
-	// which send aggregate catalog and subscriber counts to the provider.
-	CatalogCopilotEnabled bool `yaml:"catalog_copilot_enabled"`
-	// CatalogDraftingEnabled lets the catalog copilot draft price and catalog
-	// changes. Drafts are proposals; nothing is applied.
-	CatalogDraftingEnabled bool `yaml:"catalog_drafting_enabled"`
-}
-
-// ProviderSandboxConfig names loopback provider gateways for sandbox runs.
-// Each is an absolute http(s) URL whose host is a loopback IP literal, with no
-// userinfo; hostnames, even "localhost", are refused.
-type ProviderSandboxConfig struct {
-	// NMIGatewayURL replaces the NMI sandbox endpoints.
-	NMIGatewayURL string `yaml:"nmi_gateway_url"`
-	// StripeAPIURL replaces the Stripe API root. The readonly guard and the
-	// pinned API version still apply.
-	StripeAPIURL string `yaml:"stripe_api_url"`
-	// SolanaRPCURL replaces every merchant's Solana RPC endpoint.
-	SolanaRPCURL string `yaml:"solana_rpc_url"`
-	// CCBillDataLinkURL replaces the CCBill DataLink endpoint.
-	CCBillDataLinkURL string `yaml:"ccbill_datalink_url"`
-	// CCBillWebhookSources are extra source CIDRs accepted as a sandbox
-	// CCBill account's webhook origins. CCBill signs nothing, so the source
-	// address is the authentication: a live account accepts CCBill's own
-	// ranges alone.
-	CCBillWebhookSources []string `yaml:"ccbill_webhook_sources"`
 }
 
 // DefaultConfig is every engine setting's default: the value a setting left

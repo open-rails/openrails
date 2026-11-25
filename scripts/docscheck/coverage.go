@@ -47,10 +47,6 @@ var (
 // covered at their parent: rate_limits buckets are named by limiter.
 var collapsed = []string{"rate_limits"}
 
-// hiddenCommands are CLI commands that are no operator's: loopback provider
-// fakes for disposable test stacks.
-var hiddenCommands = map[string]bool{"sandbox": true, "sandbox nmi-gateway": true}
-
 // freeForm are sections whose keys are someone else's or the operator's own
 // names, so a documented key beneath them is not checked: rate-limit
 // buckets, and the chart's config (config.yaml itself, checked as
@@ -405,9 +401,7 @@ func buildCoverage(root, goTxt string) (*Coverage, error) {
 	}
 	for _, c := range cmds {
 		cov.AllCommands[c] = true
-		if !hiddenCommands[c] {
-			cov.Commands = append(cov.Commands, c)
-		}
+		cov.Commands = append(cov.Commands, c)
 	}
 	return cov, nil
 }

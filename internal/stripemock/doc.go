@@ -1,12 +1,12 @@
-// Package stripemock is a stateful, deterministic Stripe for tests and
-// disposable sandbox stacks, serving the Stripe API surface OpenRails uses.
+// Package stripemock is a stateful, deterministic Stripe for tests and test
+// fixtures, serving the Stripe API surface OpenRails uses.
 //
-// Serve it over loopback (New, then point Config.ProviderSandbox.StripeAPIURL
+// Serve it over loopback (New, then point Deps.ProviderEndpoints.StripeAPIURL
 // at URL) or in process (NewUnstarted as Deps.StripeTransport); either way
 // OpenRails' Stripe client, read-only guard and pinned API version stand in
 // front of it. Webhooks go, signed, where SendWebhooksTo (snapshot events)
 // or SendThinEventsTo (thin events) says. Time comes from Options.Clock.
-// Only tests and sandbox commands may import it.
+// Only tests and test fixtures may import it.
 //
 // # Known differences from real Stripe
 //

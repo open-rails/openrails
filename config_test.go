@@ -84,6 +84,8 @@ func TestEngineDepsCopiesEveryField(t *testing.T) {
 		CheckoutAssets:  fstest.MapFS{"index.html": {}},
 		StripeTransport: http.DefaultTransport, BasisTheoryTransport: http.DefaultTransport, NMITransport: http.DefaultTransport, FXTransport: http.DefaultTransport,
 		Clock: clockwork.NewFakeClock(),
+		ProviderEndpoints: ProviderEndpoints{NMIGatewayURL: "http://127.0.0.1:1", StripeAPIURL: "http://127.0.0.1:2", SolanaRPCURL: "http://127.0.0.1:3",
+			CCBillDataLinkURL: "http://127.0.0.1:4", CCBillWebhookSources: []string{"127.0.0.1/32"}},
 	}
 	for _, field := range mirror.Zero(deps, rootPkg) {
 		t.Fatalf("the test leaves %s zero", field)

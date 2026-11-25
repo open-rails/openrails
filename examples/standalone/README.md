@@ -18,4 +18,4 @@ OPENRAILS_CLIENT_SECRET=$(openssl rand -hex 32) docker compose up -d --build
 
 The store is http://localhost:8080, the server http://localhost:3053, the inbox
 http://localhost:8025. `docker compose down -v` removes it all.
-`compose.e2e.yaml` adds a fake NMI gateway and the browser tests.
+`compose.e2e.yaml` runs the server as `server/ci/standalone`, with a fake NMI gateway inside, and adds the browser tests.

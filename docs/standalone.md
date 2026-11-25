@@ -176,7 +176,7 @@ are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
 (`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
 signing keys; none relaxes a protection, and a deployment that leaves one unset
-fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit`, `destructive_action_limits`, `llm` and `provider_sandbox`.
+fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit` and `destructive_action_limits`.
 
 **Listener and lifecycle**
 
@@ -327,27 +327,6 @@ user_action_rate_limit:
   paid_customers_per_daily_customer: 100
 ```
 
-**LLM**
-
-| Key | Meaning |
-|---|---|
-| `llm.provider`, `llm.model` | `anthropic` (default) or `openai`, and a model; each provider has a default |
-| `llm.api_key` | a secret (`LLM_API_KEY`); without it the catalog copilot is not mounted |
-| `llm.base_url` | an endpoint override; with `openai`, any compatible backend, including `/v1` |
-| `llm.catalog_copilot_enabled` | consent to send aggregate catalog and subscriber counts to the provider for `POST /v1/console/catalog/ask` |
-| `llm.catalog_drafting_enabled` | separate consent for the copilot's draft tools |
-
-Metrics and dashboards use no LLM.
-
-**Provider sandbox (tests only)**
-
-| Key | Meaning |
-|---|---|
-| `provider_sandbox.nmi_gateway_url`, `.stripe_api_url`, `.solana_rpc_url`, `.ccbill_datalink_url` | loopback fakes the rails talk to instead of the providers. The host must be a loopback IP literal and every PSP non-live; anything else refuses boot |
-| `provider_sandbox.ccbill_webhook_sources` | extra CCBill webhook source CIDRs, honored only for a webhook naming a sandbox CCBill account; `/0` is refused |
-
-`openrails sandbox nmi-gateway` serves such an NMI fake.
-
 ## The merchant manifest
 
 The manifest is `version: 1` and `merchants.<name>`, each entry a merchant
@@ -394,7 +373,6 @@ mounted file or the environment, named like its key's variable.
 | ClickHouse | `CLICKHOUSE_PASSWORD` |
 | SMTP | `EMAIL_SMTP_PASSWORD` |
 | Vault | `VAULT_TOKEN`, or `VAULT_SECRET_ID` re-read from `vault.secrets_path` |
-| LLM | `LLM_API_KEY` |
 | Solana local keypairs | `SOLANA_CRANKERS` |
 | AuthKit's signing key and TOTP key | `keys.json` and `totp.key` under `auth.keys.path`, or the `AUTHKIT_*` variables |
 | PSP and custodian credentials | Vault, or the merchant manifest mounted from a secret |
@@ -668,8 +646,7 @@ the checkout origin. Give one public origin to `public_billing_base_url`, which 
   (`nmi`, `stripe`, `ccbill`, `basistheory`), never a PSP key, and the PSP's
   account id. The account resolves the merchant and its own secret verifies the
   request. NMI and Stripe sign; CCBill signs nothing and is accepted only from
-  its published ranges (plus `provider_sandbox.ccbill_webhook_sources` for
-  sandbox accounts). Stripe endpoints are registered automatically once
+  its published ranges. Stripe endpoints are registered automatically once
   `public_billing_base_url` is public https and provider writes are allowed.
   Per-rail setup: [PSPs](client.md#merchant-configuration-and-psps).
 
@@ -678,8 +655,7 @@ hosted product should not let merchants claim.
 
 ### Network egress
 
-Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers'
-JWKS, `llm.base_url`):
+Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' JWKS):
 
 | Destination | For |
 |---|---|
@@ -689,7 +665,6 @@ JWKS, `llm.base_url`):
 | `api.basistheory.com`, `cdn.basistheory.com` | Basis Theory custodians |
 | `api.mainnet-beta.solana.com`, `api.devnet.solana.com`, a PSP's `rpc_url` | Solana RPC |
 | `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | captcha, when set |
-| `api.anthropic.com`, `api.openai.com` | the catalog copilot, with `llm.api_key` and no `llm.base_url` |
 
 ## Event store
 
@@ -841,8 +816,8 @@ or CCBill charge and retry). Configuration never moves a subscription to another
 collector.
 
 Each PSP's environment decides whether money is real, and the provider must
-agree before it arms; test seams (`provider_sandbox`) are refused beside a live
-PSP, and a non-live PSP relaxes no other protection.
+agree before it arms; no setting redirects a provider, and a non-live PSP
+relaxes no other protection.
 
 **Importing a merchant with production credentials.** Hold it before its
 subscriptions arrive: imported `past_due` subscriptions are due at once.
@@ -1212,7 +1187,6 @@ the merchant the token is bound to.
 | `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters, credit lot counters, rollups and sign rules, and warn of a general-ledger total opposite its normal side; non-zero on a finding, not a warning. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
-| `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |
 
 ## Kubernetes and Helm
 

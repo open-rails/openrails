@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/orders/orderevent"
 	"github.com/open-rails/openrails/internal/notificationinbox"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -29,7 +30,12 @@ import (
 // delinquency module installs it.
 var Changed func(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) error
 
+// changed brings the order's allowance for doubtful accounts to its state,
+// then runs Changed.
 func changed(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) error {
+	if err := books.New(d.Gen(ctx), order.MerchantID).SettleAllowance(ctx, order.ID, now); err != nil {
+		return err
+	}
 	if Changed == nil {
 		return nil
 	}

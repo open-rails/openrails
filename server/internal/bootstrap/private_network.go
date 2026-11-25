@@ -19,7 +19,7 @@ import (
 // conventional file declares nothing. The server's AuthKit then fetches keys
 // on a private network; applications registered at run time still may not
 // name one (controlplane.RegistrationGuard).
-func PrivateNetworkApplications(merchantPath string) (bool, error) {
+func PrivateNetworkApplications(merchantPath string, logger *slog.Logger) (bool, error) {
 	path := strings.TrimSpace(merchantPath)
 	if path == "" {
 		path = DefaultMerchantConfigManifestPath
@@ -44,7 +44,7 @@ func PrivateNetworkApplications(merchantPath string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read AuthKit authority manifest: %w", err)
 	}
-	manifest, err := authkit.ParseBootstrapManifestYAML(raw, slog.Default())
+	manifest, err := authkit.ParseBootstrapManifestYAML(raw, logger)
 	if err != nil {
 		return false, fmt.Errorf("AuthKit authority manifest %s: %w", DefaultBootstrapManifestPath, err)
 	}

@@ -50,8 +50,8 @@ type RPCClientConfig struct {
 	// URL is the PSP's own endpoint (secrets.rpc_url), tried first; the
 	// network's public endpoint is its fallback.
 	URL string
-	// PublicURL replaces the network's public endpoint: a sandbox run's
-	// loopback node.
+	// PublicURL replaces the network's public endpoint: a loopback fake node
+	// (Deps.ProviderEndpoints).
 	PublicURL string
 	// ReadOnly blocks transaction submission at the wire (readonly write posture).
 	ReadOnly bool
