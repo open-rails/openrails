@@ -1361,7 +1361,7 @@
     {
       "id": "OR-J01-S32",
       "journey": "J01",
-      "name": "The console's sign-in offers the server's own accounts alone until root trusts an issuer, never a merchant's app, and then a button per root issuer whose sign-in a probe shows works: discovery naming it exactly, authorization, token and key endpoints, the code flow with PKCE S256 and published keys; a mismatched, unreachable, keyless or PKCE-less issuer is hidden and reported with why among the configuration's refusals"
+      "name": "The console signs staff in only with the server's own accounts: its config names no issuer even when root trusts applications, and none is probed or reported among the configuration's refusals"
     },
     {
       "id": "OR-J22-S05",

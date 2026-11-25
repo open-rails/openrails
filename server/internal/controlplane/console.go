@@ -6,34 +6,7 @@ import (
 	"slices"
 
 	"github.com/open-rails/authkit/iam"
-
-	"github.com/open-rails/openrails/server/internal/adminconsole"
 )
-
-// RootConsoleSources are root's enabled trusted applications: the
-// deployment's own, declared in the bootstrap manifest or by root's
-// credential managers, which the console's sign-in page offers once they
-// pass its probe.
-func (c *ControlPlane) RootConsoleSources(ctx context.Context) ([]adminconsole.Source, error) {
-	if c == nil || c.client == nil {
-		return nil, ErrNoControlPlane
-	}
-	var out []adminconsole.Source
-	for app, err := range iam.All(func(p iam.PageRequest) (iam.ListPage[iam.RemoteApplication], error) {
-		return c.client.ListRemoteApplications(ctx, iam.RootGroup(), p)
-	}) {
-		if errors.Is(err, iam.ErrGroupNotFound) {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		if app.Enabled {
-			out = append(out, adminconsole.Source{Issuer: app.Issuer, Operator: app.TrustRoot != iam.ApplicationTrustRootUser})
-		}
-	}
-	return out, nil
-}
 
 // SecondFactor fails while the server's accounts need a second factor staff
 // cannot enroll: AuthKit's authkit_two_factor probe, or authenticator apps

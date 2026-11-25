@@ -488,7 +488,7 @@ var retiredSettings = []retiredSetting{
 	{"return_origins", "RETURN_ORIGINS", "return URLs may name the billing origin, the merchant's issuer and its checkout.embed_origins"},
 	{"event_retention", "EVENT_RETENTION", "the event log keeps 90 days"},
 	{"local_sign_in", "LOCAL_SIGN_IN", "the server's own accounts always sign staff in to the console, by invitation"},
-	{"admin_console.issuers", "ADMIN_CONSOLE_ISSUERS", "staff sign in at root's trusted issuers (bootstrap.yaml) or at their merchant's, found by its name, as the client openrails-console"},
+	{"admin_console.issuers", "ADMIN_CONSOLE_ISSUERS", "staff sign in to the console with the server's own accounts; a merchant's own site embeds the admin screens with its own sign-in"},
 	{"resource_server", "RESOURCE_SERVER", "the server's resource is public_url, and each merchant's trusted issuers are its applications in AuthKit"},
 	{"llm.provider", "LLM_PROVIDER", noCatalogAssistant},
 	{"llm.model", "LLM_MODEL", noCatalogAssistant},

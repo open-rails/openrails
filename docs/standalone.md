@@ -446,7 +446,7 @@ OpenRails builds AuthKit's configuration (`controlplane.AuthKit`) from settings 
 
 The server's own accounts are staff. They join by invitation, need a second factor (a passkey or an authenticator app, whose secrets `totp.key` encrypts) and stay signed in for 30 days; passwords follow AuthKit's policy (8 to 128 characters, common ones refused). Every sign-in binds its session to the browser's DPoP key (RFC 9449): its access tokens go with a proof of that key and are refused as bearer tokens. Readiness fails while staff cannot enroll a second factor: with no `totp.key` the log names the file to mount. The server fixes the merchant roles, the API-key prefix, the scopes `openrails:merchant` and `openrails:self` and the console's client `openrails-console`; a token's `aud` is its issuer, and lifetimes and rate limits are AuthKit's.
 
-A hosted product built on `server` sets its own account policy (open registration with `MerchantCreation`, agreements, usernames, group OAuth clients, SMS countries, AuthKit's opt-in route groups) in code, with `server.Config.AuthKit`: it adjusts the derived configuration before the fixed parts apply. `AdminConsole.OwnAccountsOnly` keeps its console to its own accounts, with no trusted issuer's sign-in.
+A hosted product built on `server` sets its own account policy (open registration with `MerchantCreation`, agreements, usernames, group OAuth clients, SMS countries, AuthKit's opt-in route groups) in code, with `server.Config.AuthKit`: it adjusts the derived configuration before the fixed parts apply.
 
 ### The account directory
 
@@ -527,14 +527,11 @@ refused on `/v1/app` (`403 application_required`).
 
 ### The console
 
-`/admin` is the staff console. Staff sign in with the server's own accounts, always offered as AuthKit's sign-in form. Beside it the page shows a **Sign in with** button, named for the issuer's host, for each of root's trusted issuers (the deployment's own, from the bootstrap manifest) whose sign-in works, and nothing else: with none, the form alone. A merchant's trusted issuer is never a button; its staff use the admin screens in its own site instead ([below](#admin-screens-in-your-own-site)).
+`/admin` is the staff console. Staff sign in with the server's own accounts, AuthKit's sign-in form, and with nothing else. A merchant's own staff can instead use the admin screens in its own site, signed in there ([below](#admin-screens-in-your-own-site)).
 
-The server probes each of root's issuers in the background, at boot and as the sign-in page is loaded, never while it waits: its OpenID Connect metadata names it exactly and names authorization, token and key endpoints, it offers the authorization code flow with PKCE `S256` where it lists what it supports, and its key set has keys (an operator-declared issuer is read on any network, a run-time one on public hosts only). A working issuer is probed again after 10 minutes, a failing one after a minute, so one that recovers comes back. A failing issuer is hidden and is a refusal of the configuration, `console.issuers.<issuer>` with why: logged when it changes, a degraded `configuration` in readiness and `openrails_dependency_up`, and named by the `openrails_configuration` probe ([health](#health-and-monitoring)). Whether the issuer registered the console's client only a sign-in shows.
+The console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
 
-- **With the server's own accounts** the console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
-- **At a trusted issuer** the console is the OAuth 2.0 public client `openrails-console` there (authorization code with PKCE, redirect URI `<origin>/admin/callback`, `<origin>` being `public_url`'s). The token it receives is minted for OpenRails' resource by the issuer, so there is no exchange; people, roles and second factors are the issuer's.
-
-Each flow, and what the issuer registers, is in [authentication](authentication.md#staff-and-operators). `admin_console.disabled` omits the console.
+The flow is in [authentication](authentication.md#standalone-the-servers-own-accounts). `admin_console.disabled` omits the console.
 
 ### Admin screens in your own site
 

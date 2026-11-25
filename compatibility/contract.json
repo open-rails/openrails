@@ -1427,7 +1427,7 @@
       "func MerchantRole(name string) (iam.Role, bool)",
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
-      "type AdminConsole struct {\n\tDisabled bool `yaml:\"disabled\"`\n\n\tOwnAccountsOnly bool `yaml:\"-\"`\n}",
+      "type AdminConsole struct {\n\tDisabled bool `yaml:\"disabled\"`\n}",
       "type Config struct {\n\tEngine openrails.Config `yaml:\",inline\"`\n\n\tAuthKit func(*authkit.Config) `yaml:\"-\"`\n\n\tNaming billing.NamingConfig `yaml:\"-\"`\n\n\tMerchantCreation *MerchantCreationConfig `yaml:\"-\"`\n\n\tAdminConsole AdminConsole `yaml:\"admin_console\"`\n\n\tPort int `yaml:\"port\"`\n\n\tMetricsPort int `yaml:\"metrics_port\"`\n}",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tConsoleAssets fs.FS\n}",
       "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}",
@@ -2031,9 +2031,8 @@
       "type providerRefreshReceipt struct {\n\tJobID         int64              `json:\"job_id\"`\n\tMerchantID    billing.MerchantID `json:\"merchant_id\"`\n\tRiverSchema   string             `json:\"river_schema\"`\n\tQueue         string             `json:\"queue\"`\n\tAlreadyQueued bool               `json:\"already_queued\"`\n}"
     ],
     "server/internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tIssuers []Issuer `json:\"issuers\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
       "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
-      "type Issuer struct {\n\tKey      string `json:\"key\"`\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource    string `json:\"resource\"`\n\tScope       string `json:\"scope\"`\n\tRedirectURI string `json:\"redirect_uri\"`\n}",
       "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n\tRole        string `json:\"role,omitempty\"`\n}"
     ],
     "server/internal/http": [
@@ -3782,6 +3781,7 @@
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "eventstore": "github.com/open-rails/openrails/internal/eventstore",
+      "failpoint": "github.com/open-rails/openrails/internal/failpoint",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "hex": "encoding/hex",
