@@ -24,10 +24,6 @@ func openServer(ctx context.Context, merchantManifest string) (_ *server.Server,
 	if h == nil {
 		return nil, nil, nil, nil, fmt.Errorf("config not loaded")
 	}
-	key, err := h.SigningKey.Source()
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
 	cfg := h.Server
 	private, err := bootstrap.PrivateNetworkApplications(merchantManifest, slog.Default())
 	if err != nil {
@@ -40,7 +36,7 @@ func openServer(ctx context.Context, merchantManifest string) (_ *server.Server,
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	srv, err := server.New(ctx, cfg, server.Deps{Engine: opened.Deps, Auth: authkit.Deps{KeySource: key}})
+	srv, err := server.New(ctx, cfg, server.Deps{Engine: opened.Deps})
 	if err != nil {
 		opened.Close()
 		return nil, nil, nil, nil, fmt.Errorf("bootstrap server: %w", err)

@@ -10,7 +10,7 @@ import (
 // Deps.CheckoutAssets the handler is nil and orders still get pay URLs, for
 // another host serving the checkout origin against the same billing
 // database. "" and nil when none is declared, or the origin was refused (it
-// must be its own, apart from PublicBillingBaseURL and every declared
+// must be its own, apart from PublicURL and every declared
 // Issuer; Ready reports why).
 //
 // Orders get their pay URL from CreateOrderParams.PayURL or a customer's

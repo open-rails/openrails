@@ -2,6 +2,7 @@ package hostdeps
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -10,13 +11,16 @@ import (
 )
 
 // ClickHouse opens the clickhouse section's connection: the native protocol,
-// lz4. It dials on first use.
-func ClickHouse(c *hostconfig.ClickHouseLogin) (driver.Conn, error) {
-	conn, err := clickhouse.Open(&clickhouse.Options{
-		Addr:        []string{c.Addr},
-		Auth:        clickhouse.Auth{Username: c.Username, Password: c.Password},
-		Compression: &clickhouse.Compression{Method: clickhouse.CompressionLZ4},
-	})
+// lz4. It dials on first use and selects no database: the event store
+// creates its own.
+func ClickHouse(c *hostconfig.ClickHouseConnection) (driver.Conn, error) {
+	opts, err := clickhouse.ParseDSN(strings.TrimSpace(c.URL))
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse.url: %w", redactURL(err, c.URL))
+	}
+	opts.Auth.Database = ""
+	opts.Compression = &clickhouse.Compression{Method: clickhouse.CompressionLZ4}
+	conn, err := clickhouse.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("clickhouse: %w", err)
 	}

@@ -29,7 +29,6 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
-	"github.com/ccoveille/go-safecast/v2"
 	redis "github.com/redis/go-redis/v9"
 
 	"github.com/jonboulle/clockwork"
@@ -81,6 +80,9 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
+	// leaseConns sizes the separate pool that renews leases, copied from
+	// Deps.Postgres's configuration: count it in max_connections.
+	leaseConns = 4
 )
 
 type runtimeOverrides struct {
@@ -158,35 +160,25 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if overrides == nil {
+		overrides = &runtimeOverrides{}
+	}
 	logger := overrides.Logger
 	// Create clock early so it can be passed to services.
 	clock := runtimeClock(overrides)
 
 	var (
-		database    *db.DB
 		redisClient redis.UniversalClient
 		err         error
 	)
-	leaseConns, err := safecast.Convert[int32](cfg.Database.LeaseConns)
-	if err != nil {
-		return nil, fmt.Errorf("database.lease_conns %d exceeds the pool connection range: %w", cfg.Database.LeaseConns, err)
-	}
-	var chain fs.FS
-	if overrides != nil {
-		database, chain = overrides.DB, overrides.Migrations
-	}
+	database, chain := overrides.DB, overrides.Migrations
 	if database == nil {
 		return nil, fmt.Errorf("the database is required")
 	}
 	// OpenRails' and River's tables, before anything else touches the database.
 	migrationPool, releaseMigrationPool, err := database.MigrationPool(ctx)
 	if err == nil {
-		opts := migrate.Options{Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain, Logger: logger}
-		if cfg.Database.SkipMigrations {
-			err = migrate.Validate(ctx, migrationPool, opts)
-		} else {
-			err = migrate.Apply(ctx, migrationPool, opts)
-		}
+		err = migrate.Apply(ctx, migrationPool, migrate.Options{Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain, Logger: logger})
 		releaseMigrationPool()
 	}
 	if err != nil {
@@ -401,9 +393,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
 	serviceInstances.OrderAttemptService.SetReturnOrigins(runtime.ReturnOrigins)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
-	runtime.AdminSubscriptionService.SetRequestedCancellationLimiter(func(ctx context.Context, sub *models.Subscription) error {
-		return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID)
-	})
 	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions).WithPushes(intents.PriceMigrationPushes{})
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.ProductAccessService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
@@ -532,7 +521,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.DeleteIntents = &intents.PaymentMethodDeleteThrough{Runner: intentRunner,
 			BeforeUserDelete: func(ctx context.Context, pm *models.PaymentMethod) error {
-				return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.DeletePaymentMethod, "method-delete:"+pm.ID.String(), pm.CustomerID)
+				return destructive.NewUserActionLimiter(runtime.DB).Reserve(ctx, destructive.DeletePaymentMethod, "method-delete:"+pm.ID.String(), pm.CustomerID)
 			},
 		}
 		runtime.RailPaymentMethodService.CardVaults = &intents.CardVaultThrough{Runner: intentRunner}

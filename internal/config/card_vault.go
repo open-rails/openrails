@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"path"
-	"slices"
 	"strings"
 	"unicode"
 
@@ -17,17 +16,11 @@ import (
 // platform vault; no merchant custodian takes it.
 const PlatformCustodianKey = models.CustodianPlatform
 
-// cardVaultKinds are the vendors a platform vault may be.
-var cardVaultKinds = []string{models.CustodianBasisTheory}
-
 func validateCardVault(cfg *billing.Config) error {
 	if cfg == nil || cfg.CardVault == (billing.CardVaultConfig{}) {
 		return nil
 	}
 	v := cfg.CardVault
-	if kind := strings.ToLower(strings.TrimSpace(string(v.Kind))); !slices.Contains(cardVaultKinds, kind) {
-		return fmt.Errorf("card_vault.kind %q: must be one of %s", v.Kind, strings.Join(cardVaultKinds, ", "))
-	}
 	if v.TenantID == "" || strings.ContainsFunc(v.TenantID, func(r rune) bool { return r == '/' || unicode.IsSpace(r) }) {
 		return fmt.Errorf("card_vault.tenant_id %q: must be the vendor's tenant id, without spaces or /", v.TenantID)
 	}

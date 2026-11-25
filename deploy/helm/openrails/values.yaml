@@ -21,16 +21,16 @@ args: [run-server]
 
 # config.yaml, rendered as is (config.example.yaml lists every key). Keep
 # secrets out: they come from `secrets`, as environment variables or files
-# named like them (database.url is DATABASE_URL). host, port and metrics_port are the
+# named like them (database.url is DATABASE_URL). port and metrics_port are the
 # chart's (ports.http, metrics.port).
 config:
-  # public_billing_base_url: https://billing.example.com # https: the server's AuthKit issuer and resource
+  # public_url: https://billing.example.com # required: the server's AuthKit issuer and resource
   # Optional, no default; more than one replica needs it.
   # redis:
-  #   addr: redis:6379 # or url: rediss://…; username, tls, ca_cert
+  #   url: redis://redis:6379 # or rediss://user:password@host/db, from a REDIS_URL secret; ca_cert
   # The event store usage needs; without it usage is off.
   # clickhouse:
-  #   addr: clickhouse:9000 # password from a CLICKHOUSE_PASSWORD secret
+  #   url: clickhouse://clickhouse:9000/openrails # with a password, from a CLICKHOUSE_URL secret
   # The ingress controller's pod or node CIDR: without it the client IP is the
   # proxy's.
   # trusted_proxies: [10.244.0.0/16]
@@ -62,7 +62,7 @@ secrets:
   #   DATABASE_URL: {name: openrails-db-app, key: uri}
   env: {}
   # Secrets whose keys are environment variable names (DATABASE_URL, REDIS_URL,
-  # REDIS_PASSWORD, REDIS_CA_CERT, EMAIL_SMTP_PASSWORD, VAULT_TOKEN, …),
+  # REDIS_CA_CERT, CLICKHOUSE_URL, EMAIL_SMTP_PASSWORD, VAULT_TOKEN, …),
   # mounted as files at /vault/secrets.
   # Environment variables win over files.
   files: []

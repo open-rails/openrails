@@ -19,11 +19,26 @@ func validateHyperSwitch(cfg *billing.Config) error {
 			return fmt.Errorf("hyperswitch.%s must be an absolute HTTPS URL without credentials, query or fragment", key)
 		}
 		if u.Scheme == "http" {
-			ip := net.ParseIP(u.Hostname())
-			if !cfg.HyperSwitch.AllowLoopbackHTTP || ip == nil || !ip.IsLoopback() {
+			if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {
 				return fmt.Errorf("hyperswitch.%s requires HTTPS outside a development sandbox literal loopback fixture", key)
 			}
 		}
 	}
 	return nil
+}
+
+// HyperSwitchFixture reports a HyperSwitch deployment over http on a loopback
+// IP literal: a sandbox fixture, never beside a live PSP.
+func HyperSwitchFixture(cfg *billing.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, raw := range []string{cfg.HyperSwitch.APIBaseURL, cfg.HyperSwitch.SDKURL} {
+		if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.Scheme == "http" {
+			if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
+				return true
+			}
+		}
+	}
+	return false
 }

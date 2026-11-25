@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
@@ -91,7 +90,7 @@ func Open(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*Op
 			o.Close()
 			return nil, fmt.Errorf("clickhouse: %w", err)
 		}
-		logger.InfoContext(ctx, "ClickHouse declared", "addr", cfg.ClickHouse.Addr)
+		logger.InfoContext(ctx, "ClickHouse declared", "database", cfg.Server.Engine.ClickHouse.Database)
 		o.Deps.ClickHouse = conn
 	}
 	if cfg.Vault != nil {
@@ -146,18 +145,11 @@ func (o *Opened) Close() {
 // Pool opens the database section's pool. retry waits for the database until ctx
 // ends, as a serving process does; otherwise it tries once.
 func Pool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config, retry bool) (*pgxpool.Pool, error) {
-	url := cfg.Database.ConnectionString()
-	if url == "" {
-		return nil, errors.New("missing database configuration (DATABASE_URL or DATABASE_HOST/DATABASE_PORT/etc.)")
-	}
-	pc, err := pgxpool.ParseConfig(url)
+	pc, err := pgxpool.ParseConfig(cfg.Database.DSN(os.Getenv))
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres config: %w", err)
 	}
 	pc.MaxConns, pc.MaxConnLifetime, pc.MaxConnIdleTime = maxConns, maxConnLifetime, maxConnIdleTime
-	if cfg.Database.SQLTrace {
-		pc.ConnConfig.Tracer = db.NewSQLTracer(logger)
-	}
 	pool, err := pgxpool.NewWithConfig(ctx, pc)
 	if err != nil {
 		return nil, fmt.Errorf("create pgx pool: %w", err)

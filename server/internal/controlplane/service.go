@@ -121,9 +121,9 @@ func AuthKit(cfg *billing.Config, opts Options) (authkit.Config, error) {
 	if cfg == nil {
 		return authkit.Config{}, errors.New("controlplane: the engine's configuration is required")
 	}
-	base := strings.TrimRight(strings.TrimSpace(cfg.PublicBillingBaseURL), "/")
+	base := strings.TrimRight(strings.TrimSpace(cfg.PublicURL), "/")
 	if defaultResource(base) == "" {
-		return authkit.Config{}, fmt.Errorf("controlplane: public_billing_base_url %q must be an https URL, or http on a loopback host: it is the server's issuer and resource", cfg.PublicBillingBaseURL)
+		return authkit.Config{}, fmt.Errorf("controlplane: public_url %q must be an https URL, or http on a loopback host: it is the server's issuer and resource", cfg.PublicURL)
 	}
 	var a authkit.Config
 	a.Token.Issuer = base
@@ -131,7 +131,6 @@ func AuthKit(cfg *billing.Config, opts Options) (authkit.Config, error) {
 	a.Frontend.BaseURL = origin(base)
 	a.Keys.Path = strings.TrimSpace(opts.KeysPath)
 	a.Database.Schema = config.SchemaName(cfg) + "_auth"
-	a.Database.SkipMigrations = cfg.Database.SkipMigrations
 	// Everything is local to a loopback issuer. Elsewhere an application's
 	// keys on a private network are the operator's to declare (Configure).
 	a.Token.AllowPrivateNetworkJWKS = loopback(base)

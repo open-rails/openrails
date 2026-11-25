@@ -489,7 +489,7 @@ func TestPSPControls(t *testing.T) {
 		require.False(t, httpx.IsBlockedIP(net.ParseIP("8.8.8.8")))
 	})
 	t.Run("OR-J06-S30/a-declared-stripe-psp-registers-its-webhook-endpoint", func(t *testing.T) {
-		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicURL = stripeWebhookBase })
 		fleet := hostFleet(t, a.world)
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
@@ -509,7 +509,7 @@ func TestPSPControls(t *testing.T) {
 		require.Equal(t, strings.Join(webhooks.HandledStripeEventTypes, ","), endpoint["enabled_events"])
 	})
 	t.Run("OR-J06-S31/a-dashboard-endpoint-of-a-file-declared-psp-is-managed-not-refused", func(t *testing.T) {
-		a, p := newPaymentWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		a, p := newPaymentWorld(t, func(w *world) { w.cfg.PublicURL = stripeWebhookBase })
 		url := stripeWebhookBase + "/v1/webhooks/stripe/acct_e2e"
 		id := p.core.SeedWebhookEndpoint("acct_e2e", url, stripeapi.APIVersion, []string{"invoice.paid"})
 		fleet := hostFleet(t, a.world)
@@ -568,7 +568,7 @@ func engineFleet(t *testing.T, w *world, engine *openrails.Engine) *river.Client
 
 func TestStripeWebhookDueWork(t *testing.T) {
 	t.Run("OR-J06-S60/a-boot-reconciles-a-stripe-endpoint-only-when-its-configuration-changed", func(t *testing.T) {
-		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicURL = stripeWebhookBase })
 		fleet := engineFleet(t, a.world, a.engine)
 		_, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)
@@ -590,7 +590,7 @@ func TestStripeWebhookDueWork(t *testing.T) {
 			"a restart at the configuration the endpoint was settled at reads nothing from Stripe")
 
 		cfg := a.cfg
-		cfg.PublicBillingBaseURL = "https://billing-moved.example.test"
+		cfg.PublicURL = "https://billing-moved.example.test"
 		moved, err := openrails.New(t.Context(), cfg, a.deps)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, moved.Close(context.Background())) })
@@ -601,7 +601,7 @@ func TestStripeWebhookDueWork(t *testing.T) {
 		}, 20*time.Second, 20*time.Millisecond, "a restart whose webhook URL moved reconciles the endpoint")
 	})
 	t.Run("OR-J06-S61/a-superseded-endpoint-is-retired-by-the-pass-scheduled-at-its-deadline", func(t *testing.T) {
-		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicURL = stripeWebhookBase })
 		armDestructive(t, a, true)
 		url := stripeWebhookBase + "/v1/webhooks/stripe/acct_e2e"
 		old := p.provider.core.SeedManagedWebhookEndpoint("acct_e2e", url, "2020-08-27", webhooks.HandledStripeEventTypes)
@@ -646,7 +646,7 @@ func TestStripeWebhookDueWork(t *testing.T) {
 		}, 20*time.Second, 20*time.Millisecond, "the pass retires the predecessor at its deadline")
 	})
 	t.Run("OR-J06-S63/a-psp-change-while-its-pass-runs-reaches-stripe-without-the-backstop", func(t *testing.T) {
-		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicBillingBaseURL = stripeWebhookBase })
+		a, p := newPSPWorld(t, func(w *world) { w.cfg.PublicURL = stripeWebhookBase })
 		fleet := engineFleet(t, a.world, a.engine)
 		psp, err := a.alphaRemote.CreatePSP(t.Context(), pspInput())
 		require.NoError(t, err)

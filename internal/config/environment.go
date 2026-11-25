@@ -72,8 +72,8 @@ func ResolvePSPEnvironment(psp, rail, environment string) (string, error) {
 // FakeProviders names what cfg wires that no live PSP may sit beside: an
 // http HyperSwitch fixture.
 func FakeProviders(cfg *billing.Config) []string {
-	if cfg == nil || !cfg.HyperSwitch.AllowLoopbackHTTP {
+	if !HyperSwitchFixture(cfg) {
 		return nil
 	}
-	return []string{"hyperswitch.allow_loopback_http"}
+	return []string{"hyperswitch.api_base_url"}
 }

@@ -53,12 +53,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/* config.yaml: values.config plus the listeners the chart owns. */}}
 {{- define "openrails.config" -}}
 {{- $cfg := deepCopy (default dict .Values.config) }}
-{{- range list "host" "port" "metrics_port" }}
+{{- range list "port" "metrics_port" }}
 {{- if hasKey $cfg . }}
 {{- fail (printf "config.%s is set by the chart: use ports.http and metrics.port" .) }}
 {{- end }}
 {{- end }}
-{{- $_ := set $cfg "host" "0.0.0.0" }}
 {{- $_ := set $cfg "port" (int .Values.ports.http) }}
 {{- if .Values.metrics.enabled }}
 {{- $_ := set $cfg "metrics_port" (int .Values.metrics.port) }}

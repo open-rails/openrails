@@ -19,12 +19,9 @@ func TestLoggerConfigDefaults(t *testing.T) {
 	}
 	slog.New(h).Info("ready")
 	if !strings.HasPrefix(strings.TrimSpace(out.String()), "{") {
-		t.Fatalf("unset logger.format must be json, got %q", out.String())
+		t.Fatalf("a log that is no terminal must be json, got %q", out.String())
 	}
 	if _, err := (LoggerConfig{Level: "verbose"}).Handler(&out); err == nil {
 		t.Fatal("an unknown level must be refused")
-	}
-	if _, err := (LoggerConfig{Format: "xml"}).Handler(&out); err == nil {
-		t.Fatal("an unknown format must be refused")
 	}
 }

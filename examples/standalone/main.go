@@ -49,7 +49,7 @@ import (
 // the secret its backend authenticates with, and its mail server.
 type settings struct {
 	PublicURL    string             // this app: AuthKit's issuer and the browser's origin
-	OpenRailsURL string             // the server, and its resource identifier (public_billing_base_url)
+	OpenRailsURL string             // the server, and its resource identifier (public_url)
 	Merchant     billing.MerchantID // the merchant the server trusts this app's issuer for
 	ClientSecret string             // the backend client's secret
 	SMTP         smtp.Server        // AuthKit's mail: the codes that prove each user's email

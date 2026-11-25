@@ -35,19 +35,18 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
    `Issuer` (a credential's merchant is its group) and a host `Engine.UserInfo`.
 2. Installs `customerDirectory` as the engine's `UserInfo`
    ([customer directory](customer-directory.md)) and calls `openrails.New`, which
-   migrates unless `SkipMigrations`.
+   migrates.
 3. Builds AuthKit, single-tenant (it creates or adopts its one account directory).
    `controlplane.AuthKit` derives its configuration in three steps: facts from the
-   engine's settings (issuer and resource from `PublicBillingBaseURL`, schema
-   `<schema>_auth`, `SkipMigrations`, `Auth.Keys.Path`), the rules of the server's own
-   accounts (invite-only, a required second factor by passkey or TOTP, 30-day
-   sessions, the console's link landings), then `Config.AuthKit`, a hosted product's
-   hook, and the invariants: merchant roles, the API-key prefix, the issued audience,
-   the resource's scopes, the console's client (`ConsoleClientID`), the client-IP
-   posture, AuthKit's River schema and mount. `RegistrationGuard` wraps AuthKit's
-   run-time application and OAuth-client registrations: their key and logout URLs
-   must be https on public hosts. AuthKit gets its own pool on the engine's database
-   unless one is given.
+   engine's settings (issuer and resource from `PublicURL`, schema `<schema>_auth`,
+   `Auth.Keys.Path`), the rules of the server's own accounts (invite-only, a
+   required second factor by passkey or TOTP, 30-day sessions, the console's link
+   landings), then `Config.AuthKit`, a hosted product's hook, and the invariants:
+   merchant roles, the API-key prefix, the issued audience, the resource's scopes,
+   the console's client (`ConsoleClientID`), the client-IP posture, AuthKit's River
+   schema and mount. `RegistrationGuard` wraps AuthKit's run-time application and
+   OAuth-client registrations: their key and logout URLs must be https on public
+   hosts. AuthKit gets its own pool on the engine's database unless one is given.
 4. `controlplane.New`, `operator.Join`, then `operator.StandaloneServer` builds the
    HTTP surface.
 
@@ -89,7 +88,7 @@ Without the default manifest the server boots control-plane only.
 ### HTTP
 
 `server/internal/http` builds one public handler: health and meta, the engine's route
-groups (`RouteGroups`, each off by default), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`,
+groups (all of them), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`,
 AuthKit's routes, `/admin`, and the payment page on `CheckoutOrigin` by Host. Every
 native route passes `wrapHandler`: recovery, request log, security headers, CORS for
 browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing
@@ -239,7 +238,7 @@ Checks:
   (OR-J01-S28).
 - **CLI.** The built binary (`OPENRAILS_CRITICAL_CLI_BINARY`, `hostCLI`) runs
   OR-J04-S41, OR-J22-S04, OR-J31-S03, OR-J31-S10, OR-J32-S05, OR-J38-S21 and
-  OR-J38-S72, OR-J06-S83, OR-J06-S84, and the archive tests' `billing prepare-target`.
+  OR-J38-S72, OR-J06-S84, OR-J06-S85, and the archive tests' `billing prepare-target`.
 - **Image smoke** (`smoke-image` in `.github/workflows/docker-publish.yaml`): CVE scan,
   arm64 build, `version`, `migrate pg`, then `run-server` from environment only until
   `/health/ready` passes and `/admin/` serves the console.

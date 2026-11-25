@@ -110,8 +110,8 @@ type Store struct {
 
 // Options is how Open prepares the database.
 type Options struct {
-	// Validate checks that every migration is applied and applies none
-	// (Config.Database.SkipMigrations).
+	// Validate checks that every migration is applied and applies none: a
+	// one-off command reads the store, it never migrates it.
 	Validate bool
 	Logger   *slog.Logger
 	// Serialize runs the migration holding a lock every process migrating

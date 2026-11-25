@@ -25,6 +25,15 @@ SELECT (SELECT count(*) FROM day_customers)::bigint AS affected_customers,
  EXISTS(SELECT 1 FROM hour_customers WHERE customer_id=sqlc.arg(customer_id)::uuid)::boolean AS customer_counted_hour,
  COALESCE((SELECT last_at FROM hour_customers ORDER BY last_at,customer_id OFFSET GREATEST((SELECT count(*) FROM hour_customers)-sqlc.arg(hour_limit)::bigint,0) LIMIT 1), 'epoch'::timestamptz) AS oldest_hour_customer;
 
+-- name: UserDestructiveWave :one
+-- The rolling day's customer actions by kind and the first of them: the wave
+-- a refusal's finding names.
+SELECT count(*) FILTER (WHERE kind='cancel_subscription')::bigint AS cancellations,
+ count(*) FILTER (WHERE kind='delete_payment_method')::bigint AS card_removals,
+ COALESCE(min(reserved_at),'epoch'::timestamptz) AS started_at
+FROM billing.user_destructive_reservations
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND reserved_at>sqlc.arg(day_since)::timestamptz;
+
 -- name: UserDestructivePaidCustomers :one
 -- Completed positive payments identify paid customers. Signups, failed attempts,
 -- zero-value grants, refund events, future-dated or deleted facts never inflate it.

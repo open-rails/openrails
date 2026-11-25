@@ -83,36 +83,4 @@ func TestBaselineAdoption(t *testing.T) {
 		spend(t, client, customer, "after", 100)
 		balance(t, client, customer, 500, 500, 1000)
 	})
-
-	t.Run("OR-J31-S13/a-start-that-skips-migrations-is-refused-on-an-edited-baseline-until-the-migration-step-runs", func(t *testing.T) {
-		w := newWorld(t, riverApart(t))
-		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "kept", DisplayName: "Kept"})
-		require.NoError(t, err)
-		require.NoError(t, w.engine.Close(t.Context()))
-		built := baselineRecord(t, w)
-		other := editBaselineRecord(t, w)
-
-		skipping := w.cfg
-		skipping.Database.SkipMigrations = true
-		refused, err := openrails.New(t.Context(), skipping, w.deps)
-		if err == nil {
-			require.NoError(t, refused.Close(t.Context()))
-		}
-		require.ErrorIs(t, err, billing.ErrMigrationsRequired, "a recorded name is not enough: the content is another baseline's")
-		require.ErrorContains(t, err, "run openrails.Migrate before application startup")
-		require.ErrorContains(t, err, "0001_schema.up.sql")
-		require.NotContains(t, err.Error(), "\n")
-		require.Equal(t, other, baselineRecord(t, w), "the refused start settles nothing")
-
-		require.NoError(t, openrails.Migrate(t.Context(), w.pool, w.cfg.Database))
-		require.Equal(t, built, baselineRecord(t, w))
-		started, err := openrails.New(t.Context(), skipping, w.deps)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, started.Close(context.Background())) })
-		client, err := started.Merchant(w.alpha.MerchantID())
-		require.NoError(t, err)
-		kept, err := client.GetProduct(t.Context(), product.ID)
-		require.NoError(t, err)
-		require.Equal(t, "Kept", kept.DisplayName)
-	})
 }

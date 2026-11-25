@@ -178,7 +178,7 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.Equal(t, "http://127.0.0.1:9/jwks.json", stored.JWKSURI)
 	})
 
-	t.Run("OR-J06-S83/auth-settings-beyond-the-key-path-refuse-boot", func(t *testing.T) {
+	t.Run("OR-J06-S84/auth-settings-beyond-the-key-path-refuse-boot", func(t *testing.T) {
 		w := newWorld(t)
 		const derived = "OpenRails derives the server's AuthKit configuration; only auth.keys.path (AUTH_KEYS_PATH) is set"
 		for _, c := range []struct {
@@ -188,7 +188,7 @@ func TestStandaloneAuthSurface(t *testing.T) {
 			says  []string
 		}{
 			{"key", map[string]any{"auth": map[string]any{"password": map[string]any{"min_length": 12}}}, "", []string{"auth.password.min_length (AUTH_PASSWORD_MIN_LENGTH)", derived}},
-			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", []string{"auth.token.issuer (AUTH_TOKEN_ISSUER): set public_billing_base_url", derived}},
+			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", []string{"auth.token.issuer (AUTH_TOKEN_ISSUER): set public_url", derived}},
 			{"private", nil, "AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS=true", []string{"auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)", derived}},
 			{"local", map[string]any{"local_sign_in": true}, "", []string{"local_sign_in / LOCAL_SIGN_IN was removed"}},
 			{"console", map[string]any{"admin_console": map[string]any{"issuers": map[string]any{}}}, "", []string{"admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed", "openrails-console"}},
@@ -208,10 +208,12 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.NoError(t, err, "the key path alone loads: %s", out)
 	})
 
-	t.Run("OR-J06-S84/a-server-whose-staff-cannot-enroll-a-second-factor-is-not-ready", func(t *testing.T) {
+	t.Run("OR-J06-S85/a-server-whose-staff-cannot-enroll-a-second-factor-is-not-ready", func(t *testing.T) {
 		w := newWorld(t)
 		t.Cleanup(func() {
-			_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema + "_auth"}.Sanitize()+" CASCADE")
+			for _, schema := range []string{w.schema + "_auth", w.schema + "_river"} {
+				_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+			}
 		})
 		keys := t.TempDir()
 		writeSigningKeys(t, keys)
@@ -223,7 +225,7 @@ func TestStandaloneAuthSurface(t *testing.T) {
 			require.NoError(t, err)
 			port := listener.Addr().(*net.TCPAddr).Port
 			require.NoError(t, listener.Close())
-			cmd := hostCLICommand(t, w, map[string]any{"host": "127.0.0.1", "port": port, "public_billing_base_url": "https://billing.critical.invalid", "auth": map[string]any{"keys": map[string]any{"path": keys}}}, "run-server")
+			cmd := hostCLICommand(t, w, map[string]any{"port": port, "public_url": "https://billing.critical.invalid", "auth": map[string]any{"keys": map[string]any{"path": keys}}}, "run-server")
 			log := &lockedBuffer{}
 			cmd.Stdout, cmd.Stderr = log, log
 			require.NoError(t, cmd.Start())

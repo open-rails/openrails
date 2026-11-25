@@ -103,7 +103,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	defer h.stripe.Close()
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{
-			PublicBillingBaseURL: api, RateLimits: billing.RateLimitsConfig{Purchase: &billing.RateLimit{}, Payment: &billing.RateLimit{}, Subscribe: &billing.RateLimit{}, Webhook: &billing.RateLimit{}},
+			PublicURL: api, RateLimits: billing.RateLimitsConfig{Purchase: &billing.RateLimit{}, Payment: &billing.RateLimit{}, Subscribe: &billing.RateLimit{}, Webhook: &billing.RateLimit{}},
 			CheckoutOrigin: payment,
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.
@@ -114,9 +114,8 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 					"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
 				}}}},
 		},
-		Auth:        server.AuthConfig{Keys: server.AuthKeys{Path: keys}}, // a loopback issuer's development keys
-		AuthKit:     func(c *authkit.Config) { c.Registration.AllowMissingSenders = true },
-		RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
+		Auth:    server.AuthConfig{Keys: server.AuthKeys{Path: keys}}, // a loopback issuer's development keys
+		AuthKit: func(c *authkit.Config) { c.Registration.AllowMissingSenders = true },
 	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets),
 		ProviderEndpoints: openrails.ProviderEndpoints{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()}}})
 	if err != nil {

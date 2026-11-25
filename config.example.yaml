@@ -13,8 +13,7 @@
 # writes to a merchant's providers, and whether the charges it initiates wait,
 # are the merchant's controls (`openrails merchant controls`).
 
-host: 0.0.0.0
-port: 3053
+port: 3053 # every interface
 # The metrics listener: the operator's Prometheus GET /metrics (dependency
 # up/down, abuse-state fallbacks, per-job-kind health), on its own port so it
 # is never public. Unset serves none; the Helm chart sets 9090. Not the
@@ -22,37 +21,26 @@ port: 3053
 # metrics_port: 9090
 # On SIGTERM readiness fails at once, serving continues for 5s, then in-flight
 # requests and workers finish within 20s.
-public_billing_base_url: http://localhost:3053 # default http://localhost:<port>
+public_url: http://localhost:3053 # required: where browsers and PSPs reach this server
 
 logger:
-  level: info       # debug | info | warn | error
-  format: json      # json | text
+  level: info       # debug | info | warn | error; text on a terminal, JSON otherwise
 
-# The database: its connection and OpenRails' schemas. One role: the server
-# migrates as it at boot and owns what it creates. Merchant isolation is
-# per-query merchant predicates, not login flags.
+# The database: its connection and OpenRails' schema. One role: the server
+# migrates as it at boot, replicas taking turns on a lock, and owns what it
+# creates. Merchant isolation is per-query merchant predicates, not login
+# flags. A lease pool of 4 connections comes on top of the main pool.
 database:
-  # With no connection key set: Compose's Postgres (env DATABASE_URL). Or the
-  # parts below, all four of host, port, name and username.
+  # Env DATABASE_URL. Unset, libpq's PGHOST, PGPORT, PGDATABASE, PGUSER,
+  # PGPASSWORD (or PGPASSFILE), PGSSLMODE and PGSSLROOTCERT name the database,
+  # verify-full off this machine; with neither, Compose's Postgres.
   url: postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable
-  # host: db.example.com
-  # port: "5432"
-  # name: openrails
-  # username: openrails
-  # password: ""
-  # sslmode: verify-full # default; require for a loopback host or Unix socket
-  # sslrootcert: /etc/openrails/db-ca.pem # the CAs that verify the database; unset, the system roots
-  # sql_trace: false # log every query at debug level
-  lease_conns: 4
-  schema: billing # every OpenRails table lives here (env DATABASE_SCHEMA)
-  # river_schema: billing_river # OpenRails' River jobs; default the schema plus '_river'
+  schema: billing # every OpenRails table lives here, River's jobs in billing_river (env DATABASE_SCHEMA)
 
 # The event store usage needs (ClickHouse's native protocol). Without it
 # usage, limits and admissions answer event_store_required.
 # clickhouse:
-#   addr: localhost:9000 # default none: usage is off
-#   database: openrails  # created or upgraded at boot
-#   username: default    # password from CLICKHOUSE_PASSWORD
+#   url: clickhouse://default:password@localhost:9000/openrails # a secret (CLICKHOUSE_URL); the path is the database, created or upgraded at boot
 
 # Rate limits, lockouts, captcha challenges and card-testing declines, shared
 # by every instance.
@@ -60,32 +48,20 @@ database:
 # While a declared Redis does not answer, each process keeps its own. Default
 # none.
 redis:
-  addr: localhost:6380 # or url: rediss://user:password@cache.example:6380/0
-  password: ""
-  db: 0
-  # username: openrails # ACL user
-  # tls: true           # verify against the system roots, or ca_cert
-  # ca_cert: |          # PEM CA bundle; implies TLS (env REDIS_CA_CERT)
+  url: redis://localhost:6380/0 # or rediss://user:password@cache.example:6380/0 (env REDIS_URL, a secret)
+  # ca_cert: |          # PEM CA bundle for rediss:// (env REDIS_CA_CERT)
   #   -----BEGIN CERTIFICATE-----
 
 # The server's AuthKit decides who every request is: its own staff accounts
 # and API keys, and the access tokens trusted issuers mint for it. OpenRails
-# derives its configuration: issuer and resource are public_billing_base_url,
-# its tables live in <database.schema>_auth, and its client IP follows
-# trusted_proxies. Staff join by invitation, need a passkey or an
-# authenticator app, and stay signed in for 30 days.
+# derives its configuration: issuer and resource are public_url, its tables
+# live in <database.schema>_auth, and its client IP follows trusted_proxies.
+# Staff join by invitation, need a passkey or an authenticator app, and stay
+# signed in for 30 days.
 # auth:
 #   keys:
 #     path: /vault/auth # keys.json and totp.key (env AUTH_KEYS_PATH); default /vault/auth, or generated development keys for a loopback issuer
 
-# The rename policy for merchant names (shown defaults); usernames follow
-# AuthKit's username policy.
-naming:
-  enabled: true
-  rename_interval: 72h
-  former_names:
-    mode: finite # finite | forever | immediate; omit duration for the latter two
-    duration: 2160h # 90 days
 
 # Declaring vault connects to it (VAULT_* env settings declare it too). Name a
 # vault.kv_mount and Vault holds merchant configuration. Platform credentials
@@ -107,8 +83,7 @@ naming:
 # Platform card credentials use the same Vault connection and scope_prefix.
 # Omit this kv_mount to reuse vault.kv_mount. Set only this one to keep merchant
 # configuration in files. The credential document is platform_vault/<tenant_id>.
-# card_vault:
-#   kind: basis_theory
+# card_vault: # a Basis Theory tenant
 #   tenant_id: ""
 #   kv_mount: billing-secrets
 
@@ -133,9 +108,8 @@ naming:
 #   password: ""
 #   from: "Billing <noreply@example.com>"
 
-# Policy sections (rate_limits, user_action_rate_limit,
-# destructive_action_limits) are set here only, never in the environment.
-# Shown are the defaults.
+# Policy (rate_limits) is set here only, never in the environment. Shown
+# are the defaults.
 
 # Requests per minute per client, by bucket; 0 leaves a bucket unlimited.
 rate_limits:
@@ -148,25 +122,9 @@ rate_limits:
   webhook:
     requests_per_minute: 1200 # provider callbacks
 
-# Customer card removals and subscription cancellations: one merchant-wide
-# budget of distinct customers, whatever the rate_limits.
-user_action_rate_limit:
-  minimum_customers_per_hour: 5            # the hourly budget's floor
-  paid_customers_per_hourly_customer: 400  # +1 an hour per this many paying customers
-  minimum_customers_per_day: 10            # the daily budget's floor
-  paid_customers_per_daily_customer: 100   # +1 a day per this many paying customers
-
-# Staff refunds, revokes, cancels and other held destructive actions per
-# rolling hour/day (docs/standalone.md#destructive-holds).
-destructive_action_limits:
-  actor_per_hour: 5          # one actor's an hour
-  actor_per_day: 15          # one actor's a day
-  merchant_per_hour: 15      # one merchant's floor an hour, rising with its active customers
-  merchant_per_day: 25       # one merchant's floor a day
-  deployment_per_hour: 50    # the deployment's floor an hour, rising with active customers
-  deployment_per_day: 100    # the deployment's floor a day
-  erasure_per_hour: 100      # a merchant's contact erasures an hour, rising with its directory
-  erasure_per_day: 1000      # a merchant's contact erasures a day
+# Customers' own card removals and cancellations, and staff destructive
+# actions, have fixed limits (docs/standalone.md#abuse-limits and
+# #destructive-holds).
 
 # Return URLs (pay URLs, hosted payments, the billing portal) may name only
 # the billing origin, the merchant's issuer's or its checkout.embed_origins.
@@ -186,27 +144,17 @@ captcha:
   secret_key: ""
 
 
-# Route groups beyond the public, customer and webhook routes, each off until
-# turned on here. Each route checks its permission: the merchant: name
-# (merchant:<resource>:<action>) in the merchant's own group, or the root:
-# name on root; programmatic (/v1/app, with SCIM
-# provisioning) takes a merchant's application credential, never a person,
-# holding merchant:entitlements:read, merchant:catalog:read,
-# merchant:usage:manage, merchant:events:read or merchant:orders:manage for
-# each route.
-route_groups:
-  admin: true            # customer support: customers, subscriptions, payments, refunds, invoices
-  catalog: true          # products, prices, meters, price migrations
-  merchant_config: true  # PSPs, settings, billing import and export
-  metrics: true          # business metrics, read-only
-  programmatic: true     # your backend's calls and SCIM user provisioning
+# Every route group is served. Each route checks its permission, the
+# merchant:<resource>:<action> name in the merchant's own group or the root:
+# name on root; /v1/app (with SCIM provisioning) takes a merchant's
+# application credential, never a person.
 
 # The standalone staff console defaults to /admin. Set disabled to true for
-# an API-only server; route_groups stay independent. Release builds include
-# its assets; `task build` embeds web/console/dist after `task admin-build`. A
-# source build without assets serves build instructions with status 503.
-# Staff sign in with the server's own accounts, or at a merchant's (or root's)
-# trusted issuer that signs people in, as the public client openrails-console.
+# an API-only server. Release builds include its assets; `task build` embeds
+# web/console/dist after `task admin-build`. A source build without assets
+# serves build instructions with status 503. Staff sign in with the server's
+# own accounts, at root's trusted issuers, or at their merchant's, found by
+# its name, as the public client openrails-console.
 admin_console:
   disabled: false
 
@@ -214,6 +162,6 @@ admin_console:
 # an order's pay URL (/pay/<order>#<secret>) is on it, where the customer
 # pays. Leave it unset with the embedded checkout or your own card form; pay
 # URLs then answer pay_url_unavailable. It must be an origin of its own (not
-# public_billing_base_url's, the console's or AuthKit's); the server serves
+# public_url's, the console's or AuthKit's); the server serves
 # it by Host.
 # checkout_origin: https://pay.example.com

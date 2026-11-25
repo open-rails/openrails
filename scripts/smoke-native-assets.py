@@ -72,10 +72,10 @@ def main():
             origin = f"http://127.0.0.1:{api_port}"
             checkout = f"127.0.0.1:{checkout_port}"
             config = {
-                "host": "127.0.0.1", "port": api_port,
-                "database": {"url": owned_dsn}, "redis": {"addr": redis},
-                "public_billing_base_url": origin,
-                "checkout_origin": "http://" + checkout, "route_groups": {"admin": True},
+                "port": api_port,
+                "database": {"url": owned_dsn}, "redis": {"url": "redis://" + redis},
+                "public_url": origin,
+                "checkout_origin": "http://" + checkout,
                 "auth": {"keys": {"path": str(temporary / "keys")}},
             }
             config_path = temporary / "config.json"

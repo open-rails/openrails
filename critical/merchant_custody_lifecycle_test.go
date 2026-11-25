@@ -309,7 +309,7 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 				w.cfg.Vault = vault.Config()
 				w.deps.Vault = vault.Client()
 				if profile == "hosted-isolated-vault" {
-					w.cfg.CardVault = billing.CardVaultConfig{Kind: "basis_theory", TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
+					w.cfg.CardVault = billing.CardVaultConfig{TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
 				}
 				vendor.gateway = w.deps.NMITransport
 				target, err := url.Parse(vendor.server.URL)

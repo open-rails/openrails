@@ -67,7 +67,7 @@ func summarize(r *Results) string {
 		p("")
 		decisionTable(p, w, "steady")
 		p("")
-		p("Miss rate (decisions that reached the server or waited for a sync answer), steady phase: %s", missRates(w, "steady"))
+		p("Miss rate (decisions decided on the server, cold or held for a sync), steady phase: %s", missRates(w, "steady"))
 		p("")
 		p("### Syncs (client-observed, including ClickHouse's async-insert wait)")
 		p("")
@@ -83,10 +83,10 @@ func summarize(r *Results) string {
 		if len(w.Steps) > 0 {
 			p("### Ramp of the hot merchant")
 			p("")
-			p("| hot events/s | hot customers | offered | decided/s | hot p50 ms | hot p99 ms | sync p99 ms | syncs/s | backlog start → end | machine CPU | largest consumers (cores) | saturated |")
-			p("|---|---|---|---|---|---|---|---|---|---|---|---|")
+			p("| hot events/s | hot customers | offered | decided/s | warm p50 ms | warm p99 ms | misses | miss p50 ms | miss p99 ms | sync p99 ms | syncs/s | backlog start → end | machine CPU | largest consumers (cores) | saturated |")
+			p("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 			for _, s := range w.Steps {
-				p("| %d | %d | %.0f | %.0f | %s | %s | %s | %.0f | %d → %d | %.0f%% | %s | %s |", s.Rate, s.Customers, s.Offered, s.Achieved, ms(s.HotP50US), ms(s.HotP99US), ms(s.SyncP99US), s.SyncsPerSecond,
+				p("| %d | %d | %.0f | %.0f | %s | %s | %.1f%% | %s | %s | %s | %.0f | %d → %d | %.0f%% | %s | %s |", s.Rate, s.Customers, s.Offered, s.Achieved, ms(s.HotP50US), ms(s.HotP99US), 100*s.MissRate, ms(s.MissP50US), ms(s.MissP99US), ms(s.SyncP99US), s.SyncsPerSecond,
 					s.BacklogStart, s.BacklogEnd, 100*s.MachineBusy, topCores(s.Cores, 4), strings.Join(s.Reasons, "; "))
 			}
 			p("")
@@ -235,7 +235,7 @@ func decisionTable(p func(string, ...any), w *WorldResult, phase string) {
 }
 
 // missRates is, per merchant class, the share of a phase's decisions that
-// went to the server, were cold, or waited across a sync answer.
+// went to the server, were cold, or were held for a sync.
 func missRates(w *WorldResult, phase string) string {
 	total, miss := map[string]uint64{}, map[string]uint64{}
 	for k, h := range w.Decisions {
@@ -244,14 +244,13 @@ func missRates(w *WorldResult, phase string) string {
 			continue
 		}
 		total[parts[1]] += h.N
-		if parts[2] == "server" || parts[2] == "cold" {
+		if parts[2] == "server" || parts[2] == "cold" || parts[2] == "held" {
 			miss[parts[1]] += h.N
 		}
 	}
 	var out []string
 	for _, class := range sortedKeys(total) {
-		waited := uint64(w.Counters["waited|"+phase+"|"+class])
-		out = append(out, fmt.Sprintf("%s %.2f%% (%d server or cold, %d waited)", class, 100*float64(miss[class]+waited)/float64(max(total[class], 1)), miss[class], waited))
+		out = append(out, fmt.Sprintf("%s %.2f%% (%d)", class, 100*float64(miss[class])/float64(max(total[class], 1)), miss[class]))
 	}
 	return strings.Join(out, "; ")
 }

@@ -54,7 +54,6 @@ func TestHostDeps(t *testing.T) {
 			t.Cleanup(pool.Close)
 			require.Empty(t, pool.Config().ConnString())
 			w.deps.Postgres = pool
-			w.cfg.Database.LeaseConns = 2
 		})
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "settings-pool", DisplayName: "Settings pool"})
 		require.NoError(t, err)

@@ -65,7 +65,7 @@ type ManagedStripeWebhookResult struct {
 func PublicStripeWebhookURL(cfg *billing.Config, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {
-		base = strings.TrimSpace(cfg.PublicBillingBaseURL)
+		base = strings.TrimSpace(cfg.PublicURL)
 	}
 	if base == "" {
 		return "", false, nil
@@ -76,7 +76,7 @@ func PublicStripeWebhookURL(cfg *billing.Config, accountID string) (string, bool
 	}
 	u, err := url.Parse(base)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", false, fmt.Errorf("invalid public_billing_base_url %q", base)
+		return "", false, fmt.Errorf("invalid public_url %q", base)
 	}
 	// #SEC-21: Stripe must be able to REACH this endpoint, so it has to be a
 	// public https host. The routability rule is the shared outbound policy —

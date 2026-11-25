@@ -91,13 +91,11 @@ func TestTheReferenceStatesEveryDefault(t *testing.T) {
 	flatten("", reflect.ValueOf(d.Server), want)
 	flatten("", reflect.ValueOf(d), want)
 	configPath, _ := isolate(t)
-	cfg, err := Load(configPath)
-	if err != nil {
+	t.Setenv("PUBLIC_URL", "https://billing.example.com")
+	if _, err := Load(configPath); err != nil {
 		t.Fatal(err)
 	}
-	want["public_billing_base_url"] = cfg.Server.Engine.PublicBillingBaseURL
 	want["database.url"] = defaultDatabaseURL
-	want["naming.former_names.duration"] = cfg.Server.Naming.FormerNames.Duration.String()
 	documented := standaloneDefaults(t)
 	for key, value := range want {
 		values, ok := documented[key]
@@ -115,9 +113,10 @@ func TestTheReferenceStatesEveryDefault(t *testing.T) {
 	}
 }
 
-// With nothing configured, the server runs on the defaults against Compose's
-// dependencies: the database, its own URL and a loopback issuer, whose
-// account directory and development keys AuthKit makes.
+// With nothing configured but public_url, the server runs on the defaults
+// against Compose's dependencies: the database and a loopback issuer, whose
+// account directory and development keys AuthKit makes. Without public_url
+// boot refuses.
 func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 	configPath, _ := isolate(t)
 	cfg, err := Load(configPath)
@@ -125,10 +124,10 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	for got, want := range map[string]string{
-		cfg.Database.URL:                       defaultDatabaseURL,
-		cfg.Server.Engine.PublicBillingBaseURL: "http://localhost:3053",
-		cfg.Server.Engine.Database.Schema:      "billing",
-		fmt.Sprint(cfg.Server.Port):            "3053",
+		cfg.Database.DSN(func(string) string { return "" }): defaultDatabaseURL,
+		cfg.Server.Engine.PublicURL:                         "http://localhost:3053",
+		cfg.Server.Engine.Database.Schema:                   "billing",
+		fmt.Sprint(cfg.Server.Port):                         "3053",
 	} {
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
@@ -136,5 +135,9 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 	}
 	if cfg.Redis != nil || cfg.ClickHouse != nil || cfg.Vault != nil {
 		t.Error("no Redis, ClickHouse or Vault is declared by default")
+	}
+	t.Setenv("PUBLIC_URL", "")
+	if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), "public_url (PUBLIC_URL) is required") {
+		t.Errorf("no public_url: %v", err)
 	}
 }

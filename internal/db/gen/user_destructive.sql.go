@@ -135,6 +135,34 @@ func (q *Queries) UserDestructiveReservation(ctx context.Context, arg UserDestru
 	return i, err
 }
 
+const userDestructiveWave = `-- name: UserDestructiveWave :one
+SELECT count(*) FILTER (WHERE kind='cancel_subscription')::bigint AS cancellations,
+ count(*) FILTER (WHERE kind='delete_payment_method')::bigint AS card_removals,
+ COALESCE(min(reserved_at),'epoch'::timestamptz) AS started_at
+FROM billing.user_destructive_reservations
+WHERE merchant_id=$1::uuid AND reserved_at>$2::timestamptz
+`
+
+type UserDestructiveWaveParams struct {
+	MerchantID uuid.UUID
+	DaySince   time.Time
+}
+
+type UserDestructiveWaveRow struct {
+	Cancellations int64
+	CardRemovals  int64
+	StartedAt     *time.Time
+}
+
+// The rolling day's customer actions by kind and the first of them: the wave
+// a refusal's finding names.
+func (q *Queries) UserDestructiveWave(ctx context.Context, arg UserDestructiveWaveParams) (UserDestructiveWaveRow, error) {
+	row := q.db.QueryRow(ctx, userDestructiveWave, arg.MerchantID, arg.DaySince)
+	var i UserDestructiveWaveRow
+	err := row.Scan(&i.Cancellations, &i.CardRemovals, &i.StartedAt)
+	return i, err
+}
+
 const userDestructiveWindow = `-- name: UserDestructiveWindow :one
 WITH recent AS (
  SELECT customer_id,reserved_at FROM billing.user_destructive_reservations

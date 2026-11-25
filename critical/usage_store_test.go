@@ -414,7 +414,7 @@ products:
 		emptied := w.cfg
 		emptied.ClickHouse.Database = w.schema + "_replacement"
 		require.ErrorContains(t, openrailsNewErr(ctx, emptied, w.deps), "empty or different ClickHouse")
-		attach := map[string]any{"clickhouse": map[string]string{"addr": os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR"), "database": emptied.ClickHouse.Database}}
+		attach := map[string]any{"clickhouse": map[string]string{"url": "clickhouse://" + os.Getenv("OPENRAILS_CRITICAL_CLICKHOUSE_ADDR") + "/" + emptied.ClickHouse.Database}}
 		out, err := hostCLICommand(t, w, attach, "usage", "attach", "--actor", "critical", "--reason", "drill").CombinedOutput()
 		require.Error(t, err)
 		require.Contains(t, string(out), "--discard-unposted")

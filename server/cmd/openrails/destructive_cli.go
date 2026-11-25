@@ -42,7 +42,7 @@ triggering actor.`}
 			}
 		}
 		return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-			gate := destructive.NewAdmissions(database, nil, nil, billing.DestructiveActionLimitsConfig{})
+			gate := destructive.NewAdmissions(database, nil, nil)
 			var cursor *uuid.UUID
 			if !id.IsZero() {
 				value := id.UUID()

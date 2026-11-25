@@ -21,7 +21,7 @@ Customers are your app's users. OpenRails gives them no account and no sign-in o
 | Mode | Credential at `/v1/me` | Issued by | Carries | Bound to the merchant by |
 |---|---|---|---|---|
 | Embedded | your app's own session credential, on your mount | your app's auth | who your `Routes.Auth` says the user is | its `BoundScope`, else the merchant whose declared `Issuer` signed it |
-| Standalone | an `openrails:self` access token whose `aud` is the server's resource, its `public_billing_base_url` | (a) your app's issuer, or (b) the server's token endpoint, for an assertion your backend signs | `sub` (the customer), the scope and verified contact claims; no permissions | the trusted issuer: its remote application's merchant |
+| Standalone | an `openrails:self` access token whose `aud` is the server's resource, its `public_url` | (a) your app's issuer, or (b) the server's token endpoint, for an assertion your backend signs | `sub` (the customer), the scope and verified contact claims; no permissions | the trusted issuer: its remote application's merchant |
 | SaaS | the same token, for the platform's resource | (b) the platform's token endpoint, for an assertion signed with a key registered under **Integration → Customer tokens**, or (a) an issuer registered there | the same | the merchant the key or issuer is registered under |
 
 ### Embedded
@@ -149,7 +149,7 @@ The console is the OAuth 2.0 public client `openrails-console` at that issuer: t
 
 The issuer registers:
 
-- OpenRails' resource, the server's `public_billing_base_url`, with the scope `openrails:merchant` and a permission ceiling covering what staff do: the same resource customer tokens from path (a) and backend tokens use;
+- OpenRails' resource, the server's `public_url`, with the scope `openrails:merchant` and a permission ceiling covering what staff do: the same resource customer tokens from path (a) and backend tokens use;
 - the public client `openrails-console`, with the redirect URI `<origin>/admin/callback`, the post-logout redirect URI `<origin>/admin/login`, the authorization code grant (with refresh tokens) and that resource;
 - roles granting staff OpenRails' `merchant:` permissions by name, which its tokens for the resource carry.
 

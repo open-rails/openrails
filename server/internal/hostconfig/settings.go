@@ -36,10 +36,11 @@ func Settings() ([]Setting, error) {
 		return nil, err
 	}
 	raw := defaults()
-	raw.Database.URL = finished.Database.URL
+	raw.Database.URL = defaultDatabaseURL
 	out := []Setting{
 		{Env: "OPENRAILS_CONFIG", Default: "config.yaml", Doc: "The configuration file when --config names none; also config/ is searched."},
 		{Env: "VAULT_SECRETS_PATH", Default: config.DefaultSecretsPath, Doc: "The directory of mounted secret files, each named like its variable; vault.secrets_path defaults to it."},
+		{Env: "PGHOST", Doc: "With DATABASE_URL unset, libpq's variables name the database: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD or PGPASSFILE, PGSSLMODE (verify-full off this machine), PGSSLROOTCERT."},
 	}
 	var err error
 	var walk func(v reflect.Value, prefix string)

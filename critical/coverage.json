@@ -1144,11 +1144,6 @@
       "name": "A database whose baseline record carries other content is accepted and re-stamped by the migration step with its rows intact"
     },
     {
-      "id": "OR-J31-S13",
-      "journey": "J31",
-      "name": "A start that skips migrations is refused on a baseline record of other content until the migration step has run"
-    },
-    {
       "id": "OR-J31-S14",
       "journey": "J31",
       "name": "Open limit windows and staff adjustments move with the book: lifetime and current-window usage and adjustments survive a round trip"
@@ -3696,10 +3691,15 @@
     {
       "id": "OR-J06-S83",
       "journey": "J06",
-      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and say what OpenRails derives instead; the key path alone loads"
+      "name": "Customers' own cancellations past the merchant's cap wait with the time to wait; the finding names the wave and alerts staff once; staff cancellations spend none of the cap"
     },
     {
       "id": "OR-J06-S84",
+      "journey": "J06",
+      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and say what OpenRails derives instead; the key path alone loads"
+    },
+    {
+      "id": "OR-J06-S85",
       "journey": "J06",
       "name": "A server whose staff cannot enroll a second factor, a public issuer with no totp.key, is not ready and logs the key to mount; with it mounted the server is ready"
     },

@@ -17,8 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/open-rails/authkit"
-
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/open-rails/openrails/server"
@@ -53,10 +51,6 @@ func run(configPath, manifest string, lifetime time.Duration) error {
 		return err
 	}
 	slog.SetDefault(slog.New(handler))
-	key, err := cfg.SigningKey.Source()
-	if err != nil {
-		return err
-	}
 	gateway := nmimock.New(nmimock.Options{})
 	defer gateway.Close()
 	opened, err := hostdeps.Open(ctx, slog.Default(), cfg)
@@ -65,7 +59,7 @@ func run(configPath, manifest string, lifetime time.Duration) error {
 	}
 	defer opened.Close()
 	opened.Deps.ProviderEndpoints = openrails.ProviderEndpoints{NMIGatewayURL: gateway.URL()}
-	srv, err := server.New(ctx, cfg.Server, server.Deps{Engine: opened.Deps, Auth: authkit.Deps{KeySource: key}})
+	srv, err := server.New(ctx, cfg.Server, server.Deps{Engine: opened.Deps})
 	if err != nil {
 		return fmt.Errorf("bootstrap server: %w", err)
 	}

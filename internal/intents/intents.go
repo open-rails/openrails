@@ -120,7 +120,7 @@ type Relevance struct {
 	// or why it waits.
 	Reason string
 	// Until, when set, is when an applicable intent may be attempted: it waits
-	// without an attempt or a mutation-log row.
+	// without an attempt or an operation entry.
 	Until time.Time
 }
 

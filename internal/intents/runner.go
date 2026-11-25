@@ -420,7 +420,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats,
 			applied = OutcomeAmbiguous
 		} else {
 			if unsent, _ := outcome.Evidence["destructive_before_effect"].(bool); unsent {
-				if err := r.Store.park(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, []byte(`{"destructive_before_effect":true}`)); err != nil {
+				if err := r.Store.park(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, []byte(`{"destructive_before_effect":true}`), true); err != nil {
 					logEntry.ErrorContext(ctx, "cannot persist unsent destructive operation", logx.Err(err))
 				} else {
 					stats.Parked++
@@ -502,13 +502,15 @@ func (r *Runner) park(ctx context.Context, logEntry *slog.Logger, stats *Stats, 
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = r.transitionContext(ctx)
-	until, reason := outcome.Until, outcome.Reason
+	until := outcome.Until
+	var err error
 	if until.IsZero() {
 		until = now.Add(ParkRetryInterval)
+		err = r.Store.Park(ctx, id, until, outcome.Reason)
 	} else {
-		reason = "" // a deferral waits for its instant: no failure
+		err = r.Store.Defer(ctx, id, until)
 	}
-	if err := r.Store.Park(ctx, id, until, reason); err != nil {
+	if err != nil {
 		logEntry.ErrorContext(ctx, "intent ledger: park failed; lease expiry will re-surface the intent", logx.Err(err))
 		return
 	}

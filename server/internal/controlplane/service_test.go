@@ -16,7 +16,7 @@ import (
 // policy, and the invariants still win.
 func TestAuthKitIsDerivedFromTheEngine(t *testing.T) {
 	engine := billing.DefaultConfig()
-	engine.PublicBillingBaseURL = "https://billing.example.com/"
+	engine.PublicURL = "https://billing.example.com/"
 	engine.Database.Schema = "shop"
 	engine.TrustedProxies = []string{"10.0.0.0/8"}
 	a, err := AuthKit(&engine, Options{KeysPath: "/etc/keys", Console: true, Configure: func(c *authkit.Config) {
@@ -55,7 +55,7 @@ func TestAuthKitIsDerivedFromTheEngine(t *testing.T) {
 		t.Error("the console's client is declared")
 	}
 
-	engine.PublicBillingBaseURL = "http://localhost:3053"
+	engine.PublicURL = "http://localhost:3053"
 	if a, err := AuthKit(&engine, Options{}); err != nil || !a.Token.AllowPrivateNetworkJWKS {
 		t.Errorf("a loopback issuer is local: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestAuthKitIsDerivedFromTheEngine(t *testing.T) {
 		"http on a public host": {"http://billing.example.com", nil},
 		"open registration":     {base, func(c *authkit.Config) { c.Registration.NativeUserMode = iam.RegistrationModeOpen }},
 	} {
-		engine.PublicBillingBaseURL = c.base
+		engine.PublicURL = c.base
 		if _, err := AuthKit(&engine, Options{Configure: c.hook}); err == nil {
 			t.Errorf("%s: want refused", name)
 		}
