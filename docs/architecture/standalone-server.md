@@ -19,7 +19,7 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
   A merchant is an AuthKit group whose id is the merchant id; teams, API keys and
   trusted issuers are AuthKit's, in that group.
 - **Merchant manifest**: the file of merchant declarations (`--merchant-manifest`,
-  default `DefaultMerchantConfigManifestPath`) and its overlays.
+  default `DefaultMerchantConfigManifestPath`), one file.
 - **Operator**: `server/internal/operator`, the operations the CLI and the
   `server.Server` methods share.
 - **Console**: the SPA at `/admin`, built from `web/console` (package `console`,
@@ -51,7 +51,7 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
 ### Boot merchants
 
 `serverboot.ReconcileBootMerchantManifest` runs on `run-server` and `run-worker`. It
-loads the manifest and overlays (`bootstrap.LoadMerchantConfigManifestWithOverlays`),
+loads the manifest (`bootstrap.LoadMerchantConfigManifest`),
 creates each missing merchant with its AuthKit group and `remote_application` (a
 trusted issuer), and puts file declarations in place
 (`merchantbootstrap.ProvisionMerchant`). Only PostgreSQL or an unreadable manifest
@@ -128,7 +128,7 @@ credential's permissions reach. The SPA calls `/v1` with the staff token.
 - HTTP: the engine's catalog ([routes](../api/routes.md)), AuthKit's routes under its
   issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` on the metrics port.
 - Configuration: `config.yaml` keys ([configuration](../standalone.md#configuration-reference)), the
-  manifest and `merchant_manifest_overlays`, and the chart's `values.yaml`.
+  manifest, and the chart's `values.yaml`.
 
 ## Guarantees
 
@@ -230,7 +230,7 @@ Checks:
   `/health/ready` passes and `/admin/` serves the console.
 - **Chart.** `scripts/check.sh chart` lints and renders it with `values.yaml` and
   `ci/full-values.yaml`.
-- Gaps: no test runs `run-server` with a merchant manifest or overlays, or
+- Gaps: no test runs `run-server` with a merchant manifest, or
   `hostconfig.Load` beyond the smoke's environment; no browser test drives the
   console (the smoke only fetches `/admin/`), and its `config.json` and
   `/admin/merchants` have no scenario; `server/ci/paymentpage` is run by no script or

@@ -143,7 +143,7 @@ proxy. Boot refuses an unknown key and a retired one (naming its replacement).
 
 ## Configuration sources
 
-Each key of `config.yaml` can come from three places; the later wins:
+Each key of `config.yaml` but a policy section ([below](#configuration-reference)) can come from three places; the later wins:
 
 1. `config.yaml` (`--config`/`-c`, else `OPENRAILS_CONFIG`, else `config.yaml`
    in the working directory or `config/`).
@@ -163,12 +163,9 @@ AuthKit's keys (`AUTH_TOKEN_ISSUER`); `NAMING_FORMER_NAMES_MODE` and
 `NAMING_FORMER_NAMES_DURATION` are `naming.former_names.*`. A key is spelled
 exactly as here.
 
-The file is two Go types: `server.Config`, whose `Engine` is `openrails.Config`
-with its keys at the top level, and the keys only the binary reads (the
-connections it opens, `logger`, `signing_key`, `cloudflare_proxies`,
-`rate_limits_disabled`, `merchant_manifest_overlays`). A key neither reads
-refuses boot. Embedded, decode the same keys into `openrails.Config` (its
-`yaml` tags).
+The file is two Go types: `server.Config`, whose `Engine` is `openrails.Config` with its keys at the top level, and the keys only the binary reads (the connections it opens, `logger`, `signing_key`). A key neither reads refuses boot. Embedded, decode the same keys into `openrails.Config` (its `yaml` tags).
+
+The environment holds secrets and per-environment facts (URLs, hosts, ports, credentials); `config.yaml` holds policy. `rate_limits`, `user_action_rate_limit`, `destructive_action_limits` and `auth.http.rate_limits` are set in `config.yaml` alone: a variable or secret file naming one refuses boot.
 
 Three inputs configure a deployment, each on its own lifecycle:
 
@@ -193,16 +190,7 @@ are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
 (`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
 signing keys; none relaxes a protection, and a deployment that leaves one unset
-fails to connect or refuses to boot. The top-level
-keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`,
-`event_retention`, `webhook_secret_overlap`,
-`merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
-`checkout_origin`, `return_origins`, `trusted_proxies`,
-`cloudflare_proxies`, `database`, `clickhouse`, `redis`,
-`auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`,
-`email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`,
-`rate_limits_disabled`, `captcha`, `user_action_rate_limit`,
-`destructive_action_limits`, `llm` and `provider_sandbox`.
+fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit`, `destructive_action_limits`, `llm` and `provider_sandbox`.
 
 **Listener and lifecycle**
 
@@ -218,9 +206,6 @@ keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`,
 | Key | Default | Meaning |
 |---|---|---|
 | `engine_admission_hold` | `false` | pause admission and first submission of new engine payments; submitted ones are still verified |
-| `event_retention` | `2160h` | how long the event log keeps facts, whatever readers have read |
-| `webhook_secret_overlap` | `24h` | how long a rotated-out webhook signing secret keeps verifying, at most `168h` |
-| `merchant_manifest_overlays` | none | secret overlays merged over the merchant manifest ([the merchant manifest](#the-merchant-manifest)) |
 | `route_groups.admin` | off | customer support: `/v1/admin` |
 | `route_groups.catalog` | off | catalog reads and edits: `/v1/catalog` |
 | `route_groups.merchant_config` | off | PSPs, settings, findings, imports and archives: `/v1/merchant` |
@@ -235,10 +220,10 @@ the deployment does not serve answers `404 route_not_found`.
 | Key | Default | Meaning |
 |---|---|---|
 | `public_billing_base_url` | `http://localhost:3053` (the port's) | where browsers and PSPs reach the server, without `/v1`. Provider callbacks and billing links are built on it; Stripe webhook registration needs it public https |
-| `checkout_origin` | none | the payment page's own origin ([the payment page](#the-payment-page)); unset issues no pay URLs |
-| `return_origins` | none | exact origins a purchase's success, cancel and billing-portal return URLs may name; empty allows `public_billing_base_url`'s origin only |
-| `trusted_proxies` | none | CIDRs whose `X-Forwarded-For` is walked; empty trusts none ([proxies](#tls-proxies-cors-and-webhooks)) |
-| `cloudflare_proxies` | none | Cloudflare's ranges where Cloudflare fronts the origin: trusted like `trusted_proxies`, and the only peers whose `CF-Connecting-IP` AuthKit takes |
+| `checkout_origin` | none | needed only to serve OpenRails' own hosted pay page: its separate origin ([the payment page](#the-payment-page)). Leave it unset with the embedded checkout or your own card form; pay URLs then answer `pay_url_unavailable` |
+| `trusted_proxies` | none | CIDRs of your own proxies, whose `X-Forwarded-For` is walked; Cloudflare's published ranges are trusted too ([proxies](#tls-proxies-cors-and-webhooks)) |
+
+A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the billing origin, the origin of the merchant's issuer, or one of its `checkout.embed_origins`, so one merchant's checkout never returns to another's site.
 
 **Database**
 
@@ -296,7 +281,7 @@ boot. The ones a deployment sets:
 | `auth.registration.native_user_mode` | `closed`; `invite_only` with `local_sign_in` | local enrollment; `open` is refused unless a hosted product supplies `server.Config.MerchantCreation` |
 | `auth.registration.allow_missing_senders` | `false` | run without an email or SMS sender |
 | `auth.sign_in.dpop` | `optional` | `optional` or `required` for the server's own users |
-| `auth.http.direct_peer_ip` | follows `trusted_proxies` | AuthKit's client IP follows `trusted_proxies` and `cloudflare_proxies`, the socket peer when both are empty; `true` beside either refuses boot |
+| `auth.http.direct_peer_ip` | follows `trusted_proxies` | AuthKit's client IP follows `trusted_proxies` and Cloudflare's published ranges; `true` asserts there are no `trusted_proxies`, and beside them refuses boot |
 | `auth.http.rate_limits` | AuthKit's | AuthKit's own buckets |
 | `auth.database.schema` | `profiles` | AuthKit's tables |
 | `signing_key.active_key_id`, `signing_key.active_private_key_pem`, `signing_key.public_keys` | none | an inline signing key from `AUTHKIT_ACTIVE_KEY_ID`, `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` and `AUTHKIT_PUBLIC_KEYS` (a JSON object of further PEM keys by kid); fixed until restart, where `auth.keys.path` rotates live |
@@ -349,8 +334,10 @@ The server fixes the rest: merchant roles, the API-key prefix, the scopes `openr
 
 | Key | Default | Meaning |
 |---|---|---|
-| `rate_limits.<bucket>.requests_per_minute` | see [abuse limits](#abuse-limits) | per-minute limits of the `purchase`, `subscribe`, `payment`, `webhook` and `catalog-ask` buckets; a bucket left out is unlimited, an unknown key is reported and ignored, 0 or less means 60 |
-| `rate_limits_disabled` | `false` | make the middleware a passthrough where your gateway limits instead |
+| `rate_limits.purchase.requests_per_minute` | `10` | buying: checkout and paying an order ([abuse limits](#abuse-limits)) |
+| `rate_limits.payment.requests_per_minute` | `40` | a customer's payment-method routes |
+| `rate_limits.subscribe.requests_per_minute` | `20` | a customer's subscription changes |
+| `rate_limits.webhook.requests_per_minute` | `1200` | provider callbacks |
 | `captcha.provider`, `captcha.site_key`, `captcha.secret_key` | `turnstile` | both keys set turn captcha on; `turnstile`, `recaptcha-v3` or `hcaptcha` |
 | `user_action_rate_limit.minimum_customers_per_hour`, `user_action_rate_limit.paid_customers_per_hourly_customer` | `5`, `400` | the merchant-wide hourly budget for customer cancellations and card removals |
 | `user_action_rate_limit.minimum_customers_per_day`, `user_action_rate_limit.paid_customers_per_daily_customer` | `10`, `100` | the daily one |
@@ -359,14 +346,14 @@ The server fixes the rest: merchant roles, the API-key prefix, the scopes `openr
 | `destructive_action_limits.deployment_per_hour`, `destructive_action_limits.deployment_per_day` | `50`, `100` | per deployment, likewise |
 | `destructive_action_limits.erasure_per_hour`, `destructive_action_limits.erasure_per_day` | `100`, `1000` | contact erasures over OpenRails' own SCIM routes per merchant, floors that rise with its directory; past them an erasure waits ([client](client.md#customers)) |
 
-The example file sets the shipped buckets explicitly:
+A bucket set to 0 is unlimited: a deployment whose gateway limits sets every bucket to 0. Captcha is on only with its keys. The example file sets the shipped limits explicitly:
 
 ```yaml
 rate_limits:
-  subscribe: {requests_per_minute: 20}
   purchase: {requests_per_minute: 10}
-  webhook: {requests_per_minute: 1200}
   payment: {requests_per_minute: 40}
+  subscribe: {requests_per_minute: 20}
+  webhook: {requests_per_minute: 1200}
 user_action_rate_limit:
   minimum_customers_per_hour: 5
   paid_customers_per_hourly_customer: 400
@@ -407,7 +394,7 @@ group holding its owner role ([trusted issuers](#trusted-issuers)).
 (an explicit path must exist), else `/etc/openrails/merchants.yaml` when present;
 none boots control-plane-only. At boot:
 
-1. The manifest and its overlays merge (later wins) and parse strictly: unknown
+1. The manifest parses strictly: unknown
    fields, retired keys (`accounts`, `rail_merchant_accounts`,
    `provider_accounts`, which name their rename), several documents, aliases,
    anchors, merge keys and tags refuse boot, and so do secrets for an undeclared
@@ -427,22 +414,7 @@ metadata by revision where Vault holds it; `push-merchant-config --insert`
 creates the merchants a manifest names; `dump-merchant-config --slug` prints a
 merchant's configuration in the manifest's shape, without credentials.
 
-**Secret overlays.** Keep secret values out of the committed manifest. Render
-them as YAML in the manifest's shape, holding only `secrets` blocks, and list the
-files in `merchant_manifest_overlays` (`MERCHANT_MANIFEST_OVERLAYS`,
-comma-separated). An overlay that changes anything but secret values is refused:
-the manifest stays the authority for identities, account ids and settings.
-
-```yaml
-# /vault/secrets/merchants.yaml
-merchants:
-  onlydemo:
-    psps:
-      mobius:
-        secrets: {security_key: replace-me, webhook_signing_secret: replace-me}
-```
-
-To rotate a credential, update the secret source, re-render and restart.
+**Secrets.** The manifest is one file. Keep PSP secrets out of a committed copy: put them in Vault (`vault.kv_mount`), or keep the whole manifest, secrets included, in a secret store and mount the file from it (the chart's `secrets.merchantManifest`). To rotate a credential in the file, update the secret and restart.
 
 ## Secrets
 
@@ -459,7 +431,7 @@ mounted file or the environment, named like its key's variable.
 | LLM | `LLM_API_KEY` |
 | Solana local keypairs | `SOLANA_CRANKERS` |
 | AuthKit's signing key and TOTP key | `keys.json` and `totp.key` under `auth.keys.path`, or the `AUTHKIT_*` variables |
-| PSP and custodian credentials | Vault, or a merchant manifest overlay |
+| PSP and custodian credentials | Vault, or the merchant manifest mounted from a secret |
 
 `keys.json` is `{active_key_id, active_private_key_pem, public_keys}`; the file
 is watched, so rotate by adding the new key as active, moving the old one into
@@ -695,8 +667,7 @@ where the customer pays that one order. The server serves it at
 that origin's DNS and TLS at the same server. The checkout origin has no path
 and must differ from `public_billing_base_url`, the server's issuer and the
 frontend's origin: the page runs the PSPs' scripts and never shares an origin
-with the API or the console. Boot refuses otherwise. Without it an order asking
-for a pay URL is `400 pay_url_unavailable`.
+with the API or the console. Boot refuses otherwise. It is needed only for this page: with the embedded checkout or your own card form leave it unset, and an order asking for a pay URL is `400 pay_url_unavailable`.
 
 The page is built from `web/pay` and embedded in the release binary and image.
 A host building its own binary on `server` builds it with
@@ -714,7 +685,7 @@ console at `/admin`, `/v1/webhooks/{rail}/{account_id}` for provider webhooks an
 the checkout origin. Give one public origin to `public_billing_base_url`,
 `auth.token.issuer` and `auth.resource.id`, and another to `checkout_origin`.
 
-- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies; `auth.http` declares none of its own. Behind Cloudflare, list its ranges in `cloudflare_proxies` and lock the origin to Cloudflare's ingress.
+- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies; `auth.http` declares none of its own. Cloudflare's published ranges are built in and trusted like `trusted_proxies`, and their peers alone are believed for `CF-Connecting-IP` (AuthKit's client IP) and `CF-IPCountry` (the checkout's country); Cloudflare overwrites both, so this holds also where it does not front the origin.
 - **Body size.** Requests are capped at 1 MiB (`413 request_body_too_large`),
   but a billing archive import (`POST /v1/merchant/billing-archive`) streams up
   to 1 GiB: raise the proxy's limit if you import over HTTP.
@@ -770,8 +741,8 @@ count, primary or sticky session.
   logs, counts `openrails_abuse_state_fallbacks_total` and reports Redis
   degraded; what it counted meanwhile still counts when Redis returns. Use a
   trusted Redis 6.2+ with synchronized clocks across failover nodes.
-- **Identical everywhere:** schemas, merchant configuration (the same manifest and overlays, or Vault mount),
-  `rate_limits`, `captcha`, `trusted_proxies`, `return_origins`, `route_groups`
+- **Identical everywhere:** schemas, merchant configuration (the same manifest, or Vault mount),
+  `rate_limits`, `captcha`, `trusted_proxies`, `route_groups`
   (a route some instances lack is a 404 on them), the signing key and `totp.key`
   (generated development keys are one instance only), the captcha
   secret, and the version outside a rolling upgrade.
@@ -1000,7 +971,6 @@ Redis when configured, otherwise in each process's memory; never in PostgreSQL.
 | `subscribe` | 20 | the `/v1/me/subscriptions` writes |
 | `payment` | 40 | `/v1/me/payment-methods` |
 | `webhook` | 1200 | `/v1/webhooks/{rail}/{account_id}` |
-| `catalog-ask` | 10 | `POST /v1/console/catalog/ask` |
 
 Counting is per minute, per bucket and per subject (the client IP, and the user
 when authenticated); the strictest trip refuses with `429 rate_limit_exceeded`,
@@ -1023,7 +993,7 @@ caps for webhooks).
   recent decline is blocked. A customer without a recent decline is never
   blocked.
 - **Customer cancellations and card removals** share one merchant-wide budget,
-  enforced even with `rate_limits_disabled`: per rolling day the larger of 10
+  enforced even with every `rate_limits` bucket at 0: per rolling day the larger of 10
   customers or 1 % of customers who paid in the last 30 days, per rolling hour
   the larger of 5 or one per 400 paying customers (`user_action_rate_limit`).
   A refusal is 429, records a finding and changes nothing.
@@ -1153,7 +1123,7 @@ touches the ledger, grants or logs.
 
 ## Retention
 
-Periods are constants, the same for every merchant, except the event log's `event_retention`. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage postings, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
+Periods are constants, the same for every merchant. Each table's comment states its class: **permanent** (the ledger, grants, payments, owed usage, usage postings, receipts, operation authorizations, refusals, running charges, maintenance runs, the before-images of destructive runs, MRR movements and scheduled MRR changes), **rows** (deleted by the hourly cleanup) or **state** (one row per thing that exists).
 
 | Table | Deleted |
 |---|---|
@@ -1163,7 +1133,7 @@ Periods are constants, the same for every merchant, except the event log's `even
 | `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 90 days |
 | `parked_provider_subscriptions` | 90 days after release |
 | `carts` | 30 days after `last_changed_at` |
-| `notification_events`, `host_outbox`, the event log | 90 days, never before `event_retention` |
+| `notification_events`, `host_outbox`, the event log | 90 days |
 | `webhook_events` | 90 days after completion |
 | `customer_messages` | two years (731 days) after created |
 | `idempotency_keys`, `solana_pay_references` | at expiry, after the 7-day watch |
@@ -1184,10 +1154,7 @@ reports reach back about 26 months.
 
 ## Backup and restore
 
-Back up PostgreSQL and the merchant configuration (Vault with its
-`credential_fingerprint_key`, or the manifest and its overlays), plus
-`keys.json` and `totp.key` in your secret manager. PostgreSQL holds no
-credential, so a database alone cannot charge anyone.
+Back up PostgreSQL and the merchant configuration (Vault with its `credential_fingerprint_key`, or the manifest), plus `keys.json` and `totp.key` in your secret manager. PostgreSQL holds no credential, so a database alone cannot charge anyone.
 
 Turn on point-in-time recovery (`wal_level = replica`, `archive_mode = on`, an off-host `archive_command`, periodic base backups). PITR is whole-cluster: right for disaster, wrong for one damaged merchant. A restore never undoes what happened at a provider; it creates divergence that convergence repairs. Money is reversed by compensating entries, never deletion; the append-only tables (the ledger, grants, status transitions, the operations and configuration histories, `webhook_events`, findings) are restored whole or not at all.
 
@@ -1325,9 +1292,9 @@ ingress:
 | `image` | `repository`, `tag` (default the chart's `vX.Y.Z`; required to render a checkout, whose appVersion is `latest`), `digest` (pins over the tag), `pullPolicy` |
 | `imagePullSecrets` | for a private registry |
 | `args` | the command, `[run-server]`; the chart appends `--config=/etc/openrails/config.yaml` |
-| `config` | `config.yaml`, rendered as written; no secrets. `host`, `port` and `metrics_port` are the chart's and refused here |
-| `files` | more files in `/etc/openrails`: `merchants.yaml` (read at every boot), `bootstrap.yaml` (first run), `catalog.yaml` (for `openrails catalog apply`) |
-| `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantOverlays` (`{name, key}` overlays added to `merchant_manifest_overlays`) |
+| `config` | `config.yaml`, rendered as written; no secrets. Policy (`rate_limits`, `user_action_rate_limit`, `destructive_action_limits`) goes here, never in `env`. `host`, `port` and `metrics_port` are the chart's and refused here |
+| `files` | more files in `/etc/openrails`: `merchants.yaml` (read at every boot; without secrets), `bootstrap.yaml` (first run), `catalog.yaml` (for `openrails catalog apply`) |
+| `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantManifest` (`{name, key}`: a Secret key mounted as `/etc/openrails/merchants.yaml`, the manifest with its PSP secrets, in place of `files.merchants.yaml`) |
 | `env`, `envFrom` | further environment |
 | `ports` | `http`, default 3053 |
 | `metrics` | the metrics listener, the operator's Prometheus `GET /metrics` (`enabled`, default true; `port` 9090, rendered as `metrics_port`), served by its own ClusterIP Service `<fullname>-metrics` whatever `service.type` is so it is never public, and an optional Prometheus Operator `serviceMonitor`. Not the `/v1/metrics` business metrics API |

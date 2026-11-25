@@ -46,8 +46,8 @@ one read snapshot through the helpers module's `eventlog.Log`. OpenRails keeps n
 reader state. A cursor below the stream's floor is `410 event_cursor_expired`; one
 from another merchant or filter is `400 invalid_cursor`. `CleanupExpiredDataWorker`
 calls `eventlog.Prune` (bounded batches; `AdvanceEventLogFloor` records the floor,
-so expiry is told apart from an empty page), `PruneNotificationJournal` (past both
-90 days and `event_retention`) and `DeleteHostOutboxBefore`.
+so expiry is told apart from an empty page), `PruneNotificationJournal` (past
+90 days) and `DeleteHostOutboxBefore`.
 
 **Customer messages.** The `AFTER INSERT` trigger
 `notification_event_customer_message` runs `billing.queue_customer_message`: in the
@@ -193,7 +193,7 @@ the merchant profile's `from_email`.
   `GET /v1/admin/customers/{customer_id}/messages` (`merchant:customer:read`),
   `POST /v1/merchant/messages/preview` (`merchant:config:read`),
   `POST /v1/merchant/messages/test` (`merchant:config:manage`).
-- Configuration: `event_retention` (default `2160h`), the merchant's `alert_email`,
+- Configuration: the merchant's `alert_email`,
   `settings.balance_notices`, the merchant's `messages` document, `email_smtp`.
 - Jobs: `openrails.operator_alert`, `openrails.balance_look`, `openrails.balance_watch`,
   `openrails.config_realerts`, `openrails.customer_messages_dispatch`,
@@ -273,7 +273,7 @@ merchant's; a merchant archive carries no message.
 
 Checks:
 - `CleanupExpiredDataWorker.sweepDeployment` prunes the log and journal in bounded batches.
-- `PruneNotificationJournal`'s cutoff is the larger of `retention.EventLog` and `event_retention`.
+- `PruneNotificationJournal`'s cutoff is `retention.EventLog`, 90 days.
 - `merchantarchive` excludes the event log, journal and ordering state with reasons, and `customer_messages` (`excludedTables`: a restore sends nothing again).
 - `CleanupExpiredDataWorker` deletes messages past 731 days in bounded batches (`DeleteCustomerMessagesBefore`).
 - SCIM `deleteUser` runs `EraseCustomerMessages`; a merchant purge runs `PurgeMerchantCustomerMessages`.

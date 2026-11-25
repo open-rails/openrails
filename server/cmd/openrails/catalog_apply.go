@@ -51,7 +51,7 @@ func runCatalogApply(cmd *cobra.Command, file string, opts catalogApplyOptions) 
 		return fmt.Errorf("catalog file is required")
 	}
 	cfg := hostconfig.Engine(cmd.Context())
-	manifest, err := cliMerchantManifest(cmd.Context(), opts.merchantManifest)
+	manifest, err := cliMerchantManifest(opts.merchantManifest)
 	if err != nil {
 		return err
 	}

@@ -66,11 +66,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		return fmt.Errorf("add paced provider refresh worker: %w", err)
 	}
 	cleanupConfig := riverjobs.DefaultCleanupConfig()
-	eventRetention, err := config.EventRetentionDuration(r.Config)
-	if err != nil {
-		return err
-	}
-	cleanupConfig.EventRetention = eventRetention
 	if err := addWorker(workers, &riverjobs.CleanupExpiredDataWorker{
 		DB:     r.DB,
 		Clock:  clock,

@@ -55,8 +55,9 @@ config:
 
 # More files in /etc/openrails, each a YAML document or a string. The server
 # reads these names when present:
-#   merchants.yaml  merchant manifest, applied at every boot (its secrets go in
-#                   secrets.merchantOverlays)
+#   merchants.yaml  merchant manifest, applied at every boot; with PSP secrets
+#                   in it, mount it from a Secret (secrets.merchantManifest)
+#                   instead, or keep them in Vault (config.vault.kv_mount)
 #   bootstrap.yaml  AuthKit's first-run operators and trusted applications
 #   catalog.yaml    the catalog document `openrails catalog apply` takes
 files: {}
@@ -75,11 +76,10 @@ secrets:
   # and reloaded when it changes. Empty mounts a scratch directory, which only
   # a loopback issuer's generated development keys can use, with one replica.
   authKeys: ""
-  # Merchant manifest overlays: a Secret key holding YAML in the manifest's
-  # shape (PSP credentials kept outside Vault), added to
-  # merchant_manifest_overlays.
-  #   - {name: shop-psps, key: overlay.yaml}
-  merchantOverlays: []
+  # The merchant manifest with its PSP secrets: a Secret key mounted as
+  # /etc/openrails/merchants.yaml, in place of files.merchants.yaml.
+  #   {name: shop-merchants, key: merchants.yaml}
+  merchantManifest: {}
 
 env: []
 envFrom: []

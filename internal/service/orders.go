@@ -809,7 +809,7 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 		return err
 	}
 	if pay.hosted != nil {
-		if err := s.rt.OrderAttemptService.CheckReturnURL(pay.hosted.ReturnURL); err != nil {
+		if err := s.rt.OrderAttemptService.CheckReturnURL(ctx, pay.hosted.ReturnURL); err != nil {
 			return err
 		}
 		_, err := payment.HostedOption(options, pay.hosted.PSPID)
@@ -994,7 +994,15 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		if origin == "" {
 			return nil, false, apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "this deployment serves no checkout origin").WithParam("pay_url")
 		}
-		plan, err := paymentpage.Plan(*params.PayURL, billing.OrderID{}, now, params.ExpiresAt)
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		allowed, err := s.rt.ReturnOrigins(ctx, mid)
+		if err != nil {
+			return nil, false, err
+		}
+		plan, err := paymentpage.Plan(*params.PayURL, billing.OrderID{}, now, params.ExpiresAt, allowed)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1014,7 +1022,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 			if err != nil {
 				return err
 			}
-			c, err := paymentpage.Plan(*params.PayURL, billing.OrderID(id), now, params.ExpiresAt)
+			c, err := paymentpage.Plan(*params.PayURL, billing.OrderID(id), now, params.ExpiresAt, allowed)
 			if err != nil {
 				return err
 			}

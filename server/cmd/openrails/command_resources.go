@@ -8,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -107,12 +106,6 @@ func (c *commandControlPlane) loadMerchants(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	overlap, err := config.WebhookSecretOverlapDuration(cfg)
-	if err != nil {
-		opened.Close()
-		return err
-	}
-	opened.Service.WithWebhookSecretOverlap(overlap)
 	c.cleanups = append(c.cleanups, opened.Close)
 	c.directory = opened.Service
 	c.cp.BindMerchants(c.directory)

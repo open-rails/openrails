@@ -1591,7 +1591,6 @@ pkg openrails/billing, type Config struct, ClickHouse ClickHouseConfig `yaml:"cl
 pkg openrails/billing, type Config struct, Database DatabaseConfig `yaml:"database"`
 pkg openrails/billing, type Config struct, DestructiveActionLimits DestructiveActionLimitsConfig `yaml:"destructive_action_limits"`
 pkg openrails/billing, type Config struct, EngineAdmissionHold bool `yaml:"engine_admission_hold"`
-pkg openrails/billing, type Config struct, EventRetention time.Duration `yaml:"event_retention"`
 pkg openrails/billing, type Config struct, HyperSwitch HyperSwitchConfig `yaml:"hyperswitch"`
 pkg openrails/billing, type Config struct, LLM LLMConfig `yaml:"llm"`
 pkg openrails/billing, type Config struct, Merchants []MerchantDeclaration `yaml:"-"`
@@ -1599,12 +1598,10 @@ pkg openrails/billing, type Config struct, ProviderSandbox ProviderSandboxConfig
 pkg openrails/billing, type Config struct, PublicBillingBaseURL string `yaml:"public_billing_base_url"`
 pkg openrails/billing, type Config struct, RateLimits RateLimitsConfig `yaml:"rate_limits"`
 pkg openrails/billing, type Config struct, ReadCache ReadCache `yaml:"-"`
-pkg openrails/billing, type Config struct, ReturnOrigins []string `yaml:"return_origins"`
 pkg openrails/billing, type Config struct, Solana SolanaConfig `yaml:"solana"`
 pkg openrails/billing, type Config struct, TrustedProxies []string `yaml:"trusted_proxies"`
 pkg openrails/billing, type Config struct, UserActionRateLimit UserActionRateLimitConfig `yaml:"user_action_rate_limit"`
 pkg openrails/billing, type Config struct, Vault VaultConfig `yaml:"vault"`
-pkg openrails/billing, type Config struct, WebhookSecretOverlap time.Duration `yaml:"webhook_secret_overlap"`
 pkg openrails/billing, type ConfirmOrderParams struct
 pkg openrails/billing, type ConfirmOrderParams struct, Signature *string `json:"signature,omitempty"`
 pkg openrails/billing, type ConfirmPaymentMethodParams struct
@@ -3714,7 +3711,11 @@ pkg openrails/billing, type RailDefinition struct, Fields []string `json:"fields
 pkg openrails/billing, type RailDefinition struct, Rail Rail `json:"rail"`
 pkg openrails/billing, type RateLimit struct
 pkg openrails/billing, type RateLimit struct, RequestsPerMinute int `yaml:"requests_per_minute"`
-pkg openrails/billing, type RateLimitsConfig map[string]*RateLimit
+pkg openrails/billing, type RateLimitsConfig struct
+pkg openrails/billing, type RateLimitsConfig struct, Payment *RateLimit `yaml:"payment"`
+pkg openrails/billing, type RateLimitsConfig struct, Purchase *RateLimit `yaml:"purchase"`
+pkg openrails/billing, type RateLimitsConfig struct, Subscribe *RateLimit `yaml:"subscribe"`
+pkg openrails/billing, type RateLimitsConfig struct, Webhook *RateLimit `yaml:"webhook"`
 pkg openrails/billing, type Read string
 pkg openrails/billing, type ReadCache map[Read]ReadPolicy
 pkg openrails/billing, type ReadPolicy struct
