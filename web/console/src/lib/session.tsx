@@ -14,9 +14,8 @@ import type { BootstrapConfig, ConsoleIssuer } from "../config"
 import { IssuerIdentity, LocalIdentity } from "@/lib/identity"
 import { routerBasename } from "@/lib/mount"
 
-// The refresh token lives in sessionStorage: it stays with the tab. A
-// merchant's token never leaves memory.
-const REFRESH_KEY = "openrails.admin.refresh"
+// The refresh token lives in AuthKit's HttpOnly cookie; access tokens and a
+// merchant's token stay in memory.
 
 export type ConsoleClient =
   | { kind: "local"; client: AuthClient }
@@ -56,13 +55,6 @@ export function createConsoleSession(
           dpop: true,
         }
       : undefined,
-    storage: {
-      get: () => sessionStorage.getItem(REFRESH_KEY),
-      set: (token) =>
-        token
-          ? sessionStorage.setItem(REFRESH_KEY, token)
-          : sessionStorage.removeItem(REFRESH_KEY),
-    },
     sessionHint: false,
   })
   return { kind: "local", client }
