@@ -3,11 +3,13 @@
 -- under.
 
 -- name: UpsertUsageUnposted :exec
--- Intake marks a customer's usage in a currency unposted, in the transaction
--- that commits it: the oldest instant and the earliest due date win.
+-- Intake marks customers' usage in a currency unposted, in the transaction
+-- that commits it, in customer order: the oldest instant and the earliest
+-- due date win.
 INSERT INTO billing.usage_unposted AS u (merchant_id, customer_id, currency, since_at, due_at, updated_at)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(since_at)::timestamptz,
-    sqlc.arg(due_at)::timestamptz, sqlc.arg(now)::timestamptz)
+SELECT sqlc.arg(merchant_id)::uuid, m.customer_id, sqlc.arg(currency)::text, m.since_at, m.due_at, sqlc.arg(now)::timestamptz
+FROM unnest(sqlc.arg(customer_ids)::uuid[], sqlc.arg(since_ats)::timestamptz[], sqlc.arg(due_ats)::timestamptz[]) AS m(customer_id, since_at, due_at)
+ORDER BY m.customer_id
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     since_at = LEAST(u.since_at, EXCLUDED.since_at), due_at = LEAST(u.due_at, EXCLUDED.due_at), updated_at = EXCLUDED.updated_at;
 
