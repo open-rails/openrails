@@ -9,9 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/booktag"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/writeposture"
 )
@@ -124,15 +122,6 @@ func NewFactory(base http.RoundTripper, postures writeposture.Reader) *Factory {
 	return &Factory{base: base, postures: postures}
 }
 
-// ConfiguredFactory is the factory cfg's deployment uses: Stripe itself, or
-// the loopback Stripe its provider_sandbox.stripe_api_url names.
-func ConfiguredFactory(cfg *billing.Config, postures writeposture.Reader) *Factory {
-	if api := config.SandboxStripeAPIURL(cfg); api != "" {
-		return NewFactory(HostRewriteTransport(api), postures)
-	}
-	return NewFactory(nil, postures)
-}
-
 // NewWiredFactory sends every request to wire and exempts nothing: posture is
 // checked through wire and every write is gated as against Stripe (a test
 // seam, as nmi.NMIClient.UseTransport is).
@@ -151,7 +140,7 @@ func (f *Factory) ReadOnlyClient(timeout time.Duration) *http.Client {
 
 // HostRewriteTransport sends every request to target regardless of the
 // original host, preserving method, path, query, body and headers: how a
-// loopback Stripe (config.ProviderSandbox.StripeAPIURL) is installed under the
+// loopback Stripe (Deps.ProviderEndpoints.StripeAPIURL) is installed under the
 // guard.
 func HostRewriteTransport(target string) http.RoundTripper {
 	return hostRewriteTransport{target: target}

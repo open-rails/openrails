@@ -200,7 +200,7 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 		w.clock.Advance(w.clock.Now().Truncate(time.Second).Sub(w.clock.Now()))
 		s.node.SetClock(w.clock.Now)
 		w.posture = "full"
-		w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+		w.deps.ProviderEndpoints = openrails.ProviderEndpoints{SolanaRPCURL: s.wire.server.URL}
 		if option.fx != nil {
 			w.deps.FXTransport = option.fx
 		}

@@ -47,4 +47,34 @@ func TestRetiredRuntimeSettings(t *testing.T) {
 		}
 		require.Contains(t, hostCLI(t, w, "book", "status"), "armed", "without them the same configuration loads")
 	})
+	t.Run("OR-J06-S73/a-provider-sandbox-setting-refuses-boot", func(t *testing.T) {
+		w := newWorld(t)
+		const removed, now = "provider_sandbox / PROVIDER_SANDBOX_* was removed: no setting redirects a provider", "Deps.ProviderEndpoints"
+		for _, c := range []struct {
+			name  string
+			extra map[string]any
+			env   string
+			args  []string
+		}{
+			{"section", map[string]any{"provider_sandbox": map[string]any{"nmi_gateway_url": "http://127.0.0.1:9091"}}, "", []string{"run-server"}},
+			{"sources", map[string]any{"provider_sandbox": map[string]any{"ccbill_webhook_sources": []string{"127.0.0.1/32"}}}, "", []string{"book", "status"}},
+			{"env", nil, "PROVIDER_SANDBOX_STRIPE_API_URL=http://127.0.0.1:9092", []string{"run-server"}},
+		} {
+			cmd := hostCLICommand(t, w, c.extra, c.args...)
+			if c.env != "" {
+				cmd.Env = append(cmd.Env, c.env)
+			}
+			var out bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &out, &out
+			require.NoError(t, cmd.Start(), c.name)
+			// A server that booted anyway is stopped; the refusal comes first.
+			stop := time.AfterFunc(time.Minute, func() { _ = cmd.Process.Kill() })
+			err := cmd.Wait()
+			stop.Stop()
+			require.Error(t, err, c.name)
+			require.Contains(t, out.String(), removed, c.name)
+			require.Contains(t, out.String(), now, c.name)
+		}
+		require.Contains(t, hostCLI(t, w, "book", "status"), "armed", "without it the same configuration loads")
+	})
 }

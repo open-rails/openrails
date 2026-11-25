@@ -94,6 +94,9 @@ type Runtime struct {
 	leaseDB     *db.DB
 	RedisClient redis.UniversalClient
 	Config      *billing.Config
+	// ProviderEndpoints are the loopback fakes the provider clients reach
+	// (Deps.ProviderEndpoints); zero, the providers.
+	ProviderEndpoints config.ProviderEndpoints
 
 	// declared are the merchants Config declares (DeclareMerchants).
 	declared atomic.Pointer[declaredMerchants]

@@ -67,7 +67,7 @@ type Engine struct {
 // is an operator's ApplyCatalog. Vault, PSP posture checks and Redis
 // recover in the background and fail only the features that need them (see
 // Probes). It fails only on what the engine cannot serve without: the
-// database (Deps.Postgres) and its migrations, an invalid River schema, or a test seam beside a live PSP. Any other setting, merchant
+// database (Deps.Postgres) and its migrations, an invalid River schema, a test seam beside a live PSP, or a provider endpoint that is not loopback. Any other setting, merchant
 // or document that cannot be served is refused alone and reported by Ready
 // and the openrails_configuration probe.
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
