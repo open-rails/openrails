@@ -363,8 +363,8 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		Store:    intents.NewStoreGated(r.DB, r.RateCeiling()),
 		Registry: registry,
 		Breaker:  intents.NewVolumeBreaker(r.DB), // gates destructive types everywhere
-		// Operator kill switch: one UPDATE halts every destructive provider
-		// write on every node.
+		// The merchant's destructive arming: disarming it halts its destructive
+		// provider writes on every node.
 		Destructive: destructive.New(r.DB),
 		Admissions:  r.DestructiveAdmissions,
 		Clock:       clock,

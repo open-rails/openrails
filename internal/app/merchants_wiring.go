@@ -58,8 +58,8 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	}
 	svc.WithPlatformVaultStore(conn.PlatformKV)
 	svc.WithBasisTheoryTransport(custodianTransport)
-	// The merchant purge answers to the kill switch and per-merchant policy
-	// that hold a mass cancellation, and queues its Vault cleanup with itself.
+	// The merchant purge answers to the merchant's destructive arming, which
+	// holds a mass cancellation, and queues its Vault cleanup with itself.
 	svc.WithDestructivePolicy(destructive.New(r.DB)).WithJobs(r.DB)
 	overlap, err := config.WebhookSecretOverlapDuration(r.Config)
 	if err != nil {
