@@ -538,7 +538,7 @@ products:
 		customer, _ := fundedCustomer(t, a.world)
 		// Its first and 25th hours, an hour between, and the next day's first.
 		at := []time.Time{day.Add(30 * time.Minute), day.Add(12 * time.Hour), next.Add(-30 * time.Minute), next.Add(30 * time.Minute)}
-		units := []int64{2, 3, 4, 1}
+		units := []int64{2, 3, 4, 2}
 		var items []billing.LeaseUsage
 		for i := range at {
 			u := usageInput(customer, fmt.Sprintf("hour-%d", i), units[i])
@@ -576,11 +576,12 @@ products:
 			return out
 		}
 		first, second := day.UTC().Format(time.RFC3339), next.UTC().Format(time.RFC3339)
-		require.Equal(t, map[string]int64{first + " usage_units": 3, first + " usage_charged": 900, second + " usage_units": 1, second + " usage_charged": 100},
+		require.Equal(t, map[string]int64{first + " usage_units": 3, first + " usage_charged": 900, second + " usage_units": 1, second + " usage_charged": 200},
 			days(newYork), "the 25-hour day holds its 25th hour")
 		require.Equal(t, want(newYork), days(newYork))
 
-		// Burn reads the same days: the balance covers no more than a week of it.
+		// Burn reads the same days: 1,100 used in a week leaves the 1,000 funded
+		// under a week.
 		risk := metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"customers_at_depletion_risk"},
 			Range: &billing.MetricsRange{From: day.Format(time.DateOnly), To: next.AddDate(0, 0, 1).Format(time.DateOnly)}})
 		require.EqualValues(t, 1, whole(t, only(t, risk)["customers_at_depletion_risk"]))
