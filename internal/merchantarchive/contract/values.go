@@ -124,7 +124,9 @@ func ValidateValues(p Profile, values []*string) error {
 		}
 		v := *values[i]
 		if c.Type == "text" {
-			if !(encodedKey && (c.Name == "idempotency_key" || p.Name == "ledger_transfers" && c.Name == "source_id")) && !safeText(v) {
+			identifier := encodedKey && (c.Name == "idempotency_key" || p.Name == "ledger_transfers" && c.Name == "source_id") ||
+				p.Name == "price_psp_bindings" && c.Name == "plan_id" && solanaPlanBinding(p, values) && solanaPlanID(v)
+			if !identifier && !safeText(v) {
 				return fmt.Errorf("sensitive text in %s.%s", p.Name, c.Name)
 			}
 		}
@@ -352,6 +354,18 @@ const (
 func unattemptedSolanaPull(p Profile, values []*string) bool {
 	typ, attempts, evidence := value(p, values, "intent_type"), value(p, values, "attempts"), value(p, values, "result_evidence")
 	return typ != nil && *typ == solanaPull && attempts != nil && *attempts == "0" && evidence == nil
+}
+
+// solanaPlanBinding reports whether a price binding is a Solana plan's: its
+// configuration names the plan's owner.
+func solanaPlanBinding(p Profile, values []*string) bool {
+	raw := value(p, values, "configuration")
+	var cfg map[string]any
+	if raw == nil || json.Unmarshal([]byte(*raw), &cfg) != nil {
+		return false
+	}
+	_, ok := cfg["merchant_address"]
+	return ok
 }
 
 func value(p Profile, values []*string, name string) *string {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -45,6 +46,53 @@ var mandateJSON = object(map[string]jsonRule{"id": uuidValue, "kind": textValue,
 var frozenInstrumentJSON = object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "mandate": mandateJSON})
 
 type jsonRule func(any) bool
+
+// solanaPlanID is a Solana plan id: the Subscriptions program's u64 in
+// decimal. It is an identifier, not text: one in about 27 passes the card
+// scan.
+func solanaPlanID(s string) bool {
+	n, err := strconv.ParseUint(s, 10, 64)
+	return err == nil && strconv.FormatUint(n, 10) == s
+}
+func solanaPlanIDValue(v any) bool { s, ok := v.(string); return ok && solanaPlanID(s) }
+
+// historyFields is a history entry's changed fields: each "changed" (a
+// credential) or its sides.
+func historyFields(v any) bool {
+	fields, ok := v.(map[string]any)
+	if !ok {
+		return false
+	}
+	for name, x := range fields {
+		side := historyValue
+		if name == "plans" {
+			side = historyPlans
+		}
+		if !safeText(name) || x != "changed" && !object(map[string]jsonRule{"before": side, "after": side})(x) {
+			return false
+		}
+	}
+	return true
+}
+
+// historyPlans is a price's plans, by PSP: a history value whose Solana
+// links' plan_id is a plan id.
+func historyPlans(v any) bool {
+	links, ok := v.(map[string]any)
+	if !ok {
+		return historyValue(v)
+	}
+	rest := make(map[string]any, len(links))
+	for psp, x := range links {
+		if link, ok := x.(map[string]any); ok && link["rail"] == "solana" && solanaPlanIDValue(link["plan_id"]) {
+			link = maps.Clone(link)
+			delete(link, "plan_id")
+			x = link
+		}
+		rest[psp] = x
+	}
+	return historyValue(rest)
+}
 
 // historyValue is any JSON whose every string is safe text.
 func historyValue(v any) bool {
@@ -376,10 +424,8 @@ var jsonRules = map[string]jsonRule{
 	// A configuration history entry: its fields' values as the catalog and
 	// configuration documents hold them, credentials only as "changed".
 	"change_log.changes": object(map[string]jsonRule{"version": integerValue, "revision": integerValue, "application_id": textValue,
-		"fields": dictionary(func(v any) bool {
-			return v == "changed" || object(map[string]jsonRule{"before": historyValue, "after": historyValue})(v)
-		}),
-		"keys": array(textValue), "from": textValue, "to": textValue, "price_id": textValue, "archived": booleanValue}),
+		"fields": historyFields,
+		"keys":   array(textValue), "from": textValue, "to": textValue, "price_id": textValue, "archived": booleanValue}),
 	"catalog_applications.result": object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.
 	"subscriptions.gateway_response":   metadataJSON,
@@ -406,7 +452,7 @@ var jsonRules = map[string]jsonRule{
 		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "checkout_url": textValue,
 		"token_symbol": textValue, "token_mint": textValue, "token_decimals": textValue, "recipient": textValue, "token_amount": moneyStringValue,
 		"token_price_usd": numberValue, "fx_rate": numberValue, "fx_currency": textValue, "quoted_at": textValue, "quote_expires_at": textValue,
-		"plan_id": textValue, "mint_symbol": textValue, "amount_base_units": moneyStringValue, "period_hours": textValue, "plan_created_at": textValue,
+		"plan_id": solanaPlanIDValue, "mint_symbol": textValue, "amount_base_units": moneyStringValue, "period_hours": textValue, "plan_created_at": textValue,
 		"payer": textValue, "subscriber_wallet": textValue, "subscription_pda": textValue, "plan_owner": textValue, "treasury": textValue,
 	})),
 	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
