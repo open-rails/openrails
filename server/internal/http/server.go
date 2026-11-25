@@ -43,9 +43,8 @@ type Dependencies struct {
 	ConsoleAssets fs.FS
 	// RouteGroups turns the merchant route groups on.
 	RouteGroups config.RouteGroups
-	// ConsoleDisabled omits the console; ConsoleOwnAccountsOnly offers no
-	// trusted issuer's sign-in.
-	ConsoleDisabled, ConsoleOwnAccountsOnly bool
+	// ConsoleDisabled omits the console.
+	ConsoleDisabled bool
 	// CheckoutOrigin serves CheckoutHandler, the engine's payment page,
 	// there (by Host); empty serves none.
 	CheckoutOrigin  string
@@ -68,8 +67,6 @@ type Server struct {
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
 	consoleOff    bool
-	// consoleOwnOnly offers no trusted issuer's sign-in.
-	consoleOwnOnly bool
 	// groups are the route groups the server mounts.
 	groups config.RouteGroups
 
@@ -205,7 +202,6 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 		adminLimiter:            middleware.NewAdminOperationLimiter(logger, deps.Runtime.AbuseState),
 		consoleAssets:           deps.ConsoleAssets,
 		consoleOff:              deps.ConsoleDisabled,
-		consoleOwnOnly:          deps.ConsoleOwnAccountsOnly,
 		groups:                  deps.RouteGroups,
 		browserTierRoutes:       middleware.NewBrowserTierRoutes(),
 		Log:                     logger,

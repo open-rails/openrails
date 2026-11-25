@@ -1939,7 +1939,7 @@
       "TestStandaloneAuthSurface/OR-J01-S31/a-merchants-own-site-runs-the-admin-screens-with-its-staff-token"
     ],
     "OR-J01-S32": [
-      "TestStandaloneAuthSurface/OR-J01-S32/the-console-offers-only-trusted-issuers-whose-sign-in-works"
+      "TestStandaloneAuthSurface/OR-J01-S32/the-console-signs-staff-in-only-with-the-servers-own-accounts"
     ],
     "OR-J24-S42": [
       "TestLeaseSyncs/OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands"

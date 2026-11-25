@@ -2,16 +2,13 @@ import { useState, type ReactNode } from "react"
 import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { AccountSecurity, StepUpProvider } from "@openrails/auth-ui"
 import { AuthUiProvider } from "@openrails/auth-ui/provider"
-import {
-  useGroupAdminAccess,
-  type GroupAdminAccess,
-} from "@openrails/auth-ui/admin"
+import { useGroupAdminAccess } from "@openrails/auth-ui/admin"
 import {
   BillingAdmin,
   useBillingAdminAccess,
   type BillingAdminMerchant,
 } from "@openrails/billing-ui/admin"
-import type { ConsoleClient } from "./lib/session"
+import type { AuthClient } from "@openrails/auth-ui/client"
 import { useIdentity } from "./lib/identity"
 import { useMerchantDirectory } from "./lib/directory"
 import { AccessPage } from "./pages/access"
@@ -23,14 +20,14 @@ const requestedMerchant = takeMerchantFromHash()
 
 export function MerchantWorkspace({
   config,
-  session,
+  auth,
   subject,
 }: {
   config: BootstrapConfig
-  session: ConsoleClient
+  auth: AuthClient
   subject: string
 }) {
-  const directory = useMerchantDirectory(session, subject)
+  const directory = useMerchantDirectory(auth, subject)
   const [selected, setSelected] = useState(
     () =>
       requestedMerchant ??
@@ -46,7 +43,7 @@ export function MerchantWorkspace({
   }
   const props = {
     config,
-    session,
+    auth,
     merchant,
     merchants: directory.data?.merchants ?? [],
     root: directory.data?.root ?? false,
@@ -61,22 +58,13 @@ export function MerchantWorkspace({
         </div>
       )}
       <BillingCapability {...props}>
-        {(billing, pending) =>
-          session.kind === "local" ? (
-            <LocalWorkspace
-              {...props}
-              session={session}
-              billing={billing}
-              loading={directory.pending || pending}
-            />
-          ) : (
-            <Workspace
-              {...props}
-              billing={billing}
-              loading={directory.pending || pending}
-            />
-          )
-        }
+        {(billing, pending) => (
+          <Workspace
+            {...props}
+            billing={billing}
+            loading={directory.pending || pending}
+          />
+        )}
       </BillingCapability>
     </>
   )
@@ -84,16 +72,13 @@ export function MerchantWorkspace({
 
 interface WorkspaceProps {
   config: BootstrapConfig
-  session: ConsoleClient
+  auth: AuthClient
   merchant?: BillingAdminMerchant
   merchants: BillingAdminMerchant[]
   root: boolean
   selectMerchant(id: string): void
   billing: boolean
   loading?: boolean
-  access?: GroupAdminAccess
-  group?: string
-  setGroup?: (group: string) => void
 }
 
 function BillingCapability(
@@ -107,7 +92,7 @@ function BillingCapability(
 
 function ReadBillingCapability({
   config,
-  session,
+  auth,
   merchant,
   children,
 }: Omit<WorkspaceProps, "billing"> & {
@@ -116,10 +101,9 @@ function ReadBillingCapability({
 }) {
   const access = useBillingAdminAccess({
     baseUrl: config.api_base_url,
-    auth: session.client,
+    auth,
     merchant,
-    exchange:
-      session.kind === "local" ? (config.exchange ?? undefined) : undefined,
+    exchange: config.exchange ?? undefined,
   })
   const data = access.data
   return (
@@ -150,43 +134,25 @@ function ReadBillingCapability({
   )
 }
 
-function LocalWorkspace(
-  props: WorkspaceProps & { session: Extract<ConsoleClient, { kind: "local" }> }
-) {
-  const [rootGroup, setRootGroup] = useState<boolean>()
-  const group =
-    (rootGroup ?? props.root) && props.root
-      ? "root"
-      : (props.merchant?.id ?? "root")
-  const access = useGroupAdminAccess({
-    auth: props.session.client,
-    baseUrl: props.config.auth_base_url,
-    group,
-  })
-  return (
-    <Workspace
-      {...props}
-      access={access}
-      group={group}
-      setGroup={(value) => setRootGroup(value === "root")}
-    />
-  )
-}
-
 function Workspace({
   config,
-  session,
+  auth,
   merchant,
   merchants,
   root,
   selectMerchant,
   billing,
   loading,
-  access,
-  group,
-  setGroup,
 }: WorkspaceProps) {
   const identity = useIdentity()
+  const [rootGroup, setRootGroup] = useState<boolean>()
+  const group = (rootGroup ?? root) && root ? "root" : (merchant?.id ?? "root")
+  const setGroup = (value: string) => setRootGroup(value === "root")
+  const access = useGroupAdminAccess({
+    auth,
+    baseUrl: config.auth_base_url,
+    group,
+  })
   const location = useLocation(),
     navigate = useNavigate(),
     redirect = useRedirect()
@@ -200,11 +166,11 @@ function Workspace({
       else void navigate(path)
     },
   }
-  const hasAccess = session.kind === "issuer" || !!access?.any
+  const hasAccess = !!access?.any
   const initial = billing ? "/billing" : hasAccess ? "/access" : "/account"
   return (
     <AuthUiProvider appearance={{ theme }}>
-      <NativeStepUp enabled={session.kind === "local"}>
+      <StepUpProvider>
         <div
           className={`console-shell ${theme === "dark" ? "dark" : ""}`}
           data-theme={theme}
@@ -259,17 +225,13 @@ function Workspace({
                 billing && merchant ? (
                   <BillingAdmin
                     baseUrl={config.api_base_url}
-                    auth={session.client}
+                    auth={auth}
                     merchant={merchant}
                     merchants={merchants}
                     onMerchantChange={(item) => selectMerchant(item.id)}
                     basePath="/admin/billing"
                     navigation={navigation}
-                    exchange={
-                      session.kind === "local"
-                        ? (config.exchange ?? undefined)
-                        : undefined
-                    }
+                    exchange={config.exchange ?? undefined}
                     appearance={{ theme: "inherit" }}
                   />
                 ) : (
@@ -283,44 +245,33 @@ function Workspace({
             <Route
               path="access/*"
               element={
-                session.kind === "issuer" ? (
-                  <section className="console-section">
-                    <h1>Access</h1>
-                    <p>
-                      People and roles are managed in {session.issuer.name}.
-                      API keys and signing keys are managed here signed in with
-                      an OpenRails account.
-                    </p>
-                  </section>
-                ) : (
-                  <>
-                    {root && (
-                      <label className="console-scope">
-                        Manage access for{" "}
-                        <select
-                          value={group}
-                          onChange={(event) => setGroup?.(event.target.value)}
-                        >
-                          {merchant && (
-                            <option value={merchant.id}>
-                              {merchant.display_name || merchant.slug}
-                            </option>
-                          )}
-                          <option value="root">All-merchants staff</option>
-                        </select>
-                      </label>
-                    )}
-                    {access && group && (
-                      <AccessPage
-                        auth={session.client}
-                        baseUrl={config.auth_base_url}
-                        group={group}
-                        access={access}
-                        navigation={navigation}
-                      />
-                    )}
-                  </>
-                )
+                <>
+                  {root && (
+                    <label className="console-scope">
+                      Manage access for{" "}
+                      <select
+                        value={group}
+                        onChange={(event) => setGroup(event.target.value)}
+                      >
+                        {merchant && (
+                          <option value={merchant.id}>
+                            {merchant.display_name || merchant.slug}
+                          </option>
+                        )}
+                        <option value="root">All-merchants staff</option>
+                      </select>
+                    </label>
+                  )}
+                  {access && (
+                    <AccessPage
+                      auth={auth}
+                      baseUrl={config.auth_base_url}
+                      group={group}
+                      access={access}
+                      navigation={navigation}
+                    />
+                  )}
+                </>
               }
             />
             <Route
@@ -328,21 +279,14 @@ function Workspace({
               element={
                 <section className="console-section">
                   <h1>Account security</h1>
-                  {session.kind === "local" ? (
-                    <AccountSecurity
-                      sections={[
-                        "password",
-                        "twoFactor",
-                        "signInKeys",
-                        "sessions",
-                      ]}
-                    />
-                  ) : (
-                    <p>
-                      Your account and sign-in security are managed in{" "}
-                      {session.issuer.name}.
-                    </p>
-                  )}
+                  <AccountSecurity
+                    sections={[
+                      "password",
+                      "twoFactor",
+                      "signInKeys",
+                      "sessions",
+                    ]}
+                  />
                 </section>
               }
             />
@@ -357,17 +301,7 @@ function Workspace({
             />
           </Routes>
         </div>
-      </NativeStepUp>
+      </StepUpProvider>
     </AuthUiProvider>
   )
-}
-
-function NativeStepUp({
-  enabled,
-  children,
-}: {
-  enabled: boolean
-  children: ReactNode
-}) {
-  return enabled ? <StepUpProvider>{children}</StepUpProvider> : children
 }
