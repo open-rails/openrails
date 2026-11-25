@@ -846,6 +846,12 @@ func TestGateGivesUpOnAViewNoSyncAnswers(t *testing.T) {
 		if !errors.Is(err, ErrUnavailable) || ctx.Err() != nil {
 			t.Fatalf("a view every sync defers: %v (ctx %v)", err, ctx.Err())
 		}
+		// The deferred view is asked again each interval, not back to back.
+		before := syncCount(f)
+		time.Sleep(3 * time.Second)
+		if n := syncCount(f) - before; n > 4 {
+			t.Fatalf("the gate synced %d times in three intervals for a deferred view", n)
+		}
 	})
 }
 

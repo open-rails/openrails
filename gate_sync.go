@@ -686,7 +686,17 @@ func (g *gateState) syncOnce() {
 	acks := g.apply(params, keys, res, err, sent)
 	g.write(acks)
 	g.mu.Lock()
-	more := len(g.wanted) > 0 && err == nil || len(headLocked(g.queues[g.lease], 1)) > 0 && (len(usage) == billing.MaxSyncUsageItems || partial(usage, res, err))
+	// A view this sync asked for and the server deferred is asked again at
+	// the next interval, not at once: back-to-back syncs would only meet the
+	// same budget.
+	fresh := false
+	for k := range g.wanted {
+		if !slices.Contains(keys, k) {
+			fresh = true
+			break
+		}
+	}
+	more := fresh && err == nil || len(headLocked(g.queues[g.lease], 1)) > 0 && (len(usage) == billing.MaxSyncUsageItems || partial(usage, res, err))
 	g.mu.Unlock()
 	if more {
 		g.poke()
