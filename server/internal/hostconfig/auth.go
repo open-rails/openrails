@@ -103,10 +103,8 @@ func retiredAuthHint(key string) string {
 		return "every staff account needs a passkey or an authenticator app"
 	case key == "token.refresh_token_duration":
 		return "staff sessions last 30 days"
-	case key == "active_key_id" || key == "active_private_key_pem" || key == "public_keys":
-		return "the inline signing key is AUTHKIT_ACTIVE_KEY_ID, AUTHKIT_ACTIVE_PRIVATE_KEY_PEM and AUTHKIT_PUBLIC_KEYS"
-	case key == "keys_path":
-		return "set auth.keys.path (AUTH_KEYS_PATH)"
+	case key == "active_key_id" || key == "active_private_key_pem" || key == "public_keys" || key == "keys_path" || section == "keys":
+		return "AuthKit's keys are keys.json and totp.key under auth.keys.path (AUTH_KEYS_PATH)"
 	}
 	return ""
 }
