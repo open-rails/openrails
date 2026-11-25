@@ -413,6 +413,29 @@ func TestPublicCatalog(t *testing.T) {
 		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
 		require.NoError(t, err)
 		require.NotNil(t, read.RateCard)
+		cardIdentity := func() string {
+			var value string
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT jsonb_build_array(id, created_at, product_id, ordinal)::text FROM "+pgx.Identifier{a.schema, "catalog_rate_cards"}.Sanitize()+" WHERE merchant_id=$1 AND meter_key=$2", a.alpha.MerchantID().UUID(), "Mixed Case").Scan(&value))
+			return value
+		}
+		identity, meterCreated := cardIdentity(), read.CreatedAt
+		params.RateCard.Value.Price.PerUnit.UnitAmount = 2
+		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		require.NoError(t, err)
+		require.Equal(t, identity, cardIdentity())
+		declared, err := catalog.ParseApplicationJSON([]byte(`{
+			"schema_version":1,
+			"meters":{"Mixed Case":{"event_type":"edited","aggregation":"count"}},
+			"products":{"meter-card":{"rate_cards":[{"meter":"Mixed Case","price":{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"3","divide_by":1}}}]}}
+		}`))
+		require.NoError(t, err)
+		_, err = a.alphaRemote.ApplyCatalog(t.Context(), declared, billing.ApplyCatalogParams{Force: true})
+		require.NoError(t, err)
+		require.Equal(t, identity, cardIdentity())
+		read, err = a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.Equal(t, meterCreated, read.CreatedAt)
+		require.EqualValues(t, 3, read.RateCard.Price.PerUnit.UnitAmount)
 		params.RateCard = catalog.Null[billing.MeterRateCardParams]()
 		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
 		require.NoError(t, err)

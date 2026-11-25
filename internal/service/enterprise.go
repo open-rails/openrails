@@ -9,7 +9,6 @@ import (
 
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -31,14 +30,7 @@ func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter)
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	if err := checkCatalogMeterLimitCounts(ctx, s.catalogDatabase().Gen(ctx), mid.UUID(), spec); err != nil {
-		return err
-	}
-	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, spec)
+	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, spec, false)
 }
 
 // SetUsageMeter declares a meter and, in the same catalog edit, its rate
