@@ -66,9 +66,6 @@ func (UsageOrderArgs) InsertOpts() river.InsertOpts {
 }
 
 func (s *MoneyService) usageBillingConfig(ctx context.Context, currency string) (*billing.UsageBillingSettings, *billing.UsageBillingCurrency, error) {
-	if !s.UsageBillingEnabled {
-		return nil, nil, nil
-	}
 	cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -196,9 +193,6 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 // with enough unbilled to bill, or that has unbilled charges and no bill
 // date.
 func (s *MoneyService) MarkUsageAccountsDue(ctx context.Context) error {
-	if !s.UsageBillingEnabled {
-		return nil
-	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -343,11 +337,8 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 }
 
 func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, capacity AdmissionCapacity) (AdmissionCapacity, error) {
-	// Automatic usage collection is opt-in. Existing manual credit policies
-	// keep their independent admission contract when it is not configured.
-	if !s.UsageBillingEnabled {
-		return capacity, nil
-	}
+	// Usage billing is the merchant's usage_billing terms: without them a
+	// credit policy keeps its own capacity.
 	cfg, cur, err := s.usageBillingConfig(ctx, currency)
 	if err != nil {
 		return capacity, err

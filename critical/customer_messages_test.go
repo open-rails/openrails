@@ -247,7 +247,7 @@ func TestCustomerMessages(t *testing.T) {
 		})
 		t.Run("a-usage-orders-collection-stopped-after-failed-payments", func(t *testing.T) {
 			mail := &alertMailbox{}
-			a, p, customer := usageBillingWorld(t, true, false, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
+			a, p, customer := usageBillingWorld(t, false, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
 			p.core.SetDecline("4242", "252")
 			oneUsage(t, a.alpha, usageInput(customer, "stolen-card-usage", 3))
 			a.clock.Advance(time.Hour)

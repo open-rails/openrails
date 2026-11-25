@@ -32,7 +32,7 @@ merchants:
       from_email: billing@local-stack.example
       support_url: https://local-stack.example/support
 
-    # Active only when the host sets usage_billing_enabled: true.
+    # These terms bill the merchant's usage and running charges; without them it has none.
     usage_billing:
       billing_day: 13
       currencies:
