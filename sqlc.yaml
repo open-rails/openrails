@@ -42,6 +42,7 @@ sql:
       - "internal/migrate/postgres/0044_drop_request_holds.up.sql"
       - "internal/migrate/postgres/0046_mrr_keyed_reads.up.sql"
       - "internal/migrate/postgres/0047_usage_receivable.up.sql"
+      - "internal/migrate/postgres/0048_checkout_analytics.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

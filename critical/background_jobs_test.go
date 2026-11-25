@@ -315,8 +315,12 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err, "the order expiry deletes nothing")
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
-		require.ErrorIs(t, err, billing.ErrNotFound)
+		require.NoError(t, err, "an unpaid closed order is kept 397 days")
 		require.Zero(t, leaseCount(), "a lease 61 days past its last sync is deleted")
+		w.clock.Advance(307 * 24 * time.Hour)
+		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
+		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
+		require.ErrorIs(t, err, billing.ErrNotFound)
 	})
 	t.Run("OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants", func(t *testing.T) {
 		w := newWorld(t)

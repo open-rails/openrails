@@ -40,6 +40,7 @@ migration 0041_mrr_totals_settle.up.sql sha256:88d0cea1c62392fc13958c7e9b917d6b4
 migration 0044_drop_request_holds.up.sql sha256:f7ab167c764da9a5b518fe6984c20e48a413311864bbfefea75f1ae8da8ed31d
 migration 0046_mrr_keyed_reads.up.sql sha256:3d48a85fc96faea77697c4e71260216ae3d08728881ff8982d2b0c5ace2c8c80
 migration 0047_usage_receivable.up.sql sha256:e03ef2a943130a26447ce0f63a55724a77e2f2d282441be4664a12aa628a9ee2
+migration 0048_checkout_analytics.up.sql sha256:dcacd14f32148717d7be07654f4ce8d7f989a7a113b39ec4508cfdd86f76f38b
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1971,19 +1972,42 @@ table billing.orders
   column subscription_bill_kind text
   column lines_digest bytea
   column embedded boolean
+  column customer_type text
+  column purchase_number integer
+  column opened_at timestamp with time zone
+  column submitted_at timestamp with time zone
+  column billing_country text
+  column card_country text
+  column ip_country text
+  column language text
+  column attribution_source text
+  column attribution_medium text
+  column attribution_campaign text
+  column attribution_term text
+  column attribution_content text
+  column attribution_referrer text
+  column attribution_affiliate text
+  column checkout_order_id uuid
   constraint orders_attempt_id_fkey FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.order_attempts(merchant_id, id) ON DELETE SET NULL (attempt_id) DEFERRABLE INITIALLY DEFERRED
+  constraint orders_attribution_check CHECK (((octet_length(attribution_source) >= 1) AND (octet_length(attribution_source) <= 100) AND (octet_length(attribution_medium) >= 1) AND (octet_length(attribution_medium) <= 100) AND (octet_length(attribution_campaign) >= 1) AND (octet_length(attribution_campaign) <= 100) AND (octet_length(attribution_term) >= 1) AND (octet_length(attribution_term) <= 100) AND (octet_length(attribution_content) >= 1) AND (octet_length(attribution_content) <= 100) AND (attribution_referrer ~ '^[a-z0-9_]([a-z0-9_.-]{0,251}[a-z0-9_])?$'::text) AND (octet_length(attribution_affiliate) >= 1) AND (octet_length(attribution_affiliate) <= 100)))
   constraint orders_billing_contacts_check CHECK ((jsonb_typeof(billing_contacts) = 'array'::text))
   constraint orders_cancel_url_check CHECK ((cancel_url <> ''::text))
   constraint orders_canceled_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
+  constraint orders_checkout_facts_check CHECK (((purchase_number IS NOT NULL) OR ((opened_at IS NULL) AND (submitted_at IS NULL) AND (billing_country IS NULL) AND (card_country IS NULL) AND (ip_country IS NULL) AND (language IS NULL) AND (attribution_source IS NULL) AND (attribution_medium IS NULL) AND (attribution_campaign IS NULL) AND (attribution_term IS NULL) AND (attribution_content IS NULL) AND (attribution_referrer IS NULL) AND (attribution_affiliate IS NULL))))
+  constraint orders_checkout_order_check CHECK (((checkout_order_id IS NULL) OR (origin = 'subscription'::text)))
+  constraint orders_checkout_order_id_fkey FOREIGN KEY (merchant_id, checkout_order_id) REFERENCES billing.orders(merchant_id, id) ON DELETE SET NULL (checkout_order_id) DEFERRABLE INITIALLY DEFERRED
   constraint orders_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text])))
   constraint orders_collection_owner_check CHECK ((collection_owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint orders_complete_check CHECK (((status = 'complete'::text) = ((number IS NOT NULL) AND (completed_at IS NOT NULL))))
   constraint orders_complete_payment_check CHECK (((status <> 'complete'::text) OR (total = 0) OR (payment_id IS NOT NULL) OR (origin = 'usage'::text) OR (collection_owner <> 'engine'::text) OR (currency <> ALL (ARRAY['AED'::text, 'AUD'::text, 'BRL'::text, 'CAD'::text, 'CHF'::text, 'CNY'::text, 'CZK'::text, 'DKK'::text, 'EUR'::text, 'GBP'::text, 'HKD'::text, 'ILS'::text, 'INR'::text, 'JPY'::text, 'KRW'::text, 'MXN'::text, 'MYR'::text, 'NOK'::text, 'NZD'::text, 'PHP'::text, 'PLN'::text, 'PYUSD'::text, 'SAR'::text, 'SEK'::text, 'SGD'::text, 'SOL'::text, 'THB'::text, 'TRY'::text, 'USD'::text, 'USD1'::text, 'USDC'::text, 'USDG'::text, 'USDT'::text, 'ZAR'::text]))))
+  constraint orders_country_check CHECK (((billing_country ~ '^[A-Z]{2}$'::text) AND (card_country ~ '^[A-Z]{2}$'::text) AND (ip_country ~ '^[A-Z]{2}$'::text)))
   constraint orders_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint orders_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint orders_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
+  constraint orders_customer_type_check CHECK (((customer_type = ANY (ARRAY['new'::text, 'returning'::text, 'reactivated'::text])) AND ((customer_type IS NULL) = (purchase_number IS NULL))))
   constraint orders_expired_check CHECK (((status <> 'expired'::text) OR (expired_at IS NOT NULL)))
   constraint orders_idempotency_key_check CHECK (((octet_length(idempotency_key) >= 1) AND (octet_length(idempotency_key) <= 512)))
+  constraint orders_language_check CHECK ((language ~ '^[a-z]{2,3}(-([A-Z]{2}|[0-9]{3}))?$'::text))
   constraint orders_lines_digest_check CHECK (((lines_digest IS NULL) OR ((origin = 'customer'::text) AND (octet_length(lines_digest) = 32))))
   constraint orders_memo_check CHECK ((memo <> ''::text))
   constraint orders_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
@@ -1997,8 +2021,10 @@ table billing.orders
   constraint orders_pkey PRIMARY KEY (merchant_id, id)
   constraint orders_po_number_check CHECK ((po_number <> ''::text))
   constraint orders_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id)
+  constraint orders_purchase_number_check CHECK (((purchase_number IS NULL) OR ((purchase_number >= 1) AND (origin = ANY (ARRAY['customer'::text, 'merchant'::text])))))
   constraint orders_request_digest_check CHECK ((((idempotency_key IS NULL) = (request_digest IS NULL)) AND ((request_digest IS NULL) OR (octet_length(request_digest) = 32))))
   constraint orders_status_check CHECK ((status = ANY (ARRAY['open'::text, 'processing'::text, 'complete'::text, 'canceled'::text, 'expired'::text, 'void'::text, 'uncollectible'::text])))
+  constraint orders_submitted_check CHECK (((submitted_at IS NULL) OR (opened_at IS NOT NULL)))
   constraint orders_subscription_bill_kind_check CHECK (((subscription_bill_kind = ANY (ARRAY['initial'::text, 'renewal'::text, 'adjustment'::text])) AND ((subscription_bill_kind IS NULL) OR (origin = 'subscription'::text))))
   constraint orders_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id)
   constraint orders_succeeded_check CHECK (((payment_status = 'succeeded'::text) = ((status = 'complete'::text) OR (payment_id IS NOT NULL))))
@@ -2008,10 +2034,13 @@ table billing.orders
   constraint orders_uncollectible_check CHECK ((((status = 'uncollectible'::text) = (uncollectible_at IS NOT NULL)) AND ((status <> 'uncollectible'::text) OR (origin = 'usage'::text))))
   constraint orders_usage_check CHECK ((((origin = 'usage'::text) = ((amount_paid IS NOT NULL) AND (collection_method IS NOT NULL) AND (tax IS NOT NULL) AND (billing_contacts IS NOT NULL) AND (collection_failure_count IS NOT NULL))) AND ((amount_paid IS NULL) OR ((amount_paid >= 0) AND (amount_paid <= total))) AND ((status <> 'complete'::text) OR (amount_paid IS NULL) OR (amount_paid = total)) AND (collection_failure_count >= 0) AND ((next_collection_attempt_at IS NULL) OR (origin = 'usage'::text)) AND ((collection_failed_at IS NULL) OR (origin = 'usage'::text))))
   constraint orders_void_check CHECK (((status = 'void'::text) = (voided_at IS NOT NULL)))
+  index CREATE INDEX orders_checkout_created_at_idx ON billing.orders USING btree (merchant_id, created_at) WHERE (purchase_number IS NOT NULL)
+  index CREATE INDEX orders_checkout_order_id_idx ON billing.orders USING btree (merchant_id, checkout_order_id) WHERE (checkout_order_id IS NOT NULL)
   index CREATE INDEX orders_closed_at_unpaid_idx ON billing.orders USING btree (merchant_id, COALESCE(canceled_at, expired_at)) WHERE ((status = ANY (ARRAY['canceled'::text, 'expired'::text])) AND (payment_id IS NULL) AND (attempt_id IS NULL))
   index CREATE INDEX orders_created_at_id_idx ON billing.orders USING btree (merchant_id, created_at DESC, id DESC)
   index CREATE INDEX orders_customer_id_created_at_id_idx ON billing.orders USING btree (merchant_id, customer_id, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX orders_customer_id_id_key ON billing.orders USING btree (merchant_id, customer_id, id)
+  index CREATE INDEX orders_customer_purchases_idx ON billing.orders USING btree (merchant_id, customer_id) WHERE ((status = 'complete'::text) AND ((origin = ANY (ARRAY['customer'::text, 'merchant'::text])) OR (subscription_bill_kind = 'initial'::text)))
   index CREATE INDEX orders_due_at_open_idx ON billing.orders USING btree (merchant_id, due_at) WHERE ((status = 'open'::text) AND (due_at IS NOT NULL))
   index CREATE INDEX orders_expires_at_live_idx ON billing.orders USING btree (merchant_id, expires_at) WHERE (status = 'open'::text)
   index CREATE INDEX orders_id_idx ON billing.orders USING btree (id)
@@ -2022,10 +2051,12 @@ table billing.orders
   index CREATE INDEX orders_payment_method_id_idx ON billing.orders USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)
   index CREATE UNIQUE INDEX orders_pkey ON billing.orders USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX orders_renewal_key ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE ((origin = 'subscription'::text) AND (collection_owner = 'engine'::text) AND (subscription_bill_kind = 'renewal'::text))
+  index CREATE INDEX orders_sale_completed_at_idx ON billing.orders USING btree (merchant_id, completed_at) WHERE ((purchase_number IS NOT NULL) AND (status = 'complete'::text))
   index CREATE INDEX orders_subscription_period_idx ON billing.orders USING btree (merchant_id, subscription_id, period_starts_at) WHERE (origin = 'subscription'::text)
   index CREATE INDEX orders_usage_collection_due_idx ON billing.orders USING btree (next_collection_attempt_at, merchant_id, id) WHERE ((origin = 'usage'::text) AND (status = 'open'::text) AND (collection_method = 'charge_automatically'::text) AND (next_collection_attempt_at IS NOT NULL))
   index CREATE INDEX orders_usage_open_idx ON billing.orders USING btree (merchant_id, customer_id, currency) WHERE ((origin = 'usage'::text) AND (status = ANY (ARRAY['open'::text, 'processing'::text, 'uncollectible'::text])))
   index CREATE UNIQUE INDEX orders_usage_period_key ON billing.orders USING btree (merchant_id, customer_id, currency, period_starts_at, period_ends_at) WHERE (origin = 'usage'::text)
+  trigger CREATE TRIGGER assign_checkout_order BEFORE INSERT ON billing.orders FOR EACH ROW WHEN (((new.origin = 'subscription'::text) AND (new.checkout_order_id IS NULL))) EXECUTE FUNCTION billing.assign_checkout_order()
 
 table billing.owed_items
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3532,11 +3563,13 @@ table billing.subscriptions
   column due_recheck_at timestamp with time zone
   column rail_subscription_key text GENERATED ALWAYS AS (billing.rail_subscription_key(rail, rail_subscription_id)) STORED
   column retry_advised_at timestamp with time zone
+  column checkout_order_id uuid
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text, 'provider'::text, 'abandoned'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
   constraint subscriptions_canceled_has_type_check CHECK (((status <> 'canceled'::text) OR (cancel_type IS NOT NULL)))
   constraint subscriptions_canceled_no_retry_schedule_check CHECK (((status <> 'canceled'::text) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL))))
+  constraint subscriptions_checkout_order_id_fkey FOREIGN KEY (merchant_id, checkout_order_id) REFERENCES billing.orders(merchant_id, id) ON DELETE SET NULL (checkout_order_id) DEFERRABLE INITIALLY DEFERRED
   constraint subscriptions_collection_policy_check CHECK ((collection_policy = ANY (ARRAY['provider'::text, 'nmi_schedule'::text, 'engine'::text])))
   constraint subscriptions_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint subscriptions_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
@@ -3564,6 +3597,7 @@ table billing.subscriptions
   constraint trg_subscriptions_track_unverified TRIGGER DEFERRABLE INITIALLY DEFERRED
   index CREATE INDEX subscriptions_canceled_at_id_idx ON billing.subscriptions USING btree (merchant_id, canceled_at DESC, id DESC) WHERE ((deleted_at IS NULL) AND (canceled_at IS NOT NULL))
   index CREATE INDEX subscriptions_canceled_at_idx ON billing.subscriptions USING btree (merchant_id, canceled_at) WHERE (canceled_at IS NOT NULL)
+  index CREATE INDEX subscriptions_checkout_order_id_idx ON billing.subscriptions USING btree (merchant_id, checkout_order_id) WHERE (checkout_order_id IS NOT NULL)
   index CREATE INDEX subscriptions_created_at_id_idx ON billing.subscriptions USING btree (merchant_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL)
   index CREATE INDEX subscriptions_current_period_ends_at_engine_due_global_idx ON billing.subscriptions USING btree (current_period_ends_at, merchant_id) WHERE ((collection_policy = 'engine'::text) AND (status = ANY (ARRAY['active'::text, 'past_due'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_current_period_ends_at_id_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at, id) WHERE ((deleted_at IS NULL) AND (current_period_ends_at IS NOT NULL))
@@ -3761,6 +3795,20 @@ function billing.arm_book(text,timestamp with time zone)
           schema_oid = EXCLUDED.schema_oid,
           armed_by = EXCLUDED.armed_by,
           armed_at = EXCLUDED.armed_at;
+  END;
+  $function$
+
+function billing.assign_checkout_order()
+  CREATE OR REPLACE FUNCTION billing.assign_checkout_order()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      SELECT s.checkout_order_id INTO NEW.checkout_order_id
+      FROM billing.subscriptions s
+      WHERE s.merchant_id = NEW.merchant_id AND s.id = NEW.subscription_id;
+      RETURN NEW;
   END;
   $function$
 
@@ -6808,6 +6856,7 @@ function billing.subscriptions_row_version()
       unchanged.row_version := OLD.row_version;
       unchanged.destructive_run_class := OLD.destructive_run_class;
       unchanged.rail_subscription_key := OLD.rail_subscription_key;
+      unchanged.checkout_order_id := OLD.checkout_order_id;
       IF billing.rail_subscription_key(NEW.rail, NEW.rail_subscription_id) IS NOT DISTINCT FROM OLD.rail_subscription_key THEN
           unchanged.rail_subscription_id := OLD.rail_subscription_id;
       END IF;

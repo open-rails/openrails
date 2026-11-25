@@ -28,7 +28,12 @@ import {
   DialogFooter,
 } from "#orck/admin/components/ui/dialog"
 import { useCursorPages } from "#orck/admin/lib/cursor-pages"
-import type { Order, OrderUsage, Payment } from "#orck/client/generated/wire"
+import type {
+  Order,
+  OrderCheckout,
+  OrderUsage,
+  Payment,
+} from "#orck/client/generated/wire"
 import type { UsageAction } from "#orck/admin/lib/api/order-endpoints"
 
 import { useAdminUpdates } from "#orck/admin/lib/capabilities"
@@ -140,6 +145,7 @@ export function OrderDetail({ order }: { order: Order }) {
         ))}
       </div>
       {order.usage && <UsageFacts usage={order.usage} />}
+      {order.checkout && <CheckoutFacts checkout={order.checkout} />}
       {order.renewal && (
         <Card>
           <CardHeader>
@@ -294,6 +300,56 @@ export function OrderDetail({ order }: { order: Order }) {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+// What OpenRails recorded of a checkout: the customer's purchase number,
+// how far they got, where they are and the merchant's attribution.
+function CheckoutFacts({ checkout }: { checkout: OrderCheckout }) {
+  const a = checkout.attribution
+  const attribution = [a.source, a.medium, a.campaign, a.term, a.content, a.referrer, a.affiliate]
+    .filter(Boolean)
+    .join(" · ")
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <AdminMessage id={"Checkout"} />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3 text-sm @min-[40rem]/page:grid-cols-2">
+        <p>
+          <AdminMessage id={"Customer type: "} />
+          {checkout.customer_type}
+        </p>
+        <p>
+          <AdminMessage id={"Purchase number: "} />
+          {checkout.purchase_number}
+        </p>
+        <p>
+          <AdminMessage id={"Opened: "} />
+          {formatDate(checkout.opened_at)}
+        </p>
+        <p>
+          <AdminMessage id={"Submitted: "} />
+          {formatDate(checkout.submitted_at)}
+        </p>
+        <p>
+          <AdminMessage id={"Country: "} />
+          {checkout.country
+            ? `${checkout.country} (${checkout.country_source})`
+            : "—"}
+        </p>
+        <p>
+          <AdminMessage id={"Language: "} />
+          {checkout.language ?? "—"}
+        </p>
+        <p>
+          <AdminMessage id={"Attribution: "} />
+          {attribution || "—"}
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 

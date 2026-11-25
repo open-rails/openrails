@@ -2437,6 +2437,42 @@
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-chargeback-then-won",
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-reserved-then-chargeback-then-won",
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled"
+    ],
+    "OR-J47-S01": [
+      "TestCheckoutFunnel/OR-J47-S01/steps-are-recorded-where-the-customer-takes-them"
+    ],
+    "OR-J47-S02": [
+      "TestCheckoutFunnel/OR-J47-S02/a-pay-url-is-opened-only-by-its-page"
+    ],
+    "OR-J47-S04": [
+      "TestCheckoutFunnel/OR-J47-S04/purchase-number-counts-the-customers-paid-purchases"
+    ],
+    "OR-J47-S05": [
+      "TestCheckoutFunnel/OR-J47-S05/the-country-is-the-billing-address-then-the-ip-never-the-address"
+    ],
+    "OR-J47-S06": [
+      "TestCheckoutFunnel/OR-J47-S06/the-language-is-the-first-in-person-requests"
+    ],
+    "OR-J47-S07": [
+      "TestCheckoutFunnel/OR-J47-S07/attribution-is-kept-bounded-and-never-refuses-a-sale"
+    ],
+    "OR-J47-S09": [
+      "TestCheckoutFunnel/OR-J47-S09/an-unpaid-checkout-keeps-its-facts-for-397-days"
+    ],
+    "OR-J47-S08": [
+      "TestCheckoutFunnel/OR-J47-S08/renewals-name-the-checkout-that-bought-their-subscription"
+    ],
+    "OR-J47-S03": [
+      "TestCheckoutFunnel/OR-J47-S03/checkout-measures-read-the-funnel-as-it-happened"
+    ],
+    "OR-J47-S10": [
+      "TestCheckoutFunnel/OR-J47-S10/the-customer-type-is-new-returning-or-reactivated"
+    ],
+    "OR-J47-S11": [
+      "TestCheckoutFunnel/OR-J47-S11/spending-a-merchants-units-is-not-a-checkout"
+    ],
+    "OR-J47-S12": [
+      "TestCheckoutFunnel/OR-J47-S12/an-erasure-clears-a-checkouts-attribution"
     ]
   }
 }

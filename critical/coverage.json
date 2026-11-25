@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 751,
+  "scenario_count": 763,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3757,6 +3757,66 @@
       "id": "OR-J40-S29",
       "journey": "J40",
       "name": "A merchant's refund of a usage order's payment, made through OpenRails or observed from the provider, records and leaves its owed settled; a chargeback after a refund owes again only what the refund left, keeps it if the refund settles later, and its won dispute settles it and gives the loss back"
+    },
+    {
+      "id": "OR-J47-S01",
+      "journey": "J47",
+      "name": "Checkout steps are recorded where the customer takes them: created, opened on the first read in person, submitted on the first pay request, paid"
+    },
+    {
+      "id": "OR-J47-S02",
+      "journey": "J47",
+      "name": "A merchant's pay URL is opened only when its page reads it; an expired checkout is abandoned at the step it reached"
+    },
+    {
+      "id": "OR-J47-S04",
+      "journey": "J47",
+      "name": "A checkout's purchase number counts the customer's paid purchases; an abandoned checkout is not one"
+    },
+    {
+      "id": "OR-J47-S05",
+      "journey": "J47",
+      "name": "A checkout's country is its billing address, then the trusted proxy's IP country, never the address; an untrusted header is ignored"
+    },
+    {
+      "id": "OR-J47-S06",
+      "journey": "J47",
+      "name": "A checkout's language is the first in-person request's Accept-Language, canonicalized"
+    },
+    {
+      "id": "OR-J47-S07",
+      "journey": "J47",
+      "name": "Checkout attribution is normalized and bounded, a bad field dropped without refusing the sale, kept first, and the referrer keeps only its host"
+    },
+    {
+      "id": "OR-J47-S09",
+      "journey": "J47",
+      "name": "An unpaid checkout that never started an attempt keeps its facts for 397 days, then is deleted"
+    },
+    {
+      "id": "OR-J47-S08",
+      "journey": "J47",
+      "name": "A subscription's renewals, and an upgrade's, name the checkout that bought it, whose country and attribution they carry"
+    },
+    {
+      "id": "OR-J47-S03",
+      "journey": "J47",
+      "name": "Checkout measures read the funnel as it happened: checkouts by step and outcome, conversion, submission and customer conversion rates, sales by purchase number, repeat purchase rate, and cash by country and source; the overview's checkout section answers and saves"
+    },
+    {
+      "id": "OR-J47-S10",
+      "journey": "J47",
+      "name": "A checkout's customer type is new on a first purchase, returning after one or while subscribed, reactivated once a subscription ended; sales and cash split by it, and subscriber_type is refused with it"
+    },
+    {
+      "id": "OR-J47-S11",
+      "journey": "J47",
+      "name": "Spending a merchant's units is not a checkout: unit orders carry no checkout facts and leave the funnel, conversion, purchase numbers and repeat purchases to purchases in money"
+    },
+    {
+      "id": "OR-J47-S12",
+      "journey": "J47",
+      "name": "A customer's erasure clears every attribution field of its checkouts; the checkouts stand"
     }
   ]
 }

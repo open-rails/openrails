@@ -254,6 +254,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	}
 
 	createParams := &submod.CreateMembershipParams{
+		Succeeds:              &in.OldSubscriptionID,
 		UserID:                in.UserID,
 		PriceID:               in.NewPriceID,
 		Rail:                  models.RailSolana,

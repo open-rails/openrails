@@ -118,8 +118,9 @@ func clearContact(ctx context.Context, q *gen.Queries, row gen.BillingCustomerCo
 }
 
 // RunErasure runs a started erasure and records its outcome with it: the
-// contact as withdraw clears it, and the customer's notification events and
-// message log, which a later provisioning does not take back.
+// contact as withdraw clears it, and the customer's notification events,
+// message log and checkouts' attribution, which a later provisioning does not
+// take back.
 func RunErasure(ctx context.Context, d *db.DB, a *destructive.Admissions, action destructive.Action) error {
 	user, episode, ok := erasureTarget(action)
 	if !ok {
@@ -142,6 +143,9 @@ func RunErasure(ctx context.Context, d *db.DB, a *destructive.Admissions, action
 			return err
 		}
 		if err := q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: action.MerchantID, CustomerID: user}); err != nil {
+			return err
+		}
+		if err := q.EraseCustomerOrderAttribution(ctx, gen.EraseCustomerOrderAttributionParams{MerchantID: action.MerchantID, CustomerID: user}); err != nil {
 			return err
 		}
 		if err := eraseUsage(ctx, q, action.MerchantID, user); err != nil {
