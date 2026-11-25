@@ -21,7 +21,6 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -86,7 +85,7 @@ func QueueStripeWebhook(ctx context.Context, d *db.DB, tx pgx.Tx, mid billing.Me
 // pinned API version, the handled events, its URL and the revision of the
 // PSP's document. A pass whose digest is no longer current runs again, and a
 // boot whose digest differs from the one a PSP was settled at reconciles it.
-func StripeWebhookDigest(cfg *config.Config, accountID, environment string, revision int64) string {
+func StripeWebhookDigest(cfg *billing.Config, accountID, environment string, revision int64) string {
 	url, _, _ := catalog.PublicStripeWebhookURL(cfg, accountID)
 	events := slices.Sorted(slices.Values(webhooks.HandledStripeEventTypes))
 	sum := sha256.Sum256(fmt.Appendf(nil, "%s\n%s\n%s\n%s\n%d", stripeapi.APIVersion, strings.Join(events, ","), url, environment, revision))
@@ -97,7 +96,7 @@ type StripeWebhookReconcileWorker struct {
 	StripeClients *stripeapi.Factory
 	WorkerDefaults[StripeWebhookReconcileArgs]
 	DB        *db.DB
-	Config    *config.Config
+	Config    *billing.Config
 	Merchants *merchants.Service
 	Clock     clockwork.Clock
 	// Reload reads a merchant's configuration fresh before its pass.

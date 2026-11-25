@@ -2,14 +2,15 @@ package operator
 
 import (
 	"context"
-	"github.com/open-rails/authkit/auth"
 	"io/fs"
 	"net/http"
 
+	"github.com/open-rails/authkit/auth"
+
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/server/internal/adminconsole"
 	"github.com/open-rails/openrails/server/internal/controlplane"
-	"github.com/open-rails/openrails/server/internal/hostconfig"
 	server "github.com/open-rails/openrails/server/internal/http"
 )
 
@@ -18,7 +19,8 @@ import (
 type Surface struct {
 	CustomerAdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
 	RouteGroups             config.RouteGroups
-	AdminConsole            *hostconfig.ConsoleConfig
+	ConsoleDisabled         bool
+	ConsoleIssuers          []adminconsole.Issuer
 	ConsoleAssets           fs.FS
 	// Resource is AuthKit's resource identifier, the console's audience at a
 	// trusted issuer.
@@ -41,7 +43,8 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 		Resource:                s.Resource,
 		ConsoleAssets:           s.ConsoleAssets,
 		RouteGroups:             s.RouteGroups,
-		AdminConsole:            s.AdminConsole,
+		ConsoleDisabled:         s.ConsoleDisabled,
+		ConsoleIssuers:          s.ConsoleIssuers,
 		CheckoutOrigin:          s.CheckoutOrigin,
 		CheckoutHandler:         s.CheckoutHandler,
 	})

@@ -8,14 +8,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/sqlschema"
 )
 
 // Schema relocation (#471, #1123). OpenRails SQL is authored in
-// config.DefaultSchema and runs verbatim there. Embedded OpenRails shares the
+// sqlschema.Authored and runs verbatim there. Embedded OpenRails shares the
 // host's pool and cannot repoint its search_path, so any other configured schema
 // is reached by rewriting each statement with sqlschema just before execution.
 
@@ -149,7 +148,7 @@ func WrapPool(raw *pgxpool.Pool, schema string) *Pool {
 		return nil
 	}
 	if schema == "" {
-		schema = config.DefaultSchema
+		schema = sqlschema.Authored
 	}
 	return &Pool{raw: raw, rw: newSchemaRewriter(schema), schema: schema}
 }
@@ -166,7 +165,7 @@ func (p *Pool) Raw() *pgxpool.Pool {
 // Schema returns the configured OpenRails schema of this pool.
 func (p *Pool) Schema() string {
 	if p == nil || p.schema == "" {
-		return config.DefaultSchema
+		return sqlschema.Authored
 	}
 	return p.schema
 }

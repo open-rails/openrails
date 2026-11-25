@@ -7,8 +7,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestDBConnectionStringVerifiesRemoteTLS(t *testing.T) {
-	parts := DBConfig{Port: "5432", Database: "openrails", Username: "openrails", Password: "p@ss/word"}
+func TestDatabaseConnectionStringVerifiesRemoteTLS(t *testing.T) {
+	parts := DatabaseConnection{Port: "5432", Name: "openrails", Username: "openrails", Password: "p@ss/word"}
 	for _, c := range []struct {
 		host, sslMode, rootCert, want string
 	}{

@@ -52,7 +52,7 @@ type Source interface {
 // MerchantsSource is the production Source: scope rows via merchants.Service
 // (psps) + scoped secrets via the merchant secret store.
 type MerchantsSource struct {
-	Config *config.Config
+	Config *billing.Config
 	// MerchantsFn returns the armed merchants service. Late-bound: manifest
 	// hosts arm it at constructor reconciliation, after the graph is built.
 	// nil / returning nil resolves nothing (fail closed).
@@ -61,7 +61,7 @@ type MerchantsSource struct {
 
 // NewMerchantsSource builds the production resolver over a late-bound
 // merchants service.
-func NewMerchantsSource(cfg *config.Config, merchantsFn func() *merchants.Service) *MerchantsSource {
+func NewMerchantsSource(cfg *billing.Config, merchantsFn func() *merchants.Service) *MerchantsSource {
 	return &MerchantsSource{Config: cfg, MerchantsFn: merchantsFn}
 }
 

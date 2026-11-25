@@ -49,24 +49,7 @@ func newRootCmd() *cobra.Command {
 			if cmd.Flags().Changed("provider-write-mode") {
 				return fmt.Errorf("--provider-write-mode was removed: %s", hostconfig.WritePostureHint)
 			}
-			// Flags are a koanf confmap overlay above env: flag beats env
-			// beats yaml. They never write the process env.
-			var loadOpts []hostconfig.LoadOption
-
-			load := hostconfig.LoadForCommand
-			if cmd.Name() == "run-server" || cmd.Name() == "run-worker" {
-				load = hostconfig.Load
-			}
-			if isDatabaseOnlyBillingCommand(cmd) {
-				load = hostconfig.LoadDatabaseForCommand
-			}
-			if cmd.Name() == "workers" || cmd.Name() == "provider-refresh" || cmd.Name() == "list" && cmd.Parent() != nil && cmd.Parent().Name() == "destructive-holds" {
-				load = hostconfig.LoadDatabaseForCommand
-			}
-			if cmd.Parent() != nil && (cmd.Parent().Name() == "merchants" && (cmd.Name() == "list" || cmd.Name() == "get") || cmd.Parent().Name() == "merchant" && cmd.Name() == "purge") {
-				load = hostconfig.LoadDirectoryForCommand
-			}
-			cfg, err := load(configPath, loadOpts...)
+			cfg, err := hostconfig.Load(configPath)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
@@ -79,7 +62,7 @@ func newRootCmd() *cobra.Command {
 				slog.Info("config: loaded environment overrides", "path", cfg.EnvFile)
 			}
 
-			cmd.SetContext(hostconfig.NewContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config), cfg))
+			cmd.SetContext(hostconfig.NewContext(cmd.Context(), cfg))
 			return nil
 		},
 		Long:    "Standalone OpenRails server for payments, credits, usage, and subscriptions",
@@ -249,10 +232,10 @@ func runWorker(cmd *cobra.Command, args []string) error {
 // server. Existing single-directory accounts adopt only the explicit platform
 // tenant in configuration, never a generated or inferred merchant identity.
 func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) error {
-	if host == nil || host.Config == nil {
+	if host == nil {
 		return errors.New("standalone config is required")
 	}
-	if err := controlplane.RequireDefaultTenant(host.Auth); err != nil {
+	if err := controlplane.RequireDefaultTenant(host.Server.Auth); err != nil {
 		return err
 	}
 	database, err := openCLIDB(ctx)
@@ -260,7 +243,7 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 		return fmt.Errorf("standalone migration pool: %w", err)
 	}
 	defer database.Close()
-	if err := engine.Migrate(ctx, database.Pool(), *host.Config); err != nil {
+	if err := engine.Migrate(ctx, database.Pool(), host.Server.Engine); err != nil {
 		return err
 	}
 	if host.ClickHouse != nil {
@@ -269,13 +252,13 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 			return err
 		}
 		defer conn.Close()
-		if err := eventstore.Migrate(ctx, conn, config.ClickHouseDatabase(host.Config), slog.Default()); err != nil {
+		if err := eventstore.Migrate(ctx, conn, config.ClickHouseDatabase(&host.Server.Engine), slog.Default()); err != nil {
 			return err
 		}
 	}
 	// The control plane owns the AuthKit/River schema selection. Preserve its
 	// configuration without building its roles, HTTP handler or job workers.
-	authDatabase := host.Auth.Database
-	authDatabase.RiverSchema = config.RiverSchemaName(host.Config)
-	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{LegacyTenantID: host.Auth.DefaultTenantID})
+	authDatabase := host.Server.Auth.Database
+	authDatabase.RiverSchema = config.RiverSchemaName(&host.Server.Engine)
+	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{LegacyTenantID: host.Server.Auth.DefaultTenantID})
 }

@@ -40,11 +40,11 @@ func (e *UserActionRateError) ErrorCode() billing.ErrorCode { return billing.Cod
 // serving the merchant. It is independent of optional IP/user HTTP limits.
 type UserActionLimiter struct {
 	db     *db.DB
-	policy config.UserActionRateLimitConfig
+	policy billing.UserActionRateLimitConfig
 	err    error
 }
 
-func NewUserActionLimiter(database *db.DB, policy config.UserActionRateLimitConfig) *UserActionLimiter {
+func NewUserActionLimiter(database *db.DB, policy billing.UserActionRateLimitConfig) *UserActionLimiter {
 	normalized, err := config.NormalizeUserActionRateLimit(policy)
 	return &UserActionLimiter{db: database, policy: normalized, err: err}
 }

@@ -106,7 +106,7 @@ func Graph(client any) *app.App {
 // one of its documents, the checkout origin. PSP posture and Redis recover in
 // the background. It never changes a catalog: a catalog document applies by
 // an explicit ApplyCatalog.
-func New(ctx context.Context, cfg config.Config, deps Deps) (*Engine, error) {
+func New(ctx context.Context, cfg billing.Config, deps Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -227,7 +227,7 @@ func (e *Engine) declaredIDs() []billing.MerchantID {
 // validate enforces what embedded construction must declare; it returns
 // Config.Merchants in slug order, and the entries it refused alone. Every
 // fatal refusal happens before any resource opens.
-func validate(cfg *config.Config, deps Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
+func validate(cfg *billing.Config, deps Deps) ([]billing.MerchantDeclaration, []config.Degradation, error) {
 	declarations, refused := config.DeclaredMerchants(cfg)
 	cfg.Database.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.Database.RiverSchema))
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
@@ -251,7 +251,7 @@ func validate(cfg *config.Config, deps Deps) ([]billing.MerchantDeclaration, []c
 
 // fakeProviders names the test seams and fake providers cfg and deps wire:
 // no live PSP is declared beside them.
-func fakeProviders(cfg *config.Config, deps Deps) []string {
+func fakeProviders(cfg *billing.Config, deps Deps) []string {
 	out := append(config.FakeProviders(cfg), seams(deps)...)
 	slices.Sort(out)
 	return out

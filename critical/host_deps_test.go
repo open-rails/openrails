@@ -6,7 +6,9 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails"
@@ -19,13 +21,19 @@ import (
 // does not serve, with why.
 func configurationState(t *testing.T, engine *openrails.Engine) error {
 	t.Helper()
+	return configurationProbe(t, engine).Check(t.Context())
+}
+
+// configurationProbe is the engine's openrails_configuration probe.
+func configurationProbe(t *testing.T, engine *openrails.Engine) openrails.Probe {
+	t.Helper()
 	for _, p := range engine.Probes() {
 		if p.Name == "openrails_configuration" {
-			return p.Check(t.Context())
+			return p
 		}
 	}
 	t.Fatal("no openrails_configuration probe")
-	return nil
+	return openrails.Probe{}
 }
 
 func TestHostDeps(t *testing.T) {
@@ -58,7 +66,7 @@ func TestHostDeps(t *testing.T) {
 	})
 	t.Run("OR-J04-S73/a-kv-mount-without-a-vault-client-is-refused-and-reported", func(t *testing.T) {
 		w := newWorld(t, func(w *world) {
-			w.cfg.Vault = &openrails.VaultConfig{KVMount: "secret"}
+			w.cfg.Vault = billing.VaultConfig{KVMount: "secret"}
 			for i := range w.cfg.Merchants {
 				w.cfg.Merchants[i].MerchantDocument = billing.MerchantDocument{Slug: w.cfg.Merchants[i].Slug}
 			}
@@ -99,9 +107,15 @@ func TestHostDeps(t *testing.T) {
 		})
 		vault.Put(t, "openrails/merchants/"+w.alpha.MerchantID().UUID().String()+"/merchant", map[string]any{"display_name": "Alpha", "monthly_floor": "5000000"})
 		// The next process to load it refuses it, saying what replaced the key.
+		// The configuration loads after New returns.
 		engine, err := openrails.New(t.Context(), w.cfg, w.deps)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, engine.Close(context.Background())) })
-		require.ErrorContains(t, configurationState(t, engine), "monthly_floor was replaced by usage_billing.currencies[].delinquency_floor")
+		probe := configurationProbe(t, engine)
+		const want = "monthly_floor was replaced by usage_billing.currencies[].delinquency_floor"
+		require.Eventually(t, func() bool {
+			err := probe.Check(t.Context())
+			return err != nil && strings.Contains(err.Error(), want)
+		}, 30*time.Second, 50*time.Millisecond, want)
 	})
 }

@@ -11,12 +11,13 @@ import (
 
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/controlplane"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 type pushAuthBootstrapOptions struct {
@@ -117,7 +118,7 @@ func runPushAuthBootstrap(cmd *cobra.Command, opts pushAuthBootstrapOptions) err
 	if err != nil {
 		return err
 	}
-	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+	cfg := hostconfig.Engine(ctx)
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; push-auth-bootstrap requires --config")
 	}
@@ -148,7 +149,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return err
 	}
 
-	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+	cfg := hostconfig.Engine(ctx)
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; push-merchant-config requires --config")
 	}
@@ -197,7 +198,7 @@ func newDumpMerchantConfigCmd() *cobra.Command {
 
 func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) error {
 	ctx := cmd.Context()
-	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+	cfg := hostconfig.Engine(ctx)
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; dump-merchant-config requires --config")
 	}
@@ -292,7 +293,7 @@ func applyAuthKitAuthorityManifest(ctx context.Context, cp *controlplane.Control
 // declares: permission group, optional host-app issuer-as-owner and merchant
 // row (#527). With Vault holding configuration the manifest names merchants
 // only. It does not touch catalog or provider state.
-func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *bootstrap.BillingConfig, out io.Writer, reconcileOpts bootstrap.ReconcileOptions) error {
+func applyPushMerchantConfigManifest(ctx context.Context, cfg *billing.Config, cp *controlplane.ControlPlane, manifest *bootstrap.BillingConfig, out io.Writer, reconcileOpts bootstrap.ReconcileOptions) error {
 	if manifest == nil || len(manifest.Merchants) == 0 {
 		return nil
 	}

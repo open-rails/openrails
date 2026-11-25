@@ -20,7 +20,7 @@ import (
 // security key and its declared environment, so its posture key is the one
 // startup verified. There is no bare-key path.
 type NMIFactory struct {
-	Config *config.Config
+	Config *billing.Config
 	// Postures is each merchant's write posture: a readonly merchant's
 	// client writes nothing, and so does every client without Postures.
 	Postures writeposture.Reader

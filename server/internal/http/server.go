@@ -3,13 +3,15 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/authkit/auth"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
 
+	"github.com/open-rails/authkit/auth"
+
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/router"
 
 	"github.com/open-rails/openrails/internal/abusestate"
@@ -21,13 +23,13 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/shared/iputil"
+	"github.com/open-rails/openrails/server/internal/adminconsole"
 	"github.com/open-rails/openrails/server/internal/controlplane"
-	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 type Dependencies struct {
 	CustomerAdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
-	Config                  *config.Config
+	Config                  *billing.Config
 	Runtime                 *app.Runtime
 	// ControlPlane is the standalone server's control plane over its own
 	// AuthKit, whose Authenticator says who every request is. Required: the
@@ -42,8 +44,10 @@ type Dependencies struct {
 	ConsoleAssets fs.FS
 	// RouteGroups turns the merchant route groups on.
 	RouteGroups config.RouteGroups
-	// AdminConsole controls the optional console and its app sign-in methods.
-	AdminConsole *hostconfig.ConsoleConfig
+	// ConsoleDisabled omits the console; ConsoleIssuers are its sign-in
+	// choices.
+	ConsoleDisabled bool
+	ConsoleIssuers  []adminconsole.Issuer
 	// CheckoutOrigin serves CheckoutHandler, the engine's payment page,
 	// there (by Host); empty serves none.
 	CheckoutOrigin  string
@@ -52,7 +56,7 @@ type Dependencies struct {
 
 type Server struct {
 	customerAdmissionPolicy func(context.Context, auth.Verified, config.CustomerBinding) error
-	cfg                     *config.Config
+	cfg                     *billing.Config
 	runtime                 *app.Runtime
 	// draining fails readiness while the process stops (Drain).
 	draining atomic.Bool
@@ -65,7 +69,8 @@ type Server struct {
 	adminLimiter *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
-	adminConsole  *hostconfig.ConsoleConfig
+	consoleOff    bool
+	consoleIssuer []adminconsole.Issuer
 	// groups are the route groups the server mounts.
 	groups config.RouteGroups
 
@@ -200,7 +205,8 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 		captchaStore:            deps.Runtime.CaptchaStore,
 		adminLimiter:            middleware.NewAdminOperationLimiter(logger, deps.Runtime.AbuseState),
 		consoleAssets:           deps.ConsoleAssets,
-		adminConsole:            deps.AdminConsole,
+		consoleOff:              deps.ConsoleDisabled,
+		consoleIssuer:           deps.ConsoleIssuers,
 		groups:                  deps.RouteGroups,
 		browserTierRoutes:       middleware.NewBrowserTierRoutes(),
 		Log:                     logger,

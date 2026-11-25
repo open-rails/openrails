@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -28,7 +28,7 @@ func TestADisarmedEnginePaymentIsNotDispatched(t *testing.T) {
 	stripe := stripemock.NewUnstarted(stripemock.Options{})
 	merchant, psp := uuid.New(), uuid.New()
 	key := "sk_test_acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	service := NewAccountStripeService(&config.Config{}, merchant, psp, "acct_engine", key)
+	service := NewAccountStripeService(&billing.Config{}, merchant, psp, "acct_engine", key)
 	service.StripeClients = stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))
 	_, err := service.CreateEnginePayment(t.Context(), enginePayment(merchant, psp))
 	require.ErrorIs(t, err, charge.ErrNotDispatched)
@@ -43,7 +43,7 @@ func TestAnEnginePaymentWithARevokedKeyIsNotDispatched(t *testing.T) {
 	merchant, psp := uuid.New(), uuid.New()
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
 	key := "sk_test_acct_" + name
-	service := NewAccountStripeService(&config.Config{}, merchant, psp, "acct_"+name, key)
+	service := NewAccountStripeService(&billing.Config{}, merchant, psp, "acct_"+name, key)
 	service.StripeClients = stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))
 	service.StripeClients.RegisterPosture("engine/"+name, merchant, psp, "acct_"+name, key)
 	stripe.Intercept(func(r *http.Request) bool { return r.URL.Path == "/v1/payment_intents" }, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {

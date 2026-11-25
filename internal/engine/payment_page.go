@@ -8,7 +8,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/paymentpagehttp"
 	"github.com/open-rails/openrails/internal/paymentpage"
@@ -18,7 +17,7 @@ import (
 // assets. An origin that is not its own, or assets without the page, are
 // refused alone and reported; nil assets issue pay URLs without serving the
 // page.
-func (e *Engine) serveCheckout(cfg config.Config, declarations []billing.MerchantDeclaration, assets fs.FS) {
+func (e *Engine) serveCheckout(cfg billing.Config, declarations []billing.MerchantDeclaration, assets fs.FS) {
 	if strings.TrimSpace(cfg.CheckoutOrigin) == "" {
 		return
 	}

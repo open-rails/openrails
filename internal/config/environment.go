@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
@@ -69,7 +71,7 @@ func ResolvePSPEnvironment(psp, rail, environment string) (string, error) {
 
 // FakeProviders names what cfg wires that no live PSP may sit beside:
 // loopback provider gateways and an http HyperSwitch fixture.
-func FakeProviders(cfg *Config) []string {
+func FakeProviders(cfg *billing.Config) []string {
 	if cfg == nil {
 		return nil
 	}
@@ -79,7 +81,7 @@ func FakeProviders(cfg *Config) []string {
 			out = append(out, "provider_sandbox."+key)
 		}
 	}
-	if cfg.HyperSwitch != nil && cfg.HyperSwitch.AllowLoopbackHTTP {
+	if cfg.HyperSwitch.AllowLoopbackHTTP {
 		out = append(out, "hyperswitch.allow_loopback_http")
 	}
 	slices.Sort(out)

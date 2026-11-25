@@ -143,19 +143,19 @@ func (o *Opened) Close() {
 	}
 }
 
-// Pool opens the db section's pool. retry waits for the database until ctx
+// Pool opens the database section's pool. retry waits for the database until ctx
 // ends, as a serving process does; otherwise it tries once.
 func Pool(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config, retry bool) (*pgxpool.Pool, error) {
-	url := cfg.DB.ConnectionString()
+	url := cfg.Database.ConnectionString()
 	if url == "" {
-		return nil, errors.New("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
+		return nil, errors.New("missing database configuration (DATABASE_URL or DATABASE_HOST/DATABASE_PORT/etc.)")
 	}
 	pc, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres config: %w", err)
 	}
 	pc.MaxConns, pc.MaxConnLifetime, pc.MaxConnIdleTime = maxConns, maxConnLifetime, maxConnIdleTime
-	if cfg.DB.SQLTrace {
+	if cfg.Database.SQLTrace {
 		pc.ConnConfig.Tracer = db.NewSQLTracer(logger)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, pc)

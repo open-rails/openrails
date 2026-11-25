@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/logx"
@@ -49,7 +50,7 @@ type VerifyResult struct {
 
 // Verifier validates captcha response tokens against a provider siteverify endpoint.
 type Verifier struct {
-	cfg    *config.CaptchaConfig
+	cfg    billing.CaptchaAccount
 	client *http.Client
 }
 
@@ -62,7 +63,7 @@ type ChallengeStore struct {
 }
 
 // NewVerifier returns a provider-neutral captcha verifier when captcha is enabled.
-func NewVerifier(cfg *config.CaptchaConfig, client *http.Client) *Verifier {
+func NewVerifier(cfg billing.CaptchaAccount, client *http.Client) *Verifier {
 	if !config.CaptchaEnabled(cfg) {
 		return nil
 	}
@@ -75,7 +76,7 @@ func NewVerifier(cfg *config.CaptchaConfig, client *http.Client) *Verifier {
 }
 
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (*VerifyResult, error) {
-	if v == nil || v.cfg == nil {
+	if v == nil || !config.CaptchaEnabled(v.cfg) {
 		return nil, fmt.Errorf("captcha verifier is not configured")
 	}
 
@@ -176,7 +177,7 @@ func challengeKey(subject string) string {
 }
 
 // ShouldApply reports whether captcha escalation is enabled for a rate-limit bucket.
-func ShouldApply(cfg *config.CaptchaConfig, bucket string) bool {
+func ShouldApply(cfg billing.CaptchaAccount, bucket string) bool {
 	bucket = strings.ToLower(strings.TrimSpace(bucket))
 	if !config.CaptchaEnabled(cfg) || bucket == "" || bucket == "webhook" {
 		return false
@@ -192,7 +193,7 @@ func ShouldApply(cfg *config.CaptchaConfig, bucket string) bool {
 }
 
 // ExtremeThreshold returns the request count where rate-limit violations escalate to captcha.
-func ExtremeThreshold(limit *config.RateLimit, cfg *config.CaptchaConfig) int {
+func ExtremeThreshold(limit *billing.RateLimit, cfg billing.CaptchaAccount) int {
 	threshold := 0
 	if limit != nil {
 		threshold = limit.RequestsPerMinute

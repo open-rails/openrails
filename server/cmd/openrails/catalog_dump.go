@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 type catalogDumpOptions struct {
@@ -39,7 +39,7 @@ func runDumpCatalog(cmd *cobra.Command, opts catalogDumpOptions) error {
 	if slug == "" {
 		return fmt.Errorf("--slug is required")
 	}
-	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	cfg := hostconfig.Engine(cmd.Context())
 	pool, err := cliPool(cmd.Context())
 	if err != nil {
 		return err

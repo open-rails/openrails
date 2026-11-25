@@ -9,6 +9,7 @@ import (
 
 	vaultapi "github.com/hashicorp/vault/api"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
@@ -40,7 +41,7 @@ type Connection struct {
 // Open binds client to the mounts cfg names. A mount named without a client,
 // or a malformed mount path, leaves Vault unusable, never an error: its
 // operations refuse and Err reports why.
-func Open(ctx context.Context, logger *slog.Logger, cfg *config.Config, client *vaultapi.Client) (*Connection, error) {
+func Open(ctx context.Context, logger *slog.Logger, cfg *billing.Config, client *vaultapi.Client) (*Connection, error) {
 	mount := config.MerchantConfigKVMount(cfg)
 	platformMount, err := config.CardVaultKVMount(cfg)
 	if err != nil {
@@ -49,10 +50,7 @@ func Open(ctx context.Context, logger *slog.Logger, cfg *config.Config, client *
 	if cfg == nil || client == nil && mount == "" && platformMount == "" && !config.SolanaTransitSigns(cfg) {
 		return &Connection{}, nil
 	}
-	vc := cfg.Vault
-	if vc == nil {
-		vc = &config.VaultConfig{}
-	}
+	vc := cfg.WithDefaults().Vault
 	conn := &Connection{Err: config.ValidateVault(vc)}
 	if client == nil {
 		conn.Err = ErrNoClient
@@ -64,11 +62,7 @@ func Open(ctx context.Context, logger *slog.Logger, cfg *config.Config, client *
 		conn.stop = stop
 		go verifyCapabilities(verify, logger, client, mount, vc.ScopePrefix)
 	}
-	transitMount := vc.TransitMount
-	if transitMount == "" {
-		transitMount = config.DefaultVaultTransitMount
-	}
-	conn.SolanaTransit = vault.NewTransitAdapter(client, transitMount).Refuse(conn.Err)
+	conn.SolanaTransit = vault.NewTransitAdapter(client, vc.TransitMount).Refuse(conn.Err)
 	if mount != "" {
 		conn.KV = vault.NewKVv2Adapter(client, mount).Refuse(conn.Err)
 	}

@@ -9,10 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/modules/payment"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // newSolanaPayCmd groups the Solana Pay operator commands.
@@ -31,7 +32,7 @@ func newSolanaPayResolveCmd() *cobra.Command {
 		Short: "Close a Solana Pay review receipt after refunding or settling its money",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			cfg, _ := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(c.Context())
 			if cfg == nil {
 				return fmt.Errorf("config not loaded")
 			}
@@ -47,7 +48,7 @@ func newSolanaPayResolveCmd() *cobra.Command {
 	return cmd
 }
 
-func runSolanaPayResolve(ctx context.Context, cfg *config.Config, merchantSlug, signature, resolution string, out io.Writer) error {
+func runSolanaPayResolve(ctx context.Context, cfg *billing.Config, merchantSlug, signature, resolution string, out io.Writer) error {
 	database, err := openCLIDB(ctx)
 	if err != nil {
 		return err

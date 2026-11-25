@@ -170,7 +170,7 @@ func newMerchantsCreateCmd() *cobra.Command {
 func newMerchantsRenameCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rename <merchant> <new-name>",
-		Short: "Rename a merchant; its former name forwards under auth.naming",
+		Short: "Rename a merchant; its former name forwards under naming",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withOperator(cmd, func(ctx context.Context, srv operatorSession) error {
@@ -216,7 +216,7 @@ func newWorkersCmd() *cobra.Command {
 		Short: "Each background job kind as River holds it: overrunning, retrying and discarded jobs, last completion and newest error",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(cmd.Context())
 			return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
 				health, err := riverjobs.ReadHealth(ctx, database.Pool(), config.RiverSchemaName(cfg))
 				if err != nil {

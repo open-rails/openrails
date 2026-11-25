@@ -15,7 +15,6 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -92,7 +91,7 @@ type ProviderRefreshWorker struct {
 	// Leases renews the merchant's pull lease, on connections the pull cannot
 	// take; nil is DB.
 	Leases *db.DB
-	Config *config.Config
+	Config *billing.Config
 	Clock  clockwork.Clock
 	// Merchants resolves per-merchant PSPs and scoped secrets. nil = nothing
 	// arms.

@@ -80,7 +80,7 @@ func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.B
 }
 
 func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
-	if b.Config == nil || b.Config.HyperSwitch == nil || scope.CustodianID == nil {
+	if b.Config == nil || b.Config.HyperSwitch == (billing.HyperSwitchConfig{}) || scope.CustodianID == nil {
 		return nil, fmt.Errorf("HyperSwitch usage collection is not armed")
 	}
 	if p := (writeposture.View{DB: b.DB}).Posture(ctx, mid.UUID()); p.ReadOnly() {

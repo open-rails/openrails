@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +42,7 @@ triggering actor.`}
 			}
 		}
 		return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-			gate := destructive.NewAdmissions(database, nil, nil, config.DestructiveActionLimitsConfig{})
+			gate := destructive.NewAdmissions(database, nil, nil, billing.DestructiveActionLimitsConfig{})
 			var cursor *uuid.UUID
 			if !id.IsZero() {
 				value := id.UUID()
@@ -79,7 +79,7 @@ triggering actor.`}
 			if err != nil {
 				return err
 			}
-			cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(ctx)
 			runtime := &app.Runtime{DB: database, Config: cfg, Log: slog.Default()}
 			if err := runtime.WireOneOffDestructiveAdmissions(ctx); err != nil {
 				return err

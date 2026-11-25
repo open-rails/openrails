@@ -8,12 +8,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // newMerchantPurgeCmd purges one merchant: alone it takes and prints the
@@ -78,7 +78,7 @@ func newMerchantPurgeCmd() *cobra.Command {
 // ledger, which post the merchant's unposted usage and delete its events.
 func withPurgeMerchants(cmd *cobra.Command, run func(context.Context, *db.DB, *merchants.Service) error) error {
 	return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-		cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+		cfg := hostconfig.Engine(ctx)
 		if err := bindCLIRiverProducer(ctx, cfg, database); err != nil {
 			return err
 		}

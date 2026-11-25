@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -67,14 +67,14 @@ const stripeCancelDenialMaxAttempts = 3
 //   - an uncertain write is resolved by the verifier's read, never resent blind.
 type StripeCancelHandler struct {
 	DB      *db.DB
-	Config  *config.Config
+	Config  *billing.Config
 	Rails   railresolve.Source
 	Clients *stripeapi.Factory
 	Clock   clockwork.Clock
 	Policy  BackoffPolicy
 }
 
-func NewStripeCancelHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeCancelHandler {
+func NewStripeCancelHandler(d *db.DB, cfg *billing.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeCancelHandler {
 	return &StripeCancelHandler{DB: d, Config: cfg, Rails: rails, Clients: clients, Clock: clock, Policy: DefaultBackoff}
 }
 
