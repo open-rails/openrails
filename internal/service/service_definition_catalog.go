@@ -346,13 +346,10 @@ func productToCatalogProduct(p *models.Product) *billing.Product {
 // string can never contain, so it can never collide with a present value.
 const priceNaturalKeyNull = "\x00null"
 
-// priceDeterministicID derives a price's id from the immutable financial tuple
-// that IS its identity — exactly the prices_product_amount_window_key
-// columns (#662), canonicalized the SAME way that NULLS-NOT-DISTINCT unique
-// index compares them (amount as decimal, currency lowercased, absent nullable
-// fields → priceNaturalKeyNull). Equal terms therefore always hash equal, so a
-// derived id can never violate the constraint; a reprice changes a frozen field
-// and correctly hashes to a new id while the archived old row keeps its own.
+// priceDeterministicID derives the base id from a price's amount, currency and
+// fixed-hour terms. Absent nullable fields use priceNaturalKeyNull to match
+// the constraint's NULLS NOT DISTINCT semantics. newPriceID extends this id
+// with calendar cadence, customer amount and seat bounds.
 func priceDeterministicID(productID uuid.UUID, key string, amount int64, currency string, accessDurationHours, billingIntervalHours *int, trialUnitAmount *int64, trialDurationHours *int) uuid.UUID {
 	accessDur := priceNaturalKeyNull
 	if accessDurationHours != nil {
@@ -746,7 +743,7 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 				return nil, priceLookup(err)
 			}
 		}
-		if req.Archived != nil {
+		if req.Archived != nil && *req.Archived != current.Archived {
 			lifecycle := *scoped
 			lifecycle.localCatalogOnly = true
 			if *req.Archived {

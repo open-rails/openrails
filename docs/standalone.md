@@ -971,13 +971,6 @@ with usage needs an event store holding none of the merchant's; without a store
 an export refuses a merchant with unposted usage. The event log, active
 destructive incidents and pending actions are not in an archive.
 
-**The catalog alone.** `openrails catalog export --merchant UUID --out FILE`
-writes a sealed snapshot of every catalog table with original ids and history;
-`openrails catalog import --merchant UUID --in FILE` restores it into an empty
-catalog for the same merchant. It is a backup, separate from the editable
-documents `catalog apply` takes; `openrails dump-merchant-catalog --slug` prints
-the active catalog as one.
-
 **Not backups:** the purge inventory (counts and document names only; after a
 purge, PITR is the only way back), a provider read (providers hold no access,
 grants or ledger) and `undo-run` (one operation).
@@ -1010,9 +1003,7 @@ the merchant the token is bound to.
 | `openrails dump-merchant-config --slug NAME [--out]` | print a merchant's configuration as manifest YAML, without credentials or alert webhooks |
 | `openrails get-merchant-config --merchant NAME` | read a merchant's configuration through the client (remote: `--server-url`, `--token-file`) |
 | `openrails apply-merchant-config --merchant NAME --file PATH` | apply configuration metadata by revision (Vault only) |
-| `openrails dump-merchant-catalog --slug NAME` | print the active catalog as a document |
 | `openrails catalog apply FILE --merchant NAME [--force-conflicts]` | apply a catalog document; startup never does |
-| `openrails catalog export --merchant UUID --out FILE [--overwrite]`, `openrails catalog import --merchant UUID --in FILE` | a sealed catalog snapshot with ids and history |
 | `openrails billing export`, `openrails billing import`, `openrails billing prepare-target` | move one merchant's billing ([backup and restore](#backup-and-restore)) |
 | `openrails merchants list`, `merchants get`, `merchants create`, `merchants rename`, `merchants delete`, `merchants restore` | the merchant directory; delete is soft, a rename forwards the former name for 90 days |
 | `openrails merchant controls`, `merchant writes`, `merchant rebills`, `merchant destructive` | a merchant's controls ([merchant controls](#merchant-controls)) |

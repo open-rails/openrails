@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules/syntax"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -49,6 +51,241 @@ func publicPurchase(t *testing.T, a *authorityWorld, p *providerLedger, price bi
 }
 
 func TestPublicCatalog(t *testing.T) {
+	t.Run("OR-J05-S17/catalog-writes-only-changed-state-and-ownership", func(t *testing.T) {
+		a := newAuthorityWorld(t)
+		table := func(name string) string { return pgx.Identifier{a.schema, name}.Sanitize() }
+		revision := func() int64 {
+			var v int64
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT catalog_revision FROM "+table("merchants")+" WHERE id=$1", a.alpha.MerchantID().UUID()).Scan(&v))
+			return v
+		}
+		snapshot := func(name string) string {
+			var value string
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(jsonb_agg(jsonb_build_object('xmin', r.xmin::text, 'row', to_jsonb(r)) ORDER BY to_jsonb(r)::text), '[]')::text FROM "+table(name)+" r").Scan(&value))
+			return value
+		}
+		owners := func() map[string]string {
+			rows, err := a.pool.Query(t.Context(), "SELECT object||':'||key||':'||price_key||':'||field||':'||manager, jsonb_build_object('xmin', xmin::text, 'actor', actor, 'set_at', set_at)::text FROM "+table("catalog_field_owners"))
+			require.NoError(t, err)
+			defer rows.Close()
+			out := map[string]string{}
+			for rows.Next() {
+				var key, value string
+				require.NoError(t, rows.Scan(&key, &value))
+				out[key] = value
+			}
+			require.NoError(t, rows.Err())
+			return out
+		}
+		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"measured":{"display_name":"Measured","description":"Description","prices":{"once":{"amount":"1 USD"}}}},"meters":{"events":{"event_type":"events","aggregation":"count"}},"limits":{"cap":{"unit":"usage_units","reset":{"kind":"lifetime"}}}}`))
+		require.NoError(t, err)
+		apply := func() *billing.CatalogApplicationReceipt {
+			receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+			require.NoError(t, err)
+			return receipt
+		}
+		first := apply()
+		beforeOwners := owners()
+		require.Len(t, beforeOwners, 8)
+		a.clock.Advance(time.Second)
+		decl := document.Products["measured"]
+		decl.DisplayName = catalog.Value("Changed")
+		document.Products["measured"] = decl
+		changed := apply()
+		require.Equal(t, first.AppliedRevision+1, changed.AppliedRevision)
+		require.Len(t, changed.Changes, 1)
+		require.Equal(t, []string{"display_name"}, changed.Changes[0].Fields)
+		afterOwners := owners()
+		require.Len(t, afterOwners, len(beforeOwners))
+		for field, before := range beforeOwners {
+			if field == "product:measured::display_name:apply" {
+				require.NotEqual(t, before, afterOwners[field])
+			} else {
+				require.Equal(t, before, afterOwners[field], field)
+			}
+		}
+		beforeRevision, receipts := revision(), snapshot("catalog_applications")
+		document.Prune = true
+		equal := apply()
+		require.NotEqual(t, changed.ApplicationID, equal.ApplicationID)
+		require.Equal(t, beforeRevision, equal.BaseRevision)
+		require.Equal(t, equal.BaseRevision, equal.AppliedRevision)
+		require.Empty(t, equal.Changes)
+		require.Zero(t, equal.ProductsChanged)
+		require.Zero(t, equal.PricesChanged)
+		require.Equal(t, beforeRevision, revision())
+		require.Equal(t, receipts, snapshot("catalog_applications"))
+		require.Equal(t, afterOwners, owners())
+		require.False(t, apply().Replayed)
+
+		decl.Archived = catalog.Value(false)
+		document.Products["measured"] = decl
+		ownership := apply()
+		require.Empty(t, ownership.Changes)
+		require.Equal(t, beforeRevision+1, ownership.AppliedRevision)
+		require.Equal(t, ownership.AppliedRevision, revision())
+		require.NotEqual(t, receipts, snapshot("catalog_applications"))
+		require.True(t, apply().Replayed)
+		decl.Archived = catalog.Field[bool]{}
+		document.Products["measured"] = decl
+		released := apply()
+		require.Empty(t, released.Changes)
+		require.Equal(t, ownership.AppliedRevision+1, released.AppliedRevision)
+		require.Equal(t, released.AppliedRevision, revision())
+		require.Equal(t, afterOwners, owners())
+		beforeRevision = revision()
+
+		products, err := a.alphaRemote.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"measured"}})
+		require.NoError(t, err)
+		require.Len(t, products.Items, 1)
+		product := products.Items[0]
+		prices, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductID: product.ID})
+		require.NoError(t, err)
+		require.Len(t, prices.Items, 1)
+		for _, name := range []string{"products", "prices", "catalog_meters", "catalog_limits"} {
+			before := snapshot(name)
+			switch name {
+			case "products":
+				got, err := a.alphaRemote.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value(product.DisplayName), ExpectedRevision: &product.Revision})
+				require.NoError(t, err)
+				require.Equal(t, product, *got)
+				_, err = a.alphaRemote.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value(product.DisplayName), ExpectedRevision: ptr(product.Revision - 1)})
+				requireCode(t, err, billing.CodeRevisionMismatch)
+			case "prices":
+				price := prices.Items[0]
+				got, err := a.alphaRemote.UpdatePrice(t.Context(), price.ID, billing.UpdatePriceParams{Archived: catalog.Value(price.Archived), SellVia: catalog.Null[[]catalog.SellVia](), ExpectedRevision: &price.Revision})
+				require.NoError(t, err)
+				require.Equal(t, price, *got)
+			case "catalog_meters":
+				_, err := a.alphaRemote.SetMeter(t.Context(), "events", billing.SetMeterParams{EventType: "events", Aggregation: catalog.AggregationCount})
+				require.NoError(t, err)
+			case "catalog_limits":
+				_, err := a.alphaRemote.SetLimit(t.Context(), "cap", billing.SetLimitParams{Unit: "usage_units", Reset: catalog.LimitReset{Kind: catalog.ResetLifetime}})
+				require.NoError(t, err)
+			}
+			require.Equal(t, before, snapshot(name), name)
+			require.Equal(t, beforeRevision, revision(), name)
+			require.Equal(t, afterOwners, owners(), name)
+		}
+		_, err = a.alphaRemote.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Manual")})
+		require.NoError(t, err)
+		require.Equal(t, beforeRevision+1, revision())
+		beforeRevision = revision()
+		_, err = a.alphaRemote.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"measured:read"})})
+		require.NoError(t, err)
+		require.Equal(t, beforeRevision+1, revision(), "one field touches entitlement and product rows")
+		beforeRevision = revision()
+		beforeOwners = owners()
+		decl.Description = catalog.Value("Conflicting document")
+		document.Products["measured"] = decl
+		conflict := apply()
+		require.Len(t, conflict.Conflicts, 1)
+		require.Equal(t, beforeRevision, conflict.AppliedRevision)
+		require.Equal(t, beforeOwners, owners())
+		finding := snapshot("reconciliation_findings")
+		again := apply()
+		require.Equal(t, conflict.Conflicts, again.Conflicts)
+		require.Equal(t, beforeRevision, revision())
+		require.Equal(t, beforeOwners, owners())
+		require.NotEqual(t, finding, snapshot("reconciliation_findings"), "unchanged conflicts still refresh the sighting")
+
+		other, err := a.betaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "measured", DisplayName: "Other"})
+		require.NoError(t, err)
+		var otherRevision int64
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT catalog_revision FROM "+table("merchants")+" WHERE id=$1", a.beta.MerchantID().UUID()).Scan(&otherRevision))
+		tx, err := a.pool.Begin(t.Context())
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		for _, edit := range []struct {
+			merchant uuid.UUID
+			id       billing.ProductID
+			name     string
+		}{{a.alpha.MerchantID().UUID(), product.ID, "First"}, {a.beta.MerchantID().UUID(), other.ID, "Other changed"}, {a.alpha.MerchantID().UUID(), product.ID, "Second"}} {
+			_, err = tx.Exec(t.Context(), "UPDATE "+table("products")+" SET display_name=$1 WHERE merchant_id=$2 AND id=$3", edit.name, edit.merchant, edit.id.UUID())
+			require.NoError(t, err)
+		}
+		require.NoError(t, tx.Commit(t.Context()))
+		require.Equal(t, beforeRevision+1, revision(), "interleaved merchants each advance once")
+		var otherAfter int64
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT catalog_revision FROM "+table("merchants")+" WHERE id=$1", a.beta.MerchantID().UUID()).Scan(&otherAfter))
+		require.Equal(t, otherRevision+1, otherAfter)
+	})
+
+	t.Run("OR-J05-S16/quantity-only-price-versions-and-document-apply", func(t *testing.T) {
+		a, _ := newPaymentWorld(t)
+		product, err := a.alphaRemote.CreateProduct(t.Context(), billing.CreateProductParams{Key: "team", DisplayName: "Team"})
+		require.NoError(t, err)
+		input := billing.CreatePriceParams{ProductID: product.ID, Key: "seats", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(720), Quantity: &catalog.Quantity{Min: 1, Max: 10}}
+		status, raw := a.request(t, http.MethodPost, "/v1/catalog/prices", a.alphaKey.Secret, input)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var first billing.Price
+		require.NoError(t, json.Unmarshal(raw, &first))
+		require.EqualValues(t, 1, first.Version)
+		require.False(t, first.Archived)
+		require.Equal(t, input.Quantity, first.Quantity)
+
+		input.Quantity = &catalog.Quantity{Min: 1, Max: 50}
+		status, raw = a.request(t, http.MethodPost, "/v1/catalog/prices", a.alphaKey.Secret, input)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var second billing.Price
+		require.NoError(t, json.Unmarshal(raw, &second))
+		require.NotEqual(t, first.ID, second.ID)
+		require.EqualValues(t, 2, second.Version)
+		require.False(t, second.Archived)
+		require.Equal(t, input.Quantity, second.Quantity)
+		archived, err := a.alphaRemote.GetPrice(t.Context(), first.ID)
+		require.NoError(t, err)
+		require.True(t, archived.Archived)
+		require.Equal(t, first.Quantity, archived.Quantity)
+
+		// A file-owned price exercises the same change without an edit-ownership
+		// conflict; another product's rename must commit in the same document.
+		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"file-team":{"display_name":"File team","prices":{"seats":{"amount":"10.00 USD","billing_interval":"30 days","quantity":{"min":1,"max":10}}}},"other":{"display_name":"Original name"}}}`))
+		require.NoError(t, err)
+		receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, receipt.Conflicts)
+		require.Empty(t, receipt.Warnings)
+		prices, err := a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "file-team", Key: "seats"})
+		require.NoError(t, err)
+		require.Len(t, prices.Items, 1)
+		original := prices.Items[0]
+		require.EqualValues(t, 1, original.Version)
+		require.Equal(t, &catalog.Quantity{Min: 1, Max: 10}, original.Quantity)
+		team := document.Products["file-team"]
+		seats := team.Prices["seats"]
+		seats.Quantity = catalog.Value(catalog.Quantity{Min: 1, Max: 50})
+		team.Prices["seats"] = seats
+		document.Products["file-team"] = team
+		other := document.Products["other"]
+		other.DisplayName = catalog.Value("Renamed product")
+		document.Products["other"] = other
+		receipt, err = a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, receipt.Conflicts)
+		require.Empty(t, receipt.Warnings)
+		require.Equal(t, 1, receipt.PricesChanged)
+		require.Equal(t, 1, receipt.ProductsChanged)
+		prices, err = a.alphaRemote.ListPrices(t.Context(), billing.PriceListParams{ProductKey: "file-team", Key: "seats", Archived: ptr(false)})
+		require.NoError(t, err)
+		require.Len(t, prices.Items, 1)
+		current := prices.Items[0]
+		require.NotEqual(t, original.ID, current.ID)
+		require.EqualValues(t, 2, current.Version)
+		require.Equal(t, &catalog.Quantity{Min: 1, Max: 50}, current.Quantity)
+		archived, err = a.alphaRemote.GetPrice(t.Context(), original.ID)
+		require.NoError(t, err)
+		require.True(t, archived.Archived)
+		require.Equal(t, original.Quantity, archived.Quantity)
+		products, err := a.alphaRemote.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"other"}})
+		require.NoError(t, err)
+		require.Len(t, products.Items, 1)
+		require.Equal(t, "Renamed product", products.Items[0].DisplayName)
+		require.ElementsMatch(t, []billing.CatalogChange{
+			{Object: billing.CatalogObjectPrice, Key: "seats", ProductKey: ptr("file-team"), Fields: []string{"quantity"}, Revision: current.Revision},
+			{Object: billing.CatalogObjectProduct, Key: "other", Fields: []string{"display_name"}, Revision: products.Items[0].Revision},
+		}, receipt.Changes)
+	})
 	t.Run("OR-J05-S15/product-creates-retry-by-content-including-concurrently", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		const path = "/v1/catalog/products"
@@ -136,7 +373,10 @@ func TestPublicCatalog(t *testing.T) {
 		require.Equal(t, concurrent[0], concurrent[1])
 	})
 	t.Run("OR-J05-S14/meter-edits-preserve-document-keys-and-aggregations", func(t *testing.T) {
-		a := newAuthorityWorld(t)
+		a := newAuthorityWorld(t, func(w *world) {
+			// The meter edits share one actor and exceed its default hourly budget.
+			w.limits = func(l *destructive.Limits) { l.ActorPerHour = l.ActorPerDay }
+		})
 		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"meters":{"Mixed Case":{"event_type":"x","aggregation":"count"},"maximum":{"event_type":"x","value_property":"units","aggregation":"max"}}}`))
 		require.NoError(t, err)
 		receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
@@ -173,10 +413,85 @@ func TestPublicCatalog(t *testing.T) {
 		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
 		require.NoError(t, err)
 		require.NotNil(t, read.RateCard)
+		cardIdentity := func() string {
+			var value string
+			require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT jsonb_build_array(id, created_at, product_id, ordinal)::text FROM "+pgx.Identifier{a.schema, "catalog_rate_cards"}.Sanitize()+" WHERE merchant_id=$1 AND meter_key=$2", a.alpha.MerchantID().UUID(), "Mixed Case").Scan(&value))
+			return value
+		}
+		identity, meterCreated := cardIdentity(), read.CreatedAt
+		params.RateCard.Value.Price.PerUnit.UnitAmount = 2
+		_, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		require.NoError(t, err)
+		require.Equal(t, identity, cardIdentity())
+		declared, err := catalog.ParseApplicationJSON([]byte(`{
+			"schema_version":1,
+			"meters":{"Mixed Case":{"event_type":"edited","aggregation":"count"}},
+			"products":{"meter-card":{"rate_cards":[{"meter":"Mixed Case","price":{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"3","divide_by":1}}}]}}
+		}`))
+		require.NoError(t, err)
+		_, err = a.alphaRemote.ApplyCatalog(t.Context(), declared, billing.ApplyCatalogParams{Force: true})
+		require.NoError(t, err)
+		require.Equal(t, identity, cardIdentity())
+		read, err = a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.Equal(t, meterCreated, read.CreatedAt)
+		require.EqualValues(t, 3, read.RateCard.Price.PerUnit.UnitAmount)
 		params.RateCard = catalog.Null[billing.MeterRateCardParams]()
 		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
 		require.NoError(t, err)
 		require.Nil(t, read.RateCard)
+
+		references, err := catalog.ParseApplicationJSON([]byte(`{
+			"schema_version":1,
+			"meters":{"jobs":{"event_type":"jobs","aggregation":"count"},"Jobs":{"event_type":"Jobs","aggregation":"count"}},
+			"limits":{
+				"mixed":{"unit":"usage_units","reset":{"kind":"lifetime"},"counts":[{"meter":"Mixed Case"}]},
+				"jobs":{"unit":"usage_units","reset":{"kind":"lifetime"},"counts":[{"meter":"Jobs"}]}
+			},
+			"products":{"document-meter-card":{"display_name":"Document meter card","rate_cards":[{"meter":"Mixed Case","price":{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"1","divide_by":1}}}]}}
+		}`))
+		require.NoError(t, err)
+		receipt, err = a.alphaRemote.ApplyCatalog(t.Context(), references, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, receipt.Conflicts)
+		for key, meterKey := range map[string]string{"mixed": "Mixed Case", "jobs": "Jobs"} {
+			limit, err := a.alphaRemote.GetLimit(t.Context(), key)
+			require.NoError(t, err)
+			require.Equal(t, []catalog.LimitCount{{Meter: meterKey, Weight: 1, Per: 1}}, limit.Counts)
+		}
+		read, err = a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.NotNil(t, read.RateCard)
+		products, err := a.alphaRemote.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"document-meter-card"}})
+		require.NoError(t, err)
+		require.Len(t, products.Items, 1)
+		require.Equal(t, products.Items[0].ID, read.RateCard.ProductID)
+		for _, key := range []string{"jobs", "Jobs"} {
+			read, err := a.alphaRemote.GetMeter(t.Context(), key)
+			require.NoError(t, err)
+			require.Equal(t, key, read.Key)
+		}
+
+		// Remove the card so only the limit prevents the aggregation change.
+		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		require.NoError(t, err)
+		require.Nil(t, read.RateCard)
+		before := *read
+		status, raw = a.request(t, http.MethodPut, path, a.alphaKey.Secret, billing.SetMeterParams{EventType: "refused", ValueProperty: "units", Aggregation: catalog.AggregationMax})
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), `"code":"meter_in_use"`)
+		read, err = a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.Equal(t, before, *read)
+
+		changed, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"meters":{"Mixed Case":{"value_property":"units","aggregation":"max"}}}`))
+		require.NoError(t, err)
+		_, err = a.alphaRemote.ApplyCatalog(t.Context(), changed, billing.ApplyCatalogParams{Force: true})
+		failure := requireCode(t, err, billing.CodeMeterInUse)
+		require.Equal(t, http.StatusConflict, failure.Status)
+		read, err = a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.Equal(t, before, *read)
 
 		for _, key := range []string{strings.Repeat("m", 300), strings.Repeat("é", 128), " padded "} {
 			_, err := catalog.ParseApplicationJSON([]byte(fmt.Sprintf(`{"schema_version":1,"meters":{%q:{"event_type":"x","aggregation":"count"}}}`, key)))
@@ -195,6 +510,10 @@ func TestPublicCatalog(t *testing.T) {
 		read, err = a.alphaRemote.SetMeter(t.Context(), "has space", billing.SetMeterParams{EventType: "x", Aggregation: catalog.AggregationCount})
 		require.NoError(t, err)
 		require.Equal(t, "has space", read.Key)
+		read, err = a.alphaRemote.SetMeter(t.Context(), "has space", billing.SetMeterParams{EventType: "x", ValueProperty: "units", Aggregation: catalog.AggregationMax})
+		require.NoError(t, err)
+		require.Equal(t, catalog.AggregationMax, read.Aggregation)
+		require.False(t, read.BillingSupported)
 
 		read, err = a.alphaRemote.GetMeter(t.Context(), "maximum")
 		require.NoError(t, err)
@@ -209,7 +528,7 @@ func TestPublicCatalog(t *testing.T) {
 		require.False(t, read.BillingSupported)
 		meters, err := a.alphaRemote.ListMeters(t.Context(), billing.PageRequest{})
 		require.NoError(t, err)
-		require.Len(t, meters.Items, 3, "invalid keys and aliases must leave no extra meters")
+		require.Len(t, meters.Items, 5, "invalid keys and aliases must leave no extra meters")
 	})
 	t.Run("OR-J05-S01/exact-price-quantity-and-provider-settlement", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)

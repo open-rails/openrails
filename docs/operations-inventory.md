@@ -256,10 +256,10 @@ The source scan found 523 named SQL statements in 95 files with an explicit qual
 | [webhook_events.sql](../internal/db/queries/webhook_events.sql) | 2 | `webhook_events` |
 | [webhook_health.sql](../internal/db/queries/webhook_health.sql) | 5 | `psp_refresh_watermarks`, `webhook_health`, `webhook_health_daily` |
 
-The migrations declare these 136 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
+The migrations declare these 135 billing tables; usage events live in the event store (ClickHouse), not here. The list includes durable support tables that are written by PostgreSQL triggers, Go code, archive restore, or the event log adapter. River has its own schema. [Base billing schema](../internal/migrate/postgres/0001_schema.up.sql) · [Migration runner](../internal/migrate/migrator.go)
 
 - `balance_watches`, `book_identity`, `books_starts`, `carts`, `catalog_applications`, `catalog_field_owners`, `catalog_limits`
-- `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `catalog_restore_receipts`, `change_log`, `credit_grant_events`, `credit_grants`
+- `catalog_meters`, `catalog_product_limits`, `catalog_rate_cards`, `change_log`, `credit_grant_events`, `credit_grants`
 - `credit_reversal_shares`, `custodians`, `customer_contacts`, `customer_delinquency`, `customer_invoice_profiles`, `customer_limit_overrides`, `customer_low_balance_lines`
 - `customer_messages`, `customer_mrr`, `customers`, `dashboard_configs`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`
 - `disputes`, `event_store`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`, `eventlog_streams`, `fraud_reports`

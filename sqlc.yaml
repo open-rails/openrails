@@ -47,7 +47,11 @@ sql:
       - "internal/migrate/postgres/0050_nmi_history_due.up.sql"
       - "internal/migrate/postgres/0051_dispute_findings_name_psp.up.sql"
       - "internal/migrate/postgres/0052_invoices.up.sql"
-      - "internal/migrate/postgres/0053_provider_listed_rebills.up.sql"
+      - "internal/migrate/postgres/0053_price_quantity_identity.up.sql"
+      - "internal/migrate/postgres/0054_drop_catalog_restore_receipts.up.sql"
+      - "internal/migrate/postgres/0055_drop_unread_catalog_columns.up.sql"
+      - "internal/migrate/postgres/0056_catalog_revision_transaction.up.sql"
+      - "internal/migrate/postgres/0057_provider_listed_rebills.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -35,22 +35,33 @@ func ValidateValues(p Profile, values []*string) error {
 	}
 	if p.Name == "catalog_applications" {
 		var receipt struct {
-			ApplicationID   string `json:"application_id"`
-			BaseRevision    int64  `json:"base_revision"`
-			AppliedRevision int64  `json:"applied_revision"`
-			Replayed        bool   `json:"replayed"`
-			ProductsChanged int    `json:"products_changed"`
-			PricesChanged   int    `json:"prices_changed"`
+			ApplicationID   *string `json:"application_id"`
+			BaseRevision    *int64  `json:"base_revision"`
+			AppliedRevision *int64  `json:"applied_revision"`
+			Replayed        bool    `json:"replayed"`
+			ProductsChanged int     `json:"products_changed"`
+			PricesChanged   int     `json:"prices_changed"`
 		}
 		raw := value(p, values, "result")
 		id := value(p, values, "application_id")
 		base := value(p, values, "base_revision")
 		applied := value(p, values, "applied_revision")
 		digest := value(p, values, "request_sha256")
-		if raw == nil || id == nil || base == nil || applied == nil || digest == nil || json.Unmarshal([]byte(*raw), &receipt) != nil {
+		if raw == nil || id == nil || base == nil || applied == nil || digest == nil {
 			return fmt.Errorf("invalid catalog application receipt")
 		}
-		if receipt.ApplicationID != *id || strconv.FormatInt(receipt.BaseRevision, 10) != *base || strconv.FormatInt(receipt.AppliedRevision, 10) != *applied || receipt.BaseRevision < 0 || receipt.AppliedRevision != receipt.BaseRevision+1 || receipt.Replayed || receipt.ProductsChanged < 0 || receipt.PricesChanged < 0 {
+		baseRevision, err := strconv.ParseInt(*base, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid catalog application receipt")
+		}
+		appliedRevision, err := strconv.ParseInt(*applied, 10, 64)
+		if err != nil || json.Unmarshal([]byte(*raw), &receipt) != nil {
+			return fmt.Errorf("invalid catalog application receipt")
+		}
+		if receipt.ApplicationID != nil && *receipt.ApplicationID != *id || receipt.BaseRevision != nil && *receipt.BaseRevision != baseRevision || receipt.AppliedRevision != nil && *receipt.AppliedRevision != appliedRevision {
+			return fmt.Errorf("contradictory catalog application receipt")
+		}
+		if strconv.FormatInt(baseRevision, 10) != *base || strconv.FormatInt(appliedRevision, 10) != *applied || baseRevision < 0 || appliedRevision != baseRevision+1 || receipt.Replayed || receipt.ProductsChanged < 0 || receipt.PricesChanged < 0 {
 			return fmt.Errorf("contradictory catalog application receipt")
 		}
 		if len(*digest) != 66 || !strings.HasPrefix(*digest, `\x`) {

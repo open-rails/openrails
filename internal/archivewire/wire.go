@@ -18,7 +18,7 @@ import (
 
 const (
 	// Version is the merchant export format, the only one import reads.
-	Version              = 4
+	Version              = 5
 	MaxBytes       int64 = 1 << 30
 	MaxRecordBytes       = 8 << 20
 )
