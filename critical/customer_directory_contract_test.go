@@ -205,6 +205,85 @@ func TestCustomerDirectory(t *testing.T) {
 			require.Equal(t, want, got, "the username it is first, then the newest")
 		}
 	})
+	t.Run("OR-J07-S12/a-customer-tokens-verified-email-is-its-kept-contact-and-its-receipts-address", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _ := newPaymentWorld(t, func(w *world) {
+			w.deps.UserInfo = nil
+			w.deps.Email = mail
+		})
+		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		status, raw := a.request(t, http.MethodGet, "/v1/me", a.aliceToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		customer, err := a.alpha.GetCustomer(t.Context(), alice)
+		require.NoError(t, err)
+		require.NotNil(t, customer.Contact, "the token's claims are the customer's contact")
+		require.Equal(t, a.alice.Email, deref(customer.Contact.Email))
+		require.Equal(t, a.alice.Username, deref(customer.Contact.Username))
+		paidExternally(t, a, alice, messageSale(t, a), "claimed-receipt")
+		startFleet(t, a.world)
+		log := settledMessages(t, a.world, alice, 1)
+		require.Equal(t, billing.MessageSent, log[0].Status)
+		require.Equal(t, a.alice.Email, deref(log[0].Recipient))
+		require.Len(t, mail.to(a.alice.Email), 1)
+	})
+	t.Run("OR-J07-S13/token-claims-never-undo-a-directory-push-or-an-erasure", func(t *testing.T) {
+		mail := &alertMailbox{}
+		a, _ := newPaymentWorld(t, func(w *world) {
+			w.deps.UserInfo = nil
+			w.deps.Email = mail
+		})
+		provisioner, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
+		require.NoError(t, err)
+		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		signedIn := func(token string) *billing.CustomerContact {
+			t.Helper()
+			status, raw := a.request(t, http.MethodGet, "/v1/me", token, nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			customer, err := a.alpha.GetCustomer(t.Context(), alice)
+			require.NoError(t, err)
+			return customer.Contact
+		}
+		unverified := a.signedToken(t, func(_ map[string]any, claims map[string]any) {
+			claims["email"], claims["email_verified"], claims["username"] = "unverified@claims.invalid", false, "alice-claimed"
+		})
+		contact := signedIn(unverified)
+		require.NotNil(t, contact)
+		require.Nil(t, contact.Email, "an unverified email is never kept")
+		require.Equal(t, "alice-claimed", deref(contact.Username))
+		contact = signedIn(a.aliceToken)
+		require.Equal(t, a.alice.Email, deref(contact.Email), "undated claims replace undated claims")
+		require.Equal(t, a.alice.Username, deref(contact.Username))
+		user := map[string]any{"schemas": []string{hostSCIMUserSchema}, "externalId": a.alice.ID, "userName": "alice-directory", "displayName": "Alice Directory",
+			"emails": []any{map[string]any{"value": "alice@directory.invalid", "primary": true}}}
+		status, raw := a.request(t, http.MethodPost, scimUsers, provisioner.Token, user)
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		contact = signedIn(a.aliceToken)
+		require.Equal(t, "alice@directory.invalid", deref(contact.Email), "undated claims never replace the directory's dated push")
+		require.Equal(t, "alice-directory", deref(contact.Username))
+		status, raw = a.request(t, http.MethodDelete, scimUsers+"/"+a.alice.ID, provisioner.Token, nil)
+		require.Equal(t, http.StatusNoContent, status, string(raw))
+		contact = signedIn(a.aliceToken)
+		require.True(t, contact == nil || contact.Email == nil && contact.Username == nil, "claims restore no erased contact: %+v", contact)
+		paidExternally(t, a, alice, messageSale(t, a), "erased-claims-receipt")
+		startFleet(t, a.world)
+		log := settledMessages(t, a.world, alice, 1)
+		require.Equal(t, billing.MessageNoContact, log[0].Status)
+		require.Empty(t, mail.all())
+	})
+	t.Run("OR-J07-S14/an-asserted-customers-verified-email-is-its-contact-on-a-standalone-server", func(t *testing.T) {
+		w := newStandaloneWorld(t)
+		alpha := w.Merchants["alpha"]
+		status, raw := w.request(t, http.MethodGet, "/v1/me", alpha.CustomerToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		customer, err := w.alpha.GetCustomer(t.Context(), alpha.CustomerID)
+		require.NoError(t, err)
+		require.NotNil(t, customer.Contact, "the merchant's own customer, whose claims AuthKit keeps under the asserting application")
+		require.Equal(t, "alpha@critical.invalid", deref(customer.Contact.Email))
+		found, err := w.alpha.ListCustomers(t.Context(), billing.CustomerListParams{Search: "alpha@critical.invalid"})
+		require.NoError(t, err)
+		require.Len(t, found.Items, 1)
+		require.Equal(t, alpha.CustomerID, found.Items[0].ID)
+	})
 	t.Run("OR-J07-S04/live-host-directory-exposes-no-copied-write-authority", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		id := billing.CustomerID(uuid.MustParse(a.alice.ID))

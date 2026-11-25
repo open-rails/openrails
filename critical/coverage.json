@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 747,
+  "scenario_count": 750,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3647,6 +3647,21 @@
       "id": "OR-J07-S11",
       "journey": "J07",
       "name": "A kept customer search lists the contact whose username is the query first, then the newest customers, and the list keeps that order"
+    },
+    {
+      "id": "OR-J07-S12",
+      "journey": "J07",
+      "name": "A customer's verified email in the token it presents is its kept contact, and its receipt is sent there"
+    },
+    {
+      "id": "OR-J07-S13",
+      "journey": "J07",
+      "name": "Token claims keep no unverified email, replace only undated claims, and never undo a directory's dated push or an erasure"
+    },
+    {
+      "id": "OR-J07-S14",
+      "journey": "J07",
+      "name": "On a standalone server, the verified email a merchant's backend asserts for its own customer is that customer's contact"
     },
     {
       "id": "OR-J38-S82",

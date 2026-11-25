@@ -694,8 +694,8 @@ read from them; a trusted issuer's customer from the merchant's directory in the
 server's AuthKit, which the issuer's AuthKit pushes to over SCIM at
 `/directory/scim/v2` with its client credentials, and from the verified contact
 claims of its tokens. Each customer is read from its own issuer's directory,
-newest write winning. OpenRails emails a customer only at an address the issuer
-proved.
+newest write winning. A customer your backend names in an assertion (`CreateCustomerToken`) is the merchant's own, and its contact is what that application pushed or asserted for it.
+OpenRails emails a customer only at an address the issuer proved.
 
 ## The payment page
 
