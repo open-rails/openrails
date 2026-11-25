@@ -2358,6 +2358,15 @@
     "OR-J07-S11": [
       "TestCustomerDirectory/OR-J07-S11/a-kept-search-lists-the-exact-match-first-then-the-newest"
     ],
+    "OR-J07-S12": [
+      "TestCustomerDirectory/OR-J07-S12/a-customer-tokens-verified-email-is-its-kept-contact-and-its-receipts-address"
+    ],
+    "OR-J07-S13": [
+      "TestCustomerDirectory/OR-J07-S13/token-claims-never-undo-a-directory-push-or-an-erasure"
+    ],
+    "OR-J07-S14": [
+      "TestCustomerDirectory/OR-J07-S14/an-asserted-customers-verified-email-is-its-contact-on-a-standalone-server"
+    ],
     "OR-J38-S82": [
       "TestCCBillIdentity/OR-J38-S82/a-postback-names-its-customer-by-a-username-many-others-contain"
     ],
