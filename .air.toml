@@ -36,6 +36,12 @@ exclude_dir = [
   "tests",
   "tmp",
   "vendor",
+  "web/billing-ui/node_modules",
+  "web/billing-ui/dist",
+  "web/console/node_modules",
+  "web/console/dist",
+  "web/pay/node_modules",
+  "web/pay/dist",
 ]
 
 # Avoid inotify watcher limits in large repos/containers.

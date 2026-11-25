@@ -63,11 +63,30 @@ tasks:
       - air -c .air.toml
 
   dev:console:
-    desc: The merchant console's Vite dev server, proxying the API on :3053
+    desc: The merchant console's Vite dev server, proxying the API on :3053 (builds billing-ui first; `task dev:billing-ui` rebuilds it live)
     dir: web/console
     cmds:
+      - pnpm --dir ../billing-ui install --frozen-lockfile --prefer-offline
+      - pnpm --dir ../billing-ui --config.verify-deps-before-run=false run build
       - pnpm install --frozen-lockfile --prefer-offline
       - pnpm dev
+
+  dev:billing-ui:
+    desc: Rebuild billing-ui on every change, so the running console picks up edits to its admin components
+    dir: web/billing-ui
+    deps: [dev:billing-ui:lib, dev:billing-ui:admin]
+
+  dev:billing-ui:lib:
+    internal: true
+    dir: web/billing-ui
+    cmds:
+      - pnpm --config.verify-deps-before-run=false exec vite build --watch --no-emptyOutDir
+
+  dev:billing-ui:admin:
+    internal: true
+    dir: web/billing-ui
+    cmds:
+      - pnpm --config.verify-deps-before-run=false exec vite build --config vite.admin.config.ts --watch
 
   docker-up:
     desc: Start local docker compose stack (openrails + deps)
