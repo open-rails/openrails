@@ -404,7 +404,14 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Nil(t, facts.Country)
 		require.Nil(t, facts.CountrySource)
 
-		// Neither the order nor its archived row holds the address.
+		// A request that did not come through Cloudflare's edge is never read
+		// for a country, though a trusted proxy relays the header.
+		_, untrusted := publicSale(t, a, "funnel-untrusted", 9_990_000, nil)
+		spoofed := openCheckout(t, a, untrusted.ID, nil, map[string]string{"CF-IPCountry": "FR", "X-Forwarded-For": client})
+		require.Nil(t, checkoutOf(t, a, spoofed.ID).IPCountry)
+
+		// Neither the order nor its archived row holds the address; the export
+		// comes last, as it leaves the merchant's writes readonly.
 		staff, raw := a.request(t, http.MethodGet, "/v1/admin/orders/"+order.ID.String(), a.alphaKey.Secret, nil)
 		require.Equal(t, http.StatusOK, staff, string(raw))
 		require.NotContains(t, string(raw), client)
@@ -425,12 +432,6 @@ func TestCheckoutFunnel(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Positive(t, archived)
-
-		// A request that did not come through Cloudflare's edge is never read
-		// for a country, though a trusted proxy relays the header.
-		_, untrusted := publicSale(t, a, "funnel-untrusted", 9_990_000, nil)
-		spoofed := openCheckout(t, a, untrusted.ID, nil, map[string]string{"CF-IPCountry": "FR", "X-Forwarded-For": client})
-		require.Nil(t, checkoutOf(t, a, spoofed.ID).IPCountry)
 	})
 	t.Run("OR-J47-S06/the-language-is-the-first-in-person-requests", func(t *testing.T) {
 		a, _ := newPaymentWorld(t)
