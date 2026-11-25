@@ -151,8 +151,8 @@ export const paymentRecoverySchema = z.object({
   last_failure_reason: z.string().nullish(),
   retryable: z.boolean(),
   blocked_reason: z.string().nullish(),
-  /** An engine-owned subscription's unpaid renewal: the order to pay. */
-  order_id: z.string().nullish(),
+  /** An engine-owned subscription's unpaid renewal: the invoice to pay. */
+  invoice_id: z.string().nullish(),
 })
 export type PaymentRecovery = z.infer<typeof paymentRecoverySchema>
 
@@ -299,7 +299,7 @@ export const paymentMethodSchema = z.object({
       })
     )
     .nullish(),
-  /** Currencies whose usage orders this card pays. */
+  /** Currencies whose usage invoices this card pays. */
   default_currencies: z.array(z.string()).nullish(),
   created_at: time.nullish(),
 })
@@ -314,10 +314,10 @@ export const paymentFailureSchema = z.object({
 export type PaymentFailure = z.infer<typeof paymentFailureSchema>
 
 /**
- * One line of an order. A purchased line names its price and product; a
- * usage order's line names its accrual source (`metered:<meter>`) instead.
+ * One line of an invoice. A purchased line names its price and product; a
+ * usage invoice's line names its accrual source (`metered:<meter>`) instead.
  */
-export const orderLineSchema = z.object({
+export const invoiceLineSchema = z.object({
   id: z.string(),
   price_id: z.string().nullish(),
   product_id: z.string().nullish(),
@@ -332,21 +332,21 @@ export const orderLineSchema = z.object({
   subscription_id: z.string().nullish(),
   product_access_id: z.string().nullish(),
 })
-export type OrderLine = z.infer<typeof orderLineSchema>
+export type InvoiceLine = z.infer<typeof invoiceLineSchema>
 
 /**
  * A purchase, a subscription's renewal (`origin: subscription`) or usage
  * billed in arrears (`origin: usage`): frozen lines and total, read and paid
- * by its own customer. `status` is the order's (`open | processing |
+ * by its own customer. `status` is the invoice's (`open | processing |
  * complete | canceled | expired | void | uncollectible`); `payment.status`
  * its payment's (`requires_payment_method | requires_action | processing |
  * succeeded`).
  */
-export const orderSchema = z.object({
+export const invoiceSchema = z.object({
   id: z.string(),
   customer_id: z.string(),
   origin: z.string(),
-  /** Only `engine` orders accept generic payment commands. */
+  /** Only `engine` invoices accept generic payment commands. */
   collection_owner: z.string().nullish(),
   collection_psp_id: z.string().nullish(),
   provider_bills: z
@@ -366,7 +366,7 @@ export const orderSchema = z.object({
   number: z.number().int().nullish(),
   currency: z.string(),
   total: amount,
-  lines: z.array(orderLineSchema),
+  lines: z.array(invoiceLineSchema),
   payment: z.object({
     status: z.string(),
     next_action: nextActionSchema.nullish(),
@@ -381,18 +381,18 @@ export const orderSchema = z.object({
         rail: z.string(),
         accepts: z.array(z.string()),
         saved_payment_method_ids: z.array(z.string()).optional(),
-        /** The order's failed payments through the PSP. */
+        /** The invoice's failed payments through the PSP. */
         failed_attempts: z
           .number()
           .nullish()
           .transform((v) => v ?? 0),
-        /** What the customer must add before the PSP takes the order. */
+        /** What the customer must add before the PSP takes the invoice. */
         requires: z.array(z.string()).optional(),
       })
     )
     .nullish()
     .transform((v) => v ?? []),
-  /** Where the customer pays the order; only on the answer that made it. */
+  /** Where the customer pays the invoice; only on the answer that made it. */
   pay_url: z.string().nullish(),
   /** When the pay URL stops working; null without one. */
   pay_url_expires_at: time.nullish(),
@@ -401,7 +401,7 @@ export const orderSchema = z.object({
     .boolean()
     .nullish()
     .transform((v) => v ?? false),
-  /** A merchant order's return; none on a customer's embedded one. */
+  /** A merchant invoice's return; none on a customer's embedded one. */
   success_url: z.string().nullish(),
   cancel_url: z.string().nullish(),
   saved_payment_methods: z
@@ -417,7 +417,7 @@ export const orderSchema = z.object({
     })
     .nullish(),
   /**
-   * A usage order's period, when it is due and how much of it is paid (a
+   * A usage invoice's period, when it is due and how much of it is paid (a
    * funded balance and remittances pay part of it). `delinquent`: overdue
    * past grace, so new usage in its currency is refused until it is paid.
    */
@@ -443,11 +443,11 @@ export const orderSchema = z.object({
   uncollectible_at: time.nullish(),
   created_at: time,
 })
-export type Order = z.infer<typeof orderSchema>
+export type Invoice = z.infer<typeof invoiceSchema>
 
-/** Exact original /orders/{id}/pay request; reading never executes payment. */
-export const orderPaymentAttemptSchema = z.object({
-  order_id: z.string(),
+/** Exact original /invoices/{id}/pay request; reading never executes payment. */
+export const invoicePaymentAttemptSchema = z.object({
+  invoice_id: z.string(),
   customer_id: z.string(),
   attempt_id: z.string(),
   state: z.string(),
@@ -457,10 +457,10 @@ export const orderPaymentAttemptSchema = z.object({
   amount,
   currency: z.string(),
 })
-export type OrderPaymentAttempt = z.infer<typeof orderPaymentAttemptSchema>
+export type InvoicePaymentAttempt = z.infer<typeof invoicePaymentAttemptSchema>
 
 /** Why a line cannot be bought: `already_owned`, `entitlement_required`, `unavailable`, ... */
-export const orderLineRefusalSchema = z.object({
+export const invoiceLineRefusalSchema = z.object({
   code: z.string(),
   message: z.string(),
   owned_by: z.string().nullish(),
@@ -468,10 +468,10 @@ export const orderLineRefusalSchema = z.object({
   /** `entitlement_required`: the required keys the customer lacks. */
   missing: z.array(z.string()).optional(),
 })
-export type OrderLineRefusal = z.infer<typeof orderLineRefusalSchema>
+export type InvoiceLineRefusal = z.infer<typeof invoiceLineRefusalSchema>
 
-/** One line priced as an order would freeze it, or why it cannot be bought. */
-export const orderPreviewLineSchema = z.object({
+/** One line priced as an invoice would freeze it, or why it cannot be bought. */
+export const invoicePreviewLineSchema = z.object({
   price_id: z.string(),
   product_id: z.string(),
   description: z.string(),
@@ -482,9 +482,9 @@ export const orderPreviewLineSchema = z.object({
   billing_interval_hours: z.number().nullish(),
   billing_interval_months: z.number().int().positive().nullish(),
   access_duration_hours: z.number().nullish(),
-  refusal: orderLineRefusalSchema.nullish(),
+  refusal: invoiceLineRefusalSchema.nullish(),
 })
-export type OrderPreviewLine = z.infer<typeof orderPreviewLineSchema>
+export type InvoicePreviewLine = z.infer<typeof invoicePreviewLineSchema>
 
 /**
  * The customer's cart, priced live: one per customer of a merchant, shared by
@@ -494,19 +494,19 @@ export type OrderPreviewLine = z.infer<typeof orderPreviewLineSchema>
 export const cartSchema = z.object({
   currency: z.string(),
   total: amount,
-  lines: z.array(orderPreviewLineSchema),
-  payment_options: orderSchema.shape.payment_options,
+  lines: z.array(invoicePreviewLineSchema),
+  payment_options: invoiceSchema.shape.payment_options,
   last_changed_at: time.nullish(),
   expires_at: time.nullish(),
 })
 export type Cart = z.infer<typeof cartSchema>
 
 /**
- * How to pay an order: a saved card, a card just entered (the token of the
+ * How to pay an invoice: a saved card, a card just entered (the token of the
  * PSP's own fields, its `psp_id`), a Solana wallet (`token_symbol`, the
  * token it pays in) or the PSP's hosted page (`return_url`).
  */
-export type OrderPaymentInput =
+export type InvoicePaymentInput =
   | { payment_method_id: string }
   | {
       token: string
@@ -526,7 +526,7 @@ export const productSchema = z.object({
   description: z.string(),
   /** Opaque entitlement keys granted by the product. */
   entitlements: z.array(z.string()),
-  /** Keys a customer must already hold to order the product. */
+  /** Keys a customer must already hold to invoice the product. */
   required_entitlements: z.array(z.string()).optional(),
   /** Prepaid balance fulfilled once for each qualifying successful payment. */
   credit_grant: z
@@ -562,7 +562,7 @@ export const paymentSchema = z.object({
   currency: z.string(),
   subscription_id: z.string().nullish(),
   /** The bill this money movement settles or reverses. */
-  order_id: z.string().nullish(),
+  invoice_id: z.string().nullish(),
   /** `rail | manual | admin` */
   channel: z.string().nullish(),
   rail: z.string().nullish(),
@@ -612,7 +612,7 @@ export const customerLimitSchema: z.ZodType<wire.CustomerLimit> = z.object({
 export type CustomerLimit = wire.CustomerLimit
 
 /** Where the host's page says a checkout's customer came from; each field is optional. */
-export type OrderAttribution = Partial<wire.OrderAttribution>
+export type InvoiceAttribution = Partial<wire.InvoiceAttribution>
 
 /**
  * A customer's money in one currency, as of `as_of`. `accrued_amount` is what

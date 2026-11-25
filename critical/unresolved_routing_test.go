@@ -73,45 +73,45 @@ func TestUnresolvedRouting(t *testing.T) {
 		var saved billing.PaymentMethod
 		require.NoError(t, json.Unmarshal(raw, &saved))
 		control := input
-		control.Payment = &billing.OrderPaymentParams{PaymentMethodID: &saved.ID}
+		control.Payment = &billing.InvoicePaymentParams{PaymentMethodID: &saved.ID}
 		control.Reusable = nil
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, control, map[string]string{"Idempotency-Key": "alternate-positive-control"})
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, control, map[string]string{"Idempotency-Key": "alternate-positive-control"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.Len(t, alternate.effects(t), 1)
 		require.EqualValues(t, 3000, alternate.effects(t)[0].Amount)
 		input.Payment.PSPID = &primaryID
 		p.interruptPaymentResponses()
 		p.unavailableEvidence(true)
-		_, _ = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "unresolved-account"})
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		_, _ = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "unresolved-account"})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 		require.NoError(t, err)
-		require.Len(t, orders.Items, 2)
-		var order billing.Order
-		for _, item := range orders.Items {
-			if item.Payment.Status == billing.OrderPaymentProcessing {
-				order = item
+		require.Len(t, invoices.Items, 2)
+		var invoice billing.Invoice
+		for _, item := range invoices.Items {
+			if item.Payment.Status == billing.InvoicePaymentProcessing {
+				invoice = item
 			}
 		}
-		require.Equal(t, billing.OrderPaymentProcessing, order.Payment.Status)
+		require.Equal(t, billing.InvoicePaymentProcessing, invoice.Payment.Status)
 		for _, change := range []struct {
 			key    string
-			method billing.OrderPaymentParams
+			method billing.InvoicePaymentParams
 		}{
-			{"replacement", billing.OrderPaymentParams{PSPID: &primaryID, Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}},
+			{"replacement", billing.InvoicePaymentParams{PSPID: &primaryID, Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}},
 			{"alternate", *control.Payment},
 		} {
-			pay := billing.PayOrderParams{ExpectedTotal: 30_000_000, Payment: change.method}
+			pay := billing.PayInvoiceParams{ExpectedTotal: 30_000_000, Payment: change.method}
 			if change.method.Token != "" {
 				pay.Reusable = ptr(true)
 			}
-			status, raw = a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, pay, map[string]string{"Idempotency-Key": change.key})
+			status, raw = a.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", a.aliceToken, pay, map[string]string{"Idempotency-Key": change.key})
 			require.Equal(t, http.StatusConflict, status, string(raw))
 		}
 		require.Len(t, p.effects(t), 1)
 		require.Len(t, alternate.effects(t), 1, "only the independent positive control may debit the alternate account")
-		retained, err := a.alpha.GetOrder(t.Context(), order.ID)
+		retained, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderPaymentProcessing, retained.Payment.Status)
+		require.Equal(t, billing.InvoicePaymentProcessing, retained.Payment.Status)
 		p.restorePaymentResponses()
 		p.unavailableEvidence(false)
 		a.clock.Advance(20 * time.Minute)
@@ -125,10 +125,10 @@ func TestUnresolvedRouting(t *testing.T) {
 			}
 		}
 		require.Eventually(t, func() bool {
-			out, err := a.alpha.GetOrder(t.Context(), order.ID)
-			return err == nil && out.Status == billing.OrderComplete
+			out, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+			return err == nil && out.Status == billing.InvoiceComplete
 		}, 20*time.Second, 20*time.Millisecond)
-		retained, err = a.alpha.GetOrder(t.Context(), order.ID)
+		retained, err = a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
 		payment, err := a.alpha.GetPayment(t.Context(), *retained.Payment.PaymentID)
 		require.NoError(t, err)

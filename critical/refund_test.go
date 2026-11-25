@@ -22,12 +22,12 @@ func TestRefunds(t *testing.T) {
 	t.Run("OR-J20-S01/partial-then-final-refund-conserves-settled-value", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "refund-purchase"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "refund-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.NotNil(t, order.Payment.PaymentID)
-		paymentID := *order.Payment.PaymentID
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.NotNil(t, invoice.Payment.PaymentID)
+		paymentID := *invoice.Payment.PaymentID
 		first, err := a.alpha.RefundPayment(t.Context(), "partial-refund", paymentID, billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Partial customer refund"})
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, first.Status)
@@ -87,12 +87,12 @@ func TestRefunds(t *testing.T) {
 	})
 	t.Run("OR-J20-S06/a-won-dispute-gives-back-what-its-chargeback-took", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "disputed-purchase"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "disputed-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.NotNil(t, order.Payment.PaymentID)
-		paymentID := *order.Payment.PaymentID
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.NotNil(t, invoice.Payment.PaymentID)
+		paymentID := *invoice.Payment.PaymentID
 		paid, err := a.alpha.GetPayment(t.Context(), paymentID)
 		require.NoError(t, err)
 		var charge, intent string

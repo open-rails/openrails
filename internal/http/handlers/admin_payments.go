@@ -452,7 +452,7 @@ func ListPayments(r *httprequest.Request) {
 type MyPaymentListQuery struct {
 	billing.PageRequest
 	SubscriptionID billing.SubscriptionID `form:"subscription_id"`
-	OrderID        billing.OrderID        `form:"order_id"`
+	InvoiceID      billing.InvoiceID      `form:"invoice_id"`
 	Status         billing.PaymentStatus  `form:"status"`
 	Rail           string                 `form:"rail"`
 	Kind           billing.PaymentKind    `form:"kind"`
@@ -471,7 +471,7 @@ func ListMyPayments(r *httprequest.Request) {
 		return
 	}
 	params := billing.PaymentListParams{PageRequest: query.PageRequest, CustomerID: billing.CustomerID(customer), SubscriptionID: query.SubscriptionID,
-		OrderID: query.OrderID, Status: query.Status, Rail: billing.Rail(query.Rail), Kind: query.Kind, TransactionID: query.TransactionID}
+		InvoiceID: query.InvoiceID, Status: query.Status, Rail: billing.Rail(query.Rail), Kind: query.Kind, TransactionID: query.TransactionID}
 	if !checkPaymentList(r, &params) {
 		return
 	}
@@ -552,7 +552,7 @@ func GetPayment(r *httprequest.Request) {
 }
 
 // RecordExternalPayment (POST /admin/payments) records money received outside
-// OpenRails for one order: 201 with the payment, 200 when the
+// OpenRails for one invoice: 201 with the payment, 200 when the
 // same transaction_id was already recorded with the same terms, and 422
 // idempotency_key_reused when it was recorded with other terms.
 func RecordExternalPayment(r *httprequest.Request) {
@@ -562,8 +562,8 @@ func RecordExternalPayment(r *httprequest.Request) {
 	}
 	req.TransactionID = strings.TrimSpace(req.TransactionID)
 	switch {
-	case req.OrderID.IsZero():
-		r.APIError(api.Coded(billing.CodeInvalidParam, "order_id required").WithParam("order_id"))
+	case req.InvoiceID.IsZero():
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invoice_id required").WithParam("invoice_id"))
 		return
 	case req.Amount <= 0:
 		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must be positive").WithParam("amount"))
@@ -575,7 +575,7 @@ func RecordExternalPayment(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "paid_at must not be in the future").WithParam("paid_at"))
 		return
 	}
-	svc := orderService(r)
+	svc := invoiceService(r)
 	if svc == nil {
 		return
 	}
@@ -583,7 +583,7 @@ func RecordExternalPayment(r *httprequest.Request) {
 	switch {
 	case err == nil:
 	case db.IsNotFound(err):
-		r.ErrorCode(billing.CodeResourceNotFound, "order not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "invoice not found")
 		return
 	case errors.Is(err, billing.ErrIdempotencyKeyReused):
 		r.ErrorCode(billing.CodeIdempotencyKeyReused, "transaction_id was already recorded with other terms")
@@ -592,7 +592,7 @@ func RecordExternalPayment(r *httprequest.Request) {
 		r.ErrorCode(billing.CodePaymentExceedsDue, err.Error())
 		return
 	default:
-		writeOrderError(r, err)
+		writeInvoiceError(r, err)
 		return
 	}
 	status := http.StatusOK

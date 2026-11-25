@@ -79,9 +79,9 @@ type ErrorDetails struct {
 	RequestID string         `json:"request_id,omitempty"`
 	Param     *string        `json:"param,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
-	// Order is the order a declined payment left open (402 card_error), as
+	// Invoice is the invoice a declined payment left open (402 card_error), as
 	// Stripe's error carries its PaymentIntent.
-	Order *Order `json:"order,omitempty"`
+	Invoice *Invoice `json:"invoice,omitempty"`
 }
 
 // StatusError preserves the full server error and relevant response headers.

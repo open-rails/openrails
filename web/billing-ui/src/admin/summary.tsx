@@ -294,7 +294,7 @@ export async function loadBillingConfirmWarnings(
 }
 
 const permissionAreas: Record<string, string> = {
-  "customer:read": "Read customers, subscriptions, payments, and orders.",
+  "customer:read": "Read customers, subscriptions, payments, and invoices.",
   "customer:manage":
     "Change customer billing, including refunds, cancellations, and credits.",
   "catalog:manage": "Change products, prices, meters, and catalog migrations.",
@@ -311,8 +311,8 @@ const permissionAreas: Record<string, string> = {
   "usage:manage": "Admit and charge usage through the application API.",
   "events:read":
     "Read retained billing events through the application API.",
-  "orders:manage":
-    "Preview, create, and withdraw merchant orders through the application API.",
+  "invoices:manage":
+    "Preview, create, and withdraw merchant invoices through the application API.",
   "provisioning:read": "Read the customer directory over SCIM.",
   "provisioning:manage":
     "Push and erase the customer directory over SCIM; an erasure spends the destructive budget.",

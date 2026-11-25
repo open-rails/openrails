@@ -128,7 +128,7 @@ func (s *Service) ListCustomers(ctx context.Context, params billing.CustomerList
 		if err != nil {
 			return page, err
 		}
-		// In the search's own order: the id, then exact matches, then the newest.
+		// In the search's own invoice: the id, then exact matches, then the newest.
 		rank := make(map[uuid.UUID]int, len(ids))
 		for i, id := range ids {
 			if _, ok := rank[id]; !ok {

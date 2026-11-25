@@ -1,6 +1,6 @@
 pkg openrails, func New(context.Context, Config, Deps) (*Engine, error)
 pkg openrails, func NewGate(*Client, GateDeps) (*Gate, error)
-pkg openrails, method (*Client) CreateOrder(context.Context, billing.CreateOrderParams) (*billing.Order, error)
+pkg openrails, method (*Client) CreateInvoice(context.Context, billing.CreateInvoiceParams) (*billing.Invoice, error)
 pkg openrails, method (*Client) ListProducts(context.Context, billing.ProductListParams) (*billing.ListPage[billing.Product], error)
 pkg openrails, method (*Gate) AdmitUsage(context.Context, billing.AdmitParams) (*Ticket, error)
 pkg openrails, type Client struct
@@ -11,4 +11,4 @@ pkg openrails, type Deps struct, Logger *slog.Logger
 pkg openrails, type Gate struct
 pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, Engine openrails.Config
-pkg openrails/billing, const HostEventOrderCompleted HostEventType = "order.completed"
+pkg openrails/billing, const HostEventInvoiceCompleted HostEventType = "invoice.completed"

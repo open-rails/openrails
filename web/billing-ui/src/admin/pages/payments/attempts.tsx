@@ -274,8 +274,8 @@ export function AttemptDetailPage() {
           )}
         </Fact>
         <Fact label={adminText("Paying")}>
-          {a.order_id ? (
-            <To to={`/orders/${a.order_id}`}>{shortId(a.order_id, 16)}</To>
+          {a.invoice_id ? (
+            <To to={`/invoices/${a.invoice_id}`}>{shortId(a.invoice_id, 16)}</To>
           ) : (
             "—"
           )}

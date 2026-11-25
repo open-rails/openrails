@@ -12,7 +12,7 @@ the decider webhooks and pulls use.
 - **PSP import** (`pim_`, `psp_imports`): one read-only pull of one PSP; `pulling`, `pulled`, `applying`, `applied` or `failed`.
 - **Staged record** (`pir_`, `psp_import_records`): a provider `customer` (a vault and its cards), `subscription` or `transaction`, with its identity facts.
 - **Record state**: `unmatched`, `conflict`, `linked`, `imported`, `blocked`, or `held` (OpenRails already holds it).
-- **Rule**: one fact (`email`, `order_id`, `mdf.<field>`, `metadata.<key>`, …) looked up `via` `directory`, `mapping` or `customer_id`.
+- **Rule**: one fact (`email`, `invoice_id`, `mdf.<field>`, `metadata.<key>`, …) looked up `via` `directory`, `mapping` or `customer_id`.
 - **Mapping** (`psp_import_mappings`): the merchant's own identifiers mapped to its customers.
 - **Provider price**: a price bound to a provider plan (`price_psp_bindings`); a subscription lands only on one.
 - **Observed catalog** (`provider_catalog_objects`): the PSP's products, prices and plans as last observed.

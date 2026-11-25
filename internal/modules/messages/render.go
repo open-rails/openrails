@@ -92,7 +92,7 @@ var funcs = map[string]any{
 	"lower": strings.ToLower,
 }
 
-// languages is the order a message's parts are looked for in: the
+// languages is the invoice a message's parts are looked for in: the
 // customer's language, the merchant's default, then the built-in one.
 // Customers carry no language yet, so customer is always empty.
 func languages(s billing.MessageSettings, customer string) []string {

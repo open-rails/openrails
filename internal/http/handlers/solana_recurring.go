@@ -211,11 +211,11 @@ func parseResolvedPlanTerms(cfg map[string]string) (solanaResolvedPlanTerms, boo
 	return t, true
 }
 
-// nowOrDefault reads the clock the order attempt service uses (so tests can
+// nowOrDefault reads the clock the invoice attempt service uses (so tests can
 // pin time), falling back to wall-clock.
 func nowOrDefault(r *httprequest.Request) time.Time {
-	if r.State != nil && r.State.OrderAttemptService != nil {
-		if c := r.State.OrderAttemptService.Clock(); c != nil {
+	if r.State != nil && r.State.InvoiceAttemptService != nil {
+		if c := r.State.InvoiceAttemptService.Clock(); c != nil {
 			return c.Now()
 		}
 	}

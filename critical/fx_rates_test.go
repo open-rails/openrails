@@ -26,17 +26,17 @@ func TestFXRates(t *testing.T) {
 			require.NoError(t, err)
 			price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "EUR", SellVia: []catalog.SellVia{catalog.SellViaSolana}})
 			require.NoError(t, err)
-			return s.request(t, http.MethodPost, "/v1/me/orders", s.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &billing.OrderPaymentParams{TokenSymbol: "USDC"}}, map[string]string{"Idempotency-Key": key})
+			return s.request(t, http.MethodPost, "/v1/me/invoices", s.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &billing.InvoicePaymentParams{TokenSymbol: "USDC"}}, map[string]string{"Idempotency-Key": key})
 		}
 
 		rates.Date("eur", s.clock.Now())
 		rates.Rate(fxfake.Primary, "eur", "usd", 1.08)
 		status, raw := buy("euro-first")
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.NotNil(t, order.Payment.NextAction)
-		require.Equal(t, "10.800000", order.Payment.NextAction.Payload["token_amount"])
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.NotNil(t, invoice.Payment.NextAction)
+		require.Equal(t, "10.800000", invoice.Payment.NextAction.Payload["token_amount"])
 
 		// Three days on the held rate is stale, and the primary publishes a
 		// euro at a ten-thousandth of a dollar.

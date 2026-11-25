@@ -40,7 +40,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 ORDER BY started_at, id;
 
 -- name: ListRunningCharges :many
--- Newest first: ids are uuidv7, so the primary key is the order.
+-- Newest first: ids are uuidv7, so the primary key is the invoice.
 SELECT * FROM billing.running_charges
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)

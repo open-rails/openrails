@@ -55,8 +55,8 @@ type Payment struct {
 	// absent when the directory holds none or could not answer.
 	CustomerContact *CustomerContact `json:"customer_contact,omitempty"`
 	SubscriptionID  *SubscriptionID  `json:"subscription_id"`
-	// OrderID is the order the charge paid; its lines say what it bought.
-	OrderID *OrderID `json:"order_id"`
+	// InvoiceID is the invoice the charge paid; its lines say what it bought.
+	InvoiceID *InvoiceID `json:"invoice_id"`
 	// Quantity is the seats a subscription payment billed; null on a payment
 	// that bills no seats.
 	Quantity          *int            `json:"quantity"`
@@ -86,7 +86,7 @@ type PaymentListParams struct {
 	IDs            []PaymentID    `form:"ids,comma"`
 	CustomerID     CustomerID     `form:"customer_id"`
 	SubscriptionID SubscriptionID `form:"subscription_id"`
-	OrderID        OrderID        `form:"order_id"`
+	InvoiceID      InvoiceID      `form:"invoice_id"`
 	Status         PaymentStatus  `form:"status"`
 	Rail           Rail           `form:"rail"`
 	Kind           PaymentKind    `form:"kind"`
@@ -95,14 +95,14 @@ type PaymentListParams struct {
 }
 
 // RecordExternalPaymentParams records money the merchant received outside OpenRails
-// (cash, a bank transfer) for one order; it moves no money. A usage order
-// takes up to what it has due; any other order its total, and one with a
+// (cash, a bank transfer) for one invoice; it moves no money. A usage invoice
+// takes up to what it has due; any other invoice its total, and one with a
 // recurring line is refused, since its renewals charge the customer's card.
 // TransactionID is the remittance's identity: recording it again with the
 // same terms answers the first payment, with other terms is
 // idempotency_key_reused. PaidAt defaults to now.
 type RecordExternalPaymentParams struct {
-	OrderID       OrderID    `json:"order_id"`
+	InvoiceID     InvoiceID  `json:"invoice_id"`
 	Amount        int64      `json:"amount,string"`
 	TransactionID string     `json:"transaction_id"`
 	PaidAt        *time.Time `json:"paid_at,omitempty"`

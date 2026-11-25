@@ -561,13 +561,13 @@ func newSales(t *testing.T, configure ...func(*world)) *sales {
 
 func (s *sales) buy(t *testing.T, key string) billing.Payment {
 	t.Helper()
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: s.price}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
-		Payment: &billing.OrderPaymentParams{Token: s.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-	status, raw := s.a.request(t, http.MethodPost, "/v1/me/orders", s.a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: s.price}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+		Payment: &billing.InvoicePaymentParams{Token: s.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+	status, raw := s.a.request(t, http.MethodPost, "/v1/me/invoices", s.a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	paid, err := s.a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	paid, err := s.a.alpha.GetPayment(t.Context(), *invoice.Payment.PaymentID)
 	require.NoError(t, err)
 	for _, effect := range s.p.effects(t) {
 		if effect.Kind == "charge" && (effect.ID == paid.TransactionID || effect.Operation == paid.TransactionID) {
@@ -843,13 +843,13 @@ func disputeBlockedCard(t *testing.T) {
 		require.NoError(t, err)
 		price, err := m.a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-day", UnitAmount: 5_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
 		require.NoError(t, err)
-		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(5_000_000)), Payment: &billing.OrderPaymentParams{PaymentMethodID: &card}}
-		status, raw := m.a.request(t, http.MethodPost, "/v1/me/orders", m.a.aliceToken, input, map[string]string{"Idempotency-Key": key + "-purchase"})
+		input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(5_000_000)), Payment: &billing.InvoicePaymentParams{PaymentMethodID: &card}}
+		status, raw := m.a.request(t, http.MethodPost, "/v1/me/invoices", m.a.aliceToken, input, map[string]string{"Idempotency-Key": key + "-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.NotNil(t, order.Lines[0].SubscriptionID)
-		id := *order.Lines[0].SubscriptionID
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.NotNil(t, invoice.Lines[0].SubscriptionID)
+		id := *invoice.Lines[0].SubscriptionID
 		_, err = m.a.alpha.SetSubscriptionPaymentMethod(t.Context(), id, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &card})
 		require.NoError(t, err)
 		return id

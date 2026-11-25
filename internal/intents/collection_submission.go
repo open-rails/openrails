@@ -27,7 +27,7 @@ func (p CollectionNonexecutionProof) permits(in gen.BillingProviderIntent) bool 
 
 // BeginCollectedPayment mints authority only for the writer of a fresh fence.
 func (s *Store) BeginCollectedPayment(ctx context.Context, in gen.BillingProviderIntent, now time.Time) (CollectionNonexecutionProof, bool, error) {
-	if in.IntentType != TypeOrderCollection && in.IntentType != subscriptions.TypeSubscriptionCollection {
+	if in.IntentType != TypeInvoiceCollection && in.IntentType != subscriptions.TypeSubscriptionCollection {
 		return CollectionNonexecutionProof{}, false, errors.New("submission received an unsupported collected-payment kind")
 	}
 	binding, err := collectionBinding(in)
@@ -47,7 +47,7 @@ func (s *Store) BeginCollectedPayment(ctx context.Context, in gen.BillingProvide
 func (s *Store) ConfirmCollectedPaymentNotExecuted(ctx context.Context, in gen.BillingProviderIntent, verifier interface {
 	ConfirmCollectionNotExecuted(context.Context, gen.BillingProviderIntent) error
 }) (CollectionNonexecutionProof, error) {
-	if verifier == nil || (in.IntentType != TypeOrderCollection && in.IntentType != subscriptions.TypeSubscriptionCollection) {
+	if verifier == nil || (in.IntentType != TypeInvoiceCollection && in.IntentType != subscriptions.TypeSubscriptionCollection) {
 		return CollectionNonexecutionProof{}, errors.New("collection nonexecution verifier is unavailable")
 	}
 	current, err := s.Get(ctx, in.ID)

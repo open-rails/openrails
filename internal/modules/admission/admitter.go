@@ -142,7 +142,7 @@ func (a *Admitter) gates(ctx context.Context, q *gen.Queries, req AdmitRequest) 
 			return gated{}, nil, derr
 		}
 		if delinquent {
-			return gated{}, &AdmitDecision{BlockedBy: "money", DenyCode: billing.DenyDelinquentUnpaidOrder}, nil
+			return gated{}, &AdmitDecision{BlockedBy: "money", DenyCode: billing.DenyDelinquentUnpaidInvoice}, nil
 		}
 	}
 

@@ -225,7 +225,7 @@ func newSolanaWorld(t *testing.T, recurring bool, options ...solanaFixtureOption
 	return s
 }
 
-func (s *solanaWorld) order(t *testing.T, recurring bool) billing.Order {
+func (s *solanaWorld) invoice(t *testing.T, recurring bool) billing.Invoice {
 	t.Helper()
 	ownership := catalog.OwnershipConsumable
 	if recurring {
@@ -240,44 +240,44 @@ func (s *solanaWorld) order(t *testing.T, recurring bool) billing.Order {
 	}
 	price, err := s.alpha.CreatePrice(t.Context(), priceInput)
 	require.NoError(t, err)
-	status, raw := s.request(t, http.MethodPost, "/v1/me/orders", s.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &billing.OrderPaymentParams{TokenSymbol: "USDC"}}, map[string]string{"Idempotency-Key": "solana-order"})
+	status, raw := s.request(t, http.MethodPost, "/v1/me/invoices", s.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &billing.InvoicePaymentParams{TokenSymbol: "USDC"}}, map[string]string{"Idempotency-Key": "solana-invoice"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.NotEqual(t, billing.OrderComplete, order.Status)
-	require.NotNil(t, order.Payment.NextAction)
-	require.Equal(t, "solana_pay", order.Payment.NextAction.Type)
-	return order
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.NotEqual(t, billing.InvoiceComplete, invoice.Status)
+	require.NotNil(t, invoice.Payment.NextAction)
+	require.Equal(t, "solana_pay", invoice.Payment.NextAction.Type)
+	return invoice
 }
 
-func (s *solanaWorld) confirm(t *testing.T, order billing.Order, signature string) billing.Order {
+func (s *solanaWorld) confirm(t *testing.T, invoice billing.Invoice, signature string) billing.Invoice {
 	t.Helper()
-	status, raw := s.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/confirm", s.aliceToken, billing.ConfirmOrderParams{Signature: ptr(signature)})
+	status, raw := s.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/confirm", s.aliceToken, billing.ConfirmInvoiceParams{Signature: ptr(signature)})
 	require.Equal(t, http.StatusOK, status, string(raw))
-	var result billing.Order
+	var result billing.Invoice
 	require.NoError(t, json.Unmarshal(raw, &result))
-	require.Equal(t, order.ID, result.ID)
+	require.Equal(t, invoice.ID, result.ID)
 	return result
 }
 
-func (s *solanaWorld) noAccess(t *testing.T, order billing.Order) {
+func (s *solanaWorld) noAccess(t *testing.T, invoice billing.Invoice) {
 	t.Helper()
-	current, err := s.alpha.GetOrder(t.Context(), order.ID)
+	current, err := s.alpha.GetInvoice(t.Context(), invoice.ID)
 	require.NoError(t, err)
-	require.NotEqual(t, billing.OrderComplete, current.Status)
-	access, err := s.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: order.CustomerID, Entitlements: []string{"chain:paid"}})
+	require.NotEqual(t, billing.InvoiceComplete, current.Status)
+	access, err := s.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: invoice.CustomerID, Entitlements: []string{"chain:paid"}})
 	require.NoError(t, err)
 	require.False(t, access.Entitlements["chain:paid"])
-	events, err := s.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+	events, err := s.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 	require.NoError(t, err)
 	require.Empty(t, events.Events)
 }
 
-func (s *solanaWorld) paid(t *testing.T, order billing.Order, signature string) {
+func (s *solanaWorld) paid(t *testing.T, invoice billing.Invoice, signature string) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		current, err := s.alpha.GetOrder(t.Context(), order.ID)
-		return err == nil && current.Status == billing.OrderComplete
+		current, err := s.alpha.GetInvoice(t.Context(), invoice.ID)
+		return err == nil && current.Status == billing.InvoiceComplete
 	}, 20*time.Second, 20*time.Millisecond)
 	payments, err := s.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(s.alice.ID))})
 	require.NoError(t, err)
@@ -285,17 +285,17 @@ func (s *solanaWorld) paid(t *testing.T, order billing.Order, signature string) 
 	require.EqualValues(t, 10_000_000, payments.Items[0].Amount)
 	require.Equal(t, signature, payments.Items[0].TransactionID)
 	require.Equal(t, billing.PaymentSucceeded, payments.Items[0].Status)
-	access, err := s.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: order.CustomerID, Entitlements: []string{"chain:paid"}})
+	access, err := s.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: invoice.CustomerID, Entitlements: []string{"chain:paid"}})
 	require.NoError(t, err)
 	require.True(t, access.Entitlements["chain:paid"])
-	events, err := s.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+	events, err := s.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, events.Events, 2)
 }
 
-func (s *solanaWorld) walletTransaction(t *testing.T, order billing.Order) *solanago.Transaction {
+func (s *solanaWorld) walletTransaction(t *testing.T, invoice billing.Invoice) *solanago.Transaction {
 	t.Helper()
-	status, raw := s.request(t, http.MethodPost, "/v1/orders/"+order.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": s.payer.PublicKey().String()})
+	status, raw := s.request(t, http.MethodPost, "/v1/invoices/"+invoice.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": s.payer.PublicKey().String()})
 	require.Equal(t, http.StatusOK, status, string(raw))
 	var prepared struct {
 		Transaction string `json:"transaction"`
@@ -321,19 +321,19 @@ func solanaMemo(t *testing.T, tx *solanago.Transaction) string {
 			return string(instruction.Data)
 		}
 	}
-	t.Fatal("the public wallet transaction must bind its order with a memo")
+	t.Fatal("the public wallet transaction must bind its invoice with a memo")
 	return ""
 }
 
-func (s *solanaWorld) subscribe(t *testing.T) (billing.Order, *billing.Subscription) {
+func (s *solanaWorld) subscribe(t *testing.T) (billing.Invoice, *billing.Subscription) {
 	t.Helper()
-	order := s.order(t, true)
-	tx := s.walletTransaction(t, order)
+	invoice := s.invoice(t, true)
+	tx := s.walletTransaction(t, invoice)
 	sig, err := s.node.Land(tx, s.clock.Now())
 	require.NoError(t, err)
-	s.confirm(t, order, sig.String())
-	s.paid(t, order, sig.String())
-	subs, err := s.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: order.CustomerID})
+	s.confirm(t, invoice, sig.String())
+	s.paid(t, invoice, sig.String())
+	subs, err := s.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: invoice.CustomerID})
 	require.NoError(t, err)
 	require.Len(t, subs.Items, 1)
 	sub, err := s.alpha.GetSubscription(t.Context(), subs.Items[0].ID)
@@ -343,7 +343,7 @@ func (s *solanaWorld) subscribe(t *testing.T) (billing.Order, *billing.Subscript
 	require.Equal(t, s.clock.Now().Add(168*time.Hour), *sub.CurrentPeriodEndsAt)
 	require.EqualValues(t, 10_000_000, s.node.Balance(s.treasury.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
 	require.EqualValues(t, 90_000_000, s.node.Balance(s.payer.PublicKey(), solanago.MustPublicKeyFromBase58(solanafake.DevnetUSDCMint)))
-	return order, sub
+	return invoice, sub
 }
 
 func (s *solanaWorld) renewed(t *testing.T, sub *billing.Subscription, end time.Time) {
@@ -460,11 +460,11 @@ func TestSolanaContracts(t *testing.T) {
 	})
 	t.Run("OR-J37-S04/duplicate-confirmations-and-workers-cannot-pull-a-period-twice", func(t *testing.T) {
 		s := newSolanaWorld(t, true, solanaFixtureOptions{freshWallet: true})
-		order, sub := s.subscribe(t)
+		invoice, sub := s.subscribe(t)
 		paid, err := s.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: sub.CustomerID})
 		require.NoError(t, err)
 		for range 2 {
-			s.confirm(t, order, paid.Items[0].TransactionID)
+			s.confirm(t, invoice, paid.Items[0].TransactionID)
 		}
 		due := *sub.CurrentPeriodEndsAt
 		s.clock.Advance(due.Add(pullMargin).Sub(s.clock.Now()))
@@ -487,9 +487,9 @@ func TestSolanaContracts(t *testing.T) {
 		// Funded and delegated, so only the cranker identity can refuse it.
 		s.node.Fund(s.cranker.PublicKey(), usdc, 100_000_000)
 		require.NoError(t, s.node.Authority(s.cranker.PublicKey(), usdc, 123))
-		order := s.order(t, true)
+		invoice := s.invoice(t, true)
 		sends := s.wire.sends()
-		status, raw := s.request(t, http.MethodPost, "/v1/orders/"+order.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": s.cranker.PublicKey().String()})
+		status, raw := s.request(t, http.MethodPost, "/v1/invoices/"+invoice.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": s.cranker.PublicKey().String()})
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
 		require.Contains(t, string(raw), `"code":"invalid_param"`)
 		var prepared struct {
@@ -499,7 +499,7 @@ func TestSolanaContracts(t *testing.T) {
 		require.Empty(t, prepared.Transaction, "the cranker signs no transaction for its own wallet")
 		require.Equal(t, sends, s.wire.sends())
 		require.EqualValues(t, 100_000_000, s.node.Balance(s.cranker.PublicKey(), usdc))
-		s.noAccess(t, order)
+		s.noAccess(t, invoice)
 	})
 	t.Run("OR-J37-S05", func(t *testing.T) {
 		t.Run("wrong-chain-identity", func(t *testing.T) {
@@ -508,7 +508,7 @@ func TestSolanaContracts(t *testing.T) {
 			require.NoError(t, err)
 			price, err := s.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD"})
 			require.NoError(t, err)
-			status, raw := s.request(t, http.MethodPost, "/v1/me/orders", s.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &billing.OrderPaymentParams{TokenSymbol: "USDC"}}, map[string]string{"Idempotency-Key": "wrong-chain-purchase"})
+			status, raw := s.request(t, http.MethodPost, "/v1/me/invoices", s.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &billing.InvoicePaymentParams{TokenSymbol: "USDC"}}, map[string]string{"Idempotency-Key": "wrong-chain-purchase"})
 			require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
 			require.Contains(t, string(raw), `"code":"payment_option_unavailable"`)
 			payments, err := s.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(s.alice.ID))})
@@ -518,19 +518,19 @@ func TestSolanaContracts(t *testing.T) {
 		})
 		t.Run("foreign-wallet-and-unrelated-instructions", func(t *testing.T) {
 			s := newSolanaWorld(t, true)
-			order := s.order(t, true)
-			status, raw := s.request(t, http.MethodPost, "/v1/orders/"+order.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": "invalid-wallet"})
+			invoice := s.invoice(t, true)
+			status, raw := s.request(t, http.MethodPost, "/v1/invoices/"+invoice.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": "invalid-wallet"})
 			require.Equal(t, http.StatusBadRequest, status, string(raw))
-			s.walletTransaction(t, order)
+			s.walletTransaction(t, invoice)
 			foreign := solanago.NewWallet().PublicKey()
-			status, raw = s.request(t, http.MethodPost, "/v1/orders/"+order.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": foreign.String()})
+			status, raw = s.request(t, http.MethodPost, "/v1/invoices/"+invoice.ID.String()+"/solana-pay", s.aliceToken, map[string]string{"account": foreign.String()})
 			require.Equal(t, http.StatusConflict, status, string(raw))
-			sig, err := s.node.Pay(solanafake.Transfer{Payer: foreign, Recipient: s.treasury.PublicKey().String(), Mint: solanafake.DevnetUSDCMint, Amount: 10_000_000, Reference: order.Payment.NextAction.Payload["reference"], BlockTime: s.clock.Now()})
+			sig, err := s.node.Pay(solanafake.Transfer{Payer: foreign, Recipient: s.treasury.PublicKey().String(), Mint: solanafake.DevnetUSDCMint, Amount: 10_000_000, Reference: invoice.Payment.NextAction.Payload["reference"], BlockTime: s.clock.Now()})
 			require.NoError(t, err)
-			status, raw = s.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/confirm", s.aliceToken, billing.ConfirmOrderParams{Signature: ptr(sig)})
+			status, raw = s.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/confirm", s.aliceToken, billing.ConfirmInvoiceParams{Signature: ptr(sig)})
 			require.Equal(t, http.StatusBadRequest, status, string(raw))
-			s.noAccess(t, order)
-			payments, err := s.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: order.CustomerID})
+			s.noAccess(t, invoice)
+			payments, err := s.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: invoice.CustomerID})
 			require.NoError(t, err)
 			require.Empty(t, payments.Items)
 		})
@@ -561,11 +561,11 @@ func TestSolanaContracts(t *testing.T) {
 			})
 		}
 	})
-	t.Run("OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order", func(t *testing.T) {
+	t.Run("OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-invoice", func(t *testing.T) {
 		s := newSolanaWorld(t, false, solanaFixtureOptions{manualFleet: true})
-		order := s.order(t, false)
-		prepared := s.walletTransaction(t, order)
-		action := order.Payment.NextAction
+		invoice := s.invoice(t, false)
+		prepared := s.walletTransaction(t, invoice)
+		action := invoice.Payment.NextAction
 		require.Equal(t, solanafake.DevnetUSDCMint, action.Payload["token_mint"])
 		require.Equal(t, s.treasury.PublicKey().String(), action.Payload["recipient"])
 		require.Equal(t, "10.000000", action.Payload["token_amount"])
@@ -587,8 +587,8 @@ func TestSolanaContracts(t *testing.T) {
 				sig, err := s.node.Pay(bad)
 				require.NoError(t, err)
 				invalidSignatures = append(invalidSignatures, sig)
-				s.confirm(t, order, sig)
-				s.noAccess(t, order)
+				s.confirm(t, invoice, sig)
+				s.noAccess(t, invoice)
 			})
 		}
 		gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
@@ -604,7 +604,7 @@ func TestSolanaContracts(t *testing.T) {
 		}
 		sig, err := s.node.Pay(base)
 		require.NoError(t, err)
-		s.confirm(t, order, sig)
+		s.confirm(t, invoice, sig)
 		gate.unblock()
 		require.Eventually(t, func() bool {
 			for _, invalid := range invalidSignatures {
@@ -614,47 +614,47 @@ func TestSolanaContracts(t *testing.T) {
 			}
 			return true
 		}, 10*time.Second, 20*time.Millisecond)
-		s.noAccess(t, order)
+		s.noAccess(t, invoice)
 		// The in-flight history response did not contain the later payment.
 		// Let the injected business clock advance through normal rechecks;
 		// waiting in wall time alone leaves the next poll permanently in future.
 		require.Eventually(t, func() bool {
 			s.clock.Advance(time.Second)
-			current, err := s.alpha.GetOrder(t.Context(), order.ID)
-			return err == nil && current.Status == billing.OrderComplete
+			current, err := s.alpha.GetInvoice(t.Context(), invoice.ID)
+			return err == nil && current.Status == billing.InvoiceComplete
 		}, 20*time.Second, 100*time.Millisecond)
-		s.paid(t, order, sig)
+		s.paid(t, invoice, sig)
 	})
 	t.Run("OR-J37-S03/unknown-reverted-and-unfinalized-transfers-do-not-create-money", func(t *testing.T) {
 		s := newSolanaWorld(t, false)
-		order := s.order(t, false)
-		prepared := s.walletTransaction(t, order)
+		invoice := s.invoice(t, false)
+		prepared := s.walletTransaction(t, invoice)
 		unknown, err := s.payer.PrivateKey.Sign([]byte("unknown chain transaction"))
 		require.NoError(t, err)
-		s.confirm(t, order, unknown.String())
-		s.noAccess(t, order)
-		transfer := solanafake.Transfer{Payer: s.payer.PublicKey(), Recipient: s.treasury.PublicKey().String(), Mint: solanafake.DevnetUSDCMint, Amount: 10_000_000, Reference: order.Payment.NextAction.Payload["reference"], BlockTime: s.clock.Now(), Failed: true, Memo: solanaMemo(t, prepared)}
+		s.confirm(t, invoice, unknown.String())
+		s.noAccess(t, invoice)
+		transfer := solanafake.Transfer{Payer: s.payer.PublicKey(), Recipient: s.treasury.PublicKey().String(), Mint: solanafake.DevnetUSDCMint, Amount: 10_000_000, Reference: invoice.Payment.NextAction.Payload["reference"], BlockTime: s.clock.Now(), Failed: true, Memo: solanaMemo(t, prepared)}
 		reverted, err := s.node.Pay(transfer)
 		require.NoError(t, err)
-		s.confirm(t, order, reverted)
-		s.noAccess(t, order)
+		s.confirm(t, invoice, reverted)
+		s.noAccess(t, invoice)
 		transfer.Failed, transfer.Confirmed = false, true
 		beforeReads := s.wire.historyReads(transfer.Reference)
 		sig, err := s.node.Pay(transfer)
 		require.NoError(t, err)
 		s.clock.Advance(4 * time.Second)
-		s.confirm(t, order, sig)
+		s.confirm(t, invoice, sig)
 		require.Eventually(t, func() bool { return s.wire.historyReads(transfer.Reference) > beforeReads }, 10*time.Second, 20*time.Millisecond)
 		require.Never(t, func() bool {
-			current, err := s.alpha.GetOrder(t.Context(), order.ID)
-			return err == nil && current.Status == billing.OrderComplete
+			current, err := s.alpha.GetInvoice(t.Context(), invoice.ID)
+			return err == nil && current.Status == billing.InvoiceComplete
 		}, 1200*time.Millisecond, 30*time.Millisecond, "a merely confirmed transfer must not settle before finality")
-		s.noAccess(t, order)
+		s.noAccess(t, invoice)
 		s.node.Finalize(sig)
 		s.clock.Advance(4 * time.Second)
 		for range 2 {
-			s.confirm(t, order, sig)
+			s.confirm(t, invoice, sig)
 		}
-		s.paid(t, order, sig)
+		s.paid(t, invoice, sig)
 	})
 }

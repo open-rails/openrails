@@ -95,7 +95,7 @@ func (s *creditShop) recover(t *testing.T, payment billing.PaymentID, chargeback
 	require.NoError(t, err)
 	kind := payments.ReversalDisputeReversal
 	require.NoError(t, service.Create(ctx, &models.Payment{
-		ID: uuid.New(), CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Channel: original.Channel, Rail: original.Rail,
+		ID: uuid.New(), CustomerID: original.CustomerID, InvoiceID: original.InvoiceID, RefundedPaymentID: &original.ID, Channel: original.Channel, Rail: original.Rail,
 		PspID: original.PspID, TransactionID: key, Metadata: map[string]any{"reverses_payment_id": chargeback.String()}, Amount: amount, ListAmount: original.ListAmount,
 		Currency: original.Currency, ReversalKind: &kind, Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
@@ -357,9 +357,9 @@ func piecedAndUnitRefunds(t *testing.T) {
 	})
 }
 
-// cardPayment stores a succeeded card payment for an order of one credit
+// cardPayment stores a succeeded card payment for an invoice of one credit
 // line, as a checkout's credit line leaves its cash: for the lot it bought
-// alone. Every payment has its order.
+// alone. Every payment has its invoice.
 func (s *creditShop) cardPayment(t *testing.T, amount int64, movement models.MoneyMovement, key string) uuid.UUID {
 	t.Helper()
 	w := s.a.world
@@ -368,20 +368,20 @@ func (s *creditShop) cardPayment(t *testing.T, amount int64, movement models.Mon
 	require.NoError(t, err)
 	var psp uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(w, "psps")+" WHERE merchant_id=$1 AND rail='stripe' ORDER BY created_at LIMIT 1", mid).Scan(&psp))
-	order := uuid.New()
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "orders")+" (merchant_id, id, customer_id, origin, status, currency, total, number, payment_status, collection_owner, completed_at, created_at, updated_at)"+
-		" VALUES ($1, $2, $3, 'customer', 'complete', 'USD', $4, (SELECT COALESCE(max(number), 0) + 1000 FROM "+booksTable(w, "orders")+" WHERE merchant_id = $1), 'succeeded', 'provider', $5, $5, $5)",
-		mid, order, s.customer.UUID(), amount, w.clock.Now())
+	invoice := uuid.New()
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "invoices")+" (merchant_id, id, customer_id, origin, status, currency, total, number, payment_status, collection_owner, completed_at, created_at, updated_at)"+
+		" VALUES ($1, $2, $3, 'customer', 'complete', 'USD', $4, (SELECT COALESCE(max(number), 0) + 1000 FROM "+booksTable(w, "invoices")+" WHERE merchant_id = $1), 'succeeded', 'provider', $5, $5, $5)",
+		mid, invoice, s.customer.UUID(), amount, w.clock.Now())
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "order_lines")+" (merchant_id, id, order_id, customer_id, position, description, quantity, unit_amount, amount, credit_grant, source)"+
-		" VALUES ($1, $2, $3, $4, 0, 'Credit pack', 1, $5, $5, '{\"from_payment\": true}', 'provider_line')", mid, uuid.New(), order, s.customer.UUID(), amount)
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "invoice_lines")+" (merchant_id, id, invoice_id, customer_id, position, description, quantity, unit_amount, amount, credit_grant, source)"+
+		" VALUES ($1, $2, $3, $4, 0, 'Credit pack', 1, $5, $5, '{\"from_payment\": true}', 'provider_line')", mid, uuid.New(), invoice, s.customer.UUID(), amount)
 	require.NoError(t, err)
 	database, err := db.NewWithPGXPool(slog.Default(), w.pool, w.schema)
 	require.NoError(t, err)
 	ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 	id := uuid.New()
 	require.NoError(t, payments.NewPaymentService(database, w.clock).Create(ctx, &models.Payment{
-		ID: id, CustomerID: s.customer.UUID(), OrderID: &order, Channel: models.ChannelRail, Rail: models.RailStripe, PspID: &psp, TransactionID: key,
+		ID: id, CustomerID: s.customer.UUID(), InvoiceID: &invoice, Channel: models.ChannelRail, Rail: models.RailStripe, PspID: &psp, TransactionID: key,
 		Amount: amount, ListAmount: amount, Currency: "USD", Status: payments.PaymentStatusSucceededValue, MoneyMovement: movement,
 		PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
 	}))
@@ -417,7 +417,7 @@ func (s *creditShop) reverse(t *testing.T, payment uuid.UUID, amount int64, kind
 	require.NoError(t, err)
 	id := uuid.New()
 	require.NoError(t, service.Create(ctx, &models.Payment{
-		ID: id, CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Channel: original.Channel, Rail: original.Rail, PspID: original.PspID,
+		ID: id, CustomerID: original.CustomerID, InvoiceID: original.InvoiceID, RefundedPaymentID: &original.ID, Channel: original.Channel, Rail: original.Rail, PspID: original.PspID,
 		TransactionID: key, Amount: amount, ListAmount: original.ListAmount, Currency: original.Currency, ReversalKind: &kind,
 		Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: w.clock.Now(), CreatedAt: w.clock.Now(),
 	}))

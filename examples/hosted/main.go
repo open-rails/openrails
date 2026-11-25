@@ -118,7 +118,7 @@ func billingRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, s 
 		c.JSON(http.StatusOK, gin.H{"access_token": token.AccessToken, "expires_in": int(time.Until(token.ExpiresAt).Seconds())})
 	})
 	// guide:end
-	// POST /api/checkout {"price_id"} answers the pay URL of a new order for
+	// POST /api/checkout {"price_id"} answers the pay URL of a new invoice for
 	// the signed-in user. The browser makes the Idempotency-Key when the
 	// buyer decides and resends it on every retry.
 	r.POST("/api/checkout", authkitgin.Required(ak), func(c *gin.Context) {
@@ -137,19 +137,19 @@ func billingRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, s 
 			c.AbortWithStatus(http.StatusBadRequest)
 			return
 		}
-		order, err := bill.CreateOrder(c, key, billing.CreateOrderParams{
+		invoice, err := bill.CreateInvoice(c, key, billing.CreateInvoiceParams{
 			CustomerID: customer,
-			Lines:      []billing.OrderLineParams{{PriceID: price}},
-			PayURL: &billing.OrderPayURLParams{
-				SuccessURL: s.PublicURL + "/?order={ORDER_ID}", // access follows the order, not this redirect
+			Lines:      []billing.InvoiceLineParams{{PriceID: price}},
+			PayURL: &billing.InvoicePayURLParams{
+				SuccessURL: s.PublicURL + "/?invoice={INVOICE_ID}", // access follows the invoice, not this redirect
 				CancelURL:  new(s.PublicURL + "/"),
 			},
 		})
-		if err != nil || order.PayURL == nil {
+		if err != nil || invoice.PayURL == nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"pay_url": *order.PayURL})
+		c.JSON(http.StatusOK, gin.H{"pay_url": *invoice.PayURL})
 	})
 }
 

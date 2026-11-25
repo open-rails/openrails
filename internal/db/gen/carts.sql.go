@@ -57,7 +57,7 @@ type GetCartRow struct {
 	LastChangedAt time.Time
 }
 
-// The customer's cart: lines priced live by the order engine.
+// The customer's cart: lines priced live by the invoice engine.
 func (q *Queries) GetCart(ctx context.Context, arg GetCartParams) (GetCartRow, error) {
 	row := q.db.QueryRow(ctx, getCart, arg.MerchantID, arg.CustomerID)
 	var i GetCartRow

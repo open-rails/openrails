@@ -20,7 +20,7 @@ WITH transitions AS (
            COALESCE(t.cancel_type, '')::text AS cancel_type,
            t.from_current_period_ends_at AS from_period_end, t.to_current_period_ends_at AS to_period_end,
            ''::text AS category, ''::text AS decline_cause, ''::text AS action, ''::text AS observed_via, ''::text AS origin,
-           t.operation_id, NULL::uuid AS order_id, NULL::uuid AS payment_id,
+           t.operation_id, NULL::uuid AS invoice_id, NULL::uuid AS payment_id,
            NULL::uuid AS cycle_id, NULL::uuid AS payment_method_id, NULL::uuid AS psp_id,
            0::bigint AS amount, ''::text AS currency, 0::int AS attempt,
            COALESCE(t.origin, '')::text AS attribution_origin, COALESCE(t.actor, '')::text AS actor, COALESCE(t.executor, '')::text AS executor,
@@ -36,7 +36,7 @@ WITH transitions AS (
            ''::text AS from_status, ''::text AS to_status, ''::text AS cancel_type,
            NULL::timestamptz AS from_period_end, NULL::timestamptz AS to_period_end,
            a.outcome AS category, COALESCE(a.decline_cause, '')::text AS decline_cause, COALESCE(a.action, '')::text AS action, a.observed_via, a.source AS origin,
-           a.provider_intent_id AS operation_id, a.order_id, a.payment_id, a.cycle_id, a.payment_method_id,
+           a.provider_intent_id AS operation_id, a.invoice_id, a.payment_id, a.cycle_id, a.payment_method_id,
            a.psp_id, a.amount, COALESCE(a.currency, '')::text AS currency, 0::int AS attempt,
            ''::text AS attribution_origin, ''::text AS actor, ''::text AS executor,
            NULL::uuid AS from_payment_method_id, NULL::uuid AS to_payment_method_id, NULL::timestamptz AS from_next_retry_at, NULL::timestamptz AS to_next_retry_at, NULL::timestamptz AS from_last_retry_at, NULL::timestamptz AS to_last_retry_at, NULL::int AS from_retry_attempts, NULL::int AS to_retry_attempts, NULL::int AS from_transient_retries, NULL::int AS to_transient_retries, NULL::timestamptz AS from_grace_ends_at, NULL::timestamptz AS to_grace_ends_at, NULL::uuid AS method_version_id
@@ -51,7 +51,7 @@ WITH transitions AS (
            ''::text AS from_status, ''::text AS to_status, ''::text AS cancel_type,
            NULL::timestamptz AS from_period_end, NULL::timestamptz AS to_period_end,
            l.action AS category, ''::text AS decline_cause, ''::text AS action, ''::text AS observed_via, ''::text AS origin,
-           l.operation_id, NULL::uuid AS order_id, NULL::uuid AS payment_id,
+           l.operation_id, NULL::uuid AS invoice_id, NULL::uuid AS payment_id,
            NULL::uuid AS cycle_id, NULL::uuid AS payment_method_id, l.psp_id,
            0::bigint AS amount, ''::text AS currency, COALESCE((l.changes->>'attempt')::int, 0) AS attempt,
            COALESCE(l.changes->>'origin', '')::text AS attribution_origin,
@@ -69,7 +69,7 @@ WITH transitions AS (
            ''::text AS from_status,''::text AS to_status,''::text AS cancel_type,
            NULL::timestamptz AS from_period_end,NULL::timestamptz AS to_period_end,
            ''::text AS category,''::text AS decline_cause,''::text AS action,''::text AS observed_via,''::text AS origin,
-           c.operation_id,NULL::uuid AS order_id,NULL::uuid AS payment_id,NULL::uuid AS cycle_id,
+           c.operation_id,NULL::uuid AS invoice_id,NULL::uuid AS payment_id,NULL::uuid AS cycle_id,
            NULL::uuid AS payment_method_id,NULL::uuid AS psp_id,0::bigint AS amount,''::text AS currency,0::int AS attempt,
            COALESCE(c.origin,'')::text AS attribution_origin,COALESCE(c.actor,'')::text AS actor,COALESCE(c.executor,'')::text AS executor,
            c.from_payment_method_id, c.to_payment_method_id, c.from_next_retry_at, c.to_next_retry_at, c.from_last_retry_at, c.to_last_retry_at, c.from_retry_attempts, c.to_retry_attempts, c.from_transient_retries, c.to_transient_retries, c.from_grace_ends_at, c.to_grace_ends_at, c.method_version_id
@@ -79,10 +79,10 @@ WITH transitions AS (
         OR (c.occurred_at,4::int,c.id) < ($4::timestamptz,$5::int,$6::uuid))
     ORDER BY c.occurred_at DESC,c.id DESC LIMIT $1::int
 )
-SELECT source, id, at, recorded_at, kind, reason, from_status, to_status, cancel_type, from_period_end, to_period_end, category, decline_cause, action, observed_via, origin, operation_id, order_id, payment_id, cycle_id, payment_method_id, psp_id, amount, currency, attempt, attribution_origin, actor, executor, from_payment_method_id, to_payment_method_id, from_next_retry_at, to_next_retry_at, from_last_retry_at, to_last_retry_at, from_retry_attempts, to_retry_attempts, from_transient_retries, to_transient_retries, from_grace_ends_at, to_grace_ends_at, method_version_id FROM transitions
-UNION ALL SELECT source, id, at, recorded_at, kind, reason, from_status, to_status, cancel_type, from_period_end, to_period_end, category, decline_cause, action, observed_via, origin, operation_id, order_id, payment_id, cycle_id, payment_method_id, psp_id, amount, currency, attempt, attribution_origin, actor, executor, from_payment_method_id, to_payment_method_id, from_next_retry_at, to_next_retry_at, from_last_retry_at, to_last_retry_at, from_retry_attempts, to_retry_attempts, from_transient_retries, to_transient_retries, from_grace_ends_at, to_grace_ends_at, method_version_id FROM attempts
-UNION ALL SELECT source, id, at, recorded_at, kind, reason, from_status, to_status, cancel_type, from_period_end, to_period_end, category, decline_cause, action, observed_via, origin, operation_id, order_id, payment_id, cycle_id, payment_method_id, psp_id, amount, currency, attempt, attribution_origin, actor, executor, from_payment_method_id, to_payment_method_id, from_next_retry_at, to_next_retry_at, from_last_retry_at, to_last_retry_at, from_retry_attempts, to_retry_attempts, from_transient_retries, to_transient_retries, from_grace_ends_at, to_grace_ends_at, method_version_id FROM operations
-UNION ALL SELECT source, id, at, recorded_at, kind, reason, from_status, to_status, cancel_type, from_period_end, to_period_end, category, decline_cause, action, observed_via, origin, operation_id, order_id, payment_id, cycle_id, payment_method_id, psp_id, amount, currency, attempt, attribution_origin, actor, executor, from_payment_method_id, to_payment_method_id, from_next_retry_at, to_next_retry_at, from_last_retry_at, to_last_retry_at, from_retry_attempts, to_retry_attempts, from_transient_retries, to_transient_retries, from_grace_ends_at, to_grace_ends_at, method_version_id FROM changes
+SELECT source, id, at, recorded_at, kind, reason, from_status, to_status, cancel_type, from_period_end, to_period_end, category, decline_cause, action, observed_via, origin, operation_id, invoice_id, payment_id, cycle_id, payment_method_id, psp_id, amount, currency, attempt, attribution_origin, actor, executor, from_payment_method_id, to_payment_method_id, from_next_retry_at, to_next_retry_at, from_last_retry_at, to_last_retry_at, from_retry_attempts, to_retry_attempts, from_transient_retries, to_transient_retries, from_grace_ends_at, to_grace_ends_at, method_version_id FROM transitions
+UNION ALL SELECT source, id, at, recorded_at, kind, reason, from_status, to_status, cancel_type, from_period_end, to_period_end, category, decline_cause, action, observed_via, origin, operation_id, invoice_id, payment_id, cycle_id, payment_method_id, psp_id, amount, currency, attempt, attribution_origin, actor, executor, from_payment_method_id, to_payment_method_id, from_next_retry_at, to_next_retry_at, from_last_retry_at, to_last_retry_at, from_retry_attempts, to_retry_attempts, from_transient_retries, to_transient_retries, from_grace_ends_at, to_grace_ends_at, method_version_id FROM attempts
+UNION ALL SELECT source, id, at, recorded_at, kind, reason, from_status, to_status, cancel_type, from_period_end, to_period_end, category, decline_cause, action, observed_via, origin, operation_id, invoice_id, payment_id, cycle_id, payment_method_id, psp_id, amount, currency, attempt, attribution_origin, actor, executor, from_payment_method_id, to_payment_method_id, from_next_retry_at, to_next_retry_at, from_last_retry_at, to_last_retry_at, from_retry_attempts, to_retry_attempts, from_transient_retries, to_transient_retries, from_grace_ends_at, to_grace_ends_at, method_version_id FROM operations
+UNION ALL SELECT source, id, at, recorded_at, kind, reason, from_status, to_status, cancel_type, from_period_end, to_period_end, category, decline_cause, action, observed_via, origin, operation_id, invoice_id, payment_id, cycle_id, payment_method_id, psp_id, amount, currency, attempt, attribution_origin, actor, executor, from_payment_method_id, to_payment_method_id, from_next_retry_at, to_next_retry_at, from_last_retry_at, to_last_retry_at, from_retry_attempts, to_retry_attempts, from_transient_retries, to_transient_retries, from_grace_ends_at, to_grace_ends_at, method_version_id FROM changes
 ORDER BY at DESC, source DESC, id DESC LIMIT $1::int
 `
 
@@ -113,7 +113,7 @@ type ListSubscriptionHistoryRow struct {
 	ObservedVia          string
 	Origin               string
 	OperationID          *uuid.UUID
-	OrderID              *uuid.UUID
+	InvoiceID            *uuid.UUID
 	PaymentID            *uuid.UUID
 	CycleID              *uuid.UUID
 	PaymentMethodID      *uuid.UUID
@@ -175,7 +175,7 @@ func (q *Queries) ListSubscriptionHistory(ctx context.Context, arg ListSubscript
 			&i.ObservedVia,
 			&i.Origin,
 			&i.OperationID,
-			&i.OrderID,
+			&i.InvoiceID,
 			&i.PaymentID,
 			&i.CycleID,
 			&i.PaymentMethodID,

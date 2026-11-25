@@ -16,7 +16,7 @@ import (
 )
 
 func TestCheckout(t *testing.T) {
-	t.Run("OR-J09-S01/real-charge-order-access-and-committed-event", func(t *testing.T) {
+	t.Run("OR-J09-S01/real-charge-invoice-access-and-committed-event", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)
 		product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "download", DisplayName: "Download", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"download:owned"}})
 		require.NoError(t, err)
@@ -25,22 +25,22 @@ func TestCheckout(t *testing.T) {
 		before, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Limit: 100})
 		require.NoError(t, err)
 		token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID, Quantity: ptr(3)}}, ExpectedTotal: ptr(int64(29_970_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "purchase-once"})
+		input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID, Quantity: ptr(3)}}, ExpectedTotal: ptr(int64(29_970_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "purchase-once"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.Equal(t, billing.OrderComplete, order.Status)
-		require.Equal(t, billing.OrderPaymentSucceeded, order.Payment.Status)
-		require.EqualValues(t, 29_970_000, order.Total)
-		require.Equal(t, catalog.Currency("USD"), order.Currency)
-		require.NotNil(t, order.Payment.PaymentID)
-		money, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.Equal(t, billing.InvoiceComplete, invoice.Status)
+		require.Equal(t, billing.InvoicePaymentSucceeded, invoice.Payment.Status)
+		require.EqualValues(t, 29_970_000, invoice.Total)
+		require.Equal(t, catalog.Currency("USD"), invoice.Currency)
+		require.NotNil(t, invoice.Payment.PaymentID)
+		money, err := a.alpha.GetPayment(t.Context(), *invoice.Payment.PaymentID)
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, money.Status)
 		require.EqualValues(t, 29_970_000, money.Amount)
 		require.Equal(t, billing.PaymentCharge, money.Kind)
-		require.Equal(t, order.ID, *money.OrderID)
+		require.Equal(t, invoice.ID, *money.InvoiceID)
 		effects := provider.effects(t)
 		require.Len(t, effects, 1)
 		require.Equal(t, "charge", effects[0].Kind)
@@ -60,21 +60,21 @@ func TestCheckout(t *testing.T) {
 				settled++
 				require.Contains(t, string(event.Data), money.ID.String())
 			}
-			if event.Type == "order.completed" {
+			if event.Type == "invoice.completed" {
 				completed++
-				require.Contains(t, string(event.Data), order.ID.String())
+				require.Contains(t, string(event.Data), invoice.ID.String())
 			}
 		}
 		require.Equal(t, 1, settled)
 		require.Equal(t, 1, completed)
 		// A card kept for this purchase only still names the card it charged.
 		once := provider.core.NewPaymentMethod(stripemock.Card{Brand: "mastercard", Last4: "4444"})
-		input = billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false), Payment: &billing.OrderPaymentParams{Token: once}}
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "purchase-unkept-card"})
+		input = billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false), Payment: &billing.InvoicePaymentParams{Token: once}}
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "purchase-unkept-card"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var unkept billing.Order
+		var unkept billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &unkept))
-		require.Equal(t, billing.OrderComplete, unkept.Status)
+		require.Equal(t, billing.InvoiceComplete, unkept.Status)
 		money, err = a.alpha.GetPayment(t.Context(), *unkept.Payment.PaymentID)
 		require.NoError(t, err)
 		require.NotNil(t, money.Card, "the payment names the card it charged")
@@ -87,14 +87,14 @@ func TestCheckout(t *testing.T) {
 		require.NoError(t, err)
 		nmiPrice, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: nmiProduct.ID, Key: "nmi-download", UnitAmount: 9_990_000, Currency: "USD"})
 		require.NoError(t, err)
-		input = billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: nmiPrice.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
-			Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
-		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-unkept-card"})
+		input = billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: nmiPrice.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
+			Payment: &billing.InvoicePaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/invoices", nmi.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-unkept-card"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var nmiOrder billing.Order
-		require.NoError(t, json.Unmarshal(raw, &nmiOrder))
-		require.Equal(t, billing.OrderComplete, nmiOrder.Status, string(raw))
-		money, err = nmi.alpha.GetPayment(t.Context(), *nmiOrder.Payment.PaymentID)
+		var nmiInvoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &nmiInvoice))
+		require.Equal(t, billing.InvoiceComplete, nmiInvoice.Status, string(raw))
+		money, err = nmi.alpha.GetPayment(t.Context(), *nmiInvoice.Payment.PaymentID)
 		require.NoError(t, err)
 		require.NotNil(t, money.Card, "the NMI payment names the card it charged")
 		require.Equal(t, "mastercard", *money.Card.Brand)

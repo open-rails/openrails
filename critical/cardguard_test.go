@@ -54,7 +54,7 @@ func TestCardGuard(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) { require.Equal(t, tc.blocked, cardguard.ContainsPAN(tc.value)) })
 		}
 	})
-	t.Run("OR-J12-S14/a-card-number-in-any-field-of-a-card-save-or-order-payment-is-refused", func(t *testing.T) {
+	t.Run("OR-J12-S14/a-card-number-in-any-field-of-a-card-save-or-invoice-payment-is-refused", func(t *testing.T) {
 		// Each refusal below is its own purchase request; the purchase limit is
 		// not under test.
 		a, journal := newNMIWorld(t, func(w *world) {
@@ -68,8 +68,8 @@ func TestCardGuard(t *testing.T) {
 		require.NoError(t, err)
 		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		order := func(payment billing.OrderPaymentParams, reusable *bool) billing.CreateMyOrderParams {
-			return billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &payment, Reusable: reusable}
+		invoice := func(payment billing.InvoicePaymentParams, reusable *bool) billing.CreateMyInvoiceParams {
+			return billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Payment: &payment, Reusable: reusable}
 		}
 		const pan = "4111 1111 1111 1111"
 		holding := func(field string) *billing.BillingDetails {
@@ -98,16 +98,16 @@ func TestCardGuard(t *testing.T) {
 			require.NotContains(t, string(raw), "4111", "the refusal never echoes the number")
 		}
 		calls := len(journal.core.Calls())
-		// A token save carries no card, and an order payment names a token:
+		// A token save carries no card, and an invoice payment names a token:
 		// neither exempts any billing detail.
 		for _, field := range []string{"name", "email", "phone", "address.line1", "address.line2", "address.city", "address.state", "address.postal_code", "address.country"} {
 			token := journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})
 			refused("/v1/me/payment-methods", billing.CreatePaymentMethodParams{PSPID: psp, Token: token, BillingDetails: holding(field)}, "billing_details."+field)
-			refused("/v1/me/orders", order(billing.OrderPaymentParams{Token: token, BillingDetails: holding(field)}, ptr(false)), "payment.billing_details."+field, map[string]string{"Idempotency-Key": "firewall-" + field})
+			refused("/v1/me/invoices", invoice(billing.InvoicePaymentParams{Token: token, BillingDetails: holding(field)}, ptr(false)), "payment.billing_details."+field, map[string]string{"Idempotency-Key": "firewall-" + field})
 		}
 		refused("/v1/me/payment-methods", billing.CreatePaymentMethodParams{PSPID: psp, Token: "4111111111111111"}, "token")
-		refused("/v1/me/orders", order(billing.OrderPaymentParams{ReturnURL: alphaSite + "/return?card=4111111111111111"}, nil), "payment.return_url", map[string]string{"Idempotency-Key": "firewall-return-url"})
-		refused("/v1/me/orders", order(billing.OrderPaymentParams{TokenSymbol: pan}, nil), "payment.token_symbol", map[string]string{"Idempotency-Key": "firewall-token-symbol"})
+		refused("/v1/me/invoices", invoice(billing.InvoicePaymentParams{ReturnURL: alphaSite + "/return?card=4111111111111111"}, nil), "payment.return_url", map[string]string{"Idempotency-Key": "firewall-return-url"})
+		refused("/v1/me/invoices", invoice(billing.InvoicePaymentParams{TokenSymbol: pan}, nil), "payment.token_symbol", map[string]string{"Idempotency-Key": "firewall-token-symbol"})
 
 		require.Len(t, journal.core.Calls(), calls, "nothing reached NMI")
 		require.Empty(t, journal.core.Vaults())
@@ -116,9 +116,9 @@ func TestCardGuard(t *testing.T) {
 		var methods billing.ListPage[billing.PaymentMethod]
 		require.NoError(t, json.Unmarshal(raw, &methods))
 		require.Empty(t, methods.Items, "nothing was stored")
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 		require.NoError(t, err)
-		require.Empty(t, orders.Items)
+		require.Empty(t, invoices.Items)
 	})
 	t.Run("OR-J12-S16/legitimate-values-pass-the-firewall-on-every-card-route", func(t *testing.T) {
 		a, journal := newNMIWorld(t, func(w *world) {
@@ -133,7 +133,7 @@ func TestCardGuard(t *testing.T) {
 		require.NoError(t, err)
 		// A German mobile in E.164 is 13 digits that pass Luhn; a UUID, a Solana
 		// address and a long numeric order id hold no card either.
-		const phone, solana, orderRef = "+4915112345678", "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T", "1234567890123456789"
+		const phone, solana, invoiceRef = "+4915112345678", "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T", "1234567890123456789"
 		reference := uuid.NewString()
 		legit := &billing.BillingDetails{Name: ptr("Alice Buyer"), Phone: ptr(phone), Address: &billing.BillingAddress{Line1: ptr(solana), Line2: ptr(reference), Country: ptr("DE")}}
 		const firewall = "a card number is accepted only in a card field"
@@ -175,16 +175,16 @@ func TestCardGuard(t *testing.T) {
 		status, raw = a.request(t, http.MethodPost, "/v1/me/payment-methods/"+method.ID.String()+"/confirm", a.aliceToken, billing.ConfirmPaymentMethodParams{Capture: &billing.CustodianCaptureReference{CustodianID: reference, SessionID: "ps_" + solana, Token: "pm_" + solana}})
 		passed(status, raw)
 
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
 		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		pay := "/v1/me/orders/" + order.ID.String() + "/pay"
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		pay := "/v1/me/invoices/" + invoice.ID.String() + "/pay"
 		token := journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})
-		refused(http.MethodPost, pay, billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token, BillingDetails: &billing.BillingDetails{Phone: ptr("4111111111111111")}}, ExpectedTotal: 10_000_000, Reusable: ptr(false)}, "payment.billing_details.phone", map[string]string{"Idempotency-Key": "firewall-pay-refused"})
-		status, raw = a.request(t, http.MethodPost, pay, a.aliceToken, billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token, BillingDetails: legit}, ExpectedTotal: 10_000_000, Reusable: ptr(false)}, map[string]string{"Idempotency-Key": "firewall-pay"})
+		refused(http.MethodPost, pay, billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: token, BillingDetails: &billing.BillingDetails{Phone: ptr("4111111111111111")}}, ExpectedTotal: 10_000_000, Reusable: ptr(false)}, "payment.billing_details.phone", map[string]string{"Idempotency-Key": "firewall-pay-refused"})
+		status, raw = a.request(t, http.MethodPost, pay, a.aliceToken, billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: token, BillingDetails: legit}, ExpectedTotal: 10_000_000, Reusable: ptr(false)}, map[string]string{"Idempotency-Key": "firewall-pay"})
 		require.Equal(t, http.StatusOK, status, "legitimate billing details pay: %s", raw)
-		status, raw = a.request(t, http.MethodPost, pay, a.aliceToken, billing.PayOrderParams{Payment: billing.OrderPaymentParams{ReturnURL: alphaSite + "/return?order=" + orderRef}, ExpectedTotal: 10_000_000}, map[string]string{"Idempotency-Key": "firewall-pay-return"})
+		status, raw = a.request(t, http.MethodPost, pay, a.aliceToken, billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{ReturnURL: alphaSite + "/return?invoice=" + invoiceRef}, ExpectedTotal: 10_000_000}, map[string]string{"Idempotency-Key": "firewall-pay-return"})
 		passed(status, raw)
 
 		// A card number as an unknown field's name is not echoed, and a test

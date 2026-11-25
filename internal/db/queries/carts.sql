@@ -1,4 +1,4 @@
--- The customer's cart: lines priced live by the order engine.
+-- The customer's cart: lines priced live by the invoice engine.
 
 -- name: GetCart :one
 SELECT lines, last_changed_at FROM billing.carts

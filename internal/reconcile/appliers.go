@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -44,7 +44,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := w.DB.NewWithPgxTx(tx)
 		if a.SubscriptionID == nil {
-			return errors.New("unattributed charge requires its accepted purchase order; price alone is not a bill")
+			return errors.New("unattributed charge requires its accepted purchase invoice; price alone is not a bill")
 		}
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *a.SubscriptionID)
 		if err != nil {
@@ -83,7 +83,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	if err != nil {
 		return false, err
 	}
-	if original.OrderID == nil || original.CustomerID != a.CustomerID || string(original.Rail) != a.Rail || !strings.EqualFold(original.Currency, a.Currency) || original.PspID == nil || a.PspID == nil || *original.PspID != *a.PspID {
+	if original.InvoiceID == nil || original.CustomerID != a.CustomerID || string(original.Rail) != a.Rail || !strings.EqualFold(original.Currency, a.Currency) || original.PspID == nil || a.PspID == nil || *original.PspID != *a.PspID {
 		return false, observed.ErrConflict
 	}
 	if a.SubscriptionID != nil && (original.SubscriptionID == nil || *a.SubscriptionID != *original.SubscriptionID) {

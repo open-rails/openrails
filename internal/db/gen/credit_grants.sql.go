@@ -97,7 +97,7 @@ func (q *Queries) GetCreditGrant(ctx context.Context, arg GetCreditGrantParams) 
 }
 
 const getCreditGrantBySourceID = `-- name: GetCreditGrantBySourceID :one
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND source_id = $3::text
 `
@@ -126,7 +126,7 @@ func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGra
 		&i.SourceID,
 		&i.Invoker,
 		&i.ProductID,
-		&i.OrderLineID,
+		&i.InvoiceLineID,
 		&i.PaymentID,
 		&i.Description,
 		&i.StartsAt,
@@ -173,7 +173,7 @@ func (q *Queries) GetCreditGrantEventByKey(ctx context.Context, arg GetCreditGra
 }
 
 const getCreditLot = `-- name: GetCreditLot :one
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -199,7 +199,7 @@ func (q *Queries) GetCreditLot(ctx context.Context, arg GetCreditLotParams) (Bil
 		&i.SourceID,
 		&i.Invoker,
 		&i.ProductID,
-		&i.OrderLineID,
+		&i.InvoiceLineID,
 		&i.PaymentID,
 		&i.Description,
 		&i.StartsAt,
@@ -265,7 +265,7 @@ type GetPaymentCashApplicationRow struct {
 
 // What a payment's receipt brought and what the general ledger applied of
 // it: to its bill's lines at (application, payment, id), to the credit lot
-// it bought at (credit_issue, payment, id) and to the owed a usage order's
+// it bought at (credit_issue, payment, id) and to the owed a usage invoice's
 // payment settles at (usage_collection*, payment, id). A won dispute's
 // recovery receives what it returns to unapplied cash (dispute_won at
 // (dispute_won, payment, id)).
@@ -277,7 +277,7 @@ func (q *Queries) GetPaymentCashApplication(ctx context.Context, arg GetPaymentC
 }
 
 const getPurchasedCreditGrant = `-- name: GetPurchasedCreditGrant :one
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid AND payment_id = $2::uuid
   AND paid_amount IS NOT NULL
 `
@@ -304,7 +304,7 @@ func (q *Queries) GetPurchasedCreditGrant(ctx context.Context, arg GetPurchasedC
 		&i.SourceID,
 		&i.Invoker,
 		&i.ProductID,
-		&i.OrderLineID,
+		&i.InvoiceLineID,
 		&i.PaymentID,
 		&i.Description,
 		&i.StartsAt,
@@ -324,7 +324,7 @@ const insertCreditGrant = `-- name: InsertCreditGrant :one
 
 INSERT INTO billing.credit_grants (
     merchant_id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency,
-    source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at
+    source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::text,
     $5::bigint, $6::text, $7::bigint, $8::text,
@@ -332,7 +332,7 @@ INSERT INTO billing.credit_grants (
     $13::uuid, $14::uuid, $15::text,
     $16::timestamptz, $17::timestamptz
 )
-RETURNING merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited
+RETURNING merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited
 `
 
 type InsertCreditGrantParams struct {
@@ -348,7 +348,7 @@ type InsertCreditGrantParams struct {
 	SourceID      *string
 	Invoker       string
 	ProductID     *uuid.UUID
-	OrderLineID   *uuid.UUID
+	InvoiceLineID *uuid.UUID
 	PaymentID     *uuid.UUID
 	Description   *string
 	StartsAt      time.Time
@@ -371,7 +371,7 @@ func (q *Queries) InsertCreditGrant(ctx context.Context, arg InsertCreditGrantPa
 		arg.SourceID,
 		arg.Invoker,
 		arg.ProductID,
-		arg.OrderLineID,
+		arg.InvoiceLineID,
 		arg.PaymentID,
 		arg.Description,
 		arg.StartsAt,
@@ -392,7 +392,7 @@ func (q *Queries) InsertCreditGrant(ctx context.Context, arg InsertCreditGrantPa
 		&i.SourceID,
 		&i.Invoker,
 		&i.ProductID,
-		&i.OrderLineID,
+		&i.InvoiceLineID,
 		&i.PaymentID,
 		&i.Description,
 		&i.StartsAt,
@@ -644,7 +644,7 @@ func (q *Queries) ListCreditLotDrifts(ctx context.Context, merchantID uuid.UUID)
 }
 
 const listCreditLotsMissingDeposit = `-- name: ListCreditLotsMissingDeposit :many
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND units_credited = 0 AND revoked_at IS NULL
@@ -683,7 +683,7 @@ func (q *Queries) ListCreditLotsMissingDeposit(ctx context.Context, arg ListCred
 			&i.SourceID,
 			&i.Invoker,
 			&i.ProductID,
-			&i.OrderLineID,
+			&i.InvoiceLineID,
 			&i.PaymentID,
 			&i.Description,
 			&i.StartsAt,
@@ -719,7 +719,7 @@ WITH candidates AS (
       AND ($3::uuid IS NULL OR r.customer_id = $3::uuid)
       AND r.status = 'pending' AND r.amount < 0 AND r.deleted_at IS NULL
 )
-SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.order_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at, g.deferred_credited, g.deferred_debited FROM billing.credit_grants g
+SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.invoice_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at, g.deferred_credited, g.deferred_debited FROM billing.credit_grants g
 JOIN candidates c ON c.id = g.id
 WHERE g.merchant_id = $1::uuid AND g.paid_amount IS NOT NULL
   AND g.units_reserved <> billing.credit_grant_reservation(g.merchant_id, g.id)
@@ -760,7 +760,7 @@ func (q *Queries) ListCreditReservationDrifts(ctx context.Context, arg ListCredi
 			&i.SourceID,
 			&i.Invoker,
 			&i.ProductID,
-			&i.OrderLineID,
+			&i.InvoiceLineID,
 			&i.PaymentID,
 			&i.Description,
 			&i.StartsAt,
@@ -786,7 +786,7 @@ func (q *Queries) ListCreditReservationDrifts(ctx context.Context, arg ListCredi
 const listCustomerCreditGrants = `-- name: ListCustomerCreditGrants :many
 
 WITH page AS (
-  SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.order_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at, g.deferred_credited, g.deferred_debited FROM billing.credit_grants g
+  SELECT g.merchant_id, g.id, g.customer_id, g.account_id, g.unit, g.units, g.funding_source, g.paid_amount, g.paid_currency, g.source, g.source_id, g.invoker, g.product_id, g.invoice_line_id, g.payment_id, g.description, g.starts_at, g.expires_at, g.revoked_at, g.units_credited, g.units_debited, g.units_reserved, g.created_at, g.deferred_credited, g.deferred_debited FROM billing.credit_grants g
   WHERE g.merchant_id = $1::uuid
     AND g.customer_id = $2::uuid
     AND ($3::text IS NULL OR g.unit = $3::text)
@@ -1006,7 +1006,7 @@ func (q *Queries) ListLapsedRemaining(ctx context.Context, arg ListLapsedRemaini
 }
 
 const listRevokedCreditLotsWithUnits = `-- name: ListRevokedCreditLotsWithUnits :many
-SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
+SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND revoked_at IS NOT NULL AND units_credited > units_debited
@@ -1045,7 +1045,7 @@ func (q *Queries) ListRevokedCreditLotsWithUnits(ctx context.Context, arg ListRe
 			&i.SourceID,
 			&i.Invoker,
 			&i.ProductID,
-			&i.OrderLineID,
+			&i.InvoiceLineID,
 			&i.PaymentID,
 			&i.Description,
 			&i.StartsAt,

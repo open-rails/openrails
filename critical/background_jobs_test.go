@@ -259,7 +259,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 1000, alpha.ExpiredAmount)
 	})
-	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-leases-and-orphan-state", func(t *testing.T) {
+	t.Run("OR-J29-S08/cleanup-alone-ages-out-unpaid-invoices-leases-and-orphan-state", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) { w.deps.Redis = criticalRedis(t) })
 		w := a.world
 		fleet := hostFleet(t, w)
@@ -267,21 +267,21 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
 		require.NoError(t, fleet.Start(t.Context()))
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		_, price := publicSale(t, a, "retained-order", 9_990_000, nil)
-		unpaid, err := a.alphaRemote.CreateOrder(t.Context(), "closed-unpaid", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		_, price := publicSale(t, a, "retained-invoice", 9_990_000, nil)
+		unpaid, err := a.alphaRemote.CreateInvoice(t.Context(), "closed-unpaid", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
-		_, err = a.alphaRemote.CancelOrder(t.Context(), unpaid.ID)
+		_, err = a.alphaRemote.CancelInvoice(t.Context(), unpaid.ID)
 		require.NoError(t, err)
 		challenged := saleInput(t, a, p)
 		p.core.SetDecline("4242", "auth")
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, challenged, map[string]string{"Idempotency-Key": "abandoned-challenge"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, challenged, map[string]string{"Idempotency-Key": "abandoned-challenge"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var waiting billing.Order
+		var waiting billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &waiting))
-		require.Equal(t, billing.OrderPaymentRequiresAction, waiting.Payment.Status)
+		require.Equal(t, billing.InvoicePaymentRequiresAction, waiting.Payment.Status)
 		attempt := func() string {
 			var state string
-			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT status FROM "+pgx.Identifier{w.schema, "order_attempts"}.Sanitize()+" WHERE order_id = $1", waiting.ID.UUID()).Scan(&state))
+			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT status FROM "+pgx.Identifier{w.schema, "invoice_attempts"}.Sanitize()+" WHERE invoice_id = $1", waiting.ID.UUID()).Scan(&state))
 			return state
 		}
 		require.Contains(t, []string{"created", "requires_action"}, attempt())
@@ -308,22 +308,22 @@ func TestBackgroundJobs(t *testing.T) {
 		w.clock.Advance(25 * time.Hour)
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.Equal(t, 1, leaseCount(), "a lease is kept through the replay horizon")
-		require.Contains(t, []string{"created", "requires_action"}, attempt(), "only the order expiry expires an attempt")
+		require.Contains(t, []string{"created", "requires_action"}, attempt(), "only the invoice expiry expires an attempt")
 		require.Zero(t, orphans())
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		require.Equal(t, "expired", attempt())
 
 		w.clock.Advance(91 * 24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
-		require.NoError(t, err, "the order expiry deletes nothing")
+		_, err = a.alphaRemote.GetInvoice(t.Context(), unpaid.ID)
+		require.NoError(t, err, "the invoice expiry deletes nothing")
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
-		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
-		require.NoError(t, err, "an unpaid closed order is kept 397 days")
+		_, err = a.alphaRemote.GetInvoice(t.Context(), unpaid.ID)
+		require.NoError(t, err, "an unpaid closed invoice is kept 397 days")
 		require.Zero(t, leaseCount(), "a lease 61 days past its last sync is deleted")
 		w.clock.Advance(307 * 24 * time.Hour)
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
-		_, err = a.alphaRemote.GetOrder(t.Context(), unpaid.ID)
+		_, err = a.alphaRemote.GetInvoice(t.Context(), unpaid.ID)
 		require.ErrorIs(t, err, billing.ErrNotFound)
 	})
 	t.Run("OR-J29-S40/cleanup-continues-past-a-full-batch-of-merchants", func(t *testing.T) {
@@ -433,7 +433,7 @@ func TestBackgroundJobs(t *testing.T) {
 			}
 			// The pass's NMI history read names no sale or schedule; the probe does.
 			_ = r.ParseForm()
-			if r.Form.Get("order_id") == "" && r.Form.Get("subscription_id") == "" {
+			if r.Form.Get("invoice_id") == "" && r.Form.Get("subscription_id") == "" {
 				return false
 			}
 			probes.Add(1)

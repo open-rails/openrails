@@ -141,7 +141,7 @@ func HeadersHTTP(policy Policy, framing Framing) func(http.Handler) http.Handler
 }
 
 // Page serves the payment page from a build of web/pay: index.html at
-// /pay/{order_id}, its files under /assets/, and nothing else.
+// /pay/{invoice_id}, its files under /assets/, and nothing else.
 func Page(assets fs.FS) (http.Handler, error) {
 	if assets == nil {
 		return nil, errors.New("paymentpage: no payment page build (web/pay)")
@@ -156,7 +156,7 @@ func Page(assets fs.FS) (http.Handler, error) {
 			return
 		}
 		if rest, ok := strings.CutPrefix(r.URL.Path, PagePrefix); ok {
-			if id, err := billing.ParseOrderID(rest); err != nil || id.IsZero() {
+			if id, err := billing.ParseInvoiceID(rest); err != nil || id.IsZero() {
 				http.NotFound(w, r)
 				return
 			}

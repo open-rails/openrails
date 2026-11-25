@@ -27,7 +27,7 @@ import (
 // RecurringVerifier runs a customer-present $0 verification declaring a
 // recurring agreement on an NMI card through psp, returning NMI's
 // transaction id.
-type RecurringVerifier func(ctx context.Context, psp uuid.UUID, method gen.BillingPaymentMethod, order string) (string, error)
+type RecurringVerifier func(ctx context.Context, psp uuid.UUID, method gen.BillingPaymentMethod, invoice string) (string, error)
 
 // ErrCardUnusable: the saved card can no longer be charged.
 var ErrCardUnusable = apperr.New(http.StatusPaymentRequired, billing.CodePaymentMethodStale, "the card can no longer be charged; add it again")
@@ -262,7 +262,7 @@ func (s *SubscriptionLifecycleService) moveRecurring(ctx context.Context, d *db.
 		return err
 	}
 	if paidEnrollment {
-		// The order paid, but card storage failed before its first agreement.
+		// The invoice paid, but card storage failed before its first agreement.
 		// Choosing a card completes enrollment; there is no debt to retry.
 		if _, err := Transition(sub, lifecycle.Reinstate{PeriodStart: *sub.CurrentPeriodStartsAt, PeriodEnd: *sub.CurrentPeriodEndsAt}, now); err != nil {
 			return err

@@ -1340,8 +1340,8 @@ SELECT EXISTS (
       OR NOT COALESCE(i.result_evidence->>'transaction_id' = i.result_evidence->>'reverted_transaction_id', false))
     AND NOT EXISTS (
       SELECT 1 FROM billing.provider_bills b
-      JOIN billing.orders o ON o.merchant_id=b.merchant_id AND o.id=b.order_id
-      JOIN billing.payments p ON p.merchant_id=o.merchant_id AND p.order_id=o.id
+      JOIN billing.invoices o ON o.merchant_id=b.merchant_id AND o.id=b.invoice_id
+      JOIN billing.payments p ON p.merchant_id=o.merchant_id AND p.invoice_id=o.id
       WHERE b.merchant_id=i.merchant_id AND b.psp_id=i.psp_id
         AND b.source_kind='solana_pull' AND b.source_key=i.id::text
         AND b.settled_at IS NOT NULL AND o.collection_owner='engine'
@@ -1410,7 +1410,7 @@ func (q *Queries) HasUnattributedPaymentAfterRebillBoundary(ctx context.Context,
 const listCompletedManualRebillPaymentCoverage = `-- name: ListCompletedManualRebillPaymentCoverage :many
 SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, i.destructive_action_id, i.sent_attempt, p.id AS covered_payment_id, p.customer_id AS paid_customer_id,
        p.psp_id AS paid_psp_id, p.subscription_id AS paid_subscription_id,
-       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, (SELECT l.price_id FROM billing.order_lines l WHERE l.merchant_id=p.merchant_id AND l.order_id=p.order_id AND l.price_id=i.price_id LIMIT 1) AS paid_price_id,
+       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, (SELECT l.price_id FROM billing.invoice_lines l WHERE l.merchant_id=p.merchant_id AND l.invoice_id=p.invoice_id AND l.price_id=i.price_id LIMIT 1) AS paid_price_id,
        p.amount AS paid_amount, p.currency AS paid_currency
 FROM billing.payments p
 JOIN billing.provider_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
@@ -1647,9 +1647,9 @@ WHERE merchant_id=$1::uuid AND id IN (
       AND i.subscription_id=$2::uuid
       AND (i.payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz
     UNION ALL
-    -- An order's sale paid the first period of the subscription its line made.
-    SELECT i.id FROM billing.order_lines l
-    JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+    -- An invoice's sale paid the first period of the subscription its line made.
+    SELECT i.id FROM billing.invoice_lines l
+    JOIN billing.invoices o ON o.merchant_id = l.merchant_id AND o.id = l.invoice_id
     JOIN billing.provider_intents i ON i.merchant_id = o.merchant_id AND i.payload->>'order_id' = o.id::text
     WHERE l.merchant_id=$1::uuid AND l.subscription_id=$2::uuid
       AND o.status='complete'
@@ -2170,8 +2170,8 @@ type LockProviderIntentForCollectionCompletionParams struct {
 	MerchantID uuid.UUID
 }
 
-// Call after acquiring the domain's customer/order locks, matching admission's
-// order-before-operation order.
+// Call after acquiring the domain's customer/invoice locks, matching admission's
+// invoice-before-operation invoice.
 func (q *Queries) LockProviderIntentForCollectionCompletion(ctx context.Context, arg LockProviderIntentForCollectionCompletionParams) (BillingProviderIntent, error) {
 	row := q.db.QueryRow(ctx, lockProviderIntentForCollectionCompletion, arg.ID, arg.MerchantID)
 	var i BillingProviderIntent

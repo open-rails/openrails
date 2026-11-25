@@ -29,10 +29,10 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/invoices/usage"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/credits"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
-	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -40,14 +40,14 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// TypeOrderCollection is one off-session charge of a saved payment method
-// for one usage order. The intent id is the provider identity (NMI order id,
+// TypeInvoiceCollection is one off-session charge of a saved payment method
+// for one usage invoice. The intent id is the provider identity (NMI order id,
 // Stripe idempotency-key root), so every execution of one operation reuses
 // one provider reference. After a possible submission the operation stays
 // unknown until an exact receipt (NMI order search, Stripe idempotent replay,
 // or operator resolution) or provider-confirmed non-execution; nothing here
 // ever resends under a new identity.
-const TypeOrderCollection = intents.TypeOrderCollection
+const TypeInvoiceCollection = intents.TypeInvoiceCollection
 
 // Evidence keys retained on the operation.
 const (
@@ -79,8 +79,8 @@ const (
 // expired would create a second Stripe invoice.
 const stripeReplayWindow = 23 * time.Hour
 
-// OrderCollectionHandler executes and reconciles order_collection intents.
-type OrderCollectionHandler struct {
+// InvoiceCollectionHandler executes and reconciles order_collection intents.
+type InvoiceCollectionHandler struct {
 	DB       *db.DB
 	Charger  *ScopedCharger
 	Verifier *MerchantCollectionAdapterBuilder
@@ -90,38 +90,38 @@ type OrderCollectionHandler struct {
 	Log      *slog.Logger
 }
 
-func NewOrderCollectionHandler(database *db.DB, charger *ScopedCharger, verifier *MerchantCollectionAdapterBuilder, cfg intents.ModeView, clock clockwork.Clock) *OrderCollectionHandler {
-	return &OrderCollectionHandler{DB: database, Charger: charger, Verifier: verifier, Config: cfg, Clock: timeutil.FirstClock(clock), Policy: intents.DefaultBackoff, Log: database.Log}
+func NewInvoiceCollectionHandler(database *db.DB, charger *ScopedCharger, verifier *MerchantCollectionAdapterBuilder, cfg intents.ModeView, clock clockwork.Clock) *InvoiceCollectionHandler {
+	return &InvoiceCollectionHandler{DB: database, Charger: charger, Verifier: verifier, Config: cfg, Clock: timeutil.FirstClock(clock), Policy: intents.DefaultBackoff, Log: database.Log}
 }
 
-func (h *OrderCollectionHandler) Type() string { return TypeOrderCollection }
-func (h *OrderCollectionHandler) Backoff(attempts int32) time.Duration {
+func (h *InvoiceCollectionHandler) Type() string { return TypeInvoiceCollection }
+func (h *InvoiceCollectionHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
-func (h *OrderCollectionHandler) now() time.Time { return h.Clock.Now().UTC() }
+func (h *InvoiceCollectionHandler) now() time.Time { return h.Clock.Now().UTC() }
 
 // PrunePolicy keeps the frozen payload: a client retry key replays against
-// the operation's identity (order, customer, payment method) after success.
-func (h *OrderCollectionHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, true }
+// the operation's identity (invoice, customer, payment method) after success.
+func (h *InvoiceCollectionHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, true }
 
-// Terminal state is committed with the local order/ledger/outbox effects.
-func (h *OrderCollectionHandler) CommitsTerminalOutcome() bool { return true }
+// Terminal state is committed with the local invoice/ledger/outbox effects.
+func (h *InvoiceCollectionHandler) CommitsTerminalOutcome() bool { return true }
 
-// CheckRelevance: a collection operation is never superseded. The order's
+// CheckRelevance: a collection operation is never superseded. The invoice's
 // live attempt blocks every competing mutation while the operation lives, and a
 // possibly submitted charge must reconcile, so only a terminal outcome (or an
 // operator release of a never-submitted operation) ends it.
-func (h *OrderCollectionHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (intents.Relevance, error) {
+func (h *InvoiceCollectionHandler) CheckRelevance(context.Context, gen.BillingProviderIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 
-func (h *OrderCollectionHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
+func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
 	if err != nil {
 		return intents.Ambiguous("load canonical collection progress: " + err.Error())
 	}
 	intent = current
-	p, err := intents.DecodeOrderCollectionPayload(intent)
+	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Parked(err.Error())
 	}
@@ -129,7 +129,7 @@ func (h *OrderCollectionHandler) Execute(ctx context.Context, intent gen.Billing
 		return outcome
 	}
 	// Admission is not authority to send forever: recheck the frozen
-	// collection owner under the order lock before dispatch or replay.
+	// collection owner under the invoice lock before dispatch or replay.
 	var owned bool
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := h.DB.NewWithPgxTx(tx).Gen(ctx)
@@ -141,10 +141,10 @@ func (h *OrderCollectionHandler) Execute(ctx context.Context, intent gen.Billing
 		return err
 	})
 	if err != nil {
-		return intents.Parked("check order collection authority: " + err.Error())
+		return intents.Parked("check invoice collection authority: " + err.Error())
 	}
 	if !owned {
-		return intents.Parked("order is not owned by this engine collection")
+		return intents.Parked("invoice is not owned by this engine collection")
 	}
 	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) != "" {
 		// Resumed after a possible submission. Stripe replays its idempotent
@@ -164,12 +164,12 @@ func (h *OrderCollectionHandler) Execute(ctx context.Context, intent gen.Billing
 		return intents.Parked(reason)
 	}
 	if h.Charger == nil {
-		return intents.Parked("order collection charger not wired")
+		return intents.Parked("invoice collection charger not wired")
 	}
 	prepared, err := h.Charger.Prepare(ctx, h.chargeRequest(intent, p))
 	if errors.Is(err, charge.ErrInstrumentChanged) {
 		// Nothing was sent and the frozen instrument is gone: release the
-		// order so the next attempt freezes the method as it now is.
+		// invoice so the next attempt freezes the method as it now is.
 		return h.finalizeNotExecuted(ctx, intent, p, "instrument_changed", err.Error())
 	}
 	if err != nil {
@@ -201,13 +201,13 @@ func (h *OrderCollectionHandler) Execute(ctx context.Context, intent gen.Billing
 	return h.classify(ctx, intent, p, res, err)
 }
 
-func (h *OrderCollectionHandler) chargeRequest(intent gen.BillingProviderIntent, p intents.OrderCollectionPayload) ChargeRequest {
-	orderID := p.OrderID
+func (h *InvoiceCollectionHandler) chargeRequest(intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) ChargeRequest {
+	invoiceID := p.InvoiceID
 	return ChargeRequest{
 		MerchantID:          intent.MerchantID,
 		Payer:               identity.CustomerID(p.CustomerID),
 		Invoker:             p.CustomerID.String(),
-		OrderID:             &orderID,
+		InvoiceID:           &invoiceID,
 		PaymentMethodID:     p.PaymentMethodID,
 		AmountCents:         p.AmountMinor,
 		Currency:            p.Currency,
@@ -223,7 +223,7 @@ func (h *OrderCollectionHandler) chargeRequest(intent gen.BillingProviderIntent,
 // classify turns one submission answer into the operation outcome: a parsed
 // refusal is terminal, a receipt settles, every error is a possible
 // submission.
-func (h *OrderCollectionHandler) classify(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload, res ChargeResult, err error) intents.Outcome {
+func (h *InvoiceCollectionHandler) classify(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, res ChargeResult, err error) intents.Outcome {
 	if errors.Is(err, subscriptions.ErrStripeReceiptMismatch) {
 		return contradicted(err)
 	}
@@ -254,12 +254,12 @@ func (h *OrderCollectionHandler) classify(ctx context.Context, intent gen.Billin
 
 // replayStripe re-sends the same idempotent sequence while Stripe still holds
 // the key; beyond that window only an exact receipt resolves the operation.
-func (h *OrderCollectionHandler) replayStripe(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload) intents.Outcome {
+func (h *InvoiceCollectionHandler) replayStripe(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) intents.Outcome {
 	if !h.stripeReplayable(intent) {
 		return intents.Ambiguous("stripe idempotency window elapsed; resolve with the exact stripe invoice or provider-confirmed non-execution")
 	}
 	if h.Charger == nil {
-		return intents.Ambiguous("order collection charger not wired; cannot replay")
+		return intents.Ambiguous("invoice collection charger not wired; cannot replay")
 	}
 	prepared, err := h.Charger.Prepare(ctx, h.chargeRequest(intent, p))
 	if err != nil {
@@ -269,7 +269,7 @@ func (h *OrderCollectionHandler) replayStripe(ctx context.Context, intent gen.Bi
 	return h.classify(ctx, intent, p, res, err)
 }
 
-func (h *OrderCollectionHandler) stripeReplayable(intent gen.BillingProviderIntent) bool {
+func (h *InvoiceCollectionHandler) stripeReplayable(intent gen.BillingProviderIntent) bool {
 	submitted, err := time.Parse(time.RFC3339Nano, intents.EvidenceString(intent, collectionEvidenceSubmittedAt))
 	if err != nil {
 		submitted = intent.CreatedAt
@@ -279,13 +279,13 @@ func (h *OrderCollectionHandler) stripeReplayable(intent gen.BillingProviderInte
 
 // Verify reconciles a submitted operation from retained evidence or a
 // positive provider read. An empty search never authorizes another send.
-func (h *OrderCollectionHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
+func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
 	if err != nil {
 		return intents.Ambiguous("load canonical collection progress: " + err.Error())
 	}
 	intent = current
-	p, err := intents.DecodeOrderCollectionPayload(intent)
+	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -294,7 +294,7 @@ func (h *OrderCollectionHandler) Verify(ctx context.Context, intent gen.BillingP
 	}
 	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) == "" {
 		// An older book can retain the accepted operation but predate its
-		// submission marker. Positive same-order evidence still belongs to the
+		// submission marker. Positive same-invoice evidence still belongs to the
 		// canonical writer; an empty read grants no nonexecution authority.
 		if p.Rail == string(models.RailNMI) && h.Verifier != nil {
 			receipt, found, err := h.Verifier.ReadCollectionReceipt(ctx, intent, "")
@@ -326,8 +326,8 @@ func (h *OrderCollectionHandler) Verify(ctx context.Context, intent gen.BillingP
 // Resolve applies operator evidence: an exact provider object confirmed as
 // this operation's settled charge, or provider-confirmed non-execution. It
 // never re-sends.
-func (h *OrderCollectionHandler) Resolve(ctx context.Context, intent gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
-	p, err := intents.DecodeOrderCollectionPayload(intent)
+func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Outcome{}, err
 	}
@@ -337,7 +337,7 @@ func (h *OrderCollectionHandler) Resolve(ctx context.Context, intent gen.Billing
 		return intents.Outcome{}, intents.RejectResolution("operation holds a qualified receipt; verifier must complete settlement")
 	}
 	if resolution.Step != "" {
-		return intents.Outcome{}, fmt.Errorf("%w: an order collection has no steps", intents.ErrResolutionInvalid)
+		return intents.Outcome{}, fmt.Errorf("%w: an invoice collection has no steps", intents.ErrResolutionInvalid)
 	}
 	if receipt := intents.EvidenceString(intent, collectionEvidenceTransactionID); receipt != "" {
 		return intents.Outcome{}, intents.RejectResolution("operation already holds receipt %s; its verifier completes settlement", receipt)
@@ -379,15 +379,15 @@ func contradicted(err error) intents.Outcome {
 
 // ResolveUnsent releases a pending operation that never reached the provider:
 // the write-ahead fence is absent, so nothing can have been charged. The
-// attempt fails without a decline and the order becomes due again. An
+// attempt fails without a decline and the invoice becomes due again. An
 // operation carrying the fence belongs to its verifier.
-func (h *OrderCollectionHandler) ResolveUnsent(ctx context.Context, intent gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
 	if err != nil {
 		return intents.Outcome{}, err
 	}
 	intent = current
-	p, err := intents.DecodeOrderCollectionPayload(intent)
+	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Outcome{}, err
 	}
@@ -405,7 +405,7 @@ func (h *OrderCollectionHandler) ResolveUnsent(ctx context.Context, intent gen.B
 
 // finalizeFromEvidence retries local effects for an answer the operation
 // already holds (a receipt, a parsed refusal, confirmed non-execution).
-func (h *OrderCollectionHandler) finalizeFromEvidence(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload) (intents.Outcome, bool) {
+func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) (intents.Outcome, bool) {
 	rail := intents.EvidenceString(intent, collectionEvidenceRail)
 	if rail == "" {
 		rail = p.Rail
@@ -452,11 +452,11 @@ func (h *OrderCollectionHandler) finalizeFromEvidence(ctx context.Context, inten
 
 // finalizeSettle records one confirmed charge exactly once: the arrears
 // liability settled on the ledger (deduped on the operation key), the
-// payment, the usage order paid and its attempt ended, all or nothing. A
+// payment, the usage invoice paid and its attempt ended, all or nothing. A
 // local failure retains the receipt on the operation for the verifier and
-// keeps the order's collection live.
-func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.BillingProviderIntent, receipt intents.CollectedReceipt) intents.Outcome {
-	p, err := intents.DecodeOrderCollectionPayload(intent)
+// keeps the invoice's collection live.
+func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent gen.BillingProviderIntent, receipt intents.CollectedReceipt) intents.Outcome {
+	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -473,18 +473,18 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		complete := func() error {
-			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteOrderCollection(ctx, intent, intents.Succeeded(evidence), now)
+			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.Succeeded(evidence), now)
 		}
 		chargedAmount, err := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
 		if err != nil || chargedAmount < p.Amount {
-			return fmt.Errorf("collection charge does not cover the frozen order amount")
+			return fmt.Errorf("collection charge does not cover the frozen invoice amount")
 		}
-		// Take the payer's money lock before order/ledger writes. Rounding
+		// Take the payer's money lock before invoice/ledger writes. Rounding
 		// credits use the same spendable-lot path and lock order as deposits.
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
 			return err
 		}
-		settled, err := orderPaymentRecorded(ctx, q, intent, p)
+		settled, err := invoicePaymentRecorded(ctx, q, intent, p)
 		if err != nil {
 			return err
 		}
@@ -494,7 +494,7 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		if owned, err := collectionOwned(ctx, q, intent, p); err != nil {
 			return err
 		} else if !owned {
-			return fmt.Errorf("order %s collection already ended without a payment; confirmed charge %s needs repair", p.OrderID, transactionID)
+			return fmt.Errorf("invoice %s collection already ended without a payment; confirmed charge %s needs repair", p.InvoiceID, transactionID)
 		}
 		if strings.TrimSpace(transactionID) == "" {
 			return errors.New("collection receipt names no provider transaction")
@@ -514,22 +514,22 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		currency := normalizeCurrency(p.Currency)
 		ml := ledger.New(q, intent.MerchantID)
 		// The money arrives before it settles what is owed.
-		if err := books.New(q, intent.MerchantID).Receive(ctx, books.Receipt{Payment: p.PaymentID, Customer: p.CustomerID, Order: &p.OrderID,
+		if err := books.New(q, intent.MerchantID).Receive(ctx, books.Receipt{Payment: p.PaymentID, Customer: p.CustomerID, Invoice: &p.InvoiceID,
 			PSP: &p.Instrument.PSPID, Amount: chargedAmount, Currency: currency, At: now}); err != nil {
 			return err
 		}
 		if err := books.Started(ctx, q, intent.MerchantID, currency, now); err != nil {
 			return err
 		}
-		coord := ledger.Coord{Operation: ledger.OpOrderPayment, Source: "invoice_charge", SourceID: intent.IdempotencyKey}
+		coord := ledger.Coord{Operation: ledger.OpInvoicePayment, Source: "invoice_charge", SourceID: intent.IdempotencyKey}
 		transfer, err := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, Currency: currency,
 			TransferType: "owed_payment", Operation: string(coord.Operation), Source: coord.Source, SourceID: coord.SourceID,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			orderID := p.OrderID
-			if transfer, err = ml.PayOwed(ctx, p.CustomerID, currency, p.Amount, coord, &orderID); err == nil {
-				err = books.New(q, intent.MerchantID).CollectUsage(ctx, books.UsageCollection{Payment: p.PaymentID, Customer: p.CustomerID, Order: &orderID,
+			invoiceID := p.InvoiceID
+			if transfer, err = ml.PayOwed(ctx, p.CustomerID, currency, p.Amount, coord, &invoiceID); err == nil {
+				err = books.New(q, intent.MerchantID).CollectUsage(ctx, books.UsageCollection{Payment: p.PaymentID, Customer: p.CustomerID, Invoice: &invoiceID,
 					Currency: currency, Amount: p.Amount, At: now})
 			}
 		}
@@ -540,8 +540,8 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		if excess := chargedAmount - p.Amount; excess > 0 {
 			payer := identity.CustomerIDFromString(p.CustomerID.String())
 			key := "invoice-rounding:" + intent.ID.String()
-			reason := "Rounding credit from order " + billing.OrderID(p.OrderID).String()
-			// Change the card paid beyond the order is credit bought at face.
+			reason := "Rounding credit from invoice " + billing.InvoiceID(p.InvoiceID).String()
+			// Change the card paid beyond the invoice is credit bought at face.
 			change, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, h.DB.NewWithPgxTx(tx), DepositParams{
 				CustomerID: &payer, Invoker: payer.String(), Currency: currency, Amount: excess,
 				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason, Funding: credits.Purchase,
@@ -550,12 +550,12 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 				return fmt.Errorf("credit collection rounding surplus: %w", err)
 			}
 		}
-		if err := q.InsertOrderPayment(ctx, gen.InsertOrderPaymentParams{
-			ID: p.PaymentID, MerchantID: intent.MerchantID, CustomerID: p.CustomerID, OrderID: p.OrderID, LedgerTransferID: transfer.ID,
+		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
+			ID: p.PaymentID, MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, LedgerTransferID: transfer.ID,
 			Channel: string(models.ChannelRail), Rail: &rail, PspID: &p.Instrument.PSPID, TransactionID: transactionID,
 			Amount: chargedAmount, Currency: currency, PaidAt: now, Now: now, TokenType: optionalString(payments.DefaultTokenType(rail, p.Instrument.Custodian)),
 		}); err != nil {
-			return fmt.Errorf("record order payment: %w", err)
+			return fmt.Errorf("record invoice payment: %w", err)
 		}
 		if err := NewMoneyService(h.DB, h.Clock).fundChange(ctx, q, intent.MerchantID, change, p.PaymentID); err != nil {
 			return err
@@ -572,19 +572,19 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			}
 		}
 		attempt := intent.ID
-		paid, err := usage.Pay(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, p.Amount, &p.PaymentID, &attempt, now)
+		paid, err := usage.Pay(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.InvoiceID, p.Amount, &p.PaymentID, &attempt, now)
 		if err != nil {
-			// The order changed under its own live collection (only raw
+			// The invoice changed under its own live collection (only raw
 			// surgery can do that). Fail closed: the receipt stays on the
 			// operation for an operator to repair.
-			return fmt.Errorf("order %s no longer accepts the frozen amount %d; confirmed charge %s needs repair: %w", p.OrderID, p.Amount, transactionID, err)
+			return fmt.Errorf("invoice %s no longer accepts the frozen amount %d; confirmed charge %s needs repair: %w", p.InvoiceID, p.Amount, transactionID, err)
 		}
 		if p.Initiator == charge.InitiatorMerchant {
 			if err := queueUsageReceipt(ctx, q, intent.MerchantID, paid, p.PaymentID, chargedAmount, currency, now); err != nil {
 				return err
 			}
 		}
-		if err := usage.EndCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, true, nil, now); err != nil {
+		if err := usage.EndCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.InvoiceID, intent.ID, true, nil, now); err != nil {
 			return err
 		}
 		return complete()
@@ -596,10 +596,10 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 }
 
 // finalizeRefusal records a definitive provider refusal: attempt failed, the
-// usage order dunned on its own billing cycle under the merchant's
+// usage invoice dunned on its own billing cycle under the merchant's
 // dunning_policy and the networks' advice, and open again (or uncollectible),
 // with why. A local failure retains the refusal for the verifier.
-func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload, answer decline.Evidence, transactionID string) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, answer decline.Evidence, transactionID string) intents.Outcome {
 	if strings.TrimSpace(answer.Code) == "" {
 		answer.Code = "declined"
 	}
@@ -612,28 +612,28 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 	}
 	now := h.now()
 	var action collection.Action
-	var order *gen.BillingOrder
+	var invoice *gen.BillingInvoice
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
 			return err
 		}
 		complete := func() error {
-			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteOrderCollection(ctx, intent, intents.TerminalWithEvidence("collection refused: "+failureCode, evidence), now)
+			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence("collection refused: "+failureCode, evidence), now)
 		}
-		if settled, err := orderPaymentRecorded(ctx, q, intent, p); err != nil {
+		if settled, err := invoicePaymentRecorded(ctx, q, intent, p); err != nil {
 			return err
 		} else if settled {
 			return fmt.Errorf("payment %s already settled; refusal contradicts a recorded charge", p.PaymentID)
 		}
-		row, err := q.LockOrder(ctx, gen.LockOrderParams{MerchantID: intent.MerchantID, ID: p.OrderID})
+		row, err := q.LockInvoice(ctx, gen.LockInvoiceParams{MerchantID: intent.MerchantID, ID: p.InvoiceID})
 		if err != nil {
 			return fmt.Errorf("lock order: %w", err)
 		}
 		if !collectionLive(row, intent.ID) {
 			return complete()
 		}
-		order = &row
+		invoice = &row
 		policy, err := subscriptions.DunningPolicy(ctx, h.DB.NewWithPgxTx(tx))
 		if err != nil {
 			return err
@@ -646,7 +646,7 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 			return err
 		}
 		failure := action.Decline.Reason.Failure()
-		if err := usage.DeclineCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, failure, action.Terminal, action.NextAttemptAt, now); err != nil {
+		if err := usage.DeclineCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.InvoiceID, intent.ID, failure, action.Terminal, action.NextAttemptAt, now); err != nil {
 			return err
 		}
 		// The collection attempt names its outcome: a replay records it once.
@@ -656,23 +656,23 @@ func (h *OrderCollectionHandler) finalizeRefusal(ctx context.Context, intent gen
 		return complete()
 	})
 	if errors.Is(err, collection.ErrUnknownCycle) {
-		if ferr := collection.RecordUnknownCycle(ctx, h.DB.Gen(ctx), intent.MerchantID, p.OrderID.String(), "order", err); ferr != nil {
-			h.Log.ErrorContext(ctx, "order collection: could not record the unknown-cycle finding", logx.Err(ferr), "order_id", p.OrderID)
+		if ferr := collection.RecordUnknownCycle(ctx, h.DB.Gen(ctx), intent.MerchantID, p.InvoiceID.String(), "invoice", err); ferr != nil {
+			h.Log.ErrorContext(ctx, "invoice collection: could not record the unknown-cycle finding", logx.Err(ferr), "invoice_id", p.InvoiceID)
 		}
 	}
 	if err != nil {
 		return intents.AmbiguousWithEvidence("collection refused, but local record failed: "+err.Error(), evidence)
 	}
-	if order != nil {
-		logCollectionDecline(ctx, h.Log, p.OrderID, rail, &failureCode, action)
+	if invoice != nil {
+		logCollectionDecline(ctx, h.Log, p.InvoiceID, rail, &failureCode, action)
 	}
 	return intents.TerminalWithEvidence("collection refused: "+failureCode, evidence)
 }
 
 // finalizeNotExecuted records a collection that provably never charged: the
-// attempt fails without a decline and the order is due again immediately.
+// attempt fails without a decline and the invoice is due again immediately.
 // code/reason default to provider-confirmed non-execution.
-func (h *OrderCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.BillingProviderIntent, p intents.OrderCollectionPayload, code, reason string, proof ...intents.CollectionNonexecutionProof) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, code, reason string, proof ...intents.CollectionNonexecutionProof) intents.Outcome {
 	if code == "" {
 		code, reason = "not_executed", "provider confirmed the collection was not executed"
 	}
@@ -693,9 +693,9 @@ func (h *OrderCollectionHandler) finalizeNotExecuted(ctx context.Context, intent
 			return err
 		}
 		complete := func() error {
-			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteOrderCollection(ctx, intent, intents.TerminalWithEvidence(reason, evidence), now)
+			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence(reason, evidence), now)
 		}
-		if settled, err := orderPaymentRecorded(ctx, q, intent, p); err != nil {
+		if settled, err := invoicePaymentRecorded(ctx, q, intent, p); err != nil {
 			return err
 		} else if settled {
 			return fmt.Errorf("payment %s already settled; non-execution contradicts a recorded charge", p.PaymentID)
@@ -705,7 +705,7 @@ func (h *OrderCollectionHandler) finalizeNotExecuted(ctx context.Context, intent
 		} else if !owned {
 			return complete()
 		}
-		if err := usage.EndCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.OrderID, intent.ID, false, &now, now); err != nil {
+		if err := usage.EndCollection(ctx, h.DB.NewWithPgxTx(tx), intent.MerchantID, p.InvoiceID, intent.ID, false, &now, now); err != nil {
 			return err
 		}
 		return complete()
@@ -718,41 +718,41 @@ func (h *OrderCollectionHandler) finalizeNotExecuted(ctx context.Context, intent
 	return intents.TerminalWithEvidence(reason, evidence)
 }
 
-// usageCycleHours is the order's own billing cycle for the dunning schedule:
-// its period, floored at the shortest retriable cycle. A threshold order can
+// usageCycleHours is the invoice's own billing cycle for the dunning schedule:
+// its period, floored at the shortest retriable cycle. A threshold invoice can
 // cover minutes, or one instant when the day's usage posts as it is billed,
 // and must not be written off on its first decline. 0 = no period, which the
 // schedule refuses (ErrUnknownCycle).
-func usageCycleHours(order gen.BillingOrder) int {
-	if order.PeriodStartsAt == nil || order.PeriodEndsAt == nil || !order.PeriodEndsAt.After(*order.PeriodStartsAt) {
+func usageCycleHours(invoice gen.BillingInvoice) int {
+	if invoice.PeriodStartsAt == nil || invoice.PeriodEndsAt == nil || !invoice.PeriodEndsAt.After(*invoice.PeriodStartsAt) {
 		return 0
 	}
-	return max(collection.CycleHoursBetween(*order.PeriodStartsAt, *order.PeriodEndsAt), collection.MinRetryCycleHours)
+	return max(collection.CycleHoursBetween(*invoice.PeriodStartsAt, *invoice.PeriodEndsAt), collection.MinRetryCycleHours)
 }
 
 // logCollectionDecline names the bucket and its consequence on every
 // refusal. Nothing here cancels anything.
-func logCollectionDecline(ctx context.Context, logger *slog.Logger, orderID uuid.UUID, rail string, failureCode *string, action collection.Action) {
+func logCollectionDecline(ctx context.Context, logger *slog.Logger, invoiceID uuid.UUID, rail string, failureCode *string, action collection.Action) {
 	decline.AlertUnmapped(ctx, logger, action.Decline)
-	entry := logger.With("order_id", orderID, "rail", rail, "failure_code", derefStr(failureCode), "decline_outcome", action.Decline.Action.String(), "decline_coverage", string(action.Decline.Coverage))
+	entry := logger.With("invoice_id", invoiceID, "rail", rail, "failure_code", derefStr(failureCode), "decline_outcome", action.Decline.Action.String(), "decline_coverage", string(action.Decline.Coverage))
 	switch {
 	case action.AwaitingPaymentMethod():
-		entry.WarnContext(ctx, "order collection: the customer's card needs fixing; charging stops, the order stays open")
+		entry.WarnContext(ctx, "invoice collection: the customer's card needs fixing; charging stops, the invoice stays open")
 	case action.Terminal && !action.ScheduleExhausted():
-		entry.ErrorContext(ctx, "order collection: non-recoverable decline; the order is uncollectible")
+		entry.ErrorContext(ctx, "invoice collection: non-recoverable decline; the invoice is uncollectible")
 	case action.Terminal:
-		entry.ErrorContext(ctx, "order collection: the retry schedule is exhausted; the order is uncollectible")
+		entry.ErrorContext(ctx, "invoice collection: the retry schedule is exhausted; the invoice is uncollectible")
 	default:
-		entry.WarnContext(ctx, "order collection: retryable decline; it retries on the order's own billing cycle", "next_attempt_at", action.NextAttemptAt)
+		entry.WarnContext(ctx, "invoice collection: retryable decline; it retries on the invoice's own billing cycle", "next_attempt_at", action.NextAttemptAt)
 	}
 }
 
 // queueCollectionOutcome records the customer's notice, id, in the same
 // domain transaction; no external message is sent here.
-func queueCollectionOutcome(ctx context.Context, database *db.DB, id uuid.UUID, order gen.BillingOrder, action collection.Action, failureCode string, now time.Time) error {
-	amountDue := usage.Due(order)
+func queueCollectionOutcome(ctx context.Context, database *db.DB, id uuid.UUID, invoice gen.BillingInvoice, action collection.Action, failureCode string, now time.Time) error {
+	amountDue := usage.Due(invoice)
 	data := billing.NotificationData{
-		OrderID: billing.OrderID(order.ID), Currency: catalog.Currency(order.Currency), AmountDue: &amountDue,
+		InvoiceID: billing.InvoiceID(invoice.ID), Currency: catalog.Currency(invoice.Currency), AmountDue: &amountDue,
 		FailureCode: failureCode, DeclineOutcome: action.Decline.Action.String(),
 		RetryStatus: billing.NotificationRetryUnknown, RecoveryAction: billing.NotificationRecoveryContactSupport,
 	}
@@ -762,7 +762,7 @@ func queueCollectionOutcome(ctx context.Context, database *db.DB, id uuid.UUID, 
 		eventType = models.NotificationPaymentMethodUpdateRequired
 		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryPaymentMethodRequired, billing.NotificationRecoveryUpdatePaymentMethod
 	case action.Terminal:
-		eventType = models.NotificationOrderCollectionStopped
+		eventType = models.NotificationInvoiceCollectionStopped
 		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryStopped, billing.NotificationRecoveryUpdatePaymentMethod
 		reason := "non_recoverable"
 		if action.ScheduleExhausted() {
@@ -774,11 +774,11 @@ func queueCollectionOutcome(ctx context.Context, database *db.DB, id uuid.UUID, 
 		data.NextAttemptAt = &next
 		data.RetryStatus, data.RecoveryAction = billing.NotificationRetryScheduled, billing.NotificationRecoveryUpdatePaymentMethod
 	}
-	notification := &models.NotificationEvent{ID: id, CustomerID: order.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
+	notification := &models.NotificationEvent{ID: id, CustomerID: invoice.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
 	return subscriptions.NewNotificationService(database).CreateIfAbsent(ctx, notification)
 }
 
-func (h *OrderCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.BillingProviderIntent, reference string) intents.Outcome {
+func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.BillingProviderIntent, reference string) intents.Outcome {
 	if h.Verifier == nil {
 		return intents.Ambiguous("no collection receipt reader wired")
 	}
@@ -796,42 +796,42 @@ func (h *OrderCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.Bi
 }
 
 // recordCollectionAttempt records the collection charge's answer as a
-// payment attempt on the order, in the transaction that settles or fails it.
-func recordCollectionAttempt(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.OrderCollectionPayload, rail string, a attempts.Attempt, at time.Time) error {
+// payment attempt on the invoice, in the transaction that settles or fails it.
+func recordCollectionAttempt(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, rail string, a attempts.Attempt, at time.Time) error {
 	if rail == "" {
 		rail = in.Rail
 	}
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail, a.Kind, a.At, a.Step = in.MerchantID, p.CustomerID, p.Instrument.PSPID, rail, attempts.Collection, at, "charge"
-	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID, a.OrderID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID, &p.OrderID
+	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID, a.InvoiceID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID, &p.InvoiceID
 	a.TokenType = payments.DefaultTokenType(rail, p.Instrument.Custodian)
 	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, q, a)
 }
 
-// orderPaymentRecorded reports whether the collection's payment is written:
-// the charge settled the order.
-func orderPaymentRecorded(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.OrderCollectionPayload) (bool, error) {
-	_, err := q.GetOrderPayment(ctx, gen.GetOrderPaymentParams{MerchantID: in.MerchantID, CustomerID: p.CustomerID, OrderID: p.OrderID, ID: p.PaymentID})
+// invoicePaymentRecorded reports whether the collection's payment is written:
+// the charge settled the invoice.
+func invoicePaymentRecorded(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) (bool, error) {
+	_, err := q.GetInvoicePayment(ctx, gen.GetInvoicePaymentParams{MerchantID: in.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, ID: p.PaymentID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	return err == nil, err
 }
 
-// collectionOwned locks the order and reports whether this collection is
+// collectionOwned locks the invoice and reports whether this collection is
 // still its live attempt; one that ended released it.
-func collectionOwned(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.OrderCollectionPayload) (bool, error) {
-	row, err := q.LockOrder(ctx, gen.LockOrderParams{MerchantID: in.MerchantID, ID: p.OrderID})
+func collectionOwned(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) (bool, error) {
+	row, err := q.LockInvoice(ctx, gen.LockInvoiceParams{MerchantID: in.MerchantID, ID: p.InvoiceID})
 	if err != nil {
 		return false, fmt.Errorf("lock order: %w", err)
 	}
 	return collectionLive(row, in.ID), nil
 }
 
-// collectionLive reports whether operation is the order's live collection.
-func collectionLive(order gen.BillingOrder, operation uuid.UUID) bool {
-	return order.CollectionOwner == string(billing.OrderCollectionEngine) && order.Origin == string(billing.OrderOriginUsage) &&
-		order.Status == string(billing.OrderProcessing) && order.AttemptID != nil && *order.AttemptID == operation
+// collectionLive reports whether operation is the invoice's live collection.
+func collectionLive(invoice gen.BillingInvoice, operation uuid.UUID) bool {
+	return invoice.CollectionOwner == string(billing.InvoiceCollectionEngine) && invoice.Origin == string(billing.InvoiceOriginUsage) &&
+		invoice.Status == string(billing.InvoiceProcessing) && invoice.AttemptID != nil && *invoice.AttemptID == operation
 }
 
 func derefInt32(v *int32) int32 {
@@ -841,12 +841,12 @@ func derefInt32(v *int32) int32 {
 	return *v
 }
 
-// queueUsageReceipt queues the receipt of a usage order charged under the
+// queueUsageReceipt queues the receipt of a usage invoice charged under the
 // customer's collection agreement, once per payment.
-func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, order gen.BillingOrder, payment uuid.UUID, amount int64, currency string, now time.Time) error {
-	data := billing.NotificationData{OrderID: billing.OrderID(order.ID), PaymentID: billing.PaymentID(payment), Amount: &amount, Currency: catalog.Currency(currency)}
-	if order.Number != nil {
-		data.OrderNumber = *order.Number
+func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, invoice gen.BillingInvoice, payment uuid.UUID, amount int64, currency string, now time.Time) error {
+	data := billing.NotificationData{InvoiceID: billing.InvoiceID(invoice.ID), PaymentID: billing.PaymentID(payment), Amount: &amount, Currency: catalog.Currency(currency)}
+	if invoice.Number != nil {
+		data.InvoiceNumber = *invoice.Number
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {
@@ -854,6 +854,6 @@ func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 	}
 	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
 		ID:         uuidutil.DerivedV7(uuidutil.TimeOf(payment), uuidutil.DeterministicNamespace, uuidutil.Name(string(models.NotificationUsageCharged), merchantID.String(), payment.String())),
-		MerchantID: merchantID, CustomerID: order.CustomerID, EventType: string(models.NotificationUsageCharged), Data: raw, CreatedAt: now,
+		MerchantID: merchantID, CustomerID: invoice.CustomerID, EventType: string(models.NotificationUsageCharged), Data: raw, CreatedAt: now,
 	})
 }

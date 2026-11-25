@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -217,9 +217,9 @@ func RecordStripeBill(ctx context.Context, d *db.DB, sub *models.Subscription, i
 		if id := invoice.Metadata["order_id"]; id != "" {
 			parsed, err := uuid.Parse(id)
 			if err != nil {
-				return observed.Result{}, errors.New("Stripe initial invoice has invalid accepted order identity")
+				return observed.Result{}, errors.New("Stripe initial invoice has invalid accepted invoice identity")
 			}
-			bill.ExistingOrderID = &parsed
+			bill.ExistingInvoiceID = &parsed
 		}
 	}
 	settled, source, noncash := bill.Settled, bill.SettlementSource, bill.NonCashAmount

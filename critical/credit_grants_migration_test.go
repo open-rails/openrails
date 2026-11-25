@@ -152,25 +152,25 @@ func (d *seed) terminate(lot uuid.UUID, event string) (uuid.UUID, time.Time) {
 	return id, at
 }
 
-// sale is a paid order line of a credit product, with its payment.
+// sale is a paid invoice line of a credit product, with its payment.
 func (d *seed) sale(customer, product, price uuid.UUID, amount int64, interval *int) (payment, line uuid.UUID) {
-	order, payment, line := uuid.New(), uuid.New(), uuid.New()
-	d.exec("INSERT INTO "+d.s.table("orders")+" (merchant_id, id, customer_id, origin, status, currency, total, payment_status, expires_at)"+
-		" VALUES ($1, $2, $3, 'customer', 'processing', 'USD', $4, 'processing', $5)", d.m, order, customer, amount, d.at.Add(time.Hour))
-	d.exec("INSERT INTO "+d.s.table("order_lines")+" (merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity,"+
+	invoice, payment, line := uuid.New(), uuid.New(), uuid.New()
+	d.exec("INSERT INTO "+d.s.table("invoices")+" (merchant_id, id, customer_id, origin, status, currency, total, payment_status, expires_at)"+
+		" VALUES ($1, $2, $3, 'customer', 'processing', 'USD', $4, 'processing', $5)", d.m, invoice, customer, amount, d.at.Add(time.Hour))
+	d.exec("INSERT INTO "+d.s.table("invoice_lines")+" (merchant_id, id, invoice_id, customer_id, position, price_id, product_id, description, quantity,"+
 		" unit_amount, amount, ownership, credit_grant, billing_interval_hours)"+
 		" VALUES ($1, $2, $3, $4, 0, $5, $6, 'Credit pack', 1, $7, $7, 'consumable', '{\"currency\":\"USD\",\"amount\":\"25000000\"}'::jsonb, $8)",
-		d.m, line, order, customer, price, product, amount, interval)
-	d.exec("INSERT INTO "+d.s.table("payments")+" (merchant_id, id, customer_id, order_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at)"+
-		" VALUES ($1, $2, $3, $4, 'manual', $5, $6, $6, 'USD', 'succeeded', $7)", d.m, payment, customer, order, "sale-"+payment.String(), amount, d.at)
+		d.m, line, invoice, customer, price, product, amount, interval)
+	d.exec("INSERT INTO "+d.s.table("payments")+" (merchant_id, id, customer_id, invoice_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at)"+
+		" VALUES ($1, $2, $3, $4, 'manual', $5, $6, $6, 'USD', 'succeeded', $7)", d.m, payment, customer, invoice, "sale-"+payment.String(), amount, d.at)
 	return payment, line
 }
 
 // reversal is a refund, chargeback or won dispute of payment.
 func (d *seed) reversal(customer, payment uuid.UUID, amount int64, status, kind string) uuid.UUID {
 	id := uuid.New()
-	d.exec("INSERT INTO "+d.s.table("payments")+" (merchant_id, id, customer_id, order_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at, refunded_payment_id, reversal_kind)"+
-		" SELECT merchant_id, $3, customer_id, order_id, 'manual', $4, $5, list_amount, currency, $6, purchased_at, id, $7"+
+	d.exec("INSERT INTO "+d.s.table("payments")+" (merchant_id, id, customer_id, invoice_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at, refunded_payment_id, reversal_kind)"+
+		" SELECT merchant_id, $3, customer_id, invoice_id, 'manual', $4, $5, list_amount, currency, $6, purchased_at, id, $7"+
 		" FROM "+d.s.table("payments")+" WHERE merchant_id = $1 AND id = $2", d.m, payment, id, "reversal-"+id.String(), amount, status, kind)
 	return id
 }
@@ -226,7 +226,7 @@ type migratedLot struct {
 	funding, source, invoker            string
 	paidAmount                          *int64
 	paidCurrency, sourceID, description *string
-	payment, orderLine, product         *uuid.UUID
+	payment, invoiceLine, product       *uuid.UUID
 	revokedAt                           *time.Time
 	loggedCredited, loggedDebited       int64
 }
@@ -234,7 +234,7 @@ type migratedLot struct {
 func readMigratedLots(t *testing.T, s *legacySchema, merchant uuid.UUID) map[uuid.UUID]migratedLot {
 	t.Helper()
 	rows, err := s.pool.Query(t.Context(), "SELECT g.id, g.customer_id, g.units, g.units_credited, g.units_debited, g.units_reserved, g.funding_source, g.source, g.invoker,"+
-		" g.paid_amount, g.paid_currency, g.source_id, g.description, g.payment_id, g.order_line_id, g.product_id, g.revoked_at,"+
+		" g.paid_amount, g.paid_currency, g.source_id, g.description, g.payment_id, g.invoice_line_id, g.product_id, g.revoked_at,"+
 		" COALESCE(sum(t.amount) FILTER (WHERE t.credit_account_id = g.account_id), 0)::bigint, COALESCE(sum(t.amount) FILTER (WHERE t.debit_account_id = g.account_id), 0)::bigint"+
 		" FROM "+s.table("credit_grants")+" g LEFT JOIN "+s.table("ledger_transfers")+" t ON t.merchant_id = g.merchant_id AND t.credit_grant_id = g.id"+
 		" WHERE g.merchant_id = $1 GROUP BY g.merchant_id, g.id", merchant)
@@ -244,7 +244,7 @@ func readMigratedLots(t *testing.T, s *legacySchema, merchant uuid.UUID) map[uui
 		var id uuid.UUID
 		var l migratedLot
 		require.NoError(t, rows.Scan(&id, &l.customer, &l.units, &l.credited, &l.debited, &l.reserved, &l.funding, &l.source, &l.invoker,
-			&l.paidAmount, &l.paidCurrency, &l.sourceID, &l.description, &l.payment, &l.orderLine, &l.product, &l.revokedAt,
+			&l.paidAmount, &l.paidCurrency, &l.sourceID, &l.description, &l.payment, &l.invoiceLine, &l.product, &l.revokedAt,
 			&l.loggedCredited, &l.loggedDebited))
 		out[id] = l
 	}
@@ -282,14 +282,14 @@ func migrateCreditLots(t *testing.T) {
 	deposit(pack, clearing, "deposit", 10_000_000)
 	deposit(pack, promotion, "deposit_bonus", 15_000_000)
 	d.leg(balance, revenue, 4_000_000, "credit_spend", "spend", "critical", "spend-1", pack, &customer)
-	d.exec("INSERT INTO "+s.table("payments")+" (merchant_id, customer_id, order_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at, refunded_payment_id, reversal_kind)"+
-		" SELECT merchant_id, customer_id, order_id, 'manual', 'pending-refund', -5000000, list_amount, currency, 'pending', purchased_at, id, 'refund'"+
+	d.exec("INSERT INTO "+s.table("payments")+" (merchant_id, customer_id, invoice_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at, refunded_payment_id, reversal_kind)"+
+		" SELECT merchant_id, customer_id, invoice_id, 'manual', 'pending-refund', -5000000, list_amount, currency, 'pending', purchased_at, id, 'refund'"+
 		" FROM "+s.table("payments")+" WHERE merchant_id = $1 AND id = $2", d.m, packPayment)
 	// A recurring price's cycle, paid at face.
 	cyclePayment, cycleLine := d.sale(customer, product, price, 20_000_000, ptr(720))
 	cycle := d.lot(customer, "purchase", cyclePayment.String(), &cyclePayment, &product, 20_000_000, spec("payment", customer.String(), "20000000"), nil)
 	deposit(cycle, clearing, "deposit", 20_000_000)
-	// The change a usage order's card charge left, and a host deposit
+	// The change a usage invoice's card charge left, and a host deposit
 	// labelled a purchase: both were credits_sold, paid at face.
 	change := d.lot(customer, "purchase", "invoice-rounding:intent", nil, nil, 6_299, spec("invoice_rounding_purchase", "", ""), ptr(""))
 	deposit(change, clearing, "deposit", 6_299)
@@ -385,14 +385,14 @@ func migrateCreditLots(t *testing.T) {
 	require.EqualValues(t, 10_000_000, *lots[pack].paidAmount)
 	require.Equal(t, "USD", *lots[pack].paidCurrency)
 	require.Equal(t, packPayment, *lots[pack].payment)
-	require.Equal(t, packLine, *lots[pack].orderLine)
+	require.Equal(t, packLine, *lots[pack].invoiceLine)
 	require.Equal(t, product, *lots[pack].product)
 	require.Equal(t, "Credit pack", *lots[pack].description)
 	require.Equal(t, "payment", lots[pack].source)
 	require.Equal(t, customer.String(), lots[pack].invoker)
 
 	require.Equal(t, "recurring", lots[cycle].funding)
-	require.Equal(t, cycleLine, *lots[cycle].orderLine)
+	require.Equal(t, cycleLine, *lots[cycle].invoiceLine)
 
 	for _, id := range []uuid.UUID{change, hosted} {
 		require.Equal(t, "purchase", lots[id].funding, "a deposit labelled a purchase was bought")

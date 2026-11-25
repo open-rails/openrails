@@ -13,14 +13,14 @@ import (
 )
 
 // A public route takes no credential, so the request itself names the
-// merchant whose rows it reads: a wallet's Solana Pay request by its order.
+// merchant whose rows it reads: a wallet's Solana Pay request by its invoice.
 // That merchant replaces any pinned before the route, and opens nothing but
 // the route's own answer.
 
 // publicMerchant finds a public route's merchant, ahead of its connection.
 func (e *Env) publicMerchant(route Route) []router.Middleware {
-	if route.Merchant == MerchantOrder {
-		return []router.Middleware{e.merchantByOrder(route)}
+	if route.Merchant == MerchantInvoice {
+		return []router.Middleware{e.merchantByInvoice(route)}
 	}
 	return nil
 }
@@ -34,23 +34,23 @@ func (e *Env) directory() *gen.Queries {
 	return d.GenDirectory()
 }
 
-// merchantByOrder pins the live merchant of the order {id} names: 404 for an
-// id no one order of a live merchant has.
-func (e *Env) merchantByOrder(route Route) router.Middleware {
+// merchantByInvoice pins the live merchant of the invoice {id} names: 404 for an
+// id no one invoice of a live merchant has.
+func (e *Env) merchantByInvoice(route Route) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			id, err := billing.ParseOrderID(strings.TrimSpace(r.Param("id")))
+			id, err := billing.ParseInvoiceID(strings.TrimSpace(r.Param("id")))
 			if err != nil || id.IsZero() {
-				r.AbortCode(billing.CodeResourceNotFound, "order not found")
+				r.AbortCode(billing.CodeResourceNotFound, "invoice not found")
 				return
 			}
-			owners, err := e.directory().GetOrderMerchant(r.Request.Context(), id.UUID())
+			owners, err := e.directory().GetInvoiceMerchant(r.Request.Context(), id.UUID())
 			switch {
 			case err != nil:
-				r.Log.ErrorContext(r.Request.Context(), "openrails: order merchant lookup failed", logx.Err(err), "route", route.Key())
+				r.Log.ErrorContext(r.Request.Context(), "openrails: invoice merchant lookup failed", logx.Err(err), "route", route.Key())
 				r.AbortCode(billing.CodeInternalError, "")
 			case len(owners) != 1:
-				r.AbortCode(billing.CodeResourceNotFound, "order not found")
+				r.AbortCode(billing.CodeResourceNotFound, "invoice not found")
 			default:
 				pinPublic(r, billing.MerchantID(owners[0]))
 				next(r)

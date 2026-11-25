@@ -11,6 +11,7 @@ import type { BillingAppearance } from "../appearance"
 import {
   dataOf,
   isPaymentFailure,
+  kindOf,
   isBillingNotification,
   billingNotificationAction,
   type BillingNotificationItem,
@@ -48,7 +49,7 @@ export function BillingNotification({
       ? t("billingNotifications.paymentMethodRequiredTitle")
       : item.kind === "payment_authentication_required"
         ? t("billingNotifications.authenticationRequiredTitle")
-        : item.kind === "order_collection_stopped"
+        : kindOf(item) === "invoice_collection_stopped"
           ? t("billingNotifications.collectionStoppedTitle")
           : isPaymentFailure(item.kind)
             ? t("billingNotifications.paymentFailed")

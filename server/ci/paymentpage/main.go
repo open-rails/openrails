@@ -4,8 +4,8 @@
 // fixture nothing runs: one merchant on the loopback NMI gateway
 // and the fake Stripe, a Turnstile captcha account, the test's clock, the API
 // on one origin and the payment page on another. Test-only: /__test/* on the API
-// origin makes merchant orders with a pay URL (as a backend does through
-// POST /v1/app/orders), stands in for Stripe.js's calls to Stripe, runs the
+// origin makes merchant invoices with a pay URL (as a backend does through
+// POST /v1/app/invoices), stands in for Stripe.js's calls to Stripe, runs the
 // checkout origin's payment-method domain registration, moves the clock and
 // reads host events.
 package main
@@ -154,7 +154,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 		reply(w, http.StatusOK, map[string]string{"api": api, "payment": payment, "other": h.other})
 	})
 	mux.HandleFunc("GET /__test/embed", h.embed)
-	mux.HandleFunc("POST /__test/orders", h.newOrder)
+	mux.HandleFunc("POST /__test/invoices", h.newInvoice)
 	mux.HandleFunc("POST /__test/clock", h.advance)
 	mux.HandleFunc("GET /__test/host-events", h.hostEvents)
 	mux.HandleFunc("POST /__test/stripe/payment-methods", h.stripeMethod)
@@ -162,7 +162,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	mux.HandleFunc("GET /__test/stripe/domains", h.stripeDomains)
 	mux.HandleFunc("GET /__test/thanks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, "<!doctype html><title>Thanks</title><h1>Thanks for order %s</h1>", r.URL.Query().Get("order"))
+		fmt.Fprintf(w, "<!doctype html><title>Thanks</title><h1>Thanks for invoice %s</h1>", r.URL.Query().Get("invoice"))
 	})
 	mux.HandleFunc("GET /__test/frame", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -180,9 +180,9 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	return nil
 }
 
-// newOrder is a merchant order with a pay URL, as the merchant's backend
+// newInvoice is a merchant invoice with a pay URL, as the merchant's backend
 // creates one: for the customer named, else a new one.
-func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
+func (h *harness) newInvoice(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		CustomerID          string `json:"customer_id"`
 		SavedPaymentMethods bool   `json:"saved_payment_methods"`
@@ -212,17 +212,17 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	payURL := &billing.OrderPayURLParams{SuccessURL: h.api + "/__test/thanks?order={ORDER_ID}", SavedPaymentMethods: in.SavedPaymentMethods,
+	payURL := &billing.InvoicePayURLParams{SuccessURL: h.api + "/__test/thanks?invoice={INVOICE_ID}", SavedPaymentMethods: in.SavedPaymentMethods,
 		Embedded: in.Embedded}
 	if in.CancelURL != "" {
 		payURL.CancelURL = &in.CancelURL
 	}
-	order, err := h.shop.CreateOrder(ctx, uuid.Must(uuid.NewV7()).String(), billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: payURL})
+	invoice, err := h.shop.CreateInvoice(ctx, uuid.Must(uuid.NewV7()).String(), billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, PayURL: payURL})
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	reply(w, http.StatusCreated, map[string]string{"order_id": order.ID.String(), "customer_id": customer.String(), "url": *order.PayURL})
+	reply(w, http.StatusCreated, map[string]string{"invoice_id": invoice.ID.String(), "customer_id": customer.String(), "url": *invoice.PayURL})
 }
 
 // embed is a merchant's page framing a pay URL (src), as billing-ui's
@@ -325,7 +325,7 @@ func (h *harness) advance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.clock.Advance(time.Duration(in.Seconds) * time.Second)
-	n, err := h.rt.Orders.ExpireDue(merchant.WithID(r.Context(), h.mid), 200)
+	n, err := h.rt.Invoices.ExpireDue(merchant.WithID(r.Context(), h.mid), 200)
 	if err != nil {
 		reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

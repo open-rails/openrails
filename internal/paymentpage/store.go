@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Store keeps pay URLs on their orders.
+// Store keeps pay URLs on their invoices.
 type Store struct {
 	db  *db.DB
 	Log *slog.Logger
@@ -25,9 +25,9 @@ type Store struct {
 
 func NewStore(d *db.DB) *Store { return &Store{db: d, Log: d.Log} }
 
-// Attach gives an open merchant order its pay URL, in the caller's
+// Attach gives an open merchant invoice its pay URL, in the caller's
 // transaction (q), and answers the pay URL on origin. It is refused
-// when the order has one already or is not an open merchant order.
+// when the invoice has one already or is not an open merchant invoice.
 func Attach(ctx context.Context, q *gen.Queries, origin string, mid billing.MerchantID, c PayURL, now time.Time) (string, error) {
 	if origin == "" {
 		return "", apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "this deployment serves no checkout origin")
@@ -36,36 +36,36 @@ func Attach(ctx context.Context, q *gen.Queries, origin string, mid billing.Merc
 	if err != nil {
 		return "", err
 	}
-	n, err := q.SetOrderPayURL(ctx, gen.SetOrderPayURLParams{
+	n, err := q.SetInvoicePayURL(ctx, gen.SetInvoicePayURLParams{
 		SecretHash: hash, ExpiresAt: c.ExpiresAt, SuccessUrl: *c.SuccessURL, CancelUrl: c.CancelURL,
-		SavedPaymentMethods: c.SavedPaymentMethods, Embedded: c.Embedded, Now: now, MerchantID: mid.UUID(), ID: c.OrderID.UUID(),
+		SavedPaymentMethods: c.SavedPaymentMethods, Embedded: c.Embedded, Now: now, MerchantID: mid.UUID(), ID: c.InvoiceID.UUID(),
 	})
 	switch {
 	case err != nil:
 		return "", err
 	case n != 1:
-		return "", apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "only an open merchant order without a pay URL takes one")
+		return "", apperr.New(http.StatusBadRequest, billing.CodePayURLUnavailable, "only an open merchant invoice without a pay URL takes one")
 	}
-	if err := q.SaveOrderPayURLReceipt(ctx, gen.SaveOrderPayURLReceiptParams{
-		MerchantID: mid.UUID(), OrderID: c.OrderID.UUID(), Secret: secret, Now: now, ExpiresAt: c.ExpiresAt,
+	if err := q.SaveInvoicePayURLReceipt(ctx, gen.SaveInvoicePayURLReceiptParams{
+		MerchantID: mid.UUID(), InvoiceID: c.InvoiceID.UUID(), Secret: secret, Now: now, ExpiresAt: c.ExpiresAt,
 	}); err != nil {
 		return "", err
 	}
-	return URL(origin, c.OrderID, secret), nil
+	return URL(origin, c.InvoiceID, secret), nil
 }
 
 // ReplayURL recovers the original capability only for an authenticated,
-// matching order-creation retry. The caller has already checked the durable
-// request digest and customer binding. It reads current order state rather
-// than replaying a cached response, and ordinary order reads never call it.
-func ReplayURL(ctx context.Context, q *gen.Queries, origin string, order gen.BillingOrder, now time.Time) (string, error) {
-	if origin == "" || order.Origin != string(billing.OrderOriginMerchant) || order.Status != string(billing.OrderOpen) ||
-		order.PayUrlExpiresAt == nil || !order.PayUrlExpiresAt.After(now) ||
-		order.ExpiresAt != nil && !order.ExpiresAt.After(now) {
+// matching invoice-creation retry. The caller has already checked the durable
+// request digest and customer binding. It reads current invoice state rather
+// than replaying a cached response, and ordinary invoice reads never call it.
+func ReplayURL(ctx context.Context, q *gen.Queries, origin string, invoice gen.BillingInvoice, now time.Time) (string, error) {
+	if origin == "" || invoice.Origin != string(billing.InvoiceOriginMerchant) || invoice.Status != string(billing.InvoiceOpen) ||
+		invoice.PayUrlExpiresAt == nil || !invoice.PayUrlExpiresAt.After(now) ||
+		invoice.ExpiresAt != nil && !invoice.ExpiresAt.After(now) {
 		return "", nil
 	}
 
-	row, err := q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: order.MerchantID, Operation: "pay_url_creation", IdempotencyKey: order.ID.String()})
+	row, err := q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: invoice.MerchantID, Operation: "pay_url_creation", IdempotencyKey: invoice.ID.String()})
 	if db.IsNotFound(err) {
 		return "", nil
 	}
@@ -82,10 +82,10 @@ func ReplayURL(ctx context.Context, q *gen.Queries, origin string, order gen.Bil
 		return "", err
 	}
 	hash, ok := Hash(receipt.Secret)
-	if !ok || subtle.ConstantTimeCompare(hash, order.PayUrlSecretHash) != 1 {
+	if !ok || subtle.ConstantTimeCompare(hash, invoice.PayUrlSecretHash) != 1 {
 		return "", nil
 	}
-	return URL(origin, billing.OrderID(order.ID), receipt.Secret), nil
+	return URL(origin, billing.InvoiceID(invoice.ID), receipt.Secret), nil
 }
 
 // Resolve finds the pay URL a presented secret opens: ErrNotFound for none
@@ -95,7 +95,7 @@ func (s *Store) Resolve(ctx context.Context, secret string, now time.Time) (PayU
 	if !ok || s == nil || s.db == nil {
 		return PayURL{}, ErrNotFound
 	}
-	mids, err := s.db.GenDirectory().ResolveOrderPayURLMerchant(ctx, hash)
+	mids, err := s.db.GenDirectory().ResolveInvoicePayURLMerchant(ctx, hash)
 	if err != nil {
 		return PayURL{}, err
 	}
@@ -103,7 +103,7 @@ func (s *Store) Resolve(ctx context.Context, secret string, now time.Time) (PayU
 		return PayURL{}, ErrNotFound
 	}
 	mid := billing.MerchantID(mids[0])
-	row, err := s.db.Gen(ctx).GetOrderPayURL(ctx, gen.GetOrderPayURLParams{MerchantID: mid.UUID(), SecretHash: hash})
+	row, err := s.db.Gen(ctx).GetInvoicePayURL(ctx, gen.GetInvoicePayURLParams{MerchantID: mid.UUID(), SecretHash: hash})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PayURL{}, ErrNotFound
 	}
@@ -114,7 +114,7 @@ func (s *Store) Resolve(ctx context.Context, secret string, now time.Time) (PayU
 		return PayURL{}, ErrNotFound
 	}
 	c := PayURL{
-		MerchantID: mid, OrderID: billing.OrderID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Embedded: *row.Embedded,
+		MerchantID: mid, InvoiceID: billing.InvoiceID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Embedded: *row.Embedded,
 		ExpiresAt: *row.PayUrlExpiresAt, SuccessURL: row.SuccessUrl, CancelURL: row.CancelUrl,
 		SavedPaymentMethods: *row.SavedPaymentMethods,
 	}
@@ -124,12 +124,12 @@ func (s *Store) Resolve(ctx context.Context, secret string, now time.Time) (PayU
 	return c, nil
 }
 
-// MaxDeclines caps the card attempts a pay URL's order may have declined
-// (card testing): the merchant makes a new order after that.
+// MaxDeclines caps the card attempts a pay URL's invoice may have declined
+// (card testing): the merchant makes a new invoice after that.
 const MaxDeclines = 10
 
-// Exhausted reports whether c's order has taken MaxDeclines declines.
+// Exhausted reports whether c's invoice has taken MaxDeclines declines.
 func (s *Store) Exhausted(ctx context.Context, c PayURL) (bool, error) {
-	n, err := s.db.Gen(ctx).CountOrderDeclines(ctx, gen.CountOrderDeclinesParams{MerchantID: c.MerchantID.UUID(), OrderID: c.OrderID.UUID()})
+	n, err := s.db.Gen(ctx).CountInvoiceDeclines(ctx, gen.CountInvoiceDeclinesParams{MerchantID: c.MerchantID.UUID(), InvoiceID: c.InvoiceID.UUID()})
 	return n >= MaxDeclines, err
 }

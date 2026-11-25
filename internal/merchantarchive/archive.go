@@ -289,14 +289,14 @@ func Restore(ctx context.Context, database *db.DB, clock clockwork.Clock, id bil
 			return err
 		}
 		uid := id.UUID()
-		if err := q.RaiseOrderNumberSequence(ctx, &uid); err != nil {
+		if err := q.RaiseInvoiceNumberSequence(ctx, &uid); err != nil {
 			return err
 		}
 		// A running charge restored is watched again, due at once.
 		if err := q.RebuildBalanceWatches(ctx, gen.RebuildBalanceWatchesParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
-		// Every payer with an open usage order, in grace or delinquent, is
+		// Every payer with an open usage invoice, in grace or delinquent, is
 		// evaluated again at once.
 		if err := q.RebuildDelinquencyDue(ctx, gen.RebuildDelinquencyDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
@@ -440,19 +440,19 @@ func exportQuery(p contract.Profile) string {
 		cols[i] = "(" + expr + ")::text"
 	}
 	from := "billing." + p.Name + " t"
-	order := ""
+	invoice := ""
 	for _, c := range p.Columns {
 		if c.Name == "id" {
-			order = "t.id"
+			invoice = "t.id"
 			break
 		}
 	}
-	if order == "" {
+	if invoice == "" {
 		parts := make([]string, len(p.Columns))
 		for i, c := range p.Columns {
 			parts[i] = "t." + pgx.Identifier{c.Name}.Sanitize() + "::text COLLATE \"C\" NULLS FIRST"
 		}
-		order = strings.Join(parts, ",")
+		invoice = strings.Join(parts, ",")
 	}
 	prefix := ""
 	parent, childParent := "", ""
@@ -465,9 +465,9 @@ func exportQuery(p contract.Profile) string {
 	if parent != "" {
 		prefix = "WITH RECURSIVE lineage AS (SELECT id,0 depth FROM billing." + p.Name + " WHERE merchant_id=$1 AND " + parent + " IS NULL UNION ALL SELECT c.id,l.depth+1 FROM billing." + p.Name + " c JOIN lineage l ON " + childParent + "=l.id WHERE c.merchant_id=$1) "
 		from += " JOIN lineage l ON l.id=t.id"
-		order = "l.depth,t.id"
+		invoice = "l.depth,t.id"
 	}
-	return prefix + "SELECT " + strings.Join(cols, ",") + " FROM " + from + " WHERE " + exportWhere(p.Name) + " ORDER BY " + order
+	return prefix + "SELECT " + strings.Join(cols, ",") + " FROM " + from + " WHERE " + exportWhere(p.Name) + " ORDER BY " + invoice
 }
 
 func exportWhere(table string) string {

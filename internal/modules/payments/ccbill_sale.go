@@ -6,7 +6,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// CCBillSale is a CCBill NewSaleSuccess for an order attempt, as CCBill
+// CCBillSale is a CCBill NewSaleSuccess for an invoice attempt, as CCBill
 // reported it: the subscription CCBill now bills, its first transaction,
 // the FlexForm sold and the amounts in rail minor units.
 type CCBillSale struct {
@@ -26,7 +26,7 @@ type CCBillSale struct {
 }
 
 // CCBillSaleUnhonored is a CCBill sale OpenRails keeps no record of: the
-// order it names was paid otherwise or no longer sells, or the sale
+// invoice it names was paid otherwise or no longer sells, or the sale
 // contradicts the attempt. CCBill holds the money, so the merchant refunds
 // and cancels it there.
 type CCBillSaleUnhonored struct {

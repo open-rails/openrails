@@ -38,7 +38,7 @@ type Config struct {
 	// client.
 	TrustedProxies []string `yaml:"trusted_proxies"`
 	// CheckoutOrigin is needed only to serve OpenRails's own hosted pay page:
-	// the separate origin (https://pay.example.com) where /pay/<order> is
+	// the separate origin (https://pay.example.com) where /pay/<invoice> is
 	// served from Deps.CheckoutAssets; leave it empty when you use the
 	// embedded checkout or your own card form, and pay URLs then answer
 	// pay_url_unavailable. It is an origin of its own, apart from
@@ -97,7 +97,7 @@ type ClickHouseConfig struct {
 // refuses the request with 429. In-process Client calls count nothing. The
 // client address is the socket peer unless TrustedProxies lists the proxy.
 type RateLimitsConfig struct {
-	// Purchase limits buying: checkout and paying an order, kept tight to
+	// Purchase limits buying: checkout and paying an invoice, kept tight to
 	// deter card testing.
 	Purchase *RateLimit `yaml:"purchase"`
 	// Payment limits a customer's payment-method routes, where cards are

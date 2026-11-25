@@ -26,8 +26,8 @@ func ResolveSolanaPayReview(ctx context.Context, a *app.App, merchantID billing.
 	if err := initialized(a); err != nil {
 		return err
 	}
-	if a.Runtime.OrderAttemptService == nil {
-		return fmt.Errorf("openrails: this engine has no order attempts")
+	if a.Runtime.InvoiceAttemptService == nil {
+		return fmt.Errorf("openrails: this engine has no invoice attempts")
 	}
-	return a.Runtime.OrderAttemptService.ResolveSolanaPayReview(merchant.WithID(ctx, merchantID), signature, resolution)
+	return a.Runtime.InvoiceAttemptService.ResolveSolanaPayReview(merchant.WithID(ctx, merchantID), signature, resolution)
 }

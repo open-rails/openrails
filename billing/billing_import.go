@@ -36,7 +36,7 @@ type DeclaredBilling struct {
 	// AdminGrants are comped access windows with no payment behind them.
 	// Re-declarations reconcile imported grants at AsOf; removal is explicit.
 	AdminGrants []DeclaredAdminGrant `json:"admin_grants,omitempty"`
-	// Purchases are settled one-off sales, each an order with its payment.
+	// Purchases are settled one-off sales, each an invoice with its payment.
 	Purchases []DeclaredPurchase `json:"purchases,omitempty"`
 	// HistoricalPayments records confirmed receipts without inventing
 	// subscriptions or access.
@@ -69,7 +69,7 @@ type DeclaredHistoricalRefund struct {
 	RefundedAt    time.Time `json:"refunded_at"`
 }
 
-// DeclaredPurchase is one settled one-off sale: an engine-owned order with
+// DeclaredPurchase is one settled one-off sale: an engine-owned invoice with
 // frozen lines and the rail payment that paid it. Idempotent by SourceID and
 // by (PSP, TransactionID). Amount must equal the lines' total, in a fiat
 // currency; a row that does not is refused with a finding.
@@ -78,21 +78,21 @@ type DeclaredPurchase struct {
 	Customer CustomerID `json:"customer"`
 	Rail     Rail       `json:"rail"`
 	// PSP is the account that took the payment; falls back to DefaultPSP.
-	PSP           PSPRef              `json:"psp,omitzero"`
-	TransactionID string              `json:"transaction_id"`
-	Currency      catalog.Currency    `json:"currency"`
-	Amount        int64               `json:"amount,string"`
-	PaidAt        time.Time           `json:"paid_at"`
-	Lines         []DeclaredOrderLine `json:"lines"`
-	Settlement    *DeclaredSettlement `json:"settlement,omitempty"`
+	PSP           PSPRef                `json:"psp,omitzero"`
+	TransactionID string                `json:"transaction_id"`
+	Currency      catalog.Currency      `json:"currency"`
+	Amount        int64                 `json:"amount,string"`
+	PaidAt        time.Time             `json:"paid_at"`
+	Lines         []DeclaredInvoiceLine `json:"lines"`
+	Settlement    *DeclaredSettlement   `json:"settlement,omitempty"`
 	// Evidence is the host's verbatim legacy payload, stored for forensics.
 	Evidence json.RawMessage `json:"evidence,omitempty"`
 }
 
-// DeclaredOrderLine is one line as sold. UnitAmount is the price it was sold
+// DeclaredInvoiceLine is one line as sold. UnitAmount is the price it was sold
 // at, not today's catalog price. AccessEndsAt ends the product's access
 // window; nil takes the price's access duration from PaidAt.
-type DeclaredOrderLine struct {
+type DeclaredInvoiceLine struct {
 	Price        PriceID    `json:"price"`
 	Quantity     *int       `json:"quantity,omitempty"`
 	UnitAmount   int64      `json:"unit_amount,string"`

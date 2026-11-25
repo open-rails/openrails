@@ -50,9 +50,9 @@ type APIError struct {
 	RequestID  string
 	Param      *string
 	Metadata   map[string]any
-	// Order is the order a failed payment left open.
-	Order *billing.Order
-	cause error
+	// Invoice is the invoice a failed payment left open.
+	Invoice *billing.Invoice
+	cause   error
 	// unregistered is the code Coded refused to answer.
 	unregistered billing.ErrorCode
 }
@@ -75,7 +75,7 @@ func (e *APIError) ToResponse() ErrorResponse {
 			RequestID: e.RequestID,
 			Param:     e.Param,
 			Metadata:  e.Metadata,
-			Order:     e.Order,
+			Invoice:   e.Invoice,
 		},
 	}
 }

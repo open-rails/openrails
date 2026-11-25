@@ -1,6 +1,6 @@
 # OpenRails integration guide
 
-OpenRails is a billing engine you add to an existing application. It holds a merchant's catalog, orders, subscriptions, prepaid balances and metered usage, collects through NMI, Stripe, CCBill or Solana, emails customers their receipts and billing notices ([customer messages](#customer-messages)), and answers what each customer may access. Your app keeps its users and sign-in; a customer is your user's id.
+OpenRails is a billing engine you add to an existing application. It holds a merchant's catalog, invoices, subscriptions, prepaid balances and metered usage, collects through NMI, Stripe, CCBill or Solana, emails customers their receipts and billing notices ([customer messages](#customer-messages)), and answers what each customer may access. Your app keeps its users and sign-in; a customer is your user's id.
 
 ## Choose a path
 
@@ -191,7 +191,7 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 ```
 
 `onPaid` is a hint for the page. Grant access from what OpenRails holds: an
-entitlement check (below) or the `order.completed` event
+entitlement check (below) or the `invoice.completed` event
 ([events](client.md#events)), never the browser's word.
 
 **6. Gate access.** Ask OpenRails which keys the signed-in user holds, in one
@@ -218,7 +218,7 @@ its paid access, and the keys follow the product's current entitlements.
 
 **7. Go live.**
 
-- Buy once in the PSP's sandbox: the order completes, the check answers `true`,
+- Buy once in the PSP's sandbox: the invoice completes, the check answers `true`,
   and a refund or cancel behaves as you expect.
 - Declare the live PSP (`environment` omitted means real money) and register its
   webhook URL and signing secret; OpenRails checks the credentials before arming it.
@@ -236,7 +236,7 @@ on; it is queued with its fact, so a replayed fact sends once.
 `refund_completed`), payment problems (`payment_method_failed`,
 `payment_method_update_required`, `payment_authentication_required`), the
 cancellation confirmations (`subscription_canceled`; `premium_ended` when the
-customer, staff or failed payments ended it; `order_collection_stopped`) and the
+customer, staff or failed payments ended it; `invoice_collection_stopped`) and the
 price-change notice (`subscription_reprice_scheduled`). Every other notification
 type has a built-in English message and is off. A declined checkout, the failure
 that ended a subscription and a refund the provider reports more than seven days late send none.
@@ -267,7 +267,7 @@ messages:
 ```
 
 A template is a `subject` and a `text` or `html` body, Go `text/template` and
-`html/template` over `billing.MessageData` (version 1), whose fields are text
+`html/template` over `billing.MessageData` (version 2), whose fields are text
 formatted for the customer and empty when absent (test them with `with`):
 
 | Field | |

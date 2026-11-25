@@ -1,6 +1,6 @@
 // Shows the customer's cart, priced live, removes lines and checks it out:
-// one order made from the cart (cart: true, at the total shown), then paid
-// here with OrderPayment unless the host takes the order itself. Hosts add
+// one invoice made from the cart (cart: true, at the total shown), then paid
+// here with InvoicePayment unless the host takes the invoice itself. Hosts add
 // and change lines with client.setCartLine.
 import * as React from "react"
 
@@ -12,15 +12,15 @@ import {
 import type { BillingClient } from "./client/client"
 import type {
   Cart as CartData,
-  Order,
-  OrderAttribution,
+  Invoice,
+  InvoiceAttribution,
 } from "./client/types"
 import { PayButton } from "./components/pay-button"
 import type { PaymentFallbacks } from "./fallbacks"
 import { LoadingSkeleton } from "./components/states"
 import { useMessages } from "./i18n/context"
 import { formatAmount } from "./lib/money"
-import { OrderPayment } from "./order-payment"
+import { InvoicePayment } from "./invoice-payment"
 import { useCurrencyScales } from "./react/config"
 import { useBillingContext } from "./react/context"
 import { cn } from "cn"
@@ -29,15 +29,15 @@ export interface CartProps {
   /** The client to read and buy through; default: the provider's. */
   client?: BillingClient
   /**
-   * The order made from the cart. Default: pay it here with OrderPayment.
+   * The invoice made from the cart. Default: pay it here with InvoicePayment.
    */
-  onOrder?: (order: Order) => void
-  /** Passed to OrderPayment: the order is complete, or processing. */
-  onSettled?: (order: Order) => void
-  /** Passed to OrderPayment: PSPs kept back until others fail on the order. */
+  onInvoice?: (invoice: Invoice) => void
+  /** Passed to InvoicePayment: the invoice is complete, or processing. */
+  onSettled?: (invoice: Invoice) => void
+  /** Passed to InvoicePayment: PSPs kept back until others fail on the invoice. */
   fallbacks?: PaymentFallbacks
   /** Where the host's page says the customer came from (utm_*, referrer). */
-  attribution?: OrderAttribution
+  attribution?: InvoiceAttribution
   appearance?: BillingAppearance
   className?: string
 }
@@ -45,7 +45,7 @@ export interface CartProps {
 /** The customer's cart. Requires `BillingProvider`. */
 export function Cart({
   client: given,
-  onOrder,
+  onInvoice,
   onSettled,
   fallbacks,
   attribution,
@@ -57,10 +57,10 @@ export function Cart({
   const client = given ?? context.client
   const scales = useCurrencyScales()
   const [cart, setCart] = React.useState<CartData>()
-  const [order, setOrder] = React.useState<Order>()
+  const [invoice, setInvoice] = React.useState<Invoice>()
   const [error, setError] = React.useState<string>()
   const [busy, setBusy] = React.useState(false)
-  // One key per order attempt: a retry answers the same order.
+  // One key per invoice attempt: a retry answers the same invoice.
   const [key, setKey] = React.useState(() => crypto.randomUUID())
 
   React.useEffect(() => {
@@ -84,10 +84,10 @@ export function Cart({
     }
   }
 
-  if (order && !onOrder)
+  if (invoice && !onInvoice)
     return (
-      <OrderPayment
-        orderId={order.id}
+      <InvoicePayment
+        invoiceId={invoice.id}
         client={client}
         onSettled={onSettled}
         fallbacks={fallbacks}
@@ -118,15 +118,15 @@ export function Cart({
 
   const purchase = () =>
     act(async () => {
-      const result = await client.createOrder({
+      const result = await client.createInvoice({
         cart: true,
         expectedTotal: cart.total,
         ...(attribution ? { attribution } : {}),
         idempotencyKey: key,
       })
       if (result.error) throw result.error
-      setOrder(result.order)
-      onOrder?.(result.order)
+      setInvoice(result.invoice)
+      onInvoice?.(result.invoice)
     })
 
   return (

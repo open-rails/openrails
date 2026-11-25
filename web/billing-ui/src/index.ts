@@ -46,7 +46,7 @@ export {
   SavePaymentMethod,
   type SavePaymentMethodProps,
 } from "./save-payment-method"
-export { OrderPayment, type OrderPaymentProps } from "./order-payment"
+export { InvoicePayment, type InvoicePaymentProps } from "./invoice-payment"
 export {
   PAYMENT_COMPLETE_MESSAGE,
   PAYMENT_RESIZE_MESSAGE,

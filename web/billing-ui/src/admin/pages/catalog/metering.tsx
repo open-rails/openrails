@@ -441,7 +441,7 @@ function DefaultRateSection({
     const removing = await confirm({
       title: "Remove the default rate?",
       description:
-        "New usage for this meter will stop being rated after removal. Billed usage orders and accrued amounts remain unchanged.",
+        "New usage for this meter will stop being rated after removal. Billed usage invoices and accrued amounts remain unchanged.",
       confirmLabel: "Remove default",
       cancelLabel: "Keep rate",
       tone: "destructive",

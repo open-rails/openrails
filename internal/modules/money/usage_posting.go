@@ -33,7 +33,7 @@ import (
 // Usage posts to the ledger at each month's end in the merchant's
 // accounting zone (the close) and before any other movement of the
 // customer's balance in its currency: a top-up or staff grant, a credit
-// lot's expiry, revocation or refund, a usage order and an agreement's
+// lot's expiry, revocation or refund, a usage invoice and an agreement's
 // revocation. A posting is cut at an instant: per pricing period, the price
 // of the period's deduplicated usage that occurred before the cut, less what
 // the period's earlier postings took. It draws the balance first, one
@@ -225,7 +225,7 @@ func (s *MoneyService) postUsageTx(ctx context.Context, q *gen.Queries, merchant
 	if err != nil {
 		return false, err
 	}
-	billed, err := q.LatestUsageOrderEndInCurrency(ctx, gen.LatestUsageOrderEndInCurrencyParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
+	billed, err := q.LatestUsageInvoiceEndInCurrency(ctx, gen.LatestUsageInvoiceEndInCurrencyParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
 	if err != nil {
 		return false, err
 	}
@@ -470,7 +470,7 @@ func postingDelta(target, posted map[lineKey]*PostingLine) ([]PostingLine, int64
 
 // postPeriod posts what a period's usage adds: balance first, the rest owed,
 // split by meter and dated when the usage occurred but never before the end
-// of the customer's last usage order. In a merchant's unit, never owed, what
+// of the customer's last usage invoice. In a merchant's unit, never owed, what
 // the lots live before the cut cannot take is forgiven.
 func (s *MoneyService) postPeriod(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, currency string, period, end, cut, ingested time.Time,
 	reason string, amount int64, lines []PostingLine, billed time.Time) error {

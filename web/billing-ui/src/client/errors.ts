@@ -7,8 +7,8 @@ export interface BillingErrorBody {
   request_id?: string
   param?: string
   metadata?: Record<string, unknown>
-  /** The order a failed payment left open (402 card_error). */
-  order?: unknown
+  /** The invoice a failed payment left open (402 card_error). */
+  invoice?: unknown
 }
 
 // Local codes: network_error (no server reached), server_unavailable (a
@@ -22,8 +22,8 @@ export class BillingError extends Error {
   readonly param?: string
   readonly requestId?: string
   readonly metadata: Record<string, unknown>
-  /** The order a failed payment left open, unvalidated. */
-  readonly order?: unknown
+  /** The invoice a failed payment left open, unvalidated. */
+  readonly invoice?: unknown
 
   constructor(status: number, body: BillingErrorBody) {
     super(body.message)
@@ -34,7 +34,7 @@ export class BillingError extends Error {
     this.param = body.param
     this.requestId = body.request_id
     this.metadata = body.metadata ?? {}
-    this.order = body.order
+    this.invoice = body.invoice
   }
 }
 
@@ -73,7 +73,7 @@ export async function readBillingError(res: Response): Promise<BillingError> {
         param: typeof e.param === "string" ? e.param : undefined,
         metadata:
           e.metadata && typeof e.metadata === "object" ? e.metadata : undefined,
-        order: e.order,
+        invoice: e.invoice,
       })
     }
   }

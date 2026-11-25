@@ -13,9 +13,9 @@ import (
 )
 
 // EnrollService verifies a recurring Solana subscription's first payment:
-// the atomic [init?, subscribe, transfer_subscription] transaction an order's
+// the atomic [init?, subscribe, transfer_subscription] transaction an invoice's
 // wallet request built and the merchant co-signed. Activation rests only on
-// that landed transaction: subscriber-signed, subscribing to the order's
+// that landed transaction: subscriber-signed, subscribing to the invoice's
 // terms, pulling the full first period to the merchant, carrying the
 // attempt's reference and landing within its validity. The caller claims the
 // payment for its attempt and opens the membership in one transaction.

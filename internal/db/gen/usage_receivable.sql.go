@@ -26,7 +26,7 @@ type GetCustomerUsageAllowanceParams struct {
 }
 
 // A customer's allowance for doubtful accounts in a currency, every usage
-// order's together.
+// invoice's together.
 func (q *Queries) GetCustomerUsageAllowance(ctx context.Context, arg GetCustomerUsageAllowanceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, getCustomerUsageAllowance, arg.MerchantID, arg.CustomerID, arg.Currency)
 	var allowance int64
@@ -78,8 +78,8 @@ type GetUsageAllowanceRow struct {
 	Legs      int64
 }
 
-// A usage order's allowance for doubtful accounts, and how many legs moved
-// it, at (allowance, order:<id>, n): bad_debt raises it; bad_debt_recovery
+// A usage invoice's allowance for doubtful accounts, and how many legs moved
+// it, at (allowance, invoice:<id>, n): bad_debt raises it; bad_debt_recovery
 // and a write-off (usage_waived) lower it.
 func (q *Queries) GetUsageAllowance(ctx context.Context, arg GetUsageAllowanceParams) (GetUsageAllowanceRow, error) {
 	row := q.db.QueryRow(ctx, getUsageAllowance, arg.MerchantID, arg.Source)
@@ -92,7 +92,7 @@ const hasPendingReopenedOwed = `-- name: HasPendingReopenedOwed :one
 SELECT EXISTS (
     SELECT 1 FROM billing.owed_items
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
-      AND order_id IS NULL AND status = 'pending' AND source_type = 'owed_reopened'
+      AND invoice_id IS NULL AND status = 'pending' AND source_type = 'owed_reopened'
 )::boolean AS reopened
 `
 
@@ -102,7 +102,7 @@ type HasPendingReopenedOwedParams struct {
 	Currency   string
 }
 
-// Whether owed a chargeback reopened waits for a usage order.
+// Whether owed a chargeback reopened waits for a usage invoice.
 func (q *Queries) HasPendingReopenedOwed(ctx context.Context, arg HasPendingReopenedOwedParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasPendingReopenedOwed, arg.MerchantID, arg.CustomerID, arg.Currency)
 	var reopened bool
@@ -128,9 +128,9 @@ type ListUsagePaymentReopeningsRow struct {
 	Amount       int64
 }
 
-// The units book's legs for a usage order payment's chargebacks
+// The units book's legs for a usage invoice payment's chargebacks
 // (owed_reopened) and their won disputes (owed_payment), at
-// (_, usage_payment:<id>, reversal id[:order]).
+// (_, usage_payment:<id>, reversal id[:invoice]).
 func (q *Queries) ListUsagePaymentReopenings(ctx context.Context, arg ListUsagePaymentReopeningsParams) ([]ListUsagePaymentReopeningsRow, error) {
 	rows, err := q.db.Query(ctx, listUsagePaymentReopenings, arg.MerchantID, arg.Source)
 	if err != nil {
@@ -152,7 +152,7 @@ func (q *Queries) ListUsagePaymentReopenings(ctx context.Context, arg ListUsageP
 }
 
 const listUsagePaymentReversals = `-- name: ListUsagePaymentReversals :many
-SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, ledger_transfer_id, quantity, refund_reason, payment_method_id FROM billing.payments
+SELECT id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, invoice_id, ledger_transfer_id, quantity, refund_reason, payment_method_id FROM billing.payments
 WHERE merchant_id = $1::uuid AND refunded_payment_id = $2::uuid
   AND reversal_kind IN ('refund', 'chargeback', 'dispute_reversal') AND status = 'succeeded' AND deleted_at IS NULL
 ORDER BY created_at, id
@@ -163,7 +163,7 @@ type ListUsagePaymentReversalsParams struct {
 	PaymentID  uuid.UUID
 }
 
-// A usage order payment's settled reversals (refunds, chargebacks and won
+// A usage invoice payment's settled reversals (refunds, chargebacks and won
 // disputes), in the order they were stored.
 func (q *Queries) ListUsagePaymentReversals(ctx context.Context, arg ListUsagePaymentReversalsParams) ([]BillingPayment, error) {
 	rows, err := q.db.Query(ctx, listUsagePaymentReversals, arg.MerchantID, arg.PaymentID)
@@ -206,7 +206,7 @@ func (q *Queries) ListUsagePaymentReversals(ctx context.Context, arg ListUsagePa
 			&i.DestructiveRunClass,
 			&i.MoneyMovement,
 			&i.CreditGrantSnapshot,
-			&i.OrderID,
+			&i.InvoiceID,
 			&i.LedgerTransferID,
 			&i.Quantity,
 			&i.RefundReason,
@@ -312,7 +312,7 @@ type UsageCollectionPostedParams struct {
 	PaymentID  string
 }
 
-// Whether the general ledger applied a usage order payment's cash.
+// Whether the general ledger applied a usage invoice payment's cash.
 func (q *Queries) UsageCollectionPosted(ctx context.Context, arg UsageCollectionPostedParams) (bool, error) {
 	row := q.db.QueryRow(ctx, usageCollectionPosted, arg.MerchantID, arg.PaymentID)
 	var posted bool

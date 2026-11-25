@@ -43,7 +43,7 @@ func TestRenewalAgreements(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
 		due := *sub.CurrentPeriodEndsAt
 		intents := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
-		// A second paid agreement at the same boundary: the order's sale, twice.
+		// A second paid agreement at the same boundary: the invoice's sale, twice.
 		tag, err := a.pool.Exec(t.Context(), "INSERT INTO "+intents+` (merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status,
 			attempts, next_attempt_at, origin, origin_reason, actor, result_evidence, executed_at, psp_id, custodian_id, subject, credential)
 			SELECT merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, 'critical:second-agreement', status,
@@ -67,7 +67,7 @@ func TestRenewalAgreements(t *testing.T) {
 		require.Equal(t, due, *current.CurrentPeriodEndsAt)
 		require.Len(t, p.effects(t), 1)
 
-		// The order's sale alone renews the first period.
+		// The invoice's sale alone renews the first period.
 		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+intents+" WHERE merchant_id = $1 AND idempotency_key = 'critical:second-agreement'", a.alpha.MerchantID().UUID())
 		require.NoError(t, err)
 		// Its recheck is a minute later; the period still starts at the boundary.
@@ -100,19 +100,19 @@ func TestRenewalAgreements(t *testing.T) {
 		require.Equal(t, "collected", cycles.Items[0].Outcome)
 		require.EqualValues(t, 20_000_000, cycles.Items[0].Amount)
 
-		// Seats added mid-period change the order's agreement, not replace it.
+		// Seats added mid-period change the invoice's agreement, not replace it.
 		w, provider := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
 		team, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "team", DisplayName: "Team", Entitlements: []string{"team:member"}})
 		require.NoError(t, err)
 		seat, err := w.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: team.ID, Key: "team-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24), Quantity: &catalog.Quantity{Min: 1, Max: 5}})
 		require.NoError(t, err)
-		order := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: seat.ID, Quantity: ptr(1)}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
-			Payment: &billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-		status, raw = w.request(t, http.MethodPost, "/v1/me/orders", w.aliceToken, order, map[string]string{"Idempotency-Key": "team-purchase"})
+		invoice := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: seat.ID, Quantity: ptr(1)}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+			Payment: &billing.InvoicePaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+		status, raw = w.request(t, http.MethodPost, "/v1/me/invoices", w.aliceToken, invoice, map[string]string{"Idempotency-Key": "team-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var bought billing.Order
+		var bought billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &bought))
-		require.Equal(t, billing.OrderComplete, bought.Status, string(raw))
+		require.Equal(t, billing.InvoiceComplete, bought.Status, string(raw))
 		member, err := w.alpha.GetSubscription(t.Context(), *bought.Lines[0].SubscriptionID)
 		require.NoError(t, err)
 		w.clock.Advance(12 * time.Hour)

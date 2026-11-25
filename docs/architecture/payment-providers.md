@@ -44,7 +44,7 @@ Per rail ([provider uncertainty](../standalone.md#provider-intents) has the full
 
 - **NMI** has no idempotency key. Local refusals return `nmi.ErrNotDispatched`;
   any error after sending is ambiguous. A charge settles only from the exact
-  receipt under its order id, which every attempt for one period shares; an
+  receipt under its invoice id, which every attempt for one period shares; an
   empty search proves nothing, and NMI is never resent
   (`Store.ArmLostSubmissionResend` refuses any rail but Stripe).
 - **Stripe** requests carry an `Idempotency-Key` rooted in the operation id
@@ -59,9 +59,9 @@ Per rail ([provider uncertainty](../standalone.md#provider-intents) has the full
 
 Money-moving types include `nmi_sale`, `subscription_collection`,
 `manual_rebill`, `order_collection`, `stripe_tier_change`, `nmi_refund` and
-`solana_pull`. Provider-run renewals are orders with `collection_owner`
+`solana_pull`. Provider-run renewals are invoices with `collection_owner`
 `nmi_schedule` or `provider`, matched to accepted schedule versions
-([provider-managed orders](../client.md#orders-and-checkout)).
+([provider-managed invoices](../client.md#invoices-and-checkout)).
 
 ### Callbacks
 
@@ -171,7 +171,7 @@ parks for a person.
 
 Checks:
 - `markSubscriptionDirty` (`internal/modules/webhooks/converge.go`) only enqueues; state changes go through `ApplyDecision`.
-- OR-J28-S04 (duplicate, out-of-order) and OR-J28-S05 (callback during a fetch).
+- OR-J28-S04 (duplicate, out-of-invoice) and OR-J28-S05 (callback during a fetch).
 - OR-J15-S01, S03, S04: a missing callback repaired from the Query API, a skipped cycle collected only after proven absence, a reversed charge never recollected.
 - OR-J15-S18, S19: any other 404 fails the converge, which retries with access intact.
 
@@ -203,7 +203,7 @@ and environment. Staff routes are `MerchantConfig` with `LevelRead` or
 `LevelUpdate`; approving and dismissing proposals is `Person: true`.
 
 Checks:
-- OR-J28-S02: a missing, wrong, tampered or foreign-account signature changes no order and wakes no `openrails.provider_operation`.
+- OR-J28-S02: a missing, wrong, tampered or foreign-account signature changes no invoice and wakes no `openrails.provider_operation`.
 - OR-J28-S06, S07: another merchant's claim of an account is refused; live and test PSPs on one account get only events their own secret verifies.
 - OR-J15-S06: an unverified subscription is read with its own PSP, and a sibling account's absence cancels nothing.
 
@@ -239,7 +239,7 @@ Checks:
 
 ### 8. Abuse protection
 
-Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail body caps (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) before parsing. Unsigned, mis-signed and stale deliveries are refused and counted in `webhook_health_daily`. CCBill is accepted from its published ranges, or from `Deps.ProviderEndpoints.CCBillWebhookSources`, a test seam, only for an account proven non-live. Customer declines from charge operations feed the card-testing ledger (`Runner.recordOrderCardDecline`).
+Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail body caps (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) before parsing. Unsigned, mis-signed and stale deliveries are refused and counted in `webhook_health_daily`. CCBill is accepted from its published ranges, or from `Deps.ProviderEndpoints.CCBillWebhookSources`, a test seam, only for an account proven non-live. Customer declines from charge operations feed the card-testing ledger (`Runner.recordInvoiceCardDecline`).
 
 Checks:
 - `readLimitedWebhookBody` wraps every body in `http.MaxBytesReader` and answers 413.
@@ -269,12 +269,12 @@ Checks:
 Critical scenarios:
 
 - J06: OR-J06-S01 to S05, S09, S30, S31, S60 to S64 (`TestPSPControls`, `TestStripeWebhookDueWork`), S07 (`TestBackgroundJobs`), S08 (`TestPSPPostureExpiry`), S65 (`TestDueWork`).
-- J10: OR-J10-S01, S03, S04 (`TestPaymentReplay`), S02 (`TestCheckoutBoundaries`), S05 (`TestOrderPaymentReceipts`).
+- J10: OR-J10-S01, S03, S04 (`TestPaymentReplay`), S02 (`TestCheckoutBoundaries`), S05 (`TestInvoicePaymentReceipts`).
 - J11: OR-J11-S01, S02 (`TestProviderRecovery`), S04 (`TestUnresolvedRouting`).
 - J15: OR-J15-S01 to S04 (`TestNMIRecovery`), S06, S07 (`TestVerificationBinding`), S08 to S21 (`TestProviderTrailing`), S30 (`TestBackgroundJobs`), S70, S72 (`TestDueWork`), S71 (`TestNMIRoster`).
 - J28: OR-J28-S01 to S05, S08 (`TestCallbackContracts`), S06, S07 (`TestWebhookAccountClasses`).
 - J29: OR-J29-S01, S04 (`TestProcessRecovery`), S02, S05, S06 (`TestUnresolvedMoneyContracts`), S07, S08, S40, S41 (`TestBackgroundJobs`), S37, S70 to S73 (`TestDueWork`).
-- J37: OR-J37-S01 to S05, S63 (`TestSolanaContracts`), S07, S09, S60 to S62 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestOrderExpiryClock`).
+- J37: OR-J37-S01 to S05, S63 (`TestSolanaContracts`), S07, S09, S60 to S62 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestInvoiceExpiryClock`).
 - Elsewhere: OR-J09-S05, S06 (lost and partial NMI sales), OR-J16-S04, OR-J20-S03, S70, OR-J26-S55, OR-J31-S03, S04 (copied book, export with open work), OR-J34-S05, OR-J04-S43.
 
 Provider fakes: `nmimock`, `stripemock`, `ccbillmock`, `solanafake`. The only package tests here are `internal/reconcile/solana_discovery_test.go` and the fake's own `openrailstest/nmimock/nmimock_test.go`.

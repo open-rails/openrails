@@ -440,13 +440,13 @@ func TestPriceMigrationScale(t *testing.T) {
 		second, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: alice.ProductID, Key: "membership-day", UnitAmount: 11_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
 		require.NoError(t, err)
 		require.NotEqual(t, alice.PriceID, second.ID)
-		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: second.ID}}, ExpectedTotal: ptr(int64(11_000_000)), Reusable: ptr(true),
-			Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.bobToken, input, map[string]string{"Idempotency-Key": "bob-second-version"})
+		input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: second.ID}}, ExpectedTotal: ptr(int64(11_000_000)), Reusable: ptr(true),
+			Payment: &billing.InvoicePaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.bobToken, input, map[string]string{"Idempotency-Key": "bob-second-version"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		bob, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		bob, err := a.alpha.GetSubscription(t.Context(), *invoice.Lines[0].SubscriptionID)
 		require.NoError(t, err)
 
 		// By key: before the version they move to exists, both are counted.

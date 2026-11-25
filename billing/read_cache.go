@@ -5,7 +5,7 @@ import "time"
 // Read names a family of Client reads served from memory.
 type Read string
 
-// The cacheable reads. Customer and money reads (orders, payments,
+// The cacheable reads. Customer and money reads (invoices, payments,
 // subscriptions, entitlements, balances, customers) are never cached.
 const (
 	// ReadCatalog is GetProduct, ListProducts, GetPrice (without Verify) and

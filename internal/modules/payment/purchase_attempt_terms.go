@@ -62,7 +62,7 @@ func (s *FulfillmentService) checkPermanentOwnership(ctx context.Context, user s
 		return err
 	}
 	if owned {
-		return fmt.Errorf("%w: customer already owns this product", ErrOrderAttemptConflict)
+		return fmt.Errorf("%w: customer already owns this product", ErrInvoiceAttemptConflict)
 	}
 	return nil
 }

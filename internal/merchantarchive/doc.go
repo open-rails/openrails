@@ -5,7 +5,7 @@
 // services; a restore queues only the wakes of the operations it moves.
 //
 // Export streams a repeatable-read snapshot; Restore verifies the whole
-// bounded JSONL stream (internal/archivewire: format Version 3, a header,
+// bounded JSONL stream (internal/archivewire: format Version 4, a header,
 // ordered rows and a footer with the row count and a SHA-256 digest; 1 GiB
 // total, 8 MiB per line) and inserts it in one transaction. Merchant UUID,
 // record IDs, customer subjects, money, ledger history, catalog identities,

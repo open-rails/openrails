@@ -44,7 +44,7 @@ type Engine struct {
 	// a note; an unavailable history source is never a run error.
 	History *PGHistorySource
 
-	// RecoverUsagePayment qualifies an observed NMI receipt of a usage order
+	// RecoverUsagePayment qualifies an observed NMI receipt of a usage invoice
 	// through its canonical financial writer before the generic subscription
 	// diff. Nil leaves those receipts as visible findings.
 	RecoverUsagePayment func(context.Context, uuid.UUID, string) error

@@ -1,6 +1,6 @@
 # Subscriptions
 
-Recurring agreements between a customer and one price: start, renewal, cancel and resume, plan and seat changes. The MRR they move is [recurring revenue](mrr.md). Retries are in [dunning.md](dunning.md); the starting order is in [orders.md](orders.md); price migrations, which move subscribers to other prices at renewal, are in [catalog.md](catalog.md#moving-subscribers-to-other-prices-and-products).
+Recurring agreements between a customer and one price: start, renewal, cancel and resume, plan and seat changes. The MRR they move is [recurring revenue](mrr.md). Retries are in [dunning.md](dunning.md); the starting invoice is in [invoices.md](invoices.md); price migrations, which move subscribers to other prices at renewal, are in [catalog.md](catalog.md#moving-subscribers-to-other-prices-and-products).
 
 ## Concepts
 
@@ -26,7 +26,7 @@ proven NMI skip opens dunning; a clock alone reaches only `unverified`. Creation
 sets the first state directly (`createMembershipCore`); a trigger logs each
 status change to `subscription_status_transitions`.
 
-**Enrollment.** A customer buys a recurring price as an order line (`POST /v1/me/orders`); once paid, `orders.Service.fulfil` calls `CreateMembershipTx` with frozen `InitialMembershipTerms` and records a recurring `mandates` row; it is engine-owned unless the provider enrolled it (`orders.Charge.Enrolled`). `subscriptions_customer_id_tier_group_key` and its product twin allow one live membership per tier group. A calendar price fixes its anchor at the first payment ([billing intervals](../client.md#catalog)); trial prices are refused (`order_line_unavailable`).
+**Enrollment.** A customer buys a recurring price as an invoice line (`POST /v1/me/invoices`); once paid, `invoices.Service.fulfil` calls `CreateMembershipTx` with frozen `InitialMembershipTerms` and records a recurring `mandates` row; it is engine-owned unless the provider enrolled it (`invoices.Charge.Enrolled`). `subscriptions_customer_id_tier_group_key` and its product twin allow one live membership per tier group. A calendar price fixes its anchor at the first payment ([billing intervals](../client.md#catalog)); trial prices are refused (`invoice_line_unavailable`).
 
 **Engine renewal.** The hourly billing pass's `openrails.dunning` scan
 (`ListDueDunningMerchants`, then `ListDueDunningSubscriptions` in each
@@ -38,11 +38,11 @@ customer and subscription locks it replays an unresolved
 `EngineCollectionDue` or for a wholly elapsed period
 (`SelectEngineRenewalPeriod`); takes terms from the one paid agreement at the
 boundary (`PrepareEngineRenewalTerms`), never the catalog, with any due
-scheduled change; opens the renewal order (`orders.OpenRenewal`); and enqueues
+scheduled change; opens the renewal invoice (`invoices.OpenRenewal`); and enqueues
 the operation keyed by `SubscriptionCollectionKey`. The
-`openrails.provider_operation` job charges; payment, order and `RenewMembership`
+`openrails.provider_operation` job charges; payment, invoice and `RenewMembership`
 commit with its terminal outcome (`CommitsTerminalOutcome`). An unchargeable
-card leaves the order to the customer (`awaiting_method`). A renewal past grace
+card leaves the invoice to the customer (`awaiting_method`). A renewal past grace
 with no outcome is held, access kept by default (`access_while_renewal_held`),
 and reported as `life.renewal.held`.
 

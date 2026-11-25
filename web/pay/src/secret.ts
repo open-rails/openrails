@@ -4,18 +4,18 @@
 // a provider's page) and drops them from the address bar and history.
 import { readPaymentFragment, type PaymentFallbacks } from "@openrails/billing-ui"
 
-const storageKey = (order: string) => `openrails.payment.${order}`
+const storageKey = (invoice: string) => `openrails.payment.${invoice}`
 
-export function orderIdFromPath(path = window.location.pathname): string | null {
+export function invoiceIdFromPath(path = window.location.pathname): string | null {
   const match = /^\/pay\/(ord_[0-9a-f-]{36})\/?$/.exec(path)
   return match ? match[1] : null
 }
 
-export function takeFragment(order: string): { secret: string | null; fallbacks?: PaymentFallbacks } {
+export function takeFragment(invoice: string): { secret: string | null; fallbacks?: PaymentFallbacks } {
   const fromHash = readPaymentFragment(window.location.hash)
   if (fromHash.secret) {
     try {
-      window.sessionStorage.setItem(storageKey(order), window.location.hash)
+      window.sessionStorage.setItem(storageKey(invoice), window.location.hash)
     } catch {
       // Storage refused: this load still has the secret.
     }
@@ -23,7 +23,7 @@ export function takeFragment(order: string): { secret: string | null; fallbacks?
     return fromHash
   }
   try {
-    return readPaymentFragment(window.sessionStorage.getItem(storageKey(order)) ?? "")
+    return readPaymentFragment(window.sessionStorage.getItem(storageKey(invoice)) ?? "")
   } catch {
     return { secret: null }
   }

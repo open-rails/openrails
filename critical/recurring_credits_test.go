@@ -33,13 +33,13 @@ func recurringCredits(t *testing.T) {
 	})
 	require.NoError(t, err)
 	token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(20_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "monthly-credit-purchase"})
+	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(20_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "monthly-credit-purchase"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status)
-	require.NotNil(t, order.Lines[0].SubscriptionID)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status)
+	require.NotNil(t, invoice.Lines[0].SubscriptionID)
 	customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 	balance(t, a.alpha, customer, 25_000_000, 0, 25_000_000)
 	grants, err := a.alpha.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: customer})
@@ -51,7 +51,7 @@ func recurringCredits(t *testing.T) {
 	require.Len(t, provider.effects(t), 1)
 	require.EqualValues(t, 2000, provider.effects(t)[0].Amount, "Stripe charged $20, not the 25 service credits")
 
-	sub, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+	sub, err := a.alpha.GetSubscription(t.Context(), *invoice.Lines[0].SubscriptionID)
 	require.NoError(t, err)
 	// Existing accepted benefits survive a catalog edit before renewal.
 	_, err = a.alpha.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{
@@ -107,7 +107,7 @@ func recurringCredits(t *testing.T) {
 	require.Len(t, payments.Items, 2)
 	var renewalPayment billing.PaymentID
 	for _, payment := range payments.Items {
-		if payment.ID != *order.Payment.PaymentID {
+		if payment.ID != *invoice.Payment.PaymentID {
 			renewalPayment = payment.ID
 		}
 	}

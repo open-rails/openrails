@@ -22,12 +22,13 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// KindUsageOrders bills the due usage accounts and queues the due collections.
-const KindUsageOrders = "openrails.usage_orders"
+// KindUsageInvoices bills the due usage accounts and queues the due collections.
+// It keeps the kind, and UsageInvoiceKey its key, that queued jobs carry.
+const KindUsageInvoices = "openrails.usage_orders"
 
-// UsageOrdersInterval is the pass's cadence: how long a bill date or a due
+// UsageInvoicesInterval is the pass's cadence: how long a bill date or a due
 // collection waits. A threshold crossing queues a pass at once.
-const UsageOrdersInterval = 5 * time.Minute
+const UsageInvoicesInterval = 5 * time.Minute
 
 // usageOutstanding are a pass's states before it finishes.
 var usageOutstanding = []rivertype.JobState{
@@ -37,12 +38,12 @@ var usageOutstanding = []rivertype.JobState{
 // reopenedOwedSource is the line source of owed a chargeback reopened.
 const reopenedOwedSource = owed.ReopenedSource
 
-// UsageOrderArgs is one usage pass over every merchant: it bills the due
+// UsageInvoiceArgs is one usage pass over every merchant: it bills the due
 // accounts, then queues the due collections. Bill or Collect continues a pass
 // past a full page.
-type UsageOrderArgs struct {
+type UsageInvoiceArgs struct {
 	Bill    *UsageAccountKey `json:"bill,omitempty"`
-	Collect *UsageOrderKey   `json:"collect,omitempty"`
+	Collect *UsageInvoiceKey `json:"collect,omitempty"`
 }
 
 // UsageAccountKey is a due usage account's place in the pass.
@@ -53,19 +54,19 @@ type UsageAccountKey struct {
 	Currency   string    `json:"currency"`
 }
 
-// UsageOrderKey is a due collection's place in the pass.
-type UsageOrderKey struct {
+// UsageInvoiceKey is a due collection's place in the pass.
+type UsageInvoiceKey struct {
 	DueAt      time.Time `json:"due_at"`
 	MerchantID uuid.UUID `json:"merchant_id"`
-	OrderID    uuid.UUID `json:"order_id"`
+	InvoiceID  uuid.UUID `json:"order_id"`
 }
 
-func (UsageOrderArgs) Kind() string { return KindUsageOrders }
+func (UsageInvoiceArgs) Kind() string { return KindUsageInvoices }
 
 // InsertOpts coalesces passes, and a pass's continuations, while one is
 // outstanding. A failed pass is not retried: what it left due, the next one
 // takes.
-func (UsageOrderArgs) InsertOpts() river.InsertOpts {
+func (UsageInvoiceArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "billing", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}}
 }
 
@@ -205,7 +206,7 @@ func (s *MoneyService) requestUsageBilling(ctx context.Context, q *gen.Queries, 
 	if err = q.FlagUsageCollectionDue(ctx, gen.FlagUsageCollectionDueParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, Now: s.now()}); err != nil {
 		return err
 	}
-	_, err = s.db.InsertRiverJob(ctx, UsageOrderArgs{}, nil)
+	_, err = s.db.InsertRiverJob(ctx, UsageInvoiceArgs{}, nil)
 	return err
 }
 
@@ -309,7 +310,7 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 			}
 		}
 		// Due next at the bill date while something is pending. The check
-		// completes with the order: a failed one leaves the account due.
+		// completes with the invoice: a failed one leaves the account due.
 		var next *time.Time
 		if _, err := q.EarliestPendingOwedAccrual(ctx, gen.EarliestPendingOwedAccrualParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err == nil {
 			at := *row.UsageNextBillAt
@@ -326,7 +327,7 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 }
 
 // billPendingUsage bills the account's pending charges through now as one
-// usage order, at most what no other order claims and not below the minimum.
+// usage invoice, at most what no other invoice claims and not below the minimum.
 func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer uuid.UUID, currency string, owed int64, terms usageTerms, now time.Time) (bool, error) {
 	q := d.Gen(ctx)
 	mid, err := merchant.Require(ctx)
@@ -340,9 +341,9 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 	if err != nil {
 		return false, err
 	}
-	// Each usage order ends after the last: a close never ends where one did.
+	// Each usage invoice ends after the last: a close never ends where one did.
 	cutoff := now.Add(time.Microsecond)
-	last, err := q.LatestUsageOrderEndInCurrency(ctx, gen.LatestUsageOrderEndInCurrencyParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
+	last, err := q.LatestUsageInvoiceEndInCurrency(ctx, gen.LatestUsageInvoiceEndInCurrencyParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
 	if err != nil {
 		return false, err
 	}
@@ -360,7 +361,7 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 		// Owed a chargeback reopened is billed at once, whatever the minimum.
 		reopened = reopened || source.Source == reopenedOwedSource && source.Amount > 0
 	}
-	claimed, err := q.SumOwedOrderClaims(ctx, gen.SumOwedOrderClaimsParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
+	claimed, err := q.SumOwedInvoiceClaims(ctx, gen.SumOwedInvoiceClaimsParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
 	if err != nil {
 		return false, err
 	}
@@ -368,11 +369,11 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 	if amount <= 0 || amount < terms.minimum && !reopened {
 		return false, nil
 	}
-	order, err := s.finalizeUsageTx(ctx, d, identity.CustomerID(customer), currency, from, cutoff, now)
+	invoice, err := s.finalizeUsageTx(ctx, d, identity.CustomerID(customer), currency, from, cutoff, now)
 	if err != nil {
 		return false, fmt.Errorf("invoice usage: %w", err)
 	}
-	return order != nil, nil
+	return invoice != nil, nil
 }
 
 func (s *MoneyService) usageAdmissionCapacity(ctx context.Context, q *gen.Queries, payer identity.CustomerID, currency string, capacity AdmissionCapacity) (AdmissionCapacity, error) {

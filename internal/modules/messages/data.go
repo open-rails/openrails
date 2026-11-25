@@ -61,10 +61,10 @@ func messageData(f fact) billing.MessageData {
 			LowBalanceAmount: shown(d.LowBalanceAmount, d.Currency),
 			EndedAt:          day(d.EndedAt), EffectiveAt: day(d.EffectiveAt), PeriodStartsAt: day(d.PeriodStartsAt), PeriodEndsAt: day(d.PeriodEndsAt),
 			DueAt: day(d.DueAt), NextAttemptAt: day(d.NextAttemptAt), RunwayEndsAt: day(d.RunwayEndsAt), OverdueStartedAt: day(d.OverdueStartedAt),
-			OrderNumber: count(d.OrderNumber), OverdueOrders: count(int64(d.OverdueOrders)), Quantity: quantity(d.Quantity),
+			InvoiceNumber: count(d.InvoiceNumber), OverdueInvoices: count(int64(d.OverdueInvoices)), Quantity: quantity(d.Quantity),
 			AccessEnded: d.AccessEnded, DowngradeApplied: d.DowngradeApplied, Voided: d.Voided,
 			RetryStatus: d.RetryStatus, RecoveryAction: d.RecoveryAction, CollectionMethod: d.CollectionMethod,
-			OrderID: id(d.OrderID.IsZero(), d.OrderID.String()), PaymentID: id(d.PaymentID.IsZero(), d.PaymentID.String()),
+			InvoiceID: id(d.InvoiceID.IsZero(), d.InvoiceID.String()), PaymentID: id(d.PaymentID.IsZero(), d.PaymentID.String()),
 			RefundedPaymentID: id(d.RefundedPaymentID.IsZero(), d.RefundedPaymentID.String()),
 			SubscriptionID:    id(d.SubscriptionID.IsZero(), d.SubscriptionID.String()),
 		},
@@ -134,13 +134,13 @@ func sample(eventType string) fact {
 	amount := func(v int64) *int64 { return &v }
 	seats := 3
 	d := billing.NotificationData{Currency: "USD"}
-	order, payment := billing.OrderID(uuid.MustParse("019a0000-0000-7000-8000-000000000001")), billing.PaymentID(uuid.MustParse("019a0000-0000-7000-8000-000000000002"))
+	invoice, payment := billing.InvoiceID(uuid.MustParse("019a0000-0000-7000-8000-000000000001")), billing.PaymentID(uuid.MustParse("019a0000-0000-7000-8000-000000000002"))
 	sub := billing.SubscriptionID(uuid.MustParse("019a0000-0000-7000-8000-000000000003"))
 	switch models.NotificationEventType(eventType) {
 	case models.NotificationOneOffPurchaseCompleted, models.NotificationUsageCharged:
-		d.Amount, d.ProductName, d.PaymentID, d.OrderID, d.OrderNumber = amount(12_500_000), "Field guide", payment, order, 1001
+		d.Amount, d.ProductName, d.PaymentID, d.InvoiceID, d.InvoiceNumber = amount(12_500_000), "Field guide", payment, invoice, 1001
 	case models.NotificationRefundCompleted:
-		d.Amount, d.ProductName, d.PaymentID, d.OrderID, d.OrderNumber = amount(12_500_000), "Field guide", payment, order, 1001
+		d.Amount, d.ProductName, d.PaymentID, d.InvoiceID, d.InvoiceNumber = amount(12_500_000), "Field guide", payment, invoice, 1001
 		d.RefundedPaymentID = billing.PaymentID(uuid.MustParse("019a0000-0000-7000-8000-000000000004"))
 	case models.NotificationPremiumStarted:
 		d.SubscriptionID, d.Amount, d.PeriodStartsAt, d.PeriodEndsAt = sub, amount(9_990_000), &at, &later
@@ -157,17 +157,17 @@ func sample(eventType string) fact {
 		d.SubscriptionID = sub
 		d.RetryStatus, d.RecoveryAction = billing.NotificationRetryPaymentMethodRequired, billing.NotificationRecoveryUpdatePaymentMethod
 	case models.NotificationPaymentAuthenticationRequired:
-		d.Amount, d.ProductName, d.OrderID = amount(9_990_000), "Pro plan", order
+		d.Amount, d.ProductName, d.InvoiceID = amount(9_990_000), "Pro plan", invoice
 		d.RetryStatus, d.RecoveryAction = billing.NotificationRetryStopped, billing.NotificationRecoveryAuthenticatePayment
-	case models.NotificationOrderCollectionStopped:
-		d.OrderID, d.AmountDue, d.Reason = order, amount(30_000_000), "schedule_exhausted"
+	case models.NotificationInvoiceCollectionStopped:
+		d.InvoiceID, d.AmountDue, d.Reason = invoice, amount(30_000_000), "schedule_exhausted"
 		d.RetryStatus, d.RecoveryAction = billing.NotificationRetryStopped, billing.NotificationRecoveryUpdatePaymentMethod
 	case models.NotificationAccountDelinquent, models.NotificationAccountDelinquencyClosed:
-		d.OverdueAmount, d.OverdueOrders, d.OverdueStartedAt = amount(30_000_000), 2, &at
+		d.OverdueAmount, d.OverdueInvoices, d.OverdueStartedAt = amount(30_000_000), 2, &at
 	case models.NotificationBalanceLow, models.NotificationBalanceDepleted:
 		d.AvailableAmount, d.OwedAmount, d.LowBalanceAmount, d.RunwayEndsAt = amount(4_000_000), amount(0), amount(5_000_000), &sooner
-	case models.NotificationOrderDue, models.NotificationOrderOverdue:
-		d.OrderID, d.AmountDue, d.DueAt, d.CollectionMethod = order, amount(30_000_000), &sooner, billing.CollectSendInvoice
+	case models.NotificationInvoiceDue, models.NotificationInvoiceOverdue:
+		d.InvoiceID, d.AmountDue, d.DueAt, d.CollectionMethod = invoice, amount(30_000_000), &sooner, billing.CollectSendInvoice
 	case models.NotificationSubscriptionRepriceScheduled:
 		d.SubscriptionID, d.OldAmount, d.NewAmount, d.EffectiveAt = sub, amount(10_000_000), amount(12_000_000), &later
 	case models.NotificationSubscriptionPlanChangeScheduled:
@@ -175,7 +175,7 @@ func sample(eventType string) fact {
 	case models.NotificationSubscriptionChanged:
 		d.SubscriptionID, d.Amount, d.Quantity, d.EffectiveAt, d.ToProductName = sub, amount(5_000_000), &seats, &at, "Team plan"
 	case models.NotificationAgreementRevoked:
-		d.EffectiveAt, d.AmountDue, d.OrderID = &at, amount(3_000_000), order
+		d.EffectiveAt, d.AmountDue, d.InvoiceID = &at, amount(3_000_000), invoice
 	case models.NotificationPaymentMethodAutoUpdated:
 	}
 	return fact{

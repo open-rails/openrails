@@ -63,18 +63,18 @@ type SolanaDueSubscriptionSource func(ctx context.Context, before time.Time) (ma
 
 // SolanaLocalRecord kinds: the two record types a memo is stamped for.
 const (
-	SolanaLocalKindOrderAttempt = "order_attempt"
-	SolanaLocalKindPullIntent   = "pull_intent"
+	SolanaLocalKindInvoiceAttempt = "invoice_attempt"
+	SolanaLocalKindPullIntent     = "pull_intent"
 )
 
 // SolanaLocalRecord is what a memo local-id resolves to locally. The
-// expected* fields are the order attempt's bound quote, which the wallet
+// expected* fields are the invoice attempt's bound quote, which the wallet
 // scan verifies the on-chain transfer against (a mismatch parks the finding).
 type SolanaLocalRecord struct {
-	Kind string // SolanaLocalKindOrderAttempt | SolanaLocalKindPullIntent
+	Kind string // SolanaLocalKindInvoiceAttempt | SolanaLocalKindPullIntent
 	Rail string
 
-	// order_attempt fields.
+	// invoice_attempt fields.
 	CustomerID           uuid.UUID
 	PriceID              uuid.UUID
 	PublicPriceID        string
@@ -716,7 +716,7 @@ func classifySolanaTx(tx *solanago.Transaction) (solanaTxClass, bool) {
 	return class, class.Kind != ""
 }
 
-// wrappedSOLMint is the canonical wrapped-SOL mint; order attempts bind
+// wrappedSOLMint is the canonical wrapped-SOL mint; invoice attempts bind
 // native-SOL quotes as "" or this mint.
 const wrappedSOLMint = "So11111111111111111111111111111111111111112"
 
@@ -739,7 +739,7 @@ type solanaDiscovery struct {
 	ParkReason    string `json:"park_reason,omitempty"`
 	Kind          string `json:"kind"` // one_off | pull
 	MemoLocalID   string `json:"memo_local_id"`
-	LocalKind     string `json:"local_kind"` // order_attempt | pull_intent | none
+	LocalKind     string `json:"local_kind"` // invoice_attempt | pull_intent | none
 	CustomerID    string `json:"customer_id,omitempty"`
 	PriceID       string `json:"price_id,omitempty"`
 	PublicPriceID string `json:"public_price_id,omitempty"`
@@ -1050,25 +1050,25 @@ func (f *SolanaFetcher) verifyWalletDiscovery(ctx context.Context, c *walletScan
 	}
 
 	switch rec.Kind {
-	case SolanaLocalKindOrderAttempt:
+	case SolanaLocalKindInvoiceAttempt:
 		d.LocalKind = rec.Kind
 		switch {
 		case c.kind != solanaDiscoveryKindOneOff:
-			park("memo resolves to a order attempt but the transaction is a subscription pull")
+			park("memo resolves to a invoice attempt but the transaction is a subscription pull")
 		case rec.Rail != "" && rec.Rail != string(ProviderSolana):
-			park(fmt.Sprintf("memo resolves to a %s order attempt, not a solana one", rec.Rail))
+			park(fmt.Sprintf("memo resolves to a %s invoice attempt, not a solana one", rec.Rail))
 		case rec.ExpectedRecipient != "" && rec.ExpectedRecipient != wallet:
-			park("order attempt expects a different recipient wallet than the scanned merchant wallet")
+			park("invoice attempt expects a different recipient wallet than the scanned merchant wallet")
 		case !c.hasMoney:
-			park("memo claims a order attempt but the transaction moved no money into the wallet: " + c.moneyNote)
+			park("memo claims a invoice attempt but the transaction moved no money into the wallet: " + c.moneyNote)
 		case rec.ExpectedTokenAmount == 0:
-			park("order attempt carries no bound solana token quote to verify against")
+			park("invoice attempt carries no bound solana token quote to verify against")
 		case !sameSolanaAsset(rec.ExpectedMint, c.transfer.Mint):
 			park(fmt.Sprintf("transfer asset %s disagrees with the session's quoted mint %s", assetName(c.transfer.Mint), assetName(rec.ExpectedMint)))
 		case rec.ExpectedTokenAmount != c.transfer.BaseUnits:
 			park(fmt.Sprintf("transfer of %d base units disagrees with the session's quoted %d", c.transfer.BaseUnits, rec.ExpectedTokenAmount))
 		case rec.SettledTransactionID != "" && rec.SettledTransactionID != c.txn.TransactionID:
-			park("order attempt already settled by a different signature: " + rec.SettledTransactionID)
+			park("invoice attempt already settled by a different signature: " + rec.SettledTransactionID)
 		default:
 			d.CustomerID = rec.CustomerID.String()
 			d.PriceID = rec.PriceID.String()

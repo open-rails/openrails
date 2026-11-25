@@ -156,7 +156,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 -- name: ListCustomersBalanceCurrencies :many
 -- Every currency each customer holds a balance, settings, pending charges or
--- an unpaid usage order in: at most one row per customer and registered
+-- an unpaid usage invoice in: at most one row per customer and registered
 -- currency, which bounds row_limit.
 SELECT DISTINCT customer_id::uuid AS customer_id, currency::text AS currency
 FROM (
@@ -169,9 +169,9 @@ FROM (
     UNION ALL
     SELECT customer_id, currency FROM billing.owed_items
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
-      AND order_id IS NULL AND status = 'pending'
+      AND invoice_id IS NULL AND status = 'pending'
     UNION ALL
-    SELECT customer_id, currency FROM billing.orders
+    SELECT customer_id, currency FROM billing.invoices
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
       AND origin = 'usage' AND status IN ('open', 'processing') AND amount_paid < total
 ) currencies

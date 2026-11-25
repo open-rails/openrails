@@ -25,8 +25,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/money/books"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/stripemock"
 )
@@ -36,8 +36,8 @@ func TestRevenueRecognition(t *testing.T) {
 		start := time.Date(2026, time.June, 15, 12, 0, 0, 0, time.UTC)
 		a, provider := newPaymentWorld(t, atClock(start))
 		price := calendarPrice(t, a, "monthly", 10_000_000, 1)
-		order := buy(t, a, provider, "monthly-plan", []billing.OrderLineParams{{PriceID: price}}, 10_000_000)
-		line, payment := order.Lines[0].ID.UUID(), order.Payment.PaymentID.UUID()
+		invoice := buy(t, a, provider, "monthly-plan", []billing.InvoiceLineParams{{PriceID: price}}, 10_000_000)
+		line, payment := invoice.Lines[0].ID.UUID(), invoice.Payment.PaymentID.UUID()
 
 		var psp uuid.UUID
 		var paidAt time.Time
@@ -48,7 +48,7 @@ func TestRevenueRecognition(t *testing.T) {
 			Through: start, Next: ptr(time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC))}, sched.terms())
 		require.Equal(t, []glRow{
 			{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.String(), Debit: "cash_clearing", DebitPSP: &psp, Credit: "unapplied_cash", Amount: 10_000_000, At: paidAt},
-			{Type: "cash_applied", Operation: "application", Source: "payment", SourceID: payment.String(), Debit: "unapplied_cash", Credit: "deferred_revenue", Amount: 10_000_000, At: minTime(start, paidAt), OrderLine: &line, Schedule: &sched.ID},
+			{Type: "cash_applied", Operation: "application", Source: "payment", SourceID: payment.String(), Debit: "unapplied_cash", Credit: "deferred_revenue", Amount: 10_000_000, At: minTime(start, paidAt), InvoiceLine: &line, Schedule: &sched.ID},
 		}, glFor(t, a.world, "payment", payment.String()), "the money lands in its PSP's clearing account and waits in deferred revenue")
 
 		// Midnight on 1 July ends June: 15.5 of the period's 30 days, dated
@@ -79,8 +79,8 @@ func TestRevenueRecognition(t *testing.T) {
 		start := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 		a, provider := newPaymentWorld(t, atClock(start))
 		price := calendarPrice(t, a, "annual", 120_000_000, 12)
-		order := buy(t, a, provider, "annual-plan", []billing.OrderLineParams{{PriceID: price}}, 120_000_000)
-		line := order.Lines[0].ID.UUID()
+		invoice := buy(t, a, provider, "annual-plan", []billing.InvoiceLineParams{{PriceID: price}}, 120_000_000)
+		line := invoice.Lines[0].ID.UUID()
 		sched := scheduleOfLine(t, a.world, line)
 		require.NotNil(t, sched.Months)
 		require.EqualValues(t, 12, *sched.Months)
@@ -107,7 +107,7 @@ func TestRevenueRecognition(t *testing.T) {
 			setCfgMerchant(&w.cfg, "alpha", alpha)
 		})
 		monthly := calendarPrice(t, n, "monthly", 10_000_000, 1)
-		norder := buy(t, n, nprovider, "new-york-plan", []billing.OrderLineParams{{PriceID: monthly}}, 10_000_000)
+		norder := buy(t, n, nprovider, "new-york-plan", []billing.InvoiceLineParams{{PriceID: monthly}}, 10_000_000)
 		nline := norder.Lines[0].ID.UUID()
 		nsched := scheduleOfLine(t, n.world, nline)
 		april := time.Date(2026, time.April, 1, 0, 0, 0, 0, ny).UTC()
@@ -144,9 +144,9 @@ func TestRevenueRecognition(t *testing.T) {
 			BillingIntervalHours: ptr(720), AccessDurationHours: ptr(720), Quantity: &catalog.Quantity{Min: 1, Max: 5}})
 		require.NoError(t, err)
 
-		owned := buy(t, a, provider, "lifetime", []billing.OrderLineParams{{PriceID: lifetime}}, 25_000_000)
-		bought := buy(t, a, provider, "pass", []billing.OrderLineParams{{PriceID: pass}}, 9_000_000)
-		seats := buy(t, a, provider, "seats", []billing.OrderLineParams{{PriceID: seat.ID, Quantity: ptr(3)}}, 12_000_000)
+		owned := buy(t, a, provider, "lifetime", []billing.InvoiceLineParams{{PriceID: lifetime}}, 25_000_000)
+		bought := buy(t, a, provider, "pass", []billing.InvoiceLineParams{{PriceID: pass}}, 9_000_000)
+		seats := buy(t, a, provider, "seats", []billing.InvoiceLineParams{{PriceID: seat.ID, Quantity: ptr(3)}}, 12_000_000)
 
 		// Lifetime access is delivered at once.
 		lline := owned.Lines[0].ID.UUID()
@@ -201,7 +201,7 @@ func TestRevenueRecognition(t *testing.T) {
 			l.UnitAmount, l.Amount = amount, amount
 			return l
 		}
-		var stripeOrder uuid.UUID
+		var stripeInvoice uuid.UUID
 		for _, r := range []rebill{
 			// A Stripe invoice: 20.00 less a 2.00 provider discount plus 1.00
 			// of tax, 3.00 of it paid from the customer's Stripe balance. The
@@ -237,11 +237,11 @@ func TestRevenueRecognition(t *testing.T) {
 			require.True(t, result.Completed, r.rail)
 			payment := result.Payment.ID
 			if r.rail == "stripe" {
-				stripeOrder = result.Order.ID
+				stripeInvoice = result.Invoice.ID
 			}
 
 			// One schedule: the adjustment line has none of its own.
-			lines := orderSchedules(t, w, result.Order.ID)
+			lines := invoiceSchedules(t, w, result.Invoice.ID)
 			require.Len(t, lines, 1, r.rail)
 			sched := lines[0]
 			require.Equal(t, revenueSchedule{Method: "ratable", Account: "subscription_revenue", Funded: r.applied + r.nonCash, Recognized: r.caughtUp, Starts: start, Ends: end, Through: now,
@@ -249,15 +249,15 @@ func TestRevenueRecognition(t *testing.T) {
 			require.Equal(t, r.currency, sched.Currency)
 			want := []glRow{
 				{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.String(), Debit: "cash_clearing", DebitPSP: &psp, Credit: "unapplied_cash", Amount: r.cash, At: now},
-				{Type: "cash_applied", Operation: "application", Source: "payment", SourceID: payment.String(), Debit: "unapplied_cash", Credit: "deferred_revenue", Amount: r.applied, At: now, OrderLine: &sched.OrderLine, Schedule: &sched.ID},
+				{Type: "cash_applied", Operation: "application", Source: "payment", SourceID: payment.String(), Debit: "unapplied_cash", Credit: "deferred_revenue", Amount: r.applied, At: now, InvoiceLine: &sched.InvoiceLine, Schedule: &sched.ID},
 			}
 			require.Equal(t, want, glFor(t, w, "payment", payment.String()), r.rail)
 			var nonCash []glRow
 			if r.nonCash > 0 {
-				nonCash = []glRow{{Type: "revenue_adjusted", Operation: "application", Source: "order", SourceID: result.Order.ID.String(), Debit: "revenue_adjustments", Credit: "deferred_revenue", Amount: r.nonCash, At: now, OrderLine: &sched.OrderLine, Schedule: &sched.ID}}
+				nonCash = []glRow{{Type: "revenue_adjusted", Operation: "application", Source: "order", SourceID: result.Invoice.ID.String(), Debit: "revenue_adjustments", Credit: "deferred_revenue", Amount: r.nonCash, At: now, InvoiceLine: &sched.InvoiceLine, Schedule: &sched.ID}}
 			}
-			require.ElementsMatch(t, nonCash, glFor(t, w, "order", result.Order.ID.String()), r.rail)
-			require.Equal(t, []glRow{recognized(sched.ID, sched.OrderLine, "recognition", now, now, r.caughtUp)}, recognitions(t, w, sched.ID), "an hour of %s's period is earned at payment", r.rail)
+			require.ElementsMatch(t, nonCash, glFor(t, w, "order", result.Invoice.ID.String()), r.rail)
+			require.Equal(t, []glRow{recognized(sched.ID, sched.InvoiceLine, "recognition", now, now, r.caughtUp)}, recognitions(t, w, sched.ID), "an hour of %s's period is earned at payment", r.rail)
 			var currency string
 			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT currency FROM "+booksTable(w, "ledger_transfers")+" WHERE merchant_id=$1 AND book='general' AND operation='cash' AND source='payment' AND source_id=$2", mid, payment.String()).Scan(&currency))
 			require.Equal(t, r.currency, currency, "each PSP clears in its own currency")
@@ -269,7 +269,7 @@ func TestRevenueRecognition(t *testing.T) {
 		require.Equal(t, "1000000", findings.Items[0].Evidence["amount"])
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 
-		// Settled by a person, the finding stays settled when the order is
+		// Settled by a person, the finding stays settled when the invoice is
 		// replayed.
 		_, err = w.pool.Exec(t.Context(), "UPDATE "+booksTable(w, "reconciliation_findings")+" SET status='fixed', resolution='auto_vanished', resolved_at=now() WHERE merchant_id=$1 AND finding_type='books.adjustment.unapplied'", mid)
 		require.NoError(t, err)
@@ -277,7 +277,7 @@ func TestRevenueRecognition(t *testing.T) {
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), w.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return books.Replay(ctx, database.NewWithPgxTx(tx), stripeOrder)
+			return books.Replay(ctx, database.NewWithPgxTx(tx), stripeInvoice)
 		}))
 		findings, err = w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.adjustment.unapplied", Status: "fixed"})
 		require.NoError(t, err)
@@ -295,9 +295,9 @@ func TestRevenueRecognition(t *testing.T) {
 		seat, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: team.ID, Key: "team-day", UnitAmount: 10_000_000, Currency: "USD",
 			BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24), Quantity: &catalog.Quantity{Min: 1, Max: 5}})
 		require.NoError(t, err)
-		order := buy(t, a, provider, "team", []billing.OrderLineParams{{PriceID: seat.ID, Quantity: ptr(1)}}, 10_000_000)
-		sub := *order.Lines[0].SubscriptionID
-		first := scheduleOfLine(t, a.world, order.Lines[0].ID.UUID())
+		invoice := buy(t, a, provider, "team", []billing.InvoiceLineParams{{PriceID: seat.ID, Quantity: ptr(1)}}, 10_000_000)
+		sub := *invoice.Lines[0].SubscriptionID
+		first := scheduleOfLine(t, a.world, invoice.Lines[0].ID.UUID())
 
 		// Two more seats half way through the day: 2 × 10.00 × 12/24.
 		accepted := start.Add(12 * time.Hour)
@@ -322,16 +322,16 @@ func TestRevenueRecognition(t *testing.T) {
 		fleet := startFleet(t, a.world)
 		end := start.Add(24 * time.Hour)
 		passAt(t, a, fleet, end.Add(30*time.Minute))
-		require.Equal(t, []glRow{recognized(adjustment.ID, adjustment.OrderLine, "recognition", end, end.Add(-time.Microsecond), 10_000_000)}, recognitions(t, a.world, adjustment.ID))
-		require.Equal(t, []glRow{recognized(first.ID, first.OrderLine, "recognition", end, end.Add(-time.Microsecond), 10_000_000)}, recognitions(t, a.world, first.ID))
+		require.Equal(t, []glRow{recognized(adjustment.ID, adjustment.InvoiceLine, "recognition", end, end.Add(-time.Microsecond), 10_000_000)}, recognitions(t, a.world, adjustment.ID))
+		require.Equal(t, []glRow{recognized(first.ID, first.InvoiceLine, "recognition", end, end.Add(-time.Microsecond), 10_000_000)}, recognitions(t, a.world, first.ID))
 	})
 
 	t.Run("OR-J41-S06/an-idle-pass-locks-no-schedule-and-a-replayed-boundary-posts-once", func(t *testing.T) {
 		start := time.Date(2026, time.June, 15, 12, 0, 0, 0, time.UTC)
 		a, provider := newPaymentWorld(t, atClock(start))
 		price := calendarPrice(t, a, "monthly", 10_000_000, 1)
-		order := buy(t, a, provider, "monthly-plan", []billing.OrderLineParams{{PriceID: price}}, 10_000_000)
-		line := order.Lines[0].ID.UUID()
+		invoice := buy(t, a, provider, "monthly-plan", []billing.InvoiceLineParams{{PriceID: price}}, 10_000_000)
+		line := invoice.Lines[0].ID.UUID()
 		sched := scheduleOfLine(t, a.world, line)
 		fleet := startFleet(t, a.world)
 
@@ -352,13 +352,13 @@ func TestRevenueRecognition(t *testing.T) {
 		want := []glRow{recognized(sched.ID, line, "recognition", july, july.Add(-time.Microsecond), 5_166_666)}
 		require.Equal(t, want, recognitions(t, a.world, sched.ID))
 
-		// The rebuild's replay of the order posts nothing again.
+		// The rebuild's replay of the invoice posts nothing again.
 		count = scheduleLegCount(t, a.world)
 		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return books.Replay(ctx, database.NewWithPgxTx(tx), order.ID.UUID())
+			return books.Replay(ctx, database.NewWithPgxTx(tx), invoice.ID.UUID())
 		}))
 		require.Equal(t, count, scheduleLegCount(t, a.world))
 		require.Equal(t, want, recognitions(t, a.world, sched.ID))
@@ -368,10 +368,10 @@ func TestRevenueRecognition(t *testing.T) {
 	t.Run("OR-J41-S07/an-external-payment-books-to-external-receipts-and-a-payment-beyond-the-bill-stays-unapplied", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		order := unpaidSale(t, a, p, customer, "external-order")
-		payment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "bank-receipt-0001"})
+		invoice := unpaidSale(t, a, p, customer, "external-invoice")
+		payment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: "bank-receipt-0001"})
 		require.NoError(t, err)
-		line := order.Lines[0].ID.UUID()
+		line := invoice.Lines[0].ID.UUID()
 		sched := scheduleOfLine(t, a.world, line)
 		require.Equal(t, "point_in_time", sched.Method)
 		var paidAt time.Time
@@ -388,7 +388,7 @@ func TestRevenueRecognition(t *testing.T) {
 		// A provider bill paid twice: the second capture is beyond it.
 		var psp uuid.UUID
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(a.world, "psps")+" WHERE merchant_id=$1 AND rail='stripe'", a.alpha.MerchantID().UUID()).Scan(&psp))
-		sale := order.Lines[0]
+		sale := invoice.Lines[0]
 		salePrice := priceUUID(t, a.world, sale.ProductID.UUID())
 		now := a.clock.Now().UTC().Truncate(time.Microsecond)
 		bill := func(transaction string) observed.Bill {
@@ -439,7 +439,7 @@ func TestRevenueRecognition(t *testing.T) {
 		a.clock.Advance(canceled.Sub(a.clock.Now()))
 		_, err := a.alpha.CancelSubscription(t.Context(), sub.ID, billing.CancelSubscriptionParams{Reason: "Ended by the merchant", RevokeAccess: true})
 		require.NoError(t, err)
-		ended := scheduleOfLine(t, a.world, sched.OrderLine)
+		ended := scheduleOfLine(t, a.world, sched.InvoiceLine)
 		require.Equal(t, &canceled, ended.EndedAt)
 		require.Equal(t, &canceled, ended.Next, "an early end makes the schedule due")
 		require.Empty(t, recognitions(t, a.world, sched.ID), "nothing is recognised inline")
@@ -447,15 +447,15 @@ func TestRevenueRecognition(t *testing.T) {
 		fleet := startFleet(t, a.world)
 		passAt(t, a, fleet, canceled.Add(time.Hour))
 		require.Equal(t, []glRow{
-			recognized(sched.ID, sched.OrderLine, "recognition", canceled, canceled.Add(-time.Microsecond), 2_500_000),
-			recognized(sched.ID, sched.OrderLine, "termination", canceled, canceled.Add(-time.Microsecond), 7_500_000),
+			recognized(sched.ID, sched.InvoiceLine, "recognition", canceled, canceled.Add(-time.Microsecond), 2_500_000),
+			recognized(sched.ID, sched.InvoiceLine, "termination", canceled, canceled.Add(-time.Microsecond), 7_500_000),
 		}, recognitions(t, a.world, sched.ID), "six hours earned, the rest forfeited")
-		done := scheduleOfLine(t, a.world, sched.OrderLine)
+		done := scheduleOfLine(t, a.world, sched.InvoiceLine)
 		require.EqualValues(t, 10_000_000, done.Recognized)
 		require.Nil(t, done.Next)
 	})
 
-	t.Run("OR-J41-S09/a-usage-orders-payment-books-its-cash-and-applies-it-to-the-receivable", func(t *testing.T) {
+	t.Run("OR-J41-S09/a-usage-invoices-payment-books-its-cash-and-applies-it-to-the-receivable", func(t *testing.T) {
 		for _, collection := range []string{"card", "remittance"} {
 			t.Run(collection, func(t *testing.T) {
 				a, _, customer := usageBillingWorld(t, collection == "remittance")
@@ -467,19 +467,19 @@ func TestRevenueRecognition(t *testing.T) {
 					postUsageMonth(t, a.world, fleet)
 				}
 				runUsageDue(t, fleet)
-				order := oneUsageOrder(t, a, customer)
+				invoice := oneUsageInvoice(t, a, customer)
 				if collection == "remittance" {
-					require.Equal(t, billing.OrderOpen, order.Status)
-					_, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "bank-usage-receipt"})
+					require.Equal(t, billing.InvoiceOpen, invoice.Status)
+					_, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: "bank-usage-receipt"})
 					require.NoError(t, err)
 				} else {
-					require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderComplete }, 15*time.Second, 20*time.Millisecond)
+					require.Eventually(t, func() bool { return oneUsageInvoice(t, a, customer).Status == billing.InvoiceComplete }, 15*time.Second, 20*time.Millisecond)
 				}
 				var payment uuid.UUID
 				var psp *uuid.UUID
 				var paidAt time.Time
-				require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id, psp_id, purchased_at FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND order_id=$2",
-					a.alpha.MerchantID().UUID(), order.ID.UUID()).Scan(&payment, &psp, &paidAt))
+				require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id, psp_id, purchased_at FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND invoice_id=$2",
+					a.alpha.MerchantID().UUID(), invoice.ID.UUID()).Scan(&payment, &psp, &paidAt))
 				debit := "cash_clearing"
 				if collection == "remittance" {
 					debit = "external_receipts"
@@ -488,7 +488,7 @@ func TestRevenueRecognition(t *testing.T) {
 					{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.String(), Debit: debit, DebitPSP: psp, Credit: "unapplied_cash", Amount: 30_000_000, At: paidAt.UTC()},
 					{Type: "usage_collected", Operation: "usage_collection", Source: "payment", SourceID: payment.String(), Debit: "unapplied_cash", Credit: "usage_receivable", Amount: 30_000_000, At: paidAt.UTC()},
 				}, glFor(t, a.world, "payment", payment.String()), "the money is booked once and applied to the receivable, to no line")
-				require.Empty(t, orderSchedules(t, a.world, order.ID.UUID()))
+				require.Empty(t, invoiceSchedules(t, a.world, invoice.ID.UUID()))
 				require.Zero(t, unappliedCash(t, a.world, "USD"), "it settles the usage receivable")
 				require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", "id:"+a.alpha.MerchantID().String()), "Ledger integrity OK")
 			})
@@ -499,8 +499,8 @@ func TestRevenueRecognition(t *testing.T) {
 		start := time.Date(2026, time.May, 10, 10, 0, 0, 0, time.UTC)
 		a, provider := newPaymentWorld(t, atClock(start))
 		pass := oneOffPrice(t, a, "pass", 9_000_000, ptr(720))
-		order := buy(t, a, provider, "pass", []billing.OrderLineParams{{PriceID: pass}}, 9_000_000)
-		line, access := order.Lines[0].ID.UUID(), *order.Lines[0].ProductAccessID
+		invoice := buy(t, a, provider, "pass", []billing.InvoiceLineParams{{PriceID: pass}}, 9_000_000)
+		line, access := invoice.Lines[0].ID.UUID(), *invoice.Lines[0].ProductAccessID
 		sched := scheduleOfLine(t, a.world, line)
 		june := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
 		require.Equal(t, &june, sched.Next)
@@ -549,7 +549,7 @@ func TestRevenueRecognition(t *testing.T) {
 		passAt(t, a, fleet, june.Add(time.Hour))
 		reinstated := func(gen int, at time.Time) glRow {
 			return glRow{Type: "revenue_recognized", Operation: "reinstatement", Source: "revenue_schedule", SourceID: sched.ID.String() + "@" + revoked.Format(time.RFC3339Nano) + "#" + strconv.Itoa(gen),
-				Debit: "one_time_revenue", Amount: 7_500_000, At: at, OrderLine: &line, Schedule: &sched.ID}
+				Debit: "one_time_revenue", Amount: 7_500_000, At: at, InvoiceLine: &line, Schedule: &sched.ID}
 		}
 		require.Equal(t, []glRow{earned, forfeited, reinstated(1, undone.Add(time.Hour)), inGeneration(forfeited, 1), reinstated(2, undone.Add(3*time.Hour)),
 			recognized(sched.ID, line, "recognition", june, june.Add(-time.Microsecond), 4_975_000)}, recognitions(t, a.world, sched.ID))
@@ -558,7 +558,7 @@ func TestRevenueRecognition(t *testing.T) {
 		require.EqualValues(t, 2, done.Reinstatements)
 	})
 
-	t.Run("OR-J41-S11/a-late-payment-on-an-order-another-holds-stays-unapplied", func(t *testing.T) {
+	t.Run("OR-J41-S11/a-late-payment-on-an-invoice-another-holds-stays-unapplied", func(t *testing.T) {
 		a, provider := newPaymentWorld(t, func(w *world) {
 			w.clock.Advance(-30 * 24 * time.Hour)
 			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillWebhookSources: []string{"127.0.0.1/32"}}
@@ -574,10 +574,10 @@ func TestRevenueRecognition(t *testing.T) {
 		_, err = a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "member-ccbill", PSP: "ccbill", FlexID: "critical-flex",
 			Currency: "USD", UnitAmount: ptr(int64(10_000_000)), BillingIntervalHours: ptr(720)})
 		require.NoError(t, err)
-		lines := []billing.OrderLineParams{{PriceID: price.ID}}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders/preview", a.aliceToken, billing.PreviewMyOrderParams{Lines: lines})
+		lines := []billing.InvoiceLineParams{{PriceID: price.ID}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/preview", a.aliceToken, billing.PreviewMyInvoiceParams{Lines: lines})
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var preview billing.OrderPreview
+		var preview billing.InvoicePreview
 		require.NoError(t, json.Unmarshal(raw, &preview))
 		var page billing.PSPID
 		for _, option := range preview.PaymentOptions {
@@ -587,25 +587,25 @@ func TestRevenueRecognition(t *testing.T) {
 		}
 		require.False(t, page.IsZero(), string(raw))
 
-		// Alice opens the CCBill page and leaves; the order expires and she
+		// Alice opens the CCBill page and leaves; the invoice expires and she
 		// buys the membership by card in another.
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
-			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, billing.CreateMyInvoiceParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
+			Payment: &billing.InvoicePaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var abandoned billing.Order
+		var abandoned billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &abandoned))
 		link, err := url.Parse(*abandoned.Payment.NextAction.URL)
 		require.NoError(t, err)
 		a.clock.Advance(25 * time.Hour)
 		fleet := startFleet(t, a.world)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		expired, err := a.alpha.GetOrder(t.Context(), abandoned.ID)
+		expired, err := a.alpha.GetInvoice(t.Context(), abandoned.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderExpired, expired.Status)
+		require.Equal(t, billing.InvoiceExpired, expired.Status)
 		card := buy(t, a, provider, "card-instead", lines, 10_000_000)
 
 		// The page is completed after all: the money lands on the expired
-		// order, whose membership the card's order holds. It is kept for
+		// invoice, whose membership the card's invoice holds. It is kept for
 		// refund and applied to nothing.
 		sale := map[string]any{"subscriptionId": "0778899001122334466", "transactionId": "0812233445566778831", "reservationId": link.Query().Get("reservationId"),
 			"flexId": "critical-flex", "username": a.alice.Username, "billedInitialPrice": "10.00", "billedRecurringPrice": "10.00", "billedCurrencyCode": "840",
@@ -619,16 +619,16 @@ func TestRevenueRecognition(t *testing.T) {
 			a.alpha.MerchantID().UUID()).Scan(&late, &ccbill, &paidAt))
 		require.Equal(t, []glRow{{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: late.String(), Debit: "cash_clearing", DebitPSP: &ccbill, Credit: "unapplied_cash", Amount: 10_000_000, At: paidAt.UTC()}},
 			glFor(t, a.world, "payment", late.String()))
-		require.Empty(t, orderSchedules(t, a.world, abandoned.ID.UUID()))
-		require.Len(t, orderSchedules(t, a.world, card.ID.UUID()), 1)
+		require.Empty(t, invoiceSchedules(t, a.world, abandoned.ID.UUID()))
+		require.Len(t, invoiceSchedules(t, a.world, card.ID.UUID()), 1)
 		require.EqualValues(t, 10_000_000, unappliedCash(t, a.world, "USD"), "the late payment waits for its refund")
-		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.order.late_payment"})
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.invoice.late_payment"})
 		require.NoError(t, err)
 		require.Len(t, findings.Items, 1)
 		require.Equal(t, late.String(), findings.Items[0].SubjectKey)
 	})
 
-	t.Run("OR-J41-S12/a-purchase-is-applied-over-the-access-its-grant-gives-and-a-replay-applies-an-order-with-no-schedule", func(t *testing.T) {
+	t.Run("OR-J41-S12/a-purchase-is-applied-over-the-access-its-grant-gives-and-a-replay-applies-an-invoice-with-no-schedule", func(t *testing.T) {
 		start := time.Date(2026, time.July, 6, 9, 0, 0, 0, time.UTC)
 		a, _ := newPaymentWorld(t, atClock(start))
 		oneOffPrice(t, a, "pass", 9_000_000, ptr(720))
@@ -652,12 +652,12 @@ func TestRevenueRecognition(t *testing.T) {
 				Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now},
 			Settled: true, SettlementSource: "cash"}, now)
 		require.True(t, paid.Completed)
-		require.Empty(t, orderSchedules(t, a.world, paid.Order.ID), "no access yet, no service to recognise over")
+		require.Empty(t, invoiceSchedules(t, a.world, paid.Invoice.ID), "no access yet, no service to recognise over")
 		require.EqualValues(t, 10_000_000, unappliedCash(t, a.world, "USD"))
 		tax, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.adjustment.unapplied"})
 		require.NoError(t, err)
 		require.Len(t, tax.Items, 1)
-		require.Equal(t, "order:"+paid.Order.ID.String(), tax.Items[0].SubjectKey)
+		require.Equal(t, "order:"+paid.Invoice.ID.String(), tax.Items[0].SubjectKey)
 		unapplied := func(status billing.FindingStatus) []billing.Finding {
 			t.Helper()
 			found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.line.unapplied", Status: status})
@@ -672,17 +672,17 @@ func TestRevenueRecognition(t *testing.T) {
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return books.ApplyOrder(ctx, database.NewWithPgxTx(tx), paid.Order.ID, nil)
+			return books.ApplyInvoice(ctx, database.NewWithPgxTx(tx), paid.Invoice.ID, nil)
 		}))
 		pending := unapplied("")
 		require.Len(t, pending, 1)
-		lines, err := a.alpha.GetOrder(t.Context(), billing.OrderID(paid.Order.ID))
+		lines, err := a.alpha.GetInvoice(t.Context(), billing.InvoiceID(paid.Invoice.ID))
 		require.NoError(t, err)
 		require.Equal(t, "order_line:"+lines.Lines[0].ID.UUID().String(), pending[0].SubjectKey)
 		audit := "id:" + a.alpha.MerchantID().String()
 		output, err := hostCLIResult(t, a.world, "ledger-audit", "--merchant", audit)
 		require.Error(t, err)
-		require.Contains(t, output, "unscheduled line: order="+paid.Order.ID.String())
+		require.Contains(t, output, "unscheduled line: invoice="+paid.Invoice.ID.String())
 
 		// Its grant stacks after ten days the customer already holds.
 		from, until := now.Add(240*time.Hour), now.Add(960*time.Hour)
@@ -692,11 +692,11 @@ func TestRevenueRecognition(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, granted)
 
-		// The rebuild's replay applies the order now: over the window granted.
+		// The rebuild's replay applies the invoice now: over the window granted.
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return books.Replay(ctx, database.NewWithPgxTx(tx), paid.Order.ID)
+			return books.Replay(ctx, database.NewWithPgxTx(tx), paid.Invoice.ID)
 		}))
-		schedules := orderSchedules(t, a.world, paid.Order.ID)
+		schedules := invoiceSchedules(t, a.world, paid.Invoice.ID)
 		require.Len(t, schedules, 1)
 		sched := schedules[0]
 		require.Equal(t, granted.ID, *sched.ProductAccess)
@@ -708,10 +708,10 @@ func TestRevenueRecognition(t *testing.T) {
 
 		// Revoked before it began: forfeited whole at its start.
 		require.NoError(t, a.alpha.RevokeProductAccess(t.Context(), billing.ProductAccessID(granted.ID), billing.RevokeProductAccessParams{Reason: "Ended by the merchant"}))
-		require.Equal(t, &from, scheduleOfLine(t, a.world, sched.OrderLine).EndedAt)
+		require.Equal(t, &from, scheduleOfLine(t, a.world, sched.InvoiceLine).EndedAt)
 		fleet := startFleet(t, a.world)
 		passAt(t, a, fleet, from.Add(time.Hour))
-		require.Equal(t, []glRow{recognized(sched.ID, sched.OrderLine, "termination", from, from.Add(-time.Microsecond), 9_000_000)}, recognitions(t, a.world, sched.ID))
+		require.Equal(t, []glRow{recognized(sched.ID, sched.InvoiceLine, "termination", from, from.Add(-time.Microsecond), 9_000_000)}, recognitions(t, a.world, sched.ID))
 	})
 
 	t.Run("OR-J41-S13/a-prune-that-hides-booked-money-or-a-recognising-subscription-raises-a-finding-its-undo-resolves", func(t *testing.T) {
@@ -743,7 +743,7 @@ func TestRevenueRecognition(t *testing.T) {
 			Payment: &models.Payment{CustomerID: customer, SubscriptionID: &sub, Rail: models.RailStripe, TransactionID: "ch_pruned_renewal", Amount: 10_000_000, ListAmount: 10_000_000,
 				Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now},
 			Settled: true, SettlementSource: "cash"}, now)
-		require.Len(t, orderSchedules(t, w, renewed.Order.ID), 1)
+		require.Len(t, invoiceSchedules(t, w, renewed.Invoice.ID), 1)
 
 		// The provider's complete record lacks both charges and the
 		// subscription.
@@ -806,13 +806,13 @@ func TestRevenueRecognition(t *testing.T) {
 				Currency: "USD", Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now},
 			Settled: true, SettlementSource: "cash"}, now)
 		require.True(t, bill.Completed)
-		schedules := orderSchedules(t, w, bill.Order.ID)
+		schedules := invoiceSchedules(t, w, bill.Invoice.ID)
 		require.Len(t, schedules, 1)
 		sched := schedules[0]
 		require.Equal(t, &start, sched.EndedAt, "the end before the schedule reaches it")
 		require.Nil(t, sched.Next)
 		require.Equal(t, []glRow{{Type: "revenue_recognized", Operation: "termination", Source: "revenue_schedule", SourceID: sched.ID.String() + "@" + now.Format(time.RFC3339Nano) + "#0",
-			Debit: "deferred_revenue", Amount: 10_000_000, At: now, OrderLine: &sched.OrderLine, Schedule: &sched.ID}}, recognitions(t, w, sched.ID))
+			Debit: "deferred_revenue", Amount: 10_000_000, At: now, InvoiceLine: &sched.InvoiceLine, Schedule: &sched.ID}}, recognitions(t, w, sched.ID))
 		after, err := w.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "pull.charge.after_cancellation"})
 		require.NoError(t, err)
 		require.Len(t, after.Items, 1, "and the charge is a person's to refund")
@@ -822,10 +822,10 @@ func TestRevenueRecognition(t *testing.T) {
 		w := newWorld(t)
 		audit := "id:" + w.alpha.MerchantID().String()
 		customer := uuid.New()
-		// An order completed two days before the merchant's books started,
+		// An invoice completed two days before the merchant's books started,
 		// from before OpenRails kept them.
 		before := time.Now().Add(-48 * time.Hour)
-		legacy, legacyLine := rawOrder(t, w, customer, "USD", &before, rawLine{amount: 10_000_000})
+		legacy, legacyLine := rawInvoice(t, w, customer, "USD", &before, rawLine{amount: 10_000_000})
 
 		// The books start: a provider's sale, its tax unapplied.
 		product, err := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sale", DisplayName: "Sale", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"sale:owned"}})
@@ -842,25 +842,25 @@ func TestRevenueRecognition(t *testing.T) {
 				Status: "succeeded", MoneyMovement: models.MoneyMovementRail, PurchasedAt: now},
 			Settled: true, SettlementSource: "cash"}, now)
 		require.True(t, sold.Completed)
-		require.Len(t, orderSchedules(t, w, sold.Order.ID), 1)
-		// An order priced in the merchant's own unit: the books keep no unit.
-		gems, _ := rawOrder(t, w, customer, "GEMS", nil, rawLine{amount: 500})
+		require.Len(t, invoiceSchedules(t, w, sold.Invoice.ID), 1)
+		// An invoice priced in the merchant's own unit: the books keep no unit.
+		gems, _ := rawInvoice(t, w, customer, "GEMS", nil, rawLine{amount: 500})
 
 		output := hostCLI(t, w, "ledger-audit", "--merchant", audit)
 		require.Contains(t, output, "Ledger integrity OK")
-		require.Contains(t, output, "unscheduled line: order="+legacy.String()+" line="+legacyLine.String()+" amount=10.00 USD completed before the books started, awaiting their rebuild (warning)")
-		require.Contains(t, output, "unapplied adjustment: order="+sold.Order.ID.String())
+		require.Contains(t, output, "unscheduled line: invoice="+legacy.String()+" line="+legacyLine.String()+" amount=10.00 USD completed before the books started, awaiting their rebuild (warning)")
+		require.Contains(t, output, "unapplied adjustment: invoice="+sold.Invoice.ID.String())
 		require.NotContains(t, output, gems.String())
 
 		// A line completed since the books started has no excuse.
-		late, lateLine := rawOrder(t, w, customer, "USD", nil, rawLine{amount: 7_000_000})
+		late, lateLine := rawInvoice(t, w, customer, "USD", nil, rawLine{amount: 7_000_000})
 		output, err = hostCLIResult(t, w, "ledger-audit", "--merchant", audit)
 		require.Error(t, err)
-		require.Contains(t, output, "unscheduled line: order="+late.String()+" line="+lateLine.String()+" amount=7.00 USD; ", "a failure, before the warnings")
+		require.Contains(t, output, "unscheduled line: invoice="+late.String()+" line="+lateLine.String()+" amount=7.00 USD; ", "a failure, before the warnings")
 		require.Contains(t, output, "completed before the books started")
 	})
 
-	t.Run("OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-order-is-applied-again", func(t *testing.T) {
+	t.Run("OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-invoice-is-applied-again", func(t *testing.T) {
 		start := time.Date(2026, time.July, 6, 9, 0, 0, 0, time.UTC)
 		a, _ := newPaymentWorld(t, atClock(start))
 		pass, passProduct := catalogLine(t, a, "pass", 22_000_000, ptr(720))
@@ -870,31 +870,31 @@ func TestRevenueRecognition(t *testing.T) {
 
 		// A bill of 36.00 that 20.00 in two payments paid: its sale is applied
 		// at once, its pass waits for its access.
-		order, _ := rawOrder(t, a.world, customer, "USD", &now, rawLine{price: &pass, product: &passProduct, amount: 22_000_000, accessHours: ptr(720)},
+		invoice, _ := rawInvoice(t, a.world, customer, "USD", &now, rawLine{price: &pass, product: &passProduct, amount: 22_000_000, accessHours: ptr(720)},
 			rawLine{price: &sale, product: &saleProduct, amount: 14_000_000})
-		own := rawReceipt(t, a.world, customer, order, 5_000_000, now.Add(-2*time.Hour))
-		_, err := a.pool.Exec(t.Context(), "UPDATE "+booksTable(a.world, "orders")+" SET payment_id=$3 WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), order, own)
+		own := rawReceipt(t, a.world, customer, invoice, 5_000_000, now.Add(-2*time.Hour))
+		_, err := a.pool.Exec(t.Context(), "UPDATE "+booksTable(a.world, "invoices")+" SET payment_id=$3 WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), invoice, own)
 		require.NoError(t, err)
-		other := rawReceipt(t, a.world, customer, order, 15_000_000, now.Add(-time.Hour))
+		other := rawReceipt(t, a.world, customer, invoice, 15_000_000, now.Add(-time.Hour))
 		database, err := db.NewWithPGXPool(slog.Default(), a.pool, a.schema)
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return books.ApplyRecorded(ctx, database.NewWithPgxTx(tx), order)
+			return books.ApplyRecorded(ctx, database.NewWithPgxTx(tx), invoice)
 		}))
-		require.Len(t, orderSchedules(t, a.world, order), 1)
+		require.Len(t, invoiceSchedules(t, a.world, invoice), 1)
 
 		// A payment reported late sorts between the two; the access is
-		// granted, and the order is applied again.
-		late := rawReceipt(t, a.world, customer, order, 12_500_000, now.Add(-90*time.Minute))
+		// granted, and the invoice is applied again.
+		late := rawReceipt(t, a.world, customer, invoice, 12_500_000, now.Add(-90*time.Minute))
 		until := now.Add(720 * time.Hour)
 		_, err = entitlements.NewEntitlementService(database, a.clock).PushAccess(ctx, entitlements.PushAccessParams{UserID: customer.String(), CustomerID: customer, ProductID: passProduct,
 			NotBefore: &now, EndsAt: &until, SourceType: models.AccessSourcePurchase, SourceID: own.String(), PaymentID: &own})
 		require.NoError(t, err)
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return books.ApplyOrder(ctx, database.NewWithPgxTx(tx), order, nil)
+			return books.ApplyInvoice(ctx, database.NewWithPgxTx(tx), invoice, nil)
 		}))
-		schedules := orderSchedules(t, a.world, order)
+		schedules := invoiceSchedules(t, a.world, invoice)
 		require.Len(t, schedules, 2)
 		require.EqualValues(t, 7_777_779, schedules[0].Funded, "the sale had what the two payments brought")
 		require.EqualValues(t, 22_000_000, schedules[1].Funded)
@@ -925,7 +925,7 @@ func TestRevenueRecognition(t *testing.T) {
 		paid := start.Add(-240 * time.Hour)
 		imported, err := a.alpha.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: a.clock.Now(), DefaultPSP: billing.PSPRef{Key: "stripe"}, Customers: []billing.DeclaredCustomer{{Customer: customer}},
 			Purchases: []billing.DeclaredPurchase{{SourceID: "imported-pass", Customer: customer, Rail: "stripe", TransactionID: "ch_imported_pass", Currency: "USD", Amount: 9_000_000, PaidAt: paid,
-				Lines: []billing.DeclaredOrderLine{{Price: pass, Quantity: ptr(1), UnitAmount: 9_000_000}}}}})
+				Lines: []billing.DeclaredInvoiceLine{{Price: pass, Quantity: ptr(1), UnitAmount: 9_000_000}}}}})
 		require.NoError(t, err)
 		require.Empty(t, imported.Blocked)
 
@@ -954,7 +954,7 @@ func catalogLine(t *testing.T, a *authorityWorld, key string, amount int64, hour
 	return priceUUID(t, a.world, product), product
 }
 
-// rawLine is a line of a rawOrder: a catalog line when it names a price, else
+// rawLine is a line of a rawInvoice: a catalog line when it names a price, else
 // a provider's line.
 type rawLine struct {
 	price, product *uuid.UUID
@@ -962,22 +962,22 @@ type rawLine struct {
 	accessHours    *int
 }
 
-// rawOrder is a completed order as stored data, written by no writer: made
-// and completed at made (the database's now when nil). It returns the order
+// rawInvoice is a completed invoice as stored data, written by no writer: made
+// and completed at made (the database's now when nil). It returns the invoice
 // and its first line.
-func rawOrder(t *testing.T, w *world, customer uuid.UUID, currency string, made *time.Time, lines ...rawLine) (order, first uuid.UUID) {
+func rawInvoice(t *testing.T, w *world, customer uuid.UUID, currency string, made *time.Time, lines ...rawLine) (invoice, first uuid.UUID) {
 	t.Helper()
 	mid := w.alpha.MerchantID().UUID()
-	order = uuid.New()
+	invoice = uuid.New()
 	var total int64
 	for _, l := range lines {
 		total += l.amount
 	}
 	_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "customers")+" (merchant_id, id) VALUES ($1, $2) ON CONFLICT DO NOTHING", mid, customer)
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "orders")+" (merchant_id, id, customer_id, origin, status, currency, total, number, payment_status, collection_owner, completed_at, created_at, updated_at)"+
-		" VALUES ($1, $2, $3, 'customer', 'complete', $4, $5, (SELECT COALESCE(max(number), 0) + 1000 FROM "+booksTable(w, "orders")+" WHERE merchant_id = $1), 'succeeded', 'provider',"+
-		" COALESCE($6::timestamptz, now()), COALESCE($6::timestamptz, now()), COALESCE($6::timestamptz, now()))", mid, order, customer, currency, total, made)
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "invoices")+" (merchant_id, id, customer_id, origin, status, currency, total, number, payment_status, collection_owner, completed_at, created_at, updated_at)"+
+		" VALUES ($1, $2, $3, 'customer', 'complete', $4, $5, (SELECT COALESCE(max(number), 0) + 1000 FROM "+booksTable(w, "invoices")+" WHERE merchant_id = $1), 'succeeded', 'provider',"+
+		" COALESCE($6::timestamptz, now()), COALESCE($6::timestamptz, now()), COALESCE($6::timestamptz, now()))", mid, invoice, customer, currency, total, made)
 	require.NoError(t, err)
 	for i, l := range lines {
 		id := uuid.New()
@@ -990,20 +990,20 @@ func rawOrder(t *testing.T, w *world, customer uuid.UUID, currency string, made 
 		} else {
 			ownership = ptr("consumable")
 		}
-		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "order_lines")+" (merchant_id, id, order_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, access_duration_hours, source)"+
-			" VALUES ($1, $2, $3, $4, $5, $6, $7, 'Fixture line', 1, $8, $8, $9, $10, $11)", mid, id, order, customer, i, l.price, l.product, l.amount, ownership, l.accessHours, source)
+		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "invoice_lines")+" (merchant_id, id, invoice_id, customer_id, position, price_id, product_id, description, quantity, unit_amount, amount, ownership, access_duration_hours, source)"+
+			" VALUES ($1, $2, $3, $4, $5, $6, $7, 'Fixture line', 1, $8, $8, $9, $10, $11)", mid, id, invoice, customer, i, l.price, l.product, l.amount, ownership, l.accessHours, source)
 		require.NoError(t, err)
 	}
-	return order, first
+	return invoice, first
 }
 
-// rawReceipt is a payment received outside OpenRails toward an order, as
+// rawReceipt is a payment received outside OpenRails toward an invoice, as
 // stored data.
-func rawReceipt(t *testing.T, w *world, customer, order uuid.UUID, amount int64, at time.Time) uuid.UUID {
+func rawReceipt(t *testing.T, w *world, customer, invoice uuid.UUID, amount int64, at time.Time) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "payments")+" (merchant_id, id, customer_id, order_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at)"+
-		" VALUES ($1, $2, $3, $4, 'manual', $5, $6, $6, 'USD', 'succeeded', $7)", w.alpha.MerchantID().UUID(), id, customer, order, "receipt-"+id.String(), amount, at)
+	_, err := w.pool.Exec(t.Context(), "INSERT INTO "+booksTable(w, "payments")+" (merchant_id, id, customer_id, invoice_id, channel, transaction_id, amount, list_amount, currency, status, purchased_at)"+
+		" VALUES ($1, $2, $3, $4, 'manual', $5, $6, $6, 'USD', 'succeeded', $7)", w.alpha.MerchantID().UUID(), id, customer, invoice, "receipt-"+id.String(), amount, at)
 	require.NoError(t, err)
 	return id
 }
@@ -1042,17 +1042,17 @@ func oneOffPrice(t *testing.T, a *authorityWorld, key string, amount int64, hour
 }
 
 // buy is alice paying for lines with a new card she keeps.
-func buy(t *testing.T, a *authorityWorld, provider *providerLedger, key string, lines []billing.OrderLineParams, total int64) billing.Order {
+func buy(t *testing.T, a *authorityWorld, provider *providerLedger, key string, lines []billing.InvoiceLineParams, total int64) billing.Invoice {
 	t.Helper()
-	input := billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(total), Reusable: ptr(true),
-		Payment: &billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+	input := billing.CreateMyInvoiceParams{Lines: lines, ExpectedTotal: ptr(total), Reusable: ptr(true),
+		Payment: &billing.InvoicePaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status, string(raw))
-	require.NotNil(t, order.Payment.PaymentID)
-	return order
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status, string(raw))
+	require.NotNil(t, invoice.Payment.PaymentID)
+	return invoice
 }
 
 // glRow is one general-ledger transfer as the books keep it.
@@ -1063,14 +1063,14 @@ type glRow struct {
 	Credit                            string
 	Amount                            int64
 	At                                time.Time
-	OrderLine, Schedule               *uuid.UUID
+	InvoiceLine, Schedule             *uuid.UUID
 }
 
 // recognized is one of a schedule's recognitions; a termination is in its
 // first generation.
 func recognized(schedule, line uuid.UUID, op string, at, dated time.Time, amount int64) glRow {
 	r := glRow{Type: "revenue_recognized", Operation: op, Source: "revenue_schedule", SourceID: schedule.String() + "@" + at.UTC().Format(time.RFC3339Nano),
-		Debit: "deferred_revenue", Credit: "", Amount: amount, At: dated.UTC(), OrderLine: &line, Schedule: &schedule}
+		Debit: "deferred_revenue", Credit: "", Amount: amount, At: dated.UTC(), InvoiceLine: &line, Schedule: &schedule}
 	if op == "termination" {
 		r.SourceID += "#0"
 	}
@@ -1085,14 +1085,14 @@ func inGeneration(r glRow, n int) glRow {
 
 func glQuery(t *testing.T, w *world, where string, args ...any) []glRow {
 	t.Helper()
-	rows, err := w.pool.Query(t.Context(), "SELECT t.transfer_type, t.operation, t.source, t.source_id, d.account_type, d.psp_id, c.account_type, t.amount, t.effective_at, t.order_line_id, t.revenue_schedule_id FROM "+
+	rows, err := w.pool.Query(t.Context(), "SELECT t.transfer_type, t.operation, t.source, t.source_id, d.account_type, d.psp_id, c.account_type, t.amount, t.effective_at, t.invoice_line_id, t.revenue_schedule_id FROM "+
 		booksTable(w, "ledger_transfers")+" t JOIN "+booksTable(w, "ledger_accounts")+" d ON d.merchant_id=t.merchant_id AND d.id=t.debit_account_id JOIN "+
 		booksTable(w, "ledger_accounts")+" c ON c.merchant_id=t.merchant_id AND c.id=t.credit_account_id WHERE t.merchant_id=$1 AND t.book='general' AND "+where+" ORDER BY t.id",
 		append([]any{w.alpha.MerchantID().UUID()}, args...)...)
 	require.NoError(t, err)
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (glRow, error) {
 		var r glRow
-		err := row.Scan(&r.Type, &r.Operation, &r.Source, &r.SourceID, &r.Debit, &r.DebitPSP, &r.Credit, &r.Amount, &r.At, &r.OrderLine, &r.Schedule)
+		err := row.Scan(&r.Type, &r.Operation, &r.Source, &r.SourceID, &r.Debit, &r.DebitPSP, &r.Credit, &r.Amount, &r.At, &r.InvoiceLine, &r.Schedule)
 		r.At = r.At.UTC()
 		return r, err
 	})
@@ -1151,19 +1151,19 @@ type revenueSchedule struct {
 }
 
 type revenueScheduleRow struct {
-	ID, OrderLine  uuid.UUID
-	Currency       string
-	ProductAccess  *uuid.UUID
-	Method         string
-	Account        string
-	Funded         int64
-	Recognized     int64
-	Starts, Ends   time.Time
-	Months         *int32
-	EndedAt        *time.Time
-	Through        time.Time
-	Next           *time.Time
-	Reinstatements int32
+	ID, InvoiceLine uuid.UUID
+	Currency        string
+	ProductAccess   *uuid.UUID
+	Method          string
+	Account         string
+	Funded          int64
+	Recognized      int64
+	Starts, Ends    time.Time
+	Months          *int32
+	EndedAt         *time.Time
+	Through         time.Time
+	Next            *time.Time
+	Reinstatements  int32
 }
 
 func (r revenueScheduleRow) terms() revenueSchedule {
@@ -1172,12 +1172,12 @@ func (r revenueScheduleRow) terms() revenueSchedule {
 
 func schedulesWhere(t *testing.T, w *world, where string, arg any) []revenueScheduleRow {
 	t.Helper()
-	rows, err := w.pool.Query(t.Context(), "SELECT id, order_line_id, currency, product_access_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements FROM "+
+	rows, err := w.pool.Query(t.Context(), "SELECT id, invoice_line_id, currency, product_access_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements FROM "+
 		booksTable(w, "revenue_schedules")+" WHERE merchant_id=$1 AND "+where+" ORDER BY created_at, id", w.alpha.MerchantID().UUID(), arg)
 	require.NoError(t, err)
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (revenueScheduleRow, error) {
 		var r revenueScheduleRow
-		err := row.Scan(&r.ID, &r.OrderLine, &r.Currency, &r.ProductAccess, &r.Method, &r.Account, &r.Funded, &r.Recognized, &r.Starts, &r.Ends, &r.Months, &r.EndedAt, &r.Through, &r.Next, &r.Reinstatements)
+		err := row.Scan(&r.ID, &r.InvoiceLine, &r.Currency, &r.ProductAccess, &r.Method, &r.Account, &r.Funded, &r.Recognized, &r.Starts, &r.Ends, &r.Months, &r.EndedAt, &r.Through, &r.Next, &r.Reinstatements)
 		r.Starts, r.Ends, r.Through = r.Starts.UTC(), r.Ends.UTC(), r.Through.UTC()
 		r.EndedAt, r.Next = utcPtr(r.EndedAt), utcPtr(r.Next)
 		return r, err
@@ -1188,14 +1188,14 @@ func schedulesWhere(t *testing.T, w *world, where string, arg any) []revenueSche
 
 func scheduleOfLine(t *testing.T, w *world, line uuid.UUID) revenueScheduleRow {
 	t.Helper()
-	out := schedulesWhere(t, w, "order_line_id=$2", line)
+	out := schedulesWhere(t, w, "invoice_line_id=$2", line)
 	require.Len(t, out, 1, "one schedule per paid line")
 	return out[0]
 }
 
-func orderSchedules(t *testing.T, w *world, order uuid.UUID) []revenueScheduleRow {
+func invoiceSchedules(t *testing.T, w *world, invoice uuid.UUID) []revenueScheduleRow {
 	t.Helper()
-	return schedulesWhere(t, w, "order_id=$2", order)
+	return schedulesWhere(t, w, "invoice_id=$2", invoice)
 }
 
 func subscriptionSchedules(t *testing.T, w *world, sub uuid.UUID) []revenueScheduleRow {

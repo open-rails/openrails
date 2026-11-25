@@ -162,14 +162,14 @@ func mrrPlan(t *testing.T, client *openrails.Client, key string, price billing.C
 func buyMRRPlan(t *testing.T, a *authorityWorld, provider *providerLedger, price billing.PriceID, total int64, key string) *billing.Subscription {
 	t.Helper()
 	token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(total), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}, ExpectedTotal: ptr(total), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status, string(raw))
-	require.NotNil(t, order.Lines[0].SubscriptionID)
-	sub, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status, string(raw))
+	require.NotNil(t, invoice.Lines[0].SubscriptionID)
+	sub, err := a.alpha.GetSubscription(t.Context(), *invoice.Lines[0].SubscriptionID)
 	require.NoError(t, err)
 	return sub
 }

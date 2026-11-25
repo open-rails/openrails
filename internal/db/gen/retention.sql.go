@@ -28,25 +28,25 @@ func (q *Queries) DeclareRetentionSweep(ctx context.Context, tableName string) e
 	return err
 }
 
-const deleteAbandonedOrderAttemptsBefore = `-- name: DeleteAbandonedOrderAttemptsBefore :execrows
-DELETE FROM billing.order_attempts
+const deleteAbandonedInvoiceAttemptsBefore = `-- name: DeleteAbandonedInvoiceAttemptsBefore :execrows
+DELETE FROM billing.invoice_attempts
 WHERE merchant_id = $1::uuid
   AND deleted_at IS NULL
   AND id IN (
-    SELECT ca.id FROM billing.order_attempts ca
+    SELECT ca.id FROM billing.invoice_attempts ca
     WHERE ca.merchant_id = $1::uuid
       AND ca.status = 'expired' AND ca.deleted_at IS NULL
       AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
       AND ca.expires_at < $2::timestamptz
-      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.order_attempt_id = ca.id)
-      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.order_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.invoice_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.invoice_attempt_id = ca.id)
       AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'order_attempt_id' AND pi.payload->>'order_attempt_id' = ca.id::text)
     ORDER BY ca.expires_at
     LIMIT $3::int
 )
 `
 
-type DeleteAbandonedOrderAttemptsBeforeParams struct {
+type DeleteAbandonedInvoiceAttemptsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
 	RowLimit   int32
@@ -57,8 +57,8 @@ type DeleteAbandonedOrderAttemptsBeforeParams struct {
 // reference or receipt names it. Its checkout session, if one still exists,
 // goes with it. A soft-deleted attempt belongs to a destructive run that can
 // still be undone, and is left to it.
-func (q *Queries) DeleteAbandonedOrderAttemptsBefore(ctx context.Context, arg DeleteAbandonedOrderAttemptsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAbandonedOrderAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+func (q *Queries) DeleteAbandonedInvoiceAttemptsBefore(ctx context.Context, arg DeleteAbandonedInvoiceAttemptsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAbandonedInvoiceAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -461,18 +461,18 @@ FROM (
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT ca.merchant_id AS mid
-       FROM billing.order_attempts ca
+       FROM billing.invoice_attempts ca
       WHERE ($1::uuid IS NULL OR ca.merchant_id > $1::uuid)
         AND ca.status = 'expired' AND ca.deleted_at IS NULL
         AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
         AND ca.expires_at < $7::timestamptz
-        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.order_attempt_id = ca.id)
-        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.order_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.invoice_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.invoice_attempt_id = ca.id)
         AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'order_attempt_id' AND pi.payload->>'order_attempt_id' = ca.id::text)
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT o.merchant_id AS mid
-       FROM billing.orders o
+       FROM billing.invoices o
       WHERE ($1::uuid IS NULL OR o.merchant_id > $1::uuid)
         AND o.collection_owner = 'engine' AND o.status IN ('canceled', 'expired') AND o.payment_id IS NULL AND o.attempt_id IS NULL
         AND COALESCE(o.canceled_at, o.expired_at) < $8::timestamptz
@@ -541,21 +541,21 @@ LIMIT $3::int
 `
 
 type ListRetentionWorkMerchantsParams struct {
-	After               *uuid.UUID
-	WebhookCutoff       time.Time
-	MerchantLimit       int32
-	OutboxCutoff        time.Time
-	AttemptCutoff       time.Time
-	TransitionCutoff    time.Time
-	OrderAttemptCutoff  time.Time
-	UnpaidOrderCutoff   time.Time
-	CounterCutoff       time.Time
-	FindingCutoff       time.Time
-	ProviderWriteCutoff time.Time
-	ParkCutoff          time.Time
-	LimitWindowCutoff   time.Time
-	ReplayCutoff        time.Time
-	MessageCutoff       time.Time
+	After                *uuid.UUID
+	WebhookCutoff        time.Time
+	MerchantLimit        int32
+	OutboxCutoff         time.Time
+	AttemptCutoff        time.Time
+	TransitionCutoff     time.Time
+	InvoiceAttemptCutoff time.Time
+	UnpaidInvoiceCutoff  time.Time
+	CounterCutoff        time.Time
+	FindingCutoff        time.Time
+	ProviderWriteCutoff  time.Time
+	ParkCutoff           time.Time
+	LimitWindowCutoff    time.Time
+	ReplayCutoff         time.Time
+	MessageCutoff        time.Time
 }
 
 // Retention sweep: due-work discovery.
@@ -570,8 +570,8 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.OutboxCutoff,
 		arg.AttemptCutoff,
 		arg.TransitionCutoff,
-		arg.OrderAttemptCutoff,
-		arg.UnpaidOrderCutoff,
+		arg.InvoiceAttemptCutoff,
+		arg.UnpaidInvoiceCutoff,
 		arg.CounterCutoff,
 		arg.FindingCutoff,
 		arg.ProviderWriteCutoff,

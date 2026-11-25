@@ -167,7 +167,7 @@ type ApplyProduct struct {
 	Ownership    Field[Ownership] `json:"ownership,omitzero"`
 	Entitlements Field[[]string]  `json:"entitlements,omitzero"`
 	// RequiredEntitlements are the keys a customer must already hold to
-	// order the product.
+	// invoice the product.
 	RequiredEntitlements Field[[]string]        `json:"required_entitlements,omitzero"`
 	CreditGrant          Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
 	// Prices are OpenRails' own: it vaults the card and runs the billing.

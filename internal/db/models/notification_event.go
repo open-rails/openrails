@@ -2,6 +2,8 @@ package models
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,7 +26,7 @@ const (
 	NotificationPaymentMethodAutoUpdated    NotificationEventType = "payment_method_auto_updated"
 	NotificationPaymentMethodUpdateRequired NotificationEventType = "payment_method_update_required"
 	// The bank asks the customer to authenticate a renewal's payment: its
-	// order (data.order_id) awaits them.
+	// invoice (data.invoice_id) awaits them.
 	NotificationPaymentAuthenticationRequired NotificationEventType = "payment_authentication_required"
 
 	// One-off payment notifications
@@ -32,13 +34,13 @@ const (
 
 	// A refund of the customer's payment settled: its receipt (data.amount
 	// refunded, payment_id the refund, refunded_payment_id the charge, the
-	// order and what it bought). One per refund.
+	// invoice and what it bought). One per refund.
 	NotificationRefundCompleted NotificationEventType = "refund_completed"
 
-	// A usage order's collection stopped: nothing is canceled and the debt
+	// A usage invoice's collection stopped: nothing is canceled and the debt
 	// stands. data.reason is schedule_exhausted (we gave up) or non_recoverable
 	// (the issuer withdrew the mandate).
-	NotificationOrderCollectionStopped NotificationEventType = "order_collection_stopped"
+	NotificationInvoiceCollectionStopped NotificationEventType = "invoice_collection_stopped"
 
 	// Arrears delinquency: the debt outlived the merchant's grace window.
 	// Nothing is canceled or withdrawn; OpenRails refuses new spend and tells
@@ -47,11 +49,11 @@ const (
 	NotificationAccountDelinquencyClosed NotificationEventType = "account_delinquency_cleared"
 
 	// The customer revoked its agreement to be charged for usage in a
-	// currency (data.currency, effective_at; amount_due and order_id: what it
+	// currency (data.currency, effective_at; amount_due and invoice_id: what it
 	// still owes, which it pays itself).
 	NotificationAgreementRevoked NotificationEventType = "agreement_revoked"
-	// A usage order charged under the customer's collection agreement: its
-	// receipt (data.order_id, amount, currency, payment_id).
+	// A usage invoice charged under the customer's collection agreement: its
+	// receipt (data.invoice_id, amount, currency, payment_id).
 	NotificationUsageCharged NotificationEventType = "usage_charged"
 
 	// A watched balance went under its low line, or its capacity reached
@@ -60,9 +62,9 @@ const (
 	NotificationBalanceLow      NotificationEventType = "balance_low"
 	NotificationBalanceDepleted NotificationEventType = "balance_depleted"
 
-	// A usage order with an amount due, and one past its due date.
-	NotificationOrderDue     NotificationEventType = "order_due"
-	NotificationOrderOverdue NotificationEventType = "order_overdue"
+	// A usage invoice with an amount due, and one past its due date.
+	NotificationInvoiceDue     NotificationEventType = "invoice_due"
+	NotificationInvoiceOverdue NotificationEventType = "invoice_overdue"
 
 	// Fired when a subscription reprice is scheduled, not applied: the
 	// card-network-required advance notice of a recurring amount change.
@@ -88,3 +90,66 @@ type NotificationEvent struct {
 }
 
 func (n *NotificationEvent) DataJSONB() ([]byte, error) { return json.Marshal(n.Data) }
+
+// Facts recorded before invoices were named keep their type and data keys: the
+// rows are immutable, so readers rename them.
+var (
+	legacyNotificationTypes = map[string]NotificationEventType{
+		"order_due": NotificationInvoiceDue, "order_overdue": NotificationInvoiceOverdue, "order_collection_stopped": NotificationInvoiceCollectionStopped,
+	}
+	legacyNotificationKeys = map[string]string{"order_id": "invoice_id", "order_number": "invoice_number", "overdue_orders": "overdue_invoices"}
+)
+
+// NotificationType is a stored fact's type as it is named now.
+func NotificationType(stored string) NotificationEventType {
+	if t, ok := legacyNotificationTypes[stored]; ok {
+		return t
+	}
+	return NotificationEventType(stored)
+}
+
+// StoredNotificationTypes are the spellings facts of these types are stored
+// under, earlier ones included.
+func StoredNotificationTypes(types ...NotificationEventType) []string {
+	out := make([]string, 0, len(types))
+	for _, t := range types {
+		out = append(out, string(t))
+	}
+	for stored, t := range legacyNotificationTypes {
+		if slices.Contains(types, t) {
+			out = append(out, stored)
+		}
+	}
+	return out
+}
+
+// DecodeNotificationData reads a stored fact's data, renaming the keys of one
+// recorded before invoices were named (an order_id is ord_ prefixed).
+func DecodeNotificationData(raw []byte, into *billing.NotificationData) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	renamed := false
+	for stored, key := range legacyNotificationKeys {
+		v, ok := fields[stored]
+		if !ok {
+			continue
+		}
+		var id string
+		if stored == "order_id" && json.Unmarshal(v, &id) == nil {
+			if rest, ok := strings.CutPrefix(id, "ord_"); ok {
+				v, _ = json.Marshal("in_" + rest)
+			}
+		}
+		delete(fields, stored)
+		fields[key], renamed = v, true
+	}
+	if renamed {
+		var err error
+		if raw, err = json.Marshal(fields); err != nil {
+			return err
+		}
+	}
+	return json.Unmarshal(raw, into)
+}

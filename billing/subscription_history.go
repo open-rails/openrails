@@ -67,7 +67,7 @@ type SubscriptionHistoryAttempt struct {
 	Amount          int64            `json:"amount,string"`
 	Currency        catalog.Currency `json:"currency"`
 	PSPID           PSPID            `json:"psp_id"`
-	OrderID         *OrderID         `json:"order_id,omitempty"`
+	InvoiceID       *InvoiceID       `json:"invoice_id,omitempty"`
 	PaymentID       *PaymentID       `json:"payment_id,omitempty"`
 	RenewalID       *RenewalID       `json:"renewal_id,omitempty"`
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`

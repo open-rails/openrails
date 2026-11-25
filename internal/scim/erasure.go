@@ -145,7 +145,7 @@ func RunErasure(ctx context.Context, d *db.DB, a *destructive.Admissions, action
 		if err := q.EraseCustomerMessages(ctx, gen.EraseCustomerMessagesParams{MerchantID: action.MerchantID, CustomerID: user}); err != nil {
 			return err
 		}
-		if err := q.EraseCustomerOrderAttribution(ctx, gen.EraseCustomerOrderAttributionParams{MerchantID: action.MerchantID, CustomerID: user}); err != nil {
+		if err := q.EraseCustomerInvoiceAttribution(ctx, gen.EraseCustomerInvoiceAttributionParams{MerchantID: action.MerchantID, CustomerID: user}); err != nil {
 			return err
 		}
 		if err := eraseUsage(ctx, q, action.MerchantID, user); err != nil {

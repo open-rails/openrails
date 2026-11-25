@@ -114,7 +114,7 @@ type ProviderRefreshWorker struct {
 	// Verifier reads the unverified NMI rows; nil leaves them to the
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
-	// Positive usage-order recovery does not authorize provider or lifecycle writes.
+	// Positive usage-invoice recovery does not authorize provider or lifecycle writes.
 	RecoverUsagePayment func(context.Context, uuid.UUID, string) error
 	// Disputes records the dispute cases each pull reads.
 	Disputes reconcile.DisputeRecorder

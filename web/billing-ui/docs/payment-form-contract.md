@@ -1,14 +1,14 @@
 # Payment form contract
 
-`OrderPayment` renders one real `<form autocomplete="on">` and submits through
+`InvoicePayment` renders one real `<form autocomplete="on">` and submits through
 its native submit event. Every host-owned billing field has a stable `id`,
 `name`, label, and standards-based autocomplete token.
 
 ## Money
 
-An order (`GET /billing/v1/me/orders/{id}`) carries every amount as an exact
+An invoice (`GET /billing/v1/me/invoices/{id}`) carries every amount as an exact
 int64 decimal string of its `currency`'s native unit: `total`, each line's
-`unit_amount` and `amount`, and a usage order's `amount_paid` and
+`unit_amount` and `amount`, and a usage invoice's `amount_paid` and
 `amount_due`. A JSON number, a decimal point or a value outside int64 fails
 schema validation; the package never assumes a scale. It takes the scale from
 OpenRails' currency registry (`catalog.ParseCurrency` and `Currency.Units()`, the `currencies` of
@@ -38,7 +38,7 @@ autofill against the real gateway in each supported browser because a DOM unit
 test cannot inspect or control the cross-origin fields.
 
 A PSP that takes cards on OpenRails itself (`card_entry: server`) takes no
-card on an order: `OrderPayment` offers it for saved cards only, and the card
+card on an invoice: `InvoicePayment` offers it for saved cards only, and the card
 is saved first (`SavePaymentMethod`).
 
 A new-card payment sends the one-time `token` and its `psp_id` plus
@@ -52,20 +52,20 @@ projects the one name onto provider-specific fields at the rail boundary.
 
 ## Card subscriptions
 
-Subscribing is one action: paying the order with a `token` (or a
+Subscribing is one action: paying the invoice with a `token` (or a
 `payment_method_id`) charges and saves a new card and starts the subscription.
-A decline answers `402` with the order open again and keeps no card.
+A decline answers `402` with the invoice open again and keeps no card.
 
 ## Solana Pay
 
-A Solana payment option takes a token from `GET /v1/me/config`'s `payment.solana.tokens`; the pay sends its `token_symbol`. The order answers a `solana_pay` next action whose `url` the package shows as a QR code and a wallet link. OpenRails watches the chain itself: the package reads the order every 3 seconds until the transfer lands, and confirms it every 30, well under the `purchase` limit; an older read never replaces a newer one. Each open tab polls on its own, so two tabs confirm four times a minute, still under the limit.
+A Solana payment option takes a token from `GET /v1/me/config`'s `payment.solana.tokens`; the pay sends its `token_symbol`. The invoice answers a `solana_pay` next action whose `url` the package shows as a QR code and a wallet link. OpenRails watches the chain itself: the package reads the invoice every 3 seconds until the transfer lands, and confirms it every 30, well under the `purchase` limit; an older read never replaces a newer one. Each open tab polls on its own, so two tabs confirm four times a minute, still under the limit.
 
 ## Pending payment outcomes
 
 `processing` means an accepted outcome is unresolved; `onSettled` reports it,
-and the host waits for the verified terminal state (the order read again, or
+and the host waits for the verified terminal state (the invoice read again, or
 its host event) rather than inferring payment from navigation or a timeout.
-Each payment sends one Idempotency-Key, minted when the button renders and kept until the payment has an answer: a retry of the same request answers what the first did. A pay whose answer is lost (network, `5xx`, or `idempotency_key_in_use`, `idempotency_key_reused`, `order_payment_in_progress`) is read back with `getOrderPaymentAttempt` under its key: an attempt it took is answered from the order, one that ended mints a new key, and none keeps the key for the retry. A decline, a refusal before any attempt, or a failed bank challenge shows its message, and the next pay is a new payment under a new key; a challenge that passed but whose confirmation was lost keeps the key and reads the order again.
+Each payment sends one Idempotency-Key, minted when the button renders and kept until the payment has an answer: a retry of the same request answers what the first did. A pay whose answer is lost (network, `5xx`, or `idempotency_key_in_use`, `idempotency_key_reused`, `invoice_payment_in_progress`) is read back with `getInvoicePaymentAttempt` under its key: an attempt it took is answered from the invoice, one that ended mints a new key, and none keeps the key for the retry. A decline, a refusal before any attempt, or a failed bank challenge shows its message, and the next pay is a new payment under a new key; a challenge that passed but whose confirmation was lost keeps the key and reads the invoice again.
 
 ## Separate NMI card setup
 

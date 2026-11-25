@@ -78,6 +78,15 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invalid_query` | 400 | `invalid_request_error` | A query parameter is malformed or out of range; param is the parameter. |
 | `invalid_request_body` | 400 | `invalid_request_error` | The request body could not be read or is not one JSON value. |
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
+| `invoice_action_not_allowed` | 409 | `invalid_request_error` | The invoice's origin or status does not allow this action. |
+| `invoice_attempt_closed` | 409 | `invalid_request_error` | The invoice attempt already completed or was canceled. |
+| `invoice_attempt_expired` | 410 | `invalid_request_error` | The invoice attempt expired before it was paid. |
+| `invoice_has_recurring_line` | 409 | `invalid_request_error` | An invoice with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid. |
+| `invoice_line_unavailable` | 422 | `invalid_request_error` | A line cannot be bought; param names it and metadata.code says why. |
+| `invoice_not_cancelable` | 409 | `invalid_request_error` | Only an open invoice, or one awaiting the customer's action, can be canceled. |
+| `invoice_not_payable` | 409 | `invalid_request_error` | The invoice takes no payment: it is paid, canceled or expired. |
+| `invoice_payment_in_progress` | 409 | `invalid_request_error` | A payment on this invoice is unresolved; read the invoice. |
+| `invoice_total_changed` | 409 | `invalid_request_error` | The invoice's total is not expected_total; preview it again. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
 | `lease_not_found` | 404 | `invalid_request_error` | No lease of the merchant has this id, which is older than the replay horizon; start a new lease. |
 | `limit_not_found` | 404 | `invalid_request_error` | The catalog declares no limit under this key. |
@@ -91,21 +100,12 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `meter_rate_card_conflict` | 409 | `invalid_request_error` | The meter and its rate card disagree. |
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |
 | `metrics_query_invalid` | 400 | `invalid_request_error` | The metrics query is invalid; metadata.errors lists why. |
-| `order_action_not_allowed` | 409 | `invalid_request_error` | The order's origin or status does not allow this action. |
-| `order_attempt_closed` | 409 | `invalid_request_error` | The order attempt already completed or was canceled. |
-| `order_attempt_expired` | 410 | `invalid_request_error` | The order attempt expired before it was paid. |
-| `order_has_recurring_line` | 409 | `invalid_request_error` | An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid. |
-| `order_line_unavailable` | 422 | `invalid_request_error` | A line cannot be bought; param names it and metadata.code says why. |
-| `order_not_cancelable` | 409 | `invalid_request_error` | Only an open order, or one awaiting the customer's action, can be canceled. |
-| `order_not_payable` | 409 | `invalid_request_error` | The order takes no payment: it is paid, canceled or expired. |
-| `order_payment_in_progress` | 409 | `invalid_request_error` | A payment on this order is unresolved; read the order. |
-| `order_total_changed` | 409 | `invalid_request_error` | The order's total is not expected_total; preview it again. |
-| `pay_url_attempts_exhausted` | 409 | `invalid_request_error` | The pay URL took its most card attempts; the merchant creates a new order. |
-| `pay_url_expired` | 410 | `invalid_request_error` | The pay URL expired; the merchant creates a new order. |
+| `pay_url_attempts_exhausted` | 409 | `invalid_request_error` | The pay URL took its most card attempts; the merchant creates a new invoice. |
+| `pay_url_expired` | 410 | `invalid_request_error` | The pay URL expired; the merchant creates a new invoice. |
 | `pay_url_not_found` | 404 | `invalid_request_error` | The pay URL is unknown or no longer valid. |
-| `pay_url_unavailable` | 400 | `invalid_request_error` | This deployment serves no checkout origin, or the order cannot take a pay URL. |
+| `pay_url_unavailable` | 400 | `invalid_request_error` | This deployment serves no checkout origin, or the invoice cannot take a pay URL. |
 | `payment_duplicate_refused` | 409 | `invalid_request_error` | The provider refused an identical charge it had just made; retry after its duplicate window. |
-| `payment_exceeds_due` | 409 | `invalid_request_error` | The recorded payment exceeds what the usage order has due, or is not the order's total. |
+| `payment_exceeds_due` | 409 | `invalid_request_error` | The recorded payment exceeds what the usage invoice has due, or is not the invoice's total. |
 | `payment_failed` | 402 | `card_error` | The payment was not made. |
 | `payment_idempotency_conflict` | 409 | `invalid_request_error` | The idempotency key belongs to another payment request. |
 | `payment_in_progress` | 409 | `invalid_request_error` | A payment is already unresolved; read the resource before retrying. |
@@ -122,7 +122,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_not_found` | 404 | `invalid_request_error` | The payment does not exist. |
 | `payment_not_refundable` | 400 | `invalid_request_error` | The payment is not a completed rail charge, or the amount exceeds what remains refundable. |
 | `payment_not_retryable` | 409 | `invalid_request_error` | The resource is not payable now. |
-| `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the order's lines accepts this payment. |
+| `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the invoice's lines accepts this payment. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
 | `person_required` | 403 | `authorization_error` | Only a person signed in, or the embedding host in process, may take this action; an API key or service token may not. |

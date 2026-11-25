@@ -1,0 +1,173 @@
+package riverjobs
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
+	"github.com/riverqueue/river"
+
+	"github.com/open-rails/openrails/billing"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/controls"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/modules/money"
+)
+
+// usagePage bounds one job's due accounts, and its due collections; a full
+// page continues in a new job.
+const usagePage = 200
+
+// UsageInvoiceWorker is the usage pass across merchants: it bills the usage
+// accounts that are due (money_settings.usage_due_at), then queues the usage
+// invoices whose next charge is due (invoices.next_collection_attempt_at) as
+// order_collection operations, which their own jobs charge. Both reads are
+// indexed on the due instant, so an idle pass reads no row. A merchant's
+// collection waits while its write posture is below full. A failed account or invoice stays due and fails the
+// job once the others are done.
+type UsageInvoiceWorker struct {
+	WorkerDefaults[money.UsageInvoiceArgs]
+	DB     *db.DB
+	Money  *money.MoneyService
+	Config *billing.Config
+	Clock  clockwork.Clock
+	Log    *slog.Logger
+}
+
+func (UsageInvoiceWorker) Kind() string { return money.KindUsageInvoices }
+
+func (w UsageInvoiceWorker) now() time.Time {
+	if w.Clock != nil {
+		return w.Clock.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// DueBy reports a usage account the pass would bill, or a collection it would
+// queue, at at.
+func (w UsageInvoiceWorker) DueBy(ctx context.Context, at time.Time) (bool, error) {
+	q := w.DB.GenDirectory()
+	accounts, err := q.ListDueUsageAccounts(ctx, gen.ListDueUsageAccountsParams{Now: at, RowLimit: 1})
+	if err != nil || len(accounts) > 0 {
+		return len(accounts) > 0, err
+	}
+	invoices, err := q.ListDueUsageCollections(ctx, gen.ListDueUsageCollectionsParams{Now: at, RowLimit: 1})
+	return len(invoices) > 0, err
+}
+
+// Pass is the billing pass's usage scan: its first page.
+func (w UsageInvoiceWorker) Pass(ctx context.Context) error {
+	return w.run(ctx, money.UsageInvoiceArgs{})
+}
+
+func (w UsageInvoiceWorker) Work(ctx context.Context, job *river.Job[money.UsageInvoiceArgs]) error {
+	return w.run(ctx, job.Args)
+}
+
+func (w UsageInvoiceWorker) run(ctx context.Context, page money.UsageInvoiceArgs) error {
+	if w.DB == nil || w.Money == nil {
+		return nil
+	}
+	logger := w.Log.With("worker", money.KindUsageInvoices)
+	now := w.now()
+	var failed error
+	if page.Collect == nil {
+		next, err := w.bill(ctx, logger, now, page.Bill)
+		failed = err
+		if next != nil {
+			return errors.Join(failed, continuePass(ctx, money.UsageInvoiceArgs{Bill: next}))
+		}
+	}
+	next, err := w.collect(ctx, logger, now, page.Collect)
+	failed = errors.Join(failed, err)
+	if next != nil {
+		return errors.Join(failed, continuePass(ctx, money.UsageInvoiceArgs{Collect: next}))
+	}
+	return failed
+}
+
+// bill checks one page of due usage accounts after after; it returns where
+// the next page starts when this one was full.
+func (w UsageInvoiceWorker) bill(ctx context.Context, logger *slog.Logger, now time.Time, after *money.UsageAccountKey) (*money.UsageAccountKey, error) {
+	args := gen.ListDueUsageAccountsParams{Now: now, RowLimit: usagePage}
+	if after != nil {
+		args.AfterAt, args.AfterMerchantID, args.AfterCustomerID, args.AfterCurrency = &after.DueAt, &after.MerchantID, &after.CustomerID, &after.Currency
+	}
+	due, err := w.DB.GenDirectory().ListDueUsageAccounts(ctx, args)
+	if err != nil {
+		return nil, fmt.Errorf("list due usage accounts: %w", err)
+	}
+	var failed error
+	billed := 0
+	for _, row := range due {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "usage billing", func(ctx context.Context) error {
+			ok, err := w.Money.BillDueUsageAccount(ctx, row.CustomerID, row.Currency, now)
+			if ok {
+				billed++
+			}
+			return err
+		})
+		if err != nil {
+			logger.ErrorContext(ctx, "usage billing: account failed; continuing", logx.Err(err), "merchant_id", row.MerchantID, "customer_id", row.CustomerID, "currency", row.Currency)
+			failed = errors.Join(failed, fmt.Errorf("usage account %s/%s/%s: %w", row.MerchantID, row.CustomerID, row.Currency, err))
+		}
+		if ctx.Err() != nil {
+			return nil, errors.Join(failed, ctx.Err())
+		}
+	}
+	if billed > 0 {
+		logger.InfoContext(ctx, "usage invoices billed", "invoices", billed)
+	}
+	if len(due) < usagePage {
+		return nil, failed
+	}
+	last := due[len(due)-1]
+	return &money.UsageAccountKey{DueAt: last.UsageDueAt, MerchantID: last.MerchantID, CustomerID: last.CustomerID, Currency: last.Currency}, failed
+}
+
+// collect queues one page of due collections after after; it returns where
+// the next page starts when this one was full.
+func (w UsageInvoiceWorker) collect(ctx context.Context, logger *slog.Logger, now time.Time, after *money.UsageInvoiceKey) (*money.UsageInvoiceKey, error) {
+	args := gen.ListDueUsageCollectionsParams{Now: now, RowLimit: usagePage}
+	if after != nil {
+		args.AfterAt, args.AfterMerchantID, args.AfterID = &after.DueAt, &after.MerchantID, &after.InvoiceID
+	}
+	due, err := w.DB.GenDirectory().ListDueUsageCollections(ctx, args)
+	if err != nil {
+		return nil, fmt.Errorf("list due usage collections: %w", err)
+	}
+	var failed error
+	held := map[uuid.UUID]bool{}
+	postures := controls.View{DB: w.DB}
+	for _, row := range due {
+		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "usage collection", func(ctx context.Context) error {
+			limited, seen := held[row.MerchantID]
+			if !seen {
+				limited = postures.Posture(ctx, row.MerchantID).Limited()
+				held[row.MerchantID] = limited
+			}
+			if limited {
+				return nil
+			}
+			return w.Money.CollectDueUsageInvoice(ctx, identity.CustomerID(row.CustomerID), row.ID)
+		})
+		if err != nil {
+			logger.ErrorContext(ctx, "usage collection: invoice failed; continuing", logx.Err(err), "merchant_id", row.MerchantID, "invoice_id", row.ID)
+			failed = errors.Join(failed, fmt.Errorf("usage invoice %s/%s: %w", row.MerchantID, row.ID, err))
+		}
+		if ctx.Err() != nil {
+			return nil, errors.Join(failed, ctx.Err())
+		}
+	}
+	if len(due) < usagePage {
+		return nil, failed
+	}
+	last := due[len(due)-1]
+	return &money.UsageInvoiceKey{DueAt: last.NextCollectionAttemptAt, MerchantID: last.MerchantID, InvoiceID: last.ID}, failed
+}

@@ -5,7 +5,7 @@ INSERT INTO billing.payment_attempts (
     outcome, decline_cause, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, purchase_id, purchase_target,
     subscription_id, payment_method_id, payment_id, provider_intent_id, step, cycle_id,
-    card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, order_id,
+    card_bin, issuer_code, issuer_text, mandate_id, sent_initial_transaction_id, invoice_id,
     advice_code, network_advice_code
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
@@ -20,11 +20,11 @@ INSERT INTO billing.payment_attempts (
     sqlc.arg(step)::text, sqlc.narg(cycle_id)::uuid,
     sqlc.narg(card_bin)::text, sqlc.narg(issuer_code)::text, sqlc.narg(issuer_text)::text,
     sqlc.narg(mandate_id)::uuid, sqlc.narg(sent_initial_transaction_id)::text,
-    sqlc.narg(order_id)::uuid, sqlc.narg(advice_code)::text, sqlc.narg(network_advice_code)::text
+    sqlc.narg(invoice_id)::uuid, sqlc.narg(advice_code)::text, sqlc.narg(network_advice_code)::text
 )
 ON CONFLICT DO NOTHING;
 
--- name: LatestPaymentOrderAttempt :one
+-- name: LatestPaymentInvoiceAttempt :one
 -- The buyer's most recent attempt on one purchase target since a moment.
 SELECT purchase_id::uuid AS purchase_id, kind, outcome
 FROM billing.payment_attempts
@@ -67,7 +67,7 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(psp_id)::uuid IS NULL OR a.psp_id = sqlc.narg(psp_id)::uuid)
   AND (sqlc.narg(customer_id)::uuid IS NULL OR a.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(payment_id)::uuid IS NULL OR a.payment_id = sqlc.narg(payment_id)::uuid)
-  AND (sqlc.narg(order_id)::uuid IS NULL OR a.order_id = sqlc.narg(order_id)::uuid)
+  AND (sqlc.narg(invoice_id)::uuid IS NULL OR a.invoice_id = sqlc.narg(invoice_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR a.subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(cycle_id)::uuid IS NULL OR a.cycle_id = sqlc.narg(cycle_id)::uuid)
   AND (sqlc.narg(since)::timestamptz IS NULL OR a.attempted_at >= sqlc.narg(since)::timestamptz)

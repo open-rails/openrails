@@ -1,6 +1,6 @@
 // Package collection is the collection engine core: schedule retries for money
 // owed, classify outcomes and go terminal deliberately. Subscription dunning and
-// usage order collection consume it; their terminal policy stays with them.
+// usage invoice collection consume it; their terminal policy stays with them.
 package collection
 
 import (
@@ -55,7 +55,7 @@ func (e *UnknownCycleError) Is(target error) bool { return target == ErrUnknownC
 const FindingUnknownCycle = "life.cadence.unknown"
 
 // RecordUnknownCycle raises the operator finding for subject (a subscription
-// or usage order id) that collection refused because its cycle is unknown.
+// or usage invoice id) that collection refused because its cycle is unknown.
 func RecordUnknownCycle(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, subject, consumer string, cause error) error {
 	evidence, _ := json.Marshal(map[string]any{"subject": subject, "consumer": consumer, "error": cause.Error()})
 	action := fmt.Sprintf("%s %s has no billing cycle, so collection refuses to charge, retry or end it (%v). Give its price a recurring cadence or resolve it by hand", consumer, subject, cause)
@@ -102,7 +102,7 @@ func BillingCycleHoursOf(price *models.Price) int {
 	return *cycleHours
 }
 
-// CycleHoursBetween returns a billing period's length in hours: a usage order's
+// CycleHoursBetween returns a billing period's length in hours: a usage invoice's
 // cycle is its statement period. A degenerate or unset period returns 0
 // (ErrUnknownCycle).
 func CycleHoursBetween(from, to time.Time) int {

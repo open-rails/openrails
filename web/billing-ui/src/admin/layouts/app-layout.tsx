@@ -24,7 +24,7 @@ const trails: [string, { label: string; to?: string }[]][] = [
   ["/customers", [{ label: "Customers" }]],
   ["/subscriptions", [{ label: "Subscriptions" }]],
   ["/payments", [{ label: "Payments" }]],
-  ["/orders", [{ label: "Orders" }]],
+  ["/invoices", [{ label: "Invoices" }]],
   [
     "/catalog/metering",
     [{ label: "Catalog", to: "/catalog" }, { label: "Metering" }],
@@ -61,7 +61,7 @@ function areaOf(
     pathname === prefix || pathname.startsWith(prefix + "/")
   if (under("/payments/health"))
     return { name: "payment health", allowed: access.metrics === true }
-  if (["/customers", "/subscriptions", "/payments", "/orders"].some(under))
+  if (["/customers", "/subscriptions", "/payments", "/invoices"].some(under))
     return {
       name: "customer support",
       allowed: access.admin === "read" || access.admin === "update",

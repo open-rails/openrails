@@ -27,8 +27,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/mandates"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -200,8 +200,8 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 		if terms.Rail == models.RailSolana && (params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "") {
 			return nil, nil, errors.New("Solana membership has no verified on-chain subscription")
 		}
-		if terms.AwaitingMethod && params.ExistingOrderID == nil {
-			return nil, nil, errors.New("awaiting method requires a paid order")
+		if terms.AwaitingMethod && params.ExistingInvoiceID == nil {
+			return nil, nil, errors.New("awaiting method requires a paid invoice")
 		}
 		if params.InitialPaymentReversal != "" && (terms.CollectionPolicy != models.CollectionPolicyEngine || terms.Amount <= 0 || params.Rail != models.RailStripe || (params.InitialPaymentReversal != "refund" && params.InitialPaymentReversal != "dispute")) {
 			return nil, nil, errors.New("invalid accepted initial payment reversal")
@@ -214,9 +214,9 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 			return nil, nil, err
 		}
 		if terms.Rail == models.RailSolana {
-			// Order fulfillment has already recorded the wallet payment in this
+			// Invoice fulfillment has already recorded the wallet payment in this
 			// transaction. Its membership effect carries zero additional cash.
-			if err := validateSolanaEnrollmentOrder(ctx, txDB.Gen(ctx), mid.UUID(), *terms, params.ExistingOrderID, *params.RailSubscriptionID); err != nil {
+			if err := validateSolanaEnrollmentInvoice(ctx, txDB.Gen(ctx), mid.UUID(), *terms, params.ExistingInvoiceID, *params.RailSubscriptionID); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -539,8 +539,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	subscription.Price = price
 
-	if params.Prepared != nil && params.Prepared.Amount == 0 && params.ExistingOrderID == nil {
-		// A free or pending accepted enrollment is still an order. Its
+	if params.Prepared != nil && params.Prepared.Amount == 0 && params.ExistingInvoiceID == nil {
+		// A free or pending accepted enrollment is still an invoice. Its
 		// zero-due settlement creates no payment, while a provider schedule
 		// freezes the explicitly accepted future cadence for its first bill.
 		if _, err := initialBill(ctx, dbb, params, subscription, nil, now); err != nil {
@@ -761,7 +761,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			if err != nil {
 				return err
 			}
-			if existing.SubscriptionID == nil || *existing.SubscriptionID != subscription.ID || existing.CustomerID != subscription.CustomerID || existing.OrderID == nil {
+			if existing.SubscriptionID == nil || *existing.SubscriptionID != subscription.ID || existing.CustomerID != subscription.CustomerID || existing.InvoiceID == nil {
 				return errors.New("confirmed charge replay belongs to different accepted terms")
 			}
 			if err := paymentHasPrice(ctx, db, existing, priceID); err != nil {
@@ -881,7 +881,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			// exact payment. Check before applying a change or advancing the period.
 			existing, err := paymentService.GetByPSPTransactionID(ctx, params.Rail, params.TransactionID)
 			if err == nil {
-				if existing.SubscriptionID == nil || *existing.SubscriptionID != terms.SubscriptionID || existing.CustomerID != terms.CustomerID || existing.OrderID == nil {
+				if existing.SubscriptionID == nil || *existing.SubscriptionID != terms.SubscriptionID || existing.CustomerID != terms.CustomerID || existing.InvoiceID == nil {
 					return errors.New("renewal transaction already belongs to different accepted terms")
 				}
 				if err := validateCompletedPayment(existing, terms.Amount, terms.Currency); err != nil {

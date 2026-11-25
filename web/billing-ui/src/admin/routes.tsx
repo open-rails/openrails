@@ -84,9 +84,9 @@ const routes = [
     ),
   },
   {
-    path: "/orders",
+    path: "/invoices",
     Component: lazy(() =>
-      import("./pages/orders").then((m) => ({ default: m.OrdersPage }))
+      import("./pages/invoices").then((m) => ({ default: m.InvoicesPage }))
     ),
   },
   {
@@ -206,10 +206,10 @@ const routes = [
     ),
   },
   {
-    path: "/orders/:id",
+    path: "/invoices/:id",
     Component: lazy(() =>
-      import("./pages/orders/detail").then((m) => ({
-        default: m.OrderDetailPage,
+      import("./pages/invoices/detail").then((m) => ({
+        default: m.InvoiceDetailPage,
       }))
     ),
   },

@@ -79,7 +79,7 @@ type Deps struct {
 
 	// CheckoutAssets is the built payment page (web/pay) rooted at
 	// index.html, served on Config.CheckoutOrigin. Nil serves no page:
-	// orders still get pay URLs, for another process serving that origin.
+	// invoices still get pay URLs, for another process serving that origin.
 	CheckoutAssets fs.FS
 
 	// Test seams, refused beside a live PSP. StripeTransport and

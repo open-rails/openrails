@@ -24,7 +24,7 @@ import (
 // ListPaymentAttempts lists the merchant's payment attempts, newest first
 // (#1116).
 //
-//	GET /admin/payment-attempts?kind&owner&outcome&decline_cause&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&payment_id&invoice_id&order_id&subscription_id&cycle_id&since&until&limit&offset
+//	GET /admin/payment-attempts?kind&owner&outcome&decline_cause&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&payment_id&invoice_id&invoice_id&subscription_id&cycle_id&since&until&limit&offset
 //
 // A text filter takes one value or a comma-separated list.
 func ListPaymentAttempts(r *httprequest.Request) {
@@ -53,7 +53,7 @@ func ListPaymentAttempts(r *httprequest.Request) {
 		MerchantID: mid, Kinds: filled(query.Kind), Owners: filled(query.Owner), Outcomes: filled(query.Outcome), DeclineCauses: filled(query.DeclineCause), Reasons: filled(query.Reason),
 		ResponseCodes: filled(query.ResponseCode), CardEntries: filled(query.CardEntry), Sources: filled(query.Source), ObservedVias: filled(query.ObservedVia),
 		AvsResults: filled(query.AVSResult), CvvResults: filled(query.CVVResult), PspID: idOf(query.PSPID), CustomerID: idOf(query.CustomerID),
-		PaymentID: idOf(query.PaymentID), OrderID: idOf(query.OrderID), SubscriptionID: idOf(query.SubscriptionID), CycleID: idOf(query.CycleID),
+		PaymentID: idOf(query.PaymentID), InvoiceID: idOf(query.InvoiceID), SubscriptionID: idOf(query.SubscriptionID), CycleID: idOf(query.CycleID),
 		Since: instant(query.Since), Until: instant(query.Until),
 	}
 	limit, ok := keyset(r, query.PageRequest, &params.AfterAt, &params.AfterID)
@@ -223,9 +223,9 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 		Rail: billing.Rail(a.Rail), PSPID: billing.PSPID(a.PspID), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: catalog.Currency(normalize.FromPtr(a.Currency)),
 		AttemptedAt: a.AttemptedAt,
 	}
-	if a.OrderID != nil {
-		id := billing.OrderID(*a.OrderID)
-		out.OrderID = &id
+	if a.InvoiceID != nil {
+		id := billing.InvoiceID(*a.InvoiceID)
+		out.InvoiceID = &id
 	}
 	if a.CycleID != nil {
 		id := billing.RenewalID(*a.CycleID)

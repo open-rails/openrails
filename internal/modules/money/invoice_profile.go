@@ -18,7 +18,7 @@ import (
 const MaxInvoiceNetTermsDays = int64((1<<63 - 1) / (24 * time.Hour))
 
 // Invoice collection methods. charge_automatically charges the customer's
-// default card from its due date (CollectDueUsageOrder); send_invoice is a
+// default card from its due date (CollectDueUsageInvoice); send_invoice is a
 // manual-remittance receivable the collection path never touches, paid via
 // RecordUsageRemittance.
 const (

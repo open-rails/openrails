@@ -43,9 +43,9 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Billin
 	if customerID == "" || req.Instrument.RailMethodRef != paymentMethodID {
 		return nil, errors.New("Stripe collection requires the frozen provider customer and method")
 	}
-	openRailsOrderID := ""
-	if req.OrderID != nil {
-		openRailsOrderID = req.OrderID.String()
+	openRailsInvoiceID := ""
+	if req.InvoiceID != nil {
+		openRailsInvoiceID = req.InvoiceID.String()
 	}
 	params := subscriptions.StripeInvoiceCollectionParams{
 		CustomerID:          customerID,
@@ -54,7 +54,7 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Billin
 		Currency:            req.Currency,
 		Description:         req.Description,
 		IdempotencyKey:      strings.TrimSpace(req.IdempotencyKey),
-		OpenRailsOrderID:    openRailsOrderID,
+		OpenRailsInvoiceID:  openRailsInvoiceID,
 		OpenRailsMerchantID: method.MerchantID.String(),
 		OpenRailsCustomerID: method.CustomerID.String(),
 	}

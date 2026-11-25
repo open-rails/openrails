@@ -72,8 +72,8 @@ func decodeCollectedTerms(in gen.BillingProviderIntent) (collectedTerms, error) 
 		return collectedTerms{Rail: in.Rail, Currency: p.Currency, AmountMinor: minor, Instrument: p.Instrument, ProviderCustomerRef: p.Instrument.RailCustomerRef,
 			OrderReference: payments.NMISaleOrderReference(in.ID, p.E2ERunID), NewVault: token && !p.PurchaseScoped, NoVault: token && p.PurchaseScoped}, err
 
-	case TypeOrderCollection:
-		p, err := DecodeOrderCollectionPayload(in)
+	case TypeInvoiceCollection:
+		p, err := DecodeInvoiceCollectionPayload(in)
 		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String(), false, false}, err
 	case subscriptions.TypeInitialMembership:
 		p, err := subscriptions.DecodeInitialMembershipPayload(in)
@@ -121,7 +121,7 @@ func collectionBinding(in gen.BillingProviderIntent) (receiptBinding, error) {
 	return receiptBinding{in.ID, in.MerchantID, *in.PspID, in.IntentType, hex.EncodeToString(digest[:])}, nil
 }
 
-// ReadNMICollectionReceipt resolves the accepted PSP and reads the actual order
+// ReadNMICollectionReceipt resolves the accepted PSP and reads the actual invoice
 // match and exact transaction from that account. Terms are never caller inputs.
 func ReadNMICollectionReceipt(ctx context.Context, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, reference string) (CollectedReceipt, bool, error) {
 	binding, err := collectionBinding(in)
@@ -239,7 +239,7 @@ func (r CollectedReceipt) Validate(in gen.BillingProviderIntent) error {
 }
 
 // NMICard is the brand and last four of the card an NMI sale charged, as
-// its order search reported them.
+// its invoice search reported them.
 func (r CollectedReceipt) NMICard() models.Card {
 	if r.data.NMI == nil {
 		return models.Card{}

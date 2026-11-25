@@ -7,22 +7,22 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Checkout creates the customer's order with a pay URL and returns where to
+// Checkout creates the customer's invoice with a pay URL and returns where to
 // send them.
 func Checkout(ctx context.Context, shop *openrails.Client, customer billing.CustomerID, price billing.PriceID, key string) (string, error) {
 	// guide:checkout
 	// key is made when the buyer decides, stored, and resent on every retry.
-	order, err := shop.CreateOrder(ctx, key, billing.CreateOrderParams{
+	invoice, err := shop.CreateInvoice(ctx, key, billing.CreateInvoiceParams{
 		CustomerID: customer,
-		Lines:      []billing.OrderLineParams{{PriceID: price}},
-		PayURL: &billing.OrderPayURLParams{
-			SuccessURL: "https://shop.example/thanks?order={ORDER_ID}",
+		Lines:      []billing.InvoiceLineParams{{PriceID: price}},
+		PayURL: &billing.InvoicePayURLParams{
+			SuccessURL: "https://shop.example/thanks?invoice={INVOICE_ID}",
 			CancelURL:  new("https://shop.example/cart"),
 		},
 	})
 	if err != nil {
 		return "", err
 	}
-	return *order.PayURL, nil // redirect the buyer there
+	return *invoice.PayURL, nil // redirect the buyer there
 	// guide:end
 }

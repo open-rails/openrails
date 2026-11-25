@@ -1,0 +1,407 @@
+-- Invoices: purchases, their lines, ownership claims and numbers.
+
+-- name: CreateInvoice :exec
+INSERT INTO billing.invoices (
+    merchant_id, id, customer_id, origin, status, payment_status, currency, total,
+    idempotency_key, request_digest, lines_digest, expires_at, created_at, updated_at,
+    customer_type, purchase_number, ip_country, language,
+    attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content,
+    attribution_referrer, attribution_affiliate
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(origin)::text,
+    'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
+    sqlc.narg(idempotency_key)::text, sqlc.narg(request_digest)::bytea, sqlc.narg(lines_digest)::bytea,
+    sqlc.arg(expires_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz,
+    sqlc.narg(customer_type)::text, sqlc.narg(purchase_number)::int,
+    sqlc.narg(ip_country)::text, sqlc.narg(language)::text,
+    sqlc.narg(attribution_source)::text, sqlc.narg(attribution_medium)::text, sqlc.narg(attribution_campaign)::text,
+    sqlc.narg(attribution_term)::text, sqlc.narg(attribution_content)::text, sqlc.narg(attribution_referrer)::text, sqlc.narg(attribution_affiliate)::text
+);
+
+-- name: GetCheckoutCustomer :one
+-- Who a new checkout's customer is: their paid purchases (complete invoices in
+-- money, never a merchant's unit, and observed initial enrollments), whether
+-- they ever had MRR with the merchant, and whether they have any now.
+SELECT
+    (SELECT count(*) FROM billing.invoices
+     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+       AND status = 'complete' AND (origin IN ('customer', 'merchant') OR subscription_bill_kind = 'initial')
+       AND currency = ANY(sqlc.arg(money)::text[]))::int AS purchases,
+    EXISTS (SELECT 1 FROM billing.customer_mrr
+            WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+              AND first_active_at IS NOT NULL)::boolean AS had_mrr,
+    EXISTS (SELECT 1 FROM billing.customer_mrr
+            WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+              AND mrr > 0)::boolean AS has_mrr;
+
+-- name: MarkCheckoutOpened :execrows
+-- The customer's first read of the open checkout in person; a later read
+-- writes nothing.
+UPDATE billing.invoices
+SET opened_at = sqlc.arg(now)::timestamptz,
+    ip_country = COALESCE(ip_country, sqlc.narg(ip_country)::text),
+    language = COALESCE(language, sqlc.narg(language)::text)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND purchase_number IS NOT NULL AND opened_at IS NULL AND status = 'open'
+  AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz);
+
+-- name: MarkCheckoutSubmitted :execrows
+-- A pay request on the open checkout: the first is when it was submitted;
+-- the latest billing country (the request's, else the saved card's) is
+-- kept. Nothing is written when nothing would change.
+WITH asked AS (
+    SELECT COALESCE(sqlc.narg(billing_country)::text, (
+        SELECT CASE WHEN upper(pm.metadata->>'billing_country') ~ '^[A-Z]{2}$' THEN upper(pm.metadata->>'billing_country') END
+        FROM billing.payment_methods pm
+        WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = sqlc.arg(customer_id)::uuid AND pm.id = sqlc.narg(payment_method_id)::uuid
+    )) AS billing_country
+)
+UPDATE billing.invoices o
+SET submitted_at = COALESCE(o.submitted_at, sqlc.arg(now)::timestamptz),
+    opened_at = COALESCE(o.opened_at, sqlc.arg(now)::timestamptz),
+    ip_country = COALESCE(o.ip_country, sqlc.narg(ip_country)::text),
+    language = COALESCE(o.language, sqlc.narg(language)::text),
+    billing_country = COALESCE(asked.billing_country, o.billing_country)
+FROM asked
+WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.customer_id = sqlc.arg(customer_id)::uuid AND o.id = sqlc.arg(id)::uuid
+  AND o.purchase_number IS NOT NULL AND o.status = 'open'
+  AND (o.expires_at IS NULL OR o.expires_at > sqlc.arg(now)::timestamptz)
+  AND (o.submitted_at IS NULL OR (asked.billing_country IS NOT NULL AND asked.billing_country IS DISTINCT FROM o.billing_country));
+
+-- name: SetSubscriptionCheckout :execrows
+-- The checkout whose payment created the subscription, kept from the first;
+-- nothing when the invoice is not a checkout.
+UPDATE billing.subscriptions s
+SET checkout_invoice_id = o.id
+FROM billing.invoices o
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = sqlc.arg(id)::uuid AND s.checkout_invoice_id IS NULL
+  AND o.merchant_id = s.merchant_id AND o.id = sqlc.arg(invoice_id)::uuid AND o.purchase_number IS NOT NULL;
+
+-- name: InheritSubscriptionCheckout :execrows
+-- A membership that replaces another (an upgrade, a tier change) keeps the
+-- checkout of the one it replaces.
+UPDATE billing.subscriptions s
+SET checkout_invoice_id = p.checkout_invoice_id
+FROM billing.subscriptions p
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = sqlc.arg(id)::uuid AND s.checkout_invoice_id IS NULL
+  AND p.merchant_id = s.merchant_id AND p.id = sqlc.arg(predecessor_id)::uuid AND p.checkout_invoice_id IS NOT NULL;
+
+-- name: EraseCustomerInvoiceAttribution :exec
+-- An erased customer's checkouts keep no attribution: a campaign's term or
+-- content can name its recipient.
+UPDATE billing.invoices
+SET attribution_source = NULL, attribution_medium = NULL, attribution_campaign = NULL, attribution_term = NULL,
+    attribution_content = NULL, attribution_referrer = NULL, attribution_affiliate = NULL
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND purchase_number IS NOT NULL
+  AND num_nonnulls(attribution_source, attribution_medium, attribution_campaign, attribution_term,
+      attribution_content, attribution_referrer, attribution_affiliate) > 0;
+
+-- name: GetOpenInvoiceByLines :one
+-- The customer's open invoice of these lines, expired or not.
+SELECT id, expires_at FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND lines_digest = sqlc.arg(lines_digest)::bytea AND status = 'open';
+
+-- name: CreateRenewalInvoice :execrows
+-- A renewal's invoice, once per subscription and period: zero rows when it
+-- exists.
+INSERT INTO billing.invoices (
+    merchant_id, id, customer_id, origin, status, payment_status, currency, total,
+    subscription_id, period_starts_at, period_ends_at, due_at, created_at, updated_at, subscription_bill_kind
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, 'subscription',
+    'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
+    sqlc.arg(subscription_id)::uuid, sqlc.arg(period_starts_at)::timestamptz, sqlc.arg(period_ends_at)::timestamptz,
+    sqlc.arg(due_at)::timestamptz, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz, 'renewal'
+)
+ON CONFLICT (merchant_id, subscription_id, period_starts_at) WHERE origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal' DO NOTHING;
+
+-- name: GetRenewalInvoice :one
+SELECT * FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal'
+  AND subscription_id = sqlc.arg(subscription_id)::uuid AND period_starts_at = sqlc.arg(period_starts_at)::timestamptz;
+
+-- name: VoidRenewalInvoice :execrows
+-- A live renewal its subscription's end left unowed. A payment that landed
+-- anyway stays on it (refunded).
+UPDATE billing.invoices
+SET status = 'void', voided_at = sqlc.arg(now)::timestamptz, updated_at = sqlc.arg(now)::timestamptz,
+    payment_id = sqlc.narg(payment_id)::uuid,
+    payment_status = CASE WHEN sqlc.narg(payment_id)::uuid IS NULL THEN 'requires_payment_method' ELSE 'succeeded' END
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND origin = 'subscription' AND status IN ('open', 'processing');
+
+-- name: GetOpenRenewalInvoice :one
+-- The subscription's unpaid renewal, if any.
+SELECT * FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription' AND collection_owner = 'engine' AND subscription_bill_kind = 'renewal'
+  AND subscription_id = sqlc.arg(subscription_id)::uuid AND status IN ('open', 'processing')
+ORDER BY period_starts_at DESC
+LIMIT 1;
+
+-- name: CreateInvoiceLine :exec
+INSERT INTO billing.invoice_lines (
+    merchant_id, id, invoice_id, customer_id, "position", price_id, product_id, description,
+    quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, billing_interval_months,
+    access_duration_hours, provider_access_default, credit_grant, created_at
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(invoice_id)::uuid, sqlc.arg(customer_id)::uuid,
+    sqlc.arg(position)::int, sqlc.arg(price_id)::uuid, sqlc.arg(product_id)::uuid, sqlc.arg(description)::text,
+    sqlc.narg(quantity)::int, sqlc.arg(unit_amount)::bigint, sqlc.arg(amount)::bigint, sqlc.arg(ownership)::text,
+    sqlc.narg(claim_key)::text, sqlc.narg(billing_interval_hours)::int, sqlc.narg(billing_interval_months)::int, sqlc.narg(access_duration_hours)::int, sqlc.arg(provider_access_default)::boolean,
+    sqlc.narg(credit_grant)::jsonb, sqlc.arg(now)::timestamptz
+);
+
+-- name: GetInvoice :one
+SELECT * FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: LockInvoice :one
+-- No key update: a bill's deferred check of the checkout it names (KEY
+-- SHARE) never waits on it.
+SELECT * FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+FOR NO KEY UPDATE;
+
+-- name: GetInvoiceByIdempotencyKey :one
+-- The invoice a scoped create key made: unique per merchant, whichever customer
+-- it was for.
+SELECT * FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(idempotency_key)::text;
+
+-- name: ListInvoicesPage :many
+-- One page of invoices, newest first; every filter is optional. status reads an
+-- open invoice past its expiry as expired; price_id names invoices with a line on
+-- that price; overdue_at the open ones due before it.
+SELECT o.* FROM billing.invoices o
+WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR o.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (sqlc.narg(status)::text IS NULL OR sqlc.narg(status)::text = CASE
+        WHEN o.status = 'open' AND o.collection_owner = 'engine' AND o.expires_at <= sqlc.arg(now)::timestamptz THEN 'expired' ELSE o.status END)
+  AND (sqlc.narg(origin)::text IS NULL OR o.origin = sqlc.narg(origin)::text)
+  AND (sqlc.narg(subscription_id)::uuid IS NULL OR o.subscription_id = sqlc.narg(subscription_id)::uuid)
+  AND (sqlc.narg(overdue_at)::timestamptz IS NULL OR (o.status = 'open' AND o.due_at < sqlc.narg(overdue_at)::timestamptz))
+  AND (sqlc.narg(price_id)::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM billing.invoice_lines l
+        WHERE l.merchant_id = o.merchant_id AND l.invoice_id = o.id AND l.price_id = sqlc.narg(price_id)::uuid))
+  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
+       OR (o.created_at, o.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY o.created_at DESC, o.id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListInvoicesByIDs :many
+-- The merchant's named invoices, newest first.
+SELECT * FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at DESC, id DESC;
+
+-- name: GetInvoiceLine :one
+SELECT * FROM billing.invoice_lines
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: GetInvoiceLineBySubscription :one
+-- The line of invoice that produced a subscription; its renewal invoices' lines
+-- name it too.
+SELECT * FROM billing.invoice_lines
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND invoice_id = sqlc.arg(invoice_id)::uuid
+  AND subscription_id = sqlc.arg(subscription_id)::uuid;
+
+-- name: ListInvoiceLines :many
+SELECT * FROM billing.invoice_lines
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND invoice_id = ANY(sqlc.arg(invoice_ids)::uuid[])
+ORDER BY invoice_id, "position";
+
+-- name: SetInvoiceLineProduced :exec
+UPDATE billing.invoice_lines
+SET subscription_id = COALESCE(sqlc.narg(subscription_id)::uuid, subscription_id),
+    product_access_id = COALESCE(sqlc.narg(product_access_id)::uuid, product_access_id)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- An invoice whose one line is a subscription: its payment is that
+-- subscription's first, so refunds and disputes of it reach the subscription.
+-- name: SetPaymentSubscription :exec
+UPDATE billing.payments SET subscription_id = sqlc.arg(subscription_id)::uuid,
+    metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('period_start', sqlc.arg(period_start)::text)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND subscription_id IS NULL AND deleted_at IS NULL;
+
+-- An attempt starts on an open invoice: one that takes payment, or awaits the
+-- customer's action on an attempt that has since ended.
+-- Admission is durable before provider execution: a lost process must not make
+-- potentially billable work look like a cart that still needs a payment method.
+-- name: StartInvoiceAttempt :execrows
+UPDATE billing.invoices
+SET status = 'processing', payment_status = 'processing', attempt_id = sqlc.arg(attempt_id)::uuid, payment_method_id = sqlc.narg(payment_method_id)::uuid,
+    psp_id = sqlc.arg(psp_id)::uuid, last_payment_error = NULL, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'open';
+
+-- name: SetInvoicePending :execrows
+-- The live attempt awaits the customer (the invoice stays open) or the
+-- provider (the invoice is processing).
+UPDATE billing.invoices
+SET payment_status = sqlc.arg(payment_status)::text,
+    status = CASE sqlc.arg(payment_status)::text WHEN 'processing' THEN 'processing' ELSE 'open' END,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND attempt_id = sqlc.arg(attempt_id)::uuid AND status IN ('open', 'processing')
+  AND sqlc.arg(payment_status)::text IN ('requires_action', 'processing');
+
+-- name: SetInvoiceDeclined :execrows
+UPDATE billing.invoices
+SET status = 'open', payment_status = 'requires_payment_method', last_payment_error = sqlc.arg(last_payment_error)::jsonb,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND attempt_id = sqlc.arg(attempt_id)::uuid AND status IN ('open', 'processing');
+
+-- name: SetInvoicePaymentMethod :execrows
+-- The card a new card's charge saved, once it exists.
+UPDATE billing.invoices
+SET payment_method_id = sqlc.arg(payment_method_id)::uuid, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: SetInvoiceComplete :execrows
+UPDATE billing.invoices
+SET status = 'complete', payment_status = 'succeeded', number = sqlc.arg(number)::bigint, payment_id = sqlc.narg(payment_id)::uuid,
+    completed_at = sqlc.arg(now)::timestamptz, last_payment_error = NULL, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status <> 'complete';
+
+-- name: SetInvoiceLatePayment :execrows
+-- Money moved on a closed invoice whose claims were taken meanwhile: the
+-- payment is recorded, the invoice stays closed and the payment is refunded.
+UPDATE billing.invoices
+SET payment_id = sqlc.arg(payment_id)::uuid, payment_status = 'succeeded', updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND status IN ('canceled', 'expired') AND payment_id IS NULL;
+
+-- name: CloseInvoice :execrows
+-- An invoice expires at its expires_at, however late the pass closes it.
+UPDATE billing.invoices
+SET status = sqlc.arg(status)::text, payment_status = 'requires_payment_method',
+    canceled_at = CASE WHEN sqlc.arg(status)::text = 'canceled' THEN sqlc.arg(now)::timestamptz ELSE canceled_at END,
+    expired_at = CASE WHEN sqlc.arg(status)::text = 'expired' THEN LEAST(COALESCE(expires_at, sqlc.arg(now)::timestamptz), sqlc.arg(now)::timestamptz) ELSE expired_at END,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND collection_owner = 'engine' AND status = 'open' AND sqlc.arg(status)::text IN ('canceled', 'expired');
+
+-- name: ListInvoiceExpiryMerchants :many
+-- The expiry's work queue: merchants with a live invoice or an invoice attempt
+-- waiting on its customer past its expiry, in id order after a cursor.
+SELECT merchant_id FROM (
+    SELECT merchant_id FROM billing.invoices
+    WHERE collection_owner = 'engine' AND status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
+      AND merchant_id > sqlc.arg(after_merchant_id)::uuid
+    UNION
+    SELECT merchant_id FROM billing.invoice_attempts
+    WHERE expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
+      AND deleted_at IS NULL AND status IN ('created', 'requires_action')
+      AND merchant_id > sqlc.arg(after_merchant_id)::uuid
+) due
+ORDER BY merchant_id
+LIMIT sqlc.arg(merchant_limit)::int;
+
+-- name: ListExpiredInvoices :many
+-- A merchant's live invoices past their expiry, in expiry order after a cursor.
+SELECT id, expires_at::timestamptz AS expires_at FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND collection_owner = 'engine' AND status = 'open'
+  AND expires_at <= sqlc.arg(now)::timestamptz
+  AND (sqlc.narg(after_expires_at)::timestamptz IS NULL
+       OR (expires_at, id) > (sqlc.narg(after_expires_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY expires_at, id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: DeleteClosedUnpaidInvoices :execrows
+-- Retention: an unpaid closed invoice that never started a payment attempt goes
+-- 397 days after it closed; its lines and claims go with it.
+DELETE FROM billing.invoices o
+WHERE o.ctid IN (
+    SELECT c.ctid FROM billing.invoices c
+    WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.collection_owner = 'engine' AND c.status IN ('canceled', 'expired')
+      AND c.payment_id IS NULL AND c.attempt_id IS NULL
+      AND COALESCE(c.canceled_at, c.expired_at) < sqlc.arg(before)::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM billing.invoice_attempts a WHERE a.merchant_id = c.merchant_id AND a.invoice_id = c.id)
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- name: ClaimOwnership :execrows
+INSERT INTO billing.ownership_claims (merchant_id, customer_id, claim_key, invoice_id, holder_type, holder_id, created_at, updated_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(claim_key)::text, sqlc.arg(invoice_id)::uuid,
+        'invoice', sqlc.arg(invoice_id)::uuid, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz)
+ON CONFLICT (merchant_id, customer_id, claim_key) DO NOTHING;
+
+-- name: GetOwnershipClaim :one
+SELECT * FROM billing.ownership_claims
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND claim_key = sqlc.arg(claim_key)::text;
+
+-- name: ListOwnershipClaims :many
+SELECT * FROM billing.ownership_claims
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND claim_key = ANY(sqlc.arg(claim_keys)::text[]);
+
+-- name: HandOverOwnershipClaim :execrows
+UPDATE billing.ownership_claims
+SET holder_type = sqlc.arg(holder_type)::text, holder_id = sqlc.arg(holder_id)::uuid, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND claim_key = sqlc.arg(claim_key)::text AND invoice_id = sqlc.arg(invoice_id)::uuid AND holder_type = 'invoice';
+
+-- name: ReleaseInvoiceClaims :execrows
+DELETE FROM billing.ownership_claims
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND invoice_id = sqlc.arg(invoice_id)::uuid AND holder_type = 'invoice';
+
+-- name: NextInvoiceNumber :one
+SELECT nextval('billing.invoice_number_seq'::regclass)::bigint AS number;
+
+-- name: ListLiveOwnership :many
+-- What a customer holds of the given products or tier groups: live
+-- subscriptions (a canceled one while still paid through or while its
+-- provider schedule may still bill), and product access that never ends.
+SELECT 'subscription'::text AS holder_type, s.id AS holder_id, s.product_id, s.tier_group,
+       s.status, s.current_period_ends_at
+FROM billing.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = sqlc.arg(customer_id)::uuid
+  AND s.deleted_at IS NULL
+  AND (s.product_id = ANY(sqlc.arg(product_ids)::uuid[]) OR s.tier_group = ANY(sqlc.arg(tier_groups)::text[]))
+  AND (s.status <> 'canceled' OR s.current_period_ends_at > sqlc.arg(now)::timestamptz OR s.deletion_scheduled_at IS NOT NULL)
+UNION ALL
+SELECT 'product_access'::text, a.id, a.product_id, NULL::text, 'active'::text, a.ends_at
+FROM billing.product_access a
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = sqlc.arg(customer_id)::uuid
+  AND a.product_id = ANY(sqlc.arg(product_ids)::uuid[])
+  AND a.source_type IN ('purchase', 'grant') AND a.ends_at IS NULL AND a.revoked_at IS NULL AND a.deleted_at IS NULL
+  AND a.starts_at <= sqlc.arg(now)::timestamptz;
+
+-- name: CreateInvoiceAttempt :exec
+-- A card attempt starts created; a Solana one requires_action, with its
+-- reference.
+INSERT INTO billing.invoice_attempts (
+    id, merchant_id, customer_id, invoice_id, rail, status, reference, amount, currency,
+    expires_at, rail_state, psp_id, created_at, updated_at
+) VALUES (
+    sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(invoice_id)::uuid,
+    sqlc.arg(rail)::text, sqlc.arg(status)::text, sqlc.narg(reference)::text, sqlc.arg(amount)::bigint, sqlc.arg(currency)::text,
+    sqlc.arg(expires_at)::timestamptz, sqlc.arg(rail_state)::jsonb, sqlc.arg(psp_id)::uuid,
+    sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
+);
+
+-- name: GetInvoiceAttempt :one
+SELECT * FROM billing.invoice_attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND invoice_id IS NOT NULL AND deleted_at IS NULL;
+
+-- name: SetInvoiceAttemptStatus :execrows
+-- A terminal attempt never moves again.
+UPDATE billing.invoice_attempts
+SET status = sqlc.arg(status)::text,
+    payment_id = COALESCE(sqlc.narg(payment_id)::uuid, payment_id),
+    transaction_id = COALESCE(sqlc.narg(transaction_id)::text, transaction_id),
+    rail_state = COALESCE(rail_state, '{}'::jsonb) || COALESCE(sqlc.narg(rail_state)::jsonb, '{}'::jsonb),
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND invoice_id IS NOT NULL
+  AND status IN ('created', 'requires_action', 'processing') AND deleted_at IS NULL;
+
+-- name: EnqueueInvoiceHostEvent :execrows
+INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, amount, currency, occurred_at, data, dedupe_key)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(event_type)::text, 'invoice', sqlc.arg(invoice_id)::uuid,
+        sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(occurred_at)::timestamptz,
+        sqlc.arg(data)::jsonb, sqlc.arg(dedupe_key)::text)
+ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;

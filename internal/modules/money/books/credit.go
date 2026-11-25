@@ -8,7 +8,7 @@ package books
 // Worth(n) = P - floor(P*(U-n)/U), so the last unit carries the remainder.
 // After every movement of its units the poster brings the lot's deferred money
 // to the worth of what is left, posting the difference where the units went:
-// usage revenue (or an order line's deferred revenue) for a spend,
+// usage revenue (or an invoice line's deferred revenue) for a spend,
 // breakage_revenue for an expiry or a revocation, back from breakage_revenue
 // for a reinstatement. Being cumulative, rounding never drifts.
 //
@@ -219,25 +219,25 @@ type CreditMove struct {
 	// Coord and At are the units-book leg's coordinate and effective_at.
 	Coord Coord
 	At    time.Time
-	// Into is the order line a spend pays, priced in the lot's unit: its
+	// Into is the invoice line a spend pays, priced in the lot's unit: its
 	// release goes to that line's deferred revenue, which its revenue
 	// schedule recognises. nil is usage revenue.
 	Into *Line
 }
 
-// CreditLineSchedule is the revenue schedule of an order line priced in a
+// CreditLineSchedule is the revenue schedule of an invoice line priced in a
 // merchant's unit, in one currency its lots were paid in: the spends name it
-// as they release the lots' money, before the order's application makes it.
+// as they release the lots' money, before the invoice's application makes it.
 func CreditLineSchedule(line uuid.UUID, currency string) uuid.UUID {
 	return uuidutil.DeterministicID(line, "revenue_schedule", currency)
 }
 
-// Line is an order line a spend of credit pays, and its order, which the
+// Line is an invoice line a spend of credit pays, and its invoice, which the
 // spend's legs in both books name.
 type Line struct {
-	Order     uuid.UUID
-	OrderLine uuid.UUID
-	Product   *uuid.UUID
+	Invoice     uuid.UUID
+	InvoiceLine uuid.UUID
+	Product     *uuid.UUID
 }
 
 // MoveCredit posts the money of a movement of the lot's units, l being the lot
@@ -269,7 +269,7 @@ func (b *Books) MoveCredit(ctx context.Context, l CreditLot, m CreditMove) error
 }
 
 // postInto credits a spend's revenue: usage_revenue, or the deferred revenue
-// of the order line it pays.
+// of the invoice line it pays.
 func (b *Books) postInto(ctx context.Context, l CreditLot, debit Ref, amount int64, currency string, typ TransferType, m CreditMove) error {
 	if amount <= 0 {
 		return nil
@@ -277,19 +277,19 @@ func (b *Books) postInto(ctx context.Context, l CreditLot, debit Ref, amount int
 	if m.Into == nil {
 		return b.postLot(ctx, l, debit, Ref{Type: UsageRevenue}, amount, currency, typ, m.Coord, m.At)
 	}
-	customer, lot, line := l.Customer, l.ID, m.Into.OrderLine
+	customer, lot, line := l.Customer, l.ID, m.Into.InvoiceLine
 	product := m.Into.Product
 	if product == nil {
 		product = l.Product
 	}
-	var order *uuid.UUID
-	if m.Into.Order != uuid.Nil {
-		order = &m.Into.Order
+	var invoice *uuid.UUID
+	if m.Into.Invoice != uuid.Nil {
+		invoice = &m.Into.Invoice
 	}
 	schedule := CreditLineSchedule(line, currency)
 	_, _, err := b.Post(ctx, Posting{
 		Debit: debit, Credit: Ref{Type: DeferredRevenue}, Amount: amount, Currency: currency, Type: typ, Coord: m.Coord,
-		EffectiveAt: m.At, Customer: &customer, CreditGrant: &lot, Order: order, OrderLine: &line, Product: product, RevenueSchedule: &schedule,
+		EffectiveAt: m.At, Customer: &customer, CreditGrant: &lot, Invoice: invoice, InvoiceLine: &line, Product: product, RevenueSchedule: &schedule,
 	})
 	if err != nil {
 		return fmt.Errorf("books: credit lot %s %s into line %s: %w", l.ID, typ, line, err)

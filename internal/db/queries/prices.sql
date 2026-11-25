@@ -187,7 +187,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(produc
 -- a subscription, a purchase, a price migration, a scheduled change, a
 -- provider write, a PSP link or a PSP import's price pick.
 SELECT (
-    EXISTS (SELECT 1 FROM billing.order_lines WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
+    EXISTS (SELECT 1 FROM billing.invoice_lines WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND from_price_id = ANY(sqlc.arg(price_ids)::uuid[]))
     OR EXISTS (SELECT 1 FROM billing.price_migrations WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND to_price_id = ANY(sqlc.arg(price_ids)::uuid[]))

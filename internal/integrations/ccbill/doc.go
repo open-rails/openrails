@@ -26,11 +26,11 @@
 //
 // Sales: a price links a FlexForm (flex_id, recurring_billing_option_id)
 // whose pricing must equal the catalog's; renewals are checked within 2%. A
-// FlexForm sells subscriptions only. Paying an order on CCBill redirects to a
+// FlexForm sells subscriptions only. Paying an invoice on CCBill redirects to a
 // signed FlexForm carrying the attempt as reservationId and the customer's
 // verified email and username (else 400 customer_email_required). Only the
-// NewSaleSuccess webhook naming the attempt completes the order; a sale the
-// order no longer takes is booked for refund (life.order.late_payment,
+// NewSaleSuccess webhook naming the attempt completes the invoice; a sale the
+// invoice no longer takes is booked for refund (life.invoice.late_payment,
 // consistency.ledger.unbooked) or refused (ccbill_sale_unhonored); a sale no
 // attempt issued is refused (ccbill_new_subscription_unsupported). Upgrades
 // redirect with originalSubscriptionId and apply on UpgradeSuccess; there are

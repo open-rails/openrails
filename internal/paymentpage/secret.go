@@ -1,7 +1,7 @@
-// Package paymentpage is the payment page: an order's pay URL on
-// the checkout origin (a merchant order's, or a customer's own order's), the
+// Package paymentpage is the payment page: an invoice's pay URL on
+// the checkout origin (a merchant invoice's, or a customer's own invoice's), the
 // secret it carries, the page served there and what the secret opens. The secret
-// acts as the order's customer, for that order alone, and only on the
+// acts as the invoice's customer, for that invoice alone, and only on the
 // checkout origin (Stripe's client secret).
 package paymentpage
 
@@ -23,7 +23,7 @@ const (
 )
 
 // NewSecret mints a pay URL secret and its authentication hash. Attach stores
-// the hash on the order and retains the secret in its bounded creation receipt.
+// the hash on the invoice and retains the secret in its bounded creation receipt.
 func NewSecret() (secret string, hash []byte, err error) {
 	raw := make([]byte, secretBytes)
 	if _, err := rand.Read(raw); err != nil {
@@ -48,14 +48,14 @@ func Hash(secret string) ([]byte, bool) {
 	return sum[:], true
 }
 
-// PagePrefix starts every order page's path on the checkout origin.
+// PagePrefix starts every invoice page's path on the checkout origin.
 const PagePrefix = "/pay/"
 
-// PagePath is the page's path for an order on the checkout origin.
-func PagePath(order billing.OrderID) string { return PagePrefix + order.String() }
+// PagePath is the page's path for an invoice on the checkout origin.
+func PagePath(invoice billing.InvoiceID) string { return PagePrefix + invoice.String() }
 
-// URL is the pay URL: the page for the order on the checkout origin,
+// URL is the pay URL: the page for the invoice on the checkout origin,
 // with the secret in the fragment, which browsers never send to a server.
-func URL(origin string, order billing.OrderID, secret string) string {
-	return strings.TrimRight(origin, "/") + PagePath(order) + "#" + secret
+func URL(origin string, invoice billing.InvoiceID, secret string) string {
+	return strings.TrimRight(origin, "/") + PagePath(invoice) + "#" + secret
 }

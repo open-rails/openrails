@@ -1,6 +1,6 @@
 // Package intents is the durable provider-write ledger. Every outbound
 // provider mutation (NMI sales, deletes and vault writes, NMI and Stripe
-// refunds, manual rebills, order collections, tier changes, CCBill cancels,
+// refunds, manual rebills, invoice collections, tier changes, CCBill cancels,
 // payment-method swaps, Solana pulls, Stripe payment-method domains) is first
 // a provider_intents row with immutable terms, an idempotency key, an origin
 // and a relevance window, committed atomically with its River job
@@ -18,13 +18,13 @@
 // unknown attempt. A known pre-submission refusal parks without consuming an
 // attempt; a parsed definitive decline ends the attempt. Provider-idempotent
 // calls may replay their key (Stripe, within its 23-hour retention). A
-// receipt is inserted once against the frozen terms (account, order, vault,
+// receipt is inserted once against the frozen terms (account, invoice, vault,
 // amount, currency, instrument); one that contradicts them settles nothing
 // and is kept as provider_contradiction. An instrument changed before
 // submission is provable non-execution (instrument_changed). Nothing triggers
 // a compensating cancel or refund automatically.
 //
-// An order collection freezes its instrument, owns its order while
+// An invoice collection freezes its instrument, owns its invoice while
 // unresolved and charges NMI only under the currency's active unscheduled
 // mandate. A tier change (nmi_upgrade, stripe_tier_change) is one operation
 // keyed by the request's Idempotency-Key: the same key replays the stored
@@ -38,7 +38,7 @@
 // with `openrails intents resolve` (Resolution): --receipt reads the named
 // provider object back and must match the frozen operation; --not-executed
 // needs the type's own non-execution proof (for NMI, a definitive decline as
-// the one transaction under the order; refused for submitted collections,
+// the one transaction under the invoice; refused for submitted collections,
 // rebills and prorations) or an operation that never crossed its fence. Each
 // resolution records its actor and reason. Unresolved outcomes raise
 // life.submission.unresolved or life.sale.unresolved.

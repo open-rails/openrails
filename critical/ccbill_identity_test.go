@@ -224,7 +224,7 @@ func TestCCBillIdentity(t *testing.T) {
 			requireCCBillCard(t, a.alpha, alice, "0912233445566778801", "visa", "1111")
 		})
 
-		t.Run("an-order-sale-names-the-card-ccbill-billed", func(t *testing.T) {
+		t.Run("an-invoice-sale-names-the-card-ccbill-billed", func(t *testing.T) {
 			// Selling a FlexForm is a provider write.
 			a := ccbillWebhookWorld(t, func(w *world) { w.posture = "full" })
 			price := ccbillMemberPrice(t, a.alpha)
@@ -234,9 +234,9 @@ func TestCCBillIdentity(t *testing.T) {
 			// and paying without it is refused in the customer's words.
 			requires := func(token string) []string {
 				t.Helper()
-				status, raw := a.request(t, http.MethodPost, "/v1/me/orders/preview", token, billing.PreviewMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}})
+				status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/preview", token, billing.PreviewMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}})
 				require.Equal(t, http.StatusOK, status, string(raw))
-				var preview billing.OrderPreview
+				var preview billing.InvoicePreview
 				require.NoError(t, json.Unmarshal(raw, &preview))
 				require.Len(t, preview.PaymentOptions, 1)
 				require.Equal(t, billing.RailCCBill, preview.PaymentOptions[0].Rail)
@@ -247,20 +247,20 @@ func TestCCBillIdentity(t *testing.T) {
 			require.NoError(t, err)
 			pending := authtest.SignIn(t, a.auth, authtest.User{User: unverified, Password: authtest.Password}).AccessToken
 			require.Equal(t, []string{"verified_email"}, requires(pending))
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", pending, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
-				Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}},
-				map[string]string{"Idempotency-Key": "ccbill-unverified-order"})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", pending, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
+				Payment: &billing.InvoicePaymentParams{ReturnURL: alphaSite + "/paid"}},
+				map[string]string{"Idempotency-Key": "ccbill-unverified-invoice"})
 			require.Equal(t, http.StatusBadRequest, status, string(raw))
 			require.Contains(t, string(raw), "customer_email_required")
 			require.Contains(t, string(raw), "Verify your email and set a username to pay with CCBill.")
-			status, raw = a.request(t, http.MethodPost, "/v1/me/orders", token, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
-				Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}},
-				map[string]string{"Idempotency-Key": "ccbill-card-order"})
+			status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", token, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
+				Payment: &billing.InvoicePaymentParams{ReturnURL: alphaSite + "/paid"}},
+				map[string]string{"Idempotency-Key": "ccbill-card-invoice"})
 			require.Equal(t, http.StatusCreated, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
-			require.NotNil(t, order.Payment.NextAction, string(raw))
-			page, err := url.Parse(*order.Payment.NextAction.URL)
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			require.NotNil(t, invoice.Payment.NextAction, string(raw))
+			page, err := url.Parse(*invoice.Payment.NextAction.URL)
 			require.NoError(t, err)
 			next := a.clock.Now().UTC().Add(720 * time.Hour)
 			status, body := ccbillNotice(t, a, "NewSaleSuccess", map[string]any{"subscriptionId": "0556677889900112233", "transactionId": "0812233445566778809",
@@ -598,7 +598,7 @@ func TestCCBillIdentity(t *testing.T) {
 		}
 	})
 
-	t.Run("OR-J38-S43/a-late-sale-on-an-order-paid-by-card-is-kept-for-refund", func(t *testing.T) {
+	t.Run("OR-J38-S43/a-late-sale-on-an-invoice-paid-by-card-is-kept-for-refund", func(t *testing.T) {
 		// A payment is never recorded in the database's future.
 		a, provider := newPaymentWorld(t, func(w *world) {
 			w.clock.Advance(-30 * 24 * time.Hour)
@@ -615,10 +615,10 @@ func TestCCBillIdentity(t *testing.T) {
 		_, err = a.alpha.CreateProviderPrice(t.Context(), billing.CreateProviderPriceParams{ProductID: product.ID, Key: "member-ccbill", PSP: "ccbill", FlexID: "critical-flex",
 			Currency: "USD", UnitAmount: ptr(int64(10_000_000)), BillingIntervalHours: ptr(720)})
 		require.NoError(t, err)
-		lines := []billing.OrderLineParams{{PriceID: price.ID}}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders/preview", a.aliceToken, billing.PreviewMyOrderParams{Lines: lines})
+		lines := []billing.InvoiceLineParams{{PriceID: price.ID}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/preview", a.aliceToken, billing.PreviewMyInvoiceParams{Lines: lines})
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var preview billing.OrderPreview
+		var preview billing.InvoicePreview
 		require.NoError(t, json.Unmarshal(raw, &preview))
 		var page billing.PSPID
 		for _, option := range preview.PaymentOptions {
@@ -629,21 +629,21 @@ func TestCCBillIdentity(t *testing.T) {
 		require.False(t, page.IsZero(), "the card sale's FlexForm stands in for it: %s", raw)
 
 		// Alice opens the CCBill page and leaves; once it lapses she pays by card.
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
-			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, billing.CreateMyInvoiceParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
+			Payment: &billing.InvoicePaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.NotNil(t, order.Payment.NextAction, string(raw))
-		link, err := url.Parse(*order.Payment.NextAction.URL)
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.NotNil(t, invoice.Payment.NextAction, string(raw))
+		link, err := url.Parse(*invoice.Payment.NextAction.URL)
 		require.NoError(t, err)
 		a.clock.Advance(61 * time.Minute)
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, billing.PayOrderParams{ExpectedTotal: 10_000_000, Reusable: ptr(true),
-			Payment: billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}, map[string]string{"Idempotency-Key": "card-after-page"})
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", a.aliceToken, billing.PayInvoiceParams{ExpectedTotal: 10_000_000, Reusable: ptr(true),
+			Payment: billing.InvoicePaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}, map[string]string{"Idempotency-Key": "card-after-page"})
 		require.Equal(t, http.StatusOK, status, string(raw))
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.Equal(t, billing.OrderComplete, order.Status, string(raw))
-		card := *order.Payment.PaymentID
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.Equal(t, billing.InvoiceComplete, invoice.Status, string(raw))
+		card := *invoice.Payment.PaymentID
 
 		// The page is completed after all: CCBill charged her twice and bills a
 		// subscription OpenRails never took. Its sale is kept for refund, once.
@@ -656,10 +656,10 @@ func TestCCBillIdentity(t *testing.T) {
 			require.Equal(t, http.StatusOK, status, body)
 			a.clock.Advance(time.Second)
 		}
-		paid, err := a.alpha.GetOrder(t.Context(), order.ID)
+		paid, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderComplete, paid.Status)
-		require.Equal(t, card, *paid.Payment.PaymentID, "the card still pays the order")
+		require.Equal(t, billing.InvoiceComplete, paid.Status)
+		require.Equal(t, card, *paid.Payment.PaymentID, "the card still pays the invoice")
 		listed, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: alice})
 		require.NoError(t, err)
 		var held []billing.Payment
@@ -672,16 +672,16 @@ func TestCCBillIdentity(t *testing.T) {
 		require.Equal(t, billing.PaymentSucceeded, held[0].Status)
 		require.EqualValues(t, 10_000_000, held[0].Amount)
 		require.Equal(t, billing.RailCCBill, *held[0].Rail)
-		require.Equal(t, order.ID, *held[0].OrderID)
+		require.Equal(t, invoice.ID, *held[0].InvoiceID)
 		require.Nil(t, held[0].SubscriptionID, "the sale grants nothing")
 		booked := glFor(t, a.world, "payment", held[0].ID.UUID().String())
 		require.Len(t, booked, 1, "the books keep the second charge unapplied, for its refund")
 		require.Equal(t, "cash_received", booked[0].Type)
 		require.Equal(t, "cash_clearing", booked[0].Debit)
-		require.Len(t, glFor(t, a.world, "payment", card.UUID().String()), 2, "the card's money pays the order")
+		require.Len(t, glFor(t, a.world, "payment", card.UUID().String()), 2, "the card's money pays the invoice")
 		require.EqualValues(t, 10_000_000, unappliedCash(t, a.world, "USD"))
 		require.Equal(t, billing.RailStripe, onlySubscription(t, a.alpha, alice).Rail, "the card's membership is the only one")
-		late, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.order.late_payment"})
+		late, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.invoice.late_payment"})
 		require.NoError(t, err)
 		require.Len(t, late.Items, 1)
 		require.Equal(t, held[0].ID.UUID().String(), late.Items[0].SubjectKey)
@@ -690,7 +690,7 @@ func TestCCBillIdentity(t *testing.T) {
 		unbooked, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.ledger.unbooked"})
 		require.NoError(t, err)
 		require.Len(t, unbooked.Items, 1, "one repair: cancel the subscription at CCBill")
-		require.Equal(t, "ccbill_sale_order_paid", unbooked.Items[0].Evidence["operation"])
+		require.Equal(t, "ccbill_sale_invoice_paid", unbooked.Items[0].Evidence["operation"])
 		require.Equal(t, "0778899001122334455", unbooked.Items[0].Evidence["metadata"].(map[string]any)["rail_subscription_id"])
 		effects := provider.effects(t)
 		require.Len(t, effects, 1, "the card is never refunded for CCBill's charge")

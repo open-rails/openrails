@@ -24,7 +24,7 @@ func TestEnrollmentContracts(t *testing.T) {
 		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
 		require.NoError(t, err)
 		token := p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
+		input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token}}
 		type response struct {
 			status int
 			raw    []byte
@@ -35,12 +35,12 @@ func TestEnrollmentContracts(t *testing.T) {
 		for range 2 {
 			go func() {
 				<-begin
-				status, raw, err := a.do(t.Context(), http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "one-membership"})
+				status, raw, err := a.do(t.Context(), http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "one-membership"})
 				answers <- response{status, raw, err}
 			}()
 		}
 		close(begin)
-		ids := []billing.OrderID{}
+		ids := []billing.InvoiceID{}
 		for range 2 {
 			r := <-answers
 			require.NoError(t, r.err)
@@ -49,27 +49,27 @@ func TestEnrollmentContracts(t *testing.T) {
 				continue
 			}
 			require.Equal(t, http.StatusCreated, r.status, string(r.raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(r.raw, &order))
-			require.Equal(t, billing.OrderComplete, order.Status)
-			ids = append(ids, order.ID)
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(r.raw, &invoice))
+			require.Equal(t, billing.InvoiceComplete, invoice.Status)
+			ids = append(ids, invoice.ID)
 		}
 		require.NotEmpty(t, ids)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "one-membership"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "one-membership"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var replay billing.Order
+		var replay billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &replay))
 		for _, id := range ids {
 			require.Equal(t, id, replay.ID)
 		}
-		require.Equal(t, billing.OrderComplete, replay.Status)
+		require.Equal(t, billing.InvoiceComplete, replay.Status)
 		subscriptions, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 		require.NoError(t, err)
 		require.Len(t, subscriptions.Items, 1)
 		require.Equal(t, billing.SubscriptionActive, subscriptions.Items[0].Status)
 		require.Len(t, p.effects(t), 1)
 		require.EqualValues(t, 1000, p.effects(t)[0].Amount)
-		events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, events.Events, 2)
 	})
@@ -151,17 +151,17 @@ func TestEnrollmentContracts(t *testing.T) {
 			price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "trial", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(168), TrialUnitAmount: &amount, TrialDurationHours: ptr(48)})
 			require.NoError(t, err)
 			token := p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-			input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: &amount, Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "unsupported-trial-" + price.ID.String()})
+			input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: &amount, Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token}}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "unsupported-trial-" + price.ID.String()})
 			require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
-			require.Contains(t, string(raw), "order_line_unavailable")
+			require.Contains(t, string(raw), "invoice_line_unavailable")
 			require.Empty(t, p.effects(t))
 		}
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: customer})
 		require.NoError(t, err)
 		require.Empty(t, subs.Items)
-		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 	})

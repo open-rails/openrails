@@ -64,14 +64,14 @@ SELECT COALESCE(min(at), $1::timestamptz)::timestamptz AS oldest_at FROM (
       AND status IN ('active','past_due','awaiting_method','unverified') AND deleted_at IS NULL
   UNION ALL
   SELECT COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz, NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at)
-    FROM billing.provider_intents pi LEFT JOIN billing.orders i ON i.merchant_id=pi.merchant_id AND i.id::text=COALESCE(pi.payload->>'order_id', pi.payload->>'invoice_id')
+    FROM billing.provider_intents pi LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=COALESCE(pi.payload->>'order_id', pi.payload->>'invoice_id')
     WHERE pi.merchant_id=$2::uuid AND pi.psp_id=$3::uuid
       AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
   UNION ALL
-  -- An unbound unpaid usage order may have charged on any known merchant
+  -- An unbound unpaid usage invoice may have charged on any known merchant
   -- account after the restored snapshot. Looking only at its newly selected
-  -- card is not evidence that the old order was unpaid elsewhere.
-  SELECT i.period_starts_at FROM billing.orders i
+  -- card is not evidence that the old invoice was unpaid elsewhere.
+  SELECT i.period_starts_at FROM billing.invoices i
     WHERE i.merchant_id=$2::uuid AND i.origin='usage'
       AND i.status IN ('open','uncollectible')
       AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=$3::uuid AND p.rail IN ('nmi','stripe'))

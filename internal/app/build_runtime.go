@@ -51,11 +51,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/invoices"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -317,7 +317,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 
 	// SEC-30: the card-testing ledger, in the abuse state.
 	cardFailureLedger := abuse.NewFailureLedger(abuseState, clock, abuse.DefaultCardAbuseConfig())
-	serviceInstances.OrderAttemptService.SetCardFailureLedger(cardFailureLedger)
+	serviceInstances.InvoiceAttemptService.SetCardFailureLedger(cardFailureLedger)
 
 	// #725/#788: collection adapters arm PER MERCHANT from the armed rail
 	// state at charge time — no boot adapter map exists anymore.
@@ -363,21 +363,21 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		WebhookDispatcher:            serviceInstances.WebhookDispatcher,
 		DeduplicationService:         serviceInstances.DeduplicationService,
 
-		PurchaseService:     serviceInstances.PurchaseService,
-		OrderAttemptService: serviceInstances.OrderAttemptService,
-		Orders:              orders.New(database, serviceInstances.SubscriptionLifecycleService, clock),
-		Idempotency:         serviceInstances.Idempotency,
-		CardAbuseGuard:      cardAbuseGuard,
-		AbuseState:          abuseState,
-		CaptchaStore:        captchaStore,
-		CardFailureLedger:   cardFailureLedger,
-		MoneyService:        serviceInstances.MoneyService,
-		MetricsService:      serviceInstances.MetricsService,
-		DashboardService:    serviceInstances.DashboardService,
-		AlertService:        alertService,
-		WebhookHealth:       &webhookhealth.Recorder{DB: database, Clock: clock, Log: logger},
-		MoneyCharger:        moneyCharger,
-		RailCustomerService: serviceInstances.RailCustomerService,
+		PurchaseService:       serviceInstances.PurchaseService,
+		InvoiceAttemptService: serviceInstances.InvoiceAttemptService,
+		Invoices:              invoices.New(database, serviceInstances.SubscriptionLifecycleService, clock),
+		Idempotency:           serviceInstances.Idempotency,
+		CardAbuseGuard:        cardAbuseGuard,
+		AbuseState:            abuseState,
+		CaptchaStore:          captchaStore,
+		CardFailureLedger:     cardFailureLedger,
+		MoneyService:          serviceInstances.MoneyService,
+		MetricsService:        serviceInstances.MetricsService,
+		DashboardService:      serviceInstances.DashboardService,
+		AlertService:          alertService,
+		WebhookHealth:         &webhookhealth.Recorder{DB: database, Clock: clock, Log: logger},
+		MoneyCharger:          moneyCharger,
+		RailCustomerService:   serviceInstances.RailCustomerService,
 	}
 
 	runtime.Disputes = disputes.New(database, clock)
@@ -393,8 +393,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	runtime.Disputes.Admissions, runtime.Disputes.Postures = runtime.DestructiveAdmissions, runtime.Posture()
 	runtime.Disputes.Lifecycle = runtime.SubscriptionLifecycleService
 	// Redirect PSPs and bank challenges come back to the payment page itself.
-	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
-	serviceInstances.OrderAttemptService.SetReturnOrigins(runtime.ReturnOrigins)
+	serviceInstances.InvoiceAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
+	serviceInstances.InvoiceAttemptService.SetReturnOrigins(runtime.ReturnOrigins)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.PriceMigrationService.WithDestructiveAdmissions(runtime.DestructiveAdmissions).WithPushes(intents.PriceMigrationPushes{})
 	runtime.MoneyService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
@@ -418,8 +418,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 			}
 		}
 	}
-	if serviceInstances.OrderAttemptService != nil {
-		serviceInstances.OrderAttemptService.SetPSPPosture(runtime.PSPPostureDisarmed)
+	if serviceInstances.InvoiceAttemptService != nil {
+		serviceInstances.InvoiceAttemptService.SetPSPPosture(runtime.PSPPostureDisarmed)
 	}
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.NMIClients = nmiClients
@@ -431,9 +431,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	// #817: decimals come from the SPL mint on-chain, read through the same
 	// per-merchant chain reader and cached (mint decimals are immutable).
 	runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(solanaRPCResolver.ChainReader())
-	if serviceInstances.OrderAttemptService != nil {
-		serviceInstances.OrderAttemptService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
-		serviceInstances.OrderAttemptService.SetSolanaMintInfo(solanaRPCResolver.ChainReader())
+	if serviceInstances.InvoiceAttemptService != nil {
+		serviceInstances.InvoiceAttemptService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
+		serviceInstances.InvoiceAttemptService.SetSolanaMintInfo(solanaRPCResolver.ChainReader())
 	}
 	if serviceInstances.SolanaPayPoller != nil {
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
@@ -516,8 +516,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		}
 		runtime.PurchaseService.StripeEngines = runtime.CollectionResolver
 	}
-	if runtime.OrderAttemptService != nil {
-		runtime.OrderAttemptService.SetOrders(runtime.Orders)
+	if runtime.InvoiceAttemptService != nil {
+		runtime.InvoiceAttemptService.SetInvoices(runtime.Invoices)
 	}
 	// User card removals execute only in the explicit request. The retained
 	// operation supplies idempotency and fences, without a background retry.
@@ -591,12 +591,12 @@ type servicesInstances struct {
 
 	WebhookDispatcher *webhooks.WebhookDispatcher
 
-	PurchaseService     *payment.PurchaseService
-	OrderAttemptService *payment.OrderAttemptService
-	MoneyService        *money.MoneyService
-	MetricsService      *metrics.Service
-	DashboardService    *dashboard.Service
-	RailCustomerService *payments.RailCustomerService
+	PurchaseService       *payment.PurchaseService
+	InvoiceAttemptService *payment.InvoiceAttemptService
+	MoneyService          *money.MoneyService
+	MetricsService        *metrics.Service
+	DashboardService      *dashboard.Service
+	RailCustomerService   *payments.RailCustomerService
 }
 
 func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver *identity.Customers, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
@@ -731,7 +731,7 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	purchaseService.StripeService.StripeClients = stripeClients
 	purchaseService.SetSubscriptionLifecycleService(subscriptionLifecycleService)
 	webhookDispatcher.PurchaseRegistrar = purchaseService
-	orderAttemptService := payment.NewOrderAttemptService(
+	invoiceAttemptService := payment.NewInvoiceAttemptService(
 		database,
 		priceService,
 		productService,
@@ -745,11 +745,11 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		railConfigs,
 		clock,
 	)
-	webhookDispatcher.OrderAttemptService = orderAttemptService
+	webhookDispatcher.InvoiceAttemptService = invoiceAttemptService
 
-	// The poller settles through the order attempt service, the one
+	// The poller settles through the invoice attempt service, the one
 	// crediting path for Solana Pay purchases.
-	solanaPayPoller := solanamodule.NewSolanaPayPoller(database, orderAttemptService, clock)
+	solanaPayPoller := solanamodule.NewSolanaPayPoller(database, invoiceAttemptService, clock)
 
 	return &servicesInstances{
 		HyperSwitchErr:               hyperSwitchErr,
@@ -775,7 +775,7 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		DeduplicationService:         deduplicationService,
 		WebhookDispatcher:            webhookDispatcher,
 		PurchaseService:              purchaseService,
-		OrderAttemptService:          orderAttemptService,
+		InvoiceAttemptService:        invoiceAttemptService,
 		Idempotency:                  idempotencyService,
 		MoneyService:                 moneyService,
 		MetricsService:               metricsService,

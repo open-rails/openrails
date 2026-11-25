@@ -1,5 +1,5 @@
 // Apple Pay and Google Pay through Stripe's Express Checkout Element: the
-// wallet makes a payment method (`pm_`) the order charges as it does a new
+// wallet makes a payment method (`pm_`) the invoice charges as it does a new
 // card's. Stripe shows a wallet only on a registered payment-method domain,
 // in a browser that supports it, with a card in the wallet.
 import * as React from "react"

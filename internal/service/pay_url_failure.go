@@ -11,14 +11,14 @@ import (
 )
 
 // FindingPayPageUnreachable is a customer's page that could not frame an
-// order's pay URL: the checkout origin is down or misconfigured.
+// invoice's pay URL: the checkout origin is down or misconfigured.
 const FindingPayPageUnreachable reconcile.FindingType = "life.payment_page.unreachable"
 
 // ReportPayURLFailure records that the customer's page could not frame their
-// order's pay URL. One open finding per merchant collects the reports, and
+// invoice's pay URL. One open finding per merchant collects the reports, and
 // the operator is alerted once per episode.
-func (s *Service) ReportPayURLFailure(ctx context.Context, actor OrderActor, id billing.OrderID) error {
-	order, err := s.GetOrder(ctx, actor, id)
+func (s *Service) ReportPayURLFailure(ctx context.Context, actor InvoiceActor, id billing.InvoiceID) error {
+	invoice, err := s.GetInvoice(ctx, actor, id)
 	if err != nil {
 		return err
 	}
@@ -35,11 +35,11 @@ func (s *Service) ReportPayURLFailure(ctx context.Context, actor OrderActor, id 
 	if err != nil {
 		return err
 	}
-	s.Log.WarnContext(ctx, "payment page: the customer's page could not frame the order's pay URL", "merchant_id", mid.String(), "order_id", order.ID.String(), "customer_id", order.CustomerID.String())
+	s.Log.WarnContext(ctx, "payment page: the customer's page could not frame the invoice's pay URL", "merchant_id", mid.String(), "invoice_id", invoice.ID.String(), "customer_id", invoice.CustomerID.String())
 	rec, err := (&reconcile.PGStore{DB: rt.DB}).RaiseFinding(ctx, reconcile.RaisedFinding{
 		Type: FindingPayPageUnreachable, SubjectKey: "payment_page", Severity: reconcile.SeverityHigh,
 		RecommendedAction: "Customers' pages could not load the payment page. Check the checkout origin's DNS, TLS certificate and server.",
-		Evidence:          map[string]any{"order_id": order.ID.String(), "customer_id": order.CustomerID.String(), "reported_at": s.now().UTC().Format(time.RFC3339)},
+		Evidence:          map[string]any{"invoice_id": invoice.ID.String(), "customer_id": invoice.CustomerID.String(), "reported_at": s.now().UTC().Format(time.RFC3339)},
 	})
 	if err != nil {
 		return err

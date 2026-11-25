@@ -21,7 +21,7 @@ type UsageBillingCurrency struct {
 	Currency catalog.Currency `json:"currency"`
 	// CreditLimit is the unpaid usage a customer may run up, in the currency's units.
 	CreditLimit int64 `json:"credit_limit,string"`
-	// MinimumInvoiceAmount is the smallest usage order invoiced.
+	// MinimumInvoiceAmount is the smallest usage invoice invoiced.
 	MinimumInvoiceAmount int64 `json:"minimum_invoice_amount,string"`
 	// CollectionThreshold invoices arrears in the currency once they reach it,
 	// before the credit limit: nil is the credit limit.

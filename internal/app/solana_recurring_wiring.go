@@ -56,11 +56,11 @@ func (r *Runtime) ArmSolanaRecurringServices(transit solanaint.TransitClient) {
 	r.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(subscriptions, chainReader))
 	r.SetSolanaPrepareTierChangeService(recurring.NewPrepareTierChangeService(submitter, chainReader, tokens))
 
-	if r.OrderAttemptService == nil {
+	if r.InvoiceAttemptService == nil {
 		return
 	}
 	prepare := recurring.NewPrepareSubscribeService(r.Log, submitter, chainReader, tokens)
-	r.OrderAttemptService.SetSolanaRecurring(prepare, enroll)
+	r.InvoiceAttemptService.SetSolanaRecurring(prepare, enroll)
 }
 
 // SolanaPlanChanges records Solana plan changes from the chain: the

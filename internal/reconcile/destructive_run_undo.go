@@ -35,17 +35,17 @@ type UndoScope struct {
 // NOT NULL, so every count is zero; a non-zero total means the schema changed
 // underneath this code, and the undo refuses rather than under-cover.
 type UnattributedRows struct {
-	Subscriptions  int64 `json:"subscriptions"`
-	Payments       int64 `json:"payments"`
-	OrderAttempts  int64 `json:"order_attempts"`
-	PaymentMethods int64 `json:"payment_methods"`
-	UnfiredIntents int64 `json:"unfired_intents"`
+	Subscriptions   int64 `json:"subscriptions"`
+	Payments        int64 `json:"payments"`
+	InvoiceAttempts int64 `json:"invoice_attempts"`
+	PaymentMethods  int64 `json:"payment_methods"`
+	UnfiredIntents  int64 `json:"unfired_intents"`
 }
 
 // Total is how many live rows this merchant holds that no PSP-scoped predicate
 // can reach. Always zero while psp_id is NOT NULL.
 func (b UnattributedRows) Total() int64 {
-	return b.Subscriptions + b.Payments + b.OrderAttempts + b.PaymentMethods + b.UnfiredIntents
+	return b.Subscriptions + b.Payments + b.InvoiceAttempts + b.PaymentMethods + b.UnfiredIntents
 }
 
 // ErrUnattributedRows is the undo's refusal when the invariant does not hold.
@@ -171,7 +171,7 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 		}
 		plan.Restorable["subscriptions"] = c.Subscriptions
 		plan.Restorable["payments"] = c.Payments
-		plan.Restorable["order_attempts"] = c.OrderAttempts
+		plan.Restorable["invoice_attempts"] = c.InvoiceAttempts
 		plan.Restorable["product_access"] = c.ProductAccess
 	case DestructiveRunKindApproval:
 		c, err := q.CountConvergeRestorableForRun(ctx, gen.CountConvergeRestorableForRunParams{MerchantID: mid, RunID: runID})
@@ -210,7 +210,7 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 	}
 	plan.Unattributed = UnattributedRows{
 		Subscriptions: unattributed.Subscriptions, Payments: unattributed.Payments,
-		OrderAttempts: unattributed.OrderAttempts, PaymentMethods: unattributed.PaymentMethods,
+		InvoiceAttempts: unattributed.InvoiceAttempts, PaymentMethods: unattributed.PaymentMethods,
 		UnfiredIntents: unattributed.UnfiredIntents,
 	}
 	if n := plan.Unattributed.Total(); n > 0 {
@@ -247,7 +247,7 @@ func UndoRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string
 		}
 		res.Restored["subscriptions"] = r.Subscriptions
 		res.Restored["payments"] = r.Payments
-		res.Restored["order_attempts"] = r.OrderAttempts
+		res.Restored["invoice_attempts"] = r.InvoiceAttempts
 		res.Restored["product_access"] = r.ProductAccess
 	case DestructiveRunKindApproval:
 		r, err := RollbackApprovalRun(ctx, database, runID, actor, recompute)

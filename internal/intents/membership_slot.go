@@ -27,7 +27,7 @@ type MembershipSlot struct {
 // Refuse refuses a new membership while the slot is held: by a live
 // subscription or a canceled one its provider may still bill, by a canceled
 // one paid through At, by a purchase awaiting its first payment, or by an
-// unpaid order.
+// unpaid invoice.
 func (s MembershipSlot) Refuse(ctx context.Context, q *gen.Queries) error {
 	held, err := q.GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: s.MerchantID, CustomerID: s.CustomerID, ProductID: s.ProductID})
 	switch {
@@ -59,8 +59,8 @@ func (s MembershipSlot) Refuse(ctx context.Context, q *gen.Queries) error {
 	if reason != "" {
 		return apperr.Conflictf("%s", reason)
 	}
-	if _, err := q.GetConflictingOrderClaim(ctx, gen.GetConflictingOrderClaimParams{MerchantID: s.MerchantID, CustomerID: s.CustomerID, ProductID: s.ProductID}); err == nil {
-		return apperr.Conflictf("an unpaid order of the customer buys this product or tier group; pay or cancel it")
+	if _, err := q.GetConflictingInvoiceClaim(ctx, gen.GetConflictingInvoiceClaimParams{MerchantID: s.MerchantID, CustomerID: s.CustomerID, ProductID: s.ProductID}); err == nil {
+		return apperr.Conflictf("an unpaid invoice of the customer buys this product or tier group; pay or cancel it")
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
@@ -68,7 +68,7 @@ func (s MembershipSlot) Refuse(ctx context.Context, q *gen.Queries) error {
 }
 
 // Pending names another purchase of the slot awaiting its first payment: a
-// unresolved enrollment. Solana order purchases hold ordinary order claims. It is "" when there is none.
+// unresolved enrollment. Solana invoice purchases hold ordinary invoice claims. It is "" when there is none.
 func (s MembershipSlot) Pending(ctx context.Context, q *gen.Queries) (string, error) {
 	_, err := q.GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: s.MerchantID, CustomerID: s.CustomerID, ProductID: s.ProductID})
 	if err == nil {

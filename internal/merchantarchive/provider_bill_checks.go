@@ -13,18 +13,18 @@ import (
 // match the financial fields admission compares, while preserving both texts
 // and the provider's separately accepted service-period evidence.
 var providerBillReferenceChecks = []rowCheck{
-	{"payments", `order_id IS NULL OR NOT EXISTS (
- SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=payments.order_id
+	{"payments", `invoice_id IS NULL OR NOT EXISTS (
+ SELECT 1 FROM billing.invoices o WHERE o.merchant_id=$1 AND o.id=payments.invoice_id
  AND o.customer_id=payments.customer_id AND o.currency=payments.currency)
  OR (refunded_payment_id IS NOT NULL AND NOT EXISTS (
  SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=payments.refunded_payment_id
- AND p.customer_id=payments.customer_id AND p.order_id=payments.order_id AND p.currency=payments.currency))`},
-	{"orders", `(collection_owner<>'engine' AND psp_id IS NULL)
+ AND p.customer_id=payments.customer_id AND p.invoice_id=payments.invoice_id AND p.currency=payments.currency))`},
+	{"invoices", `(collection_owner<>'engine' AND psp_id IS NULL)
  OR (payment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.payments p
- WHERE p.merchant_id=$1 AND p.id=orders.payment_id AND p.order_id=orders.id
- AND p.customer_id=orders.customer_id AND p.currency=orders.currency))`},
-	{"provider_bills", `NOT EXISTS (SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1
- AND o.id=provider_bills.order_id AND o.customer_id=provider_bills.customer_id AND o.psp_id=provider_bills.psp_id
+ WHERE p.merchant_id=$1 AND p.id=invoices.payment_id AND p.invoice_id=invoices.id
+ AND p.customer_id=invoices.customer_id AND p.currency=invoices.currency))`},
+	{"provider_bills", `NOT EXISTS (SELECT 1 FROM billing.invoices o WHERE o.merchant_id=$1
+ AND o.id=provider_bills.invoice_id AND o.customer_id=provider_bills.customer_id AND o.psp_id=provider_bills.psp_id
  AND o.customer_id::text=snapshot->>'CustomerID' AND o.psp_id::text=snapshot->>'PSPID'
  AND o.collection_owner=snapshot->>'Owner' AND o.currency=snapshot->>'Currency' AND o.total::text=snapshot->>'Total'
 
@@ -33,17 +33,17 @@ var providerBillReferenceChecks = []rowCheck{
  OR provider_reference IS DISTINCT FROM snapshot->>'ProviderReference'
  OR (snapshot->>'SubscriptionID' IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.subscriptions s
  WHERE s.merchant_id=$1 AND s.id::text=snapshot->>'SubscriptionID' AND s.customer_id=provider_bills.customer_id AND s.psp_id=provider_bills.psp_id))
- OR (SELECT count(*) FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.order_id=provider_bills.order_id)
+ OR (SELECT count(*) FROM billing.invoice_lines l WHERE l.merchant_id=$1 AND l.invoice_id=provider_bills.invoice_id)
  <> jsonb_array_length(CASE WHEN jsonb_typeof(snapshot->'Lines')='array' THEN snapshot->'Lines' ELSE '[]'::jsonb END)
  OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(snapshot->'Lines')='array' THEN snapshot->'Lines' ELSE '[]'::jsonb END) WITH ORDINALITY AS x(line, position)
- WHERE NOT EXISTS (SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.order_id=provider_bills.order_id
+ WHERE NOT EXISTS (SELECT 1 FROM billing.invoice_lines l WHERE l.merchant_id=$1 AND l.invoice_id=provider_bills.invoice_id
  AND l.customer_id=provider_bills.customer_id AND l.position=x.position-1
  AND l.price_id::text IS NOT DISTINCT FROM x.line->>'PriceID' AND l.product_id::text IS NOT DISTINCT FROM x.line->>'ProductID'
  AND COALESCE(l.quantity,1)::text=COALESCE(x.line->>'Quantity','1') AND l.unit_amount::text=x.line->>'UnitAmount' AND l.amount::text=x.line->>'Amount'
  AND COALESCE(l.source,'')=x.line->>'Source'))`},
 	{"provider_schedules", `NOT EXISTS (SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1
  AND s.id=provider_schedules.subscription_id AND s.customer_id=provider_schedules.customer_id AND s.psp_id=provider_schedules.psp_id)
- OR (initial_order_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=provider_schedules.initial_order_id
+ OR (initial_invoice_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing.invoices o WHERE o.merchant_id=$1 AND o.id=provider_schedules.initial_invoice_id
  AND o.customer_id=provider_schedules.customer_id AND o.psp_id=provider_schedules.psp_id
  AND o.collection_owner=accepted_bill->>'Owner' AND o.currency=accepted_bill->>'Currency'))
  OR subscription_id::text IS DISTINCT FROM accepted_bill->>'SubscriptionID'

@@ -66,8 +66,8 @@ func (s *billingShop) save(t *testing.T, details *billing.BillingDetails) (int, 
 // also vaults it with its billing.
 func (s *billingShop) buy(t *testing.T, details *billing.BillingDetails, key string) (int, []byte) {
 	t.Helper()
-	return s.request(t, http.MethodPost, "/v1/me/orders", s.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: s.price}}, ExpectedTotal: ptr(int64(10_000_000)),
-		Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: s.token(), BillingDetails: details}}, map[string]string{"Idempotency-Key": key})
+	return s.request(t, http.MethodPost, "/v1/me/invoices", s.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: s.price}}, ExpectedTotal: ptr(int64(10_000_000)),
+		Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: s.token(), BillingDetails: details}}, map[string]string{"Idempotency-Key": key})
 }
 
 // vaulted is the billing NMI was last sent with a new vault customer.
@@ -118,19 +118,19 @@ func TestBillingFields(t *testing.T) {
 		requireBillingRefusal(t, status, raw, "billing_details.address.country")
 		status, raw = s.buy(t, billedTo("US", ""), "us-without-zip")
 		requireBillingRefusal(t, status, raw, "payment.billing_details.address.postal_code")
-		orders, err := s.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: billing.CustomerID(uuid.MustParse(s.alice.ID))})
+		invoices, err := s.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(uuid.MustParse(s.alice.ID))})
 		require.NoError(t, err)
-		require.Empty(t, orders.Items, "a refused one-call buy makes no order")
+		require.Empty(t, invoices.Items, "a refused one-call buy makes no invoice")
 
-		status, raw = s.request(t, http.MethodPost, "/v1/me/orders", s.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: s.price}}})
+		status, raw = s.request(t, http.MethodPost, "/v1/me/invoices", s.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: s.price}}})
 		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		pay := "/v1/me/orders/" + order.ID.String() + "/pay"
-		status, raw = s.request(t, http.MethodPost, pay, s.aliceToken, billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: s.token(), BillingDetails: billedTo("US", "")}, ExpectedTotal: 10_000_000},
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		pay := "/v1/me/invoices/" + invoice.ID.String() + "/pay"
+		status, raw = s.request(t, http.MethodPost, pay, s.aliceToken, billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: s.token(), BillingDetails: billedTo("US", "")}, ExpectedTotal: 10_000_000},
 			map[string]string{"Idempotency-Key": "pay-us-without-zip"})
 		requireBillingRefusal(t, status, raw, "payment.billing_details.address.postal_code")
-		status, raw = s.request(t, http.MethodPost, pay, s.aliceToken, billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: s.token()}, ExpectedTotal: 10_000_000},
+		status, raw = s.request(t, http.MethodPost, pay, s.aliceToken, billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: s.token()}, ExpectedTotal: 10_000_000},
 			map[string]string{"Idempotency-Key": "pay-without-country"})
 		requireBillingRefusal(t, status, raw, "payment.billing_details.address.country")
 		require.Len(t, s.nmi.core.Calls(), calls, "nothing reached NMI")
@@ -140,7 +140,7 @@ func TestBillingFields(t *testing.T) {
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.Equal(t, "94105", s.vaulted(t)["zip"])
 		require.Equal(t, "US", s.vaulted(t)["country"])
-		status, raw = s.request(t, http.MethodPost, pay, s.aliceToken, billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: s.token(), BillingDetails: billedTo("US", "94105")}, ExpectedTotal: 10_000_000, Reusable: ptr(true)},
+		status, raw = s.request(t, http.MethodPost, pay, s.aliceToken, billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: s.token(), BillingDetails: billedTo("US", "94105")}, ExpectedTotal: 10_000_000, Reusable: ptr(true)},
 			map[string]string{"Idempotency-Key": "pay-us-with-zip"})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Equal(t, "94105", s.sold(t).Get("zip"))
@@ -156,9 +156,9 @@ func TestBillingFields(t *testing.T) {
 
 		status, raw = s.buy(t, billedTo("DE", ""), "de-without-postcode")
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.Equal(t, billing.OrderComplete, order.Status)
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.Equal(t, billing.InvoiceComplete, invoice.Status)
 		require.Equal(t, "add_customer", s.sold(t).Get("customer_vault"))
 		require.Equal(t, "DE", s.sold(t).Get("country"))
 		require.False(t, s.sold(t).Has("zip"))

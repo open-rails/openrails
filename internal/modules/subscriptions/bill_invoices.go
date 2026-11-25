@@ -1,0 +1,121 @@
+package subscriptions
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
+	"github.com/open-rails/openrails/internal/modules/payments"
+)
+
+func initialBill(ctx context.Context, d *db.DB, params *CreateMembershipParams, sub *models.Subscription, p *models.Payment, now time.Time) (observed.Result, error) {
+	// An accepted engine charge names the saved card it charged.
+	if p != nil && params.Prepared != nil && params.Prepared.PaymentMethodID != uuid.Nil {
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return observed.Result{}, err
+		}
+		if err := payments.SetMethodCard(ctx, d.Gen(ctx), mid.UUID(), params.Prepared.PaymentMethodID, p); err != nil {
+			return observed.Result{}, err
+		}
+	}
+	if params.ProviderBill != nil {
+		b := *params.ProviderBill
+		b.SubscriptionID = &sub.ID
+		b.Payment = p
+		return observed.Record(ctx, d, b, now)
+	}
+	t := params.Prepared
+	if t == nil {
+		return observed.Result{}, errors.New("provider enrollment payment requires verified bill evidence")
+	}
+	interval := int(t.PeriodEnd.Sub(t.PeriodStart) / time.Hour)
+	if t.RecurringIntervalHours != nil {
+		interval = *t.RecurringIntervalHours
+	}
+	b := observed.Bill{PSPID: t.PSPID, CustomerID: t.CustomerID, SubscriptionID: &t.SubscriptionID, Owner: string(t.CollectionPolicy), Kind: "initial", SourceKind: "accepted_initial", SourceKey: t.SubscriptionID.String(), Currency: t.Currency, Total: t.Amount, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, DueAt: t.PeriodStart, Payment: p, Settled: true, SettlementSource: "cash", Lines: []observed.Line{{PriceID: &t.PriceID, ProductID: &t.ProductID, Description: t.ProductName, Quantity: t.Quantity, UnitAmount: t.Amount / int64(SeatCount(t.Quantity)), Amount: t.Amount, BillingIntervalHours: &interval, AccessDurationHours: t.AccessDurationHours, ProviderAccessDefault: t.ProviderAccessDefault}}}
+	if b.Lines[0].Description == "" {
+		b.Lines[0].Description = "Subscription enrollment"
+	}
+	b.ExistingInvoiceID = params.ExistingInvoiceID
+	recorded, err := observed.Record(ctx, d, b, now)
+	if err != nil {
+		return recorded, err
+	}
+	if t.CollectionPolicy != models.CollectionPolicyEngine {
+		if t.RecurringIntervalHours == nil {
+			return recorded, errors.New("accepted provider enrollment has no recurring cadence")
+		}
+		if err := observed.SeedSchedule(ctx, d, recorded.Invoice.ID, sub.ID, t.PeriodEnd, *t.RecurringIntervalHours, t.RecurringAmount, now); err != nil {
+			return recorded, err
+		}
+	}
+	return recorded, nil
+}
+
+func renewalBill(ctx context.Context, d *db.DB, params *RenewMembershipParams, sub *models.Subscription, p *models.Payment, now time.Time) (observed.Result, error) {
+	if p != nil && params.PaymentMethodID != uuid.Nil {
+		if err := payments.SetMethodCard(ctx, d.Gen(ctx), sub.MerchantID, params.PaymentMethodID, p); err != nil {
+			return observed.Result{}, err
+		}
+	}
+	if params.ProviderBill != nil {
+		b := *params.ProviderBill
+		if p != nil {
+			b.Payment = p
+		}
+		return observed.Record(ctx, d, b, now)
+	}
+	t := params.Prepared
+	if t == nil {
+		return observed.Result{}, errors.New("provider renewal payment requires verified bill evidence")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return observed.Result{}, err
+	}
+	boundary := t.PeriodStart
+	if params.PreviousPeriodEnd != nil {
+		boundary = *params.PreviousPeriodEnd
+	}
+	invoice, err := d.Gen(ctx).GetRenewalInvoice(ctx, gen.GetRenewalInvoiceParams{MerchantID: mid.UUID(), SubscriptionID: t.SubscriptionID, PeriodStartsAt: boundary})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return observed.Result{}, err
+	}
+	interval := int(t.PeriodEnd.Sub(t.PeriodStart) / time.Hour)
+	b := observed.Bill{PSPID: renewalPaymentPSPID(params, sub), CustomerID: t.CustomerID, SubscriptionID: &t.SubscriptionID, Owner: string(sub.CollectionPolicy), Kind: "renewal", SourceKind: "accepted_renewal", SourceKey: t.SubscriptionID.String() + ":" + boundary.UTC().Format(time.RFC3339Nano), Currency: t.Currency, Total: t.Amount, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, DueAt: boundary, Payment: p, Lines: []observed.Line{{PriceID: &t.PriceID, ProductID: &t.ProductID, Description: t.ProductName, Quantity: t.Quantity, UnitAmount: t.UnitAmount(), Amount: t.Amount, BillingIntervalHours: &interval, AccessDurationHours: t.AccessDurationHours, ProviderAccessDefault: t.ProviderAccessDefault}}}
+	if b.Lines[0].Description == "" {
+		b.Lines[0].Description = "Subscription renewal"
+	}
+	if err == nil {
+		b.ExistingInvoiceID = &invoice.ID
+	}
+	// A provider-scheduled bill that OpenRails itself collected (its decline
+	// recovery) is settled by that capture; the engine settles its own.
+	if sub.CollectionPolicy != models.CollectionPolicyEngine && p != nil && p.Amount >= t.Amount {
+		b.Settled, b.SettlementSource = true, "cash"
+	}
+	return observed.Record(ctx, d, b, now)
+}
+
+func paymentHasPrice(ctx context.Context, d *db.DB, p *models.Payment, price uuid.UUID) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	matches, err := d.Gen(ctx).PaymentMatchesInvoicePrice(ctx, gen.PaymentMatchesInvoicePriceParams{MerchantID: mid.UUID(), PaymentID: p.ID, PriceID: price})
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return errors.New("payment invoice belongs to another accepted price")
+	}
+	return nil
+}

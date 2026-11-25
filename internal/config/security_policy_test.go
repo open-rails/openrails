@@ -16,7 +16,7 @@ func TestReturnOriginsAreTheMerchantsOwn(t *testing.T) {
 	alpha := ReturnOrigins(cfg, "https://alpha.example", []string{"https://shop.alpha.example"})
 	for raw, want := range map[string]bool{
 		"https://billing.example.com/account":  true,
-		"https://alpha.example/done?order=1":   true,
+		"https://alpha.example/done?invoice=1": true,
 		"https://shop.alpha.example/thanks":    true,
 		"https://beta.example/done":            false,
 		"https://user@alpha.example/done":      false,

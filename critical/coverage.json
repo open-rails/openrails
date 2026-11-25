@@ -56,12 +56,12 @@
     {
       "id": "OR-J03-S01",
       "journey": "J03",
-      "name": "Valid pay capability opens only its order and permitted routes"
+      "name": "Valid pay capability opens only its invoice and permitted routes"
     },
     {
       "id": "OR-J03-S02",
       "journey": "J03",
-      "name": "Expired or foreign capability and changed order ID are refused"
+      "name": "Expired or foreign capability and changed invoice ID are refused"
     },
     {
       "id": "OR-J03-S03",
@@ -71,7 +71,7 @@
     {
       "id": "OR-J03-S04",
       "journey": "J03",
-      "name": "Iframe completion and fallback messages require expected origin and order"
+      "name": "Iframe completion and fallback messages require expected origin and invoice"
     },
     {
       "id": "OR-J03-S05",
@@ -241,7 +241,7 @@
     {
       "id": "OR-J08-S02",
       "journey": "J08",
-      "name": "Application creates unpaid order without charging a saved card"
+      "name": "Application creates unpaid invoice without charging a saved card"
     },
     {
       "id": "OR-J08-S03",
@@ -251,12 +251,12 @@
     {
       "id": "OR-J08-S04",
       "journey": "J08",
-      "name": "Cancel or expiry cannot invalidate an already settled order"
+      "name": "Cancel or expiry cannot invalidate an already settled invoice"
     },
     {
       "id": "OR-J09-S01",
       "journey": "J09",
-      "name": "Successful one-off charge commits exact payment order access and event"
+      "name": "Successful one-off charge commits exact payment invoice access and event"
     },
     {
       "id": "OR-J09-S02",
@@ -266,7 +266,7 @@
     {
       "id": "OR-J09-S03",
       "journey": "J09",
-      "name": "Definitive decline returns the correct order and no successful payment"
+      "name": "Definitive decline returns the correct invoice and no successful payment"
     },
     {
       "id": "OR-J09-S04",
@@ -276,12 +276,12 @@
     {
       "id": "OR-J09-S05",
       "journey": "J09",
-      "name": "A sale whose answer was lost settles from NMI: its decline reopens the order, a charge NMI can't show raises a high finding until the receipt appears, and nothing is resent"
+      "name": "A sale whose answer was lost settles from NMI: its decline reopens the invoice, a charge NMI can't show raises a high finding until the receipt appears, and nothing is resent"
     },
     {
       "id": "OR-J09-S06",
       "journey": "J09",
-      "name": "An NMI sale the issuer approves for part of its amount asks NMI to settle only in full, never pays the order, raises a high finding, and is never resent"
+      "name": "An NMI sale the issuer approves for part of its amount asks NMI to settle only in full, never pays the invoice, raises a high finding, and is never resent"
     },
     {
       "id": "OR-J10-S01",
@@ -301,7 +301,7 @@
     {
       "id": "OR-J10-S04",
       "journey": "J10",
-      "name": "Different order or merchant remains an independent obligation"
+      "name": "Different invoice or merchant remains an independent obligation"
     },
     {
       "id": "OR-J11-S01",
@@ -391,7 +391,7 @@
     {
       "id": "OR-J14-S06",
       "journey": "J14",
-      "name": "An order's sale, a renewal's collection and an upgrade's membership each authorize one renewal; two agreements at one boundary refuse"
+      "name": "An invoice's sale, a renewal's collection and an upgrade's membership each authorize one renewal; two agreements at one boundary refuse"
     },
     {
       "id": "OR-J14-S07",
@@ -801,7 +801,7 @@
     {
       "id": "OR-J24-S39",
       "journey": "J24",
-      "name": "Without ClickHouse usage, limits, usage catalog declarations, usage settings and usage metrics answer event_store_required in process and over HTTP, a gate refuses for good, and subscriptions, credit packs, running charges and usage orders work"
+      "name": "Without ClickHouse usage, limits, usage catalog declarations, usage settings and usage metrics answer event_store_required in process and over HTTP, a gate refuses for good, and subscriptions, credit packs, running charges and usage invoices work"
     },
     {
       "id": "OR-J24-S40",
@@ -951,7 +951,7 @@
     {
       "id": "OR-J26-S02",
       "journey": "J26",
-      "name": "A merchant without usage_billing terms bills no usage: its debt is owed and no usage order is made"
+      "name": "A merchant without usage_billing terms bills no usage: its debt is owed and no usage invoice is made"
     },
     {
       "id": "OR-J26-S03",
@@ -1026,7 +1026,7 @@
     {
       "id": "OR-J28-S04",
       "journey": "J28",
-      "name": "Duplicate and out-of-order callback settles once without regression"
+      "name": "Duplicate and out-of-invoice callback settles once without regression"
     },
     {
       "id": "OR-J28-S05",
@@ -1056,7 +1056,7 @@
     {
       "id": "OR-J29-S02",
       "journey": "J29",
-      "name": "Checkout process death after provider acceptance repairs order/payment outcome from stored evidence"
+      "name": "Checkout process death after provider acceptance repairs invoice/payment outcome from stored evidence"
     },
     {
       "id": "OR-J29-S04",
@@ -1136,7 +1136,7 @@
     {
       "id": "OR-J31-S09",
       "journey": "J31",
-      "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
+      "name": "A paid Stripe hosted-page invoice exports and restores with its attempt's Checkout Session state"
     },
     {
       "id": "OR-J31-S12",
@@ -1391,7 +1391,7 @@
     {
       "id": "OR-J10-S07",
       "journey": "J10",
-      "name": "A merchant order's Idempotency-Key names one order per merchant: the same key for another customer is idempotency_key_reused and creates nothing"
+      "name": "A merchant invoice's Idempotency-Key names one invoice per merchant: the same key for another customer is idempotency_key_reused and creates nothing"
     },
     {
       "id": "OR-J12-S06",
@@ -1701,7 +1701,7 @@
     {
       "id": "OR-J15-S13",
       "journey": "J15",
-      "name": "An NMI subscription OpenRails does not hold is adopted for the vault's one owner on a mapped plan, parks otherwise, waits for the first pull and drops order ids"
+      "name": "An NMI subscription OpenRails does not hold is adopted for the vault's one owner on a mapped plan, parks otherwise, waits for the first pull and drops invoice ids"
     },
     {
       "id": "OR-J15-S14",
@@ -1846,7 +1846,7 @@
     {
       "id": "OR-J38-S43",
       "journey": "J38",
-      "name": "A CCBill sale that arrives after its lapsed page's order was paid by card is recorded once against the order as a payment held for refund, with a late-payment finding to refund it at CCBill and a repair to cancel its CCBill subscription; it grants nothing, the card keeps paying the order, the card is never refunded, and a replay changes nothing"
+      "name": "A CCBill sale that arrives after its lapsed page's invoice was paid by card is recorded once against the invoice as a payment held for refund, with a late-payment finding to refund it at CCBill and a repair to cancel its CCBill subscription; it grants nothing, the card keeps paying the invoice, the card is never refunded, and a replay changes nothing"
     },
     {
       "id": "OR-J38-S41",
@@ -1886,7 +1886,7 @@
     {
       "id": "OR-J29-S08",
       "journey": "J29",
-      "name": "Retention cleanup alone ages out unpaid orders, stale gate leases and orphan state; order expiry alone expires abandoned attempts"
+      "name": "Retention cleanup alone ages out unpaid invoices, stale gate leases and orphan state; invoice expiry alone expires abandoned attempts"
     },
     {
       "id": "OR-J19-S05",
@@ -2051,7 +2051,7 @@
     {
       "id": "OR-J12-S14",
       "journey": "J12",
-      "name": "A card number in any field of a card save or order payment but the typed card is refused before a provider sees it"
+      "name": "A card number in any field of a card save or invoice payment but the typed card is refused before a provider sees it"
     },
     {
       "id": "OR-J12-S15",
@@ -2066,7 +2066,7 @@
     {
       "id": "OR-J12-S17",
       "journey": "J12",
-      "name": "By default a new card's billing country is required and a US one needs its postal code: a card save, a one-call buy or an order payment missing either is refused with billing_details_required before NMI sees it, and with them the card reaches NMI as entered"
+      "name": "By default a new card's billing country is required and a US one needs its postal code: a card save, a one-call buy or an invoice payment missing either is refused with billing_details_required before NMI sees it, and with them the card reaches NMI as entered"
     },
     {
       "id": "OR-J12-S18",
@@ -2111,12 +2111,12 @@
     {
       "id": "OR-J26-S50",
       "journey": "J26",
-      "name": "Paying, waiving or writing off a usage order clears its customer's delinquency in the same change"
+      "name": "Paying, waiving or writing off a usage invoice clears its customer's delinquency in the same change"
     },
     {
       "id": "OR-J26-S51",
       "journey": "J26",
-      "name": "An overdue usage order is told once by the billing pass"
+      "name": "An overdue usage invoice is told once by the billing pass"
     },
     {
       "id": "OR-J26-S52",
@@ -2146,7 +2146,7 @@
     {
       "id": "OR-J26-S56",
       "journey": "J26",
-      "name": "Usage of a billed day reported after its usage order is owed after that order's period and billed by the next order"
+      "name": "Usage of a billed day reported after its usage invoice is owed after that invoice's period and billed by the next invoice"
     },
     {
       "id": "OR-J26-S57",
@@ -2156,12 +2156,12 @@
     {
       "id": "OR-J26-S58",
       "journey": "J26",
-      "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage order"
+      "name": "Revoking the collection agreement posts today's usage on the revocation's clock and bills it in the final usage invoice"
     },
     {
       "id": "OR-J26-S59",
       "journey": "J26",
-      "name": "A declined usage-order collection retries on the merchant's dunning_policy, not the built-in schedule"
+      "name": "A declined usage-invoice collection retries on the merchant's dunning_policy, not the built-in schedule"
     },
     {
       "id": "OR-J26-S60",
@@ -2176,12 +2176,12 @@
     {
       "id": "OR-J26-S62",
       "journey": "J26",
-      "name": "A usage order whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
+      "name": "A usage invoice whose total is not a whole cent is paid by card, and its change is a credit lot bought at face"
     },
     {
       "id": "OR-J26-S63",
       "journey": "J26",
-      "name": "A usage order's period covers the usage it bills, from its pricing period's start to the bill"
+      "name": "A usage invoice's period covers the usage it bills, from its pricing period's start to the bill"
     },
     {
       "id": "OR-J37-S60",
@@ -2426,7 +2426,7 @@
     {
       "id": "OR-J04-S46",
       "journey": "J04",
-      "name": "An order past its expiry is refused payment at once and tidied by the next hourly billing pass"
+      "name": "An invoice past its expiry is refused payment at once and tidied by the next hourly billing pass"
     },
     {
       "id": "OR-J04-S47",
@@ -2461,22 +2461,22 @@
     {
       "id": "OR-J37-S70",
       "journey": "J37",
-      "name": "A transfer landing after its order's expiry, before any expiry pass, is held for review as session_closed"
+      "name": "A transfer landing after its invoice's expiry, before any expiry pass, is held for review as session_closed"
     },
     {
       "id": "OR-J09-S70",
       "journey": "J09",
-      "name": "A challenge or hosted-page confirm past the order's expiry closes it before any pass; money that moved after expiry settles the order it closed"
+      "name": "A challenge or hosted-page confirm past the invoice's expiry closes it before any pass; money that moved after expiry settles the invoice it closed"
     },
     {
       "id": "OR-J08-S70",
       "journey": "J08",
-      "name": "An open order past its expiry claims nothing: preview, merchant and cart orders buy its lines before any pass"
+      "name": "An open invoice past its expiry claims nothing: preview, merchant and cart invoices buy its lines before any pass"
     },
     {
       "id": "OR-J08-S71",
       "journey": "J08",
-      "name": "An open order past its expiry reads expired, without next action or payment options, in every read and list, and cannot be canceled"
+      "name": "An open invoice past its expiry reads expired, without next action or payment options, in every read and list, and cannot be canceled"
     },
     {
       "id": "OR-J12-S70",
@@ -2501,7 +2501,7 @@
     {
       "id": "OR-J04-S37",
       "journey": "J04",
-      "name": "An order expiry backlog past one batch is expired by one billing pass"
+      "name": "An invoice expiry backlog past one batch is expired by one billing pass"
     },
     {
       "id": "OR-J04-S38",
@@ -2581,17 +2581,17 @@
     {
       "id": "OR-J22-S07",
       "journey": "J22",
-      "name": "A pending refund of a mixed order's credit line holds the line's whole credit lot until it settles"
+      "name": "A pending refund of a mixed invoice's credit line holds the line's whole credit lot until it settles"
     },
     {
       "id": "OR-J22-S08",
       "journey": "J22",
-      "name": "Refunds and chargebacks of a mixed order reverse the credit line first, then the rest, and a won dispute restores what it took"
+      "name": "Refunds and chargebacks of a mixed invoice reverse the credit line first, then the rest, and a won dispute restores what it took"
     },
     {
       "id": "OR-J22-S09",
       "journey": "J22",
-      "name": "Credit a won dispute restores stays with the customer: an earlier refund that found the mixed order's credit line already returned keeps the share it settled with"
+      "name": "Credit a won dispute restores stays with the customer: an earlier refund that found the mixed invoice's credit line already returned keeps the share it settled with"
     },
     {
       "id": "OR-J22-S10",
@@ -2886,7 +2886,7 @@
     {
       "id": "OR-J39-S01",
       "journey": "J39",
-      "name": "A paid one-off order sends one receipt: a replayed settlement queues no second message and a refused send is retried once"
+      "name": "A paid one-off invoice sends one receipt: a replayed settlement queues no second message and a refused send is retried once"
     },
     {
       "id": "OR-J39-S02",
@@ -3031,7 +3031,7 @@
     {
       "id": "OR-J48-S04",
       "journey": "J48",
-      "name": "An order priced in a merchant's unit is paid from the customer's balance as it is created, with no payment or provider, and grants its product's keys; its key answers a retry with the same order; a balance short of it is refused insufficient_credits and creates nothing"
+      "name": "An invoice priced in a merchant's unit is paid from the customer's balance as it is created, with no payment or provider, and grants its product's keys; its key answers a retry with the same invoice; a balance short of it is refused insufficient_credits and creates nothing"
     },
     {
       "id": "OR-J48-S05",
@@ -3056,7 +3056,7 @@
     {
       "id": "OR-J48-S09",
       "journey": "J48",
-      "name": "Reversals of a multi-line order's pack apply in the order they settle: a chargeback settling before an earlier pending refund takes the line's share first, the refund then takes the rest, each share is recorded once, in the general ledger, and a won dispute restores what the chargeback took"
+      "name": "Reversals of a multi-line invoice's pack apply in the order they settle: a chargeback settling before an earlier pending refund takes the line's share first, the refund then takes the rest, each share is recorded once, in the general ledger, and a won dispute restores what the chargeback took"
     },
     {
       "id": "OR-J48-S10",
@@ -3076,7 +3076,7 @@
     {
       "id": "OR-J48-S13",
       "journey": "J48",
-      "name": "An order priced in a merchant's unit, paid from lots bought in dollars and euros, has one revenue schedule per paid currency, each funded with exactly the lots' money its spends released: an item recognised at once, a 30-day pass ratably over its window; applying the order again makes nothing new, and the schedules move with a billing archive, whose export refuses a leg naming the order in money no lot paid it with"
+      "name": "An invoice priced in a merchant's unit, paid from lots bought in dollars and euros, has one revenue schedule per paid currency, each funded with exactly the lots' money its spends released: an item recognised at once, a 30-day pass ratably over its window; applying the invoice again makes nothing new, and the schedules move with a billing archive, whose export refuses a leg naming the invoice in money no lot paid it with"
     },
     {
       "id": "OR-J48-S14",
@@ -3091,7 +3091,7 @@
     {
       "id": "OR-J48-S16",
       "journey": "J48",
-      "name": "Money of a lot released into a unit-priced line's schedule after it was made adds to its funding when the order is applied again, also when a chargeback took some back and the funding returns to a level it reached before; ledger-audit fails money released under a schedule that does not exist"
+      "name": "Money of a lot released into a unit-priced line's schedule after it was made adds to its funding when the invoice is applied again, also when a chargeback took some back and the funding returns to a level it reached before; ledger-audit fails money released under a schedule that does not exist"
     },
     {
       "id": "OR-J48-S17",
@@ -3336,7 +3336,7 @@
     {
       "id": "OR-J45-S11",
       "journey": "J45",
-      "name": "An engine NMI renewal declined with 200 reads the issuer's code after the decline, or from the order read when the answer was lost; a failed read keeps NMI's own code"
+      "name": "An engine NMI renewal declined with 200 reads the issuer's code after the decline, or from the invoice read when the answer was lost; a failed read keeps NMI's own code"
     },
     {
       "id": "OR-J45-S12",
@@ -3391,7 +3391,7 @@
     {
       "id": "OR-J41-S06",
       "journey": "J41",
-      "name": "An idle recognition pass takes no schedule; a replayed boundary or order posts once"
+      "name": "An idle recognition pass takes no schedule; a replayed boundary or invoice posts once"
     },
     {
       "id": "OR-J41-S07",
@@ -3406,7 +3406,7 @@
     {
       "id": "OR-J41-S09",
       "journey": "J41",
-      "name": "A usage order's card and remitted payments book their cash and apply it to the usage receivable"
+      "name": "A usage invoice's card and remitted payments book their cash and apply it to the usage receivable"
     },
     {
       "id": "OR-J41-S10",
@@ -3416,12 +3416,12 @@
     {
       "id": "OR-J41-S11",
       "journey": "J41",
-      "name": "A late payment on an expired order whose product another order holds stays unapplied"
+      "name": "A late payment on an expired invoice whose product another invoice holds stays unapplied"
     },
     {
       "id": "OR-J41-S12",
       "journey": "J41",
-      "name": "A purchase is applied over the access its grant gives; a replay applies an order with no schedule"
+      "name": "A purchase is applied over the access its grant gives; a replay applies an invoice with no schedule"
     },
     {
       "id": "OR-J41-S13",
@@ -3441,7 +3441,7 @@
     {
       "id": "OR-J41-S16",
       "journey": "J41",
-      "name": "An order applied again after a payment sorting earlier arrives applies no payment beyond what it brought"
+      "name": "An invoice applied again after a payment sorting earlier arrives applies no payment beyond what it brought"
     },
     {
       "id": "OR-J41-S17",
@@ -3481,7 +3481,7 @@
     {
       "id": "OR-J41-S24",
       "journey": "J41",
-      "name": "A usage order's refund is contra revenue, its payment's cash having settled the receivable; its chargeback reopens the owed, receivable again, with no contra"
+      "name": "A usage invoice's refund is contra revenue, its payment's cash having settled the receivable; its chargeback reopens the owed, receivable again, with no contra"
     },
     {
       "id": "OR-J41-S25",
@@ -3496,7 +3496,7 @@
     {
       "id": "OR-J41-S27",
       "journey": "J41",
-      "name": "A mixed credit order's refund, chargeback and won dispute move each dollar once: the lot's share first"
+      "name": "A mixed credit invoice's refund, chargeback and won dispute move each dollar once: the lot's share first"
     },
     {
       "id": "OR-J41-S28",
@@ -3526,7 +3526,7 @@
     {
       "id": "OR-J41-S33",
       "journey": "J41",
-      "name": "A usage order's payment, the merchant's first receipt, starts the books, so a reversal of it stored past the poster is named"
+      "name": "A usage invoice's payment, the merchant's first receipt, starts the books, so a reversal of it stored past the poster is named"
     },
     {
       "id": "OR-J41-S34",
@@ -3756,12 +3756,12 @@
     {
       "id": "OR-J04-S78",
       "journey": "J04",
-      "name": "OrderPayment reads back a pay whose answer was lost with getOrderPaymentAttempt under its key, and retries a pay that never arrived under the same key: one attempt"
+      "name": "InvoicePayment reads back a pay whose answer was lost with getInvoicePaymentAttempt under its key, and retries a pay that never arrived under the same key: one attempt"
     },
     {
       "id": "OR-J04-S79",
       "journey": "J04",
-      "name": "OrderPayment reads a Solana order awaiting its wallet and confirms it at most twice a minute, well under the purchase limit"
+      "name": "InvoicePayment reads a Solana invoice awaiting its wallet and confirms it at most twice a minute, well under the purchase limit"
     },
     {
       "id": "OR-J07-S11",
@@ -3846,7 +3846,7 @@
     {
       "id": "OR-J40-S21",
       "journey": "J40",
-      "name": "A waived usage order takes its revenue back; an uncollectible one carries an allowance for doubtful accounts that comes back as it is collected, or is written off when it is waived"
+      "name": "A waived usage invoice takes its revenue back; an uncollectible one carries an allowance for doubtful accounts that comes back as it is collected, or is written off when it is waived"
     },
     {
       "id": "OR-J40-S22",
@@ -3861,12 +3861,12 @@
     {
       "id": "OR-J40-S28",
       "journey": "J40",
-      "name": "A chargeback of a usage order's payment owes again what it paid, in both books, once, and its card's rounding change is a loss; the reopened owed is billed and collected again, and the dispute won after that gives the loss back and is the customer's credit at face for the rest, with nothing left unapplied"
+      "name": "A chargeback of a usage invoice's payment owes again what it paid, in both books, once, and its card's rounding change is a loss; the reopened owed is billed and collected again, and the dispute won after that gives the loss back and is the customer's credit at face for the rest, with nothing left unapplied"
     },
     {
       "id": "OR-J40-S29",
       "journey": "J40",
-      "name": "A merchant's refund of a usage order's payment, made through OpenRails or observed from the provider, records and leaves its owed settled; a chargeback after a refund owes again only what the refund left, keeps it if the refund settles later, and its won dispute settles it and gives the loss back"
+      "name": "A merchant's refund of a usage invoice's payment, made through OpenRails or observed from the provider, records and leaves its owed settled; a chargeback after a refund owes again only what the refund left, keeps it if the refund settles later, and its won dispute settles it and gives the loss back"
     },
     {
       "id": "OR-J47-S01",
@@ -3921,7 +3921,7 @@
     {
       "id": "OR-J47-S11",
       "journey": "J47",
-      "name": "Spending a merchant's units is not a checkout: unit orders carry no checkout facts and leave the funnel, conversion, purchase numbers and repeat purchases to purchases in money"
+      "name": "Spending a merchant's units is not a checkout: unit invoices carry no checkout facts and leave the funnel, conversion, purchase numbers and repeat purchases to purchases in money"
     },
     {
       "id": "OR-J47-S12",

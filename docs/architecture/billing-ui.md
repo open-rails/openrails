@@ -5,7 +5,7 @@ client, React hooks and styled components for a customer's purchase and
 self-service, and the staff administration console. Hosts embed it in their own
 apps; the standalone server's console (`web/console`) and the hosted payment
 page (`web/pay`) are built from it. It ships at OpenRails' version, published to
-npm with provenance. Guides: [frontend](../client.md#orders-and-checkout),
+npm with provenance. Guides: [frontend](../client.md#invoices-and-checkout),
 [billing administration](../../web/billing-ui/README.md#staff-administration) and the
 [package README](../../web/billing-ui/README.md). Paths starting `src/`,
 `tooling/` or `critical/` below are inside `web/billing-ui` unless marked otherwise.
@@ -22,12 +22,12 @@ npm with provenance. Guides: [frontend](../client.md#orders-and-checkout),
 
 **Customer client.** `createBillingClient({ baseUrl, fetch | getToken })` gives one method per customer route and public config. Responses are parsed by zod schemas (`src/client/types.ts`) typed against `generated/wire.ts`; an amount must be an int64 string (`isAmount`). Only a GET is retried: once, on a network error, a 502, 503 or 504, or a 429 naming its wait, within `RETRY_BUDGET_MS` (2 s). A write is sent again only after `401 credential_expired`, which the gate answers before the route runs. `tokenSource` keeps the token in memory, fetches the next one `skew` seconds (60) before expiry once for every waiting call, and drives that single resend. Payments and card saves carry the caller's `Idempotency-Key`. Failures become `BillingError` with the server's registry code or a local one (`network_error`, …).
 
-**Customer components.** `BuyButton`, `ProductList`, `OrderPayment`,
-`EmbeddedPayment` and `Cart` buy through orders (`BuyButton`, `ProductList` and `Cart` pass the host's `attribution` to the order, and requests carry the provider's `locale` as `Accept-Language`); `AccountBilling` shows
+**Customer components.** `BuyButton`, `ProductList`, `InvoicePayment`,
+`EmbeddedPayment` and `Cart` buy through invoices (`BuyButton`, `ProductList` and `Cart` pass the host's `attribution` to the invoice, and requests carry the provider's `locale` as `Accept-Language`); `AccountBilling` shows
 subscriptions, payment methods and history and runs cancel, resume, plan and card
 changes. Card data is tokenized in the PSP's own fields (Collect.js, Stripe
-Elements, Basis Theory) and never enters the host page. `OrderPayment` pays with
-`expectedTotal` set to the order's total. Amounts are formatted with BigInt
+Elements, Basis Theory) and never enters the host page. `InvoicePayment` pays with
+`expectedTotal` set to the invoice's total. Amounts are formatted with BigInt
 (`amountUnits`, `formatAmount`) at the scale from `OPENRAILS_CURRENCY_SCALES`
 merged with `GET /v1/config`'s currencies (`useCurrencyScales`); a Stripe wallet
 gets the total in minor units (`amountToMinorUnits`), and none is offered when the
@@ -40,7 +40,7 @@ billing-ui owns no inbox.
 `merchants`, `appearance` and an optional `queryClient`; each instance owns its
 transport and TanStack Query cache. It reads `GET /v1/admin/access`
 (`src/admin/lib/capabilities.ts`) and shows only the areas the caller may use:
-customer support (customers, subscriptions, payments, orders), catalog, merchant
+customer support (customers, subscriptions, payments, invoices), catalog, merchant
 configuration (settings, ops: findings, proposals, PSP imports, records, provider
 prices, parked) and metrics (dashboard, reports). Hidden areas grant nothing; the
 API checks every request. Requests go through `src/admin/lib/api` (`AdminClient`,
@@ -51,7 +51,7 @@ refreshed every 30 seconds. Destructive acts use `TypedConfirmDialog` or a
 counted, typed confirmation. `AdminConsole` adds AuthKit's account administration
 (optional peer `@openrails/auth-ui`) around `BillingAdmin`.
 
-**Consumers in this repository.** `web/console` composes `BillingAdmin` with AuthKit's members, roles, API keys and account panels into the `/admin` console; `task admin-build` builds it into `web/console/dist`, which the binary embeds. `web/pay` (`@openrails/payment-page`) wraps `OrderPayment` in the hosted pay page; its build in `web/pay/dist` is embedded by `web/pay/embed.go` (`pay.FS`) and served by `Engine.CheckoutPage` from `Deps.CheckoutAssets`. Its `captchaFetch` resends a pay refused `403 captcha_required` once with the solved token.
+**Consumers in this repository.** `web/console` composes `BillingAdmin` with AuthKit's members, roles, API keys and account panels into the `/admin` console; `task admin-build` builds it into `web/console/dist`, which the binary embeds. `web/pay` (`@openrails/payment-page`) wraps `InvoicePayment` in the hosted pay page; its build in `web/pay/dist` is embedded by `web/pay/embed.go` (`pay.FS`) and served by `Engine.CheckoutPage` from `Deps.CheckoutAssets`. Its `captchaFetch` resends a pay refused `403 captcha_required` once with the solved token.
 
 **Build checks.** `pnpm build` runs `tooling/check-admin-entry.mjs`, which fails
 when the customer entry pulls in admin modules or styles.
@@ -70,9 +70,9 @@ when the customer entry pulls in admin modules or styles.
 ### 1. Exactly-once provider calls
 The client retries only GETs; its one write resend, after `401 credential_expired`,
 is safe because the gate refused before the route ran. Pays and card saves carry an
-`Idempotency-Key`; `OrderPayment` mints a new one after a failed pay, and the order
-refuses a second charge (`order_payment_in_progress`, `order_not_payable`).
-`getOrderPaymentAttempt` reads a lost pay's outcome; no component calls it.
+`Idempotency-Key`; `InvoicePayment` mints a new one after a failed pay, and the invoice
+refuses a second charge (`invoice_payment_in_progress`, `invoice_not_payable`).
+`getInvoicePaymentAttempt` reads a lost pay's outcome; no component calls it.
 
 Checks:
 - `send()` in `src/client/client.ts` sets one retry for GET and none for any other method.
@@ -91,7 +91,7 @@ offered.
 Checks:
 - `formatAmount` and `amountUnits` in `src/lib/money.ts` never convert an amount to `Number`.
 - The zod `amount` schema refines `isAmount`.
-- `src/order-payment.tsx` sends `expectedTotal: order.total` and offers no wallet when `amountToMinorUnits` returns null.
+- `src/invoice-payment.tsx` sends `expectedTotal: invoice.total` and offers no wallet when `amountToMinorUnits` returns null.
 - `currencies.ts` is generated from `catalog.Currencies`.
 
 ### 4. Access control and tenant isolation
@@ -121,11 +121,11 @@ Checks:
 Does not apply: the library owns no tables.
 
 ### 7. Work scales with activity
-Does not apply: no background jobs. An open console polls a running import's progress and the findings count; `OrderPayment` polls a processing order (GET, 10 s) and confirms a Solana order awaiting its wallet (`POST …/confirm`, 3 s).
+Does not apply: no background jobs. An open console polls a running import's progress and the findings count; `InvoicePayment` polls a processing invoice (GET, 10 s) and confirms a Solana invoice awaiting its wallet (`POST …/confirm`, 3 s).
 
 ### 8. Abuse protection
 The client retries a 429 only for a GET and only when it names its wait; the only
-repeated write is `OrderPayment`'s Solana confirm poll; `captcha_required` reaches
+repeated write is `InvoicePayment`'s Solana confirm poll; `captcha_required` reaches
 the caller as a typed error, and the pay page resends once with a solved token.
 
 Checks:

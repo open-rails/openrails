@@ -35,7 +35,7 @@ func TestCheck(t *testing.T) {
 		{receipt(billing.MessageTemplate{Subject: "x", HTML: "{{money .Event.Amount}}"}), `events.one_off_purchase_completed: html: template: body:1: function "money" not defined`},
 		{receipt(billing.MessageTemplate{Subject: "x"}), "events.one_off_purchase_completed: a text or html body is required"},
 		{receipt(billing.MessageTemplate{Text: "x"}), "events.one_off_purchase_completed: subject is required"},
-		{billing.MessageSettings{Events: map[string]billing.MessageEventSettings{"order.completed": {Enabled: &on}}}, "events.order.completed: not an event type"},
+		{billing.MessageSettings{Events: map[string]billing.MessageEventSettings{"invoice.completed": {Enabled: &on}}}, "events.invoice.completed: not an event type"},
 		{billing.MessageSettings{DefaultLanguage: "French"}, "default_language"},
 		{billing.MessageSettings{Layouts: map[string]billing.MessageLayout{"en": {HTML: "<p>no body</p>"}}}, `layouts.en: html: layout: it never runs {{template "body" .}}`},
 		{billing.MessageSettings{Events: map[string]billing.MessageEventSettings{"refund_completed": {Templates: map[string]billing.MessageTemplate{"de": {Subject: "{{.Nope}}", Text: "x"}}}}},
@@ -93,7 +93,7 @@ func TestACheckoutDeclineSendsNoneByDefault(t *testing.T) {
 	on := true
 	for _, source := range []string{"customer_checkout", "customer_subscription_change"} {
 		decline := billing.NotificationData{Source: source, RecoveryAction: billing.NotificationRecoveryUpdatePaymentMethod}
-		for _, kind := range []string{"payment_method_failed", "payment_method_update_required", "payment_authentication_required", "order_collection_stopped"} {
+		for _, kind := range []string{"payment_method_failed", "payment_method_update_required", "payment_authentication_required", "invoice_collection_stopped"} {
 			if Enabled(billing.MessageSettings{}, kind, decline) {
 				t.Errorf("%s from %s: the checkout page told the customer", kind, source)
 			}

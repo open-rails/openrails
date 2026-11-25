@@ -192,8 +192,8 @@ func (h *NMISaleIntentHandler) authenticationAbandoned(in gen.BillingProviderInt
 	if err != nil {
 		return false
 	}
-	// A closed order abandons its challenge at once.
-	if p.OrderID != uuid.Nil && intents.EvidenceString(in, orderClosedKey) == "true" {
+	// A closed invoice abandons its challenge at once.
+	if p.InvoiceID != uuid.Nil && intents.EvidenceString(in, invoiceClosedKey) == "true" {
 		return true
 	}
 	return h.Sale.Fulfillment.now().After(p.AcceptedAt.Add(subscriptions.EngineAuthenticationWindow))

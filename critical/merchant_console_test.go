@@ -228,7 +228,7 @@ func TestMerchantConsole(t *testing.T) {
 		bob := iw.nmiMember(t, iw.bob.Email, "silver", "10.00", start)
 		vault := iw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1881"})
 		iw.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Email = "carol@legacy.invalid" })
-		legacy := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "gold", Amount: "20.00", Days: 30, Created: start, NextBilling: start.AddDate(0, 0, 30), Order: "order-legacy"})
+		legacy := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "gold", Amount: "20.00", Days: 30, Created: start, NextBilling: start.AddDate(0, 0, 30), Order: "invoice-legacy"})
 		iw.nmi.AddScheduleSale(legacy, start)
 		products := map[string]billing.ProductID{}
 		for key, name := range map[string]string{"gold": "Gold", "silver": "Silver"} {
@@ -458,14 +458,14 @@ func TestMerchantConsole(t *testing.T) {
 		contacts := func() []*billing.CustomerContact {
 			subs, err := a.alphaRemote.ListSubscriptions(t.Context(), billing.SubscriptionListParams{})
 			require.NoError(t, err)
-			orders, err := a.alphaRemote.ListOrders(t.Context(), billing.OrderListParams{})
+			invoices, err := a.alphaRemote.ListInvoices(t.Context(), billing.InvoiceListParams{})
 			require.NoError(t, err)
 			payments, err := a.alphaRemote.ListPayments(t.Context(), billing.PaymentListParams{})
 			require.NoError(t, err)
 			require.Len(t, subs.Items, 1)
-			require.Len(t, orders.Items, 1)
+			require.Len(t, invoices.Items, 1)
 			require.Len(t, payments.Items, 1)
-			return []*billing.CustomerContact{subs.Items[0].CustomerContact, orders.Items[0].CustomerContact, payments.Items[0].CustomerContact}
+			return []*billing.CustomerContact{subs.Items[0].CustomerContact, invoices.Items[0].CustomerContact, payments.Items[0].CustomerContact}
 		}
 		named := contacts()
 		for _, contact := range named {
@@ -478,7 +478,7 @@ func TestMerchantConsole(t *testing.T) {
 			who = *named[0].Name
 		}
 		// The customer's own lists carry no contact.
-		for _, path := range []string{"/v1/me/subscriptions", "/v1/me/payments", "/v1/me/orders"} {
+		for _, path := range []string{"/v1/me/subscriptions", "/v1/me/payments", "/v1/me/invoices"} {
 			status, raw := a.request(t, http.MethodGet, path, a.aliceToken, nil)
 			require.Equal(t, http.StatusOK, status, string(raw))
 			require.NotContains(t, string(raw), "customer_contact", path)

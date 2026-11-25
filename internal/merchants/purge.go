@@ -28,8 +28,8 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // merchantOwnedTables are the openrails.* tables that carry the persisted
 // merchant_id column, IN PURGE ORDER: children before the rows they reference.
 //
-// The order is load-bearing, not cosmetic. prices→products, subscriptions→prices
-// and order_attempts→payments are all RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
+// The invoice is load-bearing, not cosmetic. prices→products, subscriptions→prices
+// and invoice_attempts→payments are all RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
 // whole purge (SQLSTATE 23001) for any merchant that owned a product with a
 // price — i.e. every real one. Nothing caught it because the only test seeded a
 // single entitlement row.
@@ -42,7 +42,7 @@ var merchantOwnedTables = []string{
 	"payment_attempts", "rebill_cycles", "payment_method_versions", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
 	"operation_log", "provider_intents",
-	"order_attempts", "product_access", "stripe_fee_reads", "disputes", "fraud_reports", "payments", "network_activity_daily", "subscriptions",
+	"invoice_attempts", "product_access", "stripe_fee_reads", "disputes", "fraud_reports", "payments", "network_activity_daily", "subscriptions",
 	"money_settings", "payment_methods", "psp_customers",
 	// The directory's copy of the merchant's customers and the tokens it
 	// pushes them with.
@@ -95,8 +95,8 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsSolanaPayReferences(ctx, id)
 	case "psp_customers":
 		return q.CountMerchantRowsRailCustomers(ctx, id)
-	case "order_attempts":
-		return q.CountMerchantRowsOrderAttempts(ctx, id)
+	case "invoice_attempts":
+		return q.CountMerchantRowsInvoiceAttempts(ctx, id)
 	case "operation_log":
 		return q.CountMerchantRowsOperationLog(ctx, id)
 	case "provider_intents":
@@ -151,8 +151,8 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsSolanaPayReferences(ctx, id)
 	case "psp_customers":
 		return q.PurgeMerchantRowsRailCustomers(ctx, id)
-	case "order_attempts":
-		return q.PurgeMerchantRowsOrderAttempts(ctx, id)
+	case "invoice_attempts":
+		return q.PurgeMerchantRowsInvoiceAttempts(ctx, id)
 	case "operation_log":
 		return q.PurgeMerchantRowsOperationLog(ctx, id)
 	case "provider_intents":

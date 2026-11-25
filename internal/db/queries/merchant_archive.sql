@@ -32,10 +32,10 @@ SELECT EXISTS (
 );
 
 
--- Raises the order-number sequence past the merchant's restored numbers; it
+-- Raises the invoice-number sequence past the merchant's restored numbers; it
 -- never lowers it.
--- name: RaiseOrderNumberSequence :exec
-SELECT setval('billing.order_number_seq'::regclass, m.top)
-FROM (SELECT max(number) AS top FROM billing.orders
+-- name: RaiseInvoiceNumberSequence :exec
+SELECT setval('billing.invoice_number_seq'::regclass, m.top)
+FROM (SELECT max(number) AS top FROM billing.invoices
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid) m
-WHERE m.top > (SELECT last_value FROM billing.order_number_seq);
+WHERE m.top > (SELECT last_value FROM billing.invoice_number_seq);

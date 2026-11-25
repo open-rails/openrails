@@ -73,7 +73,7 @@ type CreateCreditGrantParams struct {
 
 // CreditGrantFunding is where a granted lot's units came from: given by the
 // merchant (grant, the default; promotion) or brought from another system
-// (import). Bought lots come from orders.
+// (import). Bought lots come from invoices.
 type CreditGrantFunding string
 
 const (
@@ -195,7 +195,7 @@ const (
 	// BalanceTransactionOwedRepayment pays debt from newly funded credit; Amount is the
 	// (negative) change to both the balance and what is owed.
 	BalanceTransactionOwedRepayment BalanceTransactionType = "owed_repayment"
-	// BalanceTransactionOwedReopened owes again what a usage order payment paid,
+	// BalanceTransactionOwedReopened owes again what a usage invoice payment paid,
 	// once it is charged back.
 	BalanceTransactionOwedReopened BalanceTransactionType = "owed_reopened"
 )
@@ -402,7 +402,7 @@ type MerchantSettings struct {
 	// FraudWarningRefund decides what an actionable early fraud warning does:
 	// FraudWarningRefundCharge (default) or FraudWarningRecord.
 	FraudWarningRefund *FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
-	// ArrearsGraceDays is how long an unpaid usage order may be overdue before the customer is delinquent.
+	// ArrearsGraceDays is how long an unpaid usage invoice may be overdue before the customer is delinquent.
 	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
 	// PSPRouting are ordered rules that pick one PSP before a purchase is attempted.
 	PSPRouting *[]PSPRoutingRule `json:"psp_routing,omitempty"`
@@ -519,7 +519,7 @@ type BillingPolicyBinding struct {
 //
 // It governs renewals OpenRails collects: engine memberships on Stripe and
 // NMI, Solana pulls and NMI schedules; provider-owned Stripe and CCBill
-// subscriptions use the provider's dunning. Usage orders retry on its tiers
+// subscriptions use the provider's dunning. Usage invoices retry on its tiers
 // too, under the policy in force at each decline. The built-in tiers end inside one
 // cycle: under 4 days no retry; 4 to 27 days +1 and +2 days; 28 days and
 // longer +2, +4, +6 and +9 days, the fifth failure terminal. A failure older
@@ -540,7 +540,7 @@ type BillingPolicyBinding struct {
 // decline is the first failure, and under a 96-hour cycle NMI's next charge
 // is the retry.
 //
-// A renewal is an order (origin subscription) per period. After each paid
+// A renewal is an invoice (origin subscription) per period. After each paid
 // period the member keeps access for min(24h, max(2h, period/10)) while the
 // hourly due pass admits it; a renewal held because collection is stopped
 // raises life.renewal.held. An NMI schedule with no attempt 24 hours after its
@@ -552,7 +552,7 @@ type DunningPolicy struct {
 	// TransientRetryMinutes are the quick retries after a transient decline, in minutes.
 	TransientRetryMinutes *[]int `json:"transient_retry_minutes,omitempty"`
 	// CustomerRetries is how many declined attempts of the customer's own
-	// (retry-now, or paying the renewal order) one renewal takes on one card
+	// (retry-now, or paying the renewal invoice) one renewal takes on one card
 	// before only another card is charged. Nil is 3; 0 refuses any retry of a
 	// card the renewal declined; at most 9. A policy whose scheduled,
 	// transient and customer retries together could pass the card networks'

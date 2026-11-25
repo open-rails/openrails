@@ -174,22 +174,22 @@ func (q *Queries) InheritMoneyAccountCreditLimit(ctx context.Context, arg Inheri
 	return err
 }
 
-const latestUsageOrderEndInCurrency = `-- name: LatestUsageOrderEndInCurrency :one
-SELECT COALESCE(MAX(period_ends_at),'0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS period_end FROM billing.orders
+const latestUsageInvoiceEndInCurrency = `-- name: LatestUsageInvoiceEndInCurrency :one
+SELECT COALESCE(MAX(period_ends_at),'0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS period_end FROM billing.invoices
 WHERE merchant_id=$1::uuid AND customer_id=$2::uuid
     AND currency=$3::text AND origin='usage'
 `
 
-type LatestUsageOrderEndInCurrencyParams struct {
+type LatestUsageInvoiceEndInCurrencyParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
 }
 
-// Where the customer's usage orders in the currency end: owed dated before
-// it would fall in a period an order already billed.
-func (q *Queries) LatestUsageOrderEndInCurrency(ctx context.Context, arg LatestUsageOrderEndInCurrencyParams) (time.Time, error) {
-	row := q.db.QueryRow(ctx, latestUsageOrderEndInCurrency, arg.MerchantID, arg.CustomerID, arg.Currency)
+// Where the customer's usage invoices in the currency end: owed dated before
+// it would fall in a period an invoice already billed.
+func (q *Queries) LatestUsageInvoiceEndInCurrency(ctx context.Context, arg LatestUsageInvoiceEndInCurrencyParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, latestUsageInvoiceEndInCurrency, arg.MerchantID, arg.CustomerID, arg.Currency)
 	var period_end time.Time
 	err := row.Scan(&period_end)
 	return period_end, err
@@ -330,11 +330,11 @@ WHERE m.merchant_id = s.merchant_id AND m.customer_id = s.customer_id AND m.curr
         AND ar.debits_posted-ar.credits_posted >= s.effective_credit_limit
         AND ar.debits_posted-ar.credits_posted > 0
         AND ar.debits_posted-ar.credits_posted >= COALESCE(s.usage_minimum_invoice_amount,($2::jsonb->>s.currency)::bigint,0)
-        AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.order_id IS NULL
+        AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.invoice_id IS NULL
             HAVING COALESCE(SUM(oi.amount),0) >= GREATEST(1,COALESCE(s.usage_minimum_invoice_amount,($2::jsonb->>s.currency)::bigint,0)))) OR
     (s.usage_next_bill_at IS NULL AND EXISTS (SELECT 1 FROM billing.owed_items oi
         WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency
-        AND oi.status='pending' AND oi.order_id IS NULL)))
+        AND oi.status='pending' AND oi.invoice_id IS NULL)))
 `
 
 type MarkUsageAccountsDueParams struct {
@@ -368,7 +368,7 @@ UPDATE billing.money_settings s SET usage_due_at = CASE
 WHERE s.merchant_id = $2::uuid
   AND (s.usage_collection_due OR s.usage_next_bill_at IS NOT NULL OR EXISTS (SELECT 1 FROM billing.owed_items oi
       WHERE oi.merchant_id = s.merchant_id AND oi.customer_id = s.customer_id AND oi.currency = s.currency
-        AND oi.status = 'pending' AND oi.order_id IS NULL))
+        AND oi.status = 'pending' AND oi.invoice_id IS NULL))
 `
 
 type RebuildUsageDueParams struct {

@@ -28,9 +28,9 @@ func ValidateValues(p Profile, values []*string) error {
 		}
 	}
 	if p.Name == "payments" {
-		order := value(p, values, "order_id")
-		if order == nil || strings.TrimSpace(*order) == "" {
-			return fmt.Errorf("payments without order identity are incompatible with this archive contract; historical orders are not reconstructed")
+		invoice := value(p, values, "invoice_id")
+		if invoice == nil || strings.TrimSpace(*invoice) == "" {
+			return fmt.Errorf("payments without invoice identity are incompatible with this archive contract; historical invoices are not reconstructed")
 		}
 	}
 	if p.Name == "catalog_applications" {
@@ -96,16 +96,16 @@ func ValidateValues(p Profile, values []*string) error {
 		return err
 	}
 	if p.Name == "ledger_transfers" {
-		key, payer, order := value(p, values, "source_id"), value(p, values, "customer_id"), value(p, values, "order_id")
-		if key != nil && intents.IsOrderCollectionKey(*key) {
-			payerID, orderID := uuid.Nil, uuid.Nil
+		key, payer, invoice := value(p, values, "source_id"), value(p, values, "customer_id"), value(p, values, "invoice_id")
+		if key != nil && intents.IsInvoiceCollectionKey(*key) {
+			payerID, invoiceID := uuid.Nil, uuid.Nil
 			if payer != nil {
 				payerID, _ = uuid.Parse(*payer)
 			}
-			if order != nil {
-				orderID, _ = uuid.Parse(*order)
+			if invoice != nil {
+				invoiceID, _ = uuid.Parse(*invoice)
 			}
-			encodedKey = orderID != uuid.Nil && intents.OrderCollectionKeyValid(payerID, orderID, *key)
+			encodedKey = invoiceID != uuid.Nil && intents.InvoiceCollectionKeyValid(payerID, invoiceID, *key)
 			if encodedKey && p.Name == "ledger_transfers" {
 				for field, expected := range map[string]string{"source": "invoice_charge", "operation": "invoice_payment", "transfer_type": "owed_payment"} {
 					if actual := value(p, values, field); actual == nil || *actual != expected {
@@ -164,7 +164,7 @@ func ValidateValues(p Profile, values []*string) error {
 				if x <= 0 || x > int64(syntax.MaxDurationHours) {
 					return bad()
 				}
-			case "prices.billing_interval_months", "order_lines.billing_interval_months":
+			case "prices.billing_interval_months", "invoice_lines.billing_interval_months":
 				if x < 1 || x > 1200 {
 					return bad()
 				}
@@ -189,7 +189,7 @@ func ValidateValues(p Profile, values []*string) error {
 		case "jsonb":
 			field := p.Name + "." + c.Name
 			if p.Name == "provider_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == intents.TypePlatformMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == intents.TypeOrderCollection || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection || *typ == intents.TypeNMIRecurringConfirmation || *typ == solanaTierChange) {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == intents.TypePlatformMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == intents.TypeInvoiceCollection || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection || *typ == intents.TypeNMIRecurringConfirmation || *typ == solanaTierChange) {
 					field = p.Name + "." + *typ + "." + c.Name
 				} else if typ != nil && *typ == solanaPull && c.Name == "payload" {
 					field = p.Name + "." + solanaPull + ".payload"
@@ -204,7 +204,7 @@ func ValidateValues(p Profile, values []*string) error {
 			if v == "pending" {
 				return bad()
 			}
-		case "order_attempts.status":
+		case "invoice_attempts.status":
 			if v != "succeeded" && v != "failed" && v != "expired" && v != "canceled" {
 				return bad()
 			}
@@ -235,21 +235,21 @@ func ValidateValues(p Profile, values []*string) error {
 			if v := value(p, values, "customer_id"); v != nil {
 				customer, _ = uuid.Parse(*v)
 			}
-			status := models.OrderAttemptStatusExpired
+			status := models.InvoiceAttemptStatusExpired
 			if capture.PaymentMethodID != uuid.Nil {
-				status = models.OrderAttemptStatusSucceeded
+				status = models.InvoiceAttemptStatusSucceeded
 			}
 			if _, err := models.DecodeCardCapture([]byte(*raw), owner, customer, capture.PSPID, status, &capture.ExpiresAt); err != nil {
 				return err
 			}
 		}
 	}
-	if p.Name == "order_attempts" {
-		if id := value(p, values, "order_id"); id == nil || !uuidPattern.MatchString(*id) {
-			return fmt.Errorf("order attempt requires its order")
+	if p.Name == "invoice_attempts" {
+		if id := value(p, values, "invoice_id"); id == nil || !uuidPattern.MatchString(*id) {
+			return fmt.Errorf("invoice attempt requires its invoice")
 		}
 		if value(p, values, "amount") == nil || value(p, values, "currency") == nil {
-			return fmt.Errorf("order attempt requires its monetary terms")
+			return fmt.Errorf("invoice attempt requires its monetary terms")
 		}
 	}
 
@@ -259,7 +259,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "provider_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != intents.TypePlatformMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != intents.TypeOrderCollection && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != intents.TypeNMIRecurringConfirmation && *typ != solanaPull && *typ != solanaTierChange)) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != intents.TypePlatformMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != intents.TypeInvoiceCollection && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != intents.TypeNMIRecurringConfirmation && *typ != solanaPull && *typ != solanaTierChange)) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund") {
@@ -288,7 +288,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 		return ""
 	}
 	typ := field("intent_type")
-	if typ != intents.TypeNMIPaymentMethodDelete && typ != intents.TypeHyperSwitchMethodDelete && typ != intents.TypePlatformMethodDelete && typ != intents.TypeOrderCollection && typ != subscriptions.TypeManualRebill && typ != subscriptions.TypeSubscriptionCollection && typ != payments.TypeNMISale && typ != subscriptions.TypeInitialMembership && typ != intents.TypeNMIRecurringConfirmation {
+	if typ != intents.TypeNMIPaymentMethodDelete && typ != intents.TypeHyperSwitchMethodDelete && typ != intents.TypePlatformMethodDelete && typ != intents.TypeInvoiceCollection && typ != subscriptions.TypeManualRebill && typ != subscriptions.TypeSubscriptionCollection && typ != payments.TypeNMISale && typ != subscriptions.TypeInitialMembership && typ != intents.TypeNMIRecurringConfirmation {
 		return false, nil
 	}
 	id, _ := uuid.Parse(field("id"))
@@ -329,7 +329,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 		terms, _ := subscriptions.DecodeManualRebillPayload(row)
 		return terms.Initiator == charge.InitiatorCustomer, nil
 	}
-	terms, err := intents.DecodeOrderCollectionPayload(row)
+	terms, err := intents.DecodeInvoiceCollectionPayload(row)
 	if err != nil {
 		return false, fmt.Errorf("invalid accepted collection payload: %w", err)
 	}
@@ -340,7 +340,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 	if (row.Status == intents.StatusSucceeded) != found {
 		return false, fmt.Errorf("collection terminal state and qualified receipt disagree")
 	}
-	return terms.Initiator == charge.InitiatorCustomer || row.Origin == string(intents.OriginAdmin) && intents.OrderCollectionRetryKeyValid(terms.OrderID, row.IdempotencyKey), nil
+	return terms.Initiator == charge.InitiatorCustomer || row.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(terms.InvoiceID, row.IdempotencyKey), nil
 }
 
 // solanaPull is solanasubs.PullType; solanaTierChange is solanasubs.ChangeType.

@@ -43,11 +43,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/invoices"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/messages"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -158,7 +158,7 @@ type Runtime struct {
 	// DashboardService is the merchant's saved dashboard layout.
 	DashboardService *dashboard.Service
 	// CheckoutOrigin is where a server serving the payment page
-	// serves it; merchant orders take a purchase only when it is set.
+	// serves it; merchant invoices take a purchase only when it is set.
 	checkoutOrigin atomic.Pointer[string]
 	// paymentDomains are the (PSP, host) registrations known queued.
 	paymentDomains sync.Map
@@ -238,10 +238,10 @@ type Runtime struct {
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 	DeduplicationService         *webhooks.DeduplicationService
 
-	PurchaseService     *payment.PurchaseService
-	OrderAttemptService *payment.OrderAttemptService
-	// Orders are purchases (#1168).
-	Orders *orders.Service
+	PurchaseService       *payment.PurchaseService
+	InvoiceAttemptService *payment.InvoiceAttemptService
+	// Invoices are purchases (#1168).
+	Invoices *invoices.Service
 	// Idempotency claims request keys (#1099).
 	Idempotency *idempotency.Store
 

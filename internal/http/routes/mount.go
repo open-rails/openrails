@@ -26,7 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/wireform"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/invoices"
 	"github.com/open-rails/openrails/internal/paymentpage"
 	"github.com/open-rails/openrails/internal/scim"
 )
@@ -91,7 +91,7 @@ type Env struct {
 	live func(context.Context, billing.MerchantID) (bool, error)
 	// scim is the assembly's SCIM server, built once.
 	scim *scim.Server
-	// payURL scopes customer routes to the order a pay URL's secret
+	// payURL scopes customer routes to the invoice a pay URL's secret
 	// opened (the checkout origin).
 	payURL bool
 	// applicationPermissions are the mounted application and provisioning
@@ -253,15 +253,15 @@ func (e *Env) checkoutSubmission(route Route) []router.Middleware {
 			ctx := r.Request.Context()
 			scope, scoped := r.CustomerScope()
 			mid, bound := merchant.FromContext(ctx)
-			id, err := billing.ParseOrderID(r.Param("id"))
+			id, err := billing.ParseInvoiceID(r.Param("id"))
 			if scoped && bound && err == nil && scope.Present() {
 				now := time.Now()
 				if e.Runtime.Clock != nil {
 					now = e.Runtime.Clock.Now()
 				}
-				facts := orders.CheckoutFacts{IPCountry: r.ClientCountry(), Language: r.ClientLanguage()}
-				if err := orders.MarkCheckoutSubmitted(ctx, e.Runtime.DB, mid.UUID(), scope.Customer().UUID(), id.UUID(), facts, "", uuid.Nil, now); err != nil {
-					r.Log.WarnContext(ctx, "checkout: cannot record its submission", logx.Err(err), "order_id", id.String())
+				facts := invoices.CheckoutFacts{IPCountry: r.ClientCountry(), Language: r.ClientLanguage()}
+				if err := invoices.MarkCheckoutSubmitted(ctx, e.Runtime.DB, mid.UUID(), scope.Customer().UUID(), id.UUID(), facts, "", uuid.Nil, now); err != nil {
+					r.Log.WarnContext(ctx, "checkout: cannot record its submission", logx.Err(err), "invoice_id", id.String())
 				}
 			}
 			next(r)
@@ -445,8 +445,8 @@ const SelfRoutePrefix = "/me"
 // RegisterPaymentPageRoutes mounts, on a router rooted at the payment page
 // host's root, the routes a pay URL's secret opens. The host's own
 // middleware (paymentpage.ResolveHTTP) admits the secret; customer routes
-// act as the order's customer at the order's merchant
-// (paymentpage.Authenticator), for that order alone.
+// act as the invoice's customer at the invoice's merchant
+// (paymentpage.Authenticator), for that invoice alone.
 func RegisterPaymentPageRoutes(rr *router.Router, rt *app.Runtime, opts Options) {
 	opts.Auth = paymentpage.Authenticator{}
 	env := newEnv(rt.Log, rt, opts)
@@ -462,12 +462,12 @@ func (e *Env) payURLLimit(route Route) router.Middleware {
 	}
 	return middleware.PayURLRateLimit(e.Runtime, bucket, perMinute, func(r *httprequest.Request) string {
 		c, _ := paymentpage.FromContext(r.Request.Context())
-		return c.OrderID.UUID().String()
+		return c.InvoiceID.UUID().String()
 	})
 }
 
 // payURLScope refuses what the pay URL's secret does not open: another
-// order, or saved cards the pay URL does not offer.
+// invoice, or saved cards the pay URL does not offer.
 func payURLScope(route Route) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
@@ -475,7 +475,7 @@ func payURLScope(route Route) router.Middleware {
 			switch {
 			case !ok:
 				r.AbortCode("pay_url_not_found", "")
-			case route.PayURL == PayURLOrder && r.Param("id") != c.OrderID.String(),
+			case route.PayURL == PayURLInvoice && r.Param("id") != c.InvoiceID.String(),
 				route.PayURL == PayURLSavedCards && !c.SavedPaymentMethods:
 				r.AbortCode(billing.CodeResourceNotFound, "")
 			default:

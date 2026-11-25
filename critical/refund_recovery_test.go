@@ -14,23 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func purchasedSale(t *testing.T, configure ...func(*world)) (*authorityWorld, *providerLedger, billing.Order) {
+func purchasedSale(t *testing.T, configure ...func(*world)) (*authorityWorld, *providerLedger, billing.Invoice) {
 	t.Helper()
 	a, p := newPaymentWorld(t, configure...)
 	input := saleInput(t, a, p)
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "sale-for-refund"})
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "sale-for-refund"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status)
-	require.NotNil(t, order.Payment.PaymentID)
-	return a, p, order
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status)
+	require.NotNil(t, invoice.Payment.PaymentID)
+	return a, p, invoice
 }
 
 func TestRefundRecovery(t *testing.T) {
 	t.Run("OR-J20-S02/overlapping-refunds-conserve-original-charge", func(t *testing.T) {
-		a, p, order := purchasedSale(t)
-		payment := *order.Payment.PaymentID
+		a, p, invoice := purchasedSale(t)
+		payment := *invoice.Payment.PaymentID
 		type answer struct {
 			refund *billing.Payment
 			err    error
@@ -83,8 +83,8 @@ func TestRefundRecovery(t *testing.T) {
 	t.Run("OR-J20-S03/lost-refund-response-resolves-original-provider-refund", func(t *testing.T) {
 		// Begun an hour ago: the refund settles when the retry finds it,
 		// twenty minutes on, and a payment is never dated in the future.
-		a, p, order := purchasedSale(t, func(w *world) { w.clock.Advance(-time.Hour) })
-		payment := *order.Payment.PaymentID
+		a, p, invoice := purchasedSale(t, func(w *world) { w.clock.Advance(-time.Hour) })
+		payment := *invoice.Payment.PaymentID
 		p.mu.Lock()
 		p.lostRefundResponse = true
 		p.mu.Unlock()
@@ -130,8 +130,8 @@ func TestRefundRecovery(t *testing.T) {
 		require.Len(t, p.effects(t), 2, "recovery and caller replay cannot refund twice")
 	})
 	t.Run("OR-J20-S70/a-dashboard-refund-lands-while-the-roster-cannot-be-read", func(t *testing.T) {
-		a, p, order := purchasedSale(t)
-		payment := *order.Payment.PaymentID
+		a, p, invoice := purchasedSale(t)
+		payment := *invoice.Payment.PaymentID
 		var charge string
 		for _, effect := range p.effects(t) {
 			if effect.Kind == "charge" {

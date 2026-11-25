@@ -121,7 +121,7 @@ func beforeSchemaDrops(t *testing.T, archive []byte) ([]byte, map[string]bool) {
 		switch table {
 		case "maintenance_runs": // mode, rails, window_starts_at, window_ends_at; dry_run
 			v = slices.Concat(v[:5], []*string{nil, ptr("{}"), nil, nil}, v[5:8], []*string{ptr("false")}, v[8:])
-		case "order_attempts": // routing_reason, before order_id
+		case "invoice_attempts": // routing_reason, before invoice_id
 			v = slices.Concat(v[:len(v)-1], []*string{nil}, v[len(v)-1:])
 		case "payment_methods": // wallet_card_id
 			v = slices.Concat(v, []*string{nil})
@@ -140,7 +140,7 @@ func TestBillingArchive(t *testing.T) {
 	t.Run("OR-J31-S01/empty-target-restore-preserves-ledger-and-resets-destination-stream", func(t *testing.T) {
 		actor, provider := newPaymentWorld(t)
 		source := actor.world
-		status, raw := actor.request(t, "POST", "/v1/me/orders", actor.aliceToken, saleInput(t, actor, provider), map[string]string{"Idempotency-Key": "archive-settled"})
+		status, raw := actor.request(t, "POST", "/v1/me/invoices", actor.aliceToken, saleInput(t, actor, provider), map[string]string{"Idempotency-Key": "archive-settled"})
 		require.Equal(t, 201, status, string(raw))
 		require.Len(t, provider.effects(t), 1)
 		customer := billing.CustomerID(uuid.New())
@@ -243,7 +243,7 @@ func TestBillingArchive(t *testing.T) {
 	t.Run("OR-J31-S03/restored-custody-cannot-charge-before-explicit-arm", func(t *testing.T) {
 		source, provider := newPaymentWorld(t)
 		input := saleInput(t, source, provider)
-		status, raw := source.request(t, "POST", "/v1/me/orders", source.aliceToken, input, map[string]string{"Idempotency-Key": "source-settled"})
+		status, raw := source.request(t, "POST", "/v1/me/invoices", source.aliceToken, input, map[string]string{"Idempotency-Key": "source-settled"})
 		require.Equal(t, 201, status, string(raw))
 		require.Len(t, provider.effects(t), 1)
 		archive := archiveBytes(t, source.alpha)
@@ -269,8 +269,8 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		serveCheckoutPage(t, page, target.engine)
 		customer := billing.CustomerID(uuid.MustParse(source.alice.ID))
-		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, PayURL: &billing.OrderPayURLParams{SuccessURL: alphaSite + "/done"}}
-		_, err = client.CreateOrder(t.Context(), "destination-order", request)
+		request := billing.CreateInvoiceParams{CustomerID: customer, Lines: input.Lines, PayURL: &billing.InvoicePayURLParams{SuccessURL: alphaSite + "/done"}}
+		_, err = client.CreateInvoice(t.Context(), "destination-invoice", request)
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
 		require.Equal(t, billing.CodeProviderWritesDisabled, held.Code)
@@ -278,16 +278,16 @@ func TestBillingArchive(t *testing.T) {
 		// Final source writers really stop before the operator authorizes the copy.
 		require.NoError(t, source.engine.Close(context.Background()))
 		hostCLI(t, target, "merchant", "writes", "full", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator", "--reason", "the source is stopped")
-		order, err := client.CreateOrder(t.Context(), "destination-after-arm", request)
+		invoice, err := client.CreateInvoice(t.Context(), "destination-after-arm", request)
 		require.NoError(t, err)
-		address, err := url.Parse(*order.PayURL)
+		address, err := url.Parse(*invoice.PayURL)
 		require.NoError(t, err)
-		payment := billing.PayOrderParams{ExpectedTotal: 30_000_000, Payment: billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-		status, _, raw = hostPageRequest(t, page, "POST", "/v1/me/orders/"+order.ID.String()+"/pay", address.Fragment, payment, map[string]string{"Idempotency-Key": "after-arm"})
+		payment := billing.PayInvoiceParams{ExpectedTotal: 30_000_000, Payment: billing.InvoicePaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+		status, _, raw = hostPageRequest(t, page, "POST", "/v1/me/invoices/"+invoice.ID.String()+"/pay", address.Fragment, payment, map[string]string{"Idempotency-Key": "after-arm"})
 		require.Equal(t, 200, status, string(raw))
-		var completed billing.Order
+		var completed billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &completed))
-		require.Equal(t, billing.OrderComplete, completed.Status)
+		require.Equal(t, billing.InvoiceComplete, completed.Status)
 		require.Len(t, provider.effects(t), 2)
 		require.EqualValues(t, 3000, provider.effects(t)[1].Amount)
 	})
@@ -304,7 +304,7 @@ func TestBillingArchive(t *testing.T) {
 		require.Error(t, err)
 		require.Empty(t, partial.Bytes())
 		balance(t, source.alpha, customer, 400, 600, 1000)
-		status, raw := source.request(t, "POST", "/v1/me/orders", source.aliceToken, saleInput(t, source, provider), map[string]string{"Idempotency-Key": "after-failed-export"})
+		status, raw := source.request(t, "POST", "/v1/me/invoices", source.aliceToken, saleInput(t, source, provider), map[string]string{"Idempotency-Key": "after-failed-export"})
 		require.Equal(t, 201, status, string(raw))
 		require.Len(t, provider.effects(t), 1)
 		syncLease(t, source.alpha, billing.SyncLeasesParams{LeaseID: lease, Close: true})
@@ -318,19 +318,19 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		price, err := source.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "archived-download", UnitAmount: 9_990_000, Currency: "USD"})
 		require.NoError(t, err)
-		sale := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
-			Payment: &billing.OrderPaymentParams{Token: provider.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
-		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, sale, map[string]string{"Idempotency-Key": "archived-nmi-sale"})
+		sale := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
+			Payment: &billing.InvoicePaymentParams{Token: provider.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
+		status, raw := source.request(t, http.MethodPost, "/v1/me/invoices", source.aliceToken, sale, map[string]string{"Idempotency-Key": "archived-nmi-sale"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var paid billing.Order
+		var paid billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &paid))
-		require.Equal(t, billing.OrderComplete, paid.Status, string(raw))
+		require.Equal(t, billing.InvoiceComplete, paid.Status, string(raw))
 		oneUsage(t, source.alpha, usageInput(customer, "archived-work", 3))
 		source.clock.Advance(time.Second)
 		runUsageDue(t, startFleet(t, source.world))
 		require.Eventually(t, func() bool {
-			rows, err := source.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-			return err == nil && len(rows.Items) == 2 && rows.Items[0].Status == billing.OrderComplete && rows.Items[1].Status == billing.OrderComplete
+			rows, err := source.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 2 && rows.Items[0].Status == billing.InvoiceComplete && rows.Items[1].Status == billing.InvoiceComplete
 		}, 15*time.Second, 20*time.Millisecond)
 		cards := func(w *world) map[string]string {
 			rows, err := w.pool.Query(t.Context(), "SELECT intent_type, result_evidence#>>'{qualified_receipt,nmi,card_brand}', result_evidence#>>'{qualified_receipt,nmi,card_last4}' FROM "+pgx.Identifier{w.schema, "provider_intents"}.Sanitize()+" WHERE status = 'succeeded' AND result_evidence ? 'qualified_receipt'")
@@ -368,33 +368,33 @@ func TestBillingArchive(t *testing.T) {
 		require.False(t, receipt.AlreadyImported)
 		balance(t, client, customer, 2500, 0, 2500)
 	})
-	t.Run("OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book", func(t *testing.T) {
+	t.Run("OR-J31-S09/a-paid-stripe-hosted-page-invoice-moves-with-the-book", func(t *testing.T) {
 		source, provider := newPaymentWorld(t)
 		provider.core.SendWebhooksTo(source.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_fixture")
 		sale := saleInput(t, source, provider)
-		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}}
-		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, hosted, map[string]string{"Idempotency-Key": "archived-hosted"})
+		hosted := billing.CreateMyInvoiceParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.InvoicePaymentParams{ReturnURL: alphaSite + "/paid"}}
+		status, raw := source.request(t, http.MethodPost, "/v1/me/invoices", source.aliceToken, hosted, map[string]string{"Idempotency-Key": "archived-hosted"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.NotNil(t, order.Payment.NextAction)
-		require.Equal(t, "redirect_to_url", order.Payment.NextAction.Type)
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.NotNil(t, invoice.Payment.NextAction)
+		require.Equal(t, "redirect_to_url", invoice.Payment.NextAction.Type)
 		// The attempt keeps Stripe's page in its rail state: the session and its URL.
-		_, err := provider.core.CompleteCheckoutSession(t.Context(), strings.TrimPrefix(*order.Payment.NextAction.URL, stripemock.CheckoutURL))
+		_, err := provider.core.CompleteCheckoutSession(t.Context(), strings.TrimPrefix(*invoice.Payment.NextAction.URL, stripemock.CheckoutURL))
 		require.NoError(t, err)
-		var paid *billing.Order
+		var paid *billing.Invoice
 		require.Eventually(t, func() bool {
-			paid, err = source.alpha.GetOrder(t.Context(), order.ID)
-			return err == nil && paid.Status == billing.OrderComplete
+			paid, err = source.alpha.GetInvoice(t.Context(), invoice.ID)
+			return err == nil && paid.Status == billing.InvoiceComplete
 		}, 20*time.Second, 20*time.Millisecond)
 		require.NotNil(t, paid.Payment.PaymentID)
 		archive := archiveBytes(t, source.alpha)
 		_, client := archiveTarget(t, source.world)
 		_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 		require.NoError(t, err)
-		restored, err := client.GetOrder(t.Context(), order.ID)
+		restored, err := client.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderComplete, restored.Status)
+		require.Equal(t, billing.InvoiceComplete, restored.Status)
 		require.Equal(t, paid.Payment.PaymentID, restored.Payment.PaymentID)
 	})
 	t.Run("OR-J31-S10/a-restored-solana-pull-runs-at-its-due-time", func(t *testing.T) {
@@ -466,21 +466,21 @@ func TestBillingArchive(t *testing.T) {
 	t.Run("OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores", func(t *testing.T) {
 		actor, provider := newPaymentWorld(t)
 		source := actor.world
-		status, raw := actor.request(t, "POST", "/v1/me/orders", actor.aliceToken, saleInput(t, actor, provider), map[string]string{"Idempotency-Key": "archive-before-drops"})
+		status, raw := actor.request(t, "POST", "/v1/me/invoices", actor.aliceToken, saleInput(t, actor, provider), map[string]string{"Idempotency-Key": "archive-before-drops"})
 		require.Equal(t, 201, status, string(raw))
-		var paid billing.Order
+		var paid billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &paid))
 		_, err := source.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{source.schema, "maintenance_runs"}.Sanitize()+" (merchant_id, kind, actor, status, finished_at) VALUES ($1, 'prune', 'critical', 'completed', now())", source.alpha.MerchantID().UUID())
 		require.NoError(t, err)
 		archive, widened := beforeSchemaDrops(t, archiveBytes(t, source.alpha))
-		require.Equal(t, map[string]bool{"maintenance_runs": true, "order_attempts": true, "payment_methods": true}, widened)
+		require.Equal(t, map[string]bool{"maintenance_runs": true, "invoice_attempts": true, "payment_methods": true}, widened)
 		_, client := archiveTarget(t, source)
 		receipt, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
 		require.NoError(t, err)
 		require.False(t, receipt.AlreadyImported)
-		order, err := client.GetOrder(t.Context(), paid.ID)
+		invoice, err := client.GetInvoice(t.Context(), paid.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderComplete, order.Status)
+		require.Equal(t, billing.InvoiceComplete, invoice.Status)
 		methods, err := client.ListPaymentMethods(t.Context(), paid.CustomerID, billing.PaymentMethodListParams{})
 		require.NoError(t, err)
 		require.Len(t, methods.Items, 1, "the saved card moves with the book")

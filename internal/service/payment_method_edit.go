@@ -157,7 +157,7 @@ func (s *Service) pushCardEdit(ctx context.Context, method gen.BillingPaymentMet
 
 // reconsentCard re-establishes a card's agreements after its issuer
 // reissued it under another brand, in the customer's presence (paying an
-// order with it): one verification on the card's own account per agreement
+// invoice with it): one verification on the card's own account per agreement
 // sequence, and each mandate waiting for consent is replaced by an active one
 // citing it. Subscriptions waiting on the card resume. A card with nothing
 // waiting is left as it is.

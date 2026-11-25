@@ -318,8 +318,8 @@ func (c *Client) readProducts(ctx context.Context, query, by string, values []st
 		out.Items = append(out.Items, product)
 	}
 	slices.SortFunc(out.Items, func(a, b billing.Product) int {
-		if order := b.CreatedAt.Compare(a.CreatedAt); order != 0 {
-			return order
+		if invoice := b.CreatedAt.Compare(a.CreatedAt); invoice != 0 {
+			return invoice
 		}
 		x, y := uuid.UUID(a.ID), uuid.UUID(b.ID)
 		return bytes.Compare(y[:], x[:])

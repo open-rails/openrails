@@ -89,7 +89,7 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 
 // ApplyReversal decides, once, a settled reversal's share of the lot its
 // payment bought, and posts it: a negative payment returns the credit line's
-// money first (the rest of an order's payment bought no credit); a recovery
+// money first (the rest of an invoice's payment bought no credit); a recovery
 // restores what its chargeback took. The share is recorded, zero included,
 // so a later call never revisits it; decided reports whether this call
 // decided it. The units always move; the money only once the general ledger

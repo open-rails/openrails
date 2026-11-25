@@ -105,7 +105,7 @@ type SubscriptionConvergeWorker struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          *payment.OrderAttemptService
+	InvoiceAttemptService        *payment.InvoiceAttemptService
 	// Objects records the provider prices parked subscriptions bill.
 	Objects func() *providerobjects.Observer
 	// Importer adopts live NMI subscriptions OpenRails does not hold.
@@ -178,11 +178,11 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			PaymentService:               w.PaymentService,
 			MoneyService:                 w.MoneyService,
 
-			RailCustomerService: w.RailCustomerService,
-			OrderAttemptService: w.OrderAttemptService,
-			Objects:             w.objects(),
-			Findings:            w.Findings,
-			Log:                 w.Log,
+			RailCustomerService:   w.RailCustomerService,
+			InvoiceAttemptService: w.InvoiceAttemptService,
+			Objects:               w.objects(),
+			Findings:              w.Findings,
+			Log:                   w.Log,
 		}
 		return svc.Converge(ctx, args.SubscriptionReference)
 

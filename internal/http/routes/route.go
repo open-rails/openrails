@@ -35,7 +35,7 @@ type Group string
 const (
 	// Meta is the process surface: health, metrics, capability discovery.
 	Meta Group = "meta"
-	// Payment is the public buyer-facing surface: a wallet paying an order.
+	// Payment is the public buyer-facing surface: a wallet paying an invoice.
 	Payment Group = "payment"
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
@@ -133,20 +133,20 @@ const (
 // the merchant whose rows it reads.
 type MerchantSource string
 
-// MerchantOrder: the merchant of the order its {id} names.
-const MerchantOrder MerchantSource = "order"
+// MerchantInvoice: the merchant of the invoice its {id} names.
+const MerchantInvoice MerchantSource = "invoice"
 
 // PayURLAccess is how the checkout origin serves a route under a
-// pay URL's secret, which acts as its order's customer.
+// pay URL's secret, which acts as its invoice's customer.
 type PayURLAccess string
 
 const (
 	// PayURLPublic: a public route.
 	PayURLPublic PayURLAccess = "public"
-	// PayURLMerchant: a customer route about the order's merchant.
+	// PayURLMerchant: a customer route about the invoice's merchant.
 	PayURLMerchant PayURLAccess = "merchant"
-	// PayURLOrder: a customer route whose {id} is the secret's order.
-	PayURLOrder PayURLAccess = "order"
+	// PayURLInvoice: a customer route whose {id} is the secret's invoice.
+	PayURLInvoice PayURLAccess = "invoice"
 	// PayURLSavedCards: a customer route served only when the pay URL
 	// offers saved cards.
 	PayURLSavedCards PayURLAccess = "saved_cards"
@@ -335,7 +335,7 @@ func Catalog() []Route { return allRoutes }
 var allRoutes, index = func() ([]Route, map[string]Route) {
 	var all []Route
 	for _, resource := range [][]Route{
-		metaRoutes, configRoutes, ordersRoutes, cartsRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
+		metaRoutes, configRoutes, invoicesRoutes, cartsRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, limitsRoutes, paymentsRoutes, paymentMethodsRoutes, agreementsRoutes, pspsRoutes,
 		merchantRoutes, messagesRoutes, opsRoutes, provisioningRoutes,
 	} {
@@ -445,9 +445,9 @@ func (r Route) validate() error {
 		if r.Auth == AuthPublic && !r.NoConn {
 			return fmt.Errorf("a public route names its merchant in the request, or reads no merchant's rows (NoConn)")
 		}
-	case MerchantOrder:
+	case MerchantInvoice:
 		if r.Auth != AuthPublic || r.NoConn || !strings.Contains(r.Path, "{id}") {
-			return fmt.Errorf("only a public route names its merchant, by the order its {id} names")
+			return fmt.Errorf("only a public route names its merchant, by the invoice its {id} names")
 		}
 	default:
 		return fmt.Errorf("unknown merchant source %s", r.Merchant)
@@ -458,9 +458,9 @@ func (r Route) validate() error {
 		if r.Auth != AuthPublic {
 			return fmt.Errorf("a public pay URL route takes no credential")
 		}
-	case PayURLOrder, PayURLSavedCards, PayURLMerchant:
-		if r.Auth != AuthCustomer || (r.PayURL == PayURLOrder) != strings.Contains(r.Path, "{id}") {
-			return fmt.Errorf("a pay URL customer route is a customer route; an order route names the order as {id}")
+	case PayURLInvoice, PayURLSavedCards, PayURLMerchant:
+		if r.Auth != AuthCustomer || (r.PayURL == PayURLInvoice) != strings.Contains(r.Path, "{id}") {
+			return fmt.Errorf("a pay URL customer route is a customer route; an invoice route names the invoice as {id}")
 		}
 	default:
 		return fmt.Errorf("unknown pay URL access %s", r.PayURL)

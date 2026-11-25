@@ -314,7 +314,7 @@ ORDER BY sub.canceled_at DESC, sub.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
 -- The subscriptions whose MRR is scheduled to change by scheduled_change_before,
--- read from mrr_scheduled's index: the same filters and orders as above.
+-- read from mrr_scheduled's index: the same filters and invoices as above.
 -- name: ListScheduledSubscriptionsPage :many
 SELECT sub.* FROM billing.mrr_scheduled e
 JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
@@ -377,7 +377,7 @@ ORDER BY sub.canceled_at DESC, sub.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
 -- The subscriptions whose MRR is at risk (for risk_reason, when set), read
--- from subscription_mrr's index of at-risk rows: the same filters and orders.
+-- from subscription_mrr's index of at-risk rows: the same filters and invoices.
 -- name: ListAtRiskSubscriptionsPage :many
 SELECT sub.* FROM billing.subscription_mrr r
 JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id

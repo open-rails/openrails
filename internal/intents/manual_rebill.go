@@ -141,7 +141,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.BillingProvide
 	}
 	if errors.Is(err, nmi.ErrDuplicateTransaction) {
 		// The matching recent charge on this card and amount may be NMI's own
-		// schedule paying this period. Stay unknown: no new order is sent until
+		// schedule paying this period. Stay unknown: no new invoice is sent until
 		// a provider read or an operator settles it.
 		return Ambiguous("NMI refused the recovery as a duplicate of a recent charge on this card and amount; verify whether that charge paid this period")
 	}

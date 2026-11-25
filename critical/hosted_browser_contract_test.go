@@ -17,7 +17,7 @@ import (
 )
 
 func TestHostedBrowser(t *testing.T) {
-	t.Run("OR-J03-S04/built-iframe-origin-source-order-and-fallback-boundaries", func(t *testing.T) {
+	t.Run("OR-J03-S04/built-iframe-origin-source-invoice-and-fallback-boundaries", func(t *testing.T) {
 		attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write([]byte("<!doctype html><title>Other origin</title>"))
@@ -53,10 +53,10 @@ func TestHostedBrowser(t *testing.T) {
 			page = declareCheckoutPage(t, &w.cfg, &w.deps)
 		})
 		serveCheckoutPage(t, page, a.engine)
-		first, _ := hostPayOrder(t, a, "browser-first", true)
-		second, _ := hostPayOrder(t, a, "browser-second", true)
+		first, _ := hostPayInvoice(t, a, "browser-first", true)
+		second, _ := hostPayInvoice(t, a, "browser-second", true)
 		require.Contains(t, *first.PayURL, page.URL)
-		fixture.Store(map[string]any{"urls": []string{*first.PayURL, *second.PayURL}, "orders": []string{first.ID.String(), second.ID.String()}, "attacker": attacker.URL})
+		fixture.Store(map[string]any{"urls": []string{*first.PayURL, *second.PayURL}, "invoices": []string{first.ID.String(), second.ID.String()}, "attacker": attacker.URL})
 		results := t.TempDir()
 		if root := os.Getenv("OPENRAILS_CRITICAL_REPORT_DIR"); root != "" {
 			root, err = filepath.Abs(root)
@@ -84,10 +84,10 @@ func TestHostedBrowser(t *testing.T) {
 		require.Zero(t, receipt.Stats.Skipped)
 		// Completion messages are UI notifications, never financial admission.
 		require.Empty(t, p.effects(t))
-		for _, id := range []billing.OrderID{first.ID, second.ID} {
-			order, err := a.alpha.GetOrder(t.Context(), id)
+		for _, id := range []billing.InvoiceID{first.ID, second.ID} {
+			invoice, err := a.alpha.GetInvoice(t.Context(), id)
 			require.NoError(t, err)
-			require.Equal(t, billing.OrderOpen, order.Status)
+			require.Equal(t, billing.InvoiceOpen, invoice.Status)
 		}
 	})
 }

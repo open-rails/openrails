@@ -669,14 +669,14 @@ func (n planNode) all() []planNode {
 func buyAs(t *testing.T, a *authorityWorld, provider *providerLedger, token string, price billing.PriceID, total int64, key string) *billing.Subscription {
 	t.Helper()
 	card := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(total), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: card}}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", token, input, map[string]string{"Idempotency-Key": key})
+	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}, ExpectedTotal: ptr(total), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: card}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", token, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status, string(raw))
-	require.NotNil(t, order.Lines[0].SubscriptionID)
-	sub, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status, string(raw))
+	require.NotNil(t, invoice.Lines[0].SubscriptionID)
+	sub, err := a.alpha.GetSubscription(t.Context(), *invoice.Lines[0].SubscriptionID)
 	require.NoError(t, err)
 	return sub
 }

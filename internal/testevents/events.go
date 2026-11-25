@@ -48,9 +48,9 @@ func Hosts(ctx context.Context, c Reader, kind billing.HostEventType) (*billing.
 			case billing.HostEventProductEntitlementsChanged:
 				event.ProductEntitlements = new(billing.ProductEntitlementsChangedEvent)
 				payload = event.ProductEntitlements
-			case billing.HostEventOrderCompleted, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired, billing.HostEventOrderVoided:
-				event.Order = new(billing.OrderHostEvent)
-				payload = event.Order
+			case billing.HostEventInvoiceCompleted, billing.HostEventInvoiceRequiresAction, billing.HostEventInvoicePaymentFailed, billing.HostEventInvoiceCanceled, billing.HostEventInvoiceExpired, billing.HostEventInvoiceVoided:
+				event.Invoice = new(billing.InvoiceHostEvent)
+				payload = event.Invoice
 			case billing.HostEventMandateRevoked:
 				event.Mandate = new(billing.MandateHostEvent)
 				payload = event.Mandate

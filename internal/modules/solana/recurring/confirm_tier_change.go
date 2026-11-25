@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -36,10 +36,10 @@ type ConfirmTierChangeInput struct {
 	Signature string // the wallet's atomic tier-change tx signature
 
 	// Reference is the address the pending change was prepared with: the
-	// transaction must carry it. Required. OrderAttemptID, when set, also
+	// transaction must carry it. Required. InvoiceAttemptID, when set, also
 	// claims the transaction for that purchase.
-	OrderAttemptID uuid.UUID
-	Reference      string
+	InvoiceAttemptID uuid.UUID
+	Reference        string
 
 	// OldSubscriptionID is the lifecycle subscription being changed FROM (the
 	// caller has already authorized ownership).
@@ -305,8 +305,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		case locked.Status != models.StatusActive:
 			return fmt.Errorf("%w: it is %s", ErrTierChangeConflict, locked.Status)
 		}
-		if in.OrderAttemptID != uuid.Nil {
-			if err := settlement.ClaimOrder(ctx, txDB, in.OrderAttemptID, in.Signature); err != nil {
+		if in.InvoiceAttemptID != uuid.Nil {
+			if err := settlement.ClaimInvoice(ctx, txDB, in.InvoiceAttemptID, in.Signature); err != nil {
 				return err
 			}
 		}

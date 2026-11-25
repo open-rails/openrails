@@ -240,13 +240,13 @@ func TestSubscriptionChangeContracts(t *testing.T) {
 		require.NoError(t, err)
 		seat, err := w.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: seats.ID, Key: "team-day", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24), Quantity: &catalog.Quantity{Min: 1, Max: 5}})
 		require.NoError(t, err)
-		order := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: seat.ID, Quantity: ptr(1)}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
-			Payment: &billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-		status, raw = w.request(t, http.MethodPost, "/v1/me/orders", w.aliceToken, order, map[string]string{"Idempotency-Key": "team-purchase"})
+		invoice := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: seat.ID, Quantity: ptr(1)}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+			Payment: &billing.InvoicePaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+		status, raw = w.request(t, http.MethodPost, "/v1/me/invoices", w.aliceToken, invoice, map[string]string{"Idempotency-Key": "team-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var bought billing.Order
+		var bought billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &bought))
-		require.Equal(t, billing.OrderComplete, bought.Status, string(raw))
+		require.Equal(t, billing.InvoiceComplete, bought.Status, string(raw))
 		team := *bought.Lines[0].SubscriptionID
 		w.clock.Advance(12 * time.Hour)
 		status, raw = w.request(t, http.MethodPost, "/v1/me/subscriptions/"+team.String()+"/change", w.aliceToken, map[string]any{"quantity": 2}, map[string]string{"Idempotency-Key": "more-seats"})

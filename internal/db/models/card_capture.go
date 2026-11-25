@@ -39,7 +39,7 @@ type CardCapture struct {
 	AcceptedTokenHash  string    `json:"accepted_token_hash,omitempty"`
 }
 
-func DecodeCardCapture(raw []byte, merchantID, sessionCustomerID, pspID uuid.UUID, status OrderAttemptStatus, expiry *time.Time) (CardCapture, error) {
+func DecodeCardCapture(raw []byte, merchantID, sessionCustomerID, pspID uuid.UUID, status InvoiceAttemptStatus, expiry *time.Time) (CardCapture, error) {
 	var capture CardCapture
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -61,20 +61,20 @@ func DecodeCardCapture(raw []byte, merchantID, sessionCustomerID, pspID uuid.UUI
 		return capture, ErrCardCaptureBinding
 	}
 	switch status {
-	case OrderAttemptStatusCreated:
+	case InvoiceAttemptStatusCreated:
 		if capture.VendorSessionID != "" || capture.SecretCiphertext != "" || capture.PaymentMethodID != uuid.Nil {
 			return capture, ErrCardCaptureBinding
 		}
-	case OrderAttemptStatusRequiresAction:
+	case InvoiceAttemptStatusRequiresAction:
 		if capture.VendorSessionID == "" || capture.SecretCiphertext == "" || capture.PaymentMethodID != uuid.Nil {
 			return capture, ErrCardCaptureBinding
 		}
-	case OrderAttemptStatusSucceeded:
+	case InvoiceAttemptStatusSucceeded:
 		decoded, err := hex.DecodeString(capture.AcceptedTokenHash)
 		if capture.SecretCiphertext != "" || capture.VendorSessionID == "" || capture.PaymentMethodID == uuid.Nil || capture.VendorMethodID == "" || err != nil || len(decoded) != 32 {
 			return capture, ErrCardCaptureBinding
 		}
-	case OrderAttemptStatusExpired, OrderAttemptStatusCanceled, OrderAttemptStatusFailed:
+	case InvoiceAttemptStatusExpired, InvoiceAttemptStatusCanceled, InvoiceAttemptStatusFailed:
 		if capture.SecretCiphertext != "" || capture.PaymentMethodID != uuid.Nil {
 			return capture, ErrCardCaptureBinding
 		}

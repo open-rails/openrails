@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Fulfil applies completed orders from the event log until it is caught up.
+// Fulfil applies completed invoices from the event log until it is caught up.
 func Fulfil(ctx context.Context, shop *openrails.Client, db *pgxpool.Pool) error {
 	// guide:events
 	for {
@@ -20,7 +20,7 @@ func Fulfil(ctx context.Context, shop *openrails.Client, db *pgxpool.Pool) error
 			return err
 		}
 		page, err := shop.ListEvents(ctx, billing.EventListParams{After: cursor, Limit: 100,
-			Types: []string{string(billing.HostEventOrderCompleted)}})
+			Types: []string{string(billing.HostEventInvoiceCompleted)}})
 		var status *billing.StatusError
 		if errors.As(err, &status) && status.Code == billing.CodeEventCursorExpired {
 			return rebuild(ctx, db) // 410: re-derive your state, then start a new cursor
@@ -64,14 +64,14 @@ func saveCursor(ctx context.Context, tx pgx.Tx, cursor string) error {
 	return err
 }
 
-// fulfil grants what the order bought, once per event.
+// fulfil grants what the invoice bought, once per event.
 func fulfil(ctx context.Context, tx pgx.Tx, event billing.Event) error {
-	_, err := tx.Exec(ctx, `INSERT INTO app.fulfilled_orders (event_id, order_id) VALUES ($1, $2)
+	_, err := tx.Exec(ctx, `INSERT INTO app.fulfilled_invoices (event_id, invoice_id) VALUES ($1, $2)
 		ON CONFLICT (event_id) DO NOTHING`, event.ID, event.Subject.ID)
 	return err
 }
 
-// rebuild forgets the cursor; the app re-reads the orders it derives from.
+// rebuild forgets the cursor; the app re-reads the invoices it derives from.
 func rebuild(ctx context.Context, db *pgxpool.Pool) error {
 	_, err := db.Exec(ctx, `DELETE FROM app.billing_cursor`)
 	return err

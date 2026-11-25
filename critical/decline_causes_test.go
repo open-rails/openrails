@@ -575,9 +575,9 @@ func TestDeclineCauses(t *testing.T) {
 			require.NotNil(t, waiting.Dunning)
 			require.True(t, waiting.Dunning.WaitingForNewCard)
 		})
-		t.Run("a-lost-answer-takes-the-issuers-code-from-the-order-read", func(t *testing.T) {
+		t.Run("a-lost-answer-takes-the-issuers-code-from-the-invoice-read", func(t *testing.T) {
 			_, _, rebill := renew(t, "51", func(p *nmiJournal) { p.core.DropSaleResponses(1) })
-			require.Equal(t, billing.DeclineInsufficientFunds, rebill.Reason, "the order read carries the issuer's code")
+			require.Equal(t, billing.DeclineInsufficientFunds, rebill.Reason, "the invoice read carries the issuer's code")
 			require.Equal(t, "51", rebill.IssuerCode)
 			require.Equal(t, "retry", rebill.Action)
 		})
@@ -598,7 +598,7 @@ func TestDeclineCauses(t *testing.T) {
 			// Visa category 1: the card is never charged again.
 			{"pick-up-card-waits-for-a-new-card", "04", billing.DeclinePickupCard, "fix_payment_method", true},
 			// A stop order behind NMI's catch-all waits; it never cancels.
-			{"stop-order-waits-and-never-cancels", "R1", billing.DeclineStopRecurring, "fix_payment_method", true},
+			{"stop-invoice-waits-and-never-cancels", "R1", billing.DeclineStopRecurring, "fix_payment_method", true},
 			{"insufficient-funds-is-retried", "51", billing.DeclineInsufficientFunds, "retry", false},
 			{"suspected-fraud-is-retried", "59", billing.DeclineSuspectedFraud, "retry", false},
 		} {
@@ -889,14 +889,14 @@ func nmiEngineMembership(t *testing.T) (*authorityWorld, *nmiJournal, *billing.S
 	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-engine-weekly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24)})
 	require.NoError(t, err)
 	token := p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"})
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token, BillingDetails: billedTo("US", "10001")}}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-engine-membership"})
+	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token, BillingDetails: billedTo("US", "10001")}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-engine-membership"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status, string(raw))
-	require.NotNil(t, order.Lines[0].SubscriptionID)
-	sub, err := a.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status, string(raw))
+	require.NotNil(t, invoice.Lines[0].SubscriptionID)
+	sub, err := a.alpha.GetSubscription(t.Context(), *invoice.Lines[0].SubscriptionID)
 	require.NoError(t, err)
 	require.Equal(t, "engine", string(sub.CollectionPolicy))
 	return a, p, sub

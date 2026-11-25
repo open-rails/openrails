@@ -40,8 +40,8 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		return row, err
 	}
 	customer, err := uuid.Parse(terms.UserID)
-	order := terms.OrderID != uuid.Nil
-	if err != nil || customer == uuid.Nil || order != (p.PriceID == nil) || !order && *p.PriceID != terms.PriceID || terms.Instrument.PSPID != target {
+	invoice := terms.InvoiceID != uuid.Nil
+	if err != nil || customer == uuid.Nil || invoice != (p.PriceID == nil) || !invoice && *p.PriceID != terms.PriceID || terms.Instrument.PSPID != target {
 		return row, errors.New("sale admission coordinates contradict requested purchase")
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -56,7 +56,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 			if err != nil {
 				return err
 			}
-			if accepted.OrderAttemptID != terms.OrderAttemptID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+			if accepted.InvoiceAttemptID != terms.InvoiceAttemptID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 				return apperr.Conflictf("purchase key belongs to another accepted purchase")
 			}
 			row = previous
@@ -65,10 +65,10 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if !order {
+		if !invoice {
 			return apperr.Conflictf("priced purchase creation is retired; an accepted operation must already exist")
 		}
-		// An order's new card is saved by the sale itself: no method exists yet.
+		// An invoice's new card is saved by the sale itself: no method exists yet.
 		if !terms.NewCard {
 			method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: terms.PaymentMethodID})
 			if err != nil {
@@ -92,7 +92,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		if err != nil {
 			return err
 		}
-		if accepted.OrderAttemptID != terms.OrderAttemptID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+		if accepted.InvoiceAttemptID != terms.InvoiceAttemptID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 			return apperr.Conflictf("purchase key belongs to another accepted purchase")
 		}
 		return nil

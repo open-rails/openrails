@@ -4,12 +4,12 @@
 -- name: InsertCreditGrant :one
 INSERT INTO billing.credit_grants (
     merchant_id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency,
-    source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at
+    source, source_id, invoker, product_id, invoice_line_id, payment_id, description, starts_at, expires_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(account_id)::uuid, sqlc.arg(unit)::text,
     sqlc.arg(units)::bigint, sqlc.arg(funding_source)::text, sqlc.narg(paid_amount)::bigint, sqlc.narg(paid_currency)::text,
     sqlc.arg(source)::text, sqlc.narg(source_id)::text, sqlc.arg(invoker)::text, sqlc.narg(product_id)::uuid,
-    sqlc.narg(order_line_id)::uuid, sqlc.narg(payment_id)::uuid, sqlc.narg(description)::text,
+    sqlc.narg(invoice_line_id)::uuid, sqlc.narg(payment_id)::uuid, sqlc.narg(description)::text,
     sqlc.arg(starts_at)::timestamptz, sqlc.narg(expires_at)::timestamptz
 )
 RETURNING *;
@@ -265,7 +265,7 @@ LIMIT 1;
 -- name: GetPaymentCashApplication :one
 -- What a payment's receipt brought and what the general ledger applied of
 -- it: to its bill's lines at (application, payment, id), to the credit lot
--- it bought at (credit_issue, payment, id) and to the owed a usage order's
+-- it bought at (credit_issue, payment, id) and to the owed a usage invoice's
 -- payment settles at (usage_collection*, payment, id). A won dispute's
 -- recovery receives what it returns to unapplied cash (dispute_won at
 -- (dispute_won, payment, id)).

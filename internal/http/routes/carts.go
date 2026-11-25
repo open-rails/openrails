@@ -6,7 +6,7 @@ import (
 )
 
 // cartsRoutes are the customer's cart (#1168): lines kept across the
-// merchant's sites and priced live; an order buys it with cart: true.
+// merchant's sites and priced live; an invoice buys it with cart: true.
 var cartsRoutes = []Route{
 	{Method: GET, Path: "/v1/me/cart", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.Cart{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetMyCart)},

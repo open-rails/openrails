@@ -261,7 +261,7 @@ test("console-cancel-says-what-ends-and-a-cleared-hold-confirms", async ({
   await expect(page.locator("tr", { hasText: fx.who })).toContainText(
     "Membership"
   )
-  await open(page, "/orders")
+  await open(page, "/invoices")
   await expect(page.locator("tr", { hasText: fx.who })).toHaveCount(1)
   await open(page, `/customers/${fx.customer}`)
   for (const kind of ["subscriptions", "payments"])

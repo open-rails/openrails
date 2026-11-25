@@ -127,7 +127,7 @@ func TestUndoneEndReinstatesOnlyItsForfeit(t *testing.T) {
 
 func TestRecoveryNamingNoChargebackRestoresTheOldestFirst(t *testing.T) {
 	one := uuid.New()
-	// The older chargeback has the larger id: order is by when they occurred.
+	// The older chargeback has the larger id: invoice is by when they occurred.
 	older, newer := "0190a000-0000-7000-8000-000000000002", "0190a000-0000-7000-8000-000000000001"
 	at := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
 	pb := paymentBooks{legs: map[string]*reversalLegs{

@@ -22,9 +22,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/money/books"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -38,8 +38,8 @@ func TestRevenueReversals(t *testing.T) {
 		end := start.AddDate(0, 1, 0)
 		a, provider := newPaymentWorld(t, atClock(start))
 		price := calendarPrice(t, a, "monthly", 10_000_000, 1)
-		order := buy(t, a, provider, "monthly-plan", []billing.OrderLineParams{{PriceID: price}}, 10_000_000)
-		line, payment := order.Lines[0].ID.UUID(), *order.Payment.PaymentID
+		invoice := buy(t, a, provider, "monthly-plan", []billing.InvoiceLineParams{{PriceID: price}}, 10_000_000)
+		line, payment := invoice.Lines[0].ID.UUID(), *invoice.Payment.PaymentID
 		sched := scheduleOfLine(t, a.world, line)
 
 		// Six and a half days in, 4.00 is refunded and the access kept. The
@@ -53,8 +53,8 @@ func TestRevenueReversals(t *testing.T) {
 		require.Equal(t, billing.PaymentSucceeded, refund.Status)
 		r := refund.ID.UUID().String()
 		require.Equal(t, []glRow{
-			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 866_666, At: refundedAt, OrderLine: &line, Schedule: &sched.ID},
-			{Type: "refund_deferred", Operation: "refund", Source: "payment", SourceID: r, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 3_133_334, At: refundedAt, OrderLine: &line, Schedule: &sched.ID},
+			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 866_666, At: refundedAt, InvoiceLine: &line, Schedule: &sched.ID},
+			{Type: "refund_deferred", Operation: "refund", Source: "payment", SourceID: r, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 3_133_334, At: refundedAt, InvoiceLine: &line, Schedule: &sched.ID},
 		}, glFor(t, a.world, "payment", r))
 		require.Equal(t, revenueSchedule{Method: "ratable", Account: "subscription_revenue", Funded: 6_000_000, Recognized: 1_300_000, Starts: start, Ends: end, Through: refundedAt, Next: &end},
 			scheduleOfLine(t, a.world, line).terms())
@@ -74,8 +74,8 @@ func TestRevenueReversals(t *testing.T) {
 		start := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
 		a, provider := newPaymentWorld(t, atClock(start))
 		pass := oneOffPrice(t, a, "pass", 9_000_000, ptr(720))
-		order := buy(t, a, provider, "pass", []billing.OrderLineParams{{PriceID: pass}}, 9_000_000)
-		line := order.Lines[0].ID.UUID()
+		invoice := buy(t, a, provider, "pass", []billing.InvoiceLineParams{{PriceID: pass}}, 9_000_000)
+		line := invoice.Lines[0].ID.UUID()
 		sched := scheduleOfLine(t, a.world, line)
 
 		// Five days in, refunded in full with the access revoked: the access
@@ -83,13 +83,13 @@ func TestRevenueReversals(t *testing.T) {
 		// the 7.50 still deferred and reverses the 1.50 earned.
 		refundedAt := start.Add(120 * time.Hour)
 		a.clock.Advance(refundedAt.Sub(a.clock.Now()))
-		refund, err := a.alpha.RefundPayment(t.Context(), "full-refund", *order.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Full refund"})
+		refund, err := a.alpha.RefundPayment(t.Context(), "full-refund", *invoice.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Full refund"})
 		require.NoError(t, err)
 		require.Equal(t, billing.PaymentSucceeded, refund.Status)
 		r := refund.ID.UUID().String()
 		require.Equal(t, []glRow{
-			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 1_500_000, At: refundedAt, OrderLine: &line, Schedule: &sched.ID},
-			{Type: "refund_deferred", Operation: "refund", Source: "payment", SourceID: r, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 7_500_000, At: refundedAt, OrderLine: &line, Schedule: &sched.ID},
+			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 1_500_000, At: refundedAt, InvoiceLine: &line, Schedule: &sched.ID},
+			{Type: "refund_deferred", Operation: "refund", Source: "payment", SourceID: r, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 7_500_000, At: refundedAt, InvoiceLine: &line, Schedule: &sched.ID},
 		}, glFor(t, a.world, "payment", r))
 		require.Equal(t, []glRow{recognized(sched.ID, line, "recognition", refundedAt, refundedAt.Add(-time.Microsecond), 1_500_000)}, recognitions(t, a.world, sched.ID))
 		done := scheduleOfLine(t, a.world, line)
@@ -107,7 +107,7 @@ func TestRevenueReversals(t *testing.T) {
 		schedules := subscriptionSchedules(t, a.world, m.sub.ID.UUID())
 		require.Len(t, schedules, 1)
 		sched := schedules[0]
-		line := sched.OrderLine
+		line := sched.InvoiceLine
 		var psp uuid.UUID
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT psp_id FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), m.payment.UUID()).Scan(&psp))
 
@@ -122,8 +122,8 @@ func TestRevenueReversals(t *testing.T) {
 		require.Len(t, reversals, 1)
 		c := reversals[0].ID.UUID().String()
 		require.Equal(t, []glRow{
-			{Type: "chargeback_recognized", Operation: "chargeback", Source: "payment", SourceID: c, Debit: "chargebacks", Credit: "cash_clearing", Amount: 2_500_000, At: disputedAt, OrderLine: &line, Schedule: &sched.ID},
-			{Type: "chargeback_deferred", Operation: "chargeback", Source: "payment", SourceID: c, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 7_500_000, At: disputedAt, OrderLine: &line, Schedule: &sched.ID},
+			{Type: "chargeback_recognized", Operation: "chargeback", Source: "payment", SourceID: c, Debit: "chargebacks", Credit: "cash_clearing", Amount: 2_500_000, At: disputedAt, InvoiceLine: &line, Schedule: &sched.ID},
+			{Type: "chargeback_deferred", Operation: "chargeback", Source: "payment", SourceID: c, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 7_500_000, At: disputedAt, InvoiceLine: &line, Schedule: &sched.ID},
 		}, glFor(t, a.world, "payment", c))
 		charged := scheduleOfLine(t, a.world, line)
 		require.Zero(t, charged.Funded)
@@ -143,9 +143,9 @@ func TestRevenueReversals(t *testing.T) {
 		}
 		require.NotEmpty(t, won)
 		require.Equal(t, []glRow{
-			{Type: "dispute_won", Operation: "dispute_won", Source: "payment", SourceID: won, Debit: "cash_clearing", DebitPSP: &psp, Credit: "chargebacks", Amount: 2_500_000, At: disputedAt, OrderLine: &line, Schedule: &sched.ID},
-			{Type: "dispute_won", Operation: "dispute_won_deferred", Source: "payment", SourceID: won, Debit: "cash_clearing", DebitPSP: &psp, Credit: "deferred_revenue", Amount: 7_500_000, At: disputedAt, OrderLine: &line, Schedule: &sched.ID},
-			{Type: "revenue_recognized", Operation: "dispute_won", Source: "payment", SourceID: won, Debit: "deferred_revenue", Credit: "subscription_revenue", Amount: 7_500_000, At: disputedAt, OrderLine: &line, Schedule: &sched.ID},
+			{Type: "dispute_won", Operation: "dispute_won", Source: "payment", SourceID: won, Debit: "cash_clearing", DebitPSP: &psp, Credit: "chargebacks", Amount: 2_500_000, At: disputedAt, InvoiceLine: &line, Schedule: &sched.ID},
+			{Type: "dispute_won", Operation: "dispute_won_deferred", Source: "payment", SourceID: won, Debit: "cash_clearing", DebitPSP: &psp, Credit: "deferred_revenue", Amount: 7_500_000, At: disputedAt, InvoiceLine: &line, Schedule: &sched.ID},
+			{Type: "revenue_recognized", Operation: "dispute_won", Source: "payment", SourceID: won, Debit: "deferred_revenue", Credit: "subscription_revenue", Amount: 7_500_000, At: disputedAt, InvoiceLine: &line, Schedule: &sched.ID},
 		}, glFor(t, a.world, "payment", won))
 		restored := scheduleOfLine(t, a.world, line)
 		require.EqualValues(t, 10_000_000, restored.Funded)
@@ -157,8 +157,8 @@ func TestRevenueReversals(t *testing.T) {
 	t.Run("OR-J41-S21/a-writer-that-skips-the-poster-commits-and-ledger-audit-raises-a-finding", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)
 		sale := oneOffPrice(t, a, "sale", 10_000_000, nil)
-		order := buy(t, a, provider, "sale", []billing.OrderLineParams{{PriceID: sale}}, 10_000_000)
-		payment := order.Payment.PaymentID.UUID()
+		invoice := buy(t, a, provider, "sale", []billing.InvoiceLineParams{{PriceID: sale}}, 10_000_000)
+		payment := invoice.Payment.PaymentID.UUID()
 		audit := "id:" + a.alpha.MerchantID().String()
 		require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", audit), "Ledger integrity OK")
 
@@ -167,8 +167,8 @@ func TestRevenueReversals(t *testing.T) {
 		// Stored by the payment writer's own clock, as the books' start is.
 		skipped := uuid.New()
 		_, err := a.pool.Exec(t.Context(), "INSERT INTO "+booksTable(a.world, "payments")+
-			" (merchant_id, id, customer_id, order_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, created_at, refunded_payment_id, reversal_kind, refund_reason, money_movement)"+
-			" SELECT merchant_id, $3, customer_id, order_id, channel, rail, psp_id, 're_skipped', -3000000, list_amount, currency, 'succeeded', $4, $4, id, 'refund', 'requested_by_customer', 'rail'"+
+			" (merchant_id, id, customer_id, invoice_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, created_at, refunded_payment_id, reversal_kind, refund_reason, money_movement)"+
+			" SELECT merchant_id, $3, customer_id, invoice_id, channel, rail, psp_id, 're_skipped', -3000000, list_amount, currency, 'succeeded', $4, $4, id, 'refund', 'requested_by_customer', 'rail'"+
 			" FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), payment, skipped, a.clock.Now())
 		require.NoError(t, err)
 		output, err := hostCLIResult(t, a.world, "ledger-audit", "--merchant", audit)
@@ -228,13 +228,13 @@ func TestRevenueReversals(t *testing.T) {
 		customer := uuid.MustParse(a.alice.ID)
 		psp := worldStripePSP(t, a)
 		now := a.clock.Now().UTC().Truncate(time.Microsecond)
-		// A charge from before the books, for its order: no posting holds its
+		// A charge from before the books, for its invoice: no posting holds its
 		// money.
 		paid, yesterday := uuid.New(), now.Add(-24*time.Hour)
-		order, _ := rawOrder(t, a.world, customer, "USD", &yesterday, rawLine{amount: 10_000_000})
+		invoice, _ := rawInvoice(t, a.world, customer, "USD", &yesterday, rawLine{amount: 10_000_000})
 		_, err := a.pool.Exec(t.Context(), "INSERT INTO "+booksTable(a.world, "payments")+
-			" (merchant_id, id, customer_id, order_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, money_movement)"+
-			" VALUES ($1, $2, $3, $4, 'rail', 'stripe', $5, 'ch_before_books', 10000000, 10000000, 'USD', 'succeeded', $6, 'rail')", a.alpha.MerchantID().UUID(), paid, customer, order, psp, yesterday)
+			" (merchant_id, id, customer_id, invoice_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, money_movement)"+
+			" VALUES ($1, $2, $3, $4, 'rail', 'stripe', $5, 'ch_before_books', 10000000, 10000000, 'USD', 'succeeded', $6, 'rail')", a.alpha.MerchantID().UUID(), paid, customer, invoice, psp, yesterday)
 		require.NoError(t, err)
 
 		// Its refund posts: the money leaves unapplied cash, which goes below
@@ -252,17 +252,17 @@ func TestRevenueReversals(t *testing.T) {
 		require.Equal(t, "unapplied_cash/USD", breaches.Items[0].SubjectKey)
 	})
 
-	t.Run("OR-J41-S24/a-usage-orders-refund-is-contra-and-its-chargeback-reopens-the-owed", func(t *testing.T) {
+	t.Run("OR-J41-S24/a-usage-invoices-refund-is-contra-and-its-chargeback-reopens-the-owed", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false)
 		oneUsage(t, a.alpha, usageInput(customer, "refunded-work", 3))
 		a.clock.Advance(time.Second)
 		fleet := startFleet(t, a.world)
 		runUsageDue(t, fleet)
-		require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderComplete }, 15*time.Second, 20*time.Millisecond)
-		order := oneUsageOrder(t, a, customer)
+		require.Eventually(t, func() bool { return oneUsageInvoice(t, a, customer).Status == billing.InvoiceComplete }, 15*time.Second, 20*time.Millisecond)
+		invoice := oneUsageInvoice(t, a, customer)
 		var paid uuid.UUID
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND order_id=$2",
-			a.alpha.MerchantID().UUID(), order.ID.UUID()).Scan(&paid))
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND invoice_id=$2",
+			a.alpha.MerchantID().UUID(), invoice.ID.UUID()).Scan(&paid))
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		service := payments.NewPaymentService(configuredDB(t, a.world), a.clock)
 		now := a.clock.Now().UTC().Truncate(time.Microsecond)
@@ -294,8 +294,8 @@ func TestRevenueReversals(t *testing.T) {
 		end := start.AddDate(0, 1, 0)
 		a, provider := newPaymentWorld(t, atClock(start))
 		price := calendarPrice(t, a, "monthly", 10_000_000, 1)
-		order := buy(t, a, provider, "monthly-plan", []billing.OrderLineParams{{PriceID: price}}, 10_000_000)
-		line, payment := order.Lines[0].ID.UUID(), *order.Payment.PaymentID
+		invoice := buy(t, a, provider, "monthly-plan", []billing.InvoiceLineParams{{PriceID: price}}, 10_000_000)
+		line, payment := invoice.Lines[0].ID.UUID(), *invoice.Payment.PaymentID
 		sched := scheduleOfLine(t, a.world, line)
 		refund := func(key string, at time.Time, amount int64) string {
 			t.Helper()
@@ -310,8 +310,8 @@ func TestRevenueReversals(t *testing.T) {
 		// then the price falls to 4.00, which earned 1.333333.
 		r := refund("second-piece", second, 2_000_000)
 		require.Equal(t, []glRow{
-			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 666_667, At: second, OrderLine: &line, Schedule: &sched.ID},
-			{Type: "refund_deferred", Operation: "refund", Source: "payment", SourceID: r, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 1_333_333, At: second, OrderLine: &line, Schedule: &sched.ID},
+			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 666_667, At: second, InvoiceLine: &line, Schedule: &sched.ID},
+			{Type: "refund_deferred", Operation: "refund", Source: "payment", SourceID: r, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 1_333_333, At: second, InvoiceLine: &line, Schedule: &sched.ID},
 		}, glFor(t, a.world, "payment", r))
 		require.Equal(t, []glRow{
 			recognized(sched.ID, line, "recognition", first, first, 2_166_666),
@@ -327,28 +327,28 @@ func TestRevenueReversals(t *testing.T) {
 		a, provider := newPaymentWorld(t, atClock(start))
 		plan := calendarPrice(t, a, "monthly", 10_000_000, 1)
 		kit := oneOffPrice(t, a, "kit", 20_000_000, nil)
-		order := buy(t, a, provider, "two-lines", []billing.OrderLineParams{{PriceID: plan}, {PriceID: kit}}, 30_000_000)
-		planLine, kitLine := order.Lines[0].ID.UUID(), order.Lines[1].ID.UUID()
+		invoice := buy(t, a, provider, "two-lines", []billing.InvoiceLineParams{{PriceID: plan}, {PriceID: kit}}, 30_000_000)
+		planLine, kitLine := invoice.Lines[0].ID.UUID(), invoice.Lines[1].ID.UUID()
 		planSched, kitSched := scheduleOfLine(t, a.world, planLine), scheduleOfLine(t, a.world, kitLine)
 
 		// 6.00 of 30.00: 2.00 from the plan, a price reduction six and a half
 		// days in; 4.00 from the kit, delivered, all contra.
 		at := start.Add(156 * time.Hour)
 		a.clock.Advance(at.Sub(a.clock.Now()))
-		refund, err := a.alpha.RefundPayment(t.Context(), "two-lines", *order.Payment.PaymentID, billing.RefundPaymentParams{Amount: 6_000_000, Reason: "Partial refund"})
+		refund, err := a.alpha.RefundPayment(t.Context(), "two-lines", *invoice.Payment.PaymentID, billing.RefundPaymentParams{Amount: 6_000_000, Reason: "Partial refund"})
 		require.NoError(t, err)
 		r := refund.ID.UUID().String()
 		require.ElementsMatch(t, []glRow{
-			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 433_333, At: at, OrderLine: &planLine, Schedule: &planSched.ID},
-			{Type: "refund_deferred", Operation: "refund", Source: "payment", SourceID: r, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 1_566_667, At: at, OrderLine: &planLine, Schedule: &planSched.ID},
-			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 4_000_000, At: at, OrderLine: &kitLine, Schedule: &kitSched.ID},
+			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 433_333, At: at, InvoiceLine: &planLine, Schedule: &planSched.ID},
+			{Type: "refund_deferred", Operation: "refund", Source: "payment", SourceID: r, Debit: "deferred_revenue", Credit: "cash_clearing", Amount: 1_566_667, At: at, InvoiceLine: &planLine, Schedule: &planSched.ID},
+			{Type: "refund_recognized", Operation: "refund", Source: "payment", SourceID: r, Debit: "refunds", Credit: "cash_clearing", Amount: 4_000_000, At: at, InvoiceLine: &kitLine, Schedule: &kitSched.ID},
 		}, glFor(t, a.world, "payment", r))
 		require.EqualValues(t, 8_000_000, scheduleOfLine(t, a.world, planLine).Funded)
 		require.EqualValues(t, 16_000_000, scheduleOfLine(t, a.world, kitLine).Funded)
 		require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", "id:"+a.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
 
-	t.Run("OR-J41-S27/a-mixed-credit-orders-reversals-move-each-dollar-once", func(t *testing.T) {
+	t.Run("OR-J41-S27/a-mixed-credit-invoices-reversals-move-each-dollar-once", func(t *testing.T) {
 		m := newMixedSale(t)
 		a := m.a
 		payment := m.buy(t, "mixed-books")
@@ -394,8 +394,8 @@ func TestRevenueReversals(t *testing.T) {
 		start := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
 		a, provider := newPaymentWorld(t, atClock(start))
 		pass := oneOffPrice(t, a, "pass", 9_000_000, ptr(720))
-		order := buy(t, a, provider, "pass", []billing.OrderLineParams{{PriceID: pass}}, 9_000_000)
-		line, access := order.Lines[0].ID.UUID(), *order.Lines[0].ProductAccessID
+		invoice := buy(t, a, provider, "pass", []billing.InvoiceLineParams{{PriceID: pass}}, 9_000_000)
+		line, access := invoice.Lines[0].ID.UUID(), *invoice.Lines[0].ProductAccessID
 		sched := scheduleOfLine(t, a.world, line)
 
 		// Revoked five days in, then 3.00 refunded: its five days are
@@ -403,7 +403,7 @@ func TestRevenueReversals(t *testing.T) {
 		revoked := start.Add(120 * time.Hour)
 		a.clock.Advance(revoked.Sub(a.clock.Now()))
 		require.NoError(t, a.alpha.RevokeProductAccess(t.Context(), access, billing.RevokeProductAccessParams{Reason: "Ended by the merchant"}))
-		_, err := a.alpha.RefundPayment(t.Context(), "after-revoke", *order.Payment.PaymentID, billing.RefundPaymentParams{Amount: 3_000_000, Reason: "Partial refund"})
+		_, err := a.alpha.RefundPayment(t.Context(), "after-revoke", *invoice.Payment.PaymentID, billing.RefundPaymentParams{Amount: 3_000_000, Reason: "Partial refund"})
 		require.NoError(t, err)
 		reduced := scheduleOfLine(t, a.world, line)
 		require.EqualValues(t, 6_000_000, reduced.Funded)
@@ -496,7 +496,7 @@ func TestRevenueReversals(t *testing.T) {
 		_, err := payments.NewPaymentService(database, a.clock).RefundObservedWithReason(ctx, paid.Payment.ID, "re_refunded_pass", 9_000_000, billing.RefundRequestedByCustomer, now)
 		require.NoError(t, err)
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return books.ApplyOrder(ctx, database.NewWithPgxTx(tx), paid.Order.ID, nil)
+			return books.ApplyInvoice(ctx, database.NewWithPgxTx(tx), paid.Invoice.ID, nil)
 		}))
 		found, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "books.line.unapplied"})
 		require.NoError(t, err)
@@ -539,15 +539,15 @@ func TestRevenueReversals(t *testing.T) {
 			require.NoError(t, err)
 			itemPrice, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: item.ID, Key: "item", UnitAmount: 30_000_000, Currency: "USD"})
 			require.NoError(t, err)
-			m := &mixedSale{a: a, p: p, customer: s.alice, lines: []billing.OrderLineParams{{PriceID: gold["usd"]}, {PriceID: itemPrice.ID}}}
-			input := billing.CreateMyOrderParams{Lines: m.lines, ExpectedTotal: ptr(int64(50_000_000)), Reusable: ptr(true),
-				Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "gold-and-item"})
+			m := &mixedSale{a: a, p: p, customer: s.alice, lines: []billing.InvoiceLineParams{{PriceID: gold["usd"]}, {PriceID: itemPrice.ID}}}
+			input := billing.CreateMyInvoiceParams{Lines: m.lines, ExpectedTotal: ptr(int64(50_000_000)), Reusable: ptr(true),
+				Payment: &billing.InvoicePaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "gold-and-item"})
 			require.Equal(t, http.StatusCreated, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
-			require.Equal(t, billing.OrderComplete, order.Status)
-			payment := *order.Payment.PaymentID
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			require.Equal(t, billing.InvoiceComplete, invoice.Status)
+			payment := *invoice.Payment.PaymentID
 			unitBalance(t, a.alpha, s.alice, "GOLD", 400, 0, 400)
 
 			// R1, a $20 chargeback, takes the pack's line: 400 GOLD, $20.
@@ -583,8 +583,8 @@ func TestRevenueReversals(t *testing.T) {
 	t.Run("OR-J41-S32/a-reversal-posted-for-other-cash-than-its-amount-fails-ledger-audit", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)
 		sale := oneOffPrice(t, a, "sale", 10_000_000, nil)
-		order := buy(t, a, provider, "sale", []billing.OrderLineParams{{PriceID: sale}}, 10_000_000)
-		refund, err := a.alpha.RefundPayment(t.Context(), "misbalanced", *order.Payment.PaymentID, billing.RefundPaymentParams{Amount: 3_000_000, Reason: "Partial refund"})
+		invoice := buy(t, a, provider, "sale", []billing.InvoiceLineParams{{PriceID: sale}}, 10_000_000)
+		refund, err := a.alpha.RefundPayment(t.Context(), "misbalanced", *invoice.Payment.PaymentID, billing.RefundPaymentParams{Amount: 3_000_000, Reason: "Partial refund"})
 		require.NoError(t, err)
 		audit := "id:" + a.alpha.MerchantID().String()
 		require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", audit), "Ledger integrity OK")
@@ -617,12 +617,12 @@ func TestRevenueReversals(t *testing.T) {
 		a.clock.Advance(time.Second)
 		fleet := startFleet(t, a.world)
 		runUsageDue(t, fleet)
-		require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderComplete }, 15*time.Second, 20*time.Millisecond)
-		order := oneUsageOrder(t, a, customer)
+		require.Eventually(t, func() bool { return oneUsageInvoice(t, a, customer).Status == billing.InvoiceComplete }, 15*time.Second, 20*time.Millisecond)
+		invoice := oneUsageInvoice(t, a, customer)
 		var paid uuid.UUID
 		var started time.Time
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND order_id=$2",
-			a.alpha.MerchantID().UUID(), order.ID.UUID()).Scan(&paid))
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT id FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND invoice_id=$2",
+			a.alpha.MerchantID().UUID(), invoice.ID.UUID()).Scan(&paid))
 		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT started_at FROM "+booksTable(a.world, "books_starts")+" WHERE merchant_id=$1",
 			a.alpha.MerchantID().UUID()).Scan(&started), "the usage payment, the merchant's first receipt, started the books")
 		audit := "id:" + a.alpha.MerchantID().String()
@@ -630,8 +630,8 @@ func TestRevenueReversals(t *testing.T) {
 		// So a reversal of it stored past the poster is named.
 		skipped := uuid.New()
 		_, err := a.pool.Exec(t.Context(), "INSERT INTO "+booksTable(a.world, "payments")+
-			" (merchant_id, id, customer_id, order_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, created_at, refunded_payment_id, reversal_kind, money_movement)"+
-			" SELECT merchant_id, $3, customer_id, order_id, channel, rail, psp_id, 'cb_skipped', -1000000, list_amount, currency, 'succeeded', $4, $4, id, 'chargeback', 'rail'"+
+			" (merchant_id, id, customer_id, invoice_id, channel, rail, psp_id, transaction_id, amount, list_amount, currency, status, purchased_at, created_at, refunded_payment_id, reversal_kind, money_movement)"+
+			" SELECT merchant_id, $3, customer_id, invoice_id, channel, rail, psp_id, 'cb_skipped', -1000000, list_amount, currency, 'succeeded', $4, $4, id, 'chargeback', 'rail'"+
 			" FROM "+booksTable(a.world, "payments")+" WHERE merchant_id=$1 AND id=$2", a.alpha.MerchantID().UUID(), paid, skipped, a.clock.Now())
 		require.NoError(t, err)
 		output, err := hostCLIResult(t, a.world, "ledger-audit", "--merchant", audit)
@@ -644,8 +644,8 @@ func TestRevenueReversals(t *testing.T) {
 		start := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
 		a, provider := newPaymentWorld(t, atClock(start))
 		pass := oneOffPrice(t, a, "pass", 9_000_000, ptr(720))
-		order := buy(t, a, provider, "pass", []billing.OrderLineParams{{PriceID: pass}}, 9_000_000)
-		line, access := order.Lines[0].ID.UUID(), *order.Lines[0].ProductAccessID
+		invoice := buy(t, a, provider, "pass", []billing.InvoiceLineParams{{PriceID: pass}}, 9_000_000)
+		line, access := invoice.Lines[0].ID.UUID(), *invoice.Lines[0].ProductAccessID
 		sched := scheduleOfLine(t, a.world, line)
 
 		// Revoked five days in: the pass forfeits the 7.50 it did not earn.
@@ -658,7 +658,7 @@ func TestRevenueReversals(t *testing.T) {
 
 		// 3.00 refunded: the service is over, so it is contra, out of the
 		// forfeit first.
-		_, err := a.alpha.RefundPayment(t.Context(), "after-forfeit", *order.Payment.PaymentID, billing.RefundPaymentParams{Amount: 3_000_000, Reason: "Partial refund"})
+		_, err := a.alpha.RefundPayment(t.Context(), "after-forfeit", *invoice.Payment.PaymentID, billing.RefundPaymentParams{Amount: 3_000_000, Reason: "Partial refund"})
 		require.NoError(t, err)
 		reduced := scheduleOfLine(t, a.world, line)
 		require.EqualValues(t, 6_000_000, reduced.Funded)
@@ -706,7 +706,7 @@ func TestRevenueReversals(t *testing.T) {
 		kind := payments.ReversalDisputeReversal
 		recovery := uuid.New()
 		require.NoError(t, service.Create(ctx, &models.Payment{
-			ID: recovery, CustomerID: original.CustomerID, OrderID: original.OrderID, RefundedPaymentID: &original.ID, Rail: original.Rail, PspID: original.PspID,
+			ID: recovery, CustomerID: original.CustomerID, InvoiceID: original.InvoiceID, RefundedPaymentID: &original.ID, Rail: original.Rail, PspID: original.PspID,
 			TransactionID: "won-unnamed", Amount: 5_000_000, ListAmount: original.ListAmount, Currency: original.Currency, ReversalKind: &kind,
 			Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: a.clock.Now(), CreatedAt: a.clock.Now(),
 		}))
@@ -756,9 +756,9 @@ func TestRevenueReversals(t *testing.T) {
 		require.NoError(t, err)
 		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
 		require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			return books.ApplyOrder(ctx, database.NewWithPgxTx(tx), paid.Order.ID, nil)
+			return books.ApplyInvoice(ctx, database.NewWithPgxTx(tx), paid.Invoice.ID, nil)
 		}))
-		scheduled := orderSchedules(t, a.world, paid.Order.ID)
+		scheduled := invoiceSchedules(t, a.world, paid.Invoice.ID)
 		require.Len(t, scheduled, 1, "the item's: the pack's line is its lot's")
 		require.EqualValues(t, 80_000_000, scheduled[0].Funded)
 		require.EqualValues(t, 10_000_000, unappliedCash(t, a.world, "USD"), "the pack's 10.00 waits for its lot")

@@ -4,32 +4,32 @@ import (
 	"context"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/invoices"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // The customer's cart: lines kept across the merchant's sites, priced live as
-// an order preview, and bought with cart: true.
+// an invoice preview, and bought with cart: true.
 
-// checkOrderLines refuses a request naming both or neither of lines and the
+// checkInvoiceLines refuses a request naming both or neither of lines and the
 // cart.
-func checkOrderLines(lines []billing.OrderLineParams, cart bool) error {
+func checkInvoiceLines(lines []billing.InvoiceLineParams, cart bool) error {
 	switch {
 	case cart && len(lines) > 0:
 		return apperr.Invalidf("send lines or cart: true, not both").WithParam("cart")
 	case cart:
 		return nil
 	}
-	return orders.CheckLines(lines)
+	return invoices.CheckLines(lines)
 }
 
-// orderLinesOf is what an order request buys: its lines, or the customer's
+// invoiceLinesOf is what an invoice request buys: its lines, or the customer's
 // cart.
-func orderLinesOf(ctx context.Context, rt *orderRuntime, customer billing.CustomerID, lines []billing.OrderLineParams, cart bool) ([]billing.OrderLineParams, error) {
-	if err := checkOrderLines(lines, cart); err != nil || !cart {
+func invoiceLinesOf(ctx context.Context, rt *invoiceRuntime, customer billing.CustomerID, lines []billing.InvoiceLineParams, cart bool) ([]billing.InvoiceLineParams, error) {
+	if err := checkInvoiceLines(lines, cart); err != nil || !cart {
 		return lines, err
 	}
-	c, err := rt.Orders.Cart(ctx, customer.UUID())
+	c, err := rt.Invoices.Cart(ctx, customer.UUID())
 	if err != nil {
 		return nil, err
 	}
@@ -40,13 +40,13 @@ func orderLinesOf(ctx context.Context, rt *orderRuntime, customer billing.Custom
 }
 
 // GetCart reads the customer's cart, priced now.
-func (s *Service) GetCart(ctx context.Context, actor OrderActor) (*billing.Cart, error) {
+func (s *Service) GetCart(ctx context.Context, actor InvoiceActor) (*billing.Cart, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	rt, err := s.orderRuntime()
+	rt, err := s.invoiceRuntime()
 	if err != nil {
 		return nil, err
 	}
@@ -55,13 +55,13 @@ func (s *Service) GetCart(ctx context.Context, actor OrderActor) (*billing.Cart,
 
 // SetCartLine puts a price in the customer's cart, changes its line, or
 // (quantity 0) removes it, and answers the cart.
-func (s *Service) SetCartLine(ctx context.Context, actor OrderActor, price billing.PriceID, params billing.SetCartLineParams) (*billing.Cart, error) {
+func (s *Service) SetCartLine(ctx context.Context, actor InvoiceActor, price billing.PriceID, params billing.SetCartLineParams) (*billing.Cart, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	rt, err := s.orderRuntime()
+	rt, err := s.invoiceRuntime()
 	if err != nil {
 		return nil, err
 	}
@@ -69,43 +69,43 @@ func (s *Service) SetCartLine(ctx context.Context, actor OrderActor, price billi
 	if err != nil {
 		return nil, priceLookup(err)
 	}
-	if err := rt.Orders.SetCartLine(ctx, actor.Customer.UUID(), resolved.ID, params.Quantity, params.Amount); err != nil {
+	if err := rt.Invoices.SetCartLine(ctx, actor.Customer.UUID(), resolved.ID, params.Quantity, params.Amount); err != nil {
 		return nil, err
 	}
 	return s.cartView(ctx, rt, actor)
 }
 
 // ClearCart empties the customer's cart.
-func (s *Service) ClearCart(ctx context.Context, actor OrderActor) error {
+func (s *Service) ClearCart(ctx context.Context, actor InvoiceActor) error {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
-	rt, err := s.orderRuntime()
+	rt, err := s.invoiceRuntime()
 	if err != nil {
 		return err
 	}
-	return rt.Orders.ClearCart(ctx, actor.Customer.UUID())
+	return rt.Invoices.ClearCart(ctx, actor.Customer.UUID())
 }
 
-// cartView prices the customer's cart as an order preview; a line whose
+// cartView prices the customer's cart as an invoice preview; a line whose
 // price is gone keeps its price id, refused.
-func (s *Service) cartView(ctx context.Context, rt *orderRuntime, actor OrderActor) (*billing.Cart, error) {
+func (s *Service) cartView(ctx context.Context, rt *invoiceRuntime, actor InvoiceActor) (*billing.Cart, error) {
 	customer := actor.Customer
-	cart, err := rt.Orders.Cart(ctx, customer.UUID())
+	cart, err := rt.Invoices.Cart(ctx, customer.UUID())
 	if err != nil {
 		return nil, err
 	}
-	out := &billing.Cart{Lines: []billing.OrderPreviewLine{}, PaymentOptions: []billing.OrderPaymentOption{}}
+	out := &billing.Cart{Lines: []billing.InvoicePreviewLine{}, PaymentOptions: []billing.InvoicePaymentOption{}}
 	if len(cart.Lines) == 0 {
 		return out, nil
 	}
-	quote, err := rt.Orders.Preview(ctx, customer.UUID(), cart.Lines)
+	quote, err := rt.Invoices.Preview(ctx, customer.UUID(), cart.Lines)
 	if err != nil {
 		return nil, err
 	}
-	options, err := s.orderOptions(ctx, customer.UUID(), &actor, quote.Prices(), quote.Products())
+	options, err := s.invoiceOptions(ctx, customer.UUID(), &actor, quote.Prices(), quote.Products())
 	if err != nil {
 		return nil, err
 	}

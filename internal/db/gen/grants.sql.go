@@ -1087,8 +1087,8 @@ WHERE p.merchant_id = $1::uuid
   AND p.status = 'succeeded'
   AND p.amount > 0
   AND p.subscription_id IS NULL
-  -- An order's lines name what they produced; a usage order's payment grants nothing.
-  AND p.order_id IS NULL
+  -- An invoice's lines name what they produced; a usage invoice's payment grants nothing.
+  AND p.invoice_id IS NULL
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
@@ -1230,7 +1230,7 @@ const listUngrantedWalletPayments = `-- name: ListUngrantedWalletPayments :many
 SELECT DISTINCT p.id, p.customer_id, p.purchased_at,
        (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at, l.product_id
 FROM billing.payments p
-JOIN billing.order_lines l ON l.order_id = p.order_id AND l.merchant_id = p.merchant_id AND l.product_id IS NOT NULL
+JOIN billing.invoice_lines l ON l.invoice_id = p.invoice_id AND l.merchant_id = p.merchant_id AND l.product_id IS NOT NULL
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
   AND p.deleted_at IS NULL

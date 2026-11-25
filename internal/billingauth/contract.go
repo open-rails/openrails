@@ -57,13 +57,13 @@ const (
 	CredentialPersonalAccessToken = auth.CredentialPersonalAccessToken
 	CredentialSignedToken         = auth.CredentialSignedToken
 	CredentialAccessToken         = auth.CredentialAccessToken
-	// CredentialPayURL is a pay URL's secret: its order's customer at the
+	// CredentialPayURL is a pay URL's secret: its invoice's customer at the
 	// checkout origin.
 	CredentialPayURL CredentialKind = "pay_url"
 )
 
 // Interactive reports a user acting itself in person: by a session, a device
-// key, an access token its issuer minted for it, or its order's pay URL. Any
+// key, an access token its issuer minted for it, or its invoice's pay URL. Any
 // other credential is not: an API key, a personal access token, a signed
 // token, or a kind this does not know. Only an interactive subject starts a
 // payment for itself or takes a Person action.

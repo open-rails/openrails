@@ -123,7 +123,7 @@ func QueueFraudWarningRefund(ctx context.Context, d *db.DB, payment *models.Paym
 		return nil, err
 	}
 	// A charge no refund can reach (no money moved at the rail, a usage
-	// order's settlement, a rail that refunds nothing, no provider target)
+	// invoice's settlement, a rail that refunds nothing, no provider target)
 	// has nothing to refund; what it paid for still ends.
 	svc := payments.NewPaymentService(d, clock)
 	refunded, err := svc.GetRefundTotalByPaymentID(ctx, payment.ID)

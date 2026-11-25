@@ -1,6 +1,6 @@
 # Collection and dunning
 
-Collection decides what happens when a customer's card refuses money OpenRails asked for. The decline table maps every rail code to one reason and action; the retry schedule collects money owed (renewals OpenRails collects, usage orders); arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the retry schedule, for renewals and usage orders alike, and the arrears grace periods. Renewal admission and the state machine are in
+Collection decides what happens when a customer's card refuses money OpenRails asked for. The decline table maps every rail code to one reason and action; the retry schedule collects money owed (renewals OpenRails collects, usage invoices); arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the retry schedule, for renewals and usage invoices alike, and the arrears grace periods. Renewal admission and the state machine are in
 [subscriptions](subscriptions.md), usage rating in [usage billing](usage-billing.md).
 Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limits-and-the-gate).
 
@@ -92,42 +92,42 @@ whose processing fails raises `life.due_pass.refused`; every row left unchanged
 gets `due_recheck_at` from `deferDue`.
 
 **Customer retries.** `POST /v1/me/subscriptions/{id}/retry-now` (NMI
-schedules) and paying an engine renewal order with the subscription's card pass
+schedules) and paying an engine renewal invoice with the subscription's card pass
 `intents.AdmitCustomerRetry` before any provider call. From
 `GetCycleCardStanding` it refuses (`ErrRetryNeedsNewMethod`) once the customer's
 declines on the card reach `customer_retries`, after a non-recoverable decline
 or forbidding issuer code, and while `awaiting_method` unless
 `decline.HolderCanClear`. Another card is always admitted.
 
-**Usage orders.** An `order_collection` operation charges a due order. On a decline, `OrderCollectionHandler` applies `collection.FailureAction` to the answer and its advice (Stripe's and the network's) under the merchant's current `dunning_policy`, with the order's period as the cycle (at least 4 days); `usage.DeclineCollection` sets `next_collection_attempt_at`, marks it `uncollectible`, or stops collecting. Its transient answers count as failures; there is no transient ladder.
+**Usage invoices.** An `order_collection` operation charges a due invoice. On a decline, `InvoiceCollectionHandler` applies `collection.FailureAction` to the answer and its advice (Stripe's and the network's) under the merchant's current `dunning_policy`, with the invoice's period as the cycle (at least 4 days); `usage.DeclineCollection` sets `next_collection_attempt_at`, marks it `uncollectible`, or stops collecting. Its transient answers count as failures; there is no transient ladder.
 
 **Delinquency.** `delinquency.EvaluateTx` runs in the transaction of every
-usage-order change (`usage.Changed`), and from `riverjobs.DelinquencyWorker` at
-`next_evaluation_at`. It reads `GetOverdueOrderAggregate` under the merchant
+usage-invoice change (`usage.Changed`), and from `riverjobs.DelinquencyWorker` at
+`next_evaluation_at`. It reads `GetOverdueInvoiceAggregate` under the merchant
 policy and the customer's billing-policy overrides; `delinquency.Classify`
 decides the state. `UpsertCustomerDelinquency` returns the state before and
 after, and `transition_seq` advances only on a change. A change writes a
 `host_outbox` row deduplicated on `transition_seq` (`delinquency.grace`,
 `.entered`, `.cleared`); entering or leaving `delinquent` also notifies the
-customer. Admission refuses `delinquent_unpaid_order` only if `IsDelinquent`'s
+customer. Admission refuses `delinquent_unpaid_invoice` only if `IsDelinquent`'s
 live recompute agrees. Nothing is revoked or canceled.
 
 Tables: `subscriptions` (`retry_attempts`, `transient_retries`,
-`next_retry_at`, `grace_ends_at`, `dunning_policy`, `due_recheck_at`), `orders`
+`next_retry_at`, `grace_ends_at`, `dunning_policy`, `due_recheck_at`), `invoices`
 (`next_collection_attempt_at`), `payment_attempts`, `rebill_cycles`,
 `customer_delinquency`, `provider_intents` and `reconciliation_findings`.
 
 ## Interfaces
 
-- **Go:** `Client.ListSubscriptions` (`SubscriptionListParams.Dunning`, giving `billing.SubscriptionDunning`), `ListRenewals`, `ListPaymentAttempts`, `ListOrders`, `WaiveOrderBalance`, `MarkOrderUncollectible`, `ListFindings`, and `UpdateMerchantConfiguration` (`DunningPolicy`, `ArrearsGraceDays`, `UsageBilling` with each currency's `DelinquencyFloor`).
+- **Go:** `Client.ListSubscriptions` (`SubscriptionListParams.Dunning`, giving `billing.SubscriptionDunning`), `ListRenewals`, `ListPaymentAttempts`, `ListInvoices`, `WaiveInvoiceBalance`, `MarkInvoiceUncollectible`, `ListFindings`, and `UpdateMerchantConfiguration` (`DunningPolicy`, `ArrearsGraceDays`, `UsageBilling` with each currency's `DelinquencyFloor`).
 - **Staff:** `GET /v1/admin/subscriptions?dunning=true`, `GET /v1/admin/renewals`,
-  `GET /v1/admin/payment-attempts`, `GET /v1/admin/orders?overdue=true`,
-  `POST /v1/admin/orders/{id}/waive-balance`, `…/mark-uncollectible`,
+  `GET /v1/admin/payment-attempts`, `GET /v1/admin/invoices?overdue=true`,
+  `POST /v1/admin/invoices/{id}/waive-balance`, `…/mark-uncollectible`,
   `PATCH /v1/merchant/configuration`.
 - **Customer:** `POST /v1/me/subscriptions/{id}/retry-now`,
-  `POST /v1/me/orders/{id}/pay` ([orders and checkout](orders.md)).
+  `POST /v1/me/invoices/{id}/pay` ([invoices and checkout](invoices.md)).
 - **Notices:** `payment_method_failed`, `payment_method_update_required`,
-  `order_overdue`, `order_collection_stopped`, `account_delinquent`,
+  `invoice_overdue`, `invoice_collection_stopped`, `account_delinquent`,
   `account_delinquency_cleared`; host events `delinquency.*`
   (`billing.DelinquencyHostEvent`); findings `life.due_pass.refused`,
   `life.terminal_outcome.held`, `life.cadence.unknown`, `life.decline.unmapped`.
@@ -157,8 +157,8 @@ Checks:
 ### 3. Exact money
 A retry charges its payload's frozen renewal terms through
 `moneyutil.NativeToRailMinorExact`, which refuses inexact amounts. A usage
-collection freezes its amount in `OrderCollectionPayload`. Delinquency sums
-`total - amount_paid` per currency (`GetOverdueOrderAggregate` filters
+collection freezes its amount in `InvoiceCollectionPayload`. Delinquency sums
+`total - amount_paid` per currency (`GetOverdueInvoiceAggregate` filters
 `o.currency`).
 
 Checks:
@@ -175,7 +175,7 @@ Checks:
 - `ListDueDunningMerchants`, `ListOverdueRenewalMerchants`, `ListDueDelinquency`
   and `ListDueUsageCollections` return ids; work runs in `RunInMerchantScope`
   (OR-J16-S05).
-- `GetCycleCardStanding` and `GetOverdueOrderAggregate` name `merchant_id`.
+- `GetCycleCardStanding` and `GetOverdueInvoiceAggregate` name `merchant_id`.
 
 ### 5. Contracts match the code
 `billing.DunningPolicy`, `SubscriptionDunning`, `DeclineReason` and
@@ -202,7 +202,7 @@ Checks:
 Due work reads partial indexes in bounded cursor pages:
 `subscriptions_grace_ends_at_idx`, `subscriptions_next_retry_at_rail_idx`,
 `subscriptions_current_period_ends_at_engine_due_global_idx`,
-`orders_usage_collection_due_idx` and `customer_delinquency_due_idx`. A row left
+`invoices_usage_collection_due_idx` and `customer_delinquency_due_idx`. A row left
 unchanged leaves the due set until `due_recheck_at`.
 
 Checks:
@@ -240,7 +240,7 @@ Other tests: `internal/decline`, `internal/modules/collection` and
 `TestUsageBillingContracts`, `TestNMICollectionRefusal`, `TestBillingPass`).
 
 Gaps:
-- No scenario sends advice on a declined usage-order collection: the Stripe fake has no invoice collection.
+- No scenario sends advice on a declined usage-invoice collection: the Stripe fake has no invoice collection.
 - Untested: `access_during_dunning: suspend`; the `life.decline.unmapped` and
   `life.cadence.unknown` findings; a Solana schedule spent while the merchant is disarmed.
 - Nothing checks that `decline`'s `reasons` covers every

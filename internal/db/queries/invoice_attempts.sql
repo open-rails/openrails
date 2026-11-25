@@ -1,0 +1,82 @@
+-- billing.invoice_attempts.
+
+-- name: GetInvoiceAttemptByID :one
+SELECT * FROM billing.invoice_attempts WHERE invoice_attempts.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+  AND deleted_at IS NULL;
+
+-- name: UpdateInvoiceAttempt :execrows
+UPDATE billing.invoice_attempts SET
+    customer_id = sqlc.arg(customer_id)::uuid,
+    rail = sqlc.arg(rail)::text,
+    status = sqlc.arg(status)::text,
+    amount = sqlc.narg(amount)::bigint,
+    currency = sqlc.narg(currency)::text,
+    expires_at = sqlc.narg(expires_at),
+    reference = sqlc.narg(reference),
+    transaction_id = sqlc.narg(transaction_id),
+    payment_id = sqlc.narg(payment_id),
+    subscription_id = sqlc.narg(subscription_id),
+    metadata = sqlc.narg(metadata),
+    rail_fields = sqlc.narg(rail_fields),
+    rail_state = sqlc.narg(rail_state),
+    psp_id = sqlc.arg(psp_id)::uuid,
+    updated_at = sqlc.arg(updated_at)
+WHERE invoice_attempts.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+  AND deleted_at IS NULL
+  AND invoice_id IS NOT NULL
+  AND customer_id=sqlc.arg(customer_id)::uuid AND rail=sqlc.arg(rail)::text
+  AND amount IS NOT DISTINCT FROM sqlc.narg(amount)::bigint AND currency IS NOT DISTINCT FROM sqlc.narg(currency)::text
+  AND psp_id=sqlc.arg(psp_id)::uuid;
+
+-- name: BindSolanaInvoiceAttempt :execrows
+UPDATE billing.invoice_attempts SET
+    reference = sqlc.arg(reference),
+    rail_state = sqlc.arg(rail_state),
+    updated_at = sqlc.arg(updated_at)
+WHERE invoice_attempts.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+  AND rail = 'solana'
+  AND status = 'requires_action'
+  AND (reference IS NULL OR reference = sqlc.arg(reference))
+  AND (COALESCE(rail_state ->> 'payer', '') = '' OR rail_state ->> 'payer' = sqlc.arg(payer)::text)
+  AND deleted_at IS NULL;
+
+-- Binds a verified landed Solana transaction to the one purchase it settles.
+-- Zero rows: the purchase is already settled by another transaction. A unique
+-- violation (invoice_attempts_transaction_id_key): the transaction already
+-- settles another purchase.
+-- name: ClaimSolanaInvoiceSignature :execrows
+UPDATE billing.invoice_attempts SET transaction_id = sqlc.arg(signature)::text
+WHERE invoice_attempts.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND rail = 'solana'
+  AND deleted_at IS NULL
+  AND (transaction_id IS NULL OR transaction_id = sqlc.arg(signature)::text);
+
+-- name: ExpireInvoiceAttempts :execrows
+-- The invoice expiry's: attempts still waiting on their customer past their
+-- expiry, a bounded batch.
+UPDATE billing.invoice_attempts
+SET status = 'expired', updated_at = sqlc.arg(now)
+WHERE deleted_at IS NULL
+  AND ctid IN (
+    SELECT cs.ctid FROM billing.invoice_attempts cs
+    WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND cs.expires_at IS NOT NULL AND cs.expires_at < sqlc.arg(now)::timestamptz
+      AND cs.status IN ('created', 'requires_action')
+      AND cs.deleted_at IS NULL
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- name: GetCardCaptureAccountsForShare :one
+-- Recheck the PSP and custodian identities after vendor metadata readback,
+-- inside only the short local attachment transaction.
+SELECT sqlc.embed(p),sqlc.embed(c) FROM billing.psps p
+JOIN billing.custodians c ON c.merchant_id=p.merchant_id AND c.id=sqlc.arg(custodian_id)::uuid
+WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid
+FOR SHARE OF p,c;
+
+-- name: CountInvoiceFailedAttemptsByPSP :many
+-- An invoice's failed attempts, by the PSP each went through.
+SELECT psp_id, count(*)::int AS failed FROM billing.invoice_attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND invoice_id = sqlc.arg(invoice_id)::uuid
+  AND status = 'failed' AND deleted_at IS NULL
+GROUP BY psp_id;

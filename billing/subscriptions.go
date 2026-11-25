@@ -20,7 +20,7 @@ const (
 	SubscriptionUnverified SubscriptionStatus = "unverified"
 )
 
-// SubscriptionSort orders a subscription list. Each order has one direction;
+// SubscriptionSort invoices a subscription list. Each invoice has one direction;
 // ordered by a time a subscription may lack, the list holds only those with it.
 type SubscriptionSort string
 

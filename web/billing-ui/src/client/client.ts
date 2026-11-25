@@ -19,8 +19,8 @@ import {
   lowBalanceLineSchema,
   publicConfigSchema,
   listPageSchema,
-  orderSchema,
-  orderPaymentAttemptSchema,
+  invoiceSchema,
+  invoicePaymentAttemptSchema,
   cartSchema,
   paymentMethodSchema,
   paymentSchema,
@@ -41,9 +41,9 @@ import {
   type CardCaptureReference,
   type NextAction,
   type Cart,
-  type Order,
-  type OrderPaymentAttempt,
-  type OrderPaymentInput,
+  type Invoice,
+  type InvoicePaymentAttempt,
+  type InvoicePaymentInput,
   type Payment,
   type PaymentMethod,
   type Subscription,
@@ -71,7 +71,7 @@ export interface BillingClientOptions {
     string | null | undefined | Promise<string | null | undefined>
   /**
    * Sent as Accept-Language: the language the checkout is shown in, which
-   * an order records. Default: the `locale` of the `BillingProvider` the
+   * an invoice records. Default: the `locale` of the `BillingProvider` the
    * client is given to, else the browser's own header.
    */
   language?: () => string | null | undefined
@@ -225,11 +225,11 @@ function pause(ms: number, signal?: AbortSignal): Promise<number> {
 }
 
 /**
- * An order request's answer. `error` is set when the payment failed: the
- * order is open again and its `payment.last_payment_error` says why.
+ * An invoice request's answer. `error` is set when the payment failed: the
+ * invoice is open again and its `payment.last_payment_error` says why.
  */
-export interface OrderResult {
-  order: Order
+export interface InvoiceResult {
+  invoice: Invoice
   error?: BillingError
 }
 
@@ -346,7 +346,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   const subscriptionPage = listPageSchema(subscriptionSchema)
   const methodPage = listPageSchema(paymentMethodSchema)
   const paymentPage = listPageSchema(paymentSchema)
-  const orderPage = listPageSchema(orderSchema)
+  const invoicePage = listPageSchema(invoiceSchema)
   const entitlementPage = listPageSchema(customerEntitlementSchema)
   const limitPage = listPageSchema(customerLimitSchema)
   const changeOptionPage = listPageSchema(subscriptionChangeOptionSchema)
@@ -355,17 +355,17 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     cursor: opts.cursor ?? undefined,
   })
 
-  // An order answer: the order, or a failed payment's 402 with it.
-  async function orderResult(
+  // An invoice answer: the invoice, or a failed payment's 402 with it.
+  async function invoiceResult(
     path: string,
     opts: RequestOptions
-  ): Promise<OrderResult> {
+  ): Promise<InvoiceResult> {
     try {
-      return { order: await json(orderSchema, path, opts) }
+      return { invoice: await json(invoiceSchema, path, opts) }
     } catch (cause) {
-      if (isBillingError(cause) && cause.status === 402 && cause.order) {
-        const order = orderSchema.safeParse(cause.order)
-        if (order.success) return { order: order.data, error: cause }
+      if (isBillingError(cause) && cause.status === 402 && cause.invoice) {
+        const invoice = invoiceSchema.safeParse(cause.invoice)
+        if (invoice.success) return { invoice: invoice.data, error: cause }
       }
       throw cause
     }
@@ -591,27 +591,27 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * Creates an order from `lines` or the cart (`cart: true`), and with
+     * Creates an invoice from `lines` or the cart (`cart: true`), and with
      * `payment` pays it in the same call; `expectedTotal` is the total the
      * customer saw; `idempotencyKey`, required with `payment`, names the
-     * payment attempt. A failed payment resolves as payOrder's does. Without
-     * `payment` the customer's open order of the same lines is answered when
-     * there is one. With `payUrl` the order answers its embedded pay URL,
-     * `order.pay_url` on the checkout origin, for `<EmbeddedPayment>`, fresh
+     * payment attempt. A failed payment resolves as payInvoice's does. Without
+     * `payment` the customer's open invoice of the same lines is answered when
+     * there is one. With `payUrl` the invoice answers its embedded pay URL,
+     * `invoice.pay_url` on the checkout origin, for `<EmbeddedPayment>`, fresh
      * on every answer: the merchant's own signed-in person only.
      */
-    createOrder(input: {
+    createInvoice(input: {
       lines?: { price_id: string; quantity?: number; amount?: string }[]
       cart?: boolean
       expectedTotal?: string
-      payment?: OrderPaymentInput
+      payment?: InvoicePaymentInput
       reusable?: boolean
-      payUrl?: wire.MyOrderPayURLParams
+      payUrl?: wire.MyInvoicePayURLParams
       /** Where the host's page says the customer came from. */
-      attribution?: Partial<wire.OrderAttribution>
+      attribution?: Partial<wire.InvoiceAttribution>
       idempotencyKey?: string
-    }): Promise<OrderResult> {
-      return orderResult("/me/orders", {
+    }): Promise<InvoiceResult> {
+      return invoiceResult("/me/invoices", {
         method: "POST",
         body: {
           ...(input.cart ? { cart: true } : { lines: input.lines ?? [] }),
@@ -632,26 +632,26 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * The customer's orders, newest first: `origin: "usage"` their usage
-     * orders, `overdue` those still owed past their due date.
+     * The customer's invoices, newest first: `origin: "usage"` their usage
+     * invoices, `overdue` those still owed past their due date.
      */
-    listOrders(
+    listInvoices(
       opts: CursorOptions & {
-        /** Read exactly these orders (at most 100), e.g. a page of payments'. */
+        /** Read exactly these invoices (at most 100), e.g. a page of payments'. */
         ids?: string[]
         origin?: string
         status?: string
         subscriptionId?: string
         overdue?: boolean
       } = {}
-    ): Promise<ListPage<Order>> {
+    ): Promise<ListPage<Invoice>> {
       // A set of ids is the whole query: it takes no paging or filter.
       if (opts.ids?.length)
-        return json(orderPage, "/me/orders", {
+        return json(invoicePage, "/me/invoices", {
           query: { ids: opts.ids.join(",") },
           signal: opts.signal,
         })
-      return json(orderPage, "/me/orders", {
+      return json(invoicePage, "/me/invoices", {
         query: {
           ...cursorQuery(opts, 20),
           origin: opts.origin,
@@ -663,21 +663,21 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    /** One of the customer's orders: the resumable handle of a purchase. */
-    getOrder(orderId: string, signal?: AbortSignal): Promise<Order> {
-      return json(orderSchema, `/me/orders/${id(orderId)}`, { signal })
+    /** One of the customer's invoices: the resumable handle of a purchase. */
+    getInvoice(invoiceId: string, signal?: AbortSignal): Promise<Invoice> {
+      return json(invoiceSchema, `/me/invoices/${id(invoiceId)}`, { signal })
     },
 
-    /** Read the exact original payOrder key, without retrying payment. This
-     * does not look up createOrder payment keys or renewal/usage collections. */
-    getOrderPaymentAttempt(
-      orderId: string,
+    /** Read the exact original payInvoice key, without retrying payment. This
+     * does not look up createInvoice payment keys or renewal/usage collections. */
+    getInvoicePaymentAttempt(
+      invoiceId: string,
       idempotencyKey: string,
       signal?: AbortSignal
-    ): Promise<OrderPaymentAttempt> {
+    ): Promise<InvoicePaymentAttempt> {
       return json(
-        orderPaymentAttemptSchema,
-        `/me/orders/${id(orderId)}/payment-attempt`,
+        invoicePaymentAttemptSchema,
+        `/me/invoices/${id(invoiceId)}/payment-attempt`,
         {
           headers: { "Idempotency-Key": idempotencyKey },
           signal,
@@ -686,21 +686,21 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * Pays an open order. A failed payment resolves with the order (open,
+     * Pays an open invoice. A failed payment resolves with the invoice (open,
      * `payment.last_payment_error` saying why) and `error`, the 402.
      * `idempotencyKey` is minted when the pay button renders: a retry with it
      * answers what the first request answered.
      */
-    payOrder(
-      orderId: string,
+    payInvoice(
+      invoiceId: string,
       input: {
-        payment: OrderPaymentInput
+        payment: InvoicePaymentInput
         expectedTotal: string
         reusable?: boolean
         idempotencyKey: string
       }
-    ): Promise<OrderResult> {
-      return orderResult(`/me/orders/${id(orderId)}/pay`, {
+    ): Promise<InvoiceResult> {
+      return invoiceResult(`/me/invoices/${id(invoiceId)}/pay`, {
         method: "POST",
         body: {
           payment: input.payment,
@@ -711,9 +711,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    /** Reports that this page could not frame the order's pay URL. */
-    async reportPayURLFailure(orderId: string): Promise<void> {
-      await send(`/me/orders/${id(orderId)}/pay-url-failure`, {
+    /** Reports that this page could not frame the invoice's pay URL. */
+    async reportPayURLFailure(invoiceId: string): Promise<void> {
+      await send(`/me/invoices/${id(invoiceId)}/pay-url-failure`, {
         method: "POST",
       })
     },
@@ -723,11 +723,11 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      * wallet's `signature` names the transaction it sent: a subscription's
      * first payment enrolls from it at once.
      */
-    confirmOrder(
-      orderId: string,
+    confirmInvoice(
+      invoiceId: string,
       input?: { signature?: string }
-    ): Promise<OrderResult> {
-      return orderResult(`/me/orders/${id(orderId)}/confirm`, {
+    ): Promise<InvoiceResult> {
+      return invoiceResult(`/me/invoices/${id(invoiceId)}/confirm`, {
         method: "POST",
         body: input?.signature ? { signature: input.signature } : {},
       })
@@ -762,7 +762,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     /**
      * Makes the card the default for one currency: it pays the currency's
-     * usage orders and every subscription in it without its own card.
+     * usage invoices and every subscription in it without its own card.
      */
     async setDefaultPaymentMethod(input: {
       currency: string

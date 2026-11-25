@@ -19,11 +19,11 @@ import (
 // purchase, or a purchase already settled by a different transaction.
 var ErrClaimed = errors.New("solana settlement: transaction and purchase are already settled apart")
 
-// ClaimOrder binds a verified landed transaction to the purchase it
+// ClaimInvoice binds a verified landed transaction to the purchase it
 // settles, before anything is granted. A signature settles at most one purchase
 // across every merchant and PSP, and a purchase at most one signature; the
 // first claim wins and repeating it is a no-op.
-func ClaimOrder(ctx context.Context, database *db.DB, sessionID uuid.UUID, signature string) error {
+func ClaimInvoice(ctx context.Context, database *db.DB, sessionID uuid.UUID, signature string) error {
 	signature = strings.TrimSpace(signature)
 	if database == nil || sessionID == uuid.Nil || signature == "" {
 		return fmt.Errorf("solana settlement: claim needs a database, a purchase and a signature")
@@ -32,7 +32,7 @@ func ClaimOrder(ctx context.Context, database *db.DB, sessionID uuid.UUID, signa
 	if err != nil {
 		return err
 	}
-	n, err := database.Gen(ctx).ClaimSolanaOrderSignature(ctx, gen.ClaimSolanaOrderSignatureParams{
+	n, err := database.Gen(ctx).ClaimSolanaInvoiceSignature(ctx, gen.ClaimSolanaInvoiceSignatureParams{
 		Signature: signature, MerchantID: mid.UUID(), ID: sessionID,
 	})
 	if db.IsUniqueViolation(err) {

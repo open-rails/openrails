@@ -15,31 +15,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func unpaidSale(t *testing.T, a *authorityWorld, p *providerLedger, customer billing.CustomerID, key string) *billing.Order {
+func unpaidSale(t *testing.T, a *authorityWorld, p *providerLedger, customer billing.CustomerID, key string) *billing.Invoice {
 	t.Helper()
 	input := saleInput(t, a, p)
-	order, err := a.alpha.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines})
+	invoice, err := a.alpha.CreateInvoice(t.Context(), key, billing.CreateInvoiceParams{CustomerID: customer, Lines: input.Lines})
 	require.NoError(t, err)
-	require.Equal(t, billing.OrderOpen, order.Status)
+	require.Equal(t, billing.InvoiceOpen, invoice.Status)
 	require.Empty(t, p.effects(t))
-	return order
+	return invoice
 }
 
 func TestExternalPayments(t *testing.T) {
 	t.Run("OR-J21-S01/record-confirmed-external-money-without-provider-charge", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		order := unpaidSale(t, a, p, customer, "external-order")
-		payment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "bank-receipt-0001"})
+		invoice := unpaidSale(t, a, p, customer, "external-invoice")
+		payment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: "bank-receipt-0001"})
 		require.NoError(t, err)
 		require.Equal(t, billing.ChannelManual, payment.Channel)
 		require.Equal(t, billing.PaymentSucceeded, payment.Status)
 		require.Nil(t, payment.Rail)
 		require.EqualValues(t, 30_000_000, payment.Amount)
 		require.Equal(t, customer, payment.CustomerID)
-		after, err := a.alpha.GetOrder(t.Context(), order.ID)
+		after, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderComplete, after.Status)
+		require.Equal(t, billing.InvoiceComplete, after.Status)
 		require.Equal(t, payment.ID, *after.Payment.PaymentID)
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"sale:owned"}})
 		require.NoError(t, err)
@@ -51,8 +51,8 @@ func TestExternalPayments(t *testing.T) {
 	t.Run("OR-J21-S02/external-receipt-replay-is-one-payment", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		order := unpaidSale(t, a, p, customer, "external-replay-order")
-		request := billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "stable-bank-receipt"}
+		invoice := unpaidSale(t, a, p, customer, "external-replay-invoice")
+		request := billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: "stable-bank-receipt"}
 		first, err := a.alpha.RecordExternalPayment(t.Context(), request)
 		require.NoError(t, err)
 		replay, err := a.alpha.RecordExternalPayment(t.Context(), request)
@@ -68,22 +68,22 @@ func TestExternalPayments(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		bob := billing.CustomerID(uuid.MustParse(a.bob.ID))
-		firstOrder := unpaidSale(t, a, p, alice, "external-alice")
-		first, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: firstOrder.ID, Amount: 30_000_000, TransactionID: "owned-bank-receipt"})
+		firstInvoice := unpaidSale(t, a, p, alice, "external-alice")
+		first, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: firstInvoice.ID, Amount: 30_000_000, TransactionID: "owned-bank-receipt"})
 		require.NoError(t, err)
-		second, err := a.alpha.CreateOrder(t.Context(), "external-bob", billing.CreateOrderParams{CustomerID: bob, Lines: []billing.OrderLineParams{{PriceID: *firstOrder.Lines[0].PriceID}}})
+		second, err := a.alpha.CreateInvoice(t.Context(), "external-bob", billing.CreateInvoiceParams{CustomerID: bob, Lines: []billing.InvoiceLineParams{{PriceID: *firstInvoice.Lines[0].PriceID}}})
 		require.NoError(t, err)
-		_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: second.ID, Amount: 30_000_000, TransactionID: "owned-bank-receipt"})
+		_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: second.ID, Amount: 30_000_000, TransactionID: "owned-bank-receipt"})
 		require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-		_, err = a.beta.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: firstOrder.ID, Amount: 30_000_000, TransactionID: "owned-bank-receipt"})
+		_, err = a.beta.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: firstInvoice.ID, Amount: 30_000_000, TransactionID: "owned-bank-receipt"})
 		require.ErrorIs(t, err, billing.ErrNotFound)
 		retained, err := a.alpha.GetPayment(t.Context(), first.ID)
 		require.NoError(t, err)
 		require.Equal(t, alice, retained.CustomerID)
-		require.Equal(t, firstOrder.ID, *retained.OrderID)
-		unpaid, err := a.alpha.GetOrder(t.Context(), second.ID)
+		require.Equal(t, firstInvoice.ID, *retained.InvoiceID)
+		unpaid, err := a.alpha.GetInvoice(t.Context(), second.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderOpen, unpaid.Status)
+		require.Equal(t, billing.InvoiceOpen, unpaid.Status)
 		other, err := a.beta.ListPayments(t.Context(), billing.PaymentListParams{})
 		require.NoError(t, err)
 		require.Empty(t, other.Items)
@@ -119,7 +119,7 @@ func TestImportedReceipt(t *testing.T) {
 		effects := p.effects(t)
 		require.Len(t, effects, 1)
 		require.EqualValues(t, 3000, effects[0].Amount)
-		book := billing.DeclaredBilling{AsOf: a.clock.Now(), DefaultPSP: billing.PSPRef{Key: "stripe"}, Customers: []billing.DeclaredCustomer{{Customer: customer}}, Purchases: []billing.DeclaredPurchase{{SourceID: "known-settled-receipt", Customer: customer, Rail: "stripe", TransactionID: receipt.Charge, Currency: "USD", Amount: 30_000_000, PaidAt: time.Unix(receipt.Created, 0).UTC(), Lines: []billing.DeclaredOrderLine{{Price: input.Lines[0].PriceID, Quantity: ptr(1), UnitAmount: 30_000_000}}}}}
+		book := billing.DeclaredBilling{AsOf: a.clock.Now(), DefaultPSP: billing.PSPRef{Key: "stripe"}, Customers: []billing.DeclaredCustomer{{Customer: customer}}, Purchases: []billing.DeclaredPurchase{{SourceID: "known-settled-receipt", Customer: customer, Rail: "stripe", TransactionID: receipt.Charge, Currency: "USD", Amount: 30_000_000, PaidAt: time.Unix(receipt.Created, 0).UTC(), Lines: []billing.DeclaredInvoiceLine{{Price: input.Lines[0].PriceID, Quantity: ptr(1), UnitAmount: 30_000_000}}}}}
 		imported, err := a.alpha.ImportBilling(t.Context(), book)
 		require.NoError(t, err)
 		require.Empty(t, imported.Blocked)

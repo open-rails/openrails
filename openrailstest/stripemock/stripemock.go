@@ -137,7 +137,7 @@ func (s *Mock) CompleteSetup(setupIntent string, card Card) string {
 func (s *Mock) Authenticate(paymentIntent string) bool { return s.m.Authenticate(paymentIntent) }
 
 // NewPaymentMethod is Stripe Elements turning a card the customer entered into
-// a payment method: the token an order's payment takes.
+// a payment method: the token an invoice's payment takes.
 func (s *Mock) NewPaymentMethod(card Card) string { return s.m.NewPaymentMethod(stripemock.Card(card)) }
 
 // AuthenticateSetup is the customer completing the bank's challenge on a

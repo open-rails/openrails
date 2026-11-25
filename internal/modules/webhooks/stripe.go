@@ -54,7 +54,7 @@ type StripeWebhookService struct {
 	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          *payment.OrderAttemptService
+	InvoiceAttemptService        *payment.InvoiceAttemptService
 	Clock                        clockwork.Clock
 	// ConvergeEnqueuer: subscription-state events are wake-up signals; the
 	// handler marks the subscription dirty and the coalesced River job fetches
@@ -736,7 +736,7 @@ func zeroTimePtr(t time.Time) *time.Time {
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context, obj json.RawMessage) error {
-	if s.OrderAttemptService == nil {
+	if s.InvoiceAttemptService == nil {
 		return nil
 	}
 
@@ -744,8 +744,8 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 	if err := json.Unmarshal(obj, &sess); err != nil {
 		return fmt.Errorf("parse checkout session: %w", err)
 	}
-	if orderPayment(sess) {
-		return s.OrderAttemptService.CloseOrderHosted(ctx, parseOrderAttemptID(sess.Metadata), false)
+	if invoicePayment(sess) {
+		return s.InvoiceAttemptService.CloseInvoiceHosted(ctx, parseInvoiceAttemptID(sess.Metadata), false)
 	}
 
 	return nil
@@ -781,11 +781,11 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		s.Log.InfoContext(ctx, "Stripe checkout session not paid; waiting for async payment success", "checkout_session_id", sess.ID, "status", sess.Status, "payment_status", sess.PaymentStatus)
 		return nil
 	}
-	if orderPayment(sess) {
-		if s.OrderAttemptService == nil {
-			return errors.New("order purchase settlement unavailable")
+	if invoicePayment(sess) {
+		if s.InvoiceAttemptService == nil {
+			return errors.New("invoice purchase settlement unavailable")
 		}
-		return s.OrderAttemptService.SettleOrderHosted(ctx, parseOrderAttemptID(sess.Metadata), sess.ID, sess.PaymentIntent, sess.Currency, sess.AmountTotal)
+		return s.InvoiceAttemptService.SettleInvoiceHosted(ctx, parseInvoiceAttemptID(sess.Metadata), sess.ID, sess.PaymentIntent, sess.Currency, sess.AmountTotal)
 	}
 	return nil
 }
@@ -795,37 +795,30 @@ func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx conte
 	if err := json.Unmarshal(obj, &sess); err != nil {
 		return fmt.Errorf("parse checkout session: %w", err)
 	}
-	if s.OrderAttemptService == nil {
+	if s.InvoiceAttemptService == nil {
 		return nil
 	}
-	sessionID := parseOrderAttemptID(sess.Metadata)
+	sessionID := parseInvoiceAttemptID(sess.Metadata)
 	if sessionID == uuid.Nil {
 		return nil
 	}
-	if orderPayment(sess) {
-		return s.OrderAttemptService.CloseOrderHosted(ctx, sessionID, true)
+	if invoicePayment(sess) {
+		return s.InvoiceAttemptService.CloseInvoiceHosted(ctx, sessionID, true)
 	}
 	return nil
 }
 
-// orderPayment reports a Checkout Session that pays an order's attempt.
-func orderPayment(sess stripeCheckoutSession) bool {
-	return strings.TrimSpace(sess.Metadata["order_id"]) != "" && parseOrderAttemptID(sess.Metadata) != uuid.Nil
+// invoicePayment reports a Checkout Session that pays an invoice's attempt.
+func invoicePayment(sess stripeCheckoutSession) bool {
+	return strings.TrimSpace(sess.Metadata["order_id"]) != "" && parseInvoiceAttemptID(sess.Metadata) != uuid.Nil
 }
 
-func parseOrderAttemptID(metadata map[string]string) uuid.UUID {
+func parseInvoiceAttemptID(metadata map[string]string) uuid.UUID {
 	if metadata == nil {
 		return uuid.Nil
 	}
-	raw := strings.TrimSpace(metadata["order_attempt_id"])
-	if raw == "" {
-		return uuid.Nil
-	}
-	id, err := billing.ParseOrderAttemptID(raw)
-	if err != nil {
-		return uuid.Nil
-	}
-	return id.UUID()
+	id, _ := providerAttemptID(metadata["order_attempt_id"])
+	return id
 }
 
 func (s *StripeWebhookService) handleRefund(ctx context.Context, obj json.RawMessage) error {
@@ -1195,7 +1188,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 			ID:                uuidutil.NewV7(),
 			CustomerID:        original.CustomerID,
 			SubscriptionID:    original.SubscriptionID,
-			OrderID:           original.OrderID,
+			InvoiceID:         original.InvoiceID,
 			RefundedPaymentID: &original.ID,
 			Rail:              original.Rail,
 			TransactionID:     recoveryID,
@@ -1261,20 +1254,20 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	var paidThrough time.Time
 	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
 		paidThrough = sub.CurrentPeriodEndsAt.UTC()
-	} else if s.DB != nil && original.OrderID != nil {
+	} else if s.DB != nil && original.InvoiceID != nil {
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return err
 		}
-		order, err := s.DB.Gen(ctx).GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: *original.OrderID})
+		invoice, err := s.DB.Gen(ctx).GetInvoice(ctx, gen.GetInvoiceParams{MerchantID: mid.UUID(), ID: *original.InvoiceID})
 		if err != nil {
 			return fmt.Errorf("load won-dispute billing obligation: %w", err)
 		}
-		if order.CustomerID != original.CustomerID || order.SubscriptionID == nil || *order.SubscriptionID != sub.ID {
-			return errors.New("won-dispute payment order belongs to another subscription")
+		if invoice.CustomerID != original.CustomerID || invoice.SubscriptionID == nil || *invoice.SubscriptionID != sub.ID {
+			return errors.New("won-dispute payment invoice belongs to another subscription")
 		}
-		if order.PeriodEndsAt != nil {
-			paidThrough = order.PeriodEndsAt.UTC()
+		if invoice.PeriodEndsAt != nil {
+			paidThrough = invoice.PeriodEndsAt.UTC()
 		}
 	}
 	if !paidThrough.After(now) {

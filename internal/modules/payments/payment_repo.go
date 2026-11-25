@@ -91,8 +91,8 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	default:
 		return gen.CreatePaymentParams{}, fmt.Errorf("payment channel %q is not a known value", channel)
 	}
-	if p.OrderID == nil || *p.OrderID == uuid.Nil {
-		return gen.CreatePaymentParams{}, fmt.Errorf("payment requires its order")
+	if p.InvoiceID == nil || *p.InvoiceID == uuid.Nil {
+		return gen.CreatePaymentParams{}, fmt.Errorf("payment requires its invoice")
 	}
 	var quantity *int32
 	if p.Quantity != nil {
@@ -132,7 +132,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		PaymentMethodID:     p.PaymentMethodID,
 		TokenType:           p.TokenType,
 		MoneyMovement:       string(movement),
-		OrderID:             p.OrderID,
+		InvoiceID:           p.InvoiceID,
 		Quantity:            quantity,
 	}, nil
 }
@@ -284,7 +284,7 @@ func (s *PaymentService) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (
 	if err != nil {
 		return nil, nil, err
 	}
-	// An order's payment names no price.
+	// An invoice's payment names no price.
 	if err := s.attachPaymentRelations(ctx, []*models.Payment{payment}); err != nil {
 		return nil, nil, err
 	}
@@ -628,9 +628,9 @@ func (s *PaymentService) ListPage(ctx context.Context, p billing.PaymentListPara
 		id := p.SubscriptionID.UUID()
 		params.SubscriptionID = &id
 	}
-	if !p.OrderID.IsZero() {
-		id := p.OrderID.UUID()
-		params.OrderID = &id
+	if !p.InvoiceID.IsZero() {
+		id := p.InvoiceID.UUID()
+		params.InvoiceID = &id
 	}
 	if p.Status != "" {
 		status := string(p.Status)
@@ -659,7 +659,7 @@ func (s *PaymentService) ListPage(ctx context.Context, p billing.PaymentListPara
 }
 
 // attachPaymentRelations attaches subscriptions in one batched lookup.
-// Purchased terms belong to order lines, not to a payment-wide price.
+// Purchased terms belong to invoice lines, not to a payment-wide price.
 func (s *PaymentService) attachPaymentRelations(ctx context.Context, payments []*models.Payment) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {

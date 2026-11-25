@@ -98,7 +98,7 @@ export function PaymentHistory({
                 formatDate(p.created_at, locale) ?? t("common.notAvailable")
               const item = paymentItem(
                 p,
-                p.order_id ? state.orders[p.order_id] : undefined,
+                p.invoice_id ? state.invoices[p.invoice_id] : undefined,
                 m
               )
               return (

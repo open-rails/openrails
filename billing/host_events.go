@@ -43,15 +43,15 @@ const (
 	// HostEventProductEntitlementsChanged is a product gaining or losing keys:
 	// every holder's access changed with it.
 	HostEventProductEntitlementsChanged HostEventType = "product.entitlements_changed"
-	// Order transitions: fulfil on order.completed.
-	HostEventOrderCompleted      HostEventType = "order.completed"
-	HostEventOrderRequiresAction HostEventType = "order.requires_action"
-	HostEventOrderPaymentFailed  HostEventType = "order.payment_failed"
-	HostEventOrderCanceled       HostEventType = "order.canceled"
-	HostEventOrderExpired        HostEventType = "order.expired"
-	// HostEventOrderVoided: a renewal order its subscription's end left
+	// Invoice transitions: fulfil on invoice.completed.
+	HostEventInvoiceCompleted      HostEventType = "invoice.completed"
+	HostEventInvoiceRequiresAction HostEventType = "invoice.requires_action"
+	HostEventInvoicePaymentFailed  HostEventType = "invoice.payment_failed"
+	HostEventInvoiceCanceled       HostEventType = "invoice.canceled"
+	HostEventInvoiceExpired        HostEventType = "invoice.expired"
+	// HostEventInvoiceVoided: a renewal invoice its subscription's end left
 	// unowed.
-	HostEventOrderVoided HostEventType = "order.voided"
+	HostEventInvoiceVoided HostEventType = "invoice.voided"
 	// HostEventMandateRevoked: the customer revoked one of its charge
 	// agreements; the merchant charges nothing more under it.
 	HostEventMandateRevoked HostEventType = "mandate.revoked"
@@ -83,18 +83,18 @@ type BalanceHostEvent struct {
 	RunwayEndsAt       *time.Time       `json:"runway_ends_at"`
 }
 
-// OrderHostEvent is one order transition: the order's status and its
+// InvoiceHostEvent is one invoice transition: the invoice's status and its
 // payment's as the transition left them. Number and PaymentID are set on
-// order.completed.
-type OrderHostEvent struct {
-	OrderID       OrderID            `json:"order_id"`
-	CustomerID    CustomerID         `json:"customer_id"`
-	Status        OrderStatus        `json:"status"`
-	PaymentStatus OrderPaymentStatus `json:"payment_status"`
-	Total         int64              `json:"total,string"`
-	Currency      catalog.Currency   `json:"currency"`
-	Number        *int64             `json:"number"`
-	PaymentID     *PaymentID         `json:"payment_id"`
+// invoice.completed.
+type InvoiceHostEvent struct {
+	InvoiceID     InvoiceID            `json:"invoice_id"`
+	CustomerID    CustomerID           `json:"customer_id"`
+	Status        InvoiceStatus        `json:"status"`
+	PaymentStatus InvoicePaymentStatus `json:"payment_status"`
+	Total         int64                `json:"total,string"`
+	Currency      catalog.Currency     `json:"currency"`
+	Number        *int64               `json:"number"`
+	PaymentID     *PaymentID           `json:"payment_id"`
 }
 
 // ProductEntitlementsChangedEvent is one key edit of a product. Holders is how
@@ -108,13 +108,13 @@ type ProductEntitlementsChangedEvent struct {
 }
 
 // PaymentSettledEvent is one successful rail payment. CustomerID and what it
-// paid (an order, a subscription's period, or a one-price sale's price) come
+// paid (an invoice, a subscription's period, or a one-price sale's price) come
 // from the authoritative payment row so a host can route the settlement
 // without a second read.
 type PaymentSettledEvent struct {
 	PaymentID      PaymentID        `json:"payment_id"`
 	CustomerID     CustomerID       `json:"customer_id"`
-	OrderID        *OrderID         `json:"order_id,omitempty"`
+	InvoiceID      *InvoiceID       `json:"invoice_id,omitempty"`
 	SubscriptionID *SubscriptionID  `json:"subscription_id,omitempty"`
 	Amount         int64            `json:"amount,string"`
 	Currency       catalog.Currency `json:"currency"`
@@ -127,7 +127,7 @@ type DelinquencyHostEvent struct {
 	ToState          string           `json:"to_state"`
 	OverdueStartedAt *time.Time       `json:"overdue_started_at,omitempty"`
 	OverdueAmount    int64            `json:"overdue_amount,string"`
-	OverdueOrders    int64            `json:"overdue_orders"`
+	OverdueInvoices  int64            `json:"overdue_invoices"`
 	GraceDays        int64            `json:"grace_days"`
 	AmountFloor      int64            `json:"amount_floor,string"`
 }
@@ -144,8 +144,8 @@ type HostEvent struct {
 	Delinquency     *DelinquencyHostEvent `json:"delinquency"`
 	// ProductEntitlements is set for product.entitlements_changed.
 	ProductEntitlements *ProductEntitlementsChangedEvent `json:"product_entitlements"`
-	// Order is set for the order.* events.
-	Order *OrderHostEvent `json:"order"`
+	// Invoice is set for the invoice.* events.
+	Invoice *InvoiceHostEvent `json:"invoice"`
 	// Mandate is set for mandate.revoked.
 	Mandate *MandateHostEvent `json:"mandate"`
 	// Balance is set for balance.low and balance.depleted.

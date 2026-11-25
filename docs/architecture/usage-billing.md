@@ -1,6 +1,6 @@
 # Usage billing
 
-Usage billing decides what usage costs and bills it in arrears. Usage lives in the event store (ClickHouse); OpenRails prices each period on its total and posts it to [Books](books.md) at each month's end and before balance movements; usage orders bill what is owed, and running charges bill a rate per hour. How much a customer may use, and the gate that enforces it, are [entitlements and limits](entitlements.md).
+Usage billing decides what usage costs and bills it in arrears. Usage lives in the event store (ClickHouse); OpenRails prices each period on its total and posts it to [Books](books.md) at each month's end and before balance movements; usage invoices bill what is owed, and running charges bill a rate per hour. How much a customer may use, and the gate that enforces it, are [entitlements and limits](entitlements.md).
 
 ## Concepts
 
@@ -18,7 +18,7 @@ Usage billing decides what usage costs and bills it in arrears. Usage lives in t
   accounting-zone days as it is read).
 - **Posting**: what the ledger took of a period's usage (`usage_postings`);
   `usage_unposted` names who has usage it has not taken.
-- **Usage order** (`origin: usage`): bills a period's owed usage.
+- **Usage invoice** (`origin: usage`): bills a period's owed usage.
 - **Running charge**: bills a rate per hour (`running_charges`).
 
 ## How it works
@@ -60,7 +60,7 @@ the period's deduplicated usage before the cut (`PostingQuantities`, `FINAL`),
 card by card in print order (`usagePrints.cellPrice`), less what earlier
 postings took (`postingDelta`): balance first, one `credit_spend` per lot live
 before the cut, the rest one `owed_accrual` split by meter and dated before the
-period's end and the cut, never before the last usage order's end. It runs at
+period's end and the cut, never before the last usage invoice's end. It runs at
 each month's end (`UsageCloseWorker`, the first scan of the hourly billing pass)
 and before any other movement of that balance (`db.UsageLedger`). Each posting
 records how far it read the store (`usage_postings.ingested_through`); a later one
@@ -76,10 +76,10 @@ one takes what the lots hold and forgives the rest (`usage_postings.forgiven`),
 and a reversal takes forgiveness back before it credits
 ([credits](credits.md)).
 
-**Billing.** The usage pass (`UsageOrderWorker`), on every deployment, with or
+**Billing.** The usage pass (`UsageInvoiceWorker`), on every deployment, with or
 without an event store, bills each account whose `money_settings.usage_due_at` has come (its bill date, or
-a threshold crossing) as a usage order (`BillDueUsageAccount`), then queues due
-collections as `order_collection` operations. An order bills the pending owed
+a threshold crossing) as a usage invoice (`BillDueUsageAccount`), then queues due
+collections as `order_collection` operations. An invoice bills the pending owed
 items of its window; its period starts where their charges began (a posting's
 pricing period, a running charge's last posting) and ends at its close. The threshold is its currency's
 `usage_billing` `collection_threshold`, else its credit limit; a billing policy's
@@ -88,7 +88,7 @@ policy's `policy_currency`, as they do in a gate's views (OR-J26-S61). A running
 computed on read and posts at its stop, at 00:00 UTC and before other balance
 movements (`postRunningChargesThrough`).
 
-**Books.** Every owed accrual is usage revenue receivable in the general ledger as it posts, and every way the units book settles owed settles the receivable: a collection by card, remittance or observed provider payment, a repayment from credit, a waiver. An uncollectible usage order carries an allowance for doubtful accounts while it stays uncollectible; a chargeback of a usage order's payment owes again what it paid, billed at once on a usage order whatever its minimum or usage terms (in a currency whose terms are gone, that order bills all its pending owed, since nothing else would), and a won dispute's cash beyond what is still owed and the chargeback's loss is the customer's credit. See [books](books.md).
+**Books.** Every owed accrual is usage revenue receivable in the general ledger as it posts, and every way the units book settles owed settles the receivable: a collection by card, remittance or observed provider payment, a repayment from credit, a waiver. An uncollectible usage invoice carries an allowance for doubtful accounts while it stays uncollectible; a chargeback of a usage invoice's payment owes again what it paid, billed at once on a usage invoice whatever its minimum or usage terms (in a currency whose terms are gone, that invoice bills all its pending owed, since nothing else would), and a won dispute's cash beyond what is still owed and the chargeback's loss is the customer's credit. See [books](books.md).
 
 ## Interfaces
 
@@ -99,29 +99,29 @@ movements (`postRunningChargesThrough`).
   ([running charges](../client.md#usage-and-running-charges)); in a host transaction
   (`LocalClient`) `StartRunningChargeTx`, `StopRunningChargeTx`.
 - **Catalog**: `ListMeters`, `GetMeter`, `SetMeter`, or a catalog document.
-- **Staff**: `UpdateCustomer` (`usage_billing`); `WaiveOrderBalance`,
-  `MarkOrderUncollectible`, `RecordExternalPayment`.
+- **Staff**: `UpdateCustomer` (`usage_billing`); `WaiveInvoiceBalance`,
+  `MarkInvoiceUncollectible`, `RecordExternalPayment`.
 - **Customer**: `GET /v1/me/usage` (read by day of the merchant's accounting zone and priced per day, `UsageHistory`), `/v1/me/balance/transactions`.
-- **Metrics and events**: `usage_units` and `usage_charged` by `charge` (charged, forgiven) (`POST /v1/metrics/query`); `delinquency.*`; customer facts `order_due`, `order_overdue`, `order_collection_stopped`.
+- **Metrics and events**: `usage_units` and `usage_charged` by `charge` (charged, forgiven) (`POST /v1/metrics/query`); `delinquency.*`; customer facts `invoice_due`, `invoice_overdue`, `invoice_collection_stopped`.
 - **Configuration**: merchant `usage_billing` (its terms turn usage billing on), `billing_period_boundary`
   ([usage billing](../client.md#usage-and-running-charges)).
 
 ## Guarantees
 
 ### 1. Exactly-once provider calls
-Usage billing calls no provider. A usage order's card charge is an
-`order_collection` provider intent frozen with the order's attempt
+Usage billing calls no provider. A usage invoice's card charge is an
+`order_collection` provider intent frozen with the invoice's attempt
 (`enqueueUsageCollection`) and run by its own job, as
 [collection and dunning](dunning.md) describes.
 Checks:
 - `enqueueUsageCollection` (`internal/modules/money/usage_collection.go`) writes
-  the intent and the order's attempt in one transaction under the customer and
-  order locks; a repeated operation key replays the first intent.
+  the intent and the invoice's attempt in one transaction under the customer and
+  invoice locks; a repeated operation key replays the first intent.
 - The usage pass only queues and never waits on a gateway (OR-J26-S53).
 - A collection refused before dispatch keeps its proof and pays once (OR-J26-S55).
 
 ### 2. Agreement with providers
-Does not apply: usage comes from the merchant's backend, not a provider; a usage order's payment reconciles in [collection and dunning](dunning.md).
+Does not apply: usage comes from the merchant's backend, not a provider; a usage invoice's payment reconciles in [collection and dunning](dunning.md).
 
 ### 3. Exact money
 Amounts are `int64` native units of their currency end to end. A period is
@@ -158,7 +158,7 @@ Checks:
 - Each running-charge route in `internal/http/routes/metering.go` has a
   `Permission` pair.
 - Every tenant query in `internal/db/queries/usage_postings.sql`,
-  `usage_billing.sql` and `usage_orders.sql` filters on `merchant_id`; due scans
+  `usage_billing.sql` and `usage_invoices.sql` filters on `merchant_id`; due scans
   are marked `CROSS-MERCHANT`. Every event store query names the context's
   merchant (`internal/eventstore`); OR-J24-S55 keeps equal ids apart.
 
@@ -202,12 +202,12 @@ Checks:
 Does not apply: usage enters through syncs, bounded in [entitlements and limits](entitlements.md); `/v1/me/usage` takes no OpenRails rate limit, and the proxy owns a generic ceiling ([limits](../standalone.md#abuse-limits)).
 
 ### 9. Destructive-action safeguards
-Waiving or writing off a usage order is a `waive_order` or `mark_uncollectible`
-command (`MoneyService.destructiveUsageOrder`). Settled usage is never reversed,
+Waiving or writing off a usage invoice is a `waive_order` or `mark_uncollectible`
+command (`MoneyService.destructiveUsageInvoice`). Settled usage is never reversed,
 and settling it is never refused for money.
 Checks:
-- `destructiveUsageOrder` (`internal/modules/money/usage_order.go`) uses
-  `destructive.WaiveOrder` and `destructive.MarkUncollectible`.
+- `destructiveUsageInvoice` (`internal/modules/money/usage_invoice.go`) uses
+  `destructive.WaiveInvoice` and `destructive.MarkUncollectible`.
 - OR-J26-S03: paid, waived or written-off debt is not charged again; OR-J26-S50:
   each clears delinquency in the same change.
 

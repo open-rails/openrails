@@ -15,39 +15,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func saleInput(t *testing.T, a *authorityWorld, p *providerLedger) billing.CreateMyOrderParams {
+func saleInput(t *testing.T, a *authorityWorld, p *providerLedger) billing.CreateMyInvoiceParams {
 	t.Helper()
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sale", DisplayName: "Sale", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"sale:owned"}})
 	require.NoError(t, err)
 	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "sale", UnitAmount: 30_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	return billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(30_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+	return billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(30_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
 }
 
 func TestPaymentReplay(t *testing.T) {
-	t.Run("OR-J10-S04/different-orders-remain-independent-obligations", func(t *testing.T) {
+	t.Run("OR-J10-S04/different-invoices-remain-independent-obligations", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		var accepted []billing.Order
-		for _, key := range []string{"first-independent-order", "second-independent-order"} {
-			order, err := a.alpha.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines})
+		var accepted []billing.Invoice
+		for _, key := range []string{"first-independent-invoice", "second-independent-invoice"} {
+			invoice, err := a.alpha.CreateInvoice(t.Context(), key, billing.CreateInvoiceParams{CustomerID: customer, Lines: input.Lines})
 			require.NoError(t, err)
-			require.NotEqual(t, billing.OrderComplete, order.Status)
-			accepted = append(accepted, *order)
+			require.NotEqual(t, billing.InvoiceComplete, invoice.Status)
+			accepted = append(accepted, *invoice)
 		}
 		require.NotEqual(t, accepted[0].ID, accepted[1].ID)
 		require.Empty(t, p.effects(t), "creating independent debts cannot charge a saved instrument")
 		var payments []billing.PaymentID
-		for _, order := range accepted {
+		for _, invoice := range accepted {
 			token := p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token}, ExpectedTotal: 30_000_000, Reusable: ptr(true)}
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, pay, map[string]string{"Idempotency-Key": "same-key-different-order"})
+			pay := billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: token}, ExpectedTotal: 30_000_000, Reusable: ptr(true)}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", a.aliceToken, pay, map[string]string{"Idempotency-Key": "same-key-different-invoice"})
 			require.Equal(t, http.StatusOK, status, string(raw))
-			var complete billing.Order
+			var complete billing.Invoice
 			require.NoError(t, json.Unmarshal(raw, &complete))
-			require.Equal(t, order.ID, complete.ID)
-			require.Equal(t, billing.OrderComplete, complete.Status)
+			require.Equal(t, invoice.ID, complete.ID)
+			require.Equal(t, billing.InvoiceComplete, complete.Status)
 			require.NotNil(t, complete.Payment.PaymentID)
 			payments = append(payments, *complete.Payment.PaymentID)
 		}
@@ -75,12 +75,12 @@ func TestPaymentReplay(t *testing.T) {
 		for range 2 {
 			go func() {
 				<-start
-				s, b, e := a.do(t.Context(), http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "concurrent-purchase"})
+				s, b, e := a.do(t.Context(), http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "concurrent-purchase"})
 				results <- result{s, b, e}
 			}()
 		}
 		close(start)
-		var accepted []billing.Order
+		var accepted []billing.Invoice
 		observed := []result{<-results, <-results}
 		for _, r := range observed {
 			require.NoError(t, r.err)
@@ -89,20 +89,20 @@ func TestPaymentReplay(t *testing.T) {
 				continue
 			}
 			require.Equal(t, http.StatusCreated, r.status, string(r.raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(r.raw, &order))
-			accepted = append(accepted, order)
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(r.raw, &invoice))
+			accepted = append(accepted, invoice)
 		}
 		require.NotEmpty(t, accepted)
-		for _, order := range accepted {
-			require.Equal(t, accepted[0].ID, order.ID)
+		for _, invoice := range accepted {
+			require.Equal(t, accepted[0].ID, invoice.ID)
 		}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "concurrent-purchase"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "concurrent-purchase"})
 		require.Equal(t, http.StatusCreated, status, "idempotent replay preserves the original status and body: "+string(raw))
-		var replay billing.Order
+		var replay billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &replay))
 		require.Equal(t, accepted[0].ID, replay.ID)
-		require.Equal(t, billing.OrderComplete, replay.Status)
+		require.Equal(t, billing.InvoiceComplete, replay.Status)
 		effects := p.effects(t)
 		require.Len(t, effects, 1)
 		require.EqualValues(t, 3000, effects[0].Amount)
@@ -114,39 +114,39 @@ func TestPaymentReplay(t *testing.T) {
 	t.Run("OR-J10-S03/accepted-key-refuses-changed-purchase", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "meaning-of-purchase"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "meaning-of-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var first billing.Order
+		var first billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &first))
-		require.Equal(t, billing.OrderComplete, first.Status)
+		require.Equal(t, billing.InvoiceComplete, first.Status)
 		input.Lines[0].Quantity = ptr(2)
 		input.ExpectedTotal = ptr(int64(60_000_000))
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "meaning-of-purchase"})
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "meaning-of-purchase"})
 		require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
 		require.Contains(t, string(raw), `"code":"idempotency_key_reused"`)
 		effects := p.effects(t)
 		require.Len(t, effects, 1)
 		require.EqualValues(t, 3000, effects[0].Amount)
-		persisted, err := a.alpha.GetOrder(t.Context(), first.ID)
+		persisted, err := a.alpha.GetInvoice(t.Context(), first.ID)
 		require.NoError(t, err)
 		require.EqualValues(t, 30_000_000, persisted.Total)
 	})
-	t.Run("OR-J10-S07/a-merchant-order-key-names-one-order-whichever-customer", func(t *testing.T) {
+	t.Run("OR-J10-S07/a-merchant-invoice-key-names-one-invoice-whichever-customer", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
 		alice, bob := billing.CustomerID(uuid.MustParse(a.alice.ID)), billing.CustomerID(uuid.MustParse(a.bob.ID))
-		first, err := a.alpha.CreateOrder(t.Context(), "merchant-order-key", billing.CreateOrderParams{CustomerID: alice, Lines: input.Lines})
+		first, err := a.alpha.CreateInvoice(t.Context(), "merchant-invoice-key", billing.CreateInvoiceParams{CustomerID: alice, Lines: input.Lines})
 		require.NoError(t, err)
-		replayed, err := a.alpha.CreateOrder(t.Context(), "merchant-order-key", billing.CreateOrderParams{CustomerID: alice, Lines: input.Lines})
+		replayed, err := a.alpha.CreateInvoice(t.Context(), "merchant-invoice-key", billing.CreateInvoiceParams{CustomerID: alice, Lines: input.Lines})
 		require.NoError(t, err)
-		require.Equal(t, first.ID, replayed.ID, "the same request answers its order")
-		_, err = a.alpha.CreateOrder(t.Context(), "merchant-order-key", billing.CreateOrderParams{CustomerID: bob, Lines: input.Lines})
+		require.Equal(t, first.ID, replayed.ID, "the same request answers its invoice")
+		_, err = a.alpha.CreateInvoice(t.Context(), "merchant-invoice-key", billing.CreateInvoiceParams{CustomerID: bob, Lines: input.Lines})
 		requireCode(t, err, billing.CodeIdempotencyKeyReused)
-		bobs, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: bob})
+		bobs, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: bob})
 		require.NoError(t, err)
-		require.Empty(t, bobs.Items, "the key made no second order")
-		var orders int
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "orders"}.Sanitize()+" WHERE merchant_id = $1", a.alpha.MerchantID().UUID()).Scan(&orders))
-		require.Equal(t, 1, orders)
+		require.Empty(t, bobs.Items, "the key made no second invoice")
+		var invoices int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "invoices"}.Sanitize()+" WHERE merchant_id = $1", a.alpha.MerchantID().UUID()).Scan(&invoices))
+		require.Equal(t, 1, invoices)
 	})
 }

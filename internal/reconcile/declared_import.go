@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -779,7 +779,7 @@ func subscriptionTxns(txns []RemoteTransaction, railSubID string) []RemoteTransa
 // DeclaredHistory collects the book's charges that are settled history (see
 // observed.HistoricalBill) while the book's transaction runs, so the import
 // records them afterwards, one short transaction per subscription, rather
-// than holding the merchant's order numbering for the whole batch.
+// than holding the merchant's invoice numbering for the whole batch.
 type DeclaredHistory struct {
 	subs     map[uuid.UUID]*models.Subscription
 	txns     map[uuid.UUID][]RemoteTransaction

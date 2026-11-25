@@ -110,7 +110,7 @@ sale) before the normal receipt path commits its local effects.
 
 --not-executed needs the operation type's own proof. For an NMI or custodian
 sale that is NMI showing a definitive decline as the one transaction under the
-sale's order; an empty search is never enough, and a submitted order
+sale's order; an empty search is never enough, and a submitted invoice
 collection, rebill or tier-change proration refuses it. An operation that never
 crossed its submission fence is released on that alone.
 

@@ -17,15 +17,15 @@ import (
 // PurchaseReceipt is a paid one-off purchase: what was bought and what its
 // payment took.
 type PurchaseReceipt struct {
-	PaymentID   uuid.UUID
-	CustomerID  uuid.UUID
-	Items       string
-	Amount      int64
-	Currency    string
-	Rail        string
-	OrderID     uuid.UUID
-	OrderNumber int64
-	PaidAt      time.Time
+	PaymentID     uuid.UUID
+	CustomerID    uuid.UUID
+	Items         string
+	Amount        int64
+	Currency      string
+	Rail          string
+	InvoiceID     uuid.UUID
+	InvoiceNumber int64
+	PaidAt        time.Time
 }
 
 // QueuePurchaseReceipt records a one-off purchase fact in d, the transaction
@@ -44,7 +44,7 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 		ID:         uuidutil.ChildV7(r.PaymentID, string(models.NotificationOneOffPurchaseCompleted)),
 		CustomerID: r.CustomerID, EventType: models.NotificationOneOffPurchaseCompleted, CreatedAt: r.PaidAt.UTC(),
 		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, Rail: billing.Rail(r.Rail),
-			PaymentID: billing.PaymentID(r.PaymentID), OrderID: billing.OrderID(r.OrderID), OrderNumber: r.OrderNumber},
+			PaymentID: billing.PaymentID(r.PaymentID), InvoiceID: billing.InvoiceID(r.InvoiceID), InvoiceNumber: r.InvoiceNumber},
 	}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
 		return fmt.Errorf("queue receipt of payment %s: %w", r.PaymentID, err)
@@ -56,7 +56,7 @@ func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) erro
 // authenticate: one per attempt.
 type AuthenticationRequest struct {
 	AttemptID  uuid.UUID
-	OrderID    uuid.UUID
+	InvoiceID  uuid.UUID
 	CustomerID uuid.UUID
 	Items      string
 	Amount     int64
@@ -65,21 +65,21 @@ type AuthenticationRequest struct {
 }
 
 // QueuePaymentAuthenticationRequired tells the customer, in d's transaction,
-// that a renewal's payment awaits their authentication on its order:
+// that a renewal's payment awaits their authentication on its invoice:
 // OpenRails emails it unless the merchant turns its type off. One fact per
 // attempt.
 func QueuePaymentAuthenticationRequired(ctx context.Context, d *db.DB, r AuthenticationRequest) error {
-	if r.AttemptID == uuid.Nil || r.OrderID == uuid.Nil {
-		return fmt.Errorf("an authentication notice needs its attempt and order")
+	if r.AttemptID == uuid.Nil || r.InvoiceID == uuid.Nil {
+		return fmt.Errorf("an authentication notice needs its attempt and invoice")
 	}
 	amount := r.Amount
 	n := &models.NotificationEvent{
 		ID:         uuidutil.ChildV7(r.AttemptID, string(models.NotificationPaymentAuthenticationRequired)),
 		CustomerID: r.CustomerID, EventType: models.NotificationPaymentAuthenticationRequired, CreatedAt: r.At.UTC(),
-		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, OrderID: billing.OrderID(r.OrderID), RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryAuthenticatePayment},
+		Data: billing.NotificationData{Amount: &amount, Currency: catalogwire.Currency(r.Currency), ProductName: r.Items, InvoiceID: billing.InvoiceID(r.InvoiceID), RetryStatus: billing.NotificationRetryStopped, RecoveryAction: billing.NotificationRecoveryAuthenticatePayment},
 	}
 	if err := NewNotificationService(d).CreateIfAbsent(ctx, n); err != nil {
-		return fmt.Errorf("queue authentication notice of order %s: %w", r.OrderID, err)
+		return fmt.Errorf("queue authentication notice of invoice %s: %w", r.InvoiceID, err)
 	}
 	return nil
 }

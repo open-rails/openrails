@@ -1,7 +1,7 @@
 import type {
   CardSummary,
   CurrencyScales,
-  Order,
+  Invoice,
   Payment,
   Price,
   Subscription,
@@ -68,20 +68,20 @@ export function subscriptionName(s: Subscription, { t }: Translator): string {
 }
 
 /**
- * What a payment bought, from the frozen lines of the order it settles: their
- * names and, for one recurring line, its cadence. Without its order, the kind.
+ * What a payment bought, from the frozen lines of the invoice it settles: their
+ * names and, for one recurring line, its cadence. Without its invoice, the kind.
  */
 export function paymentItem(
   p: Payment,
-  order: Order | undefined,
+  invoice: Invoice | undefined,
   m: Translator
 ): { name: string; detail: string | null } {
   const names = [
     ...new Set(
-      (order?.lines ?? []).map((l) => l.description.trim()).filter(Boolean)
+      (invoice?.lines ?? []).map((l) => l.description.trim()).filter(Boolean)
     ),
   ]
-  const line = order?.lines.length === 1 ? order.lines[0] : undefined
+  const line = invoice?.lines.length === 1 ? invoice.lines[0] : undefined
   return {
     name:
       names.join(", ") ||

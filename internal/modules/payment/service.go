@@ -310,15 +310,15 @@ type stripeCheckoutInlinePrice struct {
 }
 
 type stripeCheckoutParams struct {
-	InlinePrice    stripeCheckoutInlinePrice
-	SuccessURL     string
-	CancelURL      string
-	UserID         string
-	CustomerID     string // resolved Stripe customer (cus_...); takes precedence over CustomerEmail
-	CustomerEmail  string
-	OrderAttemptID string
-	// OrderID names the order a payment-mode session pays.
-	OrderID        string
+	InlinePrice      stripeCheckoutInlinePrice
+	SuccessURL       string
+	CancelURL        string
+	UserID           string
+	CustomerID       string // resolved Stripe customer (cus_...); takes precedence over CustomerEmail
+	CustomerEmail    string
+	InvoiceAttemptID string
+	// InvoiceID names the invoice a payment-mode session pays.
+	InvoiceID      string
 	IdempotencyKey string
 }
 
@@ -354,19 +354,19 @@ func (s *PurchaseService) createStripeCheckoutSession(ctx context.Context, param
 	} else if email := strings.TrimSpace(params.CustomerEmail); email != "" {
 		values.Set("customer_email", email)
 	}
-	if params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" || params.OrderID == "" {
-		return stripeCheckoutSession{}, errors.New("invalid order purchase price")
+	if params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" || params.InvoiceID == "" {
+		return stripeCheckoutSession{}, errors.New("invalid invoice purchase price")
 	}
 	values.Set("line_items[0][price_data][currency]", strings.ToLower(params.InlinePrice.Currency))
 	values.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(int64(params.InlinePrice.AmountMinor), 10))
 	values.Set("line_items[0][price_data][product_data][name]", params.InlinePrice.Name)
 	values.Set("line_items[0][quantity]", "1")
 	values.Set("metadata[user_id]", params.UserID)
-	if strings.TrimSpace(params.OrderAttemptID) != "" {
-		values.Set("metadata[order_attempt_id]", strings.TrimSpace(params.OrderAttemptID))
+	if strings.TrimSpace(params.InvoiceAttemptID) != "" {
+		values.Set("metadata[order_attempt_id]", strings.TrimSpace(params.InvoiceAttemptID))
 	}
-	if params.OrderID != "" {
-		values.Set("metadata[order_id]", params.OrderID)
+	if params.InvoiceID != "" {
+		values.Set("metadata[order_id]", params.InvoiceID)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(values.Encode()))

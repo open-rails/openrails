@@ -141,9 +141,9 @@ func (h *StripeResumeHandler) Verify(ctx context.Context, intent gen.BillingProv
 	return Retryable("subscription still set to cancel at Stripe; resume verified not applied")
 }
 
-// stripeOrderWait is how long a Stripe cancel or resume waits for an earlier
+// stripeInvoiceWait is how long a Stripe cancel or resume waits for an earlier
 // one of its subscription before it looks again.
-const stripeOrderWait = time.Minute
+const stripeInvoiceWait = time.Minute
 
 // awaitEarlierStripeWrite keeps a Stripe cancel or resume unattempted while
 // one of the same subscription committed before it is in flight or
@@ -159,7 +159,7 @@ func awaitEarlierStripeWrite(ctx context.Context, d *db.DB, intent gen.BillingPr
 		return Relevance{}, fmt.Errorf("read earlier Stripe operations of the subscription: %w", err)
 	}
 	if waiting {
-		return WaitUntil("an earlier Stripe cancel or resume of the subscription is unresolved", timeutil.FirstClock(clock).Now().UTC().Add(stripeOrderWait)), nil
+		return WaitUntil("an earlier Stripe cancel or resume of the subscription is unresolved", timeutil.FirstClock(clock).Now().UTC().Add(stripeInvoiceWait)), nil
 	}
 	return StillRelevant(), nil
 }

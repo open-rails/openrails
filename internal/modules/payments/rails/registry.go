@@ -214,7 +214,7 @@ var descriptors = []Descriptor{
 		[]CredentialKey{{"salt", true, true}, {"datalink_username", true, false}, {"datalink_password", true, false}},
 		[]string{"dispute_ratio_limit"},
 		false,                       // OneOffSale
-		NewSubscriptionHostedForm,   // an order's FlexForm sale; CCBill bills it
+		NewSubscriptionHostedForm,   // an invoice's FlexForm sale; CCBill bills it
 		false,                       // ServerCardEntry (CCBill's own page takes the card)
 		[]string{"live", "sandbox"}, // sandbox: sandbox-api.ccbill.com
 		[]string{"client_accnum", "client_subacc"},

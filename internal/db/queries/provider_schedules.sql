@@ -1,7 +1,7 @@
 -- name: InsertProviderSchedule :execrows
-INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
+INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_invoice_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
-        sqlc.narg(initial_order_id)::uuid,
+        sqlc.narg(initial_invoice_id)::uuid,
         (SELECT COALESCE(MAX(accepted_version), 0) + 1 FROM billing.provider_schedules WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid),
         sqlc.arg(source_reference)::text, sqlc.arg(provider_reference)::text, sqlc.arg(first_due_at)::timestamptz, sqlc.arg(cadence_hours)::integer, sqlc.arg(cadence_months)::integer,
         sqlc.arg(accepted_bill)::jsonb, sqlc.arg(now)::timestamptz)
@@ -49,7 +49,7 @@ ORDER BY due_at DESC LIMIT 1;
 -- name: SubscriptionRenewalSettledOn :one
 -- A renewal bill of the subscription for the cycle due that day is complete,
 -- whoever collected it (a provider receipt or OpenRails' own recovery).
-SELECT EXISTS (SELECT 1 FROM billing.orders
+SELECT EXISTS (SELECT 1 FROM billing.invoices
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND origin = 'subscription' AND subscription_id = sqlc.arg(subscription_id)::uuid
       AND period_starts_at >= sqlc.arg(day_start)::timestamptz AND period_starts_at < sqlc.arg(day_end)::timestamptz
       AND subscription_bill_kind = 'renewal' AND status = 'complete')::boolean;

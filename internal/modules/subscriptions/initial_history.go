@@ -13,24 +13,24 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
-// validateSolanaEnrollmentOrder proves the first wallet payment from the
-// immutable paid order; membership fulfillment must not record it twice.
-func validateSolanaEnrollmentOrder(ctx context.Context, q *gen.Queries, mid uuid.UUID, t InitialMembershipTerms, orderID *uuid.UUID, providerRef string) error {
-	if orderID == nil || t.Amount != 0 || t.PaymentID != uuid.Nil {
-		return errors.New("Solana enrollment requires its already paid order")
+// validateSolanaEnrollmentInvoice proves the first wallet payment from the
+// immutable paid invoice; membership fulfillment must not record it twice.
+func validateSolanaEnrollmentInvoice(ctx context.Context, q *gen.Queries, mid uuid.UUID, t InitialMembershipTerms, invoiceID *uuid.UUID, providerRef string) error {
+	if invoiceID == nil || t.Amount != 0 || t.PaymentID != uuid.Nil {
+		return errors.New("Solana enrollment requires its already paid invoice")
 	}
-	o, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: mid, ID: *orderID})
+	o, err := q.GetInvoice(ctx, gen.GetInvoiceParams{MerchantID: mid, ID: *invoiceID})
 	if err != nil {
 		return err
 	}
 	if o.CustomerID != t.CustomerID || o.Status != "complete" || o.PaymentStatus != "succeeded" || o.PaymentID == nil || o.Total != t.RecurringAmount || o.Currency != t.Currency {
-		return errors.New("Solana enrollment contradicts its paid order")
+		return errors.New("Solana enrollment contradicts its paid invoice")
 	}
 	p, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid, ID: *o.PaymentID})
 	if err != nil {
 		return err
 	}
-	if p.CustomerID != t.CustomerID || p.OrderID == nil || *p.OrderID != o.ID || p.PspID == nil || *p.PspID != t.PSPID || models.DerefStr(p.Rail) != string(models.RailSolana) || p.TransactionID == "" || p.Amount != o.Total || p.Currency != o.Currency || !payments.PaymentStatusSucceeded(p.Status) || p.MoneyMovement != string(models.MoneyMovementRail) {
+	if p.CustomerID != t.CustomerID || p.InvoiceID == nil || *p.InvoiceID != o.ID || p.PspID == nil || *p.PspID != t.PSPID || models.DerefStr(p.Rail) != string(models.RailSolana) || p.TransactionID == "" || p.Amount != o.Total || p.Currency != o.Currency || !payments.PaymentStatusSucceeded(p.Status) || p.MoneyMovement != string(models.MoneyMovementRail) {
 		return errors.New("Solana enrollment has no matching successful wallet payment")
 	}
 	var receipt struct {
@@ -39,12 +39,12 @@ func validateSolanaEnrollmentOrder(ctx context.Context, q *gen.Queries, mid uuid
 	if json.Unmarshal(p.Metadata, &receipt) != nil || providerRef == "" || receipt.SubscriptionPDA != providerRef || !p.PurchasedAt.Equal(t.PeriodStart) {
 		return errors.New("Solana enrollment contradicts its verified subscription receipt")
 	}
-	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid, OrderIds: []uuid.UUID{o.ID}})
+	lines, err := q.ListInvoiceLines(ctx, gen.ListInvoiceLinesParams{MerchantID: mid, InvoiceIds: []uuid.UUID{o.ID}})
 	if err != nil {
 		return err
 	}
 	if len(lines) != 1 || lines[0].PriceID == nil || *lines[0].PriceID != t.PriceID || lines[0].ProductID == nil || *lines[0].ProductID != t.ProductID || lines[0].Amount != t.RecurringAmount || lines[0].BillingIntervalHours == nil || t.RecurringIntervalHours == nil || int(*lines[0].BillingIntervalHours) != *t.RecurringIntervalHours {
-		return errors.New("Solana enrollment contradicts its accepted order line")
+		return errors.New("Solana enrollment contradicts its accepted invoice line")
 	}
 	return nil
 }

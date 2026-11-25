@@ -10,14 +10,14 @@ import (
 
 // GetMyCart handles GET /v1/me/cart.
 func GetMyCart(r *httprequest.Request) {
-	actor := orderActor(r, false)
-	svc := orderService(r)
+	actor := invoiceActor(r, false)
+	svc := invoiceService(r)
 	if actor == nil || svc == nil {
 		return
 	}
 	cart, err := svc.GetCart(r.Request.Context(), *actor)
 	if err != nil {
-		writeOrderError(r, err)
+		writeInvoiceError(r, err)
 		return
 	}
 	r.SetHeader("Cache-Control", "no-store")
@@ -35,14 +35,14 @@ func SetMyCartLine(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeResourceNotFound, "price not found"))
 		return
 	}
-	actor := orderActor(r, false)
-	svc := orderService(r)
+	actor := invoiceActor(r, false)
+	svc := invoiceService(r)
 	if actor == nil || svc == nil {
 		return
 	}
 	cart, err := svc.SetCartLine(r.Request.Context(), *actor, price, body)
 	if err != nil {
-		writeOrderError(r, err)
+		writeInvoiceError(r, err)
 		return
 	}
 	r.SetHeader("Cache-Control", "no-store")
@@ -51,13 +51,13 @@ func SetMyCartLine(r *httprequest.Request) {
 
 // ClearMyCart handles DELETE /v1/me/cart.
 func ClearMyCart(r *httprequest.Request) {
-	actor := orderActor(r, false)
-	svc := orderService(r)
+	actor := invoiceActor(r, false)
+	svc := invoiceService(r)
 	if actor == nil || svc == nil {
 		return
 	}
 	if err := svc.ClearCart(r.Request.Context(), *actor); err != nil {
-		writeOrderError(r, err)
+		writeInvoiceError(r, err)
 		return
 	}
 	r.NoContent()

@@ -72,12 +72,12 @@ func usageBillingAccount(t *testing.T, manual bool, configure ...func(*world)) (
 	return a, p, customer
 }
 
-// owedAccruedAt is when the earliest owed item an order bills accrued.
-func owedAccruedAt(t *testing.T, w *world, order billing.OrderID) time.Time {
+// owedAccruedAt is when the earliest owed item an invoice bills accrued.
+func owedAccruedAt(t *testing.T, w *world, invoice billing.InvoiceID) time.Time {
 	t.Helper()
 	var at time.Time
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT min(accrued_at) FROM "+pgx.Identifier{w.schema, "owed_items"}.Sanitize()+" WHERE order_id = $1",
-		order.UUID()).Scan(&at))
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT min(accrued_at) FROM "+pgx.Identifier{w.schema, "owed_items"}.Sanitize()+" WHERE invoice_id = $1",
+		invoice.UUID()).Scan(&at))
 	return at.UTC()
 }
 
@@ -105,9 +105,9 @@ func unscheduledAgreement(t *testing.T, a *authorityWorld) billing.Agreement {
 	return billing.Agreement{}
 }
 
-func oneUsageOrder(t *testing.T, a *authorityWorld, customer billing.CustomerID) billing.Order {
+func oneUsageInvoice(t *testing.T, a *authorityWorld, customer billing.CustomerID) billing.Invoice {
 	t.Helper()
-	rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+	rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 	require.NoError(t, err)
 	require.Len(t, rows.Items, 1)
 	require.NotNil(t, rows.Items[0].Usage)
@@ -128,23 +128,23 @@ func TestUsageBillingContracts(t *testing.T) {
 				fleet := startFleet(t, a.world)
 				if profile == "monthly-date" {
 					runUsageDue(t, fleet)
-					orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+					invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 					require.NoError(t, err)
-					require.Empty(t, orders.Items)
+					require.Empty(t, invoices.Items)
 					p.money(t, 0, 0)
 					a.clock.Advance(12 * time.Hour)
 				}
 				runUsageDue(t, fleet)
 				require.Eventually(t, func() bool {
-					rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-					return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+					rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+					return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.InvoiceComplete
 				}, 15*time.Second, 20*time.Millisecond)
-				order := oneUsageOrder(t, a, customer)
-				require.Equal(t, native, order.Total)
-				require.Equal(t, native, order.Usage.AmountPaid)
-				require.Zero(t, order.Usage.AmountDue)
+				invoice := oneUsageInvoice(t, a, customer)
+				require.Equal(t, native, invoice.Total)
+				require.Equal(t, native, invoice.Usage.AmountPaid)
+				require.Zero(t, invoice.Usage.AmountDue)
 				runUsageDue(t, fleet)
-				require.Equal(t, order.ID, oneUsageOrder(t, a, customer).ID)
+				require.Equal(t, invoice.ID, oneUsageInvoice(t, a, customer).ID)
 				p.money(t, 1, cents)
 				balance(t, a.alpha, customer, 0, 0, 0)
 			})
@@ -161,9 +161,9 @@ func TestUsageBillingContracts(t *testing.T) {
 		nextMonth(a.world)
 		closeMonths(t, fleet)
 		runUsageDue(t, fleet)
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 		require.NoError(t, err)
-		require.Empty(t, orders.Items)
+		require.Empty(t, invoices.Items)
 		p.money(t, 0, 0)
 		funds, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
@@ -178,27 +178,27 @@ func TestUsageBillingContracts(t *testing.T) {
 				fleet := startFleet(t, a.world)
 				postUsageMonth(t, a.world, fleet)
 				runUsageDue(t, fleet)
-				order := oneUsageOrder(t, a, customer)
-				require.Equal(t, billing.OrderOpen, order.Status)
+				invoice := oneUsageInvoice(t, a, customer)
+				require.Equal(t, billing.InvoiceOpen, invoice.Status)
 				var err error
 				switch disposition {
 				case "paid":
-					_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "bank-receipt-one"})
+					_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: "bank-receipt-one"})
 				case "waived":
-					_, err = a.alpha.WaiveOrderBalance(t.Context(), order.ID)
+					_, err = a.alpha.WaiveInvoiceBalance(t.Context(), invoice.ID)
 				case "uncollectible":
-					_, err = a.alpha.MarkOrderUncollectible(t.Context(), order.ID)
+					_, err = a.alpha.MarkInvoiceUncollectible(t.Context(), invoice.ID)
 				}
 				require.NoError(t, err)
-				before := oneUsageOrder(t, a, customer)
+				before := oneUsageInvoice(t, a, customer)
 				require.EqualValues(t, 30_000_000, before.Total)
-				expectedStatus, expectedPaid, expectedDue, expectedOwed := billing.OrderComplete, int64(30_000_000), int64(0), int64(0)
+				expectedStatus, expectedPaid, expectedDue, expectedOwed := billing.InvoiceComplete, int64(30_000_000), int64(0), int64(0)
 				switch disposition {
 				case "waived":
-					expectedStatus, expectedPaid, expectedDue = billing.OrderVoid, 0, 0
+					expectedStatus, expectedPaid, expectedDue = billing.InvoiceVoid, 0, 0
 					require.NotNil(t, before.VoidedAt)
 				case "uncollectible":
-					expectedStatus, expectedPaid, expectedDue, expectedOwed = billing.OrderUncollectible, 0, 30_000_000, 30_000_000
+					expectedStatus, expectedPaid, expectedDue, expectedOwed = billing.InvoiceUncollectible, 0, 30_000_000, 30_000_000
 					require.NotNil(t, before.UncollectibleAt)
 				}
 				require.Equal(t, expectedStatus, before.Status)
@@ -210,7 +210,7 @@ func TestUsageBillingContracts(t *testing.T) {
 				require.Zero(t, funds.BalanceAmount)
 				a.clock.Advance(35 * 24 * time.Hour)
 				runUsageDue(t, fleet)
-				after := oneUsageOrder(t, a, customer)
+				after := oneUsageInvoice(t, a, customer)
 				require.Equal(t, before.ID, after.ID)
 				require.Equal(t, expectedStatus, after.Status)
 				require.Equal(t, expectedPaid, after.Usage.AmountPaid)
@@ -232,17 +232,17 @@ func TestUsageBillingContracts(t *testing.T) {
 				runUsageDue(t, fleet)
 				a.clock.Advance(24 * time.Hour)
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
-				order := oneUsageOrder(t, a, customer)
-				require.True(t, order.Usage.Delinquent)
+				invoice := oneUsageInvoice(t, a, customer)
+				require.True(t, invoice.Usage.Delinquent)
 				var err error
 				if disposition == "paid" {
-					_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "bank-cleared"})
+					_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: "bank-cleared"})
 				} else {
-					_, err = a.alpha.WaiveOrderBalance(t.Context(), order.ID)
+					_, err = a.alpha.WaiveInvoiceBalance(t.Context(), invoice.ID)
 				}
 				require.NoError(t, err)
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
-				require.False(t, oneUsageOrder(t, a, customer).Usage.Delinquent)
+				require.False(t, oneUsageInvoice(t, a, customer).Usage.Delinquent)
 				balance(t, a.alpha, customer, 0, 0, 0)
 				events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"delinquency.cleared"}, Limit: 100})
 				require.NoError(t, err)
@@ -279,16 +279,16 @@ func TestUsageBillingContracts(t *testing.T) {
 				runUsageDue(t, fleet)
 				a.clock.Advance(24 * time.Hour)
 				runRegistered(t, fleet, "openrails.billing_pass", 1)
-				order := oneUsageOrder(t, a, customer)
-				require.True(t, order.Usage.Delinquent)
+				invoice := oneUsageInvoice(t, a, customer)
+				require.True(t, invoice.Usage.Delinquent)
 				var err error
 				switch disposition {
 				case "paid":
-					_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "bank-at-once"})
+					_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: "bank-at-once"})
 				case "waived":
-					_, err = a.alpha.WaiveOrderBalance(t.Context(), order.ID)
+					_, err = a.alpha.WaiveInvoiceBalance(t.Context(), invoice.ID)
 				case "uncollectible":
-					_, err = a.alpha.MarkOrderUncollectible(t.Context(), order.ID)
+					_, err = a.alpha.MarkInvoiceUncollectible(t.Context(), invoice.ID)
 				}
 				require.NoError(t, err)
 				cleared := func() int {
@@ -303,9 +303,9 @@ func TestUsageBillingContracts(t *testing.T) {
 			})
 		}
 	})
-	t.Run("OR-J26-S51/an-overdue-order-is-told-once-by-the-billing-pass", func(t *testing.T) {
+	t.Run("OR-J26-S51/an-overdue-invoice-is-told-once-by-the-billing-pass", func(t *testing.T) {
 		a, p, customer := usageBillingWorld(t, false)
-		// The card declines, so the order stays unpaid past its due date.
+		// The card declines, so the invoice stays unpaid past its due date.
 		p.core.SetDecline("4242", "202")
 		oneUsage(t, a.alpha, usageInput(customer, "billed-on-revocation", 3))
 		// What the revocation bills is owed once the month's usage posts.
@@ -314,15 +314,15 @@ func TestUsageBillingContracts(t *testing.T) {
 		// Revoking the collection agreement bills what is owed so far.
 		status, raw := a.request(t, http.MethodPost, "/v1/me/agreements/"+unscheduledAgreement(t, a).ID.String()+"/revoke", a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
-		require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderOpen }, 15*time.Second, 50*time.Millisecond,
-			"the declined collection leaves the order open")
+		require.Eventually(t, func() bool { return oneUsageInvoice(t, a, customer).Status == billing.InvoiceOpen }, 15*time.Second, 50*time.Millisecond,
+			"the declined collection leaves the invoice open")
 		a.clock.Advance(time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		notices, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order_overdue"}, Limit: 100})
+		notices, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"invoice_overdue"}, Limit: 100})
 		require.NoError(t, err)
-		require.Len(t, notices.Events, 1, "the billing pass tells the overdue order")
+		require.Len(t, notices.Events, 1, "the billing pass tells the overdue invoice")
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		notices, err = a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"order_overdue"}, Limit: 100})
+		notices, err = a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"invoice_overdue"}, Limit: 100})
 		require.NoError(t, err)
 		require.Len(t, notices.Events, 1, "told once")
 	})
@@ -339,8 +339,8 @@ func TestUsageBillingContracts(t *testing.T) {
 		fleet := startFleet(t, a.world)
 		postUsageMonth(t, a.world, fleet)
 		require.Eventually(t, func() bool {
-			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+			rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.InvoiceComplete
 		}, 30*time.Second, 50*time.Millisecond, "the pass continues past its first page")
 		require.Eventually(t, func() bool {
 			jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.usage_orders").States(rivertype.JobStateCompleted).First(100))
@@ -365,8 +365,8 @@ func TestUsageBillingContracts(t *testing.T) {
 		a.clock.Advance(12 * time.Hour)
 		runUsageDue(t, fleet)
 		require.Eventually(t, func() bool {
-			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+			rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.InvoiceComplete
 		}, 15*time.Second, 20*time.Millisecond)
 		nextBill := func() *time.Time {
 			c, err := a.alpha.GetCustomer(t.Context(), customer)
@@ -403,8 +403,8 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.Equal(t, 1, running("openrails.provider_operation"), "the collection's own operation job charges")
 		hold.Release()
 		require.Eventually(t, func() bool {
-			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+			rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.InvoiceComplete
 		}, 15*time.Second, 20*time.Millisecond)
 		p.money(t, 1, 3000)
 	})
@@ -420,10 +420,10 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.NoError(t, fleet.Start(t.Context()))
 		a.clock.Advance(12*time.Hour + 10*time.Second)
 		runUsageDue(t, fleet)
-		order := oneUsageOrder(t, a, customer)
+		invoice := oneUsageInvoice(t, a, customer)
 		// 10 USD of usage and 12 h 10 s at 0.36 USD an hour, to the pass.
-		require.EqualValues(t, 14_321_000, order.Total)
-		require.Equal(t, time.Date(2026, 9, 25, 0, 0, 10, 0, time.UTC), order.Usage.PeriodEndsAt.UTC().Truncate(time.Second))
+		require.EqualValues(t, 14_321_000, invoice.Total)
+		require.Equal(t, time.Date(2026, 9, 25, 0, 0, 10, 0, time.UTC), invoice.Usage.PeriodEndsAt.UTC().Truncate(time.Second))
 	})
 	t.Run("OR-J26-S64/running-charges-bill-on-the-merchants-usage-terms-without-clickhouse", func(t *testing.T) {
 		// No host setting turns usage billing on, and the deployment has no
@@ -439,28 +439,28 @@ func TestUsageBillingContracts(t *testing.T) {
 		// Starting the charge gave the account its bill date, the 25th.
 		a.clock.Advance(12*time.Hour + 10*time.Second)
 		runUsageDue(t, fleet)
-		order := oneUsageOrder(t, a, customer)
+		invoice := oneUsageInvoice(t, a, customer)
 		// 12 h 10 s at 0.36 USD an hour, to the pass.
-		require.EqualValues(t, 4_321_000, order.Total)
-		require.Equal(t, time.Date(2026, 9, 25, 0, 0, 10, 0, time.UTC), order.Usage.PeriodEndsAt.UTC().Truncate(time.Second))
+		require.EqualValues(t, 4_321_000, invoice.Total)
+		require.Equal(t, time.Date(2026, 9, 25, 0, 0, 10, 0, time.UTC), invoice.Usage.PeriodEndsAt.UTC().Truncate(time.Second))
 	})
-	t.Run("OR-J26-S56/usage-reported-after-its-days-order-is-owed-after-that-order", func(t *testing.T) {
+	t.Run("OR-J26-S56/usage-reported-after-its-days-invoice-is-owed-after-that-invoice", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true)
 		oneUsage(t, a.alpha, usageInput(customer, "on-time", 1))
 		fleet := quietFleet(t, a.world)
 		a.clock.Advance(13 * time.Hour)
 		runUsageDue(t, fleet)
-		first := oneUsageOrder(t, a, customer)
+		first := oneUsageInvoice(t, a, customer)
 		require.EqualValues(t, 10_000_000, first.Total)
-		// Usage of the billed day reported an hour after its order, enough to
-		// reach the threshold: it is billed at once, in a period no order
+		// Usage of the billed day reported an hour after its invoice, enough to
+		// reach the threshold: it is billed at once, in a period no invoice
 		// billed.
 		a.clock.Advance(time.Hour)
 		late := usageInput(customer, "late", 3)
 		late.OccurredAt = time.Date(2026, 9, 24, 13, 0, 0, 0, time.UTC)
 		oneUsage(t, a.alpha, late)
 		runUsageDue(t, fleet)
-		rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+		rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 		require.NoError(t, err)
 		require.Len(t, rows.Items, 2)
 		second := rows.Items[0]
@@ -469,9 +469,9 @@ func TestUsageBillingContracts(t *testing.T) {
 		}
 		require.NotNil(t, second.Usage)
 		require.EqualValues(t, 30_000_000, second.Total)
-		require.False(t, owedAccruedAt(t, a.world, second.ID).Before(first.Usage.PeriodEndsAt), "late usage is owed after the order that billed its day")
+		require.False(t, owedAccruedAt(t, a.world, second.ID).Before(first.Usage.PeriodEndsAt), "late usage is owed after the invoice that billed its day")
 		require.True(t, second.Usage.PeriodEndsAt.After(first.Usage.PeriodEndsAt))
-		require.False(t, second.Usage.PeriodStartsAt.After(late.OccurredAt), "its order's period covers it: %s", second.Usage.PeriodStartsAt)
+		require.False(t, second.Usage.PeriodStartsAt.After(late.OccurredAt), "its invoice's period covers it: %s", second.Usage.PeriodStartsAt)
 	})
 	t.Run("OR-J26-S57/a-period-that-ends-within-a-day-bills-that-days-usage-in-it", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true)
@@ -486,27 +486,27 @@ func TestUsageBillingContracts(t *testing.T) {
 		// occurred before 14:00 is owed in the period that ended then.
 		a.clock.Advance(5 * time.Hour)
 		runUsageDue(t, fleet)
-		order := oneUsageOrder(t, a, customer)
-		require.EqualValues(t, 10_000_000, order.Total)
+		invoice := oneUsageInvoice(t, a, customer)
+		require.EqualValues(t, 10_000_000, invoice.Total)
 		turn := time.Date(2026, 9, 25, 14, 0, 0, 0, time.UTC)
-		require.True(t, order.Usage.PeriodStartsAt.Before(turn), "owed at %s, after its period ended", order.Usage.PeriodStartsAt)
+		require.True(t, invoice.Usage.PeriodStartsAt.Before(turn), "owed at %s, after its period ended", invoice.Usage.PeriodStartsAt)
 	})
-	t.Run("OR-J26-S63/a-usage-orders-period-covers-the-usage-it-bills", func(t *testing.T) {
+	t.Run("OR-J26-S63/a-usage-invoices-period-covers-the-usage-it-bills", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, true)
 		occurred := a.clock.Now().UTC()
 		oneUsage(t, a.alpha, usageInput(customer, "in-its-period", 3))
 		fleet := startFleet(t, a.world)
-		// The close owes it at its pricing period's last instant; the order
+		// The close owes it at its pricing period's last instant; the invoice
 		// that bills it states the period its charge came from.
 		postUsageMonth(t, a.world, fleet)
 		runUsageDue(t, fleet)
-		order := oneUsageOrder(t, a, customer)
-		require.EqualValues(t, 30_000_000, order.Total)
-		require.NotNil(t, order.Usage)
-		require.False(t, order.Usage.PeriodStartsAt.After(occurred), "the period %s..%s covers the usage at %s",
-			order.Usage.PeriodStartsAt, order.Usage.PeriodEndsAt, occurred)
-		require.True(t, occurred.Before(order.Usage.PeriodEndsAt))
-		require.False(t, order.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill")
+		invoice := oneUsageInvoice(t, a, customer)
+		require.EqualValues(t, 30_000_000, invoice.Total)
+		require.NotNil(t, invoice.Usage)
+		require.False(t, invoice.Usage.PeriodStartsAt.After(occurred), "the period %s..%s covers the usage at %s",
+			invoice.Usage.PeriodStartsAt, invoice.Usage.PeriodEndsAt, occurred)
+		require.True(t, occurred.Before(invoice.Usage.PeriodEndsAt))
+		require.False(t, invoice.Usage.PeriodEndsAt.Before(a.clock.Now()), "and runs to its bill")
 	})
 	t.Run("OR-J26-S58/revoking-the-agreement-bills-todays-usage", func(t *testing.T) {
 		a, _, customer := usageBillingWorld(t, false)
@@ -518,9 +518,9 @@ func TestUsageBillingContracts(t *testing.T) {
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var revoked billing.AgreementRevocation
 		require.NoError(t, json.Unmarshal(raw, &revoked))
-		require.NotNil(t, revoked.UsageOrder, "the final bill")
-		require.EqualValues(t, 30_000_000, revoked.UsageOrder.Total)
-		require.Equal(t, revoked.UsageOrder.ID, oneUsageOrder(t, a, customer).ID)
+		require.NotNil(t, revoked.UsageInvoice, "the final bill")
+		require.EqualValues(t, 30_000_000, revoked.UsageInvoice.Total)
+		require.Equal(t, revoked.UsageInvoice.ID, oneUsageInvoice(t, a, customer).ID)
 	})
 	t.Run("OR-J26-S59/a-declined-usage-collection-retries-on-the-merchants-dunning-policy", func(t *testing.T) {
 		// Every tier's first retry differs from the built-in schedule's (1 and 2 days).
@@ -533,22 +533,22 @@ func TestUsageBillingContracts(t *testing.T) {
 		fleet := startFleet(t, a.world)
 		declinedAt := a.clock.Now()
 		runUsageDue(t, fleet)
-		var order billing.Order
+		var invoice billing.Invoice
 		require.Eventually(t, func() bool {
-			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+			rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 			if err != nil || len(rows.Items) != 1 || rows.Items[0].Usage == nil {
 				return false
 			}
-			order = rows.Items[0]
-			return order.Payment.LastPaymentError != nil
+			invoice = rows.Items[0]
+			return invoice.Payment.LastPaymentError != nil
 		}, 15*time.Second, 20*time.Millisecond, "the collection is declined")
-		require.Equal(t, billing.OrderOpen, order.Status, "a retryable decline keeps the order open")
+		require.Equal(t, billing.InvoiceOpen, invoice.Status, "a retryable decline keeps the invoice open")
 		retry := 12 * time.Hour
-		if cycle := order.Usage.PeriodEndsAt.Sub(order.Usage.PeriodStartsAt); cycle >= 672*time.Hour {
+		if cycle := invoice.Usage.PeriodEndsAt.Sub(invoice.Usage.PeriodStartsAt); cycle >= 672*time.Hour {
 			retry = 36 * time.Hour
 		}
-		require.NotNil(t, order.Usage.NextCollectionAttemptAt)
-		require.Equal(t, declinedAt.Add(retry), *order.Usage.NextCollectionAttemptAt, "the merchant's schedule sets the retry")
+		require.NotNil(t, invoice.Usage.NextCollectionAttemptAt)
+		require.Equal(t, declinedAt.Add(retry), *invoice.Usage.NextCollectionAttemptAt, "the merchant's schedule sets the retry")
 	})
 	t.Run("OR-J26-S60/a-policys-delinquency-floor-holds-only-debt-in-its-currency", func(t *testing.T) {
 		// The policy's floor is a million euros; the debt is in dollars.
@@ -566,7 +566,7 @@ func TestUsageBillingContracts(t *testing.T) {
 		runUsageDue(t, fleet)
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "dollar debt is held to the dollar floor, not the policy's euro one")
+		require.True(t, oneUsageInvoice(t, a, customer).Usage.Delinquent, "dollar debt is held to the dollar floor, not the policy's euro one")
 	})
 	t.Run("OR-J26-S61/a-policys-cap-in-another-currency-binds-no-dollar-money", func(t *testing.T) {
 		// A yen policy caps debt at ¥1,000 and collects at ¥1,000; the dollar
@@ -587,10 +587,10 @@ func TestUsageBillingContracts(t *testing.T) {
 		fleet := startFleet(t, a.world)
 		runUsageDue(t, fleet)
 		require.Eventually(t, func() bool {
-			rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+			rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+			return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.InvoiceComplete
 		}, 15*time.Second, 20*time.Millisecond, "the dollar threshold collects")
-		require.EqualValues(t, 30_000_000, oneUsageOrder(t, a, customer).Total)
+		require.EqualValues(t, 30_000_000, oneUsageInvoice(t, a, customer).Total)
 		p.money(t, 1, 3000)
 		// A $1,500 request is within the dollar line, which the yen cap does
 		// not bind.
@@ -614,9 +614,9 @@ func TestUsageBillingContracts(t *testing.T) {
 		runUsageDue(t, fleet)
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		require.True(t, oneUsageOrder(t, a, customer).Usage.Delinquent, "the customer's policy has no grace")
+		require.True(t, oneUsageInvoice(t, a, customer).Usage.Delinquent, "the customer's policy has no grace")
 		out := syncLease(t, a.alpha, billing.SyncLeasesParams{LeaseID: newLease(), Views: []billing.ViewParams{computeView(customer)}})
 		require.NotNil(t, out.LimitSets[0].Refusal)
-		require.Equal(t, billing.DenyDelinquentUnpaidOrder, out.LimitSets[0].Refusal.DenyCode)
+		require.Equal(t, billing.DenyDelinquentUnpaidInvoice, out.LimitSets[0].Refusal.DenyCode)
 	})
 }

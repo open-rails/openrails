@@ -27,10 +27,10 @@ export function CustomerInvoiceProfileSection({
 }: {
   customerId: string
 }) {
-  const { orderQueries } = useAdminServices()
+  const { invoiceQueries } = useAdminServices()
 
   const canUpdate = useAdminUpdates()
-  const query = useQuery(orderQueries.profile(customerId))
+  const query = useQuery(invoiceQueries.profile(customerId))
   return (
     <Card>
       <CardHeader>
@@ -41,9 +41,9 @@ export function CustomerInvoiceProfileSection({
       <CardContent>
         <Link
           className="text-sm underline"
-          to={`/orders?customer_id=${customerId}&origin=usage`}
+          to={`/invoices?customer_id=${customerId}&origin=usage`}
         >
-          <AdminMessage id={"View customer usage orders"} />
+          <AdminMessage id={"View customer usage invoices"} />
         </Link>
         {query.isPending ? (
           <p>
@@ -114,7 +114,7 @@ export function InvoiceProfileEditor({
       <p className="text-sm text-muted-foreground">
         <AdminMessage
           id={
-            "Terms and billing facts for future usage orders. Billed orders keep their original snapshots. Tax details are recorded; no tax is calculated."
+            "Terms and billing facts for future usage invoices. Billed invoices keep their original snapshots. Tax details are recorded; no tax is calculated."
           }
         />
       </p>
@@ -294,7 +294,7 @@ export function InvoiceProfileEditor({
       {saved && (
         <p role="status" className="text-sm">
           <AdminMessage
-            id={"Invoice profile saved. Billed orders were not changed."}
+            id={"Invoice profile saved. Billed invoices were not changed."}
           />
         </p>
       )}

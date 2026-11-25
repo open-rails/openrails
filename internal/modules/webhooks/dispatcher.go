@@ -69,10 +69,10 @@ type WebhookDispatcher struct {
 	// comes from ctx; an unarmed rail fails closed.
 	RailConfigs railresolve.Source
 	// NMIResolver arms an NMI account's client for the reads a notice needs.
-	NMIResolver         railresolve.NMIClientResolver
-	PurchaseRegistrar   stripePurchaseRegistrar
-	OrderAttemptService *payment.OrderAttemptService
-	MoneyService        *money.MoneyService
+	NMIResolver           railresolve.NMIClientResolver
+	PurchaseRegistrar     stripePurchaseRegistrar
+	InvoiceAttemptService *payment.InvoiceAttemptService
+	MoneyService          *money.MoneyService
 	// ConvergeEnqueuer schedules the coalesced fetch-and-converge job the
 	// Stripe/NMI subscription-state handlers enqueue.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
@@ -142,7 +142,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		ProfileRepo:                  d.ProfileRepo,
 		PaymentService:               d.PaymentService,
 		DeduplicationService:         d.DeduplicationService,
-		OrderAttemptService:          d.OrderAttemptService,
+		InvoiceAttemptService:        d.InvoiceAttemptService,
 		MoneyService:                 d.MoneyService,
 		Disputes:                     d.Disputes,
 		Log:                          h.Log,
@@ -227,18 +227,18 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		SubscriptionService:          d.SubscriptionService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
 
-		PurchaseRegistrar:    d.PurchaseRegistrar,
-		PaymentService:       d.PaymentService,
-		MoneyService:         d.MoneyService,
-		DeduplicationService: d.DeduplicationService,
-		RailCustomerService:  d.RailCustomerService,
-		OrderAttemptService:  d.OrderAttemptService,
-		Clock:                d.Clock,
-		ConvergeEnqueuer:     d.ConvergeEnqueuer,
-		ObserveEnqueuer:      d.ObserveEnqueuer,
-		StripePaymentState:   paymentState,
-		Disputes:             d.Disputes,
-		Log:                  h.Log,
+		PurchaseRegistrar:     d.PurchaseRegistrar,
+		PaymentService:        d.PaymentService,
+		MoneyService:          d.MoneyService,
+		DeduplicationService:  d.DeduplicationService,
+		RailCustomerService:   d.RailCustomerService,
+		InvoiceAttemptService: d.InvoiceAttemptService,
+		Clock:                 d.Clock,
+		ConvergeEnqueuer:      d.ConvergeEnqueuer,
+		ObserveEnqueuer:       d.ObserveEnqueuer,
+		StripePaymentState:    paymentState,
+		Disputes:              d.Disputes,
+		Log:                   h.Log,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)
 }

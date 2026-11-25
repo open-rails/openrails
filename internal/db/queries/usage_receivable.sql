@@ -9,8 +9,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND account
 FOR NO KEY UPDATE;
 
 -- name: GetUsageAllowance :one
--- A usage order's allowance for doubtful accounts, and how many legs moved
--- it, at (allowance, order:<id>, n): bad_debt raises it; bad_debt_recovery
+-- A usage invoice's allowance for doubtful accounts, and how many legs moved
+-- it, at (allowance, invoice:<id>, n): bad_debt raises it; bad_debt_recovery
 -- and a write-off (usage_waived) lower it.
 SELECT (COALESCE(sum(amount) FILTER (WHERE transfer_type = 'bad_debt'), 0)
       - COALESCE(sum(amount) FILTER (WHERE transfer_type <> 'bad_debt'), 0))::bigint AS allowance,
@@ -20,7 +20,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source 
 
 -- name: GetCustomerUsageAllowance :one
 -- A customer's allowance for doubtful accounts in a currency, every usage
--- order's together.
+-- invoice's together.
 SELECT (COALESCE(sum(amount) FILTER (WHERE transfer_type = 'bad_debt'), 0)
       - COALESCE(sum(amount) FILTER (WHERE transfer_type <> 'bad_debt'), 0))::bigint AS allowance
 FROM billing.ledger_transfers
@@ -28,7 +28,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND book = 'general' AND operation = 'allowance';
 
 -- name: UsageCollectionPosted :one
--- Whether the general ledger applied a usage order payment's cash.
+-- Whether the general ledger applied a usage invoice payment's cash.
 SELECT EXISTS (
     SELECT 1 FROM billing.ledger_transfers
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment' AND source_id = sqlc.arg(payment_id)::text
@@ -36,15 +36,15 @@ SELECT EXISTS (
 )::boolean AS posted;
 
 -- name: HasPendingReopenedOwed :one
--- Whether owed a chargeback reopened waits for a usage order.
+-- Whether owed a chargeback reopened waits for a usage invoice.
 SELECT EXISTS (
     SELECT 1 FROM billing.owed_items
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
-      AND order_id IS NULL AND status = 'pending' AND source_type = 'owed_reopened'
+      AND invoice_id IS NULL AND status = 'pending' AND source_type = 'owed_reopened'
 )::boolean AS reopened;
 
 -- name: ListUsagePaymentReversals :many
--- A usage order payment's settled reversals (refunds, chargebacks and won
+-- A usage invoice payment's settled reversals (refunds, chargebacks and won
 -- disputes), in the order they were stored.
 SELECT * FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id = sqlc.arg(payment_id)::uuid
@@ -52,9 +52,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id = sqlc.a
 ORDER BY created_at, id;
 
 -- name: ListUsagePaymentReopenings :many
--- The units book's legs for a usage order payment's chargebacks
+-- The units book's legs for a usage invoice payment's chargebacks
 -- (owed_reopened) and their won disputes (owed_payment), at
--- (_, usage_payment:<id>, reversal id[:order]).
+-- (_, usage_payment:<id>, reversal id[:invoice]).
 SELECT source_id, transfer_type, amount
 FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'units' AND source = sqlc.arg(source)::text

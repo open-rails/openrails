@@ -45,8 +45,8 @@ func makeNMIRefund(t *RemoteTransaction, local map[string]*LocalPayment, now tim
 		f.RecommendedAction = "NMI refund ID is already recorded with different payment facts"
 		return f, true
 	}
-	if original.UsageOrderID != nil {
-		f.RecommendedAction = "refund belongs to a usage order; reconcile its order and ledger"
+	if original.UsageInvoiceID != nil {
+		f.RecommendedAction = "refund belongs to a usage invoice; reconcile its invoice and ledger"
 		return f, true
 	}
 	f.Status, f.RequiresAdmin = FindingStatusReconcileRequired, false

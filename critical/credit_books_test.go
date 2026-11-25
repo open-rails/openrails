@@ -59,15 +59,15 @@ func (s *creditShop) pack(t *testing.T, key string, credits, price int64, days i
 // buy pays for one pack by card and returns its payment and its lot.
 func (s *creditShop) buy(t *testing.T, price billing.PriceID, total int64, key string) (billing.PaymentID, billing.CreditGrantID) {
 	t.Helper()
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(total), Reusable: ptr(true),
-		Payment: &billing.OrderPaymentParams{Token: s.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-	status, raw := s.a.request(t, http.MethodPost, "/v1/me/orders", s.a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}, ExpectedTotal: ptr(total), Reusable: ptr(true),
+		Payment: &billing.InvoicePaymentParams{Token: s.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+	status, raw := s.a.request(t, http.MethodPost, "/v1/me/invoices", s.a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status)
-	require.NotNil(t, order.Payment.PaymentID)
-	return *order.Payment.PaymentID, paymentLot(t, s.a.alpha, s.customer, *order.Payment.PaymentID)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status)
+	require.NotNil(t, invoice.Payment.PaymentID)
+	return *invoice.Payment.PaymentID, paymentLot(t, s.a.alpha, s.customer, *invoice.Payment.PaymentID)
 }
 
 // paymentLot is the lot a payment bought.

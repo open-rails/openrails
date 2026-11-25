@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -118,7 +118,7 @@ func (s *SubscriptionLifecycleService) AddSeatsTx(ctx context.Context, txDB *db.
 			Quantity: &added, UnitAmount: terms.Amount / int64(added), Amount: terms.Amount,
 			BillingIntervalHours: terms.RecurringIntervalHours, AccessDurationHours: terms.AccessDurationHours}},
 	}, s.now()); err != nil {
-		return fmt.Errorf("record seat increase order: %w", err)
+		return fmt.Errorf("record seat increase invoice: %w", err)
 	}
 	if err := s.resizeAccess(ctx, txDB, sub, terms.PeriodStart); err != nil || staff == nil {
 		return err

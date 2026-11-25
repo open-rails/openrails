@@ -381,19 +381,19 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 	}
 	attempts, err := intents.ReadNMIOrderAttempts(ctx, in, h.Resolver)
 	if err != nil {
-		return h.unresolved(ctx, in, p, "order read is inconclusive: "+err.Error())
+		return h.unresolved(ctx, in, p, "invoice read is inconclusive: "+err.Error())
 	}
 	if attempts.Declined {
 		if reference != "" && attempts.DeclineTransactionID != reference {
-			return h.unresolved(ctx, in, p, "the order's decline contradicts the retained transaction reference")
+			return h.unresolved(ctx, in, p, "the invoice's decline contradicts the retained transaction reference")
 		}
 		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, intents.RecurringDecline{ResponseCode: attempts.DeclineCode, Reference: attempts.DeclineTransactionID, Issuer: attempts.DeclineIssuer, At: attempts.DeclineAt}); err != nil {
-			return h.unresolved(ctx, in, p, "retain the order's decline: "+err.Error())
+			return h.unresolved(ctx, in, p, "retain the invoice's decline: "+err.Error())
 		}
 		return h.Verify(ctx, in)
 	}
 	if attempts.Transactions > 0 {
-		return h.unresolved(ctx, in, p, "the order holds transactions that are not one approved or declined sale")
+		return h.unresolved(ctx, in, p, "the invoice holds transactions that are not one approved or declined sale")
 	}
 	return h.lostSubmission(ctx, in, p)
 }
@@ -487,7 +487,7 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 		if err := h.renewMembership(ctx, d, in, p, retained, params, sub); err != nil {
 			return err
 		}
-		return h.renewalOrderPaid(ctx, d, in, p, retained.TransactionID())
+		return h.renewalInvoicePaid(ctx, d, in, p, retained.TransactionID())
 	})
 }
 
@@ -548,9 +548,9 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 		if in.Rail == "stripe" && code == "canceled" {
 			failure = billing.DeclineReason("authentication_required").Failure()
 		}
-		// The order is open again before the subscription's dunning runs, so
+		// The invoice is open again before the subscription's dunning runs, so
 		// a subscription that ends voids it.
-		if err := h.renewalOrderUnpaid(ctx, d, in, p, failure); err != nil {
+		if err := h.renewalInvoiceUnpaid(ctx, d, in, p, failure); err != nil {
 			return err
 		}
 		failures := 0
@@ -586,7 +586,7 @@ func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context,
 	}
 	outcome := intents.TerminalWithEvidence(reason, map[string]any{"not_executed": true, "declined": false, "not_executed_code": code})
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, _ *models.Subscription) error {
-		return h.renewalOrderUnpaid(ctx, d, in, p, billing.DeclineReason("try_again_later").Failure())
+		return h.renewalInvoiceUnpaid(ctx, d, in, p, billing.DeclineReason("try_again_later").Failure())
 	})
 }
 

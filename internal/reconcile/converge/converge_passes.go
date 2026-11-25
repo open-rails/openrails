@@ -799,12 +799,12 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			SubjectKey: subject,
 			Provider:   "self",
 			Evidence: map[string]any{
-				"customer_id": d.UserID, "subscription_id": subID.String(), "order_id": d.PeriodKey,
+				"customer_id": d.UserID, "subscription_id": subID.String(), "invoice_id": d.PeriodKey,
 				"product_id": productID, "product_key": d.ProductKey,
 				"charge_count": d.Count, "payment_ids": ids, "total_amount": strconv.FormatInt(d.TotalAmount, 10), "currency": d.Currency,
 				"first_date": d.FirstDate, "last_date": d.LastDate,
 			},
-			RecommendedAction: fmt.Sprintf("Customer %s has net captured money exceeding the frozen total of order %s for subscription %s (%q; net %s; payments %s). Review the order and refund only the verified excess; multiple partial payments are not inherently duplicates.",
+			RecommendedAction: fmt.Sprintf("Customer %s has net captured money exceeding the frozen total of invoice %s for subscription %s (%q; net %s; payments %s). Review the invoice and refund only the verified excess; multiple partial payments are not inherently duplicates.",
 				d.UserID, d.PeriodKey, subID.String(), d.ProductKey, moneyutil.FormatAmount(d.TotalAmount, d.Currency), strings.Join(ids, ", ")),
 			// surface-only: a refund/credit is an operator decision, never automatic.
 		})

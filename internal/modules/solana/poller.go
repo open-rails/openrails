@@ -47,9 +47,9 @@ const (
 	observeTimeout = 30 * time.Second
 )
 
-// OrderSettler is the order side of a landed Solana Pay transaction.
-// Implemented by *purchase.OrderAttemptService.
-type OrderSettler interface {
+// InvoiceSettler is the invoice side of a landed Solana Pay transaction.
+// Implemented by *purchase.InvoiceAttemptService.
+type InvoiceSettler interface {
 	// SettleSolanaTransfer records one transfer on a purchase reference
 	// exactly once and credits the purchase when the transfer settles it.
 	SettleSolanaTransfer(ctx context.Context, reference string, t ObservedTransfer) (*Receipt, error)
@@ -72,7 +72,7 @@ var ErrSolanaSubscribePending = errors.New("solana: recurring subscribe pending 
 type SolanaPayPoller struct {
 	db         *db.DB
 	rpcBuilder *MerchantRPCBuilder
-	settler    OrderSettler
+	settler    InvoiceSettler
 	clock      clockwork.Clock
 
 	mu      sync.Mutex
@@ -81,7 +81,7 @@ type SolanaPayPoller struct {
 	Log     *slog.Logger
 }
 
-func NewSolanaPayPoller(database *db.DB, settler OrderSettler, clocks ...clockwork.Clock) *SolanaPayPoller {
+func NewSolanaPayPoller(database *db.DB, settler InvoiceSettler, clocks ...clockwork.Clock) *SolanaPayPoller {
 	return &SolanaPayPoller{db: database, settler: settler, rpcBuilder: &MerchantRPCBuilder{Postures: controls.View{DB: database}, Log: database.Log}, clock: timeutil.FirstClock(clocks...), Log: database.Log}
 }
 
@@ -281,11 +281,11 @@ func (p *SolanaPayPoller) check(ctx context.Context, ledger *PayLedger, ref gen.
 	if err != nil {
 		return 0, err
 	}
-	row, err := p.db.Gen(ctx).GetOrderAttemptByID(ctx, gen.GetOrderAttemptByIDParams{MerchantID: mid.UUID(), ID: ref.OrderAttemptID})
+	row, err := p.db.Gen(ctx).GetInvoiceAttemptByID(ctx, gen.GetInvoiceAttemptByIDParams{MerchantID: mid.UUID(), ID: ref.InvoiceAttemptID})
 	if err != nil {
 		return 0, err
 	}
-	session, err := models.OrderAttemptFromGen(row)
+	session, err := models.InvoiceAttemptFromGen(row)
 	if err != nil {
 		return 0, err
 	}
@@ -350,7 +350,7 @@ var errHistoryGap = errors.New("solana: node does not hold the reference's histo
 // otherwise newer signatures arrived and the walk goes down again. A short
 // answer is trusted only from a node that holds both its cursor and the
 // newest signature already processed.
-func (p *SolanaPayPoller) settlePurchase(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.BillingSolanaPayReference, session *models.OrderAttempt) error {
+func (p *SolanaPayPoller) settlePurchase(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.BillingSolanaPayReference, session *models.InvoiceAttempt) error {
 	known, err := ledger.KnownSignatures(ctx, ref.Reference)
 	if err != nil {
 		return err
@@ -445,7 +445,7 @@ func nonEmptyAll(values ...string) []string {
 // settleSignature reads one transaction and records it through the purchase.
 // Only an error worth retrying is returned: a transaction that is foreign,
 // failed or unreadable is recorded as such.
-func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RPCClient, ref gen.BillingSolanaPayReference, session *models.OrderAttempt, signature string) error {
+func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RPCClient, ref gen.BillingSolanaPayReference, session *models.InvoiceAttempt, signature string) error {
 	// OpenRails built the transaction and stamped its memo.
 	policy := solanarpc.MemoRequired
 	octx, cancel := context.WithTimeout(ctx, observeTimeout)
@@ -485,7 +485,7 @@ func (p *SolanaPayPoller) confirmMirror(ctx context.Context, ledger *PayLedger, 
 		if sig.HasError {
 			continue
 		}
-		err := p.settler.ConfirmSolanaSubscribeSession(ctx, ref.OrderAttemptID, sig.Signature)
+		err := p.settler.ConfirmSolanaSubscribeSession(ctx, ref.InvoiceAttemptID, sig.Signature)
 		if errors.Is(err, ErrSolanaSubscribePending) {
 			return true, nil
 		}

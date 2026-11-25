@@ -34,13 +34,13 @@ const (
 	// PaymentAttempts keeps payment attempts, rebill cycles and NMI history
 	// months 25 months.
 	PaymentAttempts = 761 * Day
-	// ExpiredOrderAttempts keeps an order attempt that expired without
+	// ExpiredInvoiceAttempts keeps an invoice attempt that expired without
 	// reaching a provider 90 days past its expiry.
-	ExpiredOrderAttempts = 90 * Day
-	// UnpaidOrders keeps an unpaid closed order that never started a payment
+	ExpiredInvoiceAttempts = 90 * Day
+	// UnpaidInvoices keeps an unpaid closed invoice that never started a payment
 	// attempt 397 days past its close: the checkout funnel compares a month
 	// with the same month a year before.
-	UnpaidOrders = 397 * Day
+	UnpaidInvoices = 397 * Day
 	// MetricCounters keeps a daily webhook-health count 13 months: a month is
 	// compared with a year before.
 	MetricCounters = 397 * Day

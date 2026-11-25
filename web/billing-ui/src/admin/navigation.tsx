@@ -20,7 +20,7 @@ export interface AdminNavItem {
   path: string
   icon?: IconSvgElement
   useVisible?: () => boolean
-  order?: number
+  invoice?: number
   items?: { title: string; path: string; useVisible?: () => boolean }[]
 }
 export const coreNav: AdminNavItem[] = [
@@ -28,7 +28,7 @@ export const coreNav: AdminNavItem[] = [
     title: "Dashboard",
     path: "/",
     icon: DashboardCircleIcon,
-    order: 0,
+    invoice: 0,
     useVisible: useMetrics,
     items: [
       { title: "Overview", path: "/" },
@@ -39,21 +39,21 @@ export const coreNav: AdminNavItem[] = [
     title: "Customers",
     path: "/customers",
     icon: UserGroupIcon,
-    order: 10,
+    invoice: 10,
     useVisible: useAdminArea,
   },
   {
     title: "Subscriptions",
     path: "/subscriptions",
     icon: RepeatIcon,
-    order: 20,
+    invoice: 20,
     useVisible: useAdminArea,
   },
   {
     title: "Payments",
     path: "/payments",
     icon: CreditCardIcon,
-    order: 30,
+    invoice: 30,
     useVisible: useAdminArea,
     items: [
       { title: "Payments", path: "/payments" },
@@ -63,17 +63,17 @@ export const coreNav: AdminNavItem[] = [
     ],
   },
   {
-    title: "Orders",
-    path: "/orders",
+    title: "Invoices",
+    path: "/invoices",
     icon: CreditCardIcon,
-    order: 40,
+    invoice: 40,
     useVisible: useAdminArea,
   },
   {
     title: "Catalog",
     path: "/catalog",
     icon: PackageIcon,
-    order: 50,
+    invoice: 50,
     useVisible: useCatalogArea,
     items: [
       { title: "Products", path: "/catalog" },
@@ -89,7 +89,7 @@ export const coreNav: AdminNavItem[] = [
     title: "Ops",
     path: "/ops",
     icon: Wrench01Icon,
-    order: 60,
+    invoice: 60,
     useVisible: useMerchantConfig,
     items: [
       { title: "Findings", path: "/ops" },
@@ -100,5 +100,5 @@ export const coreNav: AdminNavItem[] = [
       { title: "Parked", path: "/ops/parked" },
     ],
   },
-  { title: "Settings", path: "/settings", icon: Settings01Icon, order: 70 },
+  { title: "Settings", path: "/settings", icon: Settings01Icon, invoice: 70 },
 ].map((item) => ({ ...item }))

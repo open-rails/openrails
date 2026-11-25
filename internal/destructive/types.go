@@ -26,10 +26,11 @@ const (
 	DeletePaymentMethod Kind = "delete_payment_method"
 	// BlockPaymentMethod keeps a charged-back or fraud-reported card from
 	// being charged again; the card stays.
-	BlockPaymentMethod  Kind = "block_payment_method"
-	RevokeCredit        Kind = "revoke_credit"
-	RevokeAccess        Kind = "revoke_access"
-	WaiveOrder          Kind = "waive_order"
+	BlockPaymentMethod Kind = "block_payment_method"
+	RevokeCredit       Kind = "revoke_credit"
+	RevokeAccess       Kind = "revoke_access"
+	// WaiveInvoice keeps the kind actions recorded before invoices were named.
+	WaiveInvoice        Kind = "waive_order"
 	MarkUncollectible   Kind = "mark_uncollectible"
 	CatalogChange       Kind = "catalog_change"
 	ConfigurationChange Kind = "configuration_change"
@@ -133,7 +134,7 @@ func (c Command) validate() error {
 		return errors.New("destructive command requires a SHA256 digest")
 	}
 	switch c.Kind {
-	case Refund, CancelSubscription, DeletePaymentMethod, BlockPaymentMethod, RevokeCredit, RevokeAccess, WaiveOrder, MarkUncollectible, CatalogChange, ConfigurationChange, EraseContact:
+	case Refund, CancelSubscription, DeletePaymentMethod, BlockPaymentMethod, RevokeCredit, RevokeAccess, WaiveInvoice, MarkUncollectible, CatalogChange, ConfigurationChange, EraseContact:
 	default:
 		return fmt.Errorf("unknown destructive command kind %q", c.Kind)
 	}

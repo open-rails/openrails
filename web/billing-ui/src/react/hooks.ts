@@ -10,7 +10,7 @@ import {
 import { localError, toBillingError, type BillingError } from "../client/errors"
 import type {
   NewCard,
-  Order,
+  Invoice,
   Payment,
   PaymentMethod,
   Subscription,
@@ -390,8 +390,8 @@ export interface PaymentsOptions {
 
 export interface PaymentsState {
   payments: Payment[] | null
-  /** The bills these payments settle, by order id: what each one bought. */
-  orders: Record<string, Order>
+  /** The bills these payments settle, by invoice id: what each one bought. */
+  invoices: Record<string, Invoice>
   /** Zero-based. */
   page: number
   hasMore: boolean
@@ -402,7 +402,7 @@ export interface PaymentsState {
   refetch: () => void
 }
 
-const noOrders: Record<string, Order> = {}
+const noInvoices: Record<string, Invoice> = {}
 
 export function usePayments(options: PaymentsOptions = {}): PaymentsState {
   const { client, version } = useBillingContext()
@@ -428,23 +428,23 @@ export function usePayments(options: PaymentsOptions = {}): PaymentsState {
         rail: options.rail,
         signal,
       })
-      // One read names every payment on the page by the order it settles.
+      // One read names every payment on the page by the invoice it settles.
       const ids = [
-        ...new Set(page.data.flatMap((p) => (p.order_id ? [p.order_id] : []))),
+        ...new Set(page.data.flatMap((p) => (p.invoice_id ? [p.invoice_id] : []))),
       ]
-      const orders: Record<string, Order> = {}
+      const invoices: Record<string, Invoice> = {}
       if (ids.length) {
-        const bills = await client.listOrders({ ids, signal })
-        for (const o of bills.data) orders[o.id] = o
+        const bills = await client.listInvoices({ ids, signal })
+        for (const o of bills.data) invoices[o.id] = o
       }
-      return { ...page, orders }
+      return { ...page, invoices }
     }
   )
   const data = remote.data
   const nextCursor = data?.next_cursor ?? null
   return {
     payments: data?.data ?? null,
-    orders: data?.orders ?? noOrders,
+    invoices: data?.invoices ?? noInvoices,
     page,
     hasMore: nextCursor !== null,
     loading: remote.loading,

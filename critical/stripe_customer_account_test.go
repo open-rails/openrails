@@ -47,12 +47,12 @@ func TestStripeCustomerPerAccount(t *testing.T) {
 		buy := func(p *providerLedger, psp billing.PSPID, key, last4 string) string {
 			t.Helper()
 			input := sale
-			input.Payment = &billing.OrderPaymentParams{PSPID: &psp, Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: last4})}
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+			input.Payment = &billing.InvoicePaymentParams{PSPID: &psp, Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: last4})}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 			require.Equal(t, http.StatusCreated, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
-			require.Equal(t, billing.OrderComplete, order.Status)
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			require.Equal(t, billing.InvoiceComplete, invoice.Status)
 			charges := p.core.Submitted("/v1/payment_intents")
 			require.NotEmpty(t, charges)
 			return charges[len(charges)-1].Form.Get("customer")

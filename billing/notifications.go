@@ -50,7 +50,7 @@ const (
 func CustomerNotificationActionRequested(kind string) bool {
 	switch kind {
 	case "payment_method_failed", "payment_method_update_required", "payment_authentication_required",
-		"order_due", "order_overdue", "order_collection_stopped", "account_delinquent",
+		"invoice_due", "invoice_overdue", "invoice_collection_stopped", "account_delinquent",
 		"balance_low", "balance_depleted":
 		return true
 	default:
@@ -78,7 +78,7 @@ func CustomerNotificationOptional(kind string, data NotificationData) bool {
 type NotificationData struct {
 	// Reason qualifies premium_ended and subscription_canceled (user_cancel,
 	// admin, expired, non_recoverable, refund, chargeback, rail_cancel,
-	// access_ended, unknown) and order_collection_stopped
+	// access_ended, unknown) and invoice_collection_stopped
 	// (schedule_exhausted, non_recoverable).
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
@@ -116,15 +116,15 @@ type NotificationData struct {
 
 	// Arrears delinquency (account_delinquent, account_delinquency_cleared).
 	OverdueAmount    *int64     `json:"overdue_amount,omitempty,string"`
-	OverdueOrders    int        `json:"overdue_orders,omitempty"`
+	OverdueInvoices  int        `json:"overdue_invoices,omitempty"`
 	OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
 	FromState        string     `json:"from_state,omitempty"`
 	ToState          string     `json:"to_state,omitempty"`
 
-	// A usage order's billing and collection (order_due, order_overdue,
+	// A usage invoice's billing and collection (invoice_due, invoice_overdue,
 	// payment_method_failed, payment_method_update_required,
-	// order_collection_stopped); OrderID names it. CollectionMethod, on
-	// order_due, records whether collection is automatic or invoiced.
+	// invoice_collection_stopped); InvoiceID names it. CollectionMethod, on
+	// invoice_due, records whether collection is automatic or invoiced.
 	AmountDue        *int64                     `json:"amount_due,omitempty,string"`
 	DueAt            *time.Time                 `json:"due_at,omitempty"`
 	CollectionMethod InvoiceCollectionMethod    `json:"collection_method,omitempty"`
@@ -145,7 +145,7 @@ type NotificationData struct {
 	RunwayEndsAt     *time.Time `json:"runway_ends_at,omitempty"`
 
 	// Rail context on payment_method_failed. PSPID is the account a decline
-	// came from when the fact names no payment, order or subscription that
+	// came from when the fact names no payment, invoice or subscription that
 	// does (a declined checkout).
 	PSPID              PSPID  `json:"psp_id,omitzero"`
 	Rail               Rail   `json:"rail,omitempty"`
@@ -157,7 +157,7 @@ type NotificationData struct {
 	Quantity *int `json:"quantity,omitempty"`
 
 	// One-off purchase receipt (one_off_purchase_completed): what was bought,
-	// the amount paid, the payment and, for an order, the order and its
+	// the amount paid, the payment and, for an invoice, the invoice and its
 	// number. A refund receipt (refund_completed) has the same fields:
 	// Amount is what was refunded, PaymentID the refund and
 	// RefundedPaymentID the charge it reverses; Voided is a charge canceled
@@ -168,6 +168,6 @@ type NotificationData struct {
 	PaymentID         PaymentID `json:"payment_id,omitzero"`
 	RefundedPaymentID PaymentID `json:"refunded_payment_id,omitzero"`
 	Voided            bool      `json:"voided,omitempty"`
-	OrderID           OrderID   `json:"order_id,omitzero"`
-	OrderNumber       int64     `json:"order_number,omitempty"`
+	InvoiceID         InvoiceID `json:"invoice_id,omitzero"`
+	InvoiceNumber     int64     `json:"invoice_number,omitempty"`
 }

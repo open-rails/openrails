@@ -387,8 +387,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(s
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 
 -- name: LockProviderIntentForCollectionCompletion :one
--- Call after acquiring the domain's customer/order locks, matching admission's
--- order-before-operation order.
+-- Call after acquiring the domain's customer/invoice locks, matching admission's
+-- invoice-before-operation invoice.
 SELECT * FROM billing.provider_intents
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('order_collection', 'manual_rebill', 'subscription_collection')
@@ -516,7 +516,7 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
 -- charge's billing interval from the time its local payment row was recovered.
 SELECT sqlc.embed(i), p.id AS covered_payment_id, p.customer_id AS paid_customer_id,
        p.psp_id AS paid_psp_id, p.subscription_id AS paid_subscription_id,
-       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, (SELECT l.price_id FROM billing.order_lines l WHERE l.merchant_id=p.merchant_id AND l.order_id=p.order_id AND l.price_id=i.price_id LIMIT 1) AS paid_price_id,
+       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, (SELECT l.price_id FROM billing.invoice_lines l WHERE l.merchant_id=p.merchant_id AND l.invoice_id=p.invoice_id AND l.price_id=i.price_id LIMIT 1) AS paid_price_id,
        p.amount AS paid_amount, p.currency AS paid_currency
 FROM billing.payments p
 JOIN billing.provider_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
@@ -684,9 +684,9 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id IN (
       AND i.subscription_id=sqlc.arg(subscription_id)::uuid
       AND (i.payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz
     UNION ALL
-    -- An order's sale paid the first period of the subscription its line made.
-    SELECT i.id FROM billing.order_lines l
-    JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+    -- An invoice's sale paid the first period of the subscription its line made.
+    SELECT i.id FROM billing.invoice_lines l
+    JOIN billing.invoices o ON o.merchant_id = l.merchant_id AND o.id = l.invoice_id
     JOIN billing.provider_intents i ON i.merchant_id = o.merchant_id AND i.payload->>'order_id' = o.id::text
     WHERE l.merchant_id=sqlc.arg(merchant_id)::uuid AND l.subscription_id=sqlc.arg(subscription_id)::uuid
       AND o.status='complete'
@@ -820,8 +820,8 @@ SELECT EXISTS (
       OR NOT COALESCE(i.result_evidence->>'transaction_id' = i.result_evidence->>'reverted_transaction_id', false))
     AND NOT EXISTS (
       SELECT 1 FROM billing.provider_bills b
-      JOIN billing.orders o ON o.merchant_id=b.merchant_id AND o.id=b.order_id
-      JOIN billing.payments p ON p.merchant_id=o.merchant_id AND p.order_id=o.id
+      JOIN billing.invoices o ON o.merchant_id=b.merchant_id AND o.id=b.invoice_id
+      JOIN billing.payments p ON p.merchant_id=o.merchant_id AND p.invoice_id=o.id
       WHERE b.merchant_id=i.merchant_id AND b.psp_id=i.psp_id
         AND b.source_kind='solana_pull' AND b.source_key=i.id::text
         AND b.settled_at IS NOT NULL AND o.collection_owner='engine'

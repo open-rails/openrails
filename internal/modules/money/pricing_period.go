@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
-// PricingPeriod is the billing period instant at falls in, as usage orders
+// PricingPeriod is the billing period instant at falls in, as usage invoices
 // close it, read without writing. A currency's period is its usage-billing
 // anniversary, or the merchant's boundary anchored on the customer's first
 // activity in it; with no currency, or no activity yet, the boundary is

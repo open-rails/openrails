@@ -58,17 +58,17 @@ RETURNING *;
 INSERT INTO billing.ledger_transfers (
     merchant_id, book, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to, operation,
-    source, source_id, credit_grant_id, customer_id, invoker_id, resource, order_id,
+    source, source_id, credit_grant_id, customer_id, invoker_id, resource, invoice_id,
     effective_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, 'units', sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text,
     0, sqlc.arg(operation)::text,
     sqlc.arg(source)::text, sqlc.arg(source_id)::text, sqlc.narg(credit_grant_id)::uuid, sqlc.narg(customer_id)::uuid,
-    sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(order_id)::uuid,
+    sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(invoice_id)::uuid,
     now()
 )
-ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, invoice_line_id, book)
 DO NOTHING
 RETURNING *;
 
@@ -79,22 +79,22 @@ RETURNING *;
 INSERT INTO billing.ledger_transfers (
     merchant_id, book, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to, operation, source, source_id, credit_grant_id, customer_id,
-    invoker_id, resource, order_id, order_line_id, product_id, effective_at, revenue_schedule_id
+    invoker_id, resource, invoice_id, invoice_line_id, product_id, effective_at, revenue_schedule_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, 'general', sqlc.arg(debit_account_id)::uuid, sqlc.arg(credit_account_id)::uuid,
     sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, sqlc.arg(transfer_type)::text,
     0, sqlc.arg(operation)::text, sqlc.arg(source)::text, sqlc.arg(source_id)::text,
     sqlc.narg(credit_grant_id)::uuid, sqlc.narg(customer_id)::uuid,
-    sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(order_id)::uuid,
-    sqlc.narg(order_line_id)::uuid, sqlc.narg(product_id)::uuid,
+    sqlc.narg(invoker_id)::text, sqlc.narg(resource)::text, sqlc.narg(invoice_id)::uuid,
+    sqlc.narg(invoice_line_id)::uuid, sqlc.narg(product_id)::uuid,
     sqlc.arg(effective_at)::timestamptz, sqlc.narg(revenue_schedule_id)::uuid
 )
-ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, order_line_id, book)
+ON CONFLICT (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, credit_grant_id, invoice_line_id, book)
 DO NOTHING
 RETURNING *;
 
 -- GetLedgerTransferAtCoordinate reads the row a conflicting insert lost to —
--- the full physical identity, lot, order line and book included, so a
+-- the full physical identity, lot, invoice line and book included, so a
 -- multi-lot spend resolves the right leg.
 -- name: GetLedgerTransferAtCoordinate :one
 SELECT * FROM billing.ledger_transfers
@@ -107,7 +107,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND source = sqlc.arg(source)::text
   AND source_id = sqlc.arg(source_id)::text
   AND credit_grant_id IS NOT DISTINCT FROM sqlc.narg(credit_grant_id)::uuid
-  AND order_line_id IS NOT DISTINCT FROM sqlc.narg(order_line_id)::uuid;
+  AND invoice_line_id IS NOT DISTINCT FROM sqlc.narg(invoice_line_id)::uuid;
 
 -- LedgerAccountBalance: net credit (credits - debits) from the maintained
 -- account counters. A merchant-wide general-ledger account keeps none and

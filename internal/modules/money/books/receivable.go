@@ -4,7 +4,7 @@ package books
 // postings, running charges and failed usage accrue it (AccrueUsage); credit
 // repays it at face (RepayFromCredit); a card, a remittance or an observed
 // provider payment collects it (CollectUsage); a waiver writes it off
-// (WaiveUsage); an uncollectible usage order carries an allowance against it
+// (WaiveUsage); an uncollectible usage invoice carries an allowance against it
 // (SettleAllowance); a chargeback of a collection reopens it (ReopenUsage)
 // and its won dispute collects it again (ResettleUsage). Owed that accrued
 // before the books has no receivable: what collects it is revenue, and what
@@ -26,22 +26,22 @@ import (
 
 // The operations of the receivable's movements.
 const (
-	// OpUsageCollection applies a usage order payment's cash to the
+	// OpUsageCollection applies a usage invoice payment's cash to the
 	// receivable, and OpUsageCollectionRevenue what it paid beyond it to
 	// usage revenue, both at (_, payment, id).
 	OpUsageCollection        Operation = "usage_collection"
 	OpUsageCollectionRevenue Operation = "usage_collection_revenue"
-	// OpUsageWaiver writes a voided usage order's due off at (_, order, id).
+	// OpUsageWaiver writes a voided usage invoice's due off at (_, invoice, id).
 	OpUsageWaiver Operation = "usage_waiver"
-	// OpAllowance moves an uncollectible usage order's allowance at
-	// (allowance, order:<id>, n).
+	// OpAllowance moves an uncollectible usage invoice's allowance at
+	// (allowance, invoice:<id>, n).
 	OpAllowance Operation = "allowance"
-	// OpDisputeWonRevenue is a usage order payment's won dispute settling
+	// OpDisputeWonRevenue is a usage invoice payment's won dispute settling
 	// owed from before the books again, as usage revenue; the owed it
 	// collects from the receivable is at OpDisputeWonReopened, the rest at
 	// OpDisputeWon.
 	OpDisputeWonRevenue Operation = "dispute_won_revenue"
-	// OpDisputeWonLoss gives back what a usage order payment's chargeback
+	// OpDisputeWonLoss gives back what a usage invoice payment's chargeback
 	// lost to chargebacks.
 	OpDisputeWonLoss Operation = "dispute_won_loss"
 )
@@ -59,17 +59,17 @@ func (b *Books) Receivable(ctx context.Context, customer uuid.UUID, currency str
 	return r, nil
 }
 
-// UsageCollection is a usage order payment's cash that settles owed.
+// UsageCollection is a usage invoice payment's cash that settles owed.
 type UsageCollection struct {
 	Payment, Customer uuid.UUID
-	Order             *uuid.UUID
+	Invoice           *uuid.UUID
 	Currency          string
 	// Amount is the owed it settles, no more than the payment received.
 	Amount int64
 	At     time.Time
 }
 
-// CollectUsage applies a usage order payment's cash, which Receive booked
+// CollectUsage applies a usage invoice payment's cash, which Receive booked
 // to unapplied cash, to what it settles, never beyond what the payment left
 // unapplied: as much as the customer's receivable holds, usage_collected DR
 // unapplied_cash / CR usage_receivable; the rest settles owed from before the
@@ -104,7 +104,7 @@ func (b *Books) CollectUsage(ctx context.Context, c UsageCollection) error {
 		}
 		if _, _, err := b.Post(ctx, Posting{
 			Debit: Ref{Type: UnappliedCash}, Credit: leg.credit, Amount: leg.amount, Currency: c.Currency, Type: UsageCollected,
-			Coord: Coord{Operation: leg.op, Source: "payment", SourceID: c.Payment.String()}, EffectiveAt: c.At, Customer: &c.Customer, Order: c.Order,
+			Coord: Coord{Operation: leg.op, Source: "payment", SourceID: c.Payment.String()}, EffectiveAt: c.At, Customer: &c.Customer, Invoice: c.Invoice,
 		}); err != nil {
 			return err
 		}
@@ -112,67 +112,67 @@ func (b *Books) CollectUsage(ctx context.Context, c UsageCollection) error {
 	return nil
 }
 
-// WaiveUsage writes off a voided usage order's due: its allowance first
+// WaiveUsage writes off a voided usage invoice's due: its allowance first
 // (usage_waived DR allowance_doubtful), the rest to revenue_adjustments, CR
 // usage_receivable, all within what the receivable holds.
-func (b *Books) WaiveUsage(ctx context.Context, order gen.BillingOrder, due int64, at time.Time) error {
-	if due <= 0 || CheckCurrency(order.Currency) != nil {
+func (b *Books) WaiveUsage(ctx context.Context, invoice gen.BillingInvoice, due int64, at time.Time) error {
+	if due <= 0 || CheckCurrency(invoice.Currency) != nil {
 		return nil
 	}
-	receivable, err := b.Receivable(ctx, order.CustomerID, order.Currency)
+	receivable, err := b.Receivable(ctx, invoice.CustomerID, invoice.Currency)
 	if err != nil {
 		return err
 	}
-	allowance, err := b.q.GetUsageAllowance(ctx, gen.GetUsageAllowanceParams{MerchantID: b.merchant, Source: allowanceSource(order.ID)})
+	allowance, err := b.q.GetUsageAllowance(ctx, gen.GetUsageAllowanceParams{MerchantID: b.merchant, Source: allowanceSource(invoice.ID)})
 	if err != nil {
 		return err
 	}
 	receivable = max(receivable, 0)
 	writeOff := min(max(allowance.Allowance, 0), due, receivable)
-	if err := b.moveAllowance(ctx, order, Ref{Type: AllowanceDoubtful}, receivableOf(order), writeOff, UsageWaived, allowance.Legs, at); err != nil {
+	if err := b.moveAllowance(ctx, invoice, Ref{Type: AllowanceDoubtful}, receivableOf(invoice), writeOff, UsageWaived, allowance.Legs, at); err != nil {
 		return err
 	}
 	if waived := min(due-writeOff, receivable-writeOff); waived > 0 {
 		_, _, err = b.Post(ctx, Posting{
-			Debit: Ref{Type: RevenueAdjustments}, Credit: receivableOf(order), Amount: waived, Currency: order.Currency, Type: UsageWaived,
-			Coord: Coord{Operation: OpUsageWaiver, Source: "order", SourceID: order.ID.String()}, EffectiveAt: at, Customer: &order.CustomerID, Order: &order.ID,
+			Debit: Ref{Type: RevenueAdjustments}, Credit: receivableOf(invoice), Amount: waived, Currency: invoice.Currency, Type: UsageWaived,
+			Coord: Coord{Operation: OpUsageWaiver, Source: "order", SourceID: invoice.ID.String()}, EffectiveAt: at, Customer: &invoice.CustomerID, Invoice: &invoice.ID,
 		})
 	}
 	return err
 }
 
-// SettleAllowance brings a usage order's allowance for doubtful accounts to
+// SettleAllowance brings a usage invoice's allowance for doubtful accounts to
 // what its state calls for, after any change to what it has due or whether
-// it is open: an uncollectible order reserves its due, within what the
+// it is open: an uncollectible invoice reserves its due, within what the
 // receivable holds beyond the customer's other allowances (bad_debt DR
 // bad_debt / CR allowance_doubtful), and keeps no more than it still has
-// due; any other order none (bad_debt_recovery back). A voided order's
+// due; any other invoice none (bad_debt_recovery back). A voided invoice's
 // allowance is its waiver's to write off.
-func (b *Books) SettleAllowance(ctx context.Context, orderID uuid.UUID, at time.Time) error {
-	order, err := b.q.GetOrder(ctx, gen.GetOrderParams{MerchantID: b.merchant, ID: orderID})
+func (b *Books) SettleAllowance(ctx context.Context, invoiceID uuid.UUID, at time.Time) error {
+	invoice, err := b.q.GetInvoice(ctx, gen.GetInvoiceParams{MerchantID: b.merchant, ID: invoiceID})
 	if err != nil {
 		return err
 	}
-	if order.Origin != "usage" || order.Status == "void" || CheckCurrency(order.Currency) != nil {
+	if invoice.Origin != "usage" || invoice.Status == "void" || CheckCurrency(invoice.Currency) != nil {
 		return nil
 	}
-	current, err := b.q.GetUsageAllowance(ctx, gen.GetUsageAllowanceParams{MerchantID: b.merchant, Source: allowanceSource(order.ID)})
+	current, err := b.q.GetUsageAllowance(ctx, gen.GetUsageAllowanceParams{MerchantID: b.merchant, Source: allowanceSource(invoice.ID)})
 	if err != nil {
 		return err
 	}
 	due := int64(0)
-	if order.AmountPaid != nil {
-		due = max(order.Total-*order.AmountPaid, 0)
+	if invoice.AmountPaid != nil {
+		due = max(invoice.Total-*invoice.AmountPaid, 0)
 	}
 	target := int64(0)
-	if order.Status == "uncollectible" {
+	if invoice.Status == "uncollectible" {
 		target = min(current.Allowance, due)
 		if current.Allowance <= 0 {
-			receivable, err := b.Receivable(ctx, order.CustomerID, order.Currency)
+			receivable, err := b.Receivable(ctx, invoice.CustomerID, invoice.Currency)
 			if err != nil {
 				return err
 			}
-			others, err := b.q.GetCustomerUsageAllowance(ctx, gen.GetCustomerUsageAllowanceParams{MerchantID: b.merchant, CustomerID: order.CustomerID, Currency: order.Currency})
+			others, err := b.q.GetCustomerUsageAllowance(ctx, gen.GetCustomerUsageAllowanceParams{MerchantID: b.merchant, CustomerID: invoice.CustomerID, Currency: invoice.Currency})
 			if err != nil {
 				return err
 			}
@@ -181,34 +181,34 @@ func (b *Books) SettleAllowance(ctx context.Context, orderID uuid.UUID, at time.
 	}
 	switch delta := target - current.Allowance; {
 	case delta > 0:
-		return b.moveAllowance(ctx, order, Ref{Type: BadDebt}, Ref{Type: AllowanceDoubtful}, delta, BadDebtWrittenOff, current.Legs, at)
+		return b.moveAllowance(ctx, invoice, Ref{Type: BadDebt}, Ref{Type: AllowanceDoubtful}, delta, BadDebtWrittenOff, current.Legs, at)
 	case delta < 0:
-		return b.moveAllowance(ctx, order, Ref{Type: AllowanceDoubtful}, Ref{Type: BadDebt}, -delta, BadDebtRecovered, current.Legs, at)
+		return b.moveAllowance(ctx, invoice, Ref{Type: AllowanceDoubtful}, Ref{Type: BadDebt}, -delta, BadDebtRecovered, current.Legs, at)
 	}
 	return nil
 }
 
-// moveAllowance posts one leg of an order's allowance, the order's legs-th.
-func (b *Books) moveAllowance(ctx context.Context, order gen.BillingOrder, debit, credit Ref, amount int64, typ TransferType, legs int64, at time.Time) error {
+// moveAllowance posts one leg of an invoice's allowance, the invoice's legs-th.
+func (b *Books) moveAllowance(ctx context.Context, invoice gen.BillingInvoice, debit, credit Ref, amount int64, typ TransferType, legs int64, at time.Time) error {
 	if amount <= 0 {
 		return nil
 	}
 	_, _, err := b.Post(ctx, Posting{
-		Debit: debit, Credit: credit, Amount: amount, Currency: order.Currency, Type: typ,
-		Coord:       Coord{Operation: OpAllowance, Source: allowanceSource(order.ID), SourceID: strconv.FormatInt(legs+1, 10)},
-		EffectiveAt: at, Customer: &order.CustomerID, Order: &order.ID,
+		Debit: debit, Credit: credit, Amount: amount, Currency: invoice.Currency, Type: typ,
+		Coord:       Coord{Operation: OpAllowance, Source: allowanceSource(invoice.ID), SourceID: strconv.FormatInt(legs+1, 10)},
+		EffectiveAt: at, Customer: &invoice.CustomerID, Invoice: &invoice.ID,
 	})
 	return err
 }
 
-func allowanceSource(order uuid.UUID) string { return "order:" + order.String() }
+func allowanceSource(invoice uuid.UUID) string { return "order:" + invoice.String() }
 
-func receivableOf(order gen.BillingOrder) Ref {
-	customer := order.CustomerID
+func receivableOf(invoice gen.BillingInvoice) Ref {
+	customer := invoice.CustomerID
 	return Ref{Type: UsageReceivable, Customer: &customer}
 }
 
-// UsageReversal is a chargeback of a usage order payment, or its won
+// UsageReversal is a chargeback of a usage invoice payment, or its won
 // dispute's recovery, and what the units book made of it.
 type UsageReversal struct {
 	// Reversal is the reversal's payment row; Original the payment it
@@ -225,7 +225,7 @@ type UsageReversal struct {
 	Loss int64
 }
 
-// ReopenUsage posts a chargeback of a usage order payment, all at
+// ReopenUsage posts a chargeback of a usage invoice payment, all at
 // (chargeback, payment, its id), and returns its loss: the owed it reopened
 // is receivable again, usage_reopened DR usage_receivable / CR the payment's
 // cash account; the rest of the cash leaves what the payment still holds in
@@ -249,7 +249,7 @@ func (b *Books) ReopenUsage(ctx context.Context, r UsageReversal) (int64, error)
 	})
 }
 
-// ResettleUsage posts a won dispute's recovery of a usage order payment and
+// ResettleUsage posts a won dispute's recovery of a usage invoice payment and
 // returns what it gave back of the chargebacks' loss and what it brought
 // beyond: the owed it settled again leaves the receivable as far as it holds
 // it (dispute_won DR the cash account / CR usage_receivable, at
@@ -284,7 +284,7 @@ func (b *Books) ResettleUsage(ctx context.Context, r UsageReversal) (reversed, e
 // customer raises: the merchant may refund it instead.
 const CustomerCreditFindingType = "books.dispute.customer_credit"
 
-// RaiseCustomerCredit records that a won dispute of a usage order payment
+// RaiseCustomerCredit records that a won dispute of a usage invoice payment
 // brought back more than the customer still owed, credited to them as a credit lot.
 func (b *Books) RaiseCustomerCredit(ctx context.Context, recovery gen.BillingPayment, lot uuid.UUID, amount int64) error {
 	raw, err := json.Marshal(map[string]any{"payment_id": recovery.ID, "refunded_payment_id": recovery.RefundedPaymentID, "credit_grant_id": lot,
@@ -292,7 +292,7 @@ func (b *Books) RaiseCustomerCredit(ctx context.Context, recovery gen.BillingPay
 	if err != nil {
 		return err
 	}
-	action := "A won dispute returned more of a usage order payment than the customer still owed. The rest is credit on their balance; refund it to the customer if they should have the money back instead."
+	action := "A won dispute returned more of a usage invoice payment than the customer still owed. The rest is credit on their balance; refund it to the customer if they should have the money back instead."
 	if _, err := b.q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID: b.merchant, FindingType: CustomerCreditFindingType, SubjectKey: "payment:" + recovery.ID.String(),
 		Severity: "low", Status: "requires_review", RecommendedAction: &action, Evidence: raw,
@@ -317,7 +317,7 @@ func (b *Books) reversalLegs(ctx context.Context, reversal gen.BillingPayment, l
 		if _, _, err := b.Post(ctx, Posting{
 			Debit: leg.debit, Credit: leg.credit, Amount: leg.amount, Currency: reversal.Currency, Type: leg.typ,
 			Coord:       Coord{Operation: leg.op, Source: "payment", SourceID: reversal.ID.String()},
-			EffectiveAt: reversal.PurchasedAt, Customer: &reversal.CustomerID, Order: reversal.OrderID,
+			EffectiveAt: reversal.PurchasedAt, Customer: &reversal.CustomerID, Invoice: reversal.InvoiceID,
 		}); err != nil {
 			return err
 		}

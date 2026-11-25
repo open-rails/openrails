@@ -141,7 +141,7 @@ func decodeForgivenLines(raw []byte) ([]ForgivenLine, error) {
 }
 
 // shareForgiven splits amount (either sign) across weights by largest
-// remainder, in keys' order, leaving out empty shares.
+// remainder, in keys' invoice, leaving out empty shares.
 func shareForgiven(amount int64, keys []forgivenKey, weights []int64) []ForgivenLine {
 	sign := int64(1)
 	if amount < 0 {

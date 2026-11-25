@@ -203,15 +203,15 @@ func TestBooks(t *testing.T) {
 		}
 		require.Equal(t, posted.ID, replay.ID, "a replayed posting lands once")
 		// A coordinate that posted one transfer refuses a different one, and a
-		// posting for an order names its customer.
-		order := uuid.New()
+		// posting for an invoice names its customer.
+		invoice := uuid.New()
 		for _, bad := range []struct {
 			change func(*books.Posting)
 			err    error
 		}{
 			{func(p *books.Posting) { p.Amount++ }, books.ErrCoordinateReused},
 			{func(p *books.Posting) { p.EffectiveAt = p.EffectiveAt.Add(time.Minute) }, books.ErrCoordinateReused},
-			{func(p *books.Posting) { p.Order = &order }, books.ErrCoordinateReused},
+			{func(p *books.Posting) { p.Invoice = &invoice }, books.ErrCoordinateReused},
 		} {
 			err := booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 				p := accrual("USD", "accepted")
@@ -224,7 +224,7 @@ func TestBooks(t *testing.T) {
 		require.ErrorContains(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
 			_, _, err := books.New(q, mid).Post(ctx, books.Posting{
 				Debit: books.Ref{Type: books.RevenueAdjustments}, Credit: books.Ref{Type: books.DeferredRevenue},
-				Amount: 100, Currency: "USD", Type: books.RevenueAdjusted, EffectiveAt: w.clock.Now(), Order: &order,
+				Amount: 100, Currency: "USD", Type: books.RevenueAdjusted, EffectiveAt: w.clock.Now(), Invoice: &invoice,
 				Coord: books.Coord{Operation: "revenue_adjustment", Source: "critical", SourceID: "unattributed"},
 			})
 			return err
@@ -639,7 +639,7 @@ func TestBooks(t *testing.T) {
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
 
-	t.Run("OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-order-both-commit", func(t *testing.T) {
+	t.Run("OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-invoice-both-commit", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		w := a.world
 		mid := w.alpha.MerchantID().UUID()
@@ -703,7 +703,7 @@ func TestBooks(t *testing.T) {
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
 
-	t.Run("OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-orders-all-commit", func(t *testing.T) {
+	t.Run("OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-invoices-all-commit", func(t *testing.T) {
 		w := newWorld(t)
 		mid := w.alpha.MerchantID().UUID()
 		customer := billing.CustomerID(uuid.New())
@@ -853,7 +853,7 @@ products:
 		fundBooks(t, w, second, "USD", 1000)
 		a, b := first.UUID(), second.UUID()
 		notify := func(ctx context.Context, q *gen.Queries, customer uuid.UUID) error {
-			return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{ID: uuid.New(), MerchantID: mid, CustomerID: customer, EventType: "order_due"})
+			return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{ID: uuid.New(), MerchantID: mid, CustomerID: customer, EventType: "invoice_due"})
 		}
 		// Every row both commits lock exists, the merchant's stream included.
 		require.NoError(t, booksTx(t, w, func(ctx context.Context, q *gen.Queries) error {
@@ -877,7 +877,7 @@ products:
 			return notify(ctx, q, a)
 		})
 		posted.blocked(t, w, "the transaction that posted first")
-		// The second queues an event, then posts (a usage order made due):
+		// The second queues an event, then posts (a usage invoice made due):
 		// its commit takes the ledger step before the event streams, so it
 		// waits on the first's totals holding no stream.
 		queued := booksCommit(t, w, func(ctx context.Context, _ pgx.Tx, q *gen.Queries) error {
@@ -911,7 +911,7 @@ products:
 		require.ErrorContains(t, err, "ledger or MRR work queued after the event log flushed")
 	})
 
-	t.Run("OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit", func(t *testing.T) {
+	t.Run("OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-invoice-both-commit", func(t *testing.T) {
 		w := newWorld(t)
 		merchants := []uuid.UUID{w.alpha.MerchantID().UUID(), w.beta.MerchantID().UUID()}
 		slices.SortFunc(merchants, func(x, y uuid.UUID) int { return bytes.Compare(x[:], y[:]) })
@@ -1218,7 +1218,7 @@ func booksRollup(t *testing.T, w *world, table string, merchant uuid.UUID) []str
 
 // beforeBooks rewrites an archive into the shape exports had before the
 // books: accounts by their former names with no book, class or PSP;
-// transfers with no book, effective_at, order line or product.
+// transfers with no book, effective_at, invoice line or product.
 func beforeBooks(t *testing.T, archive []byte) []byte {
 	t.Helper()
 	former := map[string]string{}
@@ -1260,7 +1260,7 @@ func beforeBooks(t *testing.T, archive []byte) []byte {
 			require.NotEmpty(t, old, *v[typeAt])
 			v[typeAt] = &old
 		case "ledger_transfers":
-			// Before the books: no book, effective_at, order line or product,
+			// Before the books: no book, effective_at, invoice line or product,
 			// nor the revenue schedule that came after them.
 			require.Len(t, v, len(transfers.Columns))
 			v = v[:len(v)-5]

@@ -41,7 +41,7 @@ func (q *Queries) GetProviderCycleReceipt(ctx context.Context, arg GetProviderCy
 }
 
 const getProviderSchedule = `-- name: GetProviderSchedule :one
-SELECT merchant_id, subscription_id, customer_id, psp_id, initial_order_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid AND source_reference = $3::text FOR UPDATE
+SELECT merchant_id, subscription_id, customer_id, psp_id, initial_invoice_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at FROM billing.provider_schedules WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid AND source_reference = $3::text FOR UPDATE
 `
 
 type GetProviderScheduleParams struct {
@@ -58,7 +58,7 @@ func (q *Queries) GetProviderSchedule(ctx context.Context, arg GetProviderSchedu
 		&i.SubscriptionID,
 		&i.CustomerID,
 		&i.PspID,
-		&i.InitialOrderID,
+		&i.InitialInvoiceID,
 		&i.AcceptedVersion,
 		&i.SourceReference,
 		&i.ProviderReference,
@@ -108,7 +108,7 @@ func (q *Queries) InsertProviderCycleReceipt(ctx context.Context, arg InsertProv
 }
 
 const insertProviderSchedule = `-- name: InsertProviderSchedule :execrows
-INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_order_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
+INSERT INTO billing.provider_schedules (merchant_id, subscription_id, customer_id, psp_id, initial_invoice_id, accepted_version, source_reference, provider_reference, first_due_at, cadence_hours, cadence_months, accepted_bill, created_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
         $5::uuid,
         (SELECT COALESCE(MAX(accepted_version), 0) + 1 FROM billing.provider_schedules WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid),
@@ -122,7 +122,7 @@ type InsertProviderScheduleParams struct {
 	SubscriptionID    uuid.UUID
 	CustomerID        uuid.UUID
 	PspID             uuid.UUID
-	InitialOrderID    *uuid.UUID
+	InitialInvoiceID  *uuid.UUID
 	SourceReference   string
 	ProviderReference string
 	FirstDueAt        time.Time
@@ -138,7 +138,7 @@ func (q *Queries) InsertProviderSchedule(ctx context.Context, arg InsertProvider
 		arg.SubscriptionID,
 		arg.CustomerID,
 		arg.PspID,
-		arg.InitialOrderID,
+		arg.InitialInvoiceID,
 		arg.SourceReference,
 		arg.ProviderReference,
 		arg.FirstDueAt,
@@ -173,7 +173,7 @@ func (q *Queries) LatestSettledProviderCycle(ctx context.Context, arg LatestSett
 }
 
 const listAcceptedProviderSchedules = `-- name: ListAcceptedProviderSchedules :many
-SELECT ps.merchant_id, ps.subscription_id, ps.customer_id, ps.psp_id, ps.initial_order_id, ps.accepted_version, ps.source_reference, ps.provider_reference, ps.first_due_at, ps.cadence_hours, ps.cadence_months, ps.accepted_bill, ps.created_at FROM billing.provider_schedules ps
+SELECT ps.merchant_id, ps.subscription_id, ps.customer_id, ps.psp_id, ps.initial_invoice_id, ps.accepted_version, ps.source_reference, ps.provider_reference, ps.first_due_at, ps.cadence_hours, ps.cadence_months, ps.accepted_bill, ps.created_at FROM billing.provider_schedules ps
 JOIN billing.subscriptions s ON s.merchant_id = ps.merchant_id AND s.id = ps.subscription_id
 WHERE ps.merchant_id = $1::uuid AND ps.subscription_id = $2::uuid
   AND billing.rail_subscription_key(s.rail, ps.provider_reference) = billing.rail_subscription_key(s.rail, $3::text)
@@ -202,7 +202,7 @@ func (q *Queries) ListAcceptedProviderSchedules(ctx context.Context, arg ListAcc
 			&i.SubscriptionID,
 			&i.CustomerID,
 			&i.PspID,
-			&i.InitialOrderID,
+			&i.InitialInvoiceID,
 			&i.AcceptedVersion,
 			&i.SourceReference,
 			&i.ProviderReference,
@@ -223,7 +223,7 @@ func (q *Queries) ListAcceptedProviderSchedules(ctx context.Context, arg ListAcc
 }
 
 const listProviderSchedules = `-- name: ListProviderSchedules :many
-SELECT ps.merchant_id, ps.subscription_id, ps.customer_id, ps.psp_id, ps.initial_order_id, ps.accepted_version, ps.source_reference, ps.provider_reference, ps.first_due_at, ps.cadence_hours, ps.cadence_months, ps.accepted_bill, ps.created_at FROM billing.provider_schedules ps
+SELECT ps.merchant_id, ps.subscription_id, ps.customer_id, ps.psp_id, ps.initial_invoice_id, ps.accepted_version, ps.source_reference, ps.provider_reference, ps.first_due_at, ps.cadence_hours, ps.cadence_months, ps.accepted_bill, ps.created_at FROM billing.provider_schedules ps
 JOIN billing.subscriptions s ON s.merchant_id = ps.merchant_id AND s.id = ps.subscription_id
 WHERE ps.merchant_id = $1::uuid AND ps.subscription_id = $2::uuid
   AND billing.rail_subscription_key(s.rail, ps.provider_reference) = billing.rail_subscription_key(s.rail, $3::text)
@@ -252,7 +252,7 @@ func (q *Queries) ListProviderSchedules(ctx context.Context, arg ListProviderSch
 			&i.SubscriptionID,
 			&i.CustomerID,
 			&i.PspID,
-			&i.InitialOrderID,
+			&i.InitialInvoiceID,
 			&i.AcceptedVersion,
 			&i.SourceReference,
 			&i.ProviderReference,
@@ -291,7 +291,7 @@ func (q *Queries) SameProviderSubscription(ctx context.Context, arg SameProvider
 }
 
 const subscriptionRenewalSettledOn = `-- name: SubscriptionRenewalSettledOn :one
-SELECT EXISTS (SELECT 1 FROM billing.orders
+SELECT EXISTS (SELECT 1 FROM billing.invoices
     WHERE merchant_id = $1::uuid AND origin = 'subscription' AND subscription_id = $2::uuid
       AND period_starts_at >= $3::timestamptz AND period_starts_at < $4::timestamptz
       AND subscription_bill_kind = 'renewal' AND status = 'complete')::boolean

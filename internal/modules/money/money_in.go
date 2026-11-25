@@ -19,7 +19,7 @@ type ChargeRequest struct {
 	MerchantID      uuid.UUID
 	Payer           identity.CustomerID
 	Invoker         string
-	OrderID         *uuid.UUID
+	InvoiceID       *uuid.UUID
 	PaymentMethodID uuid.UUID
 	// AmountCents is rail minor units (cents for USD, whole yen for JPY),
 	// always from NativeToRailMinor, never an inline /10_000 or /100.

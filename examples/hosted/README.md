@@ -3,7 +3,7 @@
 The course store on the hosted platform. The backend calls the platform with
 a merchant API key and mints a customer token for each signed-in user; the
 browser's billing-ui buys and manages billing with it. `POST /api/checkout`
-answers a hosted pay URL from `CreateOrder` instead; `CheckEntitlements` gates
+answers a hosted pay URL from `CreateInvoice` instead; `CheckEntitlements` gates
 the courses ([client: credentials](../../docs/client.md#credentials)).
 
 1. In the console, create the merchant, its PSP and an API key; note the API URL and the merchant id.

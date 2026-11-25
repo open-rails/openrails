@@ -47,7 +47,7 @@ type Routes struct {
 // customer and webhook routes, each off until turned on.
 type RouteGroups struct {
 	// Admin is customer support (/v1/admin): customers, their
-	// subscriptions, payments, refunds, orders, credits, access and usage.
+	// subscriptions, payments, refunds, invoices, credits, access and usage.
 	// Its reads need billing.MerchantCustomerRead or RootCustomerRead, its
 	// changes MerchantCustomerManage or RootCustomerManage.
 	Admin bool `yaml:"admin"`
@@ -69,7 +69,7 @@ type RouteGroups struct {
 	// operations, host events and SCIM provisioning. They take an
 	// application Auth says a request is (its Identity's SubjectKind) and
 	// refuse a person. Each route needs its own permission (entitlements,
-	// usage, costs, events, orders, customers), so a program's role
+	// usage, costs, events, invoices, customers), so a program's role
 	// grants only what its task needs. SCIM takes any application at the
 	// merchant or the merchant's provisioning token, and is not mounted with
 	// Deps.UserInfo, which reads the directory instead. Embedded, the Client

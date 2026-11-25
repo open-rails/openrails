@@ -85,7 +85,7 @@ verifies, then executes. Only on the provider's confirmation is the row
 
 ### Card-number firewall
 
-`cardguard.ContainsPAN` is the one detector: 13 to 19 digits in a plausible grouping, Luhn-valid and in an issued range, except one unseparated run of at most 15 digits right after a `+` (an E.164 phone number). Unknown request fields are refused, and every field of a card save, edit or confirmation and of an order create or payment is scanned before anything else (`refuseCardNumber`, `cardguard.PANField`; `400 invalid_param` naming the field), as are idempotency keys, external transaction ids and declared books; an unknown field named by a card number is refused without echoing it. The typed `card` field (`billing.Card`), the one field a card number belongs in, is admitted only on a `card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last four and expiry are kept.
+`cardguard.ContainsPAN` is the one detector: 13 to 19 digits in a plausible grouping, Luhn-valid and in an issued range, except one unseparated run of at most 15 digits right after a `+` (an E.164 phone number). Unknown request fields are refused, and every field of a card save, edit or confirmation and of an invoice create or payment is scanned before anything else (`refuseCardNumber`, `cardguard.PANField`; `400 invalid_param` naming the field), as are idempotency keys, external transaction ids and declared books; an unknown field named by a card number is refused without echoing it. The typed `card` field (`billing.Card`), the one field a card number belongs in, is admitted only on a `card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last four and expiry are kept.
 
 Tables owned: `payment_methods`, `payment_method_versions`, `mandates`,
 `custodians`, `psp_customers`, `stored_card_checks`.
@@ -182,14 +182,14 @@ Checks:
 
 ### 8. Abuse protection
 
-`/v1/me/payment-methods*` is in the `payment` rate-limit bucket (40 a minute) with captcha escalation. Every card save, whatever its PSP or custodian, and every order payment checks the card-testing ledger (`refuseBlockedCardAttempt`, `card_attempts_blocked`) before any provider call ([limits](../standalone.md#abuse-limits)). The firewall above refuses card numbers.
+`/v1/me/payment-methods*` is in the `payment` rate-limit bucket (40 a minute) with captcha escalation. Every card save, whatever its PSP or custodian, and every invoice payment checks the card-testing ledger (`refuseBlockedCardAttempt`, `card_attempts_blocked`) before any provider call ([limits](../standalone.md#abuse-limits)). The firewall above refuses card numbers.
 
 Checks:
 - OR-J12-S12 and OR-J38-S36: the detector's ranges, and numeric references that are not cards.
 - OR-J12-S05: no card number, security code or secret in outputs or logs.
-- OR-J12-S14: a card number in any billing detail of a token save or an order payment, in a token, a return URL or a token symbol is refused, and NMI sees nothing.
+- OR-J12-S14: a card number in any billing detail of a token save or an invoice payment, in a token, a return URL or a token symbol is refused, and NMI sees nothing.
 - OR-J12-S15: a customer the ledger blocks is refused before HyperSwitch is asked; `CreatePaymentMethod` checks the ledger once, before choosing a branch.
-- OR-J12-S16: an E.164 phone, a UUID, a Solana address and a numeric order id pass on card saves, edits, confirmations and order pays, each of which refuses a card number; no request header is stored on a card.
+- OR-J12-S16: an E.164 phone, a UUID, a Solana address and a numeric order id pass on card saves, edits, confirmations and invoice pays, each of which refuses a card number; no request header is stored on a card.
 
 ### 9. Destructive-action safeguards
 
@@ -206,7 +206,7 @@ Checks:
 
 ## Tests
 
-- J12: OR-J12-S01 to S04, S15 (`TestPaymentMethodContracts`), S05 (`TestFinancialFailures`), S06 (`TestMerchantOwnedBasisTheoryCardLifecycle`), S07, S71 (`TestMerchantCardRemoval`), S08 to S11, S30 (`TestStoredCardRefresh`), S12, S14, S16 (`TestCardGuard`), S13 (`TestStripeCustomerPerAccount`), S70 (`TestOrderExpiryClock`).
+- J12: OR-J12-S01 to S04, S15 (`TestPaymentMethodContracts`), S05 (`TestFinancialFailures`), S06 (`TestMerchantOwnedBasisTheoryCardLifecycle`), S07, S71 (`TestMerchantCardRemoval`), S08 to S11, S30 (`TestStoredCardRefresh`), S12, S14, S16 (`TestCardGuard`), S13 (`TestStripeCustomerPerAccount`), S70 (`TestInvoiceExpiryClock`).
 - Custody and imports: OR-J06-S06 (`TestMerchantCustodyConfiguration`), OR-J38-S36 (`TestCardGuard`).
 - Agreements: OR-J14-S06 (`TestRenewalAgreements`), OR-J17-S04 (`TestCancellationRecoveryContracts`), OR-J26-S58 (`TestUsageBillingContracts`), OR-J16-S02 (`TestDunning`: a healthy card does not revive a terminal decline).
 

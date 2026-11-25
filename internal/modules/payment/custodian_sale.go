@@ -26,7 +26,7 @@ import (
 )
 
 // Custodian-held cards: the custodian (Basis Theory) holds the card and the
-// NMI PSP's own gateway charges it through the custodian's proxy. Order pay,
+// NMI PSP's own gateway charges it through the custodian's proxy. Invoice pay,
 // the NMI sale and platform card setup charge through this service.
 // Network-token provisioning rides behind the merchant flag and is never
 // load-bearing.
@@ -144,10 +144,10 @@ func (s *CustodianSaleService) basisTheory(ctx context.Context, psp uuid.UUID) (
 
 // provisionNetworkToken creates (or dedups onto) the card's network token and
 // persists id/status/PAR. Failures warn — NT is never load-bearing on NMI.
-func (s *CustodianSaleService) provisionNetworkToken(ctx context.Context, bt *basistheory.Client, merchantID, instrumentID uuid.UUID, tokenID, orderID string) {
+func (s *CustodianSaleService) provisionNetworkToken(ctx context.Context, bt *basistheory.Client, merchantID, instrumentID uuid.UUID, tokenID, invoiceID string) {
 	nt, err := bt.CreateNetworkToken(ctx, basistheory.NetworkTokenRequest{
 		TokenID:        tokenID,
-		IdempotencyKey: "btnt:" + orderID,
+		IdempotencyKey: "btnt:" + invoiceID,
 	})
 	if err != nil {
 		s.Log.WarnContext(ctx, "custodian sale: network token provisioning failed; instrument stays pan_proxy (never load-bearing)", logx.Err(err), "bt_token_id", tokenID)
@@ -158,7 +158,7 @@ func (s *CustodianSaleService) provisionNetworkToken(ctx context.Context, bt *ba
 	}
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := paymentmethods.ApplyCardLifecycle(ctx, s.DB.NewWithPgxTx(tx).Gen(ctx), paymentmethods.CardEvent{
-			MerchantID: merchantID, PaymentMethodID: instrumentID, Source: paymentmethods.SourceNetworkToken, EventRef: "provision:" + orderID,
+			MerchantID: merchantID, PaymentMethodID: instrumentID, Source: paymentmethods.SourceNetworkToken, EventRef: "provision:" + invoiceID,
 			Card: paymentmethods.Card{NetworkTokenID: nt.ID, NetworkTokenStatus: nt.Status, NetworkTokenPAR: nt.PAR}, At: s.Fulfillment.now(),
 		})
 		return err

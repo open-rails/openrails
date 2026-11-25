@@ -23,7 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -578,7 +578,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 		if err != nil {
 			return err
 		}
-		if err := observed.SeedScheduleCadence(ctx, txDB, result.Order.ID, sub.ID, p.PeriodEnd, p.CalendarAnchor, p.RecurringIntervalHours, p.RecurringIntervalMonths, p.RecurringAmount, h.Purchases.now()); err != nil {
+		if err := observed.SeedScheduleCadence(ctx, txDB, result.Invoice.ID, sub.ID, p.PeriodEnd, p.CalendarAnchor, p.RecurringIntervalHours, p.RecurringIntervalMonths, p.RecurringAmount, h.Purchases.now()); err != nil {
 			return err
 		}
 		for finding, subject := range map[string]string{ProviderUpdateStuckFinding: p.OldSubscriptionID.String(), ProrationUnresolvedFinding: in.ID.String()} {

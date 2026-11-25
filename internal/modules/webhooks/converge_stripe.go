@@ -52,7 +52,7 @@ type StripeConvergeService struct {
 	PaymentService               *payments.PaymentService
 	MoneyService                 *money.MoneyService
 	RailCustomerService          *payments.RailCustomerService
-	OrderAttemptService          *payment.OrderAttemptService
+	InvoiceAttemptService        *payment.InvoiceAttemptService
 	// Objects records the Stripe price a parked subscription bills.
 	Objects *providerobjects.Observer
 	// Findings notifies an operator of the finding a park raises.

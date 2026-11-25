@@ -244,8 +244,8 @@ type Posting struct {
 	EffectiveAt time.Time
 	// Customer is the customer the transfer is attributed to. A
 	// customer-scoped leg names the same customer.
-	Customer                               *uuid.UUID
-	Order, OrderLine, Product, CreditGrant *uuid.UUID
+	Customer                                   *uuid.UUID
+	Invoice, InvoiceLine, Product, CreditGrant *uuid.UUID
 	// RevenueSchedule is the schedule whose deferred revenue the transfer
 	// funds, recognises or reduces.
 	RevenueSchedule   *uuid.UUID
@@ -274,7 +274,7 @@ func (b *Books) Post(ctx context.Context, p Posting) (tr gen.BillingLedgerTransf
 		Amount: p.Amount, Currency: p.Currency, TransferType: string(p.Type),
 		Operation: string(p.Coord.Operation), Source: p.Coord.Source, SourceID: p.Coord.SourceID,
 		CreditGrantID: p.CreditGrant, CustomerID: p.Customer, InvokerID: p.Invoker, Resource: p.Resource,
-		OrderID: p.Order, OrderLineID: p.OrderLine, ProductID: p.Product, EffectiveAt: at, RevenueScheduleID: p.RevenueSchedule,
+		InvoiceID: p.Invoice, InvoiceLineID: p.InvoiceLine, ProductID: p.Product, EffectiveAt: at, RevenueScheduleID: p.RevenueSchedule,
 	})
 	if err == nil {
 		return tr, true, nil
@@ -283,13 +283,13 @@ func (b *Books) Post(ctx context.Context, p Posting) (tr gen.BillingLedgerTransf
 		tr, err = b.q.GetLedgerTransferAtCoordinate(ctx, gen.GetLedgerTransferAtCoordinateParams{
 			MerchantID: b.merchant, Book: string(General), CustomerID: p.Customer, Currency: p.Currency, TransferType: string(p.Type),
 			Operation: string(p.Coord.Operation), Source: p.Coord.Source, SourceID: p.Coord.SourceID,
-			CreditGrantID: p.CreditGrant, OrderLineID: p.OrderLine,
+			CreditGrantID: p.CreditGrant, InvoiceLineID: p.InvoiceLine,
 		})
 		if err != nil {
 			return tr, false, fmt.Errorf("books: resolve transfer at %s: %w", p.Coord, err)
 		}
 		if tr.DebitAccountID != debit || tr.CreditAccountID != credit || tr.Amount != p.Amount || !tr.EffectiveAt.Equal(at) ||
-			!sameUUID(tr.OrderID, p.Order) || !sameUUID(tr.ProductID, p.Product) || !sameUUID(tr.RevenueScheduleID, p.RevenueSchedule) ||
+			!sameUUID(tr.InvoiceID, p.Invoice) || !sameUUID(tr.ProductID, p.Product) || !sameUUID(tr.RevenueScheduleID, p.RevenueSchedule) ||
 			!sameText(tr.InvokerID, p.Invoker) || !sameText(tr.Resource, p.Resource) {
 			return tr, false, fmt.Errorf("%w at %s", ErrCoordinateReused, p.Coord)
 		}
@@ -311,8 +311,8 @@ func (p Posting) check() error {
 	if p.EffectiveAt.IsZero() {
 		return fmt.Errorf("books: effective_at is required")
 	}
-	if p.Customer == nil && (p.Order != nil || p.CreditGrant != nil) {
-		return fmt.Errorf("books: a posting for an order or a credit lot names its customer")
+	if p.Customer == nil && (p.Invoice != nil || p.CreditGrant != nil) {
+		return fmt.Errorf("books: a posting for an invoice or a credit lot names its customer")
 	}
 	if err := CheckCurrency(p.Currency); err != nil {
 		return err

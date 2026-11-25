@@ -190,7 +190,7 @@ func readIssuerAnswer(ctx context.Context, logger *slog.Logger, client *nmi.NMIC
 }
 
 // ReadNMIVaultTransactions reads every transaction on the operation's frozen
-// vault since since, of any order and outcome.
+// vault since since, of any invoice and outcome.
 func ReadNMIVaultTransactions(ctx context.Context, in gen.BillingProviderIntent, resolver railresolve.NMIClientResolver, since time.Time) ([]nmi.VaultTransaction, error) {
 	p, err := decodeCollectedTerms(in)
 	if err != nil {

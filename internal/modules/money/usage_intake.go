@@ -963,7 +963,7 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 
 // Changed are the balances the committed usage took from: one that crosses
 // a line of its balance watch queues a look, and one that takes arrears to
-// the threshold asks for a usage order.
+// the threshold asks for a usage invoice.
 func (b *UsageIntake) Changed() []UsageAccount {
 	if b == nil {
 		return nil
@@ -1063,7 +1063,7 @@ func addSat(a, b int64) int64 {
 }
 
 // periodAnchor is what a customer's pricing periods in a currency are cut
-// on: the usage orders' boundary and anchor.
+// on: the usage invoices' boundary and anchor.
 type periodAnchor struct {
 	anchor   time.Time
 	boundary string

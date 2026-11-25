@@ -159,10 +159,10 @@ export function PaymentDetailPage() {
             "—"
           )}
         </Fact>
-        <Fact label={adminText("Order")}>
-          {payment.order_id ? (
-            <Link className={link} to={`/orders/${payment.order_id}`}>
-              {shortId(payment.order_id, 16)}
+        <Fact label={adminText("Invoice")}>
+          {payment.invoice_id ? (
+            <Link className={link} to={`/invoices/${payment.invoice_id}`}>
+              {shortId(payment.invoice_id, 16)}
             </Link>
           ) : (
             "—"

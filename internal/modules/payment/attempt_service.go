@@ -24,7 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/invoices"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	defaultOrderAttemptTTL = 15 * time.Minute
+	defaultInvoiceAttemptTTL = 15 * time.Minute
 )
 
 // IdempotencyLease is how long a silent purchase request keeps its claim.
@@ -46,15 +46,15 @@ const (
 	IdempotencyTTL   = 24 * time.Hour
 )
 
-type OrderAttemptService struct {
+type InvoiceAttemptService struct {
 	db                   *db.DB
-	repo                 *OrderAttemptRepo
+	repo                 *InvoiceAttemptRepo
 	priceService         *catalog.PriceService
 	productService       *catalog.ProductService
 	paymentMethodService *paymentmethods.PaymentMethodService
 	// purchaseService resolves a wire selector (a PSP key or a bare rail kind)
 	// to the armed account. Required: every session lands on a real PSP
-	// (order_attempts.psp_id is NOT NULL).
+	// (invoice_attempts.psp_id is NOT NULL).
 	purchaseService          *PurchaseService
 	solanaPayService         *solanamodule.SolanaPayService
 	solanaTransactionService *solanamodule.SolanaTransactionService
@@ -79,8 +79,8 @@ type OrderAttemptService struct {
 	// pspDisarmed reports a PSP whose credentials failed posture verification.
 	pspDisarmed func(uuid.UUID) bool
 
-	// orders settles the orders order attempts pay (#1168).
-	orders *orders.Service
+	// invoices settles the invoices invoice attempts pay (#1168).
+	invoices *invoices.Service
 
 	// checkoutOrigin is the payment page's origin, "" without one: its
 	// pages are return URLs too.
@@ -91,29 +91,29 @@ type OrderAttemptService struct {
 }
 
 // SetCheckoutOrigin wires the payment page's origin, set once it is served.
-func (s *OrderAttemptService) SetCheckoutOrigin(origin func() string) {
+func (s *InvoiceAttemptService) SetCheckoutOrigin(origin func() string) {
 	s.checkoutOrigin = origin
 }
 
 // SetReturnOrigins wires the origins a merchant's return URLs may name.
-func (s *OrderAttemptService) SetReturnOrigins(origins func(context.Context, billing.MerchantID) ([]string, error)) {
+func (s *InvoiceAttemptService) SetReturnOrigins(origins func(context.Context, billing.MerchantID) ([]string, error)) {
 	s.returnOrigins = origins
 }
 
 // SetPSPPosture wires the verdict purchase consults before offering a PSP.
-func (s *OrderAttemptService) SetPSPPosture(disarmed func(uuid.UUID) bool) {
+func (s *InvoiceAttemptService) SetPSPPosture(disarmed func(uuid.UUID) bool) {
 	s.pspDisarmed = disarmed
 }
 
 // SetSolanaRecurring wires the recurring-Solana subscribe (prepare) + enroll
 // (confirm) services. Done via a setter so the constructor signature (called by
 // embedded hosts) stays stable.
-func (s *OrderAttemptService) SetSolanaRecurring(prepare *recurring.PrepareSubscribeService, enroll *recurring.EnrollService) {
+func (s *InvoiceAttemptService) SetSolanaRecurring(prepare *recurring.PrepareSubscribeService, enroll *recurring.EnrollService) {
 	s.solanaPrepareSubscribe = prepare
 	s.solanaEnroll = enroll
 }
 
-func NewOrderAttemptService(
+func NewInvoiceAttemptService(
 	db *db.DB,
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
@@ -126,10 +126,10 @@ func NewOrderAttemptService(
 	cfg *billing.Config,
 	rails railresolve.Source,
 	clocks ...clockwork.Clock,
-) *OrderAttemptService {
-	return &OrderAttemptService{
+) *InvoiceAttemptService {
+	return &InvoiceAttemptService{
 		db:                       db,
-		repo:                     NewOrderAttemptRepo(db),
+		repo:                     NewInvoiceAttemptRepo(db),
 		priceService:             priceService,
 		productService:           productService,
 		paymentMethodService:     paymentMethodService,
@@ -146,31 +146,31 @@ func NewOrderAttemptService(
 }
 
 // SetSolanaMintInfo arms the quote-time mint reader.
-func (s *OrderAttemptService) SetSolanaMintInfo(chain solanamodule.MintInfoSource) {
+func (s *InvoiceAttemptService) SetSolanaMintInfo(chain solanamodule.MintInfoSource) {
 	s.solanaMintInfo = chain
 }
 
 // SetSolanaMintDecimals arms the on-chain mint-decimals resolver (#817).
-func (s *OrderAttemptService) SetSolanaMintDecimals(mints solanamodule.MintDecimalsSource) {
+func (s *InvoiceAttemptService) SetSolanaMintDecimals(mints solanamodule.MintDecimalsSource) {
 	s.solanaMints = mints
 }
 
-func (s *OrderAttemptService) now() time.Time {
+func (s *InvoiceAttemptService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
 	}
 	return time.Now()
 }
 
-func (s *OrderAttemptService) SetClock(c clockwork.Clock) {
+func (s *InvoiceAttemptService) SetClock(c clockwork.Clock) {
 	s.clock = timeutil.FirstClock(c)
 }
 
-func (s *OrderAttemptService) Clock() clockwork.Clock {
+func (s *InvoiceAttemptService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-func (s *OrderAttemptService) requireProviderWrites(ctx context.Context) error {
+func (s *InvoiceAttemptService) requireProviderWrites(ctx context.Context) error {
 	if s == nil {
 		return ProviderWritesDisabled("write posture is unknown (nothing wired)")
 	}
@@ -224,48 +224,48 @@ type solanaPlanTerms struct {
 func parseSolanaPlanTerms(cfg map[string]string) (solanaPlanTerms, error) {
 	var t solanaPlanTerms
 	if cfg == nil {
-		return t, fmt.Errorf("%w: price has no solana plan config", ErrOrderAttemptValidation)
+		return t, fmt.Errorf("%w: price has no solana plan config", ErrInvoiceAttemptValidation)
 	}
 	var err error
 	if t.planID, err = strconv.ParseUint(cfg["plan_id"], 10, 64); err != nil {
-		return t, fmt.Errorf("%w: invalid solana plan_id", ErrOrderAttemptValidation)
+		return t, fmt.Errorf("%w: invalid solana plan_id", ErrInvoiceAttemptValidation)
 	}
 	if t.amount, err = strconv.ParseUint(cfg["amount_base_units"], 10, 64); err != nil || t.amount == 0 {
-		return t, fmt.Errorf("%w: invalid solana amount_base_units", ErrOrderAttemptValidation)
+		return t, fmt.Errorf("%w: invalid solana amount_base_units", ErrInvoiceAttemptValidation)
 	}
 	if t.period, err = strconv.ParseUint(cfg["period_hours"], 10, 64); err != nil || t.period == 0 {
-		return t, fmt.Errorf("%w: invalid solana period_hours", ErrOrderAttemptValidation)
+		return t, fmt.Errorf("%w: invalid solana period_hours", ErrInvoiceAttemptValidation)
 	}
 	t.createdAt, _ = strconv.ParseInt(cfg["created_at"], 10, 64)
 	t.mintSymbol = strings.TrimSpace(cfg["mint_symbol"])
 	t.owner = strings.TrimSpace(cfg["merchant_address"])
 	t.treasury = strings.TrimSpace(cfg["treasury"])
 	if t.owner == "" {
-		return t, fmt.Errorf("%w: the price's Solana plan names no owner", ErrOrderAttemptValidation)
+		return t, fmt.Errorf("%w: the price's Solana plan names no owner", ErrInvoiceAttemptValidation)
 	}
 	return t, nil
 }
 
 // solanaPlanOwned refuses a plan no listed cranker owns: its renewals could
 // not be pulled, so it is not sold.
-func (s *OrderAttemptService) solanaPlanOwned(ctx context.Context, terms solanaPlanTerms) error {
+func (s *InvoiceAttemptService) solanaPlanOwned(ctx context.Context, terms solanaPlanTerms) error {
 	if s.solanaPrepareSubscribe == nil {
-		return fmt.Errorf("%w: %v", ErrOrderAttemptValidation, recurring.ErrNoCranker)
+		return fmt.Errorf("%w: %v", ErrInvoiceAttemptValidation, recurring.ErrNoCranker)
 	}
 	err := s.solanaPrepareSubscribe.Holds(ctx, terms.owner)
 	var changed *recurring.CrankerKeyChangedError
 	switch {
 	case errors.Is(err, recurring.ErrUnheldPlan):
-		return fmt.Errorf("%w: the price's Solana plan is owned by %s, which no listed cranker holds; it is not sold", ErrOrderAttemptValidation, terms.owner)
+		return fmt.Errorf("%w: the price's Solana plan is owned by %s, which no listed cranker holds; it is not sold", ErrInvoiceAttemptValidation, terms.owner)
 	case errors.As(err, &changed):
-		return fmt.Errorf("%w: the price's Solana plan is not sold: %v", ErrOrderAttemptValidation, changed)
+		return fmt.Errorf("%w: the price's Solana plan is not sold: %v", ErrInvoiceAttemptValidation, changed)
 	}
 	return err
 }
 
 // solanaSignerAvailable refuses (503) while the merchant's Solana
 // configuration is unavailable.
-func (s *OrderAttemptService) solanaSignerAvailable(ctx context.Context) error {
+func (s *InvoiceAttemptService) solanaSignerAvailable(ctx context.Context) error {
 	if _, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails); err != nil && errors.Is(err, vault.ErrUnavailable) {
 		return err
 	}
@@ -278,8 +278,8 @@ func (s *OrderAttemptService) solanaSignerAvailable(ctx context.Context) error {
 // Standalone: "https://api.mysite.com" → routes at /v1/*
 // Embedded:   "https://api.mysite.com/billing" → routes at /billing/v1/*
 //
-// Generated URLs follow the pattern: PublicURL + "/v1/order-attempts/:id/solana-pay"
-func (s *OrderAttemptService) getAPIBaseURL() string {
+// Generated URLs follow the pattern: PublicURL + "/v1/invoice-attempts/:id/solana-pay"
+func (s *InvoiceAttemptService) getAPIBaseURL() string {
 	if s.config == nil {
 		return ""
 	}
@@ -342,16 +342,16 @@ func getUint64Field(fields map[string]any, key string) uint64 {
 
 func setSolanaQuoteState(railState map[string]any, tokenAmount uint64, tokenPriceUSD, fxRate float64, fxCurrency string, quotedAt, quoteExpiresAt time.Time) error {
 	if railState == nil {
-		return fmt.Errorf("%w: rail_state unavailable", ErrOrderAttemptValidation)
+		return fmt.Errorf("%w: rail_state unavailable", ErrInvoiceAttemptValidation)
 	}
 	if tokenAmount == 0 {
-		return fmt.Errorf("%w: token_amount must be greater than 0", ErrOrderAttemptValidation)
+		return fmt.Errorf("%w: token_amount must be greater than 0", ErrInvoiceAttemptValidation)
 	}
 	if quotedAt.IsZero() {
-		return fmt.Errorf("%w: quote timestamp missing", ErrOrderAttemptValidation)
+		return fmt.Errorf("%w: quote timestamp missing", ErrInvoiceAttemptValidation)
 	}
 	if quoteExpiresAt.IsZero() {
-		return fmt.Errorf("%w: quote expiry missing", ErrOrderAttemptValidation)
+		return fmt.Errorf("%w: quote expiry missing", ErrInvoiceAttemptValidation)
 	}
 
 	// MONEY-3: the token AMOUNT is written as a decimal string. A JSONB
@@ -367,51 +367,51 @@ func setSolanaQuoteState(railState map[string]any, tokenAmount uint64, tokenPric
 	return nil
 }
 
-// BuildSolanaPayTransaction builds a Solana transaction for the given order attempt and wallet account.
+// BuildSolanaPayTransaction builds a Solana transaction for the given invoice attempt and wallet account.
 // This implements the POST endpoint of the Solana Pay Transaction Request spec.
-func (s *OrderAttemptService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*solanamodule.PayTransactionResponse, error) {
+func (s *InvoiceAttemptService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*solanamodule.PayTransactionResponse, error) {
 	if err := s.requireProviderWrites(ctx); err != nil {
 		return nil, err
 	}
 	if s.repo == nil {
-		return nil, ErrOrderAttemptNotFound
+		return nil, ErrInvoiceAttemptNotFound
 	}
 	if s.solanaTransactionService == nil {
-		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrInvoiceAttemptValidation)
 	}
 	account = strings.TrimSpace(account)
 	if account == "" {
-		return nil, fmt.Errorf("%w: account is required", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: account is required", ErrInvoiceAttemptValidation)
 	}
 	if _, err := solanago.PublicKeyFromBase58(account); err != nil {
-		return nil, fmt.Errorf("%w: account must be a Solana public key", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: account must be a Solana public key", ErrInvoiceAttemptValidation)
 	}
 
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
 		if db.IsNotFound(err) {
-			return nil, ErrOrderAttemptNotFound
+			return nil, ErrInvoiceAttemptNotFound
 		}
 		return nil, err
 	}
 	// Validate it's a Solana session
 	if session.Rail != models.RailSolana {
-		return nil, ErrOrderAttemptNotSolana
+		return nil, ErrInvoiceAttemptNotSolana
 	}
 
 	// Check if expired: a one-off quote is offered only until it expires,
 	// though its reference keeps crediting a transfer already sent.
 	if session.ExpiresAt != nil && s.now().After(*session.ExpiresAt) {
-		return nil, ErrOrderAttemptExpired
+		return nil, ErrInvoiceAttemptExpired
 	}
 	if quote, ok := solanaQuoteExpiresAt(session); ok && s.now().After(quote) {
-		return nil, ErrOrderAttemptExpired
+		return nil, ErrInvoiceAttemptExpired
 	}
 
 	// Check if already completed
-	if session.Status == models.OrderAttemptStatusSucceeded ||
-		session.Status == models.OrderAttemptStatusCanceled {
-		return nil, ErrOrderAttemptAlreadyCompleted
+	if session.Status == models.InvoiceAttemptStatusSucceeded ||
+		session.Status == models.InvoiceAttemptStatusCanceled {
+		return nil, ErrInvoiceAttemptAlreadyCompleted
 	}
 
 	// A subscribe builds the atomic [init?, subscribe, first pull] transaction
@@ -432,14 +432,14 @@ func (s *OrderAttemptService) BuildSolanaPayTransaction(ctx context.Context, ses
 	// Get token symbol from rail state
 	tokenSymbol := getStringField(session.RailState, "token_symbol")
 	if tokenSymbol == "" {
-		return nil, fmt.Errorf("%w: token_symbol missing from session", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: token_symbol missing from session", ErrInvoiceAttemptValidation)
 	}
 
 	if session.RailState == nil {
 		session.RailState = map[string]any{}
 	}
 	if existingPayer := strings.TrimSpace(getStringField(session.RailState, "payer")); existingPayer != "" && existingPayer != account {
-		return nil, fmt.Errorf("%w: solana order attempt is already bound to a different payer", ErrOrderAttemptConflict)
+		return nil, fmt.Errorf("%w: solana invoice attempt is already bound to a different payer", ErrInvoiceAttemptConflict)
 	}
 
 	// Generate and persist the payment binding before returning a transaction to the wallet.
@@ -452,7 +452,7 @@ func (s *OrderAttemptService) BuildSolanaPayTransaction(ctx context.Context, ses
 	}
 	session.RailState["payer"] = account
 	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrOrderAttemptConflict, err)
+		return nil, fmt.Errorf("%w: %v", ErrInvoiceAttemptConflict, err)
 	}
 	buildReq, err := solanaBuildRequestFromSession(session, account, tokenSymbol)
 	if err != nil {
@@ -472,14 +472,14 @@ func (s *OrderAttemptService) BuildSolanaPayTransaction(ctx context.Context, ses
 	}, nil
 }
 
-// offerSolanaTransaction returns the one transaction a order attempt may
+// offerSolanaTransaction returns the one transaction a invoice attempt may
 // be paid with. While its blockhash can still land, every request gets the
 // same transaction back, so a wallet cannot be handed a second payable one.
 // A new one is built only once the chain can no longer include the previous
 // one and nothing has landed on the reference.
-func (s *OrderAttemptService) offerSolanaTransaction(ctx context.Context, ref gen.BillingSolanaPayReference, req *solanamodule.PaymentTransactionBuildRequest) (string, error) {
+func (s *InvoiceAttemptService) offerSolanaTransaction(ctx context.Context, ref gen.BillingSolanaPayReference, req *solanamodule.PaymentTransactionBuildRequest) (string, error) {
 	if ref.Status != solanamodule.ReferencePending {
-		return "", ErrOrderAttemptAlreadyCompleted
+		return "", ErrInvoiceAttemptAlreadyCompleted
 	}
 	if ref.BuiltTransaction != nil {
 		height, err := s.solanaTransactionService.BlockHeight(ctx)
@@ -491,13 +491,13 @@ func (s *OrderAttemptService) offerSolanaTransaction(ctx context.Context, ref ge
 		}
 		landed, err := s.solanaTransactionService.ReferenceHasOurTransfer(ctx, ref.Reference, req.Recipient, req.TokenMint, req.SessionID)
 		if errors.Is(err, solanamodule.ErrReferenceUndetermined) {
-			return "", fmt.Errorf("%w: a transfer for this checkout may be in flight; try again shortly", ErrOrderAttemptConflict)
+			return "", fmt.Errorf("%w: a transfer for this checkout may be in flight; try again shortly", ErrInvoiceAttemptConflict)
 		}
 		if err != nil {
 			return "", err
 		}
 		if landed {
-			return "", fmt.Errorf("%w: a transfer for this checkout has already landed and is being confirmed", ErrOrderAttemptConflict)
+			return "", fmt.Errorf("%w: a transfer for this checkout has already landed and is being confirmed", ErrInvoiceAttemptConflict)
 		}
 	}
 	built, err := s.solanaTransactionService.BuildPaymentTransactionFromQuote(ctx, req)
@@ -517,17 +517,17 @@ func (s *OrderAttemptService) offerSolanaTransaction(ctx context.Context, ref ge
 		return "", err
 	}
 	if current.Status != solanamodule.ReferencePending || current.BuiltTransaction == nil {
-		return "", ErrOrderAttemptAlreadyCompleted
+		return "", ErrInvoiceAttemptAlreadyCompleted
 	}
 	return *current.BuiltTransaction, nil
 }
 
 // registerSolanaReference puts the session's bound reference under watch.
-func (s *OrderAttemptService) registerSolanaReference(ctx context.Context, kind solanamodule.ReferenceKind, session *models.OrderAttempt) (gen.BillingSolanaPayReference, error) {
+func (s *InvoiceAttemptService) registerSolanaReference(ctx context.Context, kind solanamodule.ReferenceKind, session *models.InvoiceAttempt) (gen.BillingSolanaPayReference, error) {
 	if s.solanaPayService == nil || session.Reference == nil {
-		return gen.BillingSolanaPayReference{}, fmt.Errorf("%w: solana pay service unavailable", ErrOrderAttemptValidation)
+		return gen.BillingSolanaPayReference{}, fmt.Errorf("%w: solana pay service unavailable", ErrInvoiceAttemptValidation)
 	}
-	expires := s.now().Add(defaultOrderAttemptTTL)
+	expires := s.now().Add(defaultInvoiceAttemptTTL)
 	if quote, ok := solanaQuoteExpiresAt(session); ok {
 		expires = quote
 	} else if session.ExpiresAt != nil {
@@ -535,29 +535,29 @@ func (s *OrderAttemptService) registerSolanaReference(ctx context.Context, kind 
 	}
 	ref, err := s.solanaPayService.RegisterReference(ctx, kind, session.ID, *session.Reference, expires)
 	if err != nil {
-		return ref, fmt.Errorf("%w: register solana pay reference: %v", ErrOrderAttemptConflict, err)
+		return ref, fmt.Errorf("%w: register solana pay reference: %v", ErrInvoiceAttemptConflict, err)
 	}
 	return ref, nil
 }
 
-func solanaBuildRequestFromSession(session *models.OrderAttempt, account, tokenSymbol string) (*solanamodule.PaymentTransactionBuildRequest, error) {
+func solanaBuildRequestFromSession(session *models.InvoiceAttempt, account, tokenSymbol string) (*solanamodule.PaymentTransactionBuildRequest, error) {
 	if session == nil {
-		return nil, fmt.Errorf("%w: session is required", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: session is required", ErrInvoiceAttemptValidation)
 	}
 	tokenAmount := getUint64Field(session.RailState, "token_amount")
 	if tokenAmount == 0 {
-		return nil, fmt.Errorf("%w: token_amount missing from session", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: token_amount missing from session", ErrInvoiceAttemptValidation)
 	}
 	tokenMint := getStringField(session.RailState, "token_mint")
 	if tokenMint == "" {
-		return nil, fmt.Errorf("%w: token_mint missing from session", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: token_mint missing from session", ErrInvoiceAttemptValidation)
 	}
 	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(tokenMint) {
-		return nil, fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrInvoiceAttemptValidation)
 	}
 	recipient := getStringField(session.RailState, "recipient")
 	if recipient == "" {
-		return nil, fmt.Errorf("%w: recipient missing from session", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: recipient missing from session", ErrInvoiceAttemptValidation)
 	}
 
 	return &solanamodule.PaymentTransactionBuildRequest{
@@ -582,9 +582,9 @@ func solanaBuildRequestFromSession(session *models.OrderAttempt, account, tokenS
 // with the reference injected, and tracks the init→subscribe step on
 // RailState so a first-timer's second POST (after init lands) returns the
 // subscribe tx. The poller mirrors the confirmed subscribe via ConfirmEnrollment.
-func (s *OrderAttemptService) buildSolanaSubscribeTransaction(ctx context.Context, session *models.OrderAttempt, account string) (*solanamodule.PayTransactionResponse, error) {
+func (s *InvoiceAttemptService) buildSolanaSubscribeTransaction(ctx context.Context, session *models.InvoiceAttempt, account string) (*solanamodule.PayTransactionResponse, error) {
 	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
-		return nil, fmt.Errorf("%w: solana recurring billing is not configured", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: solana recurring billing is not configured", ErrInvoiceAttemptValidation)
 	}
 	if session.RailState == nil {
 		session.RailState = map[string]any{}
@@ -593,7 +593,7 @@ func (s *OrderAttemptService) buildSolanaSubscribeTransaction(ctx context.Contex
 	// account (it becomes the subscriber + fee payer). A second, different wallet is
 	// rejected so the QR can't be hijacked mid-flow.
 	if existingPayer := strings.TrimSpace(getStringField(session.RailState, "payer")); existingPayer != "" && existingPayer != account {
-		return nil, fmt.Errorf("%w: solana order attempt is already bound to a different payer", ErrOrderAttemptConflict)
+		return nil, fmt.Errorf("%w: solana invoice attempt is already bound to a different payer", ErrInvoiceAttemptConflict)
 	}
 	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
 		reference, err := solana.GenerateReference()
@@ -606,7 +606,7 @@ func (s *OrderAttemptService) buildSolanaSubscribeTransaction(ctx context.Contex
 	session.RailState["payer"] = account
 	session.RailState["subscriber_wallet"] = account
 	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrOrderAttemptConflict, err)
+		return nil, fmt.Errorf("%w: %v", ErrInvoiceAttemptConflict, err)
 	}
 
 	terms := solanaPlanTerms{
@@ -637,13 +637,13 @@ func (s *OrderAttemptService) buildSolanaSubscribeTransaction(ctx context.Contex
 		Reference:        reference,
 	})
 	if errors.Is(err, solana.ErrCosignerPays) {
-		return nil, fmt.Errorf("%w: %v", ErrOrderAttemptValidation, err)
+		return nil, fmt.Errorf("%w: %v", ErrInvoiceAttemptValidation, err)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if len(res.Transactions) == 0 {
-		return nil, fmt.Errorf("%w: no subscribe transaction produced", ErrOrderAttemptConflict)
+		return nil, fmt.Errorf("%w: no subscribe transaction produced", ErrInvoiceAttemptConflict)
 	}
 
 	// Record the PDA for the poller's confirm. The bundle is one-step (init
@@ -660,28 +660,28 @@ func (s *OrderAttemptService) buildSolanaSubscribeTransaction(ctx context.Contex
 	}, nil
 }
 
-// ConfirmSolanaSubscribeSession enrolls an order's Solana subscription from a
+// ConfirmSolanaSubscribeSession enrolls an invoice's Solana subscription from a
 // confirmed transaction the reference poller found carrying the attempt's
 // reference. Anyone can put a public reference in a transaction, so the
 // signature only names a candidate: enrollment verifies it is the attempt's
 // first payment. A transaction not yet readable stays pending; one that is not
 // the payment is refused and the poller moves on to the reference's other
 // signatures. A settled attempt confirms again as a no-op.
-func (s *OrderAttemptService) ConfirmSolanaSubscribeSession(ctx context.Context, attemptID uuid.UUID, signature string) error {
+func (s *InvoiceAttemptService) ConfirmSolanaSubscribeSession(ctx context.Context, attemptID uuid.UUID, signature string) error {
 	attempt, err := s.repo.GetByID(ctx, attemptID)
 	if err != nil {
-		return ErrOrderAttemptNotFound
+		return ErrInvoiceAttemptNotFound
 	}
-	if attempt.Status == models.OrderAttemptStatusSucceeded {
+	if attempt.Status == models.InvoiceAttemptStatusSucceeded {
 		return nil
 	}
-	if attempt.OrderID == nil || !solanaSubscribes(attempt) {
-		return fmt.Errorf("%w: attempt %s subscribes to nothing", ErrOrderAttemptValidation, attemptID)
+	if attempt.InvoiceID == nil || !solanaSubscribes(attempt) {
+		return fmt.Errorf("%w: attempt %s subscribes to nothing", ErrInvoiceAttemptValidation, attemptID)
 	}
 	if strings.TrimSpace(signature) == "" {
-		return fmt.Errorf("%w: signature is required", ErrOrderAttemptValidation)
+		return fmt.Errorf("%w: signature is required", ErrInvoiceAttemptValidation)
 	}
-	return s.enrollSolanaOrder(ctx, attempt, signature)
+	return s.enrollSolanaInvoice(ctx, attempt, signature)
 }
 
 // solanaSettleDeadline: a Solana one-off attempt stays open while its
@@ -692,7 +692,7 @@ func solanaSettleDeadline(quoteExpiresAt time.Time) time.Time {
 }
 
 // solanaQuoteExpiresAt is when the attempt's Solana quote stops being offered.
-func solanaQuoteExpiresAt(session *models.OrderAttempt) (time.Time, bool) {
+func solanaQuoteExpiresAt(session *models.InvoiceAttempt) (time.Time, bool) {
 	raw := getStringField(session.RailState, "quote_expires_at")
 	if raw == "" {
 		return time.Time{}, false

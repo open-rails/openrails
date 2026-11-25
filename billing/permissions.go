@@ -70,9 +70,9 @@ const (
 	// Host events: reading and acknowledging them.
 	MerchantEventsRead Permission = "merchant:events:read"
 	RootEventsRead     Permission = "root:events:read"
-	// Merchant orders: previewed, created and withdrawn.
-	MerchantOrdersManage Permission = "merchant:orders:manage"
-	RootOrdersManage     Permission = "root:orders:manage"
+	// Merchant invoices: previewed, created and withdrawn.
+	MerchantInvoicesManage Permission = "merchant:invoices:manage"
+	RootInvoicesManage     Permission = "root:invoices:manage"
 	// SCIM provisioning (/v1/app/scim/v2): a merchant's directory reading
 	// and pushing its users, its customers' contacts.
 	MerchantProvisioningRead   Permission = "merchant:provisioning:read"
@@ -91,7 +91,7 @@ func Permissions() []Permission {
 		MerchantMetricsRead, RootMetricsRead,
 		MerchantEntitlementsRead, RootEntitlementsRead, MerchantCatalogRead, RootCatalogRead,
 		MerchantUsageRead, RootUsageRead, MerchantUsageManage, RootUsageManage,
-		MerchantEventsRead, RootEventsRead, MerchantOrdersManage, RootOrdersManage,
+		MerchantEventsRead, RootEventsRead, MerchantInvoicesManage, RootInvoicesManage,
 		MerchantProvisioningRead, RootProvisioningRead, MerchantProvisioningManage, RootProvisioningManage,
 		RootAdminRateLimitsUnlock,
 	}

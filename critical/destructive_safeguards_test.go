@@ -230,7 +230,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		// A pauses between its admission and its landing; B lands the same
 		// book and loses its landing. The in-process handle carries no
 		// context value to the engine, so the attempts are told apart by
-		// order: the first admission is A's, a landing while A waits is B's,
+		// invoice: the first admission is A's, a landing while A waits is B's,
 		// and after A resumes its own landing comes first.
 		paused, resume := make(chan struct{}), make(chan struct{})
 		var pause sync.Once

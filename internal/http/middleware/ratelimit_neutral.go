@@ -488,17 +488,17 @@ func ClassifyBucket(path, method string) string {
 	}
 }
 
-// isPurchasePath is a buyer paying: creating an order, paying or confirming
+// isPurchasePath is a buyer paying: creating an invoice, paying or confirming
 // one, or a wallet's Solana Pay request for one.
 func isPurchasePath(path string) bool {
-	if path == "/v1/me/orders" {
+	if path == "/v1/me/invoices" {
 		return true
 	}
-	rest, mine := strings.CutPrefix(path, "/v1/me/orders/")
+	rest, mine := strings.CutPrefix(path, "/v1/me/invoices/")
 	if mine {
 		return strings.HasSuffix(rest, "/pay") || strings.HasSuffix(rest, "/confirm")
 	}
-	return strings.HasPrefix(path, "/v1/orders/") && strings.HasSuffix(path, "/solana-pay")
+	return strings.HasPrefix(path, "/v1/invoices/") && strings.HasSuffix(path, "/solana-pay")
 }
 
 // CardAttackCaptcha is the captcha a merchant under a card-testing attack
@@ -560,12 +560,12 @@ const (
 )
 
 // PayURLRateLimit limits the requests under one pay URL,
-// keyed by its order (key; "" passes), whatever address presents it.
+// keyed by its invoice (key; "" passes), whatever address presents it.
 func PayURLRateLimit(rt *app.Runtime, bucket string, perMinute int, key func(*request.Request) string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
-			order := key(r)
-			if rt == nil || rt.Config == nil || unlimited(rt.Config.RateLimits) || order == "" || limitSubject(r, rt, "cks:"+order, bucket, perMinute) {
+			invoice := key(r)
+			if rt == nil || rt.Config == nil || unlimited(rt.Config.RateLimits) || invoice == "" || limitSubject(r, rt, "cks:"+invoice, bucket, perMinute) {
 				next(r)
 			}
 		}

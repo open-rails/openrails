@@ -30,7 +30,7 @@ func Chain(h Handler, mw []Middleware) Handler {
 type Registrar interface{ Handle(string, http.Handler) }
 
 // Router registers handlers on a ServeMux under a path prefix. Paths are Go
-// 1.22 ServeMux patterns ("/v1/me/orders/{id}").
+// 1.22 ServeMux patterns ("/v1/me/invoices/{id}").
 type Router struct {
 	mux    Registrar
 	rt     *app.Runtime

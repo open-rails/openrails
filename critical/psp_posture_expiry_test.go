@@ -47,8 +47,8 @@ func TestPSPPostureExpiry(t *testing.T) {
 			}, http.StatusServiceUnavailable, 1_000_000)
 			product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "posture-download", DisplayName: "Download", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"download:owned"}})
 			require.NoError(t, err)
-			// One open order per customer and lines: each concurrent sale buys its
-			// own price, so each is its own order and reaches the write gate.
+			// One open invoice per customer and lines: each concurrent sale buys its
+			// own price, so each is its own invoice and reaches the write gate.
 			prices := make([]billing.PriceID, 4)
 			for i := range prices {
 				price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "posture-download-" + string(rune('a'+i)), UnitAmount: 9_990_000, Currency: "USD"})
@@ -56,9 +56,9 @@ func TestPSPPostureExpiry(t *testing.T) {
 				prices[i] = price.ID
 			}
 			buy := func(ctx context.Context, price billing.PriceID, key string) (int, []byte, error) {
-				input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
-					Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
-				return a.do(ctx, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+				input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
+					Payment: &billing.InvoicePaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
+				return a.do(ctx, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 			}
 			paid := func(key string) {
 				t.Helper()

@@ -15,12 +15,12 @@ import (
 
 var errCollectionNonexecutionUnproven = errors.New("fenced collection has no qualified nonexecution proof")
 
-// CompleteOrderCollection is called at the end of the domain transaction,
-// after its payer/order/attempt locks. It is deliberately collection-specific:
+// CompleteInvoiceCollection is called at the end of the domain transaction,
+// after its payer/invoice/attempt locks. It is deliberately collection-specific:
 // a successful state requires retained, validated provider receipt custody.
-func (s *Store) CompleteOrderCollection(ctx context.Context, in gen.BillingProviderIntent, outcome Outcome, now time.Time) error {
-	if in.IntentType != TypeOrderCollection {
-		return errors.New("order collection completion received another operation kind")
+func (s *Store) CompleteInvoiceCollection(ctx context.Context, in gen.BillingProviderIntent, outcome Outcome, now time.Time) error {
+	if in.IntentType != TypeInvoiceCollection {
+		return errors.New("invoice collection completion received another operation kind")
 	}
 	return s.completeCollectedPayment(ctx, in, outcome, now)
 }
@@ -70,7 +70,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 	}
 	var nonexecution CollectionNonexecutionProof
 	var hasNonexecution bool
-	if current.IntentType == TypeOrderCollection || current.IntentType == subscriptions.TypeSubscriptionCollection {
+	if current.IntentType == TypeInvoiceCollection || current.IntentType == subscriptions.TypeSubscriptionCollection {
 		nonexecution, hasNonexecution, err = LoadCollectionNonexecution(current)
 		if err != nil {
 			return err
@@ -99,7 +99,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.BillingProv
 		if found {
 			return errors.New("qualified collected payment cannot become nonexecution or refusal")
 		}
-		if (current.IntentType == TypeOrderCollection || current.IntentType == subscriptions.TypeSubscriptionCollection) && outcome.Evidence["not_executed"] == true {
+		if (current.IntentType == TypeInvoiceCollection || current.IntentType == subscriptions.TypeSubscriptionCollection) && outcome.Evidence["not_executed"] == true {
 			var canonical map[string]json.RawMessage
 			if len(current.ResultEvidence) > 0 {
 				if err := json.Unmarshal(current.ResultEvidence, &canonical); err != nil {

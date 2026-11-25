@@ -85,7 +85,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	ctx := intents.WithOrderCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
+	ctx := intents.WithInvoiceCaptchaSubjects(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
 	result, err := svc.RetrySubscriptionNow(ctx, payer, id, key, body, verifiedPrincipal(r))
 	if err != nil {
 		var refusal *billingservice.CustomerPaymentRefusal
@@ -109,7 +109,7 @@ func customerPaymentError(r *httprequest.Request, err error) {
 	}
 	switch {
 	case errors.Is(err, money.ErrUsageRecoveryHeld):
-		r.ErrorCode(billing.CodeServiceUnavailable, "this order needs its provider payment history to be verified")
+		r.ErrorCode(billing.CodeServiceUnavailable, "this invoice needs its provider payment history to be verified")
 	case errors.Is(err, money.ErrCustomerSessionRequired):
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, billing.CodeCustomerActionRequired, "verified customer action required"))
 	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, subscriptions.ErrSubscriptionNotFound):

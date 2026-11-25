@@ -38,14 +38,14 @@ func evaluateDelinquency(ctx context.Context, d *db.DB, merchantID, customer uui
 	return nil
 }
 
-// overdue is a usage order still owed past its due date.
-func overdue(o *billing.Order, now time.Time) bool {
-	return o.Usage != nil && o.Status == billing.OrderOpen && o.Usage.AmountDue > 0 && o.Usage.DueAt.Before(now)
+// overdue is a usage invoice still owed past its due date.
+func overdue(o *billing.Invoice, now time.Time) bool {
+	return o.Usage != nil && o.Status == billing.InvoiceOpen && o.Usage.AmountDue > 0 && o.Usage.DueAt.Before(now)
 }
 
-// markDelinquent marks each overdue usage order whose customer is delinquent
+// markDelinquent marks each overdue usage invoice whose customer is delinquent
 // in its currency: grace has run out and new usage is refused.
-func (s *Service) markDelinquent(ctx context.Context, views ...*billing.Order) error {
+func (s *Service) markDelinquent(ctx context.Context, views ...*billing.Invoice) error {
 	now := s.now()
 	var customers []uuid.UUID
 	seen := map[uuid.UUID]bool{}
@@ -86,9 +86,9 @@ func (s *Service) markDelinquent(ctx context.Context, views ...*billing.Order) e
 	return nil
 }
 
-// markDelinquentPage marks a page of orders.
-func (s *Service) markDelinquentPage(ctx context.Context, page []billing.Order) error {
-	views := make([]*billing.Order, len(page))
+// markDelinquentPage marks a page of invoices.
+func (s *Service) markDelinquentPage(ctx context.Context, page []billing.Invoice) error {
+	views := make([]*billing.Invoice, len(page))
 	for i := range page {
 		views[i] = &page[i]
 	}

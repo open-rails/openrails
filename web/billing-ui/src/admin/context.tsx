@@ -6,7 +6,7 @@ import { createAdminToast, createToastHandlers } from "./lib/toast"
 import { createQueries } from "./lib/queries"
 import { createMutations } from "./lib/mutations"
 import { createCreditQueries } from "./lib/credit-queries"
-import { createOrderQueries } from "./lib/order-queries"
+import { createInvoiceQueries } from "./lib/invoice-queries"
 import { createImportQueries } from "./lib/import-queries"
 
 /** Every request and cache key is bound to this instance's selected merchant. */
@@ -23,7 +23,7 @@ export function createAdminServices(options: AdminClientOptions) {
     ...queries,
     ...createMutations(client, api, queries),
     ...createCreditQueries(client, api),
-    ...createOrderQueries(client, api, queries),
+    ...createInvoiceQueries(client, api, queries),
     ...createImportQueries(client, api),
   }
 }

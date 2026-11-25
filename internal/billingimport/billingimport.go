@@ -550,7 +550,7 @@ func Import(ctx context.Context, logger *slog.Logger, opts Options) (Result, err
 		return res, err
 	}
 	// Settled history and purchases each take a short transaction of their
-	// own, so the merchant's order numbering is never held for the batch.
+	// own, so the merchant's invoice numbering is never held for the batch.
 	if err := reconcile.RecordDeclaredHistory(ctx, database, history, asOf); err != nil {
 		return res, err
 	}

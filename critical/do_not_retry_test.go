@@ -30,19 +30,19 @@ func TestDoNotRetry(t *testing.T) {
 		fleet := startFleet(t, a.world)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		subscriptionState(t, a, sub.ID, "awaiting_method")
-		order := myRenewalOrder(t, a, sub.ID)
+		invoice := myRenewalInvoice(t, a, sub.ID)
 		creates := paymentIntentCreates(p)
-		status, raw := payMyRenewal(t, a, order, *sub.PaymentMethodID, "lost-card-again")
+		status, raw := payMyRenewal(t, a, invoice, *sub.PaymentMethodID, "lost-card-again")
 		require.Equal(t, http.StatusConflict, status, string(raw))
-		require.Contains(t, string(raw), `"code":"order_not_payable"`)
+		require.Contains(t, string(raw), `"code":"invoice_not_payable"`)
 		require.Equal(t, creates, paymentIntentCreates(p), "the refused card never reaches the provider")
 		subscriptionState(t, a, sub.ID, "awaiting_method")
 		replacement := saveMethod(t, a, p, a.aliceToken, "5556")
-		status, raw = payMyRenewal(t, a, order, replacement.ID, "replacement-card")
+		status, raw = payMyRenewal(t, a, invoice, replacement.ID, "replacement-card")
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var paid billing.Order
+		var paid billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &paid))
-		require.Equal(t, billing.OrderComplete, paid.Status)
+		require.Equal(t, billing.InvoiceComplete, paid.Status)
 		subscriptionState(t, a, sub.ID, "active")
 		require.Len(t, p.effects(t), 2, "enrollment and the renewal on the new card")
 	})
@@ -139,10 +139,10 @@ func TestDoNotRetry(t *testing.T) {
 		fleet := startFleet(t, a.world)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		subscriptionState(t, a, sub.ID, "awaiting_method")
-		order := myRenewalOrder(t, a, sub.ID)
+		invoice := myRenewalInvoice(t, a, sub.ID)
 		const limit = 3
 		for i := range limit {
-			status, raw := payMyRenewal(t, a, order, *sub.PaymentMethodID, fmt.Sprintf("corrected-address-%d", i))
+			status, raw := payMyRenewal(t, a, invoice, *sub.PaymentMethodID, fmt.Sprintf("corrected-address-%d", i))
 			require.Equal(t, http.StatusPaymentRequired, status, string(raw))
 			require.Contains(t, string(raw), `"code":"card_declined"`)
 		}
@@ -150,9 +150,9 @@ func TestDoNotRetry(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, retries.Items, limit)
 		creates := paymentIntentCreates(p)
-		status, raw := payMyRenewal(t, a, order, *sub.PaymentMethodID, "past-the-cap")
+		status, raw := payMyRenewal(t, a, invoice, *sub.PaymentMethodID, "past-the-cap")
 		require.Equal(t, http.StatusConflict, status, string(raw))
-		require.Contains(t, string(raw), `"code":"order_not_payable"`)
+		require.Contains(t, string(raw), `"code":"invoice_not_payable"`)
 		require.Equal(t, creates, paymentIntentCreates(p), "past the cap the card never reaches the provider")
 		subscriptionState(t, a, sub.ID, "awaiting_method")
 		require.Len(t, p.effects(t), 1)
@@ -168,22 +168,22 @@ func mySubscription(t *testing.T, a *authorityWorld, id billing.SubscriptionID) 
 	return mine
 }
 
-// myRenewalOrder is the unpaid renewal the customer's subscription names.
-func myRenewalOrder(t *testing.T, a *authorityWorld, id billing.SubscriptionID) billing.Order {
+// myRenewalInvoice is the unpaid renewal the customer's subscription names.
+func myRenewalInvoice(t *testing.T, a *authorityWorld, id billing.SubscriptionID) billing.Invoice {
 	t.Helper()
 	mine := mySubscription(t, a, id)
 	require.NotNil(t, mine.Recovery)
-	require.NotNil(t, mine.Recovery.OrderID)
-	status, raw := a.request(t, http.MethodGet, "/v1/me/orders/"+mine.Recovery.OrderID.String(), a.aliceToken, nil)
+	require.NotNil(t, mine.Recovery.InvoiceID)
+	status, raw := a.request(t, http.MethodGet, "/v1/me/invoices/"+mine.Recovery.InvoiceID.String(), a.aliceToken, nil)
 	require.Equal(t, http.StatusOK, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	return order
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	return invoice
 }
 
-func payMyRenewal(t *testing.T, a *authorityWorld, order billing.Order, method billing.PaymentMethodID, key string) (int, []byte) {
+func payMyRenewal(t *testing.T, a *authorityWorld, invoice billing.Invoice, method billing.PaymentMethodID, key string) (int, []byte) {
 	t.Helper()
-	return a.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", a.aliceToken, billing.PayOrderParams{ExpectedTotal: order.Total, Payment: billing.OrderPaymentParams{PaymentMethodID: &method}}, map[string]string{"Idempotency-Key": key})
+	return a.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", a.aliceToken, billing.PayInvoiceParams{ExpectedTotal: invoice.Total, Payment: billing.InvoicePaymentParams{PaymentMethodID: &method}}, map[string]string{"Idempotency-Key": key})
 }
 
 // paymentIntentCreates counts the PaymentIntents Stripe was asked to create.

@@ -77,7 +77,7 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 		Status:          status,
 		Source:          r.Source,
 		SourceID:        &r.SourceID,
-		OrderID:         r.OrderID,
+		InvoiceID:       r.InvoiceID,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.CreatedAt,
 	}

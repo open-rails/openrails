@@ -60,7 +60,7 @@ func TestPublicEntitlements(t *testing.T) {
 	t.Run("OR-J27-S01/purchase-and-grant-overlap-counts-once", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) { publicPastClock(w, 72*time.Hour) })
 		_, price := publicSale(t, a, "purchased-day", 9_990_000, ptr(24))
-		order := publicPurchase(t, a, p, price.ID, 1, 9_990_000, "overlap-purchase")
+		invoice := publicPurchase(t, a, p, price.ID, 1, 9_990_000, "overlap-purchase")
 		start := a.clock.Now()
 		a.clock.Advance(12 * time.Hour)
 		grant := publicGrant(t, a, "overlapping-comp", 24)
@@ -71,7 +71,7 @@ func TestPublicEntitlements(t *testing.T) {
 		}
 		publicAccess(t, a, start.Add(36*time.Hour), false)
 		a.clock.Advance(24 * time.Hour)
-		tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), order.CustomerID, billing.GetAccessTenureParams{Entitlements: []string{"library:read"}})
+		tenure, err := a.alphaRemote.GetAccessTenure(t.Context(), invoice.CustomerID, billing.GetAccessTenureParams{Entitlements: []string{"library:read"}})
 		require.NoError(t, err)
 		require.EqualValues(t, 129600, tenure.Seconds["library:read"], "36 hours, not the sum of two overlapping 24-hour sources")
 	})
@@ -165,11 +165,11 @@ func TestPublicEntitlements(t *testing.T) {
 			t.Run(map[bool]string{false: "keep-access", true: "revoke-purchased-access"}[revoke], func(t *testing.T) {
 				a, p := newPaymentWorld(t)
 				product, price := publicSale(t, a, "refund-policy", 9_990_000, nil)
-				order := publicPurchase(t, a, p, price.ID, 1, 9_990_000, "refund-policy-purchase")
+				invoice := publicPurchase(t, a, p, price.ID, 1, 9_990_000, "refund-policy-purchase")
 				_, err := a.alphaRemote.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 				require.NoError(t, err)
 				publicAccess(t, a, time.Time{}, true)
-				refund, err := a.alphaRemote.RefundPayment(t.Context(), "policy-refund", *order.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: revoke, Reason: "Explicit customer refund policy"})
+				refund, err := a.alphaRemote.RefundPayment(t.Context(), "policy-refund", *invoice.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: revoke, Reason: "Explicit customer refund policy"})
 				require.NoError(t, err)
 				require.Equal(t, billing.PaymentSucceeded, refund.Status)
 				publicAccess(t, a, time.Time{}, !revoke)
@@ -181,11 +181,11 @@ func TestPublicEntitlements(t *testing.T) {
 					require.NotNil(t, requester)
 					require.Equal(t, requester, revoker, "the access revoke names who asked for the refund")
 				}
-				retained, err := a.alphaRemote.GetOrder(t.Context(), order.ID)
+				retained, err := a.alphaRemote.GetInvoice(t.Context(), invoice.ID)
 				require.NoError(t, err)
-				require.Equal(t, billing.OrderComplete, retained.Status)
-				require.Equal(t, order.Payment.PaymentID, retained.Payment.PaymentID)
-				payment, err := a.alphaRemote.GetPayment(t.Context(), *order.Payment.PaymentID)
+				require.Equal(t, billing.InvoiceComplete, retained.Status)
+				require.Equal(t, invoice.Payment.PaymentID, retained.Payment.PaymentID)
+				payment, err := a.alphaRemote.GetPayment(t.Context(), *invoice.Payment.PaymentID)
 				require.NoError(t, err)
 				require.Equal(t, billing.PaymentRefunded, payment.Status)
 				require.EqualValues(t, 9_990_000, payment.AmountRefunded)
@@ -231,12 +231,12 @@ func TestPublicEntitlements(t *testing.T) {
 			require.False(t, member(t, a, sub))
 			// Nothing stands between the customer and buying it again.
 			token := p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-			again := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: sub.PriceID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, again, map[string]string{"Idempotency-Key": "membership-again"})
+			again := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: sub.PriceID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token}}
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, again, map[string]string{"Idempotency-Key": "membership-again"})
 			require.Equal(t, http.StatusCreated, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
-			require.Equal(t, billing.OrderComplete, order.Status)
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			require.Equal(t, billing.InvoiceComplete, invoice.Status)
 			require.True(t, member(t, a, sub))
 		})
 		t.Run("membership-full-refund-of-an-earlier-period-ends-it-at-period-end", func(t *testing.T) {

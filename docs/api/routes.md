@@ -22,12 +22,12 @@ Health and capability discovery. Only the standalone server serves the root path
 
 ## Payment (public)
 
-An order's Solana Pay transaction requests.
+An invoice's Solana Pay transaction requests.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/orders/{id}/solana-pay` | public | — | — | 200 `SolanaPayGetResponse` | when `solana` |
-| POST | `/v1/orders/{id}/solana-pay` | public | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
+| GET | `/v1/invoices/{id}/solana-pay` | public | — | — | 200 `SolanaPayGetResponse` | when `solana` |
+| POST | `/v1/invoices/{id}/solana-pay` | public | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
 
 ## Customer (`/v1/me`)
 
@@ -36,15 +36,15 @@ A customer acting on its own account.
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/v1/me/config` | customer | — | — | 200 `CustomerConfig` |  |
-| POST | `/v1/me/orders/preview` | customer | — | `PreviewMyOrderParams` | 200 `OrderPreview` |  |
-| POST | `/v1/me/orders` | customer | — | `CreateMyOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
-| GET | `/v1/me/orders` | customer | — | — | 200 `ListPage<Order>` |  |
-| GET | `/v1/me/orders/{id}` | customer | — | — | 200 `Order` |  |
-| GET | `/v1/me/orders/{id}/payment-attempt` | customer | — | — | 200 `OrderPaymentAttempt` | `Idempotency-Key` |
-| POST | `/v1/me/orders/{id}/pay` | customer | — | `PayOrderParams` | 200 `Order` | `Idempotency-Key` |
-| POST | `/v1/me/orders/{id}/confirm` | customer | — | `ConfirmOrderParams` | 200 `Order` |  |
-| POST | `/v1/me/orders/{id}/pay-url-failure` | customer | — | — | 204 — |  |
-| POST | `/v1/me/orders/{id}/cancel` | customer | — | — | 200 `Order` |  |
+| POST | `/v1/me/invoices/preview` | customer | — | `PreviewMyInvoiceParams` | 200 `InvoicePreview` |  |
+| POST | `/v1/me/invoices` | customer | — | `CreateMyInvoiceParams` | 200 `Invoice`<br>201 `Invoice` | `Idempotency-Key` |
+| GET | `/v1/me/invoices` | customer | — | — | 200 `ListPage<Invoice>` |  |
+| GET | `/v1/me/invoices/{id}` | customer | — | — | 200 `Invoice` |  |
+| GET | `/v1/me/invoices/{id}/payment-attempt` | customer | — | — | 200 `InvoicePaymentAttempt` | `Idempotency-Key` |
+| POST | `/v1/me/invoices/{id}/pay` | customer | — | `PayInvoiceParams` | 200 `Invoice` | `Idempotency-Key` |
+| POST | `/v1/me/invoices/{id}/confirm` | customer | — | `ConfirmInvoiceParams` | 200 `Invoice` |  |
+| POST | `/v1/me/invoices/{id}/pay-url-failure` | customer | — | — | 204 — |  |
+| POST | `/v1/me/invoices/{id}/cancel` | customer | — | — | 200 `Invoice` |  |
 | GET | `/v1/me/cart` | customer | — | — | 200 `Cart` |  |
 | PUT | `/v1/me/cart/lines/{price_id}` | customer | — | `SetCartLineParams` | 200 `Cart` |  |
 | DELETE | `/v1/me/cart` | customer | — | — | 204 — |  |
@@ -82,10 +82,10 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/admin/orders` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Order>` |  |
-| GET | `/v1/admin/orders/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Order` |  |
-| POST | `/v1/admin/orders/{id}/waive-balance` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` |  |
-| POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` |  |
+| GET | `/v1/admin/invoices` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Invoice>` |  |
+| GET | `/v1/admin/invoices/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Invoice` |  |
+| POST | `/v1/admin/invoices/{id}/waive-balance` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Invoice` |  |
+| POST | `/v1/admin/invoices/{id}/mark-uncollectible` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Invoice` |  |
 | GET | `/v1/admin/subscriptions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Subscription` |  |
 | GET | `/v1/admin/subscriptions/{id}/history` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `SubscriptionHistory` |  |
@@ -227,14 +227,14 @@ The caller's none/read/update access to staff areas and effective application pe
 
 ## Programmatic (`/v1/app`)
 
-The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: orders use `Idempotency-Key`, lease syncs use the lease's item numbers and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group. An application needs `merchant:provisioning:read` for their reads and `merchant:provisioning:manage` for their writes; a provisioning token is its own grant. An erasure (`DELETE /Users/{id}`, alone or in a Bulk) takes the User out of the directory and empties its contact at once; the erasure of its message log and notifications is admitted to the merchant's own erasure budget, past which it waits rather than fails until a person holding `merchant:provisioning:manage` (or a root operator holding the unlock) clears the erasure hold. A create dated before an erasure loses to it.
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission. Each operation owns its durable replay: invoices use `Idempotency-Key`, lease syncs use the lease's item numbers and running charges use `reference`. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they and their provisioning-token management routes are not mounted with `Deps.UserInfo` or without the programmatic group. An application needs `merchant:provisioning:read` for their reads and `merchant:provisioning:manage` for their writes; a provisioning token is its own grant. An erasure (`DELETE /Users/{id}`, alone or in a Bulk) takes the User out of the directory and empties its contact at once; the erasure of its message log and notifications is admitted to the merchant's own erasure budget, past which it waits rather than fails until a person holding `merchant:provisioning:manage` (or a root operator holding the unlock) clears the erasure hold. A create dated before an erasure loses to it.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/app/orders/preview` | application | `merchant:orders:manage`<br>`root:orders:manage` | `PreviewOrderParams` | 200 `OrderPreview` |  |
-| GET | `/v1/app/orders/{id}/payment-attempt` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `OrderPaymentAttempt` | `Idempotency-Key` |
-| POST | `/v1/app/orders` | application | `merchant:orders:manage`<br>`root:orders:manage` | `CreateOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
-| POST | `/v1/app/orders/{id}/cancel` | application | `merchant:orders:manage`<br>`root:orders:manage` | — | 200 `Order` |  |
+| POST | `/v1/app/invoices/preview` | application | `merchant:invoices:manage`<br>`root:invoices:manage` | `PreviewInvoiceParams` | 200 `InvoicePreview` |  |
+| GET | `/v1/app/invoices/{id}/payment-attempt` | application | `merchant:invoices:manage`<br>`root:invoices:manage` | — | 200 `InvoicePaymentAttempt` | `Idempotency-Key` |
+| POST | `/v1/app/invoices` | application | `merchant:invoices:manage`<br>`root:invoices:manage` | `CreateInvoiceParams` | 200 `Invoice`<br>201 `Invoice` | `Idempotency-Key` |
+| POST | `/v1/app/invoices/{id}/cancel` | application | `merchant:invoices:manage`<br>`root:invoices:manage` | — | 200 `Invoice` |  |
 | POST | `/v1/app/entitlements/check` | application | `merchant:entitlements:read`<br>`root:entitlements:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
 | POST | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StartRunningChargeParams` | 201 `RunningCharge`<br>200 `RunningCharge` |  |
 | POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` |  |

@@ -86,7 +86,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 			return agreement, fmt.Errorf("%w: engine predecessor is not a recurring payment", ErrRebillNotRetryable)
 		}
 	case payments.TypeNMISale:
-		agreement, payment, err = orderAgreement(ctx, d, sub, op)
+		agreement, payment, err = invoiceAgreement(ctx, d, sub, op)
 		if err != nil {
 			return agreement, err
 		}
@@ -109,7 +109,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 	}
 	if op.IntentType == payments.TypeNMISale {
 		if observed.TransactionID != receipt.TransactionID() || observed.Rail != models.Rail(op.Rail) {
-			return agreement, fmt.Errorf("%w: order payment contradicts its receipt", ErrRebillNotRetryable)
+			return agreement, fmt.Errorf("%w: invoice payment contradicts its receipt", ErrRebillNotRetryable)
 		}
 	} else if err := subscriptions.ValidateInitialMembershipPayment(accepted, observed, models.Rail(op.Rail), receipt.TransactionID()); err != nil {
 		return agreement, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
@@ -121,43 +121,43 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 	return terms, err
 }
 
-// orderAgreement is the first period a paid order bought for the subscription
+// invoiceAgreement is the first period a paid invoice bought for the subscription
 // its recurring line made: the line's frozen price, seats and interval from
-// the moment the order was paid.
-func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op gen.BillingProviderIntent) (subscriptions.RenewalTerms, gen.BillingPayment, error) {
+// the moment the invoice was paid.
+func invoiceAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op gen.BillingProviderIntent) (subscriptions.RenewalTerms, gen.BillingPayment, error) {
 	var agreement subscriptions.RenewalTerms
 	var payment gen.BillingPayment
 	if err := ValidateNMISaleTerminal(op); err != nil {
 		return agreement, payment, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
 	}
 	p, err := payments.DecodeNMISalePayload(op)
-	if err != nil || p.OrderID == uuid.Nil || !p.Recurring || op.Origin != string(OriginUser) {
-		return agreement, payment, fmt.Errorf("%w: engine predecessor is not an order's customer payment", ErrRebillNotRetryable)
+	if err != nil || p.InvoiceID == uuid.Nil || !p.Recurring || op.Origin != string(OriginUser) {
+		return agreement, payment, fmt.Errorf("%w: engine predecessor is not an invoice's customer payment", ErrRebillNotRetryable)
 	}
 	q := d.Gen(ctx)
-	line, err := q.GetOrderLineBySubscription(ctx, gen.GetOrderLineBySubscriptionParams{MerchantID: sub.MerchantID, OrderID: p.OrderID, SubscriptionID: sub.ID})
+	line, err := q.GetInvoiceLineBySubscription(ctx, gen.GetInvoiceLineBySubscriptionParams{MerchantID: sub.MerchantID, InvoiceID: p.InvoiceID, SubscriptionID: sub.ID})
 	if err != nil {
 		return agreement, payment, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
 	}
-	order, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: sub.MerchantID, ID: p.OrderID})
+	invoice, err := q.GetInvoice(ctx, gen.GetInvoiceParams{MerchantID: sub.MerchantID, ID: p.InvoiceID})
 	if err != nil {
 		return agreement, payment, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
 	}
-	if line.OrderID != order.ID || line.PriceID == nil || line.ProductID == nil || order.CompletedAt == nil || order.PaymentID == nil || *order.PaymentID != p.PaymentID || (line.BillingIntervalHours == nil && line.BillingIntervalMonths == nil) || order.CustomerID != sub.CustomerID {
-		return agreement, payment, fmt.Errorf("%w: order line contradicts its subscription", ErrRebillNotRetryable)
+	if line.InvoiceID != invoice.ID || line.PriceID == nil || line.ProductID == nil || invoice.CompletedAt == nil || invoice.PaymentID == nil || *invoice.PaymentID != p.PaymentID || (line.BillingIntervalHours == nil && line.BillingIntervalMonths == nil) || invoice.CustomerID != sub.CustomerID {
+		return agreement, payment, fmt.Errorf("%w: invoice line contradicts its subscription", ErrRebillNotRetryable)
 	}
 	if payment, err = q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.PaymentID}); err != nil {
 		return agreement, payment, fmt.Errorf("%w: paid agreement payment is missing", ErrRebillNotRetryable)
 	}
-	if payment.OrderID == nil || *payment.OrderID != order.ID || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptInitial || payment.Amount != order.Total || payment.Status != payments.PaymentStatusSucceededValue {
-		return agreement, payment, fmt.Errorf("%w: order payment contradicts its order", ErrRebillNotRetryable)
+	if payment.InvoiceID == nil || *payment.InvoiceID != invoice.ID || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptInitial || payment.Amount != invoice.Total || payment.Status != payments.PaymentStatusSucceededValue {
+		return agreement, payment, fmt.Errorf("%w: invoice payment contradicts its invoice", ErrRebillNotRetryable)
 	}
 	var access *int
 	if line.AccessDurationHours != nil {
 		hours := int(*line.AccessDurationHours)
 		access = &hours
 	}
-	start := *order.CompletedAt
+	start := *invoice.CompletedAt
 	end := start
 	if line.BillingIntervalMonths != nil {
 		end, err = calendarutil.NextBoundary(start, start, int(*line.BillingIntervalMonths))
@@ -167,12 +167,12 @@ func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op 
 	} else {
 		end = start.Add(time.Duration(*line.BillingIntervalHours) * time.Hour)
 	}
-	agreement = subscriptions.RenewalTerms{PSPID: *op.PspID, SubscriptionID: sub.ID, CustomerID: order.CustomerID, FromPriceID: *line.PriceID, FromProductID: *line.ProductID,
-		PriceID: *line.PriceID, ProductID: *line.ProductID, ProductName: line.Description, Amount: line.Amount, Currency: order.Currency,
+	agreement = subscriptions.RenewalTerms{PSPID: *op.PspID, SubscriptionID: sub.ID, CustomerID: invoice.CustomerID, FromPriceID: *line.PriceID, FromProductID: *line.ProductID,
+		PriceID: *line.PriceID, ProductID: *line.ProductID, ProductName: line.Description, Amount: line.Amount, Currency: invoice.Currency,
 		PeriodStart: start, PeriodEnd: end, AccessDurationHours: access}
 	if len(line.CreditGrant) > 0 && string(line.CreditGrant) != "null" {
 		if err := json.Unmarshal(line.CreditGrant, &agreement.CreditGrant); err != nil {
-			return agreement, payment, fmt.Errorf("%w: order credit promise is unreadable: %w", ErrRebillNotRetryable, err)
+			return agreement, payment, fmt.Errorf("%w: invoice credit promise is unreadable: %w", ErrRebillNotRetryable, err)
 		}
 	}
 	if line.BillingIntervalMonths != nil {

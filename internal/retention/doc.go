@@ -4,7 +4,7 @@
 // baseline states its class (tables.go lists them):
 //   - permanent: the ledger, grants, payments, owed usage, usage postings
 //     and card prints, receipts, operation authorizations, refusals, running charges,
-//     maintenance runs and destructive before-images; also an order attempt
+//     maintenance runs and destructive before-images; also an invoice attempt
 //     that reached a provider, and a cost observation while its operation is
 //     open;
 //   - rows: deleted by the hourly cleanup;
@@ -14,8 +14,8 @@
 // subscription_billing_changes, operation_log, payment_attempts,
 // rebill_cycles and nmi_history_months 25 months; instruction-only
 // provider_intents 25 months after they last changed (the rest are
-// permanent); resolved reconciliation_findings 12 months; order_attempts that
-// never reached a provider 90 days, and unpaid closed orders with none 397
+// permanent); resolved reconciliation_findings 12 months; invoice_attempts that
+// never reached a provider 90 days, and unpaid closed invoices with none 397
 // days;
 // parked_provider_subscriptions 90 days after release; carts 30 days idle;
 // notification_events, host_outbox and the event log 90 days; webhook_events

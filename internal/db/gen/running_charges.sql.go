@@ -191,7 +191,7 @@ type ListRunningChargesParams struct {
 	RowLimit   int32
 }
 
-// Newest first: ids are uuidv7, so the primary key is the order.
+// Newest first: ids are uuidv7, so the primary key is the invoice.
 func (q *Queries) ListRunningCharges(ctx context.Context, arg ListRunningChargesParams) ([]BillingRunningCharge, error) {
 	rows, err := q.db.Query(ctx, listRunningCharges,
 		arg.MerchantID,

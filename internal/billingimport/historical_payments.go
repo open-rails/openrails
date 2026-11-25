@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/failpoint"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -78,8 +78,8 @@ func planHistoricalPayments(psps *pspResolver, declared []billing.DeclaredHistor
 	return out, nil
 }
 
-// Each receipt commits its order and payment together. Replaying after a lost
-// response cannot create a second order or move the payment to another customer.
+// Each receipt commits its invoice and payment together. Replaying after a lost
+// response cannot create a second invoice or move the payment to another customer.
 func recordHistoricalPayments(ctx context.Context, database *db.DB, merchantID uuid.UUID, planned []historicalPayment, now time.Time, res *Result) error {
 	for _, p := range planned {
 		created := false
@@ -187,7 +187,7 @@ func recordHistoricalRefunds(ctx context.Context, d *db.DB, merchantID uuid.UUID
 	if err != nil {
 		return false, err
 	}
-	// Only our access-free historical orders can acquire refunds through this
+	// Only our access-free historical invoices can acquire refunds through this
 	// path. Ordinary purchases may carry credits or subscription effects.
 	bill, err := d.Gen(ctx).GetProviderBill(ctx, gen.GetProviderBillParams{MerchantID: merchantID, PspID: p.psp, SourceKind: historicalPaymentSource, SourceKey: p.decl.TransactionID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -196,7 +196,7 @@ func recordHistoricalRefunds(ctx context.Context, d *db.DB, merchantID uuid.UUID
 	if err != nil {
 		return false, err
 	}
-	if original.OrderID == nil || *original.OrderID != bill.OrderID || original.SubscriptionID != nil || original.LedgerTransferID != nil {
+	if original.InvoiceID == nil || *original.InvoiceID != bill.InvoiceID || original.SubscriptionID != nil || original.LedgerTransferID != nil {
 		return false, observed.ErrConflict
 	}
 	if _, err := d.Gen(ctx).LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: merchantID, PaymentID: original.ID}); err != nil {

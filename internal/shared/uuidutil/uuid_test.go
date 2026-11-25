@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// The vectors are the derivation NotifyOverdueOrders repeats in SQL.
+// The vectors are the derivation NotifyOverdueInvoices repeats in SQL.
 func TestChildV7(t *testing.T) {
 	for _, c := range []struct{ parent, want string }{
 		{"019a0000-0000-7000-8000-000000000001", "019a0000-0000-7b90-ba50-270a2946f316"},

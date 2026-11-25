@@ -128,14 +128,14 @@ func (v *vaultCards) subscribe(t *testing.T, bearer, key string, hours int, amou
 	require.NoError(t, err)
 	price, err := v.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", BillingIntervalHours: ptr(hours)})
 	require.NoError(t, err)
-	buy := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(amount), Payment: &billing.OrderPaymentParams{PaymentMethodID: &method.ID}}
-	status, raw := v.request(t, http.MethodPost, "/v1/me/orders", bearer, buy, map[string]string{"Idempotency-Key": "buy-" + key})
+	buy := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(amount), Payment: &billing.InvoicePaymentParams{PaymentMethodID: &method.ID}}
+	status, raw := v.request(t, http.MethodPost, "/v1/me/invoices", bearer, buy, map[string]string{"Idempotency-Key": "buy-" + key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status, string(raw))
-	require.NotNil(t, order.Lines[0].SubscriptionID)
-	sub, err := v.alpha.GetSubscription(t.Context(), *order.Lines[0].SubscriptionID)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status, string(raw))
+	require.NotNil(t, invoice.Lines[0].SubscriptionID)
+	sub, err := v.alpha.GetSubscription(t.Context(), *invoice.Lines[0].SubscriptionID)
 	require.NoError(t, err)
 	require.Equal(t, "engine", string(sub.CollectionPolicy))
 	return *sub

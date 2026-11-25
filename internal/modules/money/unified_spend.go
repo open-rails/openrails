@@ -170,14 +170,14 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	return balanceSpent, owedAccrued, applied, nil
 }
 
-// insertOwedItemsTx queues what a spend left owed for its usage order: one
-// item, or one per meter an accrual's posting is for, so the order bills each
+// insertOwedItemsTx queues what a spend left owed for its usage invoice: one
+// item, or one per meter an accrual's posting is for, so the invoice bills each
 // meter on its own line.
 func (s *MoneyService) insertOwedItemsTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, key IdempotencyKey, owed int64, now time.Time) error {
 	if s.posting != nil && !s.posting.owedAt.IsZero() {
 		now = s.posting.owedAt
 	}
-	// An item names when its charges began, where its order's period starts.
+	// An item names when its charges began, where its invoice's period starts.
 	metadata := func(source string) map[string]any {
 		m := map[string]any{"operation": string(key.Operation()), "source": source}
 		if s.posting != nil && !s.posting.from.IsZero() {

@@ -6,10 +6,10 @@ import {
 
 declare global {
   interface Window {
-    hostedFixture: { urls: string[]; orders: string[]; attacker: string }
+    hostedFixture: { urls: string[]; invoices: string[]; attacker: string }
     completions: EmbeddedPaymentCompletion[]
     messageSeen: number
-    showOrder: (index: number) => void
+    showInvoice: (index: number) => void
     showURL: (url: string) => void
   }
 }
@@ -30,6 +30,6 @@ window.showURL = (url) =>
       }}
     />
   )
-window.showOrder = (index) => window.showURL(window.hostedFixture.urls[index])
-window.showOrder(0)
+window.showInvoice = (index) => window.showURL(window.hostedFixture.urls[index])
+window.showInvoice(0)
 document.body.dataset.ready = "true"

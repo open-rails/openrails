@@ -102,7 +102,7 @@ SELECT EXISTS (
       AND p.id IN (
         SELECT pm.psp_id FROM billing.payments pm WHERE pm.merchant_id = $1::uuid AND pm.id = $2::uuid
         UNION ALL
-        SELECT o.psp_id FROM billing.orders o WHERE o.merchant_id = $1::uuid AND o.id = $3::uuid
+        SELECT o.psp_id FROM billing.invoices o WHERE o.merchant_id = $1::uuid AND o.id = $3::uuid
         UNION ALL
         SELECT s.psp_id FROM billing.subscriptions s WHERE s.merchant_id = $1::uuid AND s.id = $4::uuid
         UNION ALL
@@ -114,18 +114,18 @@ SELECT EXISTS (
 type CustomerMessageOnTestPSPParams struct {
 	MerchantID     uuid.UUID
 	PaymentID      *uuid.UUID
-	OrderID        *uuid.UUID
+	InvoiceID      *uuid.UUID
 	SubscriptionID *uuid.UUID
 	PspID          *uuid.UUID
 }
 
-// Whether the fact's PSP, payment, order or subscription is on a PSP that
+// Whether the fact's PSP, payment, invoice or subscription is on a PSP that
 // moves no real money.
 func (q *Queries) CustomerMessageOnTestPSP(ctx context.Context, arg CustomerMessageOnTestPSPParams) (bool, error) {
 	row := q.db.QueryRow(ctx, customerMessageOnTestPSP,
 		arg.MerchantID,
 		arg.PaymentID,
-		arg.OrderID,
+		arg.InvoiceID,
 		arg.SubscriptionID,
 		arg.PspID,
 	)

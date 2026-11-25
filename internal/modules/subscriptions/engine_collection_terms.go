@@ -20,8 +20,8 @@ const TypeSubscriptionCollection = "subscription_collection"
 // SubscriptionCollectionPayload is one accepted engine renewal. PreviousPeriodEnd
 // fences the old obligation even when the purchased period starts after a gap.
 type SubscriptionCollectionPayload struct {
-	// OrderCaptchaSubjects preserves the initiating HTTP address for worker completion.
-	OrderCaptchaSubjects     []string                  `json:"order_captcha_subjects,omitempty"`
+	// InvoiceCaptchaSubjects preserves the initiating HTTP address for worker completion.
+	InvoiceCaptchaSubjects   []string                  `json:"order_captcha_subjects,omitempty"`
 	Initiator                charge.Initiator          `json:"initiator"`
 	RequestedPaymentMethodID *uuid.UUID                `json:"requested_payment_method_id,omitempty"`
 	Renewal                  RenewalTerms              `json:"renewal"`
@@ -34,8 +34,8 @@ type SubscriptionCollectionPayload struct {
 	FailureCount             int                       `json:"failure_count"`
 	AmountMinor              moneyutil.Cents           `json:"amount_minor,string"`
 	OrderReference           string                    `json:"order_reference"`
-	// OrderID is the renewal order this collection is an attempt on.
-	OrderID uuid.UUID `json:"order_id,omitzero"`
+	// InvoiceID is the renewal invoice this collection is an attempt on.
+	InvoiceID uuid.UUID `json:"order_id,omitzero"`
 }
 
 // SubscriptionCollectionDescription correlates a gateway transaction with one

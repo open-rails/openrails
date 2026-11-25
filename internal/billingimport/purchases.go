@@ -19,8 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/modules/money/books"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -28,9 +28,9 @@ import (
 )
 
 type (
-	DeclaredPurchase   = billing.DeclaredPurchase
-	DeclaredOrderLine  = billing.DeclaredOrderLine
-	DeclaredSettlement = billing.DeclaredSettlement
+	DeclaredPurchase    = billing.DeclaredPurchase
+	DeclaredInvoiceLine = billing.DeclaredInvoiceLine
+	DeclaredSettlement  = billing.DeclaredSettlement
 )
 
 // FindingPurchaseRefused is a declared purchase the import refused: its facts
@@ -233,7 +233,7 @@ func refusePurchase(ctx context.Context, q *gen.Queries, merchantID, psp uuid.UU
 }
 
 // recordPurchases records each planned purchase in its own transaction: a
-// complete engine-owned order with frozen lines, its succeeded rail payment
+// complete engine-owned invoice with frozen lines, its succeeded rail payment
 // and the access its lines grant. No provider is called.
 func recordPurchases(ctx context.Context, database *db.DB, merchantID uuid.UUID, plans []plannedPurchase, now time.Time, res *Result) error {
 	for _, p := range plans {
@@ -306,7 +306,7 @@ func recordPurchase(ctx context.Context, d *db.DB, merchantID uuid.UUID, p plann
 		return false, err
 	}
 	// A timed line's revenue is recognised over the access it was granted.
-	return result.Created, books.ApplyOrder(ctx, d, result.Order.ID, nil)
+	return result.Created, books.ApplyInvoice(ctx, d, result.Invoice.ID, nil)
 }
 
 // grantPurchaseAccess grants each product its lines bought, from paid_at to

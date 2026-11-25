@@ -150,20 +150,20 @@ func newDeclineReport(h nmi.DeclineHistory) declineReport {
 		m.Refused += c.Count
 		refusals[declineRefusal{Kind: c.Kind, Cause: c.Cause, Reason: c.Reason}] += c.Count
 	}
-	order := map[string]int{nmi.HistoryVerification: 0, nmi.HistoryOneOffSale: 1, nmi.HistoryScheduledRebill: 2}
+	invoice := map[string]int{nmi.HistoryVerification: 0, nmi.HistoryOneOffSale: 1, nmi.HistoryScheduledRebill: 2}
 	for _, m := range months {
 		m.RefusalRate = float64(m.Refused*1000/m.Attempts) / 10
 		report.Months = append(report.Months, *m)
 	}
 	slices.SortFunc(report.Months, func(a, b declineMonth) int {
-		return cmp.Or(cmp.Compare(a.Month, b.Month), cmp.Compare(order[a.Kind], order[b.Kind]))
+		return cmp.Or(cmp.Compare(a.Month, b.Month), cmp.Compare(invoice[a.Kind], invoice[b.Kind]))
 	})
 	for r, n := range refusals {
 		r.Count = n
 		report.Refusals = append(report.Refusals, r)
 	}
 	slices.SortFunc(report.Refusals, func(a, b declineRefusal) int {
-		return cmp.Or(cmp.Compare(order[a.Kind], order[b.Kind]), cmp.Compare(b.Count, a.Count), cmp.Compare(a.Reason, b.Reason))
+		return cmp.Or(cmp.Compare(invoice[a.Kind], invoice[b.Kind]), cmp.Compare(b.Count, a.Count), cmp.Compare(a.Reason, b.Reason))
 	})
 	return report
 }

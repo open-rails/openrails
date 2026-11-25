@@ -31,14 +31,14 @@ type Params struct {
 	CustomerID identity.CustomerID
 	PaymentID  uuid.UUID
 	ProductID  uuid.UUID
-	// OrderLineID is the accepted order line that funded the credit.
-	OrderLineID uuid.UUID
-	Currency    string
-	Amount      int64
-	PaidAmount  int64
-	StartsAt    time.Time
-	ExpiresAt   *time.Time
-	Description string
+	// InvoiceLineID is the accepted invoice line that funded the credit.
+	InvoiceLineID uuid.UUID
+	Currency      string
+	Amount        int64
+	PaidAmount    int64
+	StartsAt      time.Time
+	ExpiresAt     *time.Time
+	Description   string
 }
 
 // Fund appends one credit lot per successful payment. A DB bound
@@ -47,7 +47,7 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 	if s == nil || s.db == nil {
 		return uuid.Nil, fmt.Errorf("money service not initialized")
 	}
-	if p.OrderLineID == uuid.Nil || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.CustomerID.IsZero() || p.Amount <= 0 || p.PaidAmount <= 0 || p.StartsAt.IsZero() {
+	if p.InvoiceLineID == uuid.Nil || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.CustomerID.IsZero() || p.Amount <= 0 || p.PaidAmount <= 0 || p.StartsAt.IsZero() {
 		return uuid.Nil, fmt.Errorf("purchased credit requires payment, product, customer, positive amounts and accepted start time")
 	}
 	p.Currency = strings.ToUpper(strings.TrimSpace(p.Currency))
@@ -83,12 +83,12 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		if payment.CustomerID != p.CustomerID.UUID() || inUnit && !currency.IsUnitCode(p.Currency) || payment.Status != "succeeded" || payment.RefundedPaymentID != nil {
 			return fmt.Errorf("credit funding does not match completed payment")
 		}
-		line, err := q.GetOrderLine(ctx, gen.GetOrderLineParams{MerchantID: mid.UUID(), ID: p.OrderLineID})
+		line, err := q.GetInvoiceLine(ctx, gen.GetInvoiceLineParams{MerchantID: mid.UUID(), ID: p.InvoiceLineID})
 		if err != nil {
-			return fmt.Errorf("load credit order line: %w", err)
+			return fmt.Errorf("load credit invoice line: %w", err)
 		}
-		if payment.OrderID == nil || line.OrderID != *payment.OrderID || line.ProductID == nil || *line.ProductID != p.ProductID || line.Amount != p.PaidAmount {
-			return fmt.Errorf("credit funding does not match its order line")
+		if payment.InvoiceID == nil || line.InvoiceID != *payment.InvoiceID || line.ProductID == nil || *line.ProductID != p.ProductID || line.Amount != p.PaidAmount {
+			return fmt.Errorf("credit funding does not match its invoice line")
 		}
 		existing, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: p.PaymentID})
 		if err == nil {
@@ -117,7 +117,7 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 			Customer: p.CustomerID.UUID(), Unit: p.Currency, Units: p.Amount, Funding: funding,
 			PaidAmount: &p.PaidAmount, PaidCurrency: &payment.Currency,
 			Source: "payment", SourceID: p.PaymentID.String(), Invoker: p.CustomerID.String(),
-			Product: &p.ProductID, OrderLine: &p.OrderLineID, Payment: &p.PaymentID, Description: description,
+			Product: &p.ProductID, InvoiceLine: &p.InvoiceLineID, Payment: &p.PaymentID, Description: description,
 			StartsAt: p.StartsAt, ExpiresAt: p.ExpiresAt,
 		})
 		if err != nil {

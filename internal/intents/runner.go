@@ -390,7 +390,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats,
 		}
 	case OutcomeRetryable:
 		next := now.Add(handler.Backoff(intent.Attempts))
-		if verifying && (intent.IntentType == "subscription_collection" || intent.IntentType == TypeOrderCollection) {
+		if verifying && (intent.IntentType == "subscription_collection" || intent.IntentType == TypeInvoiceCollection) {
 			submitted, malformed := hasSubmissionEvidence(intent)
 			if !submitted && malformed == nil {
 				if blocked, reason := GateExecution(ctx, r.Config, intent.MerchantID, Origin(intent.Origin)); blocked {
@@ -456,7 +456,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *slog.Logger, stats *Stats,
 		logEntry.WarnContext(ctx, "intent outcome ambiguous; verifier will resolve via provider reads", "reason", outcome.Reason)
 	case OutcomeTerminal:
 		if outcome.Evidence["declined"] == true {
-			r.recordOrderCardDecline(ctx, intent)
+			r.recordInvoiceCardDecline(ctx, intent)
 		}
 		stats.Terminal++
 		logEntry.ErrorContext(ctx, "intent failed terminally", "reason", outcome.Reason)
@@ -626,7 +626,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 func (r *Runner) holdForWritePosture(ctx context.Context, logger *slog.Logger, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string) {
 	ctx = withHistoryHold(ctx, "write_posture")
 	submitted, malformed := hasSubmissionEvidence(in)
-	if in.IntentType == "subscription_collection" || in.IntentType == TypeOrderCollection || submitted || malformed != nil {
+	if in.IntentType == "subscription_collection" || in.IntentType == TypeInvoiceCollection || submitted || malformed != nil {
 		writeCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
 		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, nil); err != nil {

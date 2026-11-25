@@ -75,7 +75,7 @@ func DefaultAmountFloor(code string) int64 {
 
 // Policy is the merchant's declared delinquency policy.
 type Policy struct {
-	// GraceDays is how long past a usage order's due_at the payer keeps grace.
+	// GraceDays is how long past a usage invoice's due_at the payer keeps grace.
 	// Zero is a valid explicit choice: delinquent the moment it is overdue.
 	GraceDays int
 	// AmountFloor (native units of the debt's currency) is the smallest
@@ -99,18 +99,18 @@ func (p Policy) Validate() error {
 	return nil
 }
 
-// Exposure is the usage-order-derived input to a delinquency decision: how much a
-// payer owes past its due date, since when, and across how many usage orders.
+// Exposure is the usage-invoice-derived input to a delinquency decision: how much a
+// payer owes past its due date, since when, and across how many usage invoices.
 type Exposure struct {
 	OverdueStartedAt time.Time
 	OverdueAmount    int64
-	OverdueOrders    int
+	OverdueInvoices  int
 }
 
 // Owes reports whether there is any overdue debt at all.
-func (e Exposure) Owes() bool { return e.OverdueOrders > 0 && e.OverdueAmount > 0 }
+func (e Exposure) Owes() bool { return e.OverdueInvoices > 0 && e.OverdueAmount > 0 }
 
-// Classify is the decision: a pure function of usage order truth and policy. The
+// Classify is the decision: a pure function of usage invoice truth and policy. The
 // stored row only remembers when a state started and whether it was announced.
 // A debt below the floor is grace however old, so a rounding remnant never
 // cuts anyone off.

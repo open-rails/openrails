@@ -1256,8 +1256,8 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 				RemoteEvidence: remoteTxnEvidence(t), RecommendedAction: "provider reports a voided sale; reconcile its retained or missing billing allocation before collection resumes; observation does not create a refund"}
 			if known != nil {
 				finding.LocalEvidence = map[string]any{"payment_id": known.ID.String(), "status": known.Status, "amount_cents": strconv.FormatInt(known.AmountCents, 10), "currency": known.Currency}
-				if known.UsageOrderID != nil {
-					finding.LocalEvidence["order_id"] = known.UsageOrderID.String()
+				if known.UsageInvoiceID != nil {
+					finding.LocalEvidence["invoice_id"] = known.UsageInvoiceID.String()
 				}
 			}
 			findings = append(findings, finding)
@@ -1266,10 +1266,10 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 				continue
 			}
 			if payment, ok := paymentsByTxnID[t.TransactionID]; ok {
-				if payment.UsageOrderID != nil && (payment.AmountCents != t.AmountCents || !strings.EqualFold(payment.Currency, t.Currency)) {
+				if payment.UsageInvoiceID != nil && (payment.AmountCents != t.AmountCents || !strings.EqualFold(payment.Currency, t.Currency)) {
 					findings = append(findings, Finding{Provider: provider, Type: FindingChargeMissingLocal, SubjectKey: t.TransactionID, Severity: SeverityHigh, Status: FindingStatusRequiresReview, RequiresAdmin: true,
-						LocalEvidence: map[string]any{"order_id": payment.UsageOrderID.String(), "amount_cents": strconv.FormatInt(payment.AmountCents, 10), "currency": payment.Currency}, RemoteEvidence: remoteTxnEvidence(t),
-						RecommendedAction: "provider charge contradicts the usage order's canonical receipt; reconcile the exact operation before collection resumes"})
+						LocalEvidence: map[string]any{"invoice_id": payment.UsageInvoiceID.String(), "amount_cents": strconv.FormatInt(payment.AmountCents, 10), "currency": payment.Currency}, RemoteEvidence: remoteTxnEvidence(t),
+						RecommendedAction: "provider charge contradicts the usage invoice's canonical receipt; reconcile the exact operation before collection resumes"})
 				}
 				continue
 			}
@@ -1517,12 +1517,12 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 	}
 
 	f.LocalEvidence = map[string]any{
-		"order_attempt_id": orderAttemptRef(d.MemoLocalID),
-		"customer_id":      customerID.String(),
-		"price_id":         d.PublicPriceID,
-		"correlated_via":   "purchase_memo",
+		"invoice_attempt_id": invoiceAttemptRef(d.MemoLocalID),
+		"customer_id":        customerID.String(),
+		"price_id":           d.PublicPriceID,
+		"correlated_via":     "purchase_memo",
 	}
-	f.RecommendedAction = "memo-recognized one-off purchase verified against its order attempt (recipient, mint and amount agree); enforce backfills the missing billing.payments row with money from the on-chain transfer"
+	f.RecommendedAction = "memo-recognized one-off purchase verified against its invoice attempt (recipient, mint and amount agree); enforce backfills the missing billing.payments row with money from the on-chain transfer"
 	f.Apply = &ApplyAction{BackfillPayment: &BackfillPaymentAction{
 		Rail:          string(ProviderSolana),
 		TransactionID: t.TransactionID,
@@ -1535,7 +1535,7 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 			"reconcile_backfill": true,
 			"correlated_via":     "purchase_memo",
 			"discovered_via":     "wallet_scan",
-			"order_attempt_id":   orderAttemptRef(d.MemoLocalID),
+			"invoice_attempt_id": invoiceAttemptRef(d.MemoLocalID),
 			"provider":           string(provider),
 		},
 	}}
@@ -1589,10 +1589,10 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		RemoteEvidence: remoteTxnEvidence(t),
 	}
 
-	if original != nil && original.UsageOrderID != nil {
+	if original != nil && original.UsageInvoiceID != nil {
 		f.Status, f.RequiresAdmin = FindingStatusRequiresReview, true
-		f.LocalEvidence = map[string]any{"order_id": original.UsageOrderID.String(), "transaction_id": original.TransactionID}
-		f.RecommendedAction = "refund belongs to a usage order's collection; reconcile its order and ledger rather than creating a subscription refund"
+		f.LocalEvidence = map[string]any{"invoice_id": original.UsageInvoiceID.String(), "transaction_id": original.TransactionID}
+		f.RecommendedAction = "refund belongs to a usage invoice's collection; reconcile its invoice and ledger rather than creating a subscription refund"
 		return f, true
 	}
 	if original == nil {
@@ -1758,11 +1758,11 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 	return findings
 }
 
-// orderAttemptRef spells a purchase memo's local id, a order attempt
+// invoiceAttemptRef spells a purchase memo's local id, a invoice attempt
 // UUID, as the attempt's wire id; a memo that is not a UUID stays verbatim.
-func orderAttemptRef(memoLocalID string) string {
+func invoiceAttemptRef(memoLocalID string) string {
 	if u, err := uuid.Parse(memoLocalID); err == nil {
-		return billing.OrderAttemptID(u).String()
+		return billing.InvoiceAttemptID(u).String()
 	}
 	return memoLocalID
 }

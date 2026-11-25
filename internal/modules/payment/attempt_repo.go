@@ -14,15 +14,15 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-type OrderAttemptRepo struct {
+type InvoiceAttemptRepo struct {
 	db *db.DB
 }
 
-func NewOrderAttemptRepo(d *db.DB) *OrderAttemptRepo {
-	return &OrderAttemptRepo{db: d}
+func NewInvoiceAttemptRepo(d *db.DB) *InvoiceAttemptRepo {
+	return &InvoiceAttemptRepo{db: d}
 }
 
-func orderAttemptJSONB(s *models.OrderAttempt) (meta, fields, state []byte, err error) {
+func invoiceAttemptJSONB(s *models.InvoiceAttempt) (meta, fields, state []byte, err error) {
 	if meta, err = models.ToJSONB(s.Metadata); err != nil {
 		return nil, nil, nil, err
 	}
@@ -35,20 +35,20 @@ func orderAttemptJSONB(s *models.OrderAttempt) (meta, fields, state []byte, err 
 	return meta, fields, state, nil
 }
 
-func (r *OrderAttemptRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.OrderAttempt, error) {
+func (r *InvoiceAttemptRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.InvoiceAttempt, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	row, err := r.db.Gen(ctx).GetOrderAttemptByID(ctx, gen.GetOrderAttemptByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
+	row, err := r.db.Gen(ctx).GetInvoiceAttemptByID(ctx, gen.GetInvoiceAttemptByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
-	return models.OrderAttemptFromGen(row)
+	return models.InvoiceAttemptFromGen(row)
 }
 
-func (r *OrderAttemptRepo) Update(ctx context.Context, session *models.OrderAttempt) error {
+func (r *InvoiceAttemptRepo) Update(ctx context.Context, session *models.InvoiceAttempt) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
@@ -57,11 +57,11 @@ func (r *OrderAttemptRepo) Update(ctx context.Context, session *models.OrderAtte
 	if err := session.ValidateTerms(); err != nil {
 		return err
 	}
-	meta, fields, state, err := orderAttemptJSONB(session)
+	meta, fields, state, err := invoiceAttemptJSONB(session)
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).UpdateOrderAttempt(ctx, gen.UpdateOrderAttemptParams{MerchantID: queryMerchant.UUID(),
+	rows, err := r.db.Gen(ctx).UpdateInvoiceAttempt(ctx, gen.UpdateInvoiceAttemptParams{MerchantID: queryMerchant.UUID(),
 		ID:         session.ID,
 		CustomerID: session.CustomerID,
 
@@ -89,20 +89,20 @@ func (r *OrderAttemptRepo) Update(ctx context.Context, session *models.OrderAtte
 	return nil
 }
 
-func (r *OrderAttemptRepo) BindSolanaTransactionRequest(ctx context.Context, session *models.OrderAttempt, payer string, now time.Time) error {
+func (r *InvoiceAttemptRepo) BindSolanaTransactionRequest(ctx context.Context, session *models.InvoiceAttempt, payer string, now time.Time) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
 	}
 
 	if session == nil {
-		return errors.New("order attempt is nil")
+		return errors.New("invoice attempt is nil")
 	}
 	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
-		return errors.New("order attempt reference is required")
+		return errors.New("invoice attempt reference is required")
 	}
 	if session.RailState == nil {
-		return errors.New("order attempt rail state is required")
+		return errors.New("invoice attempt rail state is required")
 	}
 	ref := strings.TrimSpace(*session.Reference)
 	payer = strings.TrimSpace(payer)
@@ -117,7 +117,7 @@ func (r *OrderAttemptRepo) BindSolanaTransactionRequest(ctx context.Context, ses
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).BindSolanaOrderAttempt(ctx, gen.BindSolanaOrderAttemptParams{MerchantID: queryMerchant.UUID(),
+	rows, err := r.db.Gen(ctx).BindSolanaInvoiceAttempt(ctx, gen.BindSolanaInvoiceAttemptParams{MerchantID: queryMerchant.UUID(),
 		ID:        session.ID,
 		Reference: &ref,
 		RailState: state,
@@ -128,7 +128,7 @@ func (r *OrderAttemptRepo) BindSolanaTransactionRequest(ctx context.Context, ses
 		return err
 	}
 	if rows < 1 {
-		return fmt.Errorf("solana order attempt binding conflict")
+		return fmt.Errorf("solana invoice attempt binding conflict")
 	}
 	return nil
 }

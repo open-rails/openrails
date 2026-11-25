@@ -62,7 +62,7 @@ func TestEventStore(t *testing.T) {
 		t.Run("usage-catalog-routes-client-and-gate", noStoreRefusals)
 		t.Run("usage-settings", noStoreSettings)
 		t.Run("subscriptions-credit-packs-and-running-charges", noStorePurchases)
-		t.Run("usage-orders", noStoreUsageOrders)
+		t.Run("usage-invoices", noStoreUsageInvoices)
 	})
 	t.Run("OR-J24-S40/new-migrates-clickhouse-idempotently-and-refuses-another-store", storeMigrationsAndIdentity)
 	t.Run("OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start", concurrentStoreMigrations)
@@ -172,13 +172,13 @@ func noStorePurchases(t *testing.T) {
 	require.NoError(t, err)
 	price, err := a.alpha.CreatePrice(ctx, billing.CreatePriceParams{ProductID: pack.ID, Key: "pack", UnitAmount: 10_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
-		Payment: &billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "credit-pack"})
+	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+		Payment: &billing.InvoicePaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "credit-pack"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status)
 	b, err := a.alpha.GetBalance(ctx, customer, billing.GetBalanceParams{Currency: "USD"})
 	require.NoError(t, err)
 	require.EqualValues(t, 25_000_000, b.AvailableAmount)
@@ -194,8 +194,8 @@ func noStorePurchases(t *testing.T) {
 }
 
 // A running charge leaves owed what the balance does not cover, and a usage
-// order bills it: neither needs the event store.
-func noStoreUsageOrders(t *testing.T) {
+// invoice bills it: neither needs the event store.
+func noStoreUsageInvoices(t *testing.T) {
 	a, p, customer := usageBillingAccount(t, false, withoutEventStore)
 	ctx := t.Context()
 	charge := billing.StartRunningChargeParams{Reference: "owed", CustomerID: customer, Currency: "USD", RatePerHour: 10_000_000}
@@ -209,12 +209,12 @@ func noStoreUsageOrders(t *testing.T) {
 	a.clock.Advance(12 * time.Hour)
 	runUsageDue(t, fleet)
 	require.Eventually(t, func() bool {
-		rows, err := a.alpha.ListOrders(ctx, billing.OrderListParams{CustomerID: customer})
-		return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+		rows, err := a.alpha.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: customer})
+		return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.InvoiceComplete
 	}, 15*time.Second, 20*time.Millisecond)
-	order := oneUsageOrder(t, a, customer)
-	require.EqualValues(t, 20_000_000, order.Total)
-	require.EqualValues(t, 20_000_000, order.Usage.AmountPaid)
+	invoice := oneUsageInvoice(t, a, customer)
+	require.EqualValues(t, 20_000_000, invoice.Total)
+	require.EqualValues(t, 20_000_000, invoice.Usage.AmountPaid)
 	p.money(t, 1, 2000)
 }
 

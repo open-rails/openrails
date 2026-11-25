@@ -94,7 +94,7 @@ var ErrNoRoutableProcessor = errors.New("no payment provider is available for th
 
 // Route picks the PSP for a purchase. The returned decision always carries the
 // full candidate trace, including on the no-winner error path.
-func (s *OrderAttemptService) Route(ctx context.Context, in RoutingInput) (*RoutingDecision, error) {
+func (s *InvoiceAttemptService) Route(ctx context.Context, in RoutingInput) (*RoutingDecision, error) {
 	targets := s.purchaseService
 	if targets == nil || targets.railSource() == nil {
 		return nil, fmt.Errorf("PSP routing unavailable")
@@ -145,12 +145,12 @@ func (s *OrderAttemptService) Route(ctx context.Context, in RoutingInput) (*Rout
 		return decision, nil
 	}
 
-	order, policy, rule, err := s.routingOrder(ctx, in)
+	invoice, policy, rule, err := s.routingOrder(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-	decision := &RoutingDecision{Policy: policy, Rule: rule, Candidates: make([]RoutingCandidate, 0, len(order))}
-	for _, selector := range order {
+	decision := &RoutingDecision{Policy: policy, Rule: rule, Candidates: make([]RoutingCandidate, 0, len(invoice))}
+	for _, selector := range invoice {
 		target, skip := s.evaluateCandidate(ctx, targets, in, selector)
 		candidate := RoutingCandidate{Selector: selector, Rail: target.Rail, PSPID: targetPSPID(target), Skip: skip}
 		if skip == "" {
@@ -183,7 +183,7 @@ func targetAccountID(target railTarget) string {
 // A gateway can offer an existing merchant-held card or a new platform card.
 // This is only an availability check: submission and execution resolve the
 // chosen instrument's exact custody, never fall back to another vault.
-func (s *OrderAttemptService) routingConfig(ctx context.Context, target railTarget) (*config.ResolvedPSP, error) {
+func (s *InvoiceAttemptService) routingConfig(ctx context.Context, target railTarget) (*config.ResolvedPSP, error) {
 	source := s.purchaseService.railSource()
 	cfg, err := source.RailConfig(ctx, target.Rail, targetAccountID(target))
 	if err == nil || target.Rail != string(models.RailNMI) {
@@ -226,10 +226,10 @@ func unresolvedRailTarget(selector string) railTarget {
 	return railTarget{PSP: name, Rail: name}
 }
 
-// routingOrder resolves the candidate order for these inputs: a provider
+// routingOrder resolves the candidate invoice for these inputs: a provider
 // price's own PSP, the first matching merchant rule, else the default: the
 // merchant's charge PSPs, then the other rails.
-func (s *OrderAttemptService) routingOrder(ctx context.Context, in RoutingInput) ([]string, string, *int, error) {
+func (s *InvoiceAttemptService) routingOrder(ctx context.Context, in RoutingInput) ([]string, string, *int, error) {
 	if key, _, ok := in.Price.ProviderLink(); ok {
 		return []string{key}, models.PSPRoutingPolicyDefault, nil, nil
 	}
@@ -259,7 +259,7 @@ func (s *OrderAttemptService) routingOrder(ctx context.Context, in RoutingInput)
 
 // routingConfiguration loads the merchant's routing policy and charge PSPs.
 // No stored config (or no DB, as in unit fixtures) means neither.
-func (s *OrderAttemptService) routingConfiguration(ctx context.Context) (models.MerchantConfiguration, error) {
+func (s *InvoiceAttemptService) routingConfiguration(ctx context.Context) (models.MerchantConfiguration, error) {
 	if s.db == nil {
 		return models.MerchantConfiguration{}, nil
 	}
@@ -271,7 +271,7 @@ func (s *OrderAttemptService) routingConfiguration(ctx context.Context) (models.
 }
 
 // chargePSPSkip refuses a card PSP the merchant's charge_psps leave out.
-func (s *OrderAttemptService) chargePSPSkip(ctx context.Context, target railTarget) (string, error) {
+func (s *InvoiceAttemptService) chargePSPSkip(ctx context.Context, target railTarget) (string, error) {
 	if target.Rail != string(models.RailNMI) && target.Rail != string(models.RailStripe) {
 		return "", nil
 	}
@@ -308,7 +308,7 @@ func routingRuleMatches(m models.PSPRoutingMatch, in RoutingInput) bool {
 
 // evaluateCandidate resolves one selector and reports whether it can serve this
 // price now. The empty skip class means eligible.
-func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets *PurchaseService, in RoutingInput, selector string) (railTarget, string) {
+func (s *InvoiceAttemptService) evaluateCandidate(ctx context.Context, targets *PurchaseService, in RoutingInput, selector string) (railTarget, string) {
 	target, err := targets.resolveRailTarget(ctx, selector)
 	if err != nil {
 		var ambiguous *AmbiguousRailError
@@ -356,7 +356,7 @@ func (s *OrderAttemptService) evaluateCandidate(ctx context.Context, targets *Pu
 // creating anything. It resolves the price/product exactly as purchase does and
 // runs the SAME Route call, so the trace it returns is the decision a real
 // session would record — not a re-implementation that can drift.
-func (s *OrderAttemptService) DryRunRouting(ctx context.Context, priceID, productKey, priceKey, country, selector string) (*RoutingDecision, models.PurchaseKind, error) {
+func (s *InvoiceAttemptService) DryRunRouting(ctx context.Context, priceID, productKey, priceKey, country, selector string) (*RoutingDecision, models.PurchaseKind, error) {
 	if err := validatePriceSelector(priceID, productKey, priceKey); err != nil {
 		return nil, "", err
 	}

@@ -6,7 +6,7 @@ package cardholdername
 import "strings"
 
 // Canonical prefers the full name and otherwise composes the legacy parts.
-// Only outer whitespace is trimmed; Unicode, punctuation, case, order, and
+// Only outer whitespace is trimmed; Unicode, punctuation, case, invoice, and
 // internal spacing remain the caller's source of truth.
 func Canonical(nameOnCard, firstName, lastName string) string {
 	if full := strings.TrimSpace(nameOnCard); full != "" {

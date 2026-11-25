@@ -349,7 +349,7 @@ type RemoveFencedCustodianPaymentMethodParams struct {
 	ID          uuid.UUID
 }
 
-// Keep the row and its versions as evidence for orders and payments. Terminal
+// Keep the row and its versions as evidence for invoices and payments. Terminal
 // issuer lifecycle states remain final even when the stored token is erased.
 func (q *Queries) RemoveFencedCustodianPaymentMethod(ctx context.Context, arg RemoveFencedCustodianPaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, removeFencedCustodianPaymentMethod,
@@ -382,7 +382,7 @@ type RemoveFencedNativePaymentMethodParams struct {
 	ID          uuid.UUID
 }
 
-// The provider credential is gone, but paid orders and immutable card versions
+// The provider credential is gone, but paid invoices and immutable card versions
 // retain their original reference. Keep a nonchargeable completion tombstone.
 func (q *Queries) RemoveFencedNativePaymentMethod(ctx context.Context, arg RemoveFencedNativePaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, removeFencedNativePaymentMethod,

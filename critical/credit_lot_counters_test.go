@@ -27,7 +27,7 @@ func TestCreditLotCounters(t *testing.T) {
 	t.Run("OR-J22-S11/refunded-credit-pack-raises-no-refunded-grant-finding", refundedPackRaisesNoGrantFinding)
 	t.Run("OR-J40-S04/unposted-deposit-is-not-spendable", unpostedDepositNotSpendable)
 	t.Run("OR-J22-S13/lapsed-lots-expire-only-what-they-hold", lapsedLotsExpireWhatTheyHold)
-	t.Run("OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot", usageOrderChangeIsBought)
+	t.Run("OR-J26-S62/fractional-cent-invoice-paid-by-card-books-its-change-as-a-bought-lot", usageInvoiceChangeIsBought)
 }
 
 // lotMatchesLedger reads a lot and checks its counters against its legs on
@@ -129,7 +129,7 @@ func lotViewEqualsLedger(t *testing.T) {
 	require.Zero(t, lot.RefundedAmount)
 	balance(t, a.alpha, m.customer, 26_000_000, 0, 26_000_000)
 
-	// Refund: a chargeback of the order withdraws the pack, which reads
+	// Refund: a chargeback of the invoice withdraws the pack, which reads
 	// refunded, not spent and not revoked.
 	charge, intent := m.charge(t, payment)
 	dispute := stripemock.Object{"id": "dp_lot_counters", "object": "dispute", "amount": 10_000, "currency": "usd", "charge": charge, "payment_intent": intent, "status": "needs_response", "reason": "fraudulent"}
@@ -177,15 +177,15 @@ func lotViewEqualsLedger(t *testing.T) {
 func refundedPackRaisesNoGrantFinding(t *testing.T) {
 	m := newMixedSale(t)
 	a := m.a
-	input := billing.CreateMyOrderParams{Lines: m.lines[:1], ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
-		Payment: &billing.OrderPaymentParams{Token: m.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "pack-only"})
+	input := billing.CreateMyInvoiceParams{Lines: m.lines[:1], ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true),
+		Payment: &billing.InvoicePaymentParams{Token: m.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "pack-only"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status)
 	balance(t, a.alpha, m.customer, 25_000_000, 0, 25_000_000)
-	refund, err := a.alpha.RefundPayment(t.Context(), "pack-return", *order.Payment.PaymentID, billing.RefundPaymentParams{Full: true, Reason: "Return the pack"})
+	refund, err := a.alpha.RefundPayment(t.Context(), "pack-return", *invoice.Payment.PaymentID, billing.RefundPaymentParams{Full: true, Reason: "Return the pack"})
 	require.NoError(t, err)
 	require.Equal(t, billing.PaymentSucceeded, refund.Status)
 	balance(t, a.alpha, m.customer, 0, 0, 0)
@@ -291,9 +291,9 @@ func lapsedLotsExpireWhatTheyHold(t *testing.T) {
 	require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 }
 
-// A usage order whose total is not a whole cent is charged the next cent up.
-// The order is paid, and the change is a lot bought at face.
-func usageOrderChangeIsBought(t *testing.T) {
+// A usage invoice whose total is not a whole cent is charged the next cent up.
+// The invoice is paid, and the change is a lot bought at face.
+func usageInvoiceChangeIsBought(t *testing.T) {
 	a, p, customer := usageBillingWorld(t, false)
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "fractional-compute", DisplayName: "Fractional compute"})
 	require.NoError(t, err)
@@ -309,19 +309,19 @@ func usageOrderChangeIsBought(t *testing.T) {
 	a.clock.Advance(12 * time.Hour)
 	runUsageDue(t, fleet)
 	require.Eventually(t, func() bool {
-		rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
-		return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.OrderComplete
+		rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
+		return err == nil && len(rows.Items) == 1 && rows.Items[0].Status == billing.InvoiceComplete
 	}, 15*time.Second, 20*time.Millisecond)
-	order := oneUsageOrder(t, a, customer)
-	require.EqualValues(t, 3_703_701, order.Total)
-	require.Zero(t, order.Usage.AmountDue)
+	invoice := oneUsageInvoice(t, a, customer)
+	require.EqualValues(t, 3_703_701, invoice.Total)
+	require.Zero(t, invoice.Usage.AmountDue)
 	p.money(t, 1, 371)
 	lots, err := a.alpha.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: customer, Currency: "USD"})
 	require.NoError(t, err)
 	require.Len(t, lots.Items, 1)
 	change := lots.Items[0]
 	require.Equal(t, billing.CreditFundingPurchase, change.FundingSource)
-	require.EqualValues(t, 6_299, change.Amount, "$3.71 less the order's $3.703701")
+	require.EqualValues(t, 6_299, change.Amount, "$3.71 less the invoice's $3.703701")
 	require.NotNil(t, change.PaidAmount)
 	require.EqualValues(t, 6_299, *change.PaidAmount, "bought at face")
 	lotMatchesLedger(t, a.world, change.ID)
@@ -332,7 +332,7 @@ func usageOrderChangeIsBought(t *testing.T) {
 	deferred, released := lotMoney(t, a.world, change.ID)
 	require.EqualValues(t, 6_299, deferred)
 	require.Zero(t, released)
-	// The order's share of the $3.71 settles its usage receivable.
+	// The invoice's share of the $3.71 settles its usage receivable.
 	require.Equal(t, []int64{3_703_701}, collected(t, a.world, "usage_collection"))
 	require.Zero(t, glBalance(t, a.world, "usage_receivable"))
 	require.Zero(t, glBalance(t, a.world, "unapplied_cash"))
@@ -341,8 +341,8 @@ func usageOrderChangeIsBought(t *testing.T) {
 	// per-payment audit counts it.
 	var payment, issued string
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT p.id::text, t.source || ':' || t.source_id FROM "+booksTable(a.world, "payments")+" p, "+booksTable(a.world, "ledger_transfers")+" t"+
-		" WHERE p.merchant_id = $1 AND p.order_id = $2 AND t.merchant_id = $1 AND t.credit_grant_id = $3 AND t.operation = 'credit_issue'",
-		a.alpha.MerchantID().UUID(), order.ID.UUID(), change.ID.UUID()).Scan(&payment, &issued))
+		" WHERE p.merchant_id = $1 AND p.invoice_id = $2 AND t.merchant_id = $1 AND t.credit_grant_id = $3 AND t.operation = 'credit_issue'",
+		a.alpha.MerchantID().UUID(), invoice.ID.UUID(), change.ID.UUID()).Scan(&payment, &issued))
 	require.Equal(t, "payment:"+payment, issued)
 	booksAudited(t, a.world)
 }

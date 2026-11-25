@@ -13,7 +13,7 @@ import (
 // outside OpenRails.
 type Receipt struct {
 	Payment, Customer uuid.UUID
-	Order             *uuid.UUID
+	Invoice           *uuid.UUID
 	// PSP took the money; nil for money received outside OpenRails.
 	PSP      *uuid.UUID
 	Amount   int64
@@ -28,7 +28,7 @@ func ReceiptOf(p gen.BillingPayment) (Receipt, bool) {
 	if p.Amount <= 0 || p.RefundedPaymentID != nil || p.ReversalKind != nil || p.DeletedAt != nil || p.Status != "succeeded" && p.Status != "refunded" {
 		return Receipt{}, false
 	}
-	r := Receipt{Payment: p.ID, Customer: p.CustomerID, Order: p.OrderID, Amount: p.Amount, Currency: p.Currency, At: p.PurchasedAt}
+	r := Receipt{Payment: p.ID, Customer: p.CustomerID, Invoice: p.InvoiceID, Amount: p.Amount, Currency: p.Currency, At: p.PurchasedAt}
 	switch {
 	case p.Channel == "manual":
 	case p.MoneyMovement == "rail" && p.PspID != nil:
@@ -42,7 +42,7 @@ func ReceiptOf(p gen.BillingPayment) (Receipt, bool) {
 // Receive books a receipt once, when the money arrived: DR cash_clearing of
 // its PSP, or external_receipts / CR unapplied_cash. The money stays
 // unapplied until a completed bill applies it to its lines: a payment on a
-// closed or already paid order never is.
+// closed or already paid invoice never is.
 func (b *Books) Receive(ctx context.Context, r Receipt) error {
 	// The general ledger holds registry currencies only; no payment is
 	// taken in anything else.
@@ -56,7 +56,7 @@ func (b *Books) Receive(ctx context.Context, r Receipt) error {
 	_, _, err := b.Post(ctx, Posting{
 		Debit: debit, Credit: Ref{Type: UnappliedCash}, Amount: r.Amount, Currency: r.Currency, Type: CashReceived,
 		Coord:       Coord{Operation: OpCash, Source: "payment", SourceID: r.Payment.String()},
-		EffectiveAt: r.At, Customer: &r.Customer, Order: r.Order,
+		EffectiveAt: r.At, Customer: &r.Customer, Invoice: r.Invoice,
 	})
 	return err
 }

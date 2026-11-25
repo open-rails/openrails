@@ -24,7 +24,7 @@ import (
 type FundingSource string
 
 const (
-	// Purchase was paid by a one-off order line or a charge's change.
+	// Purchase was paid by a one-off invoice line or a charge's change.
 	Purchase FundingSource = "purchase"
 	// Recurring was paid by a cycle of a recurring price.
 	Recurring FundingSource = "recurring"
@@ -86,9 +86,9 @@ type Issue struct {
 	PaidCurrency *string
 	// Source and SourceID are the funding's label and once-only key ("" for
 	// none); Invoker is who funded it.
-	Source, SourceID, Invoker   string
-	Product, OrderLine, Payment *uuid.UUID
-	Description                 *string
+	Source, SourceID, Invoker     string
+	Product, InvoiceLine, Payment *uuid.UUID
+	Description                   *string
 	// StartsAt zero is now; ExpiresAt nil never lapses.
 	StartsAt  time.Time
 	ExpiresAt *time.Time
@@ -135,7 +135,7 @@ func (l *Lots) Issue(ctx context.Context, in Issue) (gen.BillingCreditGrant, err
 	lot, err := l.q.InsertCreditGrant(ctx, gen.InsertCreditGrantParams{
 		MerchantID: l.merchant, CustomerID: in.Customer, AccountID: account, Unit: in.Unit, Units: in.Units,
 		FundingSource: string(in.Funding), PaidAmount: in.PaidAmount, PaidCurrency: in.PaidCurrency,
-		Source: in.Source, SourceID: sourceID, Invoker: in.Invoker, ProductID: in.Product, OrderLineID: in.OrderLine,
+		Source: in.Source, SourceID: sourceID, Invoker: in.Invoker, ProductID: in.Product, InvoiceLineID: in.InvoiceLine,
 		PaymentID: in.Payment, Description: in.Description, StartsAt: starts, ExpiresAt: in.ExpiresAt,
 	})
 	if err != nil {
@@ -218,7 +218,7 @@ func (l *Lots) deferPrice(ctx context.Context, lot gen.BillingCreditGrant) error
 }
 
 // Fund defers a bought lot's price from the payment recorded after it: the
-// change a charge paid beyond its order. The commit refuses a bought lot left
+// change a charge paid beyond its invoice. The commit refuses a bought lot left
 // undeferred.
 func (l *Lots) Fund(ctx context.Context, id uuid.UUID, payment gen.BillingPayment) error {
 	lot, err := l.Get(ctx, id)

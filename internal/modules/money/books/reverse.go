@@ -16,13 +16,13 @@ import (
 )
 
 // The operations of a reversal's legs, each at (operation, payment, the
-// reversal's id) and the order line it moves.
+// reversal's id) and the invoice line it moves.
 const (
 	OpRefund     Operation = "refund"
 	OpChargeback Operation = "chargeback"
 	// OpDisputeWon restores what a chargeback took from unapplied cash and
 	// from the contra; OpDisputeWonDeferred what it took from deferred
-	// revenue; OpDisputeWonReopened the owed a usage order's chargeback
+	// revenue; OpDisputeWonReopened the owed a usage invoice's chargeback
 	// reopened, collected again (ResettleUsage).
 	OpDisputeWon         Operation = "dispute_won"
 	OpDisputeWonDeferred Operation = "dispute_won_deferred"
@@ -92,12 +92,12 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 		return nil
 	}
 	usage := false
-	if p.OrderID != nil {
-		order, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: *p.OrderID})
+	if p.InvoiceID != nil {
+		invoice, err := q.GetInvoice(ctx, gen.GetInvoiceParams{MerchantID: mid.UUID(), ID: *p.InvoiceID})
 		if err != nil {
 			return err
 		}
-		usage = order.Origin == "usage"
+		usage = invoice.Origin == "usage"
 	}
 	pb, err := paymentBooksOf(ctx, q, mid.UUID(), p.ID)
 	if err != nil {
@@ -119,7 +119,7 @@ func PostReversal(ctx context.Context, d *db.DB, reversalID uuid.UUID, now time.
 		}
 		return nil
 	case usage:
-		// A usage order's chargeback reopens what the customer owes and its
+		// A usage invoice's chargeback reopens what the customer owes and its
 		// won dispute collects it again: owed.SyncUsageReversals books both
 		// (ReopenUsage, ResettleUsage) before this would.
 		return nil
@@ -147,7 +147,7 @@ type taken struct{ deferred, contra int64 }
 func (t taken) total() int64 { return t.deferred + t.contra }
 
 // reversalLegs is what one reversal of a payment posted: from unapplied
-// cash, as owed reopened (a usage order's chargeback) and per schedule.
+// cash, as owed reopened (a usage invoice's chargeback) and per schedule.
 type reversalLegs struct {
 	chargeback         bool
 	returned, reopened int64
@@ -211,7 +211,7 @@ func paymentBooksFrom(payment uuid.UUID, rows []gen.ListPaymentBooksLegsRow) pay
 		case typ == DisputeWon && op == OpDisputeWonLoss:
 			// A usage chargeback's loss given back: no unapplied cash moves.
 		case typ == CashApplied && row.RevenueScheduleID == nil:
-			// A credit lot funded from what a usage order payment's won
+			// A credit lot funded from what a usage invoice payment's won
 			// dispute returned to unapplied cash takes it from there again.
 			l.returned += row.Amount
 		case typ == DisputeWon && row.RevenueScheduleID == nil:
@@ -267,7 +267,7 @@ func (pb paymentBooks) held() map[uuid.UUID]int64 {
 	return out
 }
 
-// bySchedule orders amounts by schedule.
+// bySchedule invoices amounts by schedule.
 func bySchedule(amounts map[uuid.UUID]int64) ([]uuid.UUID, []int64) {
 	ids := make([]uuid.UUID, 0, len(amounts))
 	for id := range amounts {
@@ -635,10 +635,10 @@ func (w *reverser) post(ctx context.Context, debit, credit Ref, typ TransferType
 	p := Posting{
 		Debit: debit, Credit: credit, Amount: amount, Currency: w.reversal.Currency, Type: typ,
 		Coord:       Coord{Operation: op, Source: "payment", SourceID: w.reversal.ID.String()},
-		EffectiveAt: w.at, Customer: &w.reversal.CustomerID, Order: w.reversal.OrderID,
+		EffectiveAt: w.at, Customer: &w.reversal.CustomerID, Invoice: w.reversal.InvoiceID,
 	}
 	if row != nil {
-		p.Order, p.OrderLine, p.Product, p.RevenueSchedule = &row.OrderID, &row.OrderLineID, row.ProductID, &row.ID
+		p.Invoice, p.InvoiceLine, p.Product, p.RevenueSchedule = &row.InvoiceID, &row.InvoiceLineID, row.ProductID, &row.ID
 	}
 	_, applied, err := w.b.Post(ctx, p)
 	if err == nil && !applied {

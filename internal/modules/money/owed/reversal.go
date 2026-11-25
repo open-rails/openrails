@@ -16,22 +16,22 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// ReopenedSource is the source of a usage order line billing owed a
+// ReopenedSource is the source of a usage invoice line billing owed a
 // chargeback reopened: usage billing bills it whatever its minimum.
 const ReopenedSource = "chargeback"
 
 // SyncUsageReversals books, once each and in the order they were stored, the
-// chargebacks and won disputes of a usage order payment, in the caller's
+// chargebacks and won disputes of a usage invoice payment, in the caller's
 // transaction. A chargeback reopens the owed the payment paid, less what its
 // refunds already gave back: the usage was delivered and the network took the
 // cash back, so the debt stands again, owed again in the units book
-// (owed_reopened), billed at once on a usage order whatever its minimum, and
+// (owed_reopened), billed at once on a usage invoice whatever its minimum, and
 // receivable again in the general ledger. Its won dispute settles the
-// reopened owed again as funding would, the orders that claim the customer's
+// reopened owed again as funding would, the invoices that claim the customer's
 // debt first; what it brings beyond that is the customer's, credited as a
 // lot at face with a books.dispute.customer_credit finding. A merchant's
 // refund reopens nothing: the refund is the usage's contra revenue. A payment
-// that settled no owed (not a usage order's) has nothing to sync.
+// that settled no owed (not a usage invoice's) has nothing to sync.
 func SyncUsageReversals(ctx context.Context, d *db.DB, merchantID, paymentID uuid.UUID, now time.Time) error {
 	q := d.Gen(ctx)
 	p, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: merchantID, ID: paymentID})
@@ -118,7 +118,7 @@ func SyncUsageReversals(ctx context.Context, d *db.DB, merchantID, paymentID uui
 }
 
 // bookedReversal is what the general ledger holds of one reversal of a
-// usage order payment: the owed it reopened, and its chargeback's loss or
+// usage invoice payment: the owed it reopened, and its chargeback's loss or
 // the loss a recovery gave back.
 type bookedReversal struct{ reopened, loss int64 }
 
@@ -138,7 +138,7 @@ type reversalSync struct {
 // to chargebacks.
 func (s reversalSync) chargeback(ctx context.Context, r gen.BillingPayment, owed int64, done bool) (int64, error) {
 	if !done && owed > 0 {
-		if _, err := s.l.ReopenOwed(ctx, s.p.CustomerID, s.p.Currency, owed, ledger.Coord{Operation: books.OpChargeback, Source: s.source, SourceID: r.ID.String()}, s.p.OrderID); err != nil {
+		if _, err := s.l.ReopenOwed(ctx, s.p.CustomerID, s.p.Currency, owed, ledger.Coord{Operation: books.OpChargeback, Source: s.source, SourceID: r.ID.String()}, s.p.InvoiceID); err != nil {
 			return 0, err
 		}
 		meta, err := json.Marshal(map[string]any{"source": ReopenedSource, "payment_id": s.p.ID.String(), "chargeback_id": r.ID.String()})
@@ -150,7 +150,7 @@ func (s reversalSync) chargeback(ctx context.Context, r gen.BillingPayment, owed
 			CreatedAt: s.now, UpdatedAt: s.now}); err != nil {
 			return 0, err
 		}
-		// Bill it at once: the customer is never held to debt no order lets
+		// Bill it at once: the customer is never held to debt no invoice lets
 		// them pay.
 		if err := s.q.FlagUsageCollectionDue(ctx, gen.FlagUsageCollectionDueParams{MerchantID: s.merchant, CustomerID: s.p.CustomerID, Currency: s.p.Currency, Now: s.now}); err != nil {
 			return 0, err
@@ -176,12 +176,12 @@ func (s reversalSync) recovery(ctx context.Context, r gen.BillingPayment, reopen
 	settled = units
 	if !done {
 		recovery := r.ID
-		settled, err = settle(ctx, s.d, s.merchant, s.p.CustomerID, s.p.Currency, reopened, &recovery, s.now, func(amount int64, order *uuid.UUID) error {
+		settled, err = settle(ctx, s.d, s.merchant, s.p.CustomerID, s.p.Currency, reopened, &recovery, s.now, func(amount int64, invoice *uuid.UUID) error {
 			coord := ledger.Coord{Operation: books.OpDisputeWonReopened, Source: s.source, SourceID: r.ID.String()}
-			if order != nil {
-				coord.SourceID += ":" + order.String()
+			if invoice != nil {
+				coord.SourceID += ":" + invoice.String()
 			}
-			_, err := s.l.PayOwed(ctx, s.p.CustomerID, s.p.Currency, amount, coord, order)
+			_, err := s.l.PayOwed(ctx, s.p.CustomerID, s.p.Currency, amount, coord, invoice)
 			return err
 		})
 		if err != nil {
@@ -222,6 +222,6 @@ func collectBeforeReopening(ctx context.Context, q *gen.Queries, gl *books.Books
 	if err != nil || cash.Received <= 0 {
 		return err
 	}
-	return gl.CollectUsage(ctx, books.UsageCollection{Payment: p.ID, Customer: p.CustomerID, Order: p.OrderID, Currency: p.Currency,
+	return gl.CollectUsage(ctx, books.UsageCollection{Payment: p.ID, Customer: p.CustomerID, Invoice: p.InvoiceID, Currency: p.Currency,
 		Amount: min(paid.Amount, cash.Received-cash.Applied), At: p.PurchasedAt})
 }

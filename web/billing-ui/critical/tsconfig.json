@@ -8,7 +8,7 @@
     "./**/*.tsx",
     "../playwright.critical.config.ts",
     "../playwright.hosted.config.ts",
-    "../playwright.order.config.ts",
+    "../playwright.invoice.config.ts",
     "../playwright.admin.config.ts"
   ],
   "exclude": []

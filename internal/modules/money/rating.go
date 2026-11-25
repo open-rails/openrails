@@ -297,7 +297,7 @@ func (u usageQuantity) priceable() error {
 }
 
 // usagePeriodStart is the billing period an event dated occurred belongs
-// to: the one usage orders close, under the merchant's boundary and anchored
+// to: the one usage invoices close, under the merchant's boundary and anchored
 // on the customer's first activity.
 func (s *MoneyService) usagePeriodStart(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, occurred time.Time) (time.Time, error) {
 	cfg, cur, err := s.usageBillingConfig(ctx, currency)

@@ -30,7 +30,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: CustomerMessageOnTestPSP :one
--- Whether the fact's PSP, payment, order or subscription is on a PSP that
+-- Whether the fact's PSP, payment, invoice or subscription is on a PSP that
 -- moves no real money.
 SELECT EXISTS (
     SELECT 1 FROM billing.psps p
@@ -38,7 +38,7 @@ SELECT EXISTS (
       AND p.id IN (
         SELECT pm.psp_id FROM billing.payments pm WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = sqlc.narg(payment_id)::uuid
         UNION ALL
-        SELECT o.psp_id FROM billing.orders o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(order_id)::uuid
+        SELECT o.psp_id FROM billing.invoices o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(invoice_id)::uuid
         UNION ALL
         SELECT s.psp_id FROM billing.subscriptions s WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = sqlc.narg(subscription_id)::uuid
         UNION ALL

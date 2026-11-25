@@ -10,7 +10,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id, quantity, refund_reason, payment_method_id
+    money_movement, invoice_id, quantity, refund_reason, payment_method_id
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(channel)::text, sqlc.narg(rail)::text,
     sqlc.arg(transaction_id)::text, sqlc.arg(amount)::bigint, sqlc.arg(list_amount)::bigint,
@@ -26,7 +26,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int, sqlc.narg(refund_reason)::text, sqlc.narg(payment_method_id)::uuid
+    sqlc.arg(money_movement)::text, sqlc.narg(invoice_id)::uuid, sqlc.narg(quantity)::int, sqlc.narg(refund_reason)::text, sqlc.narg(payment_method_id)::uuid
 );
 
 -- name: CreatePaymentIfNotExists :execrows
@@ -37,7 +37,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id, quantity, refund_reason, payment_method_id
+    money_movement, invoice_id, quantity, refund_reason, payment_method_id
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(channel)::text, sqlc.narg(rail)::text,
     sqlc.arg(transaction_id)::text, sqlc.arg(amount)::bigint, sqlc.arg(list_amount)::bigint,
@@ -53,7 +53,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(quantity)::int, sqlc.narg(refund_reason)::text, sqlc.narg(payment_method_id)::uuid
+    sqlc.arg(money_movement)::text, sqlc.narg(invoice_id)::uuid, sqlc.narg(quantity)::int, sqlc.narg(refund_reason)::text, sqlc.narg(payment_method_id)::uuid
 )
 ON CONFLICT DO NOTHING;
 
@@ -215,7 +215,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.deleted_at IS NULL
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR p.subscription_id = sqlc.narg(subscription_id)::uuid)
-  AND (sqlc.narg(order_id)::uuid IS NULL OR p.order_id = sqlc.narg(order_id)::uuid)
+  AND (sqlc.narg(invoice_id)::uuid IS NULL OR p.invoice_id = sqlc.narg(invoice_id)::uuid)
   AND (sqlc.narg(rail)::text IS NULL OR p.rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(transaction_id)::text IS NULL OR p.transaction_id = sqlc.narg(transaction_id)::text)
   AND (sqlc.narg(kind)::text IS NULL OR COALESCE(p.reversal_kind,

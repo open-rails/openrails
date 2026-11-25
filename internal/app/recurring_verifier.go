@@ -23,7 +23,7 @@ import (
 // RecurringVerifier runs the NMI verification a card move needs when the
 // card has no recurring lineage: a decline is the card's refusal.
 func (rt *Runtime) RecurringVerifier(merchantID uuid.UUID, origin intents.Origin) subscriptions.RecurringVerifier {
-	return func(ctx context.Context, psp uuid.UUID, method gen.BillingPaymentMethod, order string) (string, error) {
+	return func(ctx context.Context, psp uuid.UUID, method gen.BillingPaymentMethod, invoice string) (string, error) {
 		if blocked, reason := intents.GateExecution(ctx, controls.View{DB: rt.DB}, merchantID, origin); blocked {
 			return "", apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the recurring verification cannot be sent: "+reason)
 		}
@@ -37,13 +37,13 @@ func (rt *Runtime) RecurringVerifier(merchantID uuid.UUID, origin intents.Origin
 			if resolveErr != nil {
 				return "", resolveErr
 			}
-			ref, err = proxy.VerifyRecurring(ctx, order)
+			ref, err = proxy.VerifyRecurring(ctx, invoice)
 		} else {
 			client, ok, resolveErr := rt.CollectionResolver.ResolveNMIClient(ctx, merchantID, &psp)
 			if resolveErr != nil || !ok {
 				return "", fmt.Errorf("resolve the card's NMI account: %w", resolveErr)
 			}
-			ref, err = client.VerifyStoredCredential(ctx, models.DerefStr(method.RailCustomerRef), models.DerefStr(method.RailMethodRef), order, true)
+			ref, err = client.VerifyStoredCredential(ctx, models.DerefStr(method.RailCustomerRef), models.DerefStr(method.RailMethodRef), invoice, true)
 		}
 		var refusal *nmi.CustomerVaultError
 		if errors.As(err, &refusal) && !nmi.UncertainResponseCode(refusal.ResponseCode) {

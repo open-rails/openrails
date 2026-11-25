@@ -366,20 +366,20 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 			require.NoError(t, err)
 			price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 23_000_000, Currency: "USD", BillingIntervalHours: ptr(24)})
 			require.NoError(t, err)
-			buy := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(23_000_000)), Payment: &billing.OrderPaymentParams{PaymentMethodID: &method.ID}}
+			buy := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(23_000_000)), Payment: &billing.InvoicePaymentParams{PaymentMethodID: &method.ID}}
 			vendor.mu.Lock()
 			vendor.dropSaleReply = true
 			vendor.mu.Unlock()
-			status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, buy, map[string]string{"Idempotency-Key": "merchant-owned-bt-sale"})
+			status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, buy, map[string]string{"Idempotency-Key": "merchant-owned-bt-sale"})
 			require.Equal(t, 201, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
 			journal.money(t, 1, 2300)
-			status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, buy, map[string]string{"Idempotency-Key": "merchant-owned-bt-sale"})
+			status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, buy, map[string]string{"Idempotency-Key": "merchant-owned-bt-sale"})
 			require.Equal(t, 201, status, string(raw))
-			var recovered billing.Order
+			var recovered billing.Invoice
 			require.NoError(t, json.Unmarshal(raw, &recovered))
-			require.Equal(t, order.ID, recovered.ID)
+			require.Equal(t, invoice.ID, recovered.ID)
 			journal.money(t, 1, 2300)
 			// Replay preserves the original answer while the ordinary operation
 			// worker verifies the lost gateway reply from its independent receipt.
@@ -387,8 +387,8 @@ func TestMerchantOwnedBasisTheoryCardLifecycle(t *testing.T) {
 			fleet := startFleet(t, a.world)
 			runRegistered(t, fleet, "openrails.billing_pass", 1)
 			require.Eventually(t, func() bool {
-				current, err := a.alpha.GetOrder(t.Context(), order.ID)
-				return err == nil && current.Status == billing.OrderComplete
+				current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+				return err == nil && current.Status == billing.InvoiceComplete
 			}, 15*time.Second, 20*time.Millisecond, "lost proxy response is recovered through exact gateway evidence")
 			journal.money(t, 1, 2300)
 			subs, err := a.alpha.ListSubscriptions(t.Context(), billing.SubscriptionListParams{CustomerID: method.CustomerID})

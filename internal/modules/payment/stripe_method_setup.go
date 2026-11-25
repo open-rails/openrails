@@ -75,7 +75,7 @@ func (s *PurchaseService) stripeCardAccount(ctx context.Context, psp uuid.UUID, 
 	}
 	account, err := s.SubscriptionService.Database().Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: psp})
 	if err != nil || account.Rail != string(models.RailStripe) {
-		return nil, ErrOrderAttemptValidation
+		return nil, ErrInvoiceAttemptValidation
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, mid.UUID(), &psp)
 	if err != nil {

@@ -268,7 +268,7 @@ func (q *Queries) ListUnpostedPayments(ctx context.Context, merchantID uuid.UUID
 }
 
 const lockRevenueSchedule = `-- name: LockRevenueSchedule :one
-SELECT merchant_id, id, customer_id, currency, order_id, order_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at, forfeited FROM billing.revenue_schedules
+SELECT merchant_id, id, customer_id, currency, invoice_id, invoice_line_id, subscription_id, product_access_id, product_id, price_id, method, revenue_account, funded, recognized_net, service_starts_at, service_ends_at, service_months, ended_at, recognized_through_at, next_recognition_at, reinstatements, created_at, updated_at, forfeited FROM billing.revenue_schedules
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
@@ -287,8 +287,8 @@ func (q *Queries) LockRevenueSchedule(ctx context.Context, arg LockRevenueSchedu
 		&i.ID,
 		&i.CustomerID,
 		&i.Currency,
-		&i.OrderID,
-		&i.OrderLineID,
+		&i.InvoiceID,
+		&i.InvoiceLineID,
 		&i.SubscriptionID,
 		&i.ProductAccessID,
 		&i.ProductID,

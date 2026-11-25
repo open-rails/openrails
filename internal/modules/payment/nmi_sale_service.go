@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/invoices"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
@@ -36,8 +36,8 @@ type NMISaleService struct {
 	// Intents executes the durable write-ahead sale intent. Every card charge
 	// in this flow goes through it; there is no direct provider call here.
 	Intents *intents.Runner
-	// Orders settles an order sale in its completion transaction.
-	Orders *orders.Service
+	// Invoices settles an invoice sale in its completion transaction.
+	Invoices *invoices.Service
 	// Custody charges cards a Basis Theory custodian holds.
 	Custody *CustodianSaleService
 }

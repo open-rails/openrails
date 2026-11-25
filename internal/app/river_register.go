@@ -134,7 +134,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		PaymentService:               r.PaymentService,
 		MoneyService:                 r.MoneyService,
 		RailCustomerService:          r.RailCustomerService,
-		OrderAttemptService:          r.OrderAttemptService,
+		InvoiceAttemptService:        r.InvoiceAttemptService,
 		Objects:                      r.ProviderObjects,
 		Importer:                     r.PSPImporter,
 		Findings:                     r.findingNotifier(),
@@ -196,11 +196,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if err := addWorker(workers, &riverjobs.PriceMigrationWorker{Migrations: r.PriceMigrationService}); err != nil {
 		return fmt.Errorf("add price migration worker: %w", err)
 	}
-	// Usage orders: due accounts billed, due collections queued as
+	// Usage invoices: due accounts billed, due collections queued as
 	// operations; a full page continues in its own job.
-	usage := &riverjobs.UsageOrderWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
+	usage := &riverjobs.UsageInvoiceWorker{DB: r.DB, Money: r.MoneyService, Config: r.Config, Clock: clock, Log: r.Log}
 	if err := addWorker(workers, usage); err != nil {
-		return fmt.Errorf("add usage order worker: %w", err)
+		return fmt.Errorf("add usage invoice worker: %w", err)
 	}
 	// Each NMI PSP's own history, as monthly aggregates, in its own hourly job
 	// on its own queue: a slow provider report holds no billing worker.
@@ -212,7 +212,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	dunning := &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, Lifecycle: r.SubscriptionLifecycleService, Log: r.Log}
 	balances := &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService, Log: r.Log}
 	delinquency := &riverjobs.DelinquencyWorker{DB: r.DB, Clock: clock, Log: r.Log}
-	expiry := &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}
+	expiry := &riverjobs.InvoiceExpiryWorker{DB: r.DB, Invoices: r.Invoices, Clock: clock}
 	// Overdue NMI rebills are probed.
 	rebills := &riverjobs.RebillWatchWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService, Log: r.Log}
 	// Undeclared accounts alert their operator again while unresolved.
@@ -229,11 +229,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		{Kind: riverjobs.KindSubscriptionVerificationRetry, Run: r.Verifier.RetryDue},
 		{Kind: riverjobs.KindBalanceWatch, Run: balances.Pass, DueBy: balances.DueBy},
 		{Kind: riverjobs.KindDelinquency, Run: delinquency.Pass, DueBy: delinquency.DueBy},
-		{Kind: riverjobs.KindOrderExpiry, Run: expiry.Pass, DueBy: expiry.DueBy},
+		{Kind: riverjobs.KindInvoiceExpiry, Run: expiry.Pass, DueBy: expiry.DueBy},
 		{Kind: riverjobs.KindRevenueRecognition, Run: recognition.Pass, DueBy: recognition.DueBy},
 	}
 	scans = append(scans,
-		riverjobs.Scan{Kind: money.KindUsageOrders, Run: usage.Pass, DueBy: usage.DueBy},
+		riverjobs.Scan{Kind: money.KindUsageInvoices, Run: usage.Pass, DueBy: usage.DueBy},
 		riverjobs.Scan{Kind: riverjobs.KindRebillWatch, Run: rebills.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindStoredCardRefreshDue, Run: storedCards.Pass},
@@ -305,9 +305,9 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewStripeResumeHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
 		intents.NewStripePaymentMethodDomainHandler(r.Config, r.RailConfigs, r.StripeClients),
 		rebill,
-		// Order collection rides the intent ledger like every other money
+		// Invoice collection rides the intent ledger like every other money
 		// mover.
-		money.NewOrderCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Posture(), clock),
+		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Posture(), clock),
 		money.NewSubscriptionCollectionHandler(r.DB, r.CollectionResolver, r.Config, clock),
 		// Write-through kinds live with their domain services, which every
 		// worker runtime has (validateBillingWorkerRuntime): an accepted

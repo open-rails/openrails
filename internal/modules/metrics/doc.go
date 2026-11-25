@@ -11,7 +11,7 @@
 //
 // A query takes measures and range (required), by, grain (auto picks day, week
 // or month from the range), filters (OR within a dimension, AND across),
-// order, limit and compare (previous_period or previous_year); any other key
+// invoice, limit and compare (previous_period or previous_year); any other key
 // is refused. range is
 // {from, to} as inclusive days in the merchant's accounting timezone or an
 // RFC 3339 half-open interval, or {last: "7d"} ending today there on the

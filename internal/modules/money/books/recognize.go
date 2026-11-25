@@ -53,18 +53,18 @@ func Recognize(ctx context.Context, d *db.DB, id uuid.UUID, loc *time.Location, 
 	})
 }
 
-// Replay books one order's money again through the live posters, for the
+// Replay books one invoice's money again through the live posters, for the
 // books' rebuild: the receipt of each payment that brought it money and, once
 // it is complete, their application to its lines. What posted live posts
 // nothing again. A schedule the replay makes starts at its application; the
 // recognition job then posts each boundary since, dated in its own month.
-func Replay(ctx context.Context, d *db.DB, orderID uuid.UUID) error {
+func Replay(ctx context.Context, d *db.DB, invoiceID uuid.UUID) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	q := d.Gen(ctx)
-	receipts, err := q.ListOrderReceipts(ctx, gen.ListOrderReceiptsParams{MerchantID: mid.UUID(), OrderID: orderID})
+	receipts, err := q.ListInvoiceReceipts(ctx, gen.ListInvoiceReceiptsParams{MerchantID: mid.UUID(), InvoiceID: invoiceID})
 	if err != nil {
 		return err
 	}
@@ -73,5 +73,5 @@ func Replay(ctx context.Context, d *db.DB, orderID uuid.UUID) error {
 			return err
 		}
 	}
-	return ApplyOrder(ctx, d, orderID, nil)
+	return ApplyInvoice(ctx, d, invoiceID, nil)
 }

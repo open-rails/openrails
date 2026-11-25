@@ -21,9 +21,9 @@ const TypeManualRebill = "manual_rebill"
 // confirmed charge buys. OrderReference is the obligation's, shared by every
 // attempt for the period; the idempotency key stays per attempt.
 type ManualRebillPayload struct {
-	// OrderCaptchaSubjects preserves a customer retry's HTTP subjects for its
+	// InvoiceCaptchaSubjects preserves a customer retry's HTTP subjects for its
 	// decline's captcha count.
-	OrderCaptchaSubjects     []string                `json:"order_captcha_subjects,omitempty"`
+	InvoiceCaptchaSubjects   []string                `json:"order_captcha_subjects,omitempty"`
 	Initiator                charge.Initiator        `json:"initiator"`
 	RequestedPaymentMethodID *uuid.UUID              `json:"requested_payment_method_id,omitempty"`
 	Renewal                  RenewalTerms            `json:"renewal"`
@@ -44,7 +44,7 @@ func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, r
 
 // ObligationOrderReference is the NMI order id of one obligation: every
 // attempt to pay the period that starts at boundary shares it, so a read by
-// order answers "was this period paid?" across attempts.
+// invoice answers "was this period paid?" across attempts.
 func ObligationOrderReference(subscriptionID uuid.UUID, boundary time.Time) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("obligation:"+subscriptionID.String()+":"+boundary.UTC().Format(time.RFC3339Nano))).String()
 }
@@ -80,7 +80,7 @@ func DecodeManualRebillPayload(in gen.BillingProviderIntent) (ManualRebillPayloa
 		return p, errors.New("rebill initiation is not established")
 	}
 	if p.OrderReference != ObligationOrderReference(p.Renewal.SubscriptionID, p.Renewal.PeriodStart) {
-		return p, errors.New("rebill order does not name the accepted period")
+		return p, errors.New("rebill invoice does not name the accepted period")
 	}
 	if err := moneyutil.RequireFiatCurrency(p.Renewal.Currency); err != nil {
 		return p, err

@@ -76,7 +76,7 @@ func TestGoClientDeclaresHandWritten(t *testing.T) {
 		t.Fatalf("declared methods refused: %v", err)
 	}
 	for name, fsys := range map[string]fstest.MapFS{
-		"a method elsewhere":   {handWrittenFile: ok[handWrittenFile], "orders.go": {Data: []byte("package openrails\nfunc (c *Client) GetOrder() {}\n")}},
+		"a method elsewhere":   {handWrittenFile: ok[handWrittenFile], "invoices.go": {Data: []byte("package openrails\nfunc (c *Client) GetInvoice() {}\n")}},
 		"an undeclared method": {handWrittenFile: {Data: []byte(methods.String() + "func (c *Client) Extra() {}\n")}},
 		"a missing method":     {handWrittenFile: {Data: []byte("package openrails\n")}},
 	} {

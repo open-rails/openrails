@@ -1,23 +1,23 @@
 import { test, expect, type Frame, type Page } from "@playwright/test"
 import type {} from "./app"
 
-async function post(page: Page, frame: Frame, order: string) {
+async function post(page: Page, frame: Frame, invoice: string) {
   const before = await page.evaluate(() => window.messageSeen)
   await frame.evaluate(
     (id) =>
       window.parent.postMessage(
         {
           type: "openrails.payment.complete",
-          order_id: id,
+          invoice_id: id,
           success_url: "https://critical.invalid/done",
         },
         "*"
       ),
-    order
+    invoice
   )
   await page.waitForFunction((before) => window.messageSeen > before, before)
 }
-test("OR-HOSTED-01: only the expected origin frame and order can complete", async ({
+test("OR-HOSTED-01: only the expected origin frame and invoice can complete", async ({
   page,
 }) => {
   await page.route("**/*", async (route) => {
@@ -33,7 +33,7 @@ test("OR-HOSTED-01: only the expected origin frame and order can complete", asyn
   expect(element).not.toBeNull()
   let frame = await element!.contentFrame()
   expect(frame).not.toBeNull()
-  await expect.poll(() => frame!.url()).toContain("/pay/" + fixture.orders[0])
+  await expect.poll(() => frame!.url()).toContain("/pay/" + fixture.invoices[0])
   const src = new URL((await locator.getAttribute("src")) ?? "")
   expect(src.search).toBe("")
   const params = new URLSearchParams(src.hash.split("&").slice(1).join("&"))
@@ -59,29 +59,29 @@ test("OR-HOSTED-01: only the expected origin frame and order can complete", asyn
     const other = await element!.contentFrame()
     expect(other).not.toBeNull()
     await expect.poll(() => other!.url()).not.toBe("about:blank")
-    await post(page, other!, fixture.orders[0])
+    await post(page, other!, fixture.invoices[0])
     expect(await page.evaluate(() => window.completions)).toEqual([])
   }
-  await post(page, frame!, fixture.orders[1])
+  await post(page, frame!, fixture.invoices[1])
   expect(await page.evaluate(() => window.completions)).toEqual([])
-  await post(page, frame!, fixture.orders[0])
-  await post(page, frame!, fixture.orders[0])
+  await post(page, frame!, fixture.invoices[0])
+  await post(page, frame!, fixture.invoices[0])
   expect(await page.evaluate(() => window.completions)).toEqual([
-    { orderId: fixture.orders[0], successUrl: "https://critical.invalid/done" },
+    { invoiceId: fixture.invoices[0], successUrl: "https://critical.invalid/done" },
   ])
-  await page.evaluate(() => window.showOrder(1))
+  await page.evaluate(() => window.showInvoice(1))
   await expect(locator).toHaveAttribute(
     "src",
-    new RegExp("/pay/" + fixture.orders[1])
+    new RegExp("/pay/" + fixture.invoices[1])
   )
   frame = await (await locator.elementHandle())!.contentFrame()
-  await expect.poll(() => frame!.url()).toContain("/pay/" + fixture.orders[1])
-  await post(page, frame!, fixture.orders[0])
+  await expect.poll(() => frame!.url()).toContain("/pay/" + fixture.invoices[1])
+  await post(page, frame!, fixture.invoices[0])
   expect(await page.evaluate(() => window.completions.length)).toBe(1)
-  await post(page, frame!, fixture.orders[1])
+  await post(page, frame!, fixture.invoices[1])
   expect(
-    await page.evaluate(() => window.completions.map((x) => x.orderId))
-  ).toEqual(fixture.orders)
+    await page.evaluate(() => window.completions.map((x) => x.invoiceId))
+  ).toEqual(fixture.invoices)
   await page.clock.install()
   await page.route("**/*blocked=1*", (route) => route.abort())
   const unavailable = new URL(fixture.urls[0])
@@ -96,16 +96,16 @@ test("OR-HOSTED-01: only the expected origin frame and order can complete", asyn
   await expect(page.getByRole("alert")).not.toContainText(
     "haven't been charged"
   )
-  await page.evaluate(() => window.showOrder(1))
+  await page.evaluate(() => window.showInvoice(1))
   await expect(page.getByRole("alert")).toHaveCount(0)
   await expect(locator).toHaveAttribute(
     "src",
-    new RegExp("/pay/" + fixture.orders[1])
+    new RegExp("/pay/" + fixture.invoices[1])
   )
   frame = await (await locator.elementHandle())!.contentFrame()
-  await expect.poll(() => frame!.url()).toContain("/pay/" + fixture.orders[1])
-  await post(page, frame!, fixture.orders[1])
+  await expect.poll(() => frame!.url()).toContain("/pay/" + fixture.invoices[1])
+  await post(page, frame!, fixture.invoices[1])
   expect(
-    await page.evaluate(() => window.completions.map((x) => x.orderId))
-  ).toEqual([...fixture.orders, fixture.orders[1]])
+    await page.evaluate(() => window.completions.map((x) => x.invoiceId))
+  ).toEqual([...fixture.invoices, fixture.invoices[1]])
 })

@@ -85,7 +85,7 @@ export interface SubscriptionFilters {
 export interface PaymentFilters {
   customer_id?: string
   subscription_id?: string
-  order_id?: string
+  invoice_id?: string
   status?: Payment["status"]
   rail?: string
   kind?: Payment["kind"]
@@ -115,7 +115,7 @@ export const ATTEMPT_FILTERS = [
   "psp_id",
   "customer_id",
   "payment_id",
-  "order_id",
+  "invoice_id",
   "subscription_id",
   "cycle_id",
   "since",

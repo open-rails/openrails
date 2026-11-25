@@ -59,26 +59,26 @@ func callback(t *testing.T, a *authorityWorld, account string, body []byte, sign
 	return response.StatusCode, string(raw)
 }
 
-func unknownSale(t *testing.T, a *authorityWorld, p *providerLedger) (*river.Client[pgx.Tx], billing.Order, stripemock.Object) {
+func unknownSale(t *testing.T, a *authorityWorld, p *providerLedger) (*river.Client[pgx.Tx], billing.Invoice, stripemock.Object) {
 	t.Helper()
 	fleet := hostFleet(t, a.world)
 	input := saleInput(t, a, p)
 	p.interruptPaymentResponses()
-	_, _ = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "accepted-unknown-sale"})
-	orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+	_, _ = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "accepted-unknown-sale"})
+	invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 	require.NoError(t, err)
-	require.Len(t, orders.Items, 1)
-	order := orders.Items[0]
-	require.Equal(t, billing.OrderPaymentProcessing, order.Payment.Status)
-	require.NotEqual(t, billing.OrderComplete, order.Status)
+	require.Len(t, invoices.Items, 1)
+	invoice := invoices.Items[0]
+	require.Equal(t, billing.InvoicePaymentProcessing, invoice.Payment.Status)
+	require.NotEqual(t, billing.InvoiceComplete, invoice.Status)
 	effects := p.effects(t)
 	require.Len(t, effects, 1)
 	require.EqualValues(t, 3000, effects[0].Amount)
 	p.restorePaymentResponses()
-	return fleet, order, p.core.PaymentIntent(effects[0].Operation)
+	return fleet, invoice, p.core.PaymentIntent(effects[0].Operation)
 }
 
-func recoverSale(t *testing.T, a *authorityWorld, p *providerLedger, fleet *river.Client[pgx.Tx], id billing.OrderID) *billing.Order {
+func recoverSale(t *testing.T, a *authorityWorld, p *providerLedger, fleet *river.Client[pgx.Tx], id billing.InvoiceID) *billing.Invoice {
 	t.Helper()
 	a.clock.Advance(20 * time.Minute)
 	jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
@@ -95,31 +95,31 @@ func recoverSale(t *testing.T, a *authorityWorld, p *providerLedger, fleet *rive
 	return settledSale(t, a, p, id)
 }
 
-func settledSale(t *testing.T, a *authorityWorld, p *providerLedger, id billing.OrderID) *billing.Order {
+func settledSale(t *testing.T, a *authorityWorld, p *providerLedger, id billing.InvoiceID) *billing.Invoice {
 	t.Helper()
-	var order *billing.Order
+	var invoice *billing.Invoice
 	require.Eventually(t, func() bool {
 		var err error
-		order, err = a.alpha.GetOrder(t.Context(), id)
-		return err == nil && order.Status == billing.OrderComplete
+		invoice, err = a.alpha.GetInvoice(t.Context(), id)
+		return err == nil && invoice.Status == billing.InvoiceComplete
 	}, 20*time.Second, 20*time.Millisecond)
-	require.NotNil(t, order.Payment.PaymentID)
-	payment, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
+	require.NotNil(t, invoice.Payment.PaymentID)
+	payment, err := a.alpha.GetPayment(t.Context(), *invoice.Payment.PaymentID)
 	require.NoError(t, err)
 	require.EqualValues(t, 30_000_000, payment.Amount)
 	require.Equal(t, billing.PaymentSucceeded, payment.Status)
-	events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+	events, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 	require.NoError(t, err)
 	require.Len(t, events.Events, 2)
 	require.Len(t, p.effects(t), 1)
 	require.EqualValues(t, 3000, p.effects(t)[0].Amount)
-	return order
+	return invoice
 }
 
 // A signed callback must itself commit a new wakeup. Starting the real host
 // workers at the unchanged business clock then proves that the callback
 // released verification; no manual retry or fallback sweep can make it pass.
-func callbackSettlesSale(t *testing.T, a *authorityWorld, p *providerLedger, queue *river.Client[pgx.Tx], order billing.Order, deliver func()) *billing.Order {
+func callbackSettlesSale(t *testing.T, a *authorityWorld, p *providerLedger, queue *river.Client[pgx.Tx], invoice billing.Invoice, deliver func()) *billing.Invoice {
 	t.Helper()
 	before, err := queue.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func callbackSettlesSale(t *testing.T, a *authorityWorld, p *providerLedger, que
 	require.Equal(t, at, a.clock.Now())
 	require.NoError(t, a.engine.Start(t.Context(), openrails.WithRiverClient(queue)))
 	require.NoError(t, queue.Start(t.Context()))
-	return settledSale(t, a, p, order.ID)
+	return settledSale(t, a, p, invoice.ID)
 }
 
 // nmiScheduleNotice delivers NMI's signed recurring.subscription.update notice
@@ -230,11 +230,11 @@ func TestCallbackContracts(t *testing.T) {
 		}, 20*time.Second, 20*time.Millisecond)
 		nmiRenewalReadback(t, a, p, sub)
 	})
-	t.Run("OR-J28-S01/signed-account-bound-evidence-settles-the-original-order", func(t *testing.T) {
+	t.Run("OR-J28-S01/signed-account-bound-evidence-settles-the-original-invoice", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
-		fleet, order, object := unknownSale(t, a, p)
+		fleet, invoice, object := unknownSale(t, a, p)
 		body := stripeNotice(t, "evt_account_bound", "payment_intent.succeeded", object)
-		callbackSettlesSale(t, a, p, fleet, order, func() {
+		callbackSettlesSale(t, a, p, fleet, invoice, func() {
 			status, raw := callback(t, a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
 			require.Equal(t, http.StatusOK, status, raw)
 		})
@@ -244,7 +244,7 @@ func TestCallbackContracts(t *testing.T) {
 	})
 	t.Run("OR-J28-S02/invalid-signature-and-account-cannot-admit-money", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
-		fleet, order, object := unknownSale(t, a, p)
+		fleet, invoice, object := unknownSale(t, a, p)
 		body := stripeNotice(t, "evt_refused", "payment_intent.succeeded", object)
 		beforeJobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 		require.NoError(t, err)
@@ -260,10 +260,10 @@ func TestCallbackContracts(t *testing.T) {
 			t.Run(profile.name, func(t *testing.T) {
 				status, raw := callback(t, a, profile.account, profile.body, profile.signature)
 				require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, raw)
-				current, err := a.alpha.GetOrder(t.Context(), order.ID)
+				current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 				require.NoError(t, err)
-				require.Equal(t, billing.OrderPaymentProcessing, current.Payment.Status)
-				facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+				require.Equal(t, billing.InvoicePaymentProcessing, current.Payment.Status)
+				facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 				require.NoError(t, err)
 				require.Empty(t, facts.Events)
 				require.Len(t, p.effects(t), 1)
@@ -272,7 +272,7 @@ func TestCallbackContracts(t *testing.T) {
 				require.Len(t, jobs.Jobs, len(beforeJobs.Jobs), "a refused notice cannot wake financial work")
 			})
 		}
-		callbackSettlesSale(t, a, p, fleet, order, func() {
+		callbackSettlesSale(t, a, p, fleet, invoice, func() {
 			status, raw := callback(t, a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
 			require.Equal(t, http.StatusOK, status, raw)
 		})
@@ -286,9 +286,9 @@ func TestCallbackContracts(t *testing.T) {
 			m.PSPs["stripe"] = psp
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
-		fleet, order, object := unknownSale(t, a, p)
+		fleet, invoice, object := unknownSale(t, a, p)
 		body := stripeNotice(t, "evt_overlap", "payment_intent.succeeded", object)
-		callbackSettlesSale(t, a, p, fleet, order, func() {
+		callbackSettlesSale(t, a, p, fleet, invoice, func() {
 			status, raw := callback(t, a, "acct_e2e", body, stripeSignature(body, "whsec_previous_fixture"))
 			require.Equal(t, http.StatusOK, status, raw)
 		})
@@ -297,13 +297,13 @@ func TestCallbackContracts(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, status, raw)
 		status, raw = callback(t, a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
 		require.Equal(t, http.StatusOK, status, raw)
-		settledSale(t, a, p, order.ID)
+		settledSale(t, a, p, invoice.ID)
 	})
 	t.Run("OR-J28-S04/duplicate-and-old-observations-cannot-regress-settlement", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
-		fleet, order, object := unknownSale(t, a, p)
+		fleet, invoice, object := unknownSale(t, a, p)
 		body := stripeNotice(t, "evt_once", "payment_intent.succeeded", object)
-		settled := callbackSettlesSale(t, a, p, fleet, order, func() {
+		settled := callbackSettlesSale(t, a, p, fleet, invoice, func() {
 			for range 2 {
 				status, raw := callback(t, a, "acct_e2e", body, stripeSignature(body, "whsec_critical_fixture"))
 				require.Equal(t, http.StatusOK, status, raw)
@@ -315,9 +315,9 @@ func TestCallbackContracts(t *testing.T) {
 			status, raw := callback(t, a, "acct_e2e", notice, stripeSignature(notice, "whsec_critical_fixture"))
 			require.Equal(t, http.StatusOK, status, raw)
 		}
-		require.Equal(t, settled.Payment.PaymentID, settledSale(t, a, p, order.ID).Payment.PaymentID)
+		require.Equal(t, settled.Payment.PaymentID, settledSale(t, a, p, invoice.ID).Payment.PaymentID)
 	})
-	t.Run("OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-order", func(t *testing.T) {
+	t.Run("OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-invoice", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) {
 			m := cfgMerchant(w.cfg, "alpha")
 			psp := m.PSPs["stripe"]
@@ -325,27 +325,27 @@ func TestCallbackContracts(t *testing.T) {
 			m.PSPs["stripe"] = psp
 			setCfgMerchant(&w.cfg, "alpha", m)
 		})
-		// No pass runs: only the thin notice can settle the order.
+		// No pass runs: only the thin notice can settle the invoice.
 		passlessFleet(t, a.world)
 		p.core.SendThinEventsTo(a.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_thin")
 		sale := saleInput(t, a, p)
-		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, hosted, map[string]string{"Idempotency-Key": "thin-hosted"})
+		hosted := billing.CreateMyInvoiceParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.InvoicePaymentParams{ReturnURL: alphaSite + "/paid"}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, hosted, map[string]string{"Idempotency-Key": "thin-hosted"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.NotNil(t, order.Payment.NextAction)
-		require.Equal(t, "redirect_to_url", order.Payment.NextAction.Type)
-		session := strings.TrimPrefix(*order.Payment.NextAction.URL, stripemock.CheckoutURL)
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.NotNil(t, invoice.Payment.NextAction)
+		require.Equal(t, "redirect_to_url", invoice.Payment.NextAction.Type)
+		session := strings.TrimPrefix(*invoice.Payment.NextAction.URL, stripemock.CheckoutURL)
 
 		event, err := p.core.CompleteCheckoutSession(t.Context(), session)
 		require.NoError(t, err, "the thin checkout.session.completed is read back from Stripe and acknowledged")
 		require.Equal(t, 1, p.core.Reads("/v2/core/events/"+event))
 		require.Positive(t, p.core.Reads("/v1/checkout/sessions/"+session), "the session is read at its canonical URL")
-		var settled *billing.Order
+		var settled *billing.Invoice
 		require.Eventually(t, func() bool {
-			settled, err = a.alpha.GetOrder(t.Context(), order.ID)
-			return err == nil && settled.Status == billing.OrderComplete
+			settled, err = a.alpha.GetInvoice(t.Context(), invoice.ID)
+			return err == nil && settled.Status == billing.InvoiceComplete
 		}, 20*time.Second, 20*time.Millisecond)
 		require.NotNil(t, settled.Payment.PaymentID)
 		payment, err := a.alpha.GetPayment(t.Context(), *settled.Payment.PaymentID)

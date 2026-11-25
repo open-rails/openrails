@@ -112,9 +112,9 @@ func subscriptionHistoryEntry(row gen.ListSubscriptionHistoryRow) billing.Subscr
 		if row.PspID != nil {
 			out.Attempt.PSPID = billing.PSPID(*row.PspID)
 		}
-		if row.OrderID != nil {
-			id := billing.OrderID(*row.OrderID)
-			out.Attempt.OrderID = &id
+		if row.InvoiceID != nil {
+			id := billing.InvoiceID(*row.InvoiceID)
+			out.Attempt.InvoiceID = &id
 		}
 		if row.PaymentID != nil {
 			id := billing.PaymentID(*row.PaymentID)

@@ -47,7 +47,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | `openrails.stored_card_refresh` | `billing` | The hourly scan finds a card due for an updater check, or a charge declines because the card expired or was reissued | Asks the vault's account updater for one card's latest details and applies replacement or closure effects. [Worker](../internal/river/jobs_stored_card_refresh.go) · [Decline trigger](../internal/modules/subscriptions/lifecycle_service.go) |
 | `openrails.subscription_converge` | `billing` | Stripe or NMI subscription-state webhooks, or release of a parked subscription | Coalesces wakes, fetches current provider state, and updates the local subscription and its effects. [Worker](../internal/river/jobs_subscription_converge.go) · [Coalescing](../internal/wakejobs/wakejobs.go) · [Park release](../internal/modules/parking/parking.go) |
 | `openrails.usage_erasure` | `billing` | A customer's directory user is deleted (SCIM), in that transaction | Under the customer's lock, clears the invoker and metadata of the customer's usage events in the event store and folds its usage history's invokers; quantities and what posted stay, and a retry after a partial run converges. [Worker](../internal/river/jobs_usage_erasure.go) · [Erasure](../internal/eventstore/erase.go) |
-| `openrails.usage_orders` | `billing` | Usage crosses a billing threshold or an hourly usage scan needs another page | Bills due usage accounts into orders and queues their due collections as provider operations. [Worker](../internal/river/jobs_usage_orders.go) · [Threshold trigger](../internal/modules/money/account_usage_billing.go) |
+| `openrails.usage_orders` | `billing` | Usage crosses a billing threshold or an hourly usage scan needs another page | Bills due usage accounts into invoices and queues their due collections as provider operations. [Worker](../internal/river/jobs_usage_invoices.go) · [Threshold trigger](../internal/modules/money/account_usage_billing.go) |
 
 ## Hourly billing scans
 
@@ -62,9 +62,9 @@ Each `openrails.billing_pass` job runs these scans in order within its own River
 | `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions that still need a targeted provider check after a missed notification or failed read. [Source](../internal/reconcile/verify.go) |
 | `openrails.balance_watch` | Due balance checks and failed or missed balance looks. [Source](../internal/river/jobs_balance_watch.go) |
 | `openrails.delinquency` | Usage arrears due for evaluation after a payment or grace deadline. [Source](../internal/river/jobs_delinquency.go) |
-| `openrails.order_expiry` | Expired orders and attempts, including abandoned card saves. [Source](../internal/river/jobs_order_expiry.go) |
+| `openrails.order_expiry` | Expired invoices and attempts, including abandoned card saves. [Source](../internal/river/jobs_invoice_expiry.go) |
 | `openrails.revenue_recognition` | Revenue schedules due: a month boundary reached in the merchant's accounting timezone, a schedule's end or an early end. The read is indexed on the due instant. [Source](../internal/river/jobs_revenue_recognition.go) |
-| `openrails.usage_orders` | Due usage bills and collections. [Source](../internal/river/jobs_usage_orders.go) |
+| `openrails.usage_orders` | Due usage bills and collections. [Source](../internal/river/jobs_usage_invoices.go) |
 | `openrails.rebill_watch` | Overdue NMI schedule rebills with no recorded attempt, checked against NMI's Query API. [Source](../internal/river/jobs_rebill_watch.go) |
 | `openrails.config_realerts` | Unresolved undeclared-account findings due for another operator alert. [Source](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |

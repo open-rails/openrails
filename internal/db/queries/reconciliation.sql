@@ -307,7 +307,7 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.id = sqlc.arg(id)::uuid 
 -- name: PSPForeignObjectCheck :one
 -- Whether the PSP moves real money, and whether anything of the merchant names a
 -- provider object: a subscription or plan by id, a vault or customer
--- reference, or an order or operation by uuid. Each probe is a key lookup.
+-- reference, or an invoice or operation by uuid. Each probe is a key lookup.
 SELECT p.live::boolean AS live,
     (EXISTS(SELECT 1 FROM billing.subscriptions s
             WHERE s.merchant_id=p.merchant_id AND s.psp_id=p.id AND sqlc.narg(subscription_ref)::text IS NOT NULL
@@ -324,7 +324,7 @@ SELECT p.live::boolean AS live,
      OR EXISTS(SELECT 1 FROM billing.payments pay
             WHERE pay.merchant_id=p.merchant_id AND pay.psp_id=p.id AND sqlc.narg(transaction_id)::text IS NOT NULL
               AND pay.transaction_id=sqlc.narg(transaction_id)::text)
-     OR EXISTS(SELECT 1 FROM billing.orders o
+     OR EXISTS(SELECT 1 FROM billing.invoices o
             WHERE o.merchant_id=p.merchant_id AND sqlc.narg(reference_id)::uuid IS NOT NULL AND o.id=sqlc.narg(reference_id)::uuid)
      OR EXISTS(SELECT 1 FROM billing.provider_intents i
             WHERE i.merchant_id=p.merchant_id AND sqlc.narg(reference_id)::uuid IS NOT NULL AND i.id=sqlc.narg(reference_id)::uuid)
@@ -433,7 +433,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscriptions.
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
-       subscription_id, refunded_payment_id, purchased_at, order_id, ledger_transfer_id, reversal_kind
+       subscription_id, refunded_payment_id, purchased_at, invoice_id, ledger_transfer_id, reversal_kind
 FROM billing.payments
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
@@ -593,7 +593,7 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- life.provider_intent.abandoned: provider actions that will not auto-retry:
 -- ended failed or expired since since, or past their deadline while live.
--- A provider's decline is no abandoned action: nothing moved, and the order
+-- A provider's decline is no abandoned action: nothing moved, and the invoice
 -- or dunning that asked for it owns what follows.
 -- name: ListAbandonedProviderIntents :many
 SELECT id, intent_type, status, rail FROM billing.provider_intents
@@ -726,8 +726,8 @@ LEFT JOIN billing.subscriptions s
        ON e.source_type = 'subscription' AND s.id::text = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN billing.payments pay
        ON e.source_type = 'purchase' AND pay.id = e.payment_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
-LEFT JOIN LATERAL (SELECT l.product_id FROM billing.order_lines l
-       WHERE l.merchant_id=e.merchant_id AND l.order_id=pay.order_id AND l.product_id=e.product_id
+LEFT JOIN LATERAL (SELECT l.product_id FROM billing.invoice_lines l
+       WHERE l.merchant_id=e.merchant_id AND l.invoice_id=pay.invoice_id AND l.product_id=e.product_id
        LIMIT 1) paid_line ON true
 LEFT JOIN LATERAL (SELECT true AS settled FROM billing.payments r
        WHERE r.merchant_id = pay.merchant_id AND r.refunded_payment_id = pay.id

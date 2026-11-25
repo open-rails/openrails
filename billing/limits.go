@@ -103,9 +103,9 @@ const (
 	// DenyOutstandingCapReached: unpaid arrears have reached the customer's
 	// credit line.
 	DenyOutstandingCapReached DenyCode = "outstanding_cap_reached"
-	// DenyDelinquentUnpaidOrder: a debt has outlived the merchant's grace
+	// DenyDelinquentUnpaidInvoice: a debt has outlived the merchant's grace
 	// window.
-	DenyDelinquentUnpaidOrder DenyCode = "delinquent_unpaid_order"
+	DenyDelinquentUnpaidInvoice DenyCode = "delinquent_unpaid_invoice"
 	// DenyBudgetExceeded: a spend-cap window is full.
 	DenyBudgetExceeded DenyCode = "budget_exceeded"
 	// DenyAccrualRateCapReached: the measured accrual rate, with the request,

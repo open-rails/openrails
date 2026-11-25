@@ -9,13 +9,13 @@ One page per OpenRails system: what it does, how it works, and how it keeps the 
 | Books | The units book (prepaid balances, credit lots, usage owed) and the general ledger, per merchant and currency | [books.md](books.md) |
 | Revenue recognition | Revenue schedules, recognised monthly in the accounting timezone; deferred revenue and breakage; adjustments for refunds and chargebacks | in [books.md](books.md#cash-and-revenue-recognition) |
 | Catalog | Products, prices, meters, rate cards and limits; the catalog document and applying it; price migrations | [catalog.md](catalog.md) |
-| Orders and checkout | Orders (one-off, renewal, usage), carts, previews, the payment page | [orders.md](orders.md) |
+| Invoices and checkout | Invoices (one-off, renewal, usage), carts, previews, the payment page | [invoices.md](invoices.md) |
 | Subscriptions | The state machine, renewals, cancel and resume, plan and seat changes | [subscriptions.md](subscriptions.md) |
 | Recurring revenue (MRR) | MRR movements at every subscription change, scheduled churn and contraction, MRR at risk, the rollups | [mrr.md](mrr.md) |
 | Collection and dunning | Retry schedules, the decline table and network advice, arrears delinquency | [dunning.md](dunning.md) |
 | Refunds and disputes | Refunds, chargebacks, won disputes, payments recorded from outside | [refunds.md](refunds.md) |
 | Payment health | Decline causes and network advice, authorization rates; dispute monitoring and prevention | in [dunning.md](dunning.md), [reporting.md](reporting.md#health-overview) and [refunds.md](refunds.md#dispute-monitoring) |
-| Usage billing | Meters, rate cards, the usage event store, settlement priced on totals, usage orders in arrears, running charges | [usage-billing.md](usage-billing.md) |
+| Usage billing | Meters, rate cards, the usage event store, settlement priced on totals, usage invoices in arrears, running charges | [usage-billing.md](usage-billing.md) |
 | Entitlements and limits | Product keys and access; limits per window, the balance limit, spend limits; views and lease syncs; the Go SDK's entitlement cache and gate | [entitlements.md](entitlements.md) |
 | Credits and merchant currencies | Credit lots: staff grants, packs and deposits, recurring credits, expiry, spending from a balance; units a merchant defines, bought, given and spent | [credits.md](credits.md) |
 | Payment providers | NMI, Stripe, CCBill, Solana: charges, refunds, provider-run subscriptions, webhook signatures, staying in sync | [payment-providers.md](payment-providers.md) |

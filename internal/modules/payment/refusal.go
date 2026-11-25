@@ -13,4 +13,4 @@ var ErrPaymentMethodStale = errors.New("saved payment method can no longer be ch
 
 // ErrPaymentMethodRequired is a card purchase that names neither a saved
 // method nor a new card token. The customer's default card is never implied.
-var ErrPaymentMethodRequired = fmt.Errorf("%w: payment_method_id or payment_token is required", ErrOrderAttemptValidation)
+var ErrPaymentMethodRequired = fmt.Errorf("%w: payment_method_id or payment_token is required", ErrInvoiceAttemptValidation)

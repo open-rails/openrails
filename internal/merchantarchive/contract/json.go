@@ -388,7 +388,7 @@ var jsonRules = map[string]jsonRule{
 		"credit_grant":      creditGrantJSON,
 		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "provider_access_default": booleanValue, "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
 		"instrument": frozenInstrumentJSON,
-		// An order's sale: its order, and a new card the charge saves.
+		// An invoice's sale: its invoice, and a new card the charge saves.
 		"order_id": uuidValue, "recurring": booleanValue, "new_card": booleanValue, "token": textValue, "fingerprint": textValue, "reuse": booleanValue, "purchase_scoped": booleanValue,
 		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
 		"billing":     object(map[string]jsonRule{"first_name": textValue, "last_name": textValue, "address1": textValue, "address2": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue, "phone": textValue, "email": textValue}),
@@ -430,33 +430,33 @@ var jsonRules = map[string]jsonRule{
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.
 	"subscriptions.gateway_response":   metadataJSON,
 	"subscriptions.dunning_policy":     dunningPolicyJSON,
-	"orders.last_payment_error":        object(map[string]jsonRule{"reason": textValue, "message": textValue, "field": textValue}),
+	"invoices.last_payment_error":      object(map[string]jsonRule{"reason": textValue, "message": textValue, "field": textValue}),
 	"catalog_meters.group_by":          nullable(dictionary(textValue)),
 	"price_psp_bindings.configuration": priceBindingConfigurationJSON,
 	"catalog_rate_cards.filter":        nullable(dictionary(array(textValue))),
 	"catalog_rate_cards.allowance":     nullable(object(map[string]jsonRule{"included": integerValue})),
 	"catalog_rate_cards.price":         rateJSON,
 	"catalog_limits.counts":            array(object(map[string]jsonRule{"meter": textValue, "weight": integerValue, "per": integerValue, "filter": nullable(dictionary(array(textValue)))})),
-	"orders.tax":                       nullable(emptyObject), "orders.billing_contacts": nullable(contactsJSON),
-	// An order line's credit benefit per unit, frozen when the order was made.
-	"order_lines.credit_grant":      nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
+	"invoices.tax":                     nullable(emptyObject), "invoices.billing_contacts": nullable(contactsJSON),
+	// An invoice line's credit benefit per unit, frozen when the invoice was made.
+	"invoice_lines.credit_grant":    nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":           nullable(object(map[string]jsonRule{"entitlements": array(textValue)})),
 	"usage_postings.lines":           array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "print": textValue, "requests": integerValue, "quantity": integerValue, "stated": integerValue, "amount": integerValue})),
 	"usage_postings.forgiven_lines":  nullable(array(object(map[string]jsonRule{"invoker": textValue, "event_type": textValue, "meter_key": textValue, "cell": textValue, "amount": integerValue}))),
 	"usage_card_prints.card":         metadataJSON,
 	"event_store.usage_events.event": metadataJSON,
-	"order_attempts.metadata":        metadataJSON,
-	"order_attempts.rail_fields":     nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
-	"order_attempts.rail_state": nullable(object(map[string]jsonRule{
+	"invoice_attempts.metadata":      metadataJSON,
+	"invoice_attempts.rail_fields":   nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
+	"invoice_attempts.rail_state": nullable(object(map[string]jsonRule{
 		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "checkout_url": textValue,
 		"token_symbol": textValue, "token_mint": textValue, "token_decimals": textValue, "recipient": textValue, "token_amount": moneyStringValue,
 		"token_price_usd": numberValue, "fx_rate": numberValue, "fx_currency": textValue, "quoted_at": textValue, "quote_expires_at": textValue,
 		"plan_id": solanaPlanIDValue, "mint_symbol": textValue, "amount_base_units": moneyStringValue, "period_hours": textValue, "plan_created_at": textValue,
 		"payer": textValue, "subscriber_wallet": textValue, "subscription_pda": textValue, "plan_owner": textValue, "treasury": textValue,
 	})),
-	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
-		// An order's transition: its statuses, number, payment and decline reason.
+	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_invoices": integerValue, "entered_at": textValue, "evaluated_at": textValue,
+		// An invoice's transition: its statuses, number, payment and decline reason.
 		"status": textValue, "payment_status": textValue, "number": integerValue, "payment_id": uuidValue, "reason": textValue, "settlement_source": textValue,
 		// A balance event: the balance as its crossing was seen.
 		"available_amount": moneyStringValue, "owed_amount": moneyStringValue, "accrual_rate_per_hour": moneyStringValue, "as_of": textValue, "depletes_at": nullable(textValue),

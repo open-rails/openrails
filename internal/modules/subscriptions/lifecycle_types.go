@@ -10,16 +10,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 type CreateMembershipParams struct {
-	// ProviderBill is finalized evidence; its payment and order are recorded atomically with these local effects.
+	// ProviderBill is finalized evidence; its payment and invoice are recorded atomically with these local effects.
 	ProviderBill *observed.Bill
-	// ExistingOrderID is the billing order being fulfilled, when one already
-	// exists. Provider correlation references in metadata are not order IDs.
-	ExistingOrderID *uuid.UUID
+	// ExistingInvoiceID is the billing invoice being fulfilled, when one already
+	// exists. Provider correlation references in metadata are not invoice IDs.
+	ExistingInvoiceID *uuid.UUID
 
 	// InitialPaymentReversal records a captured initial engine payment whose
 	// refund/dispute already exists at first readback. It creates accounting and
@@ -48,8 +48,8 @@ type CreateMembershipParams struct {
 	// records now() (no provider timestamp).
 	PurchasedAt     *time.Time
 	PaymentMetadata map[string]any
-	// Paid is what an order's charge took for this membership, for its
-	// premium_started receipt only: the order records the payment.
+	// Paid is what an invoice's charge took for this membership, for its
+	// premium_started receipt only: the invoice records the payment.
 	Paid *Paid
 	// Succeeds is the membership this one replaces (a Solana tier change),
 	// whose checkout it keeps; an engine upgrade names it in

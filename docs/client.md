@@ -107,7 +107,7 @@ its role's permissions. On a standalone server, a person signed in to the consol
 | read or change configuration, imports and archives | `merchant:config:read`, `merchant:config:manage` |
 | admit and report usage, limits and running charges (a Gate needs both) | `merchant:usage:read`, `merchant:usage:manage` |
 | check entitlements | `merchant:entitlements:read` |
-| create orders | `merchant:orders:manage` |
+| create invoices | `merchant:invoices:manage` |
 | read the event log | `merchant:events:read` |
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 | read metrics | `merchant:metrics:read` |
@@ -289,7 +289,7 @@ signing secret, so register the endpoint once in the dashboard at
 `consistency.stripe_webhook_endpoint` finding names what to register. With a
 `publishable_key`, cards are taken in Stripe Elements (one PaymentIntent charges
 and saves the card; 3-D Secure in the page) and the payment page offers Apple Pay
-and Google Pay. Without one, one-off orders pay on a Stripe-hosted Checkout
+and Google Pay. Without one, one-off invoices pay on a Stripe-hosted Checkout
 session. Saved Stripe cards are managed in Stripe's billing portal.
 
 ### CCBill
@@ -298,18 +298,18 @@ The PSP key and rail are both `ccbill`. Declare `client_accnum` and
 `client_subacc` (quoted), the FlexForm `salt`, and optionally the DataLink pair,
 without which merchant cancels and reads cannot run. CCBill owns the vault and the
 rebill schedule. Each price links a FlexForm (`flex_id` and
-`recurring_billing_option_id` in the catalog's `provider_prices`); an order sells
+`recurring_billing_option_id` in the catalog's `provider_prices`); an invoice sells
 it by redirect. Point CCBill's webhooks at `/v1/webhooks/ccbill/{account_id}`,
 the account being `client_accnum-client_subacc`. CCBill signs nothing:
 deliveries are admitted from its published source ranges, and the payload's
 account must match. Refunds go through CCBill's own admin (`refund_unsupported`).
-A card checkout can keep CCBill back as a fallback ([orders](#orders-and-checkout)).
+A card checkout can keep CCBill back as a fallback ([invoices](#invoices-and-checkout)).
 
 ### Solana
 
 Solana is self-custody: `treasury` is the wallet every payment lands in, and OpenRails never holds its key. One-time payments use Solana Pay; subscriptions use the on-chain Subscriptions Delegation Program, pulled each period by the deployment's crankers (`solana.crankers`, or `Config.Solana`), which pay the fees and never receive money. Without a cranker, one-time payments work and recurring Solana prices are refused. `rpc_url`, a secret, is tried before the network's public endpoint. Prices are in USD and quoted in the merchant's accepted tokens at purchase; devnet and testnet fall back to $1.00 parity when the price feed is unavailable.
 
-**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout` (`embed_origins`, and `billing_fields`, [what a card form asks for](#orders-and-checkout)), `provider_refund_access`, `fraud_warning_refund`, `delegated_invoker_wasted_spend_limits`, `currencies` and `accounting.timezone` (the IANA zone whose days and months MRR reports and usage history group in, and at whose month ends usage posts; default UTC). Rollups are kept in UTC quarter hours and usage history in UTC hours, so a change regroups every day and month, past ones too; a zone whose offset is not whole hours has its usage days cut at the hour. Posted books keep their effective instants and never change. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
+**Settings** (`billing.MerchantSettings`, flat on the merchant in a file): `profile` (`support_url`, `subscribe_url`, `billing_url`, `from_email`, `logo_url`, `terms_url`, `privacy_url`, `statement_descriptor`), `alert_email`, `card_vault` and `charge_psps` (where new cards are saved and which PSPs take new charges), `psp_routing`, `dunning_policy`, `usage_billing` (per currency: `credit_limit`, `minimum_invoice_amount`, `collection_threshold`, the credit limit when absent, and `delinquency_floor`, one unit of the currency when absent), `billing_policies` and their bindings, arrears (`arrears_grace_days`, `billing_period_boundary`), `reprice_notice_window_days`, `balance_notices`, `checkout` (`embed_origins`, and `billing_fields`, [what a card form asks for](#invoices-and-checkout)), `provider_refund_access`, `fraud_warning_refund`, `delegated_invoker_wasted_spend_limits`, `currencies` and `accounting.timezone` (the IANA zone whose days and months MRR reports and usage history group in, and at whose month ends usage posts; default UTC). Rollups are kept in UTC quarter hours and usage history in UTC hours, so a change regroups every day and month, past ones too; a zone whose offset is not whole hours has its usage days cut at the hour. Posted books keep their effective instants and never change. `from_email` and `alert_email` are each one mailbox, bare or named. Beside the settings, the merchant's `messages` document configures its [customer messages](#customer-messages).
 
 `psp_routing` picks one PSP before a purchase is attempted: ordered rules (`currency`, `product`, `price`, `mode`), first match wins, and its `prefer` list ranks the only PSPs it allows. Without a matching rule: the merchant's `charge_psps` (else stripe, nmi), then ccbill, solana, the first that can serve the price; a provider price always uses its own PSP. Fallback is pre-charge only: a decline never moves to a second processor.
 
@@ -349,7 +349,7 @@ products:
         billing_interval: 365 days
 ```
 
-Products, prices, meters and limits are maps keyed by stable keys you choose. `entitlements` are plain strings your app gives meaning to; `required_entitlements` must already be held to buy (`403 entitlement_required`); `tier_group` and `tier_rank` make a plan family that upgrades and downgrades within itself; `credit_grant` makes a product top up a balance. A price's `amount` is `9.99 USD`; `billing_interval` (`30 days`, or `1 month` for a calendar month that keeps the billing day) makes it recurring; `access_duration` defaults to the interval, or `forever` for a one-off; `quantity: {min, max}` sells seats; `customer_amount` lets the buyer name the amount; `sell_via` restricts it to `card` or `solana`. A price with a trial is not sold in an order today.
+Products, prices, meters and limits are maps keyed by stable keys you choose. `entitlements` are plain strings your app gives meaning to; `required_entitlements` must already be held to buy (`403 entitlement_required`); `tier_group` and `tier_rank` make a plan family that upgrades and downgrades within itself; `credit_grant` makes a product top up a balance. A price's `amount` is `9.99 USD`; `billing_interval` (`30 days`, or `1 month` for a calendar month that keeps the billing day) makes it recurring; `access_duration` defaults to the interval, or `forever` for a one-off; `quantity: {min, max}` sells seats; `customer_amount` lets the buyer name the amount; `sell_via` restricts it to `card` or `solana`. A price with a trial is not sold in an invoice today.
 
 ```go guide:catalog-apply
 products, err := catalog.ReadFile(path)
@@ -407,9 +407,9 @@ return shop.CreatePrice(ctx, billing.CreatePriceParams{
 
 A price id is `product-key:price-key:v1` (`billing.ParsePriceID`). Edits are merge patches (`catalog.Field`, `catalog.Null` clears); send the `Revision` you read as `ExpectedRevision` to refuse a concurrent change. No public route reads the catalog: your server reads it and puts products in its own pages with `billing.BuyerPrices`. A price migration moves each subscription at its first renewal on or after `effective_at`, skips rises inside the merchant's `reprice_notice_window_days` unless acknowledged, and blocks subscriptions a provider cannot move (CCBill, Solana). Creating one admits each subscriber it counts and each source it archives as one destructive command before reading any, archives the sources, then reaches the subscribers 100 at a time: `preparing` is true until the last; a source it could not archive is in `warnings`; a preview classifies the first 1,000 (`classified`). `openrails catalog export` keeps a full snapshot with ids and history ([standalone.md](standalone.md#commands)).
 
-## Orders and checkout
+## Invoices and checkout
 
-Every bill is an order: a purchase, a renewal OpenRails or a provider runs, a usage bill. An order's lines are priced and frozen; its payments are the money that moved. `status` is `open`, `processing`, `complete`, `canceled`, `expired`, `void` (a renewal left unowed, or a voided usage order) or `uncollectible` (a usage order written off); `collection_owner` says who collects (`engine`, `nmi_schedule`, `provider`).
+Every bill is an invoice: a purchase, a renewal OpenRails or a provider runs, a usage bill. An invoice's lines are priced and frozen; its payments are the money that moved. `status` is `open`, `processing`, `complete`, `canceled`, `expired`, `void` (a renewal left unowed, or a voided usage invoice) or `uncollectible` (a usage invoice written off); `collection_owner` says who collects (`engine`, `nmi_schedule`, `provider`).
 
 **In the browser** the signed-in customer buys with billing-ui. Your server reads
 the products it sells (`ListProducts`, `billing.BuyerPrices`) into its page:
@@ -435,50 +435,50 @@ for _, product := range listed.Items {
   fallbacks={{ ccbill: { for: ["stripe"], afterFailures: 2 } }} />
 ```
 
-A button creates the customer's order (`POST /v1/me/orders`) and pays it in a
-dialog (`<OrderPayment>`), or, on a site in `checkout.embed_origins`, frames its
+A button creates the customer's invoice (`POST /v1/me/invoices`) and pays it in a
+dialog (`<InvoicePayment>`), or, on a site in `checkout.embed_origins`, frames its
 pay URL (`<EmbeddedPayment>`). Asked again for the same lines, OpenRails answers
-the customer's open order, so a reload or a second click pays one order.
+the customer's open invoice, so a reload or a second click pays one invoice.
 `fallbacks` keeps a PSP back until the PSPs it stands in for failed
-`afterFailures` times on the order. `onPaid` is a hint: confirm access from your
+`afterFailures` times on the invoice. `onPaid` is a hint: confirm access from your
 own gate.
 
-**From your server** (and the SaaS path), create the order for the customer with
+**From your server** (and the SaaS path), create the invoice for the customer with
 a pay URL and send them there:
 
 ```go guide:checkout
 // key is made when the buyer decides, stored, and resent on every retry.
-order, err := shop.CreateOrder(ctx, key, billing.CreateOrderParams{
+invoice, err := shop.CreateInvoice(ctx, key, billing.CreateInvoiceParams{
 	CustomerID: customer,
-	Lines:      []billing.OrderLineParams{{PriceID: price}},
-	PayURL: &billing.OrderPayURLParams{
-		SuccessURL: "https://shop.example/thanks?order={ORDER_ID}",
+	Lines:      []billing.InvoiceLineParams{{PriceID: price}},
+	PayURL: &billing.InvoicePayURLParams{
+		SuccessURL: "https://shop.example/thanks?invoice={INVOICE_ID}",
 		CancelURL:  new("https://shop.example/cart"),
 	},
 })
 if err != nil {
 	return "", err
 }
-return *order.PayURL, nil // redirect the buyer there
+return *invoice.PayURL, nil // redirect the buyer there
 ```
 
-**Checkout facts.** Pass where the customer came from as `Attribution` (`billing.OrderAttribution`: source, medium, campaign, term and content as your `utm_*`, referrer, affiliate; term and content are kept for your own reads, never metrics dimensions) on `CreateOrder`, or as billing-ui's `attribution` prop on `BuyButton`, `ProductList` and `Cart`. Attribution never refuses an order: a field over 100 bytes, unprintable, or carrying an email address or card number is left out (null on the order); a referrer keeps only its host. Browser-supplied attribution is unverified: set an affiliate you pay on orders your server creates. Staff and application reads of a checkout carry `checkout`: `customer_type` (`new`, `returning`, or `reactivated` for a former subscriber with no subscription now), `purchase_number` (the customer's paid purchases before it, plus one), `opened_at` (the payment form first loaded), `submitted_at` (the first pay request), `billing_country`, `ip_country` (`CF-IPCountry`, read only from Cloudflare's published ranges; the address is never stored), `card_country` (null until cards' issuing countries are recorded), `country` with its `country_source`, `language` and `attribution`. The customer's own reads show `checkout: null`. billing-ui sends its `BillingProvider` `locale` (or the client's `language`) as `Accept-Language`, which the order records. A renewal names the checkout that bought its subscription (`renewal.checkout_order_id`).
+**Checkout facts.** Pass where the customer came from as `Attribution` (`billing.InvoiceAttribution`: source, medium, campaign, term and content as your `utm_*`, referrer, affiliate; term and content are kept for your own reads, never metrics dimensions) on `CreateInvoice`, or as billing-ui's `attribution` prop on `BuyButton`, `ProductList` and `Cart`. Attribution never refuses an invoice: a field over 100 bytes, unprintable, or carrying an email address or card number is left out (null on the invoice); a referrer keeps only its host. Browser-supplied attribution is unverified: set an affiliate you pay on invoices your server creates. Staff and application reads of a checkout carry `checkout`: `customer_type` (`new`, `returning`, or `reactivated` for a former subscriber with no subscription now), `purchase_number` (the customer's paid purchases before it, plus one), `opened_at` (the payment form first loaded), `submitted_at` (the first pay request), `billing_country`, `ip_country` (`CF-IPCountry`, read only from Cloudflare's published ranges; the address is never stored), `card_country` (null until cards' issuing countries are recorded), `country` with its `country_source`, `language` and `attribution`. The customer's own reads show `checkout: null`. billing-ui sends its `BillingProvider` `locale` (or the client's `language`) as `Accept-Language`, which the invoice records. A renewal names the checkout that bought its subscription (`renewal.checkout_invoice_id`).
 
 Generate the idempotency key when the buyer decides to buy, store it with the
-cart, and resend it on every retry: the same key recovers the same order and URL;
+cart, and resend it on every retry: the same key recovers the same invoice and URL;
 a new key is a new purchase (a duplicate subscription or permanent product is
-refused, a timed pass or credit pack sells again). Fulfil on the `order.completed`
-event ([events](#events)) or a read of the order, never on billing-ui's `onPaid`
+refused, a timed pass or credit pack sells again). Fulfil on the `invoice.completed`
+event ([events](#events)) or a read of the invoice, never on billing-ui's `onPaid`
 or the redirect to `success_url`.
 
-- The pay URL is `/pay/<order>#<secret>` on the deployment's **checkout origin**,
+- The pay URL is `/pay/<invoice>#<secret>` on the deployment's **checkout origin**,
   which must differ from the API, issuer and frontend origins: the page runs the
-  PSPs' scripts. Without one, an order asking for a pay URL is
+  PSPs' scripts. Without one, an invoice asking for a pay URL is
   `400 pay_url_unavailable` ([embedded.md](embedded.md),
   [standalone.md](standalone.md#configuration-reference)).
-- `success_url` and `cancel_url` may name any https site; `{ORDER_ID}` becomes the
-  order's id. The URL lasts an hour (30 minutes to 24 hours with `ExpiresAt`);
-  an order with no expiry of its own expires with it. Ordinary order reads show
+- `success_url` and `cancel_url` may name any https site; `{INVOICE_ID}` becomes the
+  invoice's id. The URL lasts an hour (30 minutes to 24 hours with `ExpiresAt`);
+  an invoice with no expiry of its own expires with it. Ordinary invoice reads show
   `pay_url: null`.
 - `SavedPaymentMethods` offers the customer's saved cards; set it only when your
   site signed them in. `Embedded: true` makes a URL your registered sites frame.
@@ -486,19 +486,19 @@ or the redirect to `success_url`.
   offers Apple Pay and Google Pay with a Stripe `publishable_key`, and stops after
   ten declined cards (`409 pay_url_attempts_exhausted`).
 
-Paying in the customer's own API (`POST /v1/me/orders` with `payment`, or `/{id}/pay`) takes exactly one of a saved card `{payment_method_id}`, a new one `{token, psp_id}`, a Solana wallet's token `{token_symbol}` or a hosted page's `{return_url}`; a card charge naming no card is `400 payment_method_required`. One provider request charges and saves a new card; a declined card is not saved. In the EEA and UK a new card is kept for later only with `reusable: true`, the customer's unticked opt-in. `requires_action` carries `next_action`: `authenticate` (run the PSP's script, then `confirm`), `redirect_to_url` (CCBill, Stripe-hosted Checkout), or `solana_pay` (a QR code or wallet link; the wallet signs a transaction OpenRails builds, and the order completes when it lands). A decline is `402` with the order open again for another card.
+Paying in the customer's own API (`POST /v1/me/invoices` with `payment`, or `/{id}/pay`) takes exactly one of a saved card `{payment_method_id}`, a new one `{token, psp_id}`, a Solana wallet's token `{token_symbol}` or a hosted page's `{return_url}`; a card charge naming no card is `400 payment_method_required`. One provider request charges and saves a new card; a declined card is not saved. In the EEA and UK a new card is kept for later only with `reusable: true`, the customer's unticked opt-in. `requires_action` carries `next_action`: `authenticate` (run the PSP's script, then `confirm`), `redirect_to_url` (CCBill, Stripe-hosted Checkout), or `solana_pay` (a QR code or wallet link; the wallet signs a transaction OpenRails builds, and the invoice completes when it lands). A decline is `402` with the invoice open again for another card.
 
 **Billing fields.** As Stripe does, a new card's form asks for the billing country always and the postal code only in the US, where it is required. The merchant's `checkout.billing_fields` changes that: `country` is `required` (the default), `optional` or `hidden`; `postal_code` is `auto` (the default: the US only), `required`, `optional` or `hidden`. OpenRails enforces them on a new NMI or platform-vault card, saved (`POST /v1/me/payment-methods`) or paid with (`payment.billing_details`): a required detail that is missing is `400 billing_details_required`, its `param` naming it, and a hidden one sent is dropped before the provider sees it. Stripe's Payment Element collects a Stripe card's address by Stripe's own rules. billing-ui's card forms read the fields from `GET /v1/me/config` (`payment.billing_fields`).
 
 | Method | Use it to |
 |---|---|
-| `PreviewOrder` | price lines, with refusals and the `payment_options` that can take them |
-| `CreateOrder` | an unpaid order for a customer, open 30 days unless `ExpiresAt`; only that customer pays it, signed in or through `pay_url`; takes `idempotencyKey` |
-| `GetOrder`, `ListOrders` | read orders: filter by customer, price, subscription, `origin` (`customer`, `merchant`, `subscription`, `usage`), status, overdue |
-| `GetOrderPaymentAttempt` | the outcome of one pay attempt by its idempotency key, after a lost response |
-| `CancelOrder` | withdraw an open order `CreateOrder` made (settle an unresolved payment first) |
-| `WaiveOrderBalance` | void a usage order and write off what it owes |
-| `MarkOrderUncollectible` | stop collecting and keep the debt |
+| `PreviewInvoice` | price lines, with refusals and the `payment_options` that can take them |
+| `CreateInvoice` | an unpaid invoice for a customer, open 30 days unless `ExpiresAt`; only that customer pays it, signed in or through `pay_url`; takes `idempotencyKey` |
+| `GetInvoice`, `ListInvoices` | read invoices: filter by customer, price, subscription, `origin` (`customer`, `merchant`, `subscription`, `usage`), status, overdue |
+| `GetInvoicePaymentAttempt` | the outcome of one pay attempt by its idempotency key, after a lost response |
+| `CancelInvoice` | withdraw an open invoice `CreateInvoice` made (settle an unresolved payment first) |
+| `WaiveInvoiceBalance` | void a usage invoice and write off what it owes |
+| `MarkInvoiceUncollectible` | stop collecting and keep the debt |
 | `ListRenewals`, `GetRenewal` | renewal bills OpenRails runs |
 
 ### Content-Security-Policy
@@ -568,7 +568,7 @@ return nil
 - **Dunning.** OpenRails retries the renewals it collects on a schedule sized to
   the cycle (a monthly one on days 3, 5, 7 and 10; the fifth failure cancels);
   `dunning_policy` replaces it. Stripe- and CCBill-billed subscriptions use the
-  provider's own retries. A declined renewal is an open order the customer pays
+  provider's own retries. A declined renewal is an open invoice the customer pays
   with a saved card (`POST /v1/me/subscriptions/{id}/retry-now` for a
   provider-scheduled one); a retry of a card past its limit is refused
   `payment_not_retryable` before any provider call.
@@ -577,11 +577,11 @@ return nil
 
 | Method | Use it to |
 |---|---|
-| `ListPayments`, `GetPayment` | payments and refunds, with their order |
+| `ListPayments`, `GetPayment` | payments and refunds, with their invoice |
 | `ListPaymentAttempts`, `GetPaymentAttempt` | each provider attempt, with its decline |
 | `ListDisputes`, `GetDispute` | each provider dispute (inquiry, chargeback or prevented), with its network, reason family, code, dates and outcome |
 | `RefundPayment` | refund through the PSP, in full or in part; `RefundReason` says why (default `requested_by_customer`), `Reason` in the merchant's words; `RevokeAccess` ends what the payment bought; takes `idempotencyKey` |
-| `RecordExternalPayment` | money received outside OpenRails for one order, idempotent on its transaction id: part or all of what a usage order owes, or another order's total (else `409 payment_exceeds_due`); an order with a recurring line is refused |
+| `RecordExternalPayment` | money received outside OpenRails for one invoice, idempotent on its transaction id: part or all of what a usage invoice owes, or another invoice's total (else `409 payment_exceeds_due`); an invoice with a recurring line is refused |
 
 ```go guide:refund
 // key: one per refund decision; a retry with it refunds once
@@ -633,10 +633,10 @@ products:
 `credits-10` above is a pack: each purchase is one credit lot, its amount and
 expiry (`expires_after_days`, default 365) fixed at purchase. `from_payment: true`
 grants what was paid, with a `customer_amount` price whose amount the buyer names
-on the order line. A recurring price with a `credit_grant` grants its credit after
+on the invoice line. A recurring price with a `credit_grant` grants its credit after
 each paid renewal. A voluntary refund needs the lot unused and unheld.
 
-A `credit_grant` may count one of the merchant's own units (`settings.currencies`) instead of money: it then names its `amount` (never `from_payment`), and every price of the product buys that many units, in whatever currency the price is in, so a $50 pack of 55 credits is a product beside a $20 pack of 20. Each lot records its units, what was paid and in what currency. `CreateCreditGrants` gives units, and a recurring price's `credit_grant` in a unit is a plan's allowance, delivered each paid cycle. Units are spent by usage a rate card prices in the unit and by a one-off price in it: `POST /v1/me/orders` (with an `Idempotency-Key` and no `payment`) or `CreateOrder` pays such an order from the customer's balance as it is created, soonest-expiring lot first, or refuses it with `insufficient_credits`. A unit is never owed: a gate decides a request in a unit against the unit balance, and views and lease syncs take the units the merchant declares. Its posting takes what the lots hold and forgives the rest, shown as `usage_charged` with `charge: forgiven`. `GET /v1/me/usage` reads usage in a unit at its price. Refunding a pack's payment takes the lot's share of its units, those left first. The amount shorthand (`50 GOLD`) cannot know a unit's scale: a price in a unit names `currency` and `unit_amount` in native units.
+A `credit_grant` may count one of the merchant's own units (`settings.currencies`) instead of money: it then names its `amount` (never `from_payment`), and every price of the product buys that many units, in whatever currency the price is in, so a $50 pack of 55 credits is a product beside a $20 pack of 20. Each lot records its units, what was paid and in what currency. `CreateCreditGrants` gives units, and a recurring price's `credit_grant` in a unit is a plan's allowance, delivered each paid cycle. Units are spent by usage a rate card prices in the unit and by a one-off price in it: `POST /v1/me/invoices` (with an `Idempotency-Key` and no `payment`) or `CreateInvoice` pays such an invoice from the customer's balance as it is created, soonest-expiring lot first, or refuses it with `insufficient_credits`. A unit is never owed: a gate decides a request in a unit against the unit balance, and views and lease syncs take the units the merchant declares. Its posting takes what the lots hold and forgives the rest, shown as `usage_charged` with `charge: forgiven`. `GET /v1/me/usage` reads usage in a unit at its price. Refunding a pack's payment takes the lot's share of its units, those left first. The amount shorthand (`50 GOLD`) cannot know a unit's scale: a price in a unit names `currency` and `unit_amount` in native units.
 
 A bought lot's price is deferred revenue, recognised at the lot's rate (paid ÷ credits, a pack's bonus included) as its credit is spent; what lapses or is revoked is breakage, and a reinstatement reverses it. Granted credit is promotional: spending it counts as usage revenue offset by promotional credit. See [credits](architecture/credits.md).
 
@@ -724,7 +724,7 @@ Refusals are verdicts, not errors:
 | `limit_reached` | the limit is spent until `resets_at` |
 | `insufficient_balance`, `insufficient_credit`, `outstanding_cap_reached` | the built-in `balance` limit: prepaid balance, credit line, unpaid arrears |
 | `budget_exceeded`, `accrual_rate_cap_reached` | a billing policy's spend window or accrual rate |
-| `delinquent_unpaid_order` | an unpaid usage bill past grace |
+| `delinquent_unpaid_invoice` | an unpaid usage bill past grace |
 | `failure_rate_limited` | a delegated invoker's failed usage passed its limit |
 | `delegated_spend_not_allowed` | only the customer's own credential spends its balance |
 
@@ -799,26 +799,26 @@ gate with its own lease.
 | `AdjustCustomerLimit` | add to the current window only, idempotent on `SourceID`; a rate limit takes none |
 | `UpdateCustomer` (`Limits`) | replace a customer's capacity; `Inherit` restores its products' |
 
-**Spend limits.** A billing policy (merchant settings) caps unpaid arrears (`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate (`accrual_rate_cap`, your usage and running charges). Its amounts, and a window without a currency, are in its `policy_currency`. Its outstanding cap and `collection_threshold_amount` bind only money in that currency, in gates' decisions and in usage billing alike; other currencies keep the account's own limits. Its windows and accrual-rate cap are converted to the request's currency; bindings choose the merchant default or a trust tier, and a customer's own `billing_policy` wins. **Delinquency**: an unpaid usage order past `arrears_grace_days` and above its currency's `delinquency_floor` (a policy's `delinquency_amount_floor` in its `policy_currency`) refuses requests; OpenRails never revokes access or cancels for it. Act on the `delinquency.grace`, `delinquency.entered` and `delinquency.cleared` events.
+**Spend limits.** A billing policy (merchant settings) caps unpaid arrears (`outstanding_cap`), spend per window (`window_spend_cap`) or the accrual rate (`accrual_rate_cap`, your usage and running charges). Its amounts, and a window without a currency, are in its `policy_currency`. Its outstanding cap and `collection_threshold_amount` bind only money in that currency, in gates' decisions and in usage billing alike; other currencies keep the account's own limits. Its windows and accrual-rate cap are converted to the request's currency; bindings choose the merchant default or a trust tier, and a customer's own `billing_policy` wins. **Delinquency**: an unpaid usage invoice past `arrears_grace_days` and above its currency's `delinquency_floor` (a policy's `delinquency_amount_floor` in its `policy_currency`) refuses requests; OpenRails never revokes access or cancels for it. Act on the `delinquency.grace`, `delinquency.entered` and `delinquency.cleared` events.
 
 ## Usage and running charges
 
-Usage needs the deployment's event store (ClickHouse). Without one `GET /v1/config` reports `usage: false`, and lease syncs, `GET /v1/me/usage`, customer limits and their adjustments, meter and limit edits and usage metrics answer `409 event_store_required` (`billing.ErrEventStoreRequired`); running charges and usage orders still work.
+Usage needs the deployment's event store (ClickHouse). Without one `GET /v1/config` reports `usage: false`, and lease syncs, `GET /v1/me/usage`, customer limits and their adjustments, meter and limit edits and usage metrics answer `409 event_store_required` (`billing.ErrEventStoreRequired`); running charges and usage invoices still work.
 
 `SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends it for you. A batch job picks one `lse_` lease id for its stream and sends up to 1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes a resend harmless, a changed item is `422 idempotency_key_reused`, a gap `409 usage_out_of_order`, and items past `usage.through_n` are resent. An item may be up to 35 days old, and its `metadata` at most 1,024 bytes as compact JSON (`billing.MaxUsageMetadataBytes`; a longer one is refused alone, `400 invalid_param` naming `metadata`). Usage counts toward every limit that applies to it: in the windows current when its request was admitted (`admitted_at`, else when it arrives), and in the spend windows of the invoker attributes it reports (`trust_level`, `roles`, `resource`; the customer's own trust level when absent; none while their billing policy cannot be resolved, as in an FX outage). It is priced by the rate cards in force when it arrives. A priced meter that cannot price an item refuses it alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up to the policy's `bad_spend_windows`, never charged to a delegated invoker, and what grace leaves posts at once.
 
 Each item is one event in the event store, written before the sync answers: once it answers, every view, limit and balance reads it. A resend after a lost reply inserts nothing twice. While the store is out of reach a sync answers `503 service_unavailable` and settles nothing; resend it.
 
-Usage posts to the ledger at each month's end in the merchant's `accounting.timezone` and before any other movement of the customer's balance in its currency: a top-up or grant, a credit lot's expiry, revocation or refund, a usage order. A posting takes, per pricing period, the price of the period's whole usage before it, less what earlier postings took: one deduction per credit lot drawn, then owed for the rest. So a tiered price is the price of the period's total however its usage arrived, and late usage posts with the next posting. A volume price that falls as the period grows credits the difference back once the period's 35-day late window closes. Until it posts the balance already holds the usage (`GetBalance`'s `HeldAmount`), so gates refuse as if it had posted. Read what was used with `GET /v1/me/usage` (by event type, invoker or meter, over the days of the merchant's `accounting.timezone`: each day's share of its period's price, so days sum to what posts), the posting on `ListBalanceTransactions` (its period, `through`, and what it added per meter), or `QueryMetrics`.
+Usage posts to the ledger at each month's end in the merchant's `accounting.timezone` and before any other movement of the customer's balance in its currency: a top-up or grant, a credit lot's expiry, revocation or refund, a usage invoice. A posting takes, per pricing period, the price of the period's whole usage before it, less what earlier postings took: one deduction per credit lot drawn, then owed for the rest. So a tiered price is the price of the period's total however its usage arrived, and late usage posts with the next posting. A volume price that falls as the period grows credits the difference back once the period's 35-day late window closes. Until it posts the balance already holds the usage (`GetBalance`'s `HeldAmount`), so gates refuse as if it had posted. Read what was used with `GET /v1/me/usage` (by event type, invoker or meter, over the days of the merchant's `accounting.timezone`: each day's share of its period's price, so days sum to what posts), the posting on `ListBalanceTransactions` (its period, `through`, and what it added per meter), or `QueryMetrics`.
 
 **Usage billing** follows the merchant's `usage_billing` terms: a merchant with
-them turns owed usage and running charges into a usage order on the customer's
+them turns owed usage and running charges into a usage invoice on the customer's
 monthly date, or when debt reaches the credit limit, and charges the default card
 for the currency; one without has none. No host setting turns it on or off, and
 it needs only PostgreSQL: metered prices need the event store, running charges
 do not. A
 customer spends on credit only with a valid default card and its agreement.
-Declined collection follows the renewal retry schedule; `send_invoice` orders
+Declined collection follows the renewal retry schedule; `send_invoice` invoices
 are never charged.
 
 A **running charge** bills a rate per hour from start to stop: a rented machine, a
@@ -866,7 +866,7 @@ for {
 		return err
 	}
 	page, err := shop.ListEvents(ctx, billing.EventListParams{After: cursor, Limit: 100,
-		Types: []string{string(billing.HostEventOrderCompleted)}})
+		Types: []string{string(billing.HostEventInvoiceCompleted)}})
 	var status *billing.StatusError
 	if errors.As(err, &status) && status.Code == billing.CodeEventCursorExpired {
 		return rebuild(ctx, db) // 410: re-derive your state, then start a new cursor
@@ -905,8 +905,8 @@ cursor. `EventReader()` adapts the client to the helpers module's
 
 The envelope: `id`, `merchant_id`, `source`, `type`, `version`, `occurred_at`,
 `recorded_at`, `subject` and `data`, money as decimal strings. Host events are
-the `billing.HostEventType` constants: `order.completed`, `order.expired`,
-`order.payment_failed`, `mandate.revoked`, `delinquency.*`, `balance.low`,
+the `billing.HostEventType` constants: `invoice.completed`, `invoice.expired`,
+`invoice.payment_failed`, `mandate.revoked`, `delinquency.*`, `balance.low`,
 `balance.depleted`, `product.entitlements_changed`, `destructive.hold_opened`
 and `destructive.hold_cleared`, among others. Customer notices
 (`ntf_` ids) carry the recipient: match its `account_issuer` as well as the UUID.
@@ -914,7 +914,7 @@ and `destructive.hold_cleared`, among others. Customer notices
 - `subscription_canceled` is renewal stopped with access remaining;
   `premium_ended` with `data.access_ended: true` is access closed.
 - `payment_method_failed`, `payment_method_update_required`,
-  `payment_authentication_required` and `order_collection_stopped` carry the
+  `payment_authentication_required` and `invoice_collection_stopped` carry the
   retry decision and a `recovery_action` you map to a page. Re-read before
   acting.
 - `MerchantProfile.NotificationURL(type)` picks the profile URL for a notice.
@@ -1099,14 +1099,14 @@ person acting in person who is not the one held; in process, a handle made with
 
 ## Errors
 
-An unsuccessful request is a `*billing.StatusError`: the HTTP `Status`, the `RetryAfter` header and the envelope's `ErrorDetails` (`Type`, `Code`, `Message`, `Param`, `Metadata`, `RequestID`, and on a decline the `Order` left open). Every code is registered once with its status and type (`billing.ErrorCodes()`, [error-codes.md](api/error-codes.md)). Each code is a `billing.ErrorCode` constant (`billing.CodeCardDeclined`, …), and `billing.ErrorCodeFrom(err)` reads it from a `StatusError` or an in-process refusal; `billing.LookupErrorCode` returns its `ErrorCodeInfo`. Classify by `errors.Is` and the code, never the message: comparing strings, or an interface declaring `ErrorCode() string`, does not match. The wire carries the same string. The client validates nothing the server checks: a bad request is the server's `400 invalid_param`.
+An unsuccessful request is a `*billing.StatusError`: the HTTP `Status`, the `RetryAfter` header and the envelope's `ErrorDetails` (`Type`, `Code`, `Message`, `Param`, `Metadata`, `RequestID`, and on a decline the `Invoice` left open). Every code is registered once with its status and type (`billing.ErrorCodes()`, [error-codes.md](api/error-codes.md)). Each code is a `billing.ErrorCode` constant (`billing.CodeCardDeclined`, …), and `billing.ErrorCodeFrom(err)` reads it from a `StatusError` or an in-process refusal; `billing.LookupErrorCode` returns its `ErrorCodeInfo`. Classify by `errors.Is` and the code, never the message: comparing strings, or an interface declaring `ErrorCode() string`, does not match. The wire carries the same string. The client validates nothing the server checks: a bad request is the server's `400 invalid_param`.
 
 ```go guide:errors
 var status *billing.StatusError
 switch {
 case err == nil:
 	return "done"
-case errors.Is(err, billing.ErrPaymentRefused): // 402: nothing charged; another card may pay the same order
+case errors.Is(err, billing.ErrPaymentRefused): // 402: nothing charged; another card may pay the same invoice
 	return "declined"
 case errors.Is(err, billing.ErrIdempotencyKeyReused): // the key was sent with other terms: a bug
 	return "bug"
@@ -1139,7 +1139,7 @@ default: // no answer, or a 5xx: it may have committed; retry with the same key 
 
 ## Idempotency
 
-A route that can move money or grant something takes a key, and its method takes it as `idempotencyKey` after `ctx`: `CreateOrder`, `ChangeSubscription`, `RefundPayment`, `CreateProductAccess`, `ApproveProposals`; `GetOrderPaymentAttempt` reads an attempt by it. The same key and terms recover the operation; other terms are `422 idempotency_key_reused`. Make the key when the person decides, store it with what it is for, and reuse it until the operation resolves. Other operations own their replay by a durable id instead: running charges by `Reference`, credit grants by customer and `SourceID`, external payments by `TransactionID`, lease usage by lease and item number, limit adjustments by `SourceID`. There is no response cache.
+A route that can move money or grant something takes a key, and its method takes it as `idempotencyKey` after `ctx`: `CreateInvoice`, `ChangeSubscription`, `RefundPayment`, `CreateProductAccess`, `ApproveProposals`; `GetInvoicePaymentAttempt` reads an attempt by it. The same key and terms recover the operation; other terms are `422 idempotency_key_reused`. Make the key when the person decides, store it with what it is for, and reuse it until the operation resolves. Other operations own their replay by a durable id instead: running charges by `Reference`, credit grants by customer and `SourceID`, external payments by `TransactionID`, lease usage by lease and item number, limit adjustments by `SourceID`. There is no response cache.
 
 ## Pagination
 
@@ -1178,12 +1178,12 @@ response, is in [routes.md](api/routes.md); every error code in
 | SaaS | the console's **API URL** plus `/v1` | `Authorization: Bearer <API key>` |
 
 ```sh
-curl --fail-with-body -X POST "$OPENRAILS_API_URL/v1/app/orders" \
+curl --fail-with-body -X POST "$OPENRAILS_API_URL/v1/app/invoices" \
   -H "Authorization: Bearer $OPENRAILS_API_KEY" -H "Idempotency-Key: $CART_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"customer_id":"4d1c5f2e-…","lines":[{"price_id":"course-101:purchase:v1"}],
-       "pay_url":{"success_url":"https://shop.example/thanks?order={ORDER_ID}"}}'
-curl --fail-with-body "$OPENRAILS_API_URL/v1/app/events?type=order.completed&after=$CURSOR" \
+       "pay_url":{"success_url":"https://shop.example/thanks?invoice={INVOICE_ID}"}}'
+curl --fail-with-body "$OPENRAILS_API_URL/v1/app/events?type=invoice.completed&after=$CURSOR" \
   -H "Authorization: Bearer $OPENRAILS_API_KEY"
 curl --fail-with-body -X POST "$OPENRAILS_API_URL/v1/app/entitlements/check" \
   -H "Authorization: Bearer $OPENRAILS_API_KEY" -H 'Content-Type: application/json' \
@@ -1204,7 +1204,7 @@ curl --fail-with-body -X POST "$OPENRAILS_API_URL/v1/app/entitlements/check" \
   amount is refused. Parse with `BigInt` or an exact decimal. `GET /v1/config`'s
   `currencies` gives each scale; a merchant's own units are in `GET /v1/me/config`'s `currencies`.
 - **Ids** are prefixed text accepted only in their own spelling (`prod_`, `sub_`,
-  `pay_`, `pm_`, `ord_`, `psp_`, `oat_`, `lse_`, …); customers and merchants are
+  `pay_`, `pm_`, `in_`, `psp_`, `iat_`, `lse_`, …); customers and merchants are
   UUIDs; a price id is URL-encoded as a path segment.
 - **Times** are RFC 3339 UTC; absent values are `null`, empty lists `[]`.
   `DELETE` answers `204`.

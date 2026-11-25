@@ -421,11 +421,11 @@ func (w *DunningWorker) processSubscription(
 			return dunningOutcomeRefused, nil
 		}
 		if errors.Is(err, money.ErrEngineMethodUnusable) {
-			// Only the member can fix this: their renewal is an open order
+			// Only the member can fix this: their renewal is an open invoice
 			// they pay with a usable card, on the dunning clock, under the
 			// merchant's dunning access policy.
-			w.Log.WarnContext(ctx, "renewal: the payment method cannot be charged; the member pays the renewal order", logx.Err(err), "subscription_id", sub.ID)
-			opened := w.EngineCollections.OpenDueRenewalOrder(ctx, sub.ID, w.now())
+			w.Log.WarnContext(ctx, "renewal: the payment method cannot be charged; the member pays the renewal invoice", logx.Err(err), "subscription_id", sub.ID)
+			opened := w.EngineCollections.OpenDueRenewalInvoice(ctx, sub.ID, w.now())
 			reason, code := "payment_method_unusable", "payment_method_unusable"
 			if errors.Is(err, charge.ErrAgreementRequired) {
 				code = charge.AgreementRequiredCode
@@ -435,7 +435,7 @@ func (w *DunningWorker) processSubscription(
 				return dunningOutcomeFailed, fmt.Errorf("await a payment method: %w", err)
 			}
 			if opened != nil {
-				return dunningOutcomeFailed, fmt.Errorf("open the renewal order: %w", opened)
+				return dunningOutcomeFailed, fmt.Errorf("open the renewal invoice: %w", opened)
 			}
 			return dunningOutcomeFailed, nil
 		}

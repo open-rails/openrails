@@ -102,12 +102,12 @@ func (q *Queries) CountMerchantRowsOperationLog(ctx context.Context, merchantID 
 	return count, err
 }
 
-const countMerchantRowsOrderAttempts = `-- name: CountMerchantRowsOrderAttempts :one
-SELECT count(*) FROM billing.order_attempts WHERE merchant_id = $1
+const countMerchantRowsInvoiceAttempts = `-- name: CountMerchantRowsInvoiceAttempts :one
+SELECT count(*) FROM billing.invoice_attempts WHERE merchant_id = $1
 `
 
-func (q *Queries) CountMerchantRowsOrderAttempts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsOrderAttempts, merchantID)
+func (q *Queries) CountMerchantRowsInvoiceAttempts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsInvoiceAttempts, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -328,12 +328,12 @@ func (q *Queries) PurgeMerchantRowsOperationLog(ctx context.Context, merchantID 
 	return err
 }
 
-const purgeMerchantRowsOrderAttempts = `-- name: PurgeMerchantRowsOrderAttempts :exec
-DELETE FROM billing.order_attempts WHERE merchant_id = $1
+const purgeMerchantRowsInvoiceAttempts = `-- name: PurgeMerchantRowsInvoiceAttempts :exec
+DELETE FROM billing.invoice_attempts WHERE merchant_id = $1
 `
 
-func (q *Queries) PurgeMerchantRowsOrderAttempts(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsOrderAttempts, merchantID)
+func (q *Queries) PurgeMerchantRowsInvoiceAttempts(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsInvoiceAttempts, merchantID)
 	return err
 }
 

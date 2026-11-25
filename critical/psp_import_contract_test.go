@@ -349,7 +349,7 @@ func (iw *importWorld) nmiMember(t *testing.T, email, plan, amount string, start
 	t.Helper()
 	vault := iw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
 	iw.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Email = email })
-	schedule := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: amount, Days: 30, Created: start, NextBilling: start.AddDate(0, 0, 30), Order: "order-" + plan + "-" + vault})
+	schedule := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: amount, Days: 30, Created: start, NextBilling: start.AddDate(0, 0, 30), Order: "invoice-" + plan + "-" + vault})
 	iw.nmi.AddScheduleSale(schedule, start)
 	return schedule
 }
@@ -1283,10 +1283,10 @@ func TestPSPImport(t *testing.T) {
 		member := func(email, plan, amount, currency string) string {
 			vault := iw.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "4242"})
 			iw.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Email = email })
-			order := "order-" + plan + "-" + vault
-			id := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: amount, Days: 30, Created: start, NextBilling: next, Order: order})
+			invoice := "invoice-" + plan + "-" + vault
+			id := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: amount, Days: 30, Created: start, NextBilling: next, Order: invoice})
 			if currency != "" {
-				iw.nmi.AddSale(nmimock.Sale{Vault: vault, Amount: amount, Currency: currency, OrderID: order, ScheduleID: id, At: start})
+				iw.nmi.AddSale(nmimock.Sale{Vault: vault, Amount: amount, Currency: currency, OrderID: invoice, ScheduleID: id, At: start})
 			}
 			return id
 		}

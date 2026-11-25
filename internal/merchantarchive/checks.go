@@ -99,7 +99,7 @@ var excludedColumns = map[string]string{
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
 	"leases":                        "merchant_id id created_at last_sync_at settled_through_n closed_at receipts",
 	"lease_in_flight":               "merchant_id lease_id customer_id limit_key unit amount updated_at",
-	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at purchase_id purchase_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text mandate_id sent_initial_transaction_id order_id outcome decline_cause advice_code network_advice_code",
+	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at purchase_id purchase_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text mandate_id sent_initial_transaction_id invoice_id outcome decline_cause advice_code network_advice_code",
 	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason quantity probe_failed_at next_probe_at",
 	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
 	"carts":                         "merchant_id customer_id lines last_changed_at created_at",
@@ -116,8 +116,8 @@ var excludedColumns = map[string]string{
 	"nmi_bulk_checkpoints":          "merchant_id psp_id window_starts_at window_ends_at next_page started_at",
 	"nmi_history_months":            "merchant_id psp_id month_at kind reason authorizations outcome decline_cause",
 	"nmi_history_reads":             "merchant_id psp_id read_at due_at",
-	"solana_pay_references":         "merchant_id reference order_attempt_id kind status expires_at watch_ends_at next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
-	"solana_pay_receipts":           "merchant_id reference signature order_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
+	"solana_pay_references":         "merchant_id reference invoice_attempt_id kind status expires_at watch_ends_at next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
+	"solana_pay_receipts":           "merchant_id reference signature invoice_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
 	"reconciliation_findings":       "id merchant_id finding_type rail psp_id subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity change source evidence_digest approval_run_id pull_id dismissed_at",
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class after_lifecycle_rev",
 
@@ -143,14 +143,14 @@ var omittedColumns = map[string]string{
 	// Generated from the recorded columns.
 	"subscription_mrr": "dirty",
 	"payments":         "destructive_run_class",
-	"order_attempts":   "destructive_run_class",
+	"invoice_attempts": "destructive_run_class",
 	"product_access":   "destructive_run_class",
 	"maintenance_runs": "run_class coverage affected note summary inventory_manifest inventory_total_rows",
 	// The breaker's sent attempt: the destination's breaker counts its own.
 	"provider_intents": "destructive_run_class destructive_action_id sent_attempt",
 	"price_migrations": "destructive_action_id",
-	// Derived from the lines: a restored open order is not found by it.
-	"orders": "lines_digest",
+	// Derived from the lines: a restored open invoice is not found by it.
+	"invoices": "lines_digest",
 	// When time alone next changes a payer's delinquency: restore schedules
 	// every payer again.
 	"customer_delinquency": "next_evaluation_at",
@@ -285,7 +285,7 @@ type rowCheck struct{ table, predicate string }
 // preflightChecks are states the archive cannot carry.
 var preflightChecks = []rowCheck{
 	{"destructive_run_before_images", "true"},
-	{"order_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
+	{"invoice_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
 	// A request still running under a live claim has an outcome the archive
 	// would miss; settled, failed and lapsed claims are not moved (#1099).
 	{"idempotency_keys", "status='processing' AND lease_expires_at > now()"},
@@ -348,14 +348,14 @@ var referenceChecks = []rowCheck{
 	// A native lot retains its payment's accepted promise. The product's current
 	// benefit is deliberately irrelevant to previously purchased credit.
 	{"payments", `credit_grant_snapshot IS NOT NULL AND status='succeeded' AND NOT EXISTS (
-  SELECT 1 FROM billing.credit_grants g JOIN billing.order_lines l ON l.merchant_id=$1 AND l.order_id=payments.order_id AND l.product_id=g.product_id
+  SELECT 1 FROM billing.credit_grants g JOIN billing.invoice_lines l ON l.merchant_id=$1 AND l.invoice_id=payments.invoice_id AND l.product_id=g.product_id
   WHERE g.merchant_id=$1 AND g.payment_id=payments.id AND g.source_id=payments.id::text
     AND g.customer_id=payments.customer_id AND g.product_id=l.product_id
     AND g.unit=payments.credit_grant_snapshot->>'currency' AND g.units=(payments.credit_grant_snapshot->>'amount')::bigint
     AND g.paid_amount=payments.amount AND g.paid_currency=payments.currency AND payments.amount>0
     AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
     AND g.expires_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
-	// An order's lot keeps its line's promise instead: the frozen benefit per
+	// An invoice's lot keeps its line's promise instead: the frozen benefit per
 	// unit, and the line's amount as what was paid for it.
 	{"credit_grants", `payment_id IS NOT NULL AND NOT EXISTS (
   SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=credit_grants.payment_id
@@ -363,7 +363,7 @@ var referenceChecks = []rowCheck{
     AND ((p.credit_grant_snapshot IS NOT NULL
         AND (p.credit_grant_snapshot->>'amount')::bigint=credit_grants.units
         AND p.amount=credit_grants.paid_amount)
-      OR EXISTS (SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.order_id=p.order_id
+      OR EXISTS (SELECT 1 FROM billing.invoice_lines l WHERE l.merchant_id=$1 AND l.invoice_id=p.invoice_id
         AND l.product_id=credit_grants.product_id AND l.credit_grant IS NOT NULL
         AND (l.credit_grant->>'amount')::bigint*COALESCE(l.quantity,1)=credit_grants.units
         AND l.amount=credit_grants.paid_amount)))`},
@@ -400,7 +400,7 @@ var referenceChecks = []rowCheck{
                AND m.rail_customer_ref=provider_intents.payload->'instrument'->>'rail_customer_ref'
                AND m.status IN ('removed','closed','replaced')
                AND m.park_reason IS NOT DISTINCT FROM ('removed:' || provider_intents.id::text))))`},
-	// A general-ledger leg of an order in a merchant's unit is in the paid
+	// A general-ledger leg of an invoice in a merchant's unit is in the paid
 	// currency of a lot that paid it: of the lot it names (a spend, a
 	// reversal's share), else of one that paid its line (a recognition).
 	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
@@ -411,20 +411,20 @@ var referenceChecks = []rowCheck{
        AND ledger_transfers.transfer_type IN ('credit_purchase_revenue','credit_refund_cash','credit_refund_cash_restore','credit_refund_funding')
        AND NOT EXISTS(SELECT 1 FROM billing.ledger_accounts a WHERE a.merchant_id=$1
          AND a.id IN (ledger_transfers.debit_account_id,ledger_transfers.credit_account_id) AND a.customer_id IS NOT NULL)))))
-	 OR (order_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.orders o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.order_id AND o.customer_id=ledger_transfers.customer_id
+	 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices o WHERE o.merchant_id=$1 AND o.id=ledger_transfers.invoice_id AND o.customer_id=ledger_transfers.customer_id
 	   AND (o.currency=ledger_transfers.currency
 	     OR ledger_transfers.book='general' AND o.currency <> ALL(` + registryCurrencies + `)
 	       AND (ledger_transfers.credit_grant_id IS NOT NULL AND EXISTS(SELECT 1 FROM billing.credit_grants g
 	           JOIN billing.ledger_transfers s ON s.merchant_id=g.merchant_id AND s.credit_grant_id=g.id
-	           WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND g.paid_currency=ledger_transfers.currency AND s.book='units' AND s.order_id=o.id)
+	           WHERE g.merchant_id=$1 AND g.id=ledger_transfers.credit_grant_id AND g.paid_currency=ledger_transfers.currency AND s.book='units' AND s.invoice_id=o.id)
 	         OR ledger_transfers.credit_grant_id IS NULL AND EXISTS(SELECT 1 FROM billing.ledger_transfers s
 	           JOIN billing.credit_grants g ON g.merchant_id=s.merchant_id AND g.id=s.credit_grant_id
-	           WHERE s.merchant_id=$1 AND s.source='order_line' AND s.source_id=ledger_transfers.order_line_id::text AND s.book='units'
+	           WHERE s.merchant_id=$1 AND s.source='order_line' AND s.source_id=ledger_transfers.invoice_line_id::text AND s.book='units'
 	             AND g.paid_currency=ledger_transfers.currency)))))
-	 OR (order_line_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.id=ledger_transfers.order_line_id AND l.order_id=ledger_transfers.order_id))
+	 OR (invoice_line_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoice_lines l WHERE l.merchant_id=$1 AND l.id=ledger_transfers.invoice_line_id AND l.invoice_id=ledger_transfers.invoice_id))
 	 OR (product_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=ledger_transfers.product_id))
 	 OR (revenue_schedule_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.revenue_schedules s WHERE s.merchant_id=$1 AND s.id=ledger_transfers.revenue_schedule_id
-	     AND s.order_line_id=ledger_transfers.order_line_id AND s.customer_id=ledger_transfers.customer_id AND s.currency=ledger_transfers.currency))`},
+	     AND s.invoice_line_id=ledger_transfers.invoice_line_id AND s.customer_id=ledger_transfers.customer_id AND s.currency=ledger_transfers.currency))`},
 	// Restore preserves historical denormalized tiers, but a live subscription
 	// must still agree with its product, as required by the ordinary tier
 	// derivation and product-update guards. Include remaining paid access.
@@ -437,7 +437,7 @@ var referenceChecks = []rowCheck{
 	 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
 	 NOT EXISTS(SELECT 1 FROM billing.payments a WHERE a.merchant_id=$1
 	 AND a.ledger_transfer_id=ledger_transfers.id
-	 AND a.customer_id=ledger_transfers.customer_id AND a.order_id=ledger_transfers.order_id
+	 AND a.customer_id=ledger_transfers.customer_id AND a.invoice_id=ledger_transfers.invoice_id
 	 AND a.currency=ledger_transfers.currency AND a.status='succeeded'))`},
 	{"provider_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1 AND s.id=provider_intents.subscription_id))
 	 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=provider_intents.payment_id))
@@ -481,7 +481,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	}
 	var after *uuid.UUID
 	for {
-		rows, err := gen.New(tx).ListOrderCollectionsForArchive(ctx, gen.ListOrderCollectionsForArchiveParams{MerchantID: id.UUID(), AfterID: after, PageSize: 256})
+		rows, err := gen.New(tx).ListInvoiceCollectionsForArchive(ctx, gen.ListInvoiceCollectionsForArchiveParams{MerchantID: id.UUID(), AfterID: after, PageSize: 256})
 		if err != nil {
 			return err
 		}
@@ -489,8 +489,8 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 			return nil
 		}
 		for _, row := range rows {
-			if !orderCollectionCanonical(row) {
-				return &Error{Code: "unsupported_state", Table: "payments", Err: fmt.Errorf("order collection %s does not name its canonical payment", row.BillingProviderIntent.ID)}
+			if !invoiceCollectionCanonical(row) {
+				return &Error{Code: "unsupported_state", Table: "payments", Err: fmt.Errorf("invoice collection %s does not name its canonical payment", row.BillingProviderIntent.ID)}
 			}
 		}
 		next := rows[len(rows)-1].BillingProviderIntent.ID
@@ -498,16 +498,16 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	}
 }
 
-// orderCollectionCanonical reports whether a terminal order collection and
+// invoiceCollectionCanonical reports whether a terminal invoice collection and
 // the payment its payload names agree: a settled one wrote exactly its
 // receipt's payment and owed-payment transfer, any other wrote none.
-func orderCollectionCanonical(row gen.ListOrderCollectionsForArchiveRow) bool {
+func invoiceCollectionCanonical(row gen.ListInvoiceCollectionsForArchiveRow) bool {
 	operation := row.BillingProviderIntent
-	p, err := intents.DecodeOrderCollectionPayload(operation)
+	p, err := intents.DecodeInvoiceCollectionPayload(operation)
 	if err != nil {
 		return false
 	}
-	origin := p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.OrderCollectionRetryKeyValid(p.OrderID, operation.IdempotencyKey) ||
+	origin := p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(p.InvoiceID, operation.IdempotencyKey) ||
 		p.Initiator == charge.InitiatorMerchant && operation.Origin == string(intents.OriginSystem)
 	receipt, collected, receiptErr := intents.LoadCollectedReceipt(operation)
 	charged, amountErr := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
@@ -518,7 +518,7 @@ func orderCollectionCanonical(row gen.ListOrderCollectionsForArchiveRow) bool {
 		return row.PaymentID == nil && !collected
 	}
 	return collected && row.PaymentID != nil && *row.PaymentID == p.PaymentID && row.PaymentCustomerID != nil && *row.PaymentCustomerID == p.CustomerID &&
-		row.PaymentOrderID != nil && *row.PaymentOrderID == p.OrderID && row.PaymentPspID != nil && *row.PaymentPspID == p.Instrument.PSPID &&
+		row.PaymentInvoiceID != nil && *row.PaymentInvoiceID == p.InvoiceID && row.PaymentPspID != nil && *row.PaymentPspID == p.Instrument.PSPID &&
 		row.PaymentRail != nil && *row.PaymentRail == p.Rail && row.PaymentTransactionID != nil && *row.PaymentTransactionID == receipt.TransactionID() &&
 		row.PaymentAmount != nil && *row.PaymentAmount == charged && row.PaymentCurrency != nil && *row.PaymentCurrency == p.Currency &&
 		row.PaymentStatus != nil && *row.PaymentStatus == "succeeded" && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount

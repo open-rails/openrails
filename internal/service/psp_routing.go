@@ -15,7 +15,7 @@ import (
 // It runs the production decision path, so the answer is what purchase would
 // actually do, not a prediction of it.
 func (s *Service) PreviewPSPRouting(ctx context.Context, in billing.PreviewPSPRoutingParams) (*billing.PSPRoutingPreview, error) {
-	orderAttempts, err := s.requireOrderAttemptService()
+	invoiceAttempts, err := s.requireInvoiceAttemptService()
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func (s *Service) PreviewPSPRouting(ctx context.Context, in billing.PreviewPSPRo
 	var mode models.PurchaseKind
 	if err := rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
 		var runErr error
-		decision, mode, runErr = orderAttempts.DryRunRouting(scopedCtx, in.PriceID.String(), "", "", in.Country, in.PSP)
+		decision, mode, runErr = invoiceAttempts.DryRunRouting(scopedCtx, in.PriceID.String(), "", "", in.Country, in.PSP)
 		return runErr
 	}); err != nil {
 		return nil, apperr.Invalidf("preview PSP routing: %v", err)

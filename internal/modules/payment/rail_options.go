@@ -23,7 +23,7 @@ func purchaseModeForRail(price *models.Price, rail string) models.PurchaseKind {
 // mode, or "" when it can. It is the one readiness verdict behind both the
 // option list and routing's fallback classes, so they never disagree. Which
 // sale kinds a rail supports is the rail registry's capability.
-func (s *OrderAttemptService) railSkipReason(price *models.Price, target railTarget, providerConfig *config.ResolvedPSP, mode models.PurchaseKind) string {
+func (s *InvoiceAttemptService) railSkipReason(price *models.Price, target railTarget, providerConfig *config.ResolvedPSP, mode models.PurchaseKind) string {
 	price = priceForPurchaseTarget(price, target)
 	if price == nil || providerConfig == nil {
 		return models.PSPRoutingSkipNotArmed

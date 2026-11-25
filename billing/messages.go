@@ -9,9 +9,9 @@ import (
 // MessageDataVersion is the version of MessageData that templates and
 // Deps.MessageRenderer read. Within a version fields are only added; removing
 // or changing one is a new version.
-const MessageDataVersion = 1
+const MessageDataVersion = 2
 
-// MessageData is what a customer message renders from, version 1: who it is
+// MessageData is what a customer message renders from, version 2: who it is
 // to and from, the fact it is about and where it sends the customer. Every
 // field is text formatted for the customer, empty when the fact or the
 // merchant's profile has none.
@@ -76,9 +76,9 @@ type MessageEvent struct {
 	// non_recoverable (the card can no longer be charged), refund,
 	// chargeback, rail_cancel (the provider or a system action), access_ended
 	// (access reached its end, no cause recorded) or unknown. On
-	// order_collection_stopped: schedule_exhausted or non_recoverable.
+	// invoice_collection_stopped: schedule_exhausted or non_recoverable.
 	Reason string
-	// ProductName is what the fact is about: what an order bought, else the
+	// ProductName is what the fact is about: what an invoice bought, else the
 	// subscription's product.
 	ProductName      string
 	FromProductName  string
@@ -99,8 +99,8 @@ type MessageEvent struct {
 	NextAttemptAt    string
 	RunwayEndsAt     string
 	OverdueStartedAt string
-	OrderNumber      string
-	OverdueOrders    string
+	InvoiceNumber    string
+	OverdueInvoices  string
 	Quantity         string
 	AccessEnded      bool
 	DowngradeApplied bool
@@ -111,7 +111,7 @@ type MessageEvent struct {
 	RecoveryAction   NotificationRecoveryAction
 	CollectionMethod InvoiceCollectionMethod
 	// The ids the fact names, prefixed (ord_, pay_, sub_).
-	OrderID           string
+	InvoiceID         string
 	PaymentID         string
 	RefundedPaymentID string
 	SubscriptionID    string

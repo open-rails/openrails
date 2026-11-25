@@ -63,11 +63,11 @@ WHERE m.merchant_id = s.merchant_id AND m.customer_id = s.customer_id AND m.curr
         AND ar.debits_posted-ar.credits_posted >= s.effective_credit_limit
         AND ar.debits_posted-ar.credits_posted > 0
         AND ar.debits_posted-ar.credits_posted >= COALESCE(s.usage_minimum_invoice_amount,(sqlc.arg(minimums)::jsonb->>s.currency)::bigint,0)
-        AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.order_id IS NULL
+        AND EXISTS (SELECT 1 FROM billing.owed_items oi WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency AND oi.status='pending' AND oi.invoice_id IS NULL
             HAVING COALESCE(SUM(oi.amount),0) >= GREATEST(1,COALESCE(s.usage_minimum_invoice_amount,(sqlc.arg(minimums)::jsonb->>s.currency)::bigint,0)))) OR
     (s.usage_next_bill_at IS NULL AND EXISTS (SELECT 1 FROM billing.owed_items oi
         WHERE oi.merchant_id=s.merchant_id AND oi.customer_id=s.customer_id AND oi.currency=s.currency
-        AND oi.status='pending' AND oi.order_id IS NULL)));
+        AND oi.status='pending' AND oi.invoice_id IS NULL)));
 
 -- name: RebuildUsageDue :exec
 -- A restored merchant's usage accounts are due again: at their bill date, or
@@ -79,7 +79,7 @@ UPDATE billing.money_settings s SET usage_due_at = CASE
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (s.usage_collection_due OR s.usage_next_bill_at IS NOT NULL OR EXISTS (SELECT 1 FROM billing.owed_items oi
       WHERE oi.merchant_id = s.merchant_id AND oi.customer_id = s.customer_id AND oi.currency = s.currency
-        AND oi.status = 'pending' AND oi.order_id IS NULL));
+        AND oi.status = 'pending' AND oi.invoice_id IS NULL));
 
 -- name: CompleteUsageBillingCheck :exec
 -- A check done: the account is next due at its bill date, null with nothing
@@ -96,10 +96,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(c
     AND (usage_billing_anchor IS NOT NULL OR usage_minimum_invoice_amount IS NOT NULL)
 ORDER BY customer_id, currency;
 
--- name: LatestUsageOrderEndInCurrency :one
--- Where the customer's usage orders in the currency end: owed dated before
--- it would fall in a period an order already billed.
-SELECT COALESCE(MAX(period_ends_at),'0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS period_end FROM billing.orders
+-- name: LatestUsageInvoiceEndInCurrency :one
+-- Where the customer's usage invoices in the currency end: owed dated before
+-- it would fall in a period an invoice already billed.
+SELECT COALESCE(MAX(period_ends_at),'0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS period_end FROM billing.invoices
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND customer_id=sqlc.arg(customer_id)::uuid
     AND currency=sqlc.arg(currency)::text AND origin='usage';
 

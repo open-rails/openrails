@@ -75,14 +75,14 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 		return err
 	}
 	customer, _ := uuid.Parse(p.UserID)
-	bought := observed.OrderID != nil && p.OrderID != uuid.Nil && *observed.OrderID == p.OrderID
-	if p.OrderID == uuid.Nil && p.PriceID != uuid.Nil {
-		bought, err = q.PaymentMatchesOrderPrice(ctx, gen.PaymentMatchesOrderPriceParams{MerchantID: op.MerchantID, PaymentID: observed.ID, PriceID: p.PriceID})
+	bought := observed.InvoiceID != nil && p.InvoiceID != uuid.Nil && *observed.InvoiceID == p.InvoiceID
+	if p.InvoiceID == uuid.Nil && p.PriceID != uuid.Nil {
+		bought, err = q.PaymentMatchesInvoicePrice(ctx, gen.PaymentMatchesInvoicePriceParams{MerchantID: op.MerchantID, PaymentID: observed.ID, PriceID: p.PriceID})
 		if err != nil {
 			return err
 		}
 	}
-	subscribed, err := orderSubscription(ctx, q, op.MerchantID, p.OrderID, observed.SubscriptionID)
+	subscribed, err := invoiceSubscription(ctx, q, op.MerchantID, p.InvoiceID, observed.SubscriptionID)
 	if err != nil {
 		return err
 	}
@@ -92,8 +92,8 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	if !payments.PaymentStatusSucceeded(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {
 		return errors.New("sale result is not its exact completed payment")
 	}
-	if p.OrderID != uuid.Nil {
-		return nil // The order's lines are what it bought.
+	if p.InvoiceID != uuid.Nil {
+		return nil // The invoice's lines are what it bought.
 	}
 	price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: op.MerchantID, ID: p.PriceID})
 	if err != nil {
@@ -130,16 +130,16 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	return nil
 }
 
-// orderSubscription reports whether a sale payment's subscription is absent or
-// the one a line of its order produced.
-func orderSubscription(ctx context.Context, q *gen.Queries, merchantID, orderID uuid.UUID, subscriptionID *uuid.UUID) (bool, error) {
+// invoiceSubscription reports whether a sale payment's subscription is absent or
+// the one a line of its invoice produced.
+func invoiceSubscription(ctx context.Context, q *gen.Queries, merchantID, invoiceID uuid.UUID, subscriptionID *uuid.UUID) (bool, error) {
 	if subscriptionID == nil {
 		return true, nil
 	}
-	if orderID == uuid.Nil {
+	if invoiceID == uuid.Nil {
 		return false, nil
 	}
-	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: merchantID, OrderIds: []uuid.UUID{orderID}})
+	lines, err := q.ListInvoiceLines(ctx, gen.ListInvoiceLinesParams{MerchantID: merchantID, InvoiceIds: []uuid.UUID{invoiceID}})
 	if err != nil {
 		return false, err
 	}

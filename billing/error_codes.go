@@ -55,20 +55,20 @@ const (
 	// CodeEventStoreRequired: the feature needs the event store, which the
 	// deployment does not have (Deps.ClickHouse).
 	CodeEventStoreRequired ErrorCode = "event_store_required"
-	// Orders.
+	// Invoices.
 	CodeAlreadyOwned             ErrorCode = "already_owned"
 	CodeEntitlementRequired      ErrorCode = "entitlement_required"
-	CodeOrderLineUnavailable     ErrorCode = "order_line_unavailable"
+	CodeInvoiceLineUnavailable   ErrorCode = "invoice_line_unavailable"
 	CodeQuantityNotAllowed       ErrorCode = "quantity_not_allowed"
-	CodeOrderTotalChanged        ErrorCode = "order_total_changed"
-	CodeOrderPaymentInProgress   ErrorCode = "order_payment_in_progress"
-	CodeOrderNotPayable          ErrorCode = "order_not_payable"
-	CodeOrderNotCancelable       ErrorCode = "order_not_cancelable"
-	CodeOrderActionNotAllowed    ErrorCode = "order_action_not_allowed"
+	CodeInvoiceTotalChanged      ErrorCode = "invoice_total_changed"
+	CodeInvoicePaymentInProgress ErrorCode = "invoice_payment_in_progress"
+	CodeInvoiceNotPayable        ErrorCode = "invoice_not_payable"
+	CodeInvoiceNotCancelable     ErrorCode = "invoice_not_cancelable"
+	CodeInvoiceActionNotAllowed  ErrorCode = "invoice_action_not_allowed"
 	CodePaymentOptionUnavailable ErrorCode = "payment_option_unavailable"
 	// Payments recorded outside OpenRails.
-	CodePaymentExceedsDue     ErrorCode = "payment_exceeds_due"
-	CodeOrderHasRecurringLine ErrorCode = "order_has_recurring_line"
+	CodePaymentExceedsDue       ErrorCode = "payment_exceeds_due"
+	CodeInvoiceHasRecurringLine ErrorCode = "invoice_has_recurring_line"
 )
 
 // Refusals of buying a product again while a canceled subscription to it is
@@ -193,15 +193,15 @@ const (
 	CodeRefundFailed                   ErrorCode = "refund_failed"
 )
 
-// Pay URL and order attempt codes.
+// Pay URL and invoice attempt codes.
 const (
 	CodePayURLNotFound          ErrorCode = "pay_url_not_found"
 	CodePayURLExpired           ErrorCode = "pay_url_expired"
 	CodePayURLUnavailable       ErrorCode = "pay_url_unavailable"
 	CodePayURLAttemptsExhausted ErrorCode = "pay_url_attempts_exhausted"
 	CodeEmbedOriginsRequired    ErrorCode = "embed_origins_required"
-	CodeOrderAttemptClosed      ErrorCode = "order_attempt_closed"
-	CodeOrderAttemptExpired     ErrorCode = "order_attempt_expired"
+	CodeInvoiceAttemptClosed    ErrorCode = "invoice_attempt_closed"
+	CodeInvoiceAttemptExpired   ErrorCode = "invoice_attempt_expired"
 )
 
 // Subscription codes.
@@ -391,26 +391,26 @@ var errorCodes = []ErrorCodeInfo{
 
 	// Pay URLs.
 	{CodePayURLNotFound, 404, invalid, "The pay URL is unknown or no longer valid."},
-	{CodePayURLExpired, 410, invalid, "The pay URL expired; the merchant creates a new order."},
-	{CodePayURLUnavailable, 400, invalid, "This deployment serves no checkout origin, or the order cannot take a pay URL."},
-	{CodePayURLAttemptsExhausted, 409, invalid, "The pay URL took its most card attempts; the merchant creates a new order."},
+	{CodePayURLExpired, 410, invalid, "The pay URL expired; the merchant creates a new invoice."},
+	{CodePayURLUnavailable, 400, invalid, "This deployment serves no checkout origin, or the invoice cannot take a pay URL."},
+	{CodePayURLAttemptsExhausted, 409, invalid, "The pay URL took its most card attempts; the merchant creates a new invoice."},
 	{CodeEmbedOriginsRequired, 400, invalid, "An embedded pay URL needs the origins that may frame it: the merchant's settings checkout.embed_origins."},
-	{CodeOrderAttemptClosed, 409, invalid, "The order attempt already completed or was canceled."},
-	{CodeOrderAttemptExpired, 410, invalid, "The order attempt expired before it was paid."},
+	{CodeInvoiceAttemptClosed, 409, invalid, "The invoice attempt already completed or was canceled."},
+	{CodeInvoiceAttemptExpired, 410, invalid, "The invoice attempt expired before it was paid."},
 
-	// Orders.
+	// Invoices.
 	{CodeAlreadyOwned, 409, invalid, "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume."},
 	{CodeEntitlementRequired, 403, invalid, "A line's product sells only to customers who already hold its required entitlements; param names the line and metadata.missing the keys the customer lacks."},
-	{CodeOrderLineUnavailable, 422, invalid, "A line cannot be bought; param names it and metadata.code says why."},
+	{CodeInvoiceLineUnavailable, 422, invalid, "A line cannot be bought; param names it and metadata.code says why."},
 	{CodeQuantityNotAllowed, 422, invalid, "A quantity was sent for a price that is not sold per seat."},
-	{CodeOrderTotalChanged, 409, invalid, "The order's total is not expected_total; preview it again."},
-	{CodeOrderPaymentInProgress, 409, invalid, "A payment on this order is unresolved; read the order."},
-	{CodeOrderNotPayable, 409, invalid, "The order takes no payment: it is paid, canceled or expired."},
-	{CodeOrderNotCancelable, 409, invalid, "Only an open order, or one awaiting the customer's action, can be canceled."},
-	{CodeOrderActionNotAllowed, 409, invalid, "The order's origin or status does not allow this action."},
-	{CodePaymentOptionUnavailable, 422, invalid, "No PSP that can take the order's lines accepts this payment."},
-	{CodeOrderHasRecurringLine, 409, invalid, "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid."},
-	{CodePaymentExceedsDue, 409, invalid, "The recorded payment exceeds what the usage order has due, or is not the order's total."},
+	{CodeInvoiceTotalChanged, 409, invalid, "The invoice's total is not expected_total; preview it again."},
+	{CodeInvoicePaymentInProgress, 409, invalid, "A payment on this invoice is unresolved; read the invoice."},
+	{CodeInvoiceNotPayable, 409, invalid, "The invoice takes no payment: it is paid, canceled or expired."},
+	{CodeInvoiceNotCancelable, 409, invalid, "Only an open invoice, or one awaiting the customer's action, can be canceled."},
+	{CodeInvoiceActionNotAllowed, 409, invalid, "The invoice's origin or status does not allow this action."},
+	{CodePaymentOptionUnavailable, 422, invalid, "No PSP that can take the invoice's lines accepts this payment."},
+	{CodeInvoiceHasRecurringLine, 409, invalid, "An invoice with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid."},
+	{CodePaymentExceedsDue, 409, invalid, "The recorded payment exceeds what the usage invoice has due, or is not the invoice's total."},
 
 	// Subscriptions and tier changes.
 	{CodeCatalogBenefitOverlap, 409, invalid, "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group."},

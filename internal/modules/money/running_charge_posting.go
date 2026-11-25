@@ -51,7 +51,7 @@ type runningChargePosting struct {
 	// occurred. Zero dates it at the posting.
 	owedAt time.Time
 	// from is when what the posting charges began: a usage posting's pricing
-	// period, a running charge's last posting. The usage order that bills
+	// period, a running charge's last posting. The usage invoice that bills
 	// what it leaves owed starts no later.
 	from time.Time
 }

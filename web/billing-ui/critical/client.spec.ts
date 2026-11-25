@@ -33,7 +33,7 @@ async function authenticate(page: Page, secret: string) {
   expect(result).toBe(204)
 }
 
-test("OR-UI-01: exact cart, order ownership, account and customer policy", async ({
+test("OR-UI-01: exact cart, invoice ownership, account and customer policy", async ({
   page,
 }) => {
   const facts = await page.evaluate(async () => {
@@ -45,13 +45,13 @@ test("OR-UI-01: exact cart, order ownership, account and customer policy", async
     const cart = await c.setCartLine(f.price, { quantity: 3 })
     await c.clearCart()
     const empty = await c.getCart()
-    const result = await c.createOrder({
+    const result = await c.createInvoice({
       lines: [{ price_id: f.price, quantity: 3 }],
     })
-    const own = await c.getOrder(result.order.id)
+    const own = await c.getInvoice(result.invoice.id)
     let foreign: unknown
     try {
-      await window.makeBilling(f.otherToken).getOrder(result.order.id)
+      await window.makeBilling(f.otherToken).getInvoice(result.invoice.id)
     } catch (error) {
       foreign = {
         status: (error as { status: number }).status,
@@ -76,7 +76,7 @@ test("OR-UI-01: exact cart, order ownership, account and customer policy", async
       account,
       cart,
       empty,
-      order: own,
+      invoice: own,
       foreign,
       low,
       changed,
@@ -96,7 +96,7 @@ test("OR-UI-01: exact cart, order ownership, account and customer policy", async
     amount: "29970000",
   })
   expect(facts.empty.lines).toEqual([])
-  expect(facts.order).toMatchObject({
+  expect(facts.invoice).toMatchObject({
     customer_id: facts.f.alice,
     status: "open",
     total: "29970000",
@@ -116,35 +116,35 @@ test("OR-UI-01: exact cart, order ownership, account and customer policy", async
   const entered = await card(page)
   const paid = await page.evaluate(
     async ({ id, token }) =>
-      window.billing.payOrder(id, {
+      window.billing.payInvoice(id, {
         payment: { token },
         expectedTotal: "29970000",
         idempotencyKey: "sdk-oneoff",
       }),
-    { id: facts.order.id, token: entered.token }
+    { id: facts.invoice.id, token: entered.token }
   )
   expect(paid.error).toBeUndefined()
-  expect(paid.order).toMatchObject({
-    id: facts.order.id,
+  expect(paid.invoice).toMatchObject({
+    id: facts.invoice.id,
     status: "complete",
     total: "29970000",
   })
   const receipt = await page.evaluate(
-    (id) => window.billing.getOrderPaymentAttempt(id, "sdk-oneoff"),
-    facts.order.id
+    (id) => window.billing.getInvoicePaymentAttempt(id, "sdk-oneoff"),
+    facts.invoice.id
   )
   expect(receipt).toMatchObject({
-    order_id: facts.order.id,
+    invoice_id: facts.invoice.id,
     customer_id: facts.f.alice,
     state: "succeeded",
     amount: "29970000",
     currency: "USD",
-    payment_id: paid.order.payment.payment_id,
+    payment_id: paid.invoice.payment.payment_id,
   })
   expect(receipt.payment_method_id).toBeTruthy()
   await page.evaluate(
     (id) => window.billing.reportPayURLFailure(id),
-    facts.order.id
+    facts.invoice.id
   )
   const after = await page.evaluate(() =>
     window.billing.getEntitlements({ prefix: "library:" })
@@ -229,18 +229,18 @@ test("OR-UI-05: a real expired-token refusal refreshes once before one accepted 
 }) => {
   const accepted = await page.evaluate(async () => {
     const client = window.makeRefreshingBilling()
-    const created = await client.createOrder({
+    const created = await client.createInvoice({
       lines: [{ price_id: window.fixture.price, quantity: 2 }],
     })
-    const read = await client.getOrder(created.order.id)
+    const read = await client.getInvoice(created.invoice.id)
     return { created, read, refreshes: window.refreshes }
   })
   expect(accepted.refreshes).toBe(2)
-  expect(accepted.created.order).toMatchObject({
+  expect(accepted.created.invoice).toMatchObject({
     status: "open",
     total: "19980000",
   })
-  expect(accepted.read.id).toBe(accepted.created.order.id)
+  expect(accepted.read.id).toBe(accepted.created.invoice.id)
   const counts = await page.evaluate(
     async () =>
       (await (await fetch("/__fixture/counts")).json()) as Record<
@@ -248,7 +248,7 @@ test("OR-UI-05: a real expired-token refusal refreshes once before one accepted 
         number
       >
   )
-  expect(counts["POST /v1/me/orders"]).toBe(2)
+  expect(counts["POST /v1/me/invoices"]).toBe(2)
 })
 
 test("OR-UI-02: bank challenges, saved cards and subscription changes", async ({
@@ -286,7 +286,7 @@ test("OR-UI-02: bank challenges, saved cards and subscription changes", async ({
   })
   const purchase = await page.evaluate(
     (id) =>
-      window.billing.createOrder({
+      window.billing.createInvoice({
         lines: [{ price_id: window.fixture.subscriptionPrice }],
         expectedTotal: "10000000",
         payment: { payment_method_id: id },
@@ -294,17 +294,17 @@ test("OR-UI-02: bank challenges, saved cards and subscription changes", async ({
       }),
     saved.id
   )
-  expect(purchase.order.payment.status).toBe("requires_action")
+  expect(purchase.invoice.payment.status).toBe("requires_action")
   await authenticate(
     page,
-    purchase.order.payment.next_action!.payload!.client_secret
+    purchase.invoice.payment.next_action!.payload!.client_secret
   )
   const complete = await page.evaluate(
-    (id) => window.billing.confirmOrder(id),
-    purchase.order.id
+    (id) => window.billing.confirmInvoice(id),
+    purchase.invoice.id
   )
-  expect(complete.order.status).toBe("complete")
-  let subscriptionID = complete.order.lines[0].subscription_id!
+  expect(complete.invoice.status).toBe("complete")
+  let subscriptionID = complete.invoice.lines[0].subscription_id!
   const original = await page.evaluate(
     (id) => window.billing.getSubscription(id),
     subscriptionID
@@ -403,7 +403,7 @@ test("OR-UI-03: invalid checkout reporting retains typed errors", async ({
         "reportPayURLFailure",
         () =>
           window.billing.reportPayURLFailure(
-            "ord_00000000000040008000000000000001"
+            "in_00000000000040008000000000000001"
           ),
       ],
     ] as const) {

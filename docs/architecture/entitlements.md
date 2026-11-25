@@ -112,7 +112,7 @@ Views read usage only through `leases.UsageReader`.
 ## Guarantees
 
 ### 1. Exactly-once provider calls
-Does not apply: entitlements and limits call no provider; the payments and subscriptions that open or close windows are made by [orders and checkout](orders.md), [subscriptions](subscriptions.md) and [refunds](refunds.md).
+Does not apply: entitlements and limits call no provider; the payments and subscriptions that open or close windows are made by [invoices and checkout](invoices.md), [subscriptions](subscriptions.md) and [refunds](refunds.md).
 
 ### 2. Agreement with providers
 Limits and leases come from the merchant's backend, not a provider. Access

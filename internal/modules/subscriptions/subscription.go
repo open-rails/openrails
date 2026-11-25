@@ -228,7 +228,7 @@ func (s *SubscriptionService) filters(ctx context.Context, f GetSubscriptionsFil
 }
 
 // ListSubscribers is one page of the merchant's subscriptions matching f, in
-// f.Sort's order. A cursor of another order is refused.
+// f.Sort's order. A cursor of another invoice is refused.
 func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscriptionsFilters, page billing.PageRequest) (billing.ListPage[*models.Subscription], error) {
 	sortKey := subscriptionSortKey(f.Sort)
 	if sortKey == nil && f.Sort != "" && f.Sort != billing.SubscriptionSortCreatedAt {
@@ -274,8 +274,8 @@ func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscrip
 // ErrInvalidSubscriptionSort is a sort the subscription list does not offer.
 var ErrInvalidSubscriptionSort = apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, "sort is invalid").WithParam("sort")
 
-// subscriptionSortKey is the time a non-default order sorts by; nil for
-// created_at or an unknown order. Its rows always carry it.
+// subscriptionSortKey is the time a non-default invoice sorts by; nil for
+// created_at or an unknown invoice. Its rows always carry it.
 func subscriptionSortKey(sort billing.SubscriptionSort) func(*models.Subscription) *time.Time {
 	switch sort {
 	case billing.SubscriptionSortCurrentPeriodEndsAt:
@@ -310,6 +310,6 @@ func (s *SubscriptionService) GetByPSPSubscriptionID(ctx context.Context, rail, 
 	return s.subscriptionRepo.GetByPSPSubscriptionID(ctx, rail, railSubscriptionID)
 }
 
-func (s *SubscriptionService) GetByGatewayOrder(ctx context.Context, rail, orderID string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetByGatewayOrder(ctx, rail, orderID)
+func (s *SubscriptionService) GetByGatewayOrder(ctx context.Context, rail, invoiceID string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByGatewayOrder(ctx, rail, invoiceID)
 }

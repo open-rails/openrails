@@ -15,7 +15,7 @@ type PageRequest struct {
 	Cursor string `form:"cursor"`
 }
 
-// ListPage is one page of a list, in the list's own order. Next is the opaque
+// ListPage is one page of a list, in the list's own invoice. Next is the opaque
 // cursor of the following page; "" marks the last page.
 //
 // On the wire it is {"data": [...], "next_cursor": string|null}: the one list

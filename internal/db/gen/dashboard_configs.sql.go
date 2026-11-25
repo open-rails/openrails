@@ -40,7 +40,7 @@ SELECT EXISTS (SELECT 1 FROM billing.subscriptions WHERE subscriptions.merchant_
     (EXISTS (SELECT 1 FROM billing.usage_unposted WHERE usage_unposted.merchant_id = $1::uuid)
      OR EXISTS (SELECT 1 FROM billing.usage_postings WHERE usage_postings.merchant_id = $1::uuid))::boolean AS has_usage,
     EXISTS (SELECT 1 FROM billing.credit_grants WHERE credit_grants.merchant_id = $1::uuid AND funding_source IN ('purchase', 'recurring'))::boolean AS has_credits,
-    EXISTS (SELECT 1 FROM billing.orders WHERE orders.merchant_id = $1::uuid AND purchase_number IS NOT NULL)::boolean AS has_checkouts
+    EXISTS (SELECT 1 FROM billing.invoices WHERE invoices.merchant_id = $1::uuid AND purchase_number IS NOT NULL)::boolean AS has_checkouts
 `
 
 type GetDashboardProfileRow struct {

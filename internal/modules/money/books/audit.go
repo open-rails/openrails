@@ -46,16 +46,16 @@ func CheckApplications(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]O
 
 // UnscheduledLine is a completed bill's revenue line with no revenue
 // schedule. Reason says why: unscheduled (money paid for it recognises
-// nothing: a failure), before_books (its order was made and completed before
+// nothing: a failure), before_books (its invoice was made and completed before
 // the merchant's books started; the books' rebuild schedules it) or
 // adjustment (a provider's tax or shipping, unapplied until its tax is
 // booked). The last two are warnings.
 type UnscheduledLine struct {
-	OrderID     uuid.UUID `json:"order_id"`
-	OrderLineID uuid.UUID `json:"order_line_id"`
-	Currency    string    `json:"currency"`
-	Amount      int64     `json:"amount"`
-	Reason      string    `json:"reason"`
+	InvoiceID     uuid.UUID `json:"invoice_id"`
+	InvoiceLineID uuid.UUID `json:"invoice_line_id"`
+	Currency      string    `json:"currency"`
+	Amount        int64     `json:"amount"`
+	Reason        string    `json:"reason"`
 }
 
 // Reasons a revenue line has no schedule.
@@ -69,11 +69,11 @@ func (u UnscheduledLine) String() string {
 	amount := moneyutil.FormatAmount(u.Amount, u.Currency)
 	switch u.Reason {
 	case LineBeforeBooks:
-		return fmt.Sprintf("unscheduled line: order=%s line=%s amount=%s completed before the books started, awaiting their rebuild (warning)", u.OrderID, u.OrderLineID, amount)
+		return fmt.Sprintf("unscheduled line: invoice=%s line=%s amount=%s completed before the books started, awaiting their rebuild (warning)", u.InvoiceID, u.InvoiceLineID, amount)
 	case LineAdjustment:
-		return fmt.Sprintf("unapplied adjustment: order=%s line=%s amount=%s awaits its tax booking (warning)", u.OrderID, u.OrderLineID, amount)
+		return fmt.Sprintf("unapplied adjustment: invoice=%s line=%s amount=%s awaits its tax booking (warning)", u.InvoiceID, u.InvoiceLineID, amount)
 	}
-	return fmt.Sprintf("unscheduled line: order=%s line=%s amount=%s", u.OrderID, u.OrderLineID, amount)
+	return fmt.Sprintf("unscheduled line: invoice=%s line=%s amount=%s", u.InvoiceID, u.InvoiceLineID, amount)
 }
 
 // CheckSchedules returns the merchant's completed revenue lines without a
@@ -85,11 +85,11 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 	if merchant == uuid.Nil {
 		return nil, nil, fmt.Errorf("books: merchant is required")
 	}
-	rows, err := gen.New(q).ListUnscheduledOrderLines(ctx, merchant)
+	rows, err := gen.New(q).ListUnscheduledInvoiceLines(ctx, merchant)
 	if err != nil {
 		return nil, nil, fmt.Errorf("books: schedule check: %w", err)
 	}
-	// An order whose receipts have nothing left unapplied, its money
+	// An invoice whose receipts have nothing left unapplied, its money
 	// applied or returned (a refund before a timed line's access), owes its
 	// lines nothing more.
 	spent := map[uuid.UUID]bool{}
@@ -98,19 +98,19 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 		if CheckCurrency(r.Currency) != nil {
 			continue
 		}
-		line := UnscheduledLine{OrderID: r.OrderID, OrderLineID: r.OrderLineID, Currency: r.Currency, Amount: r.Amount, Reason: LineUnscheduled}
+		line := UnscheduledLine{InvoiceID: r.InvoiceID, InvoiceLineID: r.InvoiceLineID, Currency: r.Currency, Amount: r.Amount, Reason: LineUnscheduled}
 		switch {
 		case r.Adjustment:
 			line.Reason = LineAdjustment
 		case r.BeforeBooks:
 			line.Reason = LineBeforeBooks
 		default:
-			done, known := spent[r.OrderID]
+			done, known := spent[r.InvoiceID]
 			if !known {
-				if done, err = orderSpent(ctx, gen.New(q), merchant, r.OrderID); err != nil {
+				if done, err = invoiceSpent(ctx, gen.New(q), merchant, r.InvoiceID); err != nil {
 					return nil, nil, err
 				}
-				spent[r.OrderID] = done
+				spent[r.InvoiceID] = done
 			}
 			if !done {
 				failing = append(failing, line)
@@ -124,15 +124,15 @@ func CheckSchedules(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (failin
 		return nil, nil, fmt.Errorf("books: schedule check: %w", err)
 	}
 	for _, r := range released {
-		failing = append(failing, UnscheduledLine{OrderID: r.OrderID, OrderLineID: r.OrderLineID, Currency: r.Currency, Amount: r.Amount, Reason: LineUnscheduled})
+		failing = append(failing, UnscheduledLine{InvoiceID: r.InvoiceID, InvoiceLineID: r.InvoiceLineID, Currency: r.Currency, Amount: r.Amount, Reason: LineUnscheduled})
 	}
 	return failing, warnings, nil
 }
 
-// orderSpent reports whether every receipt of an order has nothing left
+// invoiceSpent reports whether every receipt of an invoice has nothing left
 // unapplied in the books: none of its money waits for a line.
-func orderSpent(ctx context.Context, q *gen.Queries, merchant, order uuid.UUID) (bool, error) {
-	receipts, err := q.ListOrderReceipts(ctx, gen.ListOrderReceiptsParams{MerchantID: merchant, OrderID: order})
+func invoiceSpent(ctx context.Context, q *gen.Queries, merchant, invoice uuid.UUID) (bool, error) {
+	receipts, err := q.ListInvoiceReceipts(ctx, gen.ListInvoiceReceiptsParams{MerchantID: merchant, InvoiceID: invoice})
 	if err != nil {
 		return false, err
 	}

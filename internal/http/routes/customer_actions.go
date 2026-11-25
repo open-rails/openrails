@@ -17,16 +17,16 @@ var mappedCustomerOperations = []struct {
 	{"POST /v1/me/payment-methods", true},
 	{"POST /v1/me/payment-methods/{id}/confirm", true},
 	{"DELETE /v1/me/payment-methods/{id}", true},
-	{"GET /v1/me/orders/{id}", false},
-	{"GET /v1/me/orders/{id}/payment-attempt", false},
-	{"POST /v1/me/orders/{id}/pay", true},
-	{"POST /v1/me/orders/{id}/confirm", true},
+	{"GET /v1/me/invoices/{id}", false},
+	{"GET /v1/me/invoices/{id}/payment-attempt", false},
+	{"POST /v1/me/invoices/{id}/pay", true},
+	{"POST /v1/me/invoices/{id}/confirm", true},
 	{"GET /v1/me/agreements", false},
 	{"POST /v1/me/agreements/{id}/revoke", true},
 }
 
 func mappedCustomerOperation(key string) (sensitive, allowed bool) {
-	if key == "GET /v1/me/orders" || key == "GET /v1/me/subscriptions" {
+	if key == "GET /v1/me/invoices" || key == "GET /v1/me/subscriptions" {
 		return false, true
 	}
 	for _, operation := range mappedCustomerOperations {

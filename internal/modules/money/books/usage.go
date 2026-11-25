@@ -13,14 +13,14 @@ import (
 // is: every owed accrual posts it (a usage posting, a running charge, failed
 // usage past its grace, arrears). Owed in a merchant's own unit has no money
 // and posts nothing. receivable.go covers the rest of its life.
-func (b *Books) AccrueUsage(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, at time.Time, order *uuid.UUID) error {
+func (b *Books) AccrueUsage(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, at time.Time, invoice *uuid.UUID) error {
 	if amount <= 0 || CheckCurrency(currency) != nil {
 		return nil
 	}
 	_, _, err := b.Post(ctx, Posting{
 		Debit: Ref{Type: UsageReceivable, Customer: &customer}, Credit: Ref{Type: UsageRevenue},
 		Amount: amount, Currency: currency, Type: UsageAccrued, Coord: coord, EffectiveAt: at,
-		Customer: &customer, Order: order,
+		Customer: &customer, Invoice: invoice,
 	})
 	return err
 }

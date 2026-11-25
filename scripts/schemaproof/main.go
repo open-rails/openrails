@@ -2,7 +2,7 @@
 // database another revision's migrations build. It applies both chains through
 // migrate.Apply to scratch databases, in the default schema and in another one
 // (through the schema rewriter), and requires identical pg_dump output: schema
-// and data with privileges, without owners. pg_dump orders objects itself, so
+// and data with privileges, without owners. pg_dump invoices objects itself, so
 // the files' own layout does not matter.
 //
 //	go run ./scripts/schemaproof [-ref origin/master] [-dsn URL] [-pg-dump COMMAND]

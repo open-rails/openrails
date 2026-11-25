@@ -32,7 +32,7 @@ import type { Price } from "#orck/client/generated/wire"
 //     here now?
 
 // SKIP_LABELS renders the routing skip vocabulary for operators. Keep the keys
-// in lockstep with internal/db/models/order_attempt.go.
+// in lockstep with internal/db/models/invoice_attempt.go.
 const SKIP_LABELS: Record<PSPRoutingSkip, string> = {
   unknown_selector: "That name matches no provider you have set up.",
   ambiguous_selector:

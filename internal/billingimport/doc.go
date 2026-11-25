@@ -23,7 +23,7 @@
 // row it is the provider's, and a later book skips it (provider_authority).
 // Imported members are entitled when the call returns.
 //
-// Declared purchases become complete engine-owned orders with frozen lines
+// Declared purchases become complete engine-owned invoices with frozen lines
 // and access (a credit pack's credits are not deposited); a mismatched one is
 // blocked with life.import.purchase_refused. historical_payments records a
 // verified NMI sale and its refunds without access. An NMI or CCBill charge

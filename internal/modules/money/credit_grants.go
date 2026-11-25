@@ -351,7 +351,7 @@ func sourceRef(funding credits.FundingSource, id *string) *string {
 	return &ref
 }
 
-// fundChange defers the price of change a charge paid beyond its order, a
+// fundChange defers the price of change a charge paid beyond its invoice, a
 // lot recorded before its payment, from that payment. nil change is none.
 func (s *MoneyService) fundChange(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, change *models.MoneyTransaction, paymentID uuid.UUID) error {
 	if change == nil {

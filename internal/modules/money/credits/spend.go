@@ -25,7 +25,7 @@ func (l *Lots) Spend(ctx context.Context, customer uuid.UUID, unit string, amoun
 	return l.SpendInto(ctx, customer, unit, amount, invoker, resource, coord, nil)
 }
 
-// SpendInto is Spend paying an order line priced in the lot's unit: the
+// SpendInto is Spend paying an invoice line priced in the lot's unit: the
 // money goes to that line's deferred revenue (books.Line). nil is usage.
 func (l *Lots) SpendInto(ctx context.Context, customer uuid.UUID, unit string, amount int64, invoker, resource string, coord ledger.Coord, into *books.Line) (applied bool, err error) {
 	if amount <= 0 {
@@ -44,10 +44,10 @@ func (l *Lots) SpendInto(ctx context.Context, customer uuid.UUID, unit string, a
 	if total < amount {
 		return false, fmt.Errorf("%w (need %d, have %d %s)", ErrInsufficientCredits, amount, total, unit)
 	}
-	// The units book's legs of a line's spend name its order, in the unit.
-	var order *uuid.UUID
-	if into != nil && into.Order != uuid.Nil {
-		order = &into.Order
+	// The units book's legs of a line's spend name its invoice, in the unit.
+	var invoice *uuid.UUID
+	if into != nil && into.Invoice != uuid.Nil {
+		invoice = &into.Invoice
 	}
 	balance, err := l.money.EnsureCustomerBalance(ctx, customer, unit)
 	if err != nil {
@@ -69,7 +69,7 @@ func (l *Lots) SpendInto(ctx context.Context, customer uuid.UUID, unit string, a
 		id, c, inv, res := lot.ID, customer, invoker, resource
 		leg, lotApplied, err := l.money.ApplyIdempotent(ctx, ledger.Transfer{
 			Debit: balance, Credit: revenue, Amount: take, Currency: unit, Type: ledger.CreditSpend,
-			Coord: coord, CreditGrantID: &id, Customer: &c, Invoker: &inv, Resource: &res, Order: order,
+			Coord: coord, CreditGrantID: &id, Customer: &c, Invoker: &inv, Resource: &res, Invoice: invoice,
 		})
 		if err != nil {
 			return applied, fmt.Errorf("credits: spend from lot %s: %w", lot.ID, err)

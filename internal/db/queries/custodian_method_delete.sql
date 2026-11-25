@@ -72,7 +72,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
   AND id<>sqlc.arg(exclude_id)::uuid;
 
 -- name: RemoveFencedCustodianPaymentMethod :execrows
--- Keep the row and its versions as evidence for orders and payments. Terminal
+-- Keep the row and its versions as evidence for invoices and payments. Terminal
 -- issuer lifecycle states remain final even when the stored token is erased.
 UPDATE billing.payment_methods
 SET status = CASE WHEN status = 'active' THEN 'removed' ELSE status END,
@@ -83,7 +83,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND park_reason = 'delete:' || sqlc.arg(operation_id)::uuid::text;
 
 -- name: RemoveFencedNativePaymentMethod :execrows
--- The provider credential is gone, but paid orders and immutable card versions
+-- The provider credential is gone, but paid invoices and immutable card versions
 -- retain their original reference. Keep a nonchargeable completion tombstone.
 UPDATE billing.payment_methods
 SET status = CASE WHEN status = 'active' THEN 'removed' ELSE status END,

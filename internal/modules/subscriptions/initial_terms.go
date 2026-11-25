@@ -17,7 +17,7 @@ import (
 // before provider submission. A schedule-only pending phase confers no new
 // access; a free phase confers its declared access without recording money.
 type InitialMembershipTerms struct {
-	// Rail identifies the specialized wallet authorization on a Solana order.
+	// Rail identifies the specialized wallet authorization on a Solana invoice.
 	// Older card agreements omit it and retain their saved-card requirements.
 	Rail models.Rail `json:"rail,omitempty"`
 	// RecurringIntervalHours freezes the ongoing cadence separately from an
@@ -39,7 +39,7 @@ type InitialMembershipTerms struct {
 	ProductID             uuid.UUID               `json:"product_id"`
 	PriceID               uuid.UUID               `json:"price_id"`
 	PaymentMethodID       uuid.UUID               `json:"payment_method_id"`
-	// AwaitingMethod preserves a paid order's membership when its card could
+	// AwaitingMethod preserves a paid invoice's membership when its card could
 	// not be stored. It cannot renew until a recurring agreement is established.
 	AwaitingMethod bool   `json:"awaiting_method,omitempty"`
 	ProductName    string `json:"product_name"`
@@ -120,13 +120,13 @@ func (t InitialMembershipTerms) Validate() error {
 		return err
 	}
 	if t.CancelAfterInitial && t.CollectionPolicy != models.CollectionPolicyEngine {
-		return errors.New("non-renewing order requires engine collection without a provider schedule")
+		return errors.New("non-renewing invoice requires engine collection without a provider schedule")
 	}
 	if err := validateAccessChoice(t.AccessDurationHours, t.ProviderAccessDefault); err != nil {
 		return err
 	}
 	if t.AwaitingMethod && (t.CollectionPolicy != models.CollectionPolicyEngine || t.PaymentMethodID != uuid.Nil || t.Replaces != nil || t.Adds != nil) {
-		return errors.New("awaiting method requires a paid engine order without a saved card")
+		return errors.New("awaiting method requires a paid engine invoice without a saved card")
 	}
 	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil && t.CollectionPolicy == models.CollectionPolicyEngine && !t.AwaitingMethod && t.Rail != models.RailSolana || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
 		return errors.New("initial membership terms are incomplete")

@@ -20,9 +20,9 @@ const (
 	MaxLifetime     = 24 * time.Hour
 )
 
-// OrderIDPlaceholder in a return URL becomes the order's id (Stripe's
+// InvoiceIDPlaceholder in a return URL becomes the invoice's id (Stripe's
 // {CHECKOUT_SESSION_ID}).
-const OrderIDPlaceholder = "{ORDER_ID}"
+const InvoiceIDPlaceholder = "{INVOICE_ID}"
 
 const maxReturnURLBytes = 2048
 
@@ -33,15 +33,15 @@ var (
 	ErrExpired = errors.New("paymentpage: pay URL expired")
 )
 
-// PayURL is an order's pay URL as stored on it: the merchant's, or the
+// PayURL is an invoice's pay URL as stored on it: the merchant's, or the
 // customer's own.
 type PayURL struct {
 	MerchantID billing.MerchantID
-	OrderID    billing.OrderID
+	InvoiceID  billing.InvoiceID
 	CustomerID billing.CustomerID
 	Embedded   bool
 	ExpiresAt  time.Time
-	// SuccessURL is a merchant order's return; nil on a customer's.
+	// SuccessURL is a merchant invoice's return; nil on a customer's.
 	SuccessURL          *string
 	CancelURL           *string
 	SavedPaymentMethods bool
@@ -50,39 +50,39 @@ type PayURL struct {
 // Expired reports whether the pay URL is past its expiry at now.
 func (p PayURL) Expired(now time.Time) bool { return !p.ExpiresAt.After(now) }
 
-// Show puts the pay URL on its order; url is the URL itself, known only to
+// Show puts the pay URL on its invoice; url is the URL itself, known only to
 // the answer that made it or a re-ask.
-func (p PayURL) Show(o *billing.Order, url *string) {
+func (p PayURL) Show(o *billing.Invoice, url *string) {
 	expires := p.ExpiresAt.UTC()
 	o.PayURL, o.PayURLExpiresAt, o.Embedded = url, &expires, p.Embedded
 	o.SuccessURL, o.CancelURL, o.SavedPaymentMethods = p.SuccessURL, p.CancelURL, p.SavedPaymentMethods
 }
 
-// Plan resolves a merchant's pay URL request for a new order: its expiry
-// (orderExpiry, when the order has its own, bounds it) and return URLs, on
-// the merchant's return origins (allowed), with the order id filled in. A
+// Plan resolves a merchant's pay URL request for a new invoice: its expiry
+// (invoiceExpiry, when the invoice has its own, bounds it) and return URLs, on
+// the merchant's return origins (allowed), with the invoice id filled in. A
 // request that cannot be honoured is invalid_param naming its field.
-func Plan(p billing.OrderPayURLParams, order billing.OrderID, now time.Time, orderExpiry *time.Time, allowed []string) (PayURL, error) {
+func Plan(p billing.InvoicePayURLParams, invoice billing.InvoiceID, now time.Time, invoiceExpiry *time.Time, allowed []string) (PayURL, error) {
 	expires := now.Add(DefaultLifetime)
 	if p.ExpiresAt != nil {
 		expires = p.ExpiresAt.UTC()
 	}
-	if orderExpiry != nil && p.ExpiresAt == nil && orderExpiry.Before(expires) {
-		expires = *orderExpiry
+	if invoiceExpiry != nil && p.ExpiresAt == nil && invoiceExpiry.Before(expires) {
+		expires = *invoiceExpiry
 	}
 	switch life := expires.Sub(now); {
 	case life < MinLifetime || life > MaxLifetime:
 		return PayURL{}, apperr.Invalidf("pay_url.expires_at must be %s to %s away", MinLifetime, MaxLifetime).WithParam("pay_url.expires_at")
-	case orderExpiry != nil && expires.After(*orderExpiry):
-		return PayURL{}, apperr.Invalidf("pay_url.expires_at is after the order's expires_at").WithParam("pay_url.expires_at")
+	case invoiceExpiry != nil && expires.After(*invoiceExpiry):
+		return PayURL{}, apperr.Invalidf("pay_url.expires_at is after the invoice's expires_at").WithParam("pay_url.expires_at")
 	}
-	success, err := returnURL("pay_url.success_url", p.SuccessURL, order, allowed)
+	success, err := returnURL("pay_url.success_url", p.SuccessURL, invoice, allowed)
 	if err != nil {
 		return PayURL{}, err
 	}
-	out := PayURL{OrderID: order, Embedded: p.Embedded, ExpiresAt: expires, SuccessURL: &success, SavedPaymentMethods: p.SavedPaymentMethods}
+	out := PayURL{InvoiceID: invoice, Embedded: p.Embedded, ExpiresAt: expires, SuccessURL: &success, SavedPaymentMethods: p.SavedPaymentMethods}
 	if p.CancelURL != nil {
-		cancel, err := returnURL("pay_url.cancel_url", *p.CancelURL, order, allowed)
+		cancel, err := returnURL("pay_url.cancel_url", *p.CancelURL, invoice, allowed)
 		if err != nil {
 			return PayURL{}, err
 		}
@@ -91,14 +91,14 @@ func Plan(p billing.OrderPayURLParams, order billing.OrderID, now time.Time, ord
 	return out, nil
 }
 
-// returnURL checks one return URL and fills in the order id. It is https, or
+// returnURL checks one return URL and fills in the invoice id. It is https, or
 // http on a loopback host, on one of the merchant's return origins.
-func returnURL(field, raw string, order billing.OrderID, allowed []string) (string, error) {
+func returnURL(field, raw string, invoice billing.InvoiceID, allowed []string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > maxReturnURLBytes {
 		return "", apperr.Invalidf("%s is required, at most %d bytes", field, maxReturnURLBytes).WithParam(field)
 	}
-	filled := strings.ReplaceAll(raw, OrderIDPlaceholder, order.String())
+	filled := strings.ReplaceAll(raw, InvoiceIDPlaceholder, invoice.String())
 	u, err := url.Parse(filled)
 	if err != nil || u.User != nil || u.Opaque != "" || u.Host == "" || !(u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname())) {
 		return "", apperr.Invalidf("%s must be an absolute https URL (http on loopback) without credentials", field).WithParam(field)

@@ -219,7 +219,7 @@ func writePruneLog(logDir string, started time.Time, merchantID billing.Merchant
 		}
 		writeLogLine(f, now, append([]logField{lf("event", "psp"), lf("account_id", t.Binding.AccountID), run,
 			lf("subscriptions", strconv.Itoa(r.Subscriptions)), lf("payments", strconv.Itoa(r.Payments)),
-			lf("order_attempts", strconv.Itoa(r.OrderAttempts)), lf("product_access", strconv.Itoa(r.ProductAccess)),
+			lf("invoice_attempts", strconv.Itoa(r.InvoiceAttempts)), lf("product_access", strconv.Itoa(r.ProductAccess)),
 			lf("subscriptions_skipped", strconv.Itoa(r.SubscriptionsSkipped)), lf("payments_skipped", strconv.Itoa(r.PaymentsSkipped))}, psp...)...)
 		for _, rows := range []struct {
 			table string
@@ -328,7 +328,7 @@ func summarizePrune(targets []pruneTarget, apply bool) pruneCounts {
 		add("subscriptions", "skipped", r.SubscriptionsSkipped)
 		add("payments", key, r.Payments)
 		add("payments", "skipped", r.PaymentsSkipped)
-		add("order_attempts", key, r.OrderAttempts)
+		add("invoice_attempts", key, r.InvoiceAttempts)
 		add("product_access", key, r.ProductAccess)
 	}
 	return out

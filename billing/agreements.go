@@ -41,12 +41,12 @@ type AgreementSubscription struct {
 
 // AgreementRevocation answers a revoke: the agreement, now revoked; for a
 // recurring one its subscription, canceled at the period's end; for an
-// unscheduled one the open usage order of what was owed until then, which
+// unscheduled one the open usage invoice of what was owed until then, which
 // the customer pays themselves (null when nothing was owed).
 type AgreementRevocation struct {
 	Agreement    Agreement     `json:"agreement"`
 	Subscription *Subscription `json:"subscription"`
-	UsageOrder   *Order        `json:"usage_order"`
+	UsageInvoice *Invoice      `json:"usage_invoice"`
 }
 
 // MandateHostEvent is mandate.revoked: which agreement the customer revoked

@@ -45,13 +45,13 @@ func declinedCard(ctx context.Context, d *db.DB, merchantID, methodID uuid.UUID)
 	return method, nil
 }
 
-// enrollmentCard is declinedCard for an enrollment whose order attempt
+// enrollmentCard is declinedCard for an enrollment whose invoice attempt
 // vaulted its card from a token; nil for a card the buyer already had.
 func enrollmentCard(ctx context.Context, d *db.DB, merchantID uuid.UUID, p InitialMembershipPayload) (*models.PaymentMethod, error) {
-	if p.OrderAttemptID == nil {
+	if p.InvoiceAttemptID == nil {
 		return nil, nil
 	}
-	session, err := NewOrderAttemptRepo(d).GetByID(ctx, *p.OrderAttemptID)
+	session, err := NewInvoiceAttemptRepo(d).GetByID(ctx, *p.InvoiceAttemptID)
 	if err != nil {
 		return nil, err
 	}

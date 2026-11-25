@@ -96,7 +96,7 @@ func TestPublicLifecycle(t *testing.T) {
 		_, readErr := w.alpha.GetProduct(t.Context(), product.ID)
 		_, writeErr := w.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "after-close", DisplayName: "Must not commit"})
 		_, batchErr := w.alpha.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{product.Key}})
-		_, uncachedErr := w.alpha.ListOrders(t.Context(), billing.OrderListParams{})
+		_, uncachedErr := w.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{})
 		tx, err := w.pool.Begin(t.Context())
 		require.NoError(t, err)
 		_, localErr := w.local.StopRunningChargeTx(t.Context(), tx, "closed-owner", billing.StopRunningChargeParams{})
@@ -130,7 +130,7 @@ func TestPublicLifecycle(t *testing.T) {
 	t.Run("OR-J04-S06/adapters-preserve-credential-and-encoded-path-boundaries", func(t *testing.T) {
 		a, _ := newPaymentWorld(t)
 		_, price := publicSale(t, a, "adapter-control", 9_990_000, nil)
-		order, err := a.alpha.CreateOrder(t.Context(), "adapter-owned-order", billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		invoice, err := a.alpha.CreateInvoice(t.Context(), "adapter-owned-invoice", billing.CreateInvoiceParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
 		selection := openrails.Routes{Prefix: "/billing", Auth: a.auth.Authenticator()}
 		missing := selection
@@ -182,10 +182,10 @@ func TestPublicLifecycle(t *testing.T) {
 					{"/billing/v1/me", a.aliceToken, 200},
 					{"/billing/v1/me", "", 401},
 					{"/billing/v1/me", "invalid-credential", 401},
-					{"/billing/v1/me/orders/" + order.ID.String(), a.aliceToken, 200},
-					{"/billing/v1/me/orders/" + strings.Replace(order.ID.String(), "ord_", "%6Frd_", 1), a.aliceToken, 200},
-					{"/billing/v1/me/orders/" + order.ID.String() + "%2Fextra", a.aliceToken, 404},
-					{"/billing/v1/me/orders/" + order.ID.String(), a.bobToken, 404},
+					{"/billing/v1/me/invoices/" + invoice.ID.String(), a.aliceToken, 200},
+					{"/billing/v1/me/invoices/" + strings.Replace(invoice.ID.String(), "in_", "%6Frd_", 1), a.aliceToken, 200},
+					{"/billing/v1/me/invoices/" + invoice.ID.String() + "%2Fextra", a.aliceToken, 404},
+					{"/billing/v1/me/invoices/" + invoice.ID.String(), a.bobToken, 404},
 				} {
 					r, err := http.NewRequestWithContext(t.Context(), "GET", "http://critical.invalid"+sample.path, nil)
 					require.NoError(t, err)
@@ -206,7 +206,7 @@ func TestPublicLifecycle(t *testing.T) {
 						if strings.HasSuffix(sample.path, "/me") {
 							require.Equal(t, a.alice.ID, body.ID)
 						} else {
-							require.Equal(t, order.ID.String(), body.ID)
+							require.Equal(t, invoice.ID.String(), body.ID)
 						}
 					}
 				}

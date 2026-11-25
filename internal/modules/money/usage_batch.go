@@ -212,7 +212,7 @@ func (s *MoneyService) WatchUsage(ctx context.Context, d *db.DB, changed []Usage
 }
 
 // watchUsageTx queues a look at each changed balance whose watch asks for
-// one (ledger.WatchAvailable), and a usage order where what the customer
+// one (ledger.WatchAvailable), and a usage invoice where what the customer
 // owes reaches its threshold, reading every balance in one batch. It holds
 // the watches against a look (ShareBalanceWatches) instead of the customers'
 // locks.

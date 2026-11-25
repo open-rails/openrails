@@ -38,16 +38,18 @@ func inboxKey(n *models.NotificationEvent) (string, bool) {
 	if !n.Data.SubscriptionID.IsZero() {
 		return subscriptionIssue(n.Data.SubscriptionID.UUID(), kind), true
 	}
-	if !n.Data.OrderID.IsZero() {
-		return orderIssue(n.Data.OrderID.UUID(), kind), true
+	if !n.Data.InvoiceID.IsZero() {
+		return invoiceIssue(n.Data.InvoiceID.UUID(), kind), true
 	}
 	return "event:" + n.ID.String(), true
 }
 
 func subscriptionIssue(id uuid.UUID, kind string) string {
-	return "subscription:" + id.String() + ":" + kind
+	return notificationinbox.IssueKey("subscription", id, kind)
 }
-func orderIssue(id uuid.UUID, kind string) string { return "order:" + id.String() + ":" + kind }
+func invoiceIssue(id uuid.UUID, kind string) string {
+	return notificationinbox.IssueKey("invoice", id, kind)
+}
 
 func publishInbox(ctx context.Context, d *db.DB, tx pgx.Tx, n *models.NotificationEvent) error {
 	if d.Notifications() == nil {
@@ -163,11 +165,11 @@ func WithdrawMethodNotice(ctx context.Context, d *db.DB, customerID, subscriptio
 	return notificationinbox.Withdraw(ctx, d, customerID, []string{subscriptionIssue(subscriptionID, "payment_method_update_required")})
 }
 
-// WithdrawOrderPaymentNotices follows settled payment for this exact order.
-func WithdrawOrderPaymentNotices(ctx context.Context, d *db.DB, customerID, orderID uuid.UUID) error {
+// WithdrawInvoicePaymentNotices follows settled payment for this exact invoice.
+func WithdrawInvoicePaymentNotices(ctx context.Context, d *db.DB, customerID, invoiceID uuid.UUID) error {
 	keys := make([]string, 0, len(notificationinbox.PaymentIssueKinds()))
 	for _, kind := range notificationinbox.PaymentIssueKinds() {
-		keys = append(keys, orderIssue(orderID, kind))
+		keys = append(keys, invoiceIssue(invoiceID, kind))
 	}
 	return notificationinbox.Withdraw(ctx, d, customerID, keys)
 }

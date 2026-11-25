@@ -13,7 +13,7 @@ func Classify(err error) string {
 	switch {
 	case err == nil:
 		return "done"
-	case errors.Is(err, billing.ErrPaymentRefused): // 402: nothing charged; another card may pay the same order
+	case errors.Is(err, billing.ErrPaymentRefused): // 402: nothing charged; another card may pay the same invoice
 		return "declined"
 	case errors.Is(err, billing.ErrIdempotencyKeyReused): // the key was sent with other terms: a bug
 		return "bug"

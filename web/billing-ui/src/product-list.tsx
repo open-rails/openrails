@@ -9,7 +9,7 @@ import { RESET } from "#orck/account/format"
 import { EmptyState } from "#orck/account/section"
 import type { BillingAppearance } from "#orck/appearance"
 import { BuyButton } from "#orck/buy-button"
-import type { Order, OrderAttribution, Product } from "#orck/client/types"
+import type { Invoice, InvoiceAttribution, Product } from "#orck/client/types"
 import type { PaymentFallbacks } from "#orck/fallbacks"
 import {
   Card,
@@ -29,10 +29,10 @@ export interface ProductListProps {
    */
   products: Product[]
   /**
-   * The order is paid. A hint: the host's own gate decides access, so send
+   * The invoice is paid. A hint: the host's own gate decides access, so send
    * the buyer back to the content it guards.
    */
-  onPaid: (order: Order) => void
+  onPaid: (invoice: Invoice) => void
   /**
    * Buying needs a signed-in customer: called instead of the purchase when
    * `signedIn` is false or OpenRails answers 401.
@@ -42,10 +42,10 @@ export interface ProductListProps {
   signedIn?: boolean
   /** Where a redirect PSP (Stripe's hosted page) returns the buyer: one of the app's return origins. */
   returnUrl?: string
-  /** PSPs kept back until others fail on the order; see OrderPayment. */
+  /** PSPs kept back until others fail on the invoice; see InvoicePayment. */
   fallbacks?: PaymentFallbacks
   /** Where the host's page says the customer came from (utm_*, referrer). */
-  attribution?: OrderAttribution
+  attribution?: InvoiceAttribution
   appearance?: BillingAppearance
   className?: string
 }
@@ -78,7 +78,7 @@ export function ProductList({
 
   // A deposit's amount is chosen before purchase; ProductList sells fixed
   // prices. A provider's price on the terms of one of ours is that price's
-  // fallback on the order, not a price of its own.
+  // fallback on the invoice, not a price of its own.
   const products = given
     .filter((product) => !product.archived)
     .map((product) => {

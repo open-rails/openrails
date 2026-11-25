@@ -16,7 +16,7 @@ export function MissingRecord({
   back,
   backLabel,
 }: {
-  // "Order not found"
+  // "Invoice not found"
   title: string
   error?: unknown
   back: string

@@ -77,34 +77,34 @@ ORDER BY lo.customer_id, lo.product_id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ConDuplicateChargesSamePeriod :many
--- A subscription order may have multiple genuine partial payments. Report
+-- A subscription invoice may have multiple genuine partial payments. Report
 -- excess net captured money against its frozen total, never infer duplicate
 -- periods from current price cadence or receipt-time proximity.
 WITH charges AS (
-    SELECT p.id, p.customer_id, p.subscription_id, p.order_id, p.amount, p.currency, p.purchased_at,
+    SELECT p.id, p.customer_id, p.subscription_id, p.invoice_id, p.amount, p.currency, p.purchased_at,
            o.total,
            p.amount + COALESCE((SELECT SUM(r.amount) FROM billing.payments r
              WHERE r.merchant_id=p.merchant_id AND r.refunded_payment_id=p.id
                AND r.status='succeeded' AND r.deleted_at IS NULL),0) AS net_amount
     FROM billing.payments p
-    JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id
+    JOIN billing.invoices o ON o.merchant_id=p.merchant_id AND o.id=p.invoice_id
     WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.deleted_at IS NULL
       AND p.subscription_id IS NOT NULL AND p.status IN ('succeeded','refunded')
       AND p.money_movement='rail' AND p.amount>0 AND p.refunded_payment_id IS NULL
       AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id=sqlc.narg(customer_id)::uuid)
 ), excess AS (
-    SELECT subscription_id, order_id, MIN(customer_id::text)::text AS user_id,
+    SELECT subscription_id, invoice_id, MIN(customer_id::text)::text AS user_id,
            COUNT(*)::int AS count, ARRAY_AGG(id ORDER BY purchased_at DESC)::uuid[] AS payment_ids,
            SUM(net_amount)::bigint AS total_amount, MIN(currency)::text AS currency,
            MIN(purchased_at)::timestamptz AS first_date, MAX(purchased_at)::timestamptz AS last_date
-    FROM charges GROUP BY subscription_id, order_id HAVING SUM(net_amount)>MAX(total)
+    FROM charges GROUP BY subscription_id, invoice_id HAVING SUM(net_amount)>MAX(total)
 )
-SELECT e.subscription_id, e.order_id::text AS period_key, e.user_id,
+SELECT e.subscription_id, e.invoice_id::text AS period_key, e.user_id,
        l.product_id, l.product_key, e.count, e.payment_ids, e.total_amount, e.currency, e.first_date, e.last_date
 FROM excess e
 JOIN LATERAL (SELECT line.product_id, prod.key::text AS product_key
-    FROM billing.order_lines line JOIN billing.products prod ON prod.merchant_id=line.merchant_id AND prod.id=line.product_id
-    WHERE line.merchant_id=sqlc.arg(merchant_id)::uuid AND line.order_id=e.order_id
+    FROM billing.invoice_lines line JOIN billing.products prod ON prod.merchant_id=line.merchant_id AND prod.id=line.product_id
+    WHERE line.merchant_id=sqlc.arg(merchant_id)::uuid AND line.invoice_id=e.invoice_id
     ORDER BY line.position LIMIT 1) l ON true
-ORDER BY e.first_date, e.order_id
+ORDER BY e.first_date, e.invoice_id
 LIMIT sqlc.arg(row_limit)::int;

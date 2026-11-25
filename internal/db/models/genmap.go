@@ -107,7 +107,7 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 		ID:                p.ID,
 		CustomerID:        p.CustomerID,
 		SubscriptionID:    p.SubscriptionID,
-		OrderID:           p.OrderID,
+		InvoiceID:         p.InvoiceID,
 		LedgerTransferID:  p.LedgerTransferID,
 		RefundedPaymentID: p.RefundedPaymentID,
 		Channel:           Channel(p.Channel),
@@ -314,13 +314,13 @@ func PaymentMethodsFromGen(rows []gen.BillingPaymentMethod) ([]*PaymentMethod, e
 	return out, nil
 }
 
-func OrderAttemptFromGen(c gen.BillingOrderAttempt) (*OrderAttempt, error) {
-	m := &OrderAttempt{
+func InvoiceAttemptFromGen(c gen.BillingInvoiceAttempt) (*InvoiceAttempt, error) {
+	m := &InvoiceAttempt{
 		ID:             c.ID,
 		CustomerID:     c.CustomerID,
-		OrderID:        c.OrderID,
+		InvoiceID:      c.InvoiceID,
 		Rail:           Rail(c.Rail),
-		Status:         OrderAttemptStatus(c.Status),
+		Status:         InvoiceAttemptStatus(c.Status),
 		Amount:         c.Amount,
 		Currency:       c.Currency,
 		ExpiresAt:      c.ExpiresAt,
@@ -332,13 +332,13 @@ func OrderAttemptFromGen(c gen.BillingOrderAttempt) (*OrderAttempt, error) {
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,
 	}
-	if err := FromJSONB(c.Metadata, &m.Metadata, "order_attempts.metadata"); err != nil {
+	if err := FromJSONB(c.Metadata, &m.Metadata, "invoice_attempts.metadata"); err != nil {
 		return nil, err
 	}
-	if err := FromJSONB(c.RailFields, &m.RailFields, "order_attempts.rail_fields"); err != nil {
+	if err := FromJSONB(c.RailFields, &m.RailFields, "invoice_attempts.rail_fields"); err != nil {
 		return nil, err
 	}
-	if err := FromJSONB(c.RailState, &m.RailState, "order_attempts.rail_state"); err != nil {
+	if err := FromJSONB(c.RailState, &m.RailState, "invoice_attempts.rail_state"); err != nil {
 		return nil, err
 	}
 	if err := m.ValidateTerms(); err != nil {

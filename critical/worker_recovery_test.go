@@ -40,21 +40,21 @@ func TestProviderRecovery(t *testing.T) {
 		fleet := hostFleet(t, a.world)
 		input := saleInput(t, a, p)
 		p.interruptPaymentResponses()
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "ambiguous-purchase"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "ambiguous-purchase"})
 		t.Logf("caller response after provider acceptance/loss: HTTP%d", status)
 		require.NotEqual(t, http.StatusUnauthorized, status, string(raw))
 		effects := p.effects(t)
 		require.Len(t, effects, 1)
 		require.EqualValues(t, 3000, effects[0].Amount)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 		require.NoError(t, err)
-		require.Len(t, orders.Items, 1)
-		order := orders.Items[0]
-		require.NotEqual(t, billing.OrderComplete, order.Status, "the network cut must actually leave an unresolved accepted payment")
+		require.Len(t, invoices.Items, 1)
+		invoice := invoices.Items[0]
+		require.NotEqual(t, billing.InvoiceComplete, invoice.Status, "the network cut must actually leave an unresolved accepted payment")
 		p.restorePaymentResponses()
-		if order.Status != billing.OrderComplete {
-			require.Equal(t, billing.OrderPaymentProcessing, order.Payment.Status, "an ambiguous accepted debit is not a card decline")
+		if invoice.Status != billing.InvoiceComplete {
+			require.Equal(t, billing.InvoicePaymentProcessing, invoice.Payment.Status, "an ambiguous accepted debit is not a card decline")
 			access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"sale:owned"}})
 			require.NoError(t, err)
 			require.False(t, access.Entitlements["sale:owned"], "unverified money does not grant access")
@@ -90,9 +90,9 @@ func TestProviderRecovery(t *testing.T) {
 				}
 			}
 		}
-		recovered, err := a.alpha.GetOrder(t.Context(), order.ID)
+		recovered, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderComplete, recovered.Status)
+		require.Equal(t, billing.InvoiceComplete, recovered.Status)
 		require.NotNil(t, recovered.Payment.PaymentID)
 		payment, err := a.alpha.GetPayment(t.Context(), *recovered.Payment.PaymentID)
 		require.NoError(t, err)
@@ -116,13 +116,13 @@ func TestProviderRecovery(t *testing.T) {
 		input := saleInput(t, a, p)
 		p.interruptPaymentResponses()
 		p.unavailableEvidence(true)
-		_, _ = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "unavailable-evidence-purchase"})
+		_, _ = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "unavailable-evidence-purchase"})
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 		require.NoError(t, err)
-		require.Len(t, orders.Items, 1)
-		order := orders.Items[0]
-		require.Equal(t, billing.OrderPaymentProcessing, order.Payment.Status)
+		require.Len(t, invoices.Items, 1)
+		invoice := invoices.Items[0]
+		require.Equal(t, billing.InvoicePaymentProcessing, invoice.Payment.Status)
 		require.Len(t, p.effects(t), 1)
 		a.clock.Advance(20 * time.Minute)
 		jobs, err := fleet.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
@@ -151,10 +151,10 @@ func TestProviderRecovery(t *testing.T) {
 			}
 			break
 		}
-		held, err := a.alpha.GetOrder(t.Context(), order.ID)
+		held, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderPaymentProcessing, held.Payment.Status)
-		require.NotEqual(t, billing.OrderComplete, held.Status)
+		require.Equal(t, billing.InvoicePaymentProcessing, held.Payment.Status)
+		require.NotEqual(t, billing.InvoiceComplete, held.Status)
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"sale:owned"}})
 		require.NoError(t, err)
 		require.False(t, access.Entitlements["sale:owned"])
@@ -173,9 +173,9 @@ func TestProviderRecovery(t *testing.T) {
 		deadline := time.NewTimer(20 * time.Second)
 		defer deadline.Stop()
 		for {
-			read, err := a.alpha.GetOrder(t.Context(), order.ID)
+			read, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 			require.NoError(t, err)
-			if read.Status == billing.OrderComplete {
+			if read.Status == billing.InvoiceComplete {
 				break
 			}
 			select {
@@ -184,7 +184,7 @@ func TestProviderRecovery(t *testing.T) {
 					require.NotEqual(t, river.EventKindJobFailed, event.Kind)
 				}
 			case <-deadline.C:
-				t.Fatal("restored provider evidence did not resolve the existing order")
+				t.Fatal("restored provider evidence did not resolve the existing invoice")
 			}
 		}
 		require.Len(t, p.effects(t), 1, "restoring evidence resolves the original economic effect")

@@ -134,9 +134,9 @@ func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uui
 	g.Log.WarnContext(ctx, "card-abuse: attack mode — captcha required on this merchant's card routes", "merchant_id", merchantID)
 }
 
-// RecordOrderDecline counts a customer order's refusal once when concurrent
+// RecordInvoiceDecline counts a customer invoice's refusal once when concurrent
 // completion paths observe it. The payment's separate blocking count is untouched.
-func (g *CardAbuseGuard) RecordOrderDecline(ctx context.Context, merchantID, operationID uuid.UUID, subjects []string, attack bool) {
+func (g *CardAbuseGuard) RecordInvoiceDecline(ctx context.Context, merchantID, operationID uuid.UUID, subjects []string, attack bool) {
 	if !g.enabled() || len(subjects) == 0 {
 		return
 	}

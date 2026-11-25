@@ -181,9 +181,9 @@ export function CustomerDetailPage() {
         <p className="text-sm">
           <Link
             className="underline-offset-2 hover:underline"
-            to={`/orders?customer_id=${customer.id}&origin=usage&overdue=true`}
+            to={`/invoices?customer_id=${customer.id}&origin=usage&overdue=true`}
           >
-            <AdminMessage id={"Overdue usage orders"} />
+            <AdminMessage id={"Overdue usage invoices"} />
           </Link>
         </p>
       )}
@@ -297,20 +297,20 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
 }
 
 function CustomerPayments({ customerId }: { customerId: string }) {
-  const { adminQueries, orderQueries } = useAdminServices()
+  const { adminQueries, invoiceQueries } = useAdminServices()
 
   const pages = useCursorPages(customerId, 25)
   const { data, isFetching } = useQuery(
     adminQueries.customerPayments(customerId, pages.size, pages.cursor)
   )
   const payments = data?.data ?? []
-  // A payment is named by what its order bought: its first line.
-  const orderIds = [
-    ...new Set(payments.flatMap((p) => (p.order_id ? [p.order_id] : []))),
+  // A payment is named by what its invoice bought: its first line.
+  const invoiceIds = [
+    ...new Set(payments.flatMap((p) => (p.invoice_id ? [p.invoice_id] : []))),
   ]
-  const { data: orders } = useQuery(orderQueries.byIds(orderIds))
+  const { data: invoices } = useQuery(invoiceQueries.byIds(invoiceIds))
   const bought = new Map(
-    (orders?.data ?? []).map((o) => [o.id, o.lines[0]?.description])
+    (invoices?.data ?? []).map((o) => [o.id, o.lines[0]?.description])
   )
   return (
     <Card>
@@ -356,7 +356,7 @@ function CustomerPayments({ customerId }: { customerId: string }) {
                       className="text-xs underline-offset-2 hover:underline"
                       to={`/payments/${p.id}`}
                     >
-                      {(p.order_id && bought.get(p.order_id)) ||
+                      {(p.invoice_id && bought.get(p.invoice_id)) ||
                         shortId(p.id, 13)}
                     </Link>
                   </TableCell>

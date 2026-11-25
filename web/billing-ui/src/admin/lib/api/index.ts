@@ -2,7 +2,7 @@ import type { AdminClient } from "./client"
 import { createEndpoints } from "./endpoints"
 import { createMetrics } from "./metrics"
 import { createCreditEndpoints } from "./credit-endpoints"
-import { createOrderEndpoints } from "./order-endpoints"
+import { createInvoiceEndpoints } from "./invoice-endpoints"
 import { createInvoiceProfileEndpoints } from "./invoice-profile-endpoints"
 import { createImportEndpoints } from "./import-endpoints"
 
@@ -12,7 +12,7 @@ export function createAdminAPI(client: AdminClient) {
     ...endpoints,
     ...createMetrics(client),
     ...createCreditEndpoints(client),
-    ...createOrderEndpoints(client),
+    ...createInvoiceEndpoints(client),
     ...createInvoiceProfileEndpoints(endpoints),
     ...createImportEndpoints(client),
   }

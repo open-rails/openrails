@@ -23,15 +23,15 @@ import (
 // by card, in the order the cards' prints were first written, each card
 // pricing its own quantity on top of the earlier cards' (R_p(Q_<p + q_p) -
 // R_p(Q_<p)); a dynamic card charges what was stated. Within one card the
-// order usage arrived in changes nothing, so late usage and concurrent gates
+// invoice usage arrived in changes nothing, so late usage and concurrent gates
 // price exactly and per-unit rounding happens once per total. A posting takes
 // the price less what earlier postings took, and history shares it across
 // days the same way, so the days sum to what posts.
 
 // printCard is a card print's terms and when it was first written.
 type printCard struct {
-	card  ratingCard
-	order time.Time
+	card    ratingCard
+	invoice time.Time
 }
 
 // usagePrints are the merchant's card prints, by print.
@@ -74,7 +74,7 @@ func loadPrints(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, print
 		if err := json.Unmarshal(r.Card, &card); err != nil {
 			return nil, fmt.Errorf("decode card print %s: %w", r.Print, err)
 		}
-		out[r.Print] = printCard{card: card, order: r.CreatedAt}
+		out[r.Print] = printCard{card: card, invoice: r.CreatedAt}
 	}
 	return out, nil
 }
@@ -91,7 +91,7 @@ type printQuantity struct {
 // A print with no card is an error.
 func (p usagePrints) cellPrice(cell string, qs []printQuantity) ([]int64, error) {
 	slices.SortFunc(qs, func(a, b printQuantity) int {
-		return cmp.Or(p[a.print].order.Compare(p[b.print].order), strings.Compare(a.print, b.print))
+		return cmp.Or(p[a.print].invoice.Compare(p[b.print].invoice), strings.Compare(a.print, b.print))
 	})
 	out := make([]int64, len(qs))
 	var before int64

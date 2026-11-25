@@ -37,7 +37,7 @@ func FromContext(ctx context.Context) (PayURL, bool) {
 }
 
 // ResolveHTTP admits the checkout origin's API requests by their bearer
-// secret and pins its order's merchant: 404 pay_url_not_found for an
+// secret and pins its invoice's merchant: 404 pay_url_not_found for an
 // unknown or missing one, 410 pay_url_expired past its expiry. Every answer
 // is no-store. Paths outside /v1/ (the page) pass through untouched.
 func ResolveHTTP(logger *slog.Logger, store *Store, now func() time.Time) func(http.Handler) http.Handler {
@@ -94,7 +94,7 @@ func (w noStore) Write(b []byte) (int, error) {
 
 func (w noStore) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// Authenticator says a checkout origin request is its order's customer, in
+// Authenticator says a checkout origin request is its invoice's customer, in
 // person: the secret ResolveHTTP admitted.
 type Authenticator struct{}
 
@@ -116,6 +116,6 @@ func (v verified) Identity() auth.Identity {
 	return auth.Identity{
 		Issuer: Issuer, Subject: id, SubjectKind: auth.SubjectUser,
 		Invoker:    auth.Invoker{Issuer: Issuer, ID: id},
-		Credential: auth.Credential{Kind: billingauth.CredentialPayURL, ID: v.c.OrderID.String()},
+		Credential: auth.Credential{Kind: billingauth.CredentialPayURL, ID: v.c.InvoiceID.String()},
 	}
 }

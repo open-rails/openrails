@@ -11,11 +11,11 @@ import (
 // answered and rebill cycles.
 var paymentsRoutes = []Route{
 	{Method: POST, Path: "/v1/admin/payments", Group: Admin, Auth: AuthMerchant, Name: "RecordExternalPayment", Level: LevelUpdate, Limit: middleware.AdminOperationOffChannel,
-		Doc: "RecordExternalPayment records money the merchant received outside OpenRails for one order: part or " +
-			"all of what a usage order owes, or another order's total. Recording the same TransactionID again " +
+		Doc: "RecordExternalPayment records money the merchant received outside OpenRails for one invoice: part or " +
+			"all of what a usage invoice owes, or another invoice's total. Recording the same TransactionID again " +
 			"with the same terms answers the first payment; with other terms it is " +
 			"billing.ErrIdempotencyKeyReused.",
-		Request: billing.RecordExternalPaymentParams{}, Responses: []Reply{{200, billing.Payment{}}, {201, billing.Payment{}}}, Errors: codes("idempotency_key_reused", "invalid_param", "order_action_not_allowed", "order_has_recurring_line", "order_not_payable", "order_payment_in_progress", "payment_exceeds_due", "resource_not_found", "service_unavailable"), Handler: h(handlers.RecordExternalPayment)},
+		Request: billing.RecordExternalPaymentParams{}, Responses: []Reply{{200, billing.Payment{}}, {201, billing.Payment{}}}, Errors: codes("idempotency_key_reused", "invalid_param", "invoice_action_not_allowed", "invoice_has_recurring_line", "invoice_not_payable", "invoice_payment_in_progress", "payment_exceeds_due", "resource_not_found", "service_unavailable"), Handler: h(handlers.RecordExternalPayment)},
 	{Method: GET, Path: "/v1/admin/payments", Group: Admin, Auth: AuthMerchant, Name: "ListPayments", Level: LevelRead,
 		Doc:   "ListPayments is one page of the merchant's payments, newest first.",
 		Query: billing.PaymentListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Payment]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.ListPayments)},

@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/orders/usage"
+	"github.com/open-rails/openrails/internal/modules/invoices/usage"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -33,9 +33,9 @@ import (
 // one.
 var ErrAgreementNotFound = apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "agreement not found")
 
-// openUsageOrderLimit bounds the open usage orders a revocation stops: each
+// openUsageInvoiceLimit bounds the open usage invoices a revocation stops: each
 // is a closed billing window, so a customer has a few.
-const openUsageOrderLimit = 100
+const openUsageInvoiceLimit = 100
 
 // ListAgreements is one page of the customer's live charge agreements,
 // newest first.
@@ -170,8 +170,8 @@ func agreementTerms(sub billing.Subscription, terms *billing.AgreementSubscripti
 // subscription at the period's end, through the customer's own cancel; when
 // that cannot run (a provider-billed schedule while the merchant's
 // destructive actions are disarmed) nothing is revoked. An unscheduled one
-// bills the usage owed until now as an open usage order the customer pays
-// themselves, stops collecting every open usage order in its currency, and
+// bills the usage owed until now as an open usage invoice the customer pays
+// themselves, stops collecting every open usage invoice in its currency, and
 // leaves only the balance to spend there until the customer gives another.
 // The merchant hears mandate.revoked; the customer gets the confirmation.
 func (s *Service) RevokeAgreement(ctx context.Context, customer billing.CustomerID, id billing.MandateID) (billing.AgreementRevocation, error) {
@@ -198,7 +198,7 @@ func (s *Service) RevokeAgreement(ctx context.Context, customer billing.Customer
 			return billing.AgreementRevocation{}, err
 		}
 	case billing.MandateUnscheduled:
-		if out.UsageOrder, err = s.revokeUnscheduled(ctx, customer, m); err != nil {
+		if out.UsageInvoice, err = s.revokeUnscheduled(ctx, customer, m); err != nil {
 			return billing.AgreementRevocation{}, err
 		}
 	default:
@@ -244,9 +244,9 @@ func (s *Service) revokeRecurring(ctx context.Context, customer billing.Customer
 }
 
 // revokeUnscheduled bills the usage owed until now, then in one transaction
-// revokes the agreement, stops collecting the currency's open usage orders,
+// revokes the agreement, stops collecting the currency's open usage invoices,
 // closes the customer's credit there and tells the customer what it owes.
-func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.CustomerID, m gen.BillingMandate) (*billing.Order, error) {
+func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.CustomerID, m gen.BillingMandate) (*billing.Invoice, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -256,7 +256,7 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 		currency = *m.Currency
 	}
 	now := s.now().UTC()
-	var billed *gen.BillingOrder
+	var billed *gen.BillingInvoice
 	// What the customer's usage cost is owed before the agreement ends.
 	if _, err := s.rt.MoneyService.PostUsageNow(ctx, customer.UUID(), currency, now); err != nil {
 		return nil, err
@@ -281,11 +281,11 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 		if err := ledger.WatchCustomerBalance(ctx, q, gen.WatchCustomerBalanceParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, Now: now}); err != nil {
 			return err
 		}
-		open, err := q.ListOpenUsageOrdersOfCurrency(ctx, gen.ListOpenUsageOrdersOfCurrencyParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, RowLimit: openUsageOrderLimit})
+		open, err := q.ListOpenUsageInvoicesOfCurrency(ctx, gen.ListOpenUsageInvoicesOfCurrencyParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), Currency: currency, RowLimit: openUsageInvoiceLimit})
 		if err != nil {
 			return err
 		}
-		failure := billing.PaymentFailure{Reason: charge.AgreementRequiredCode, Message: "The customer revoked the agreement to charge its card for usage; it pays this order itself."}
+		failure := billing.PaymentFailure{Reason: charge.AgreementRequiredCode, Message: "The customer revoked the agreement to charge its card for usage; it pays this invoice itself."}
 		var due int64
 		var latest *uuid.UUID
 		for _, o := range open {
@@ -303,7 +303,7 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 			data.AmountDue = &due
 		}
 		if latest != nil {
-			data.OrderID = billing.OrderID(*latest)
+			data.InvoiceID = billing.InvoiceID(*latest)
 		}
 		raw, err := json.Marshal(data)
 		if err != nil {
@@ -317,11 +317,11 @@ func (s *Service) revokeUnscheduled(ctx context.Context, customer billing.Custom
 	if err != nil || billed == nil {
 		return nil, err
 	}
-	order, err := s.GetOrder(ctx, OrderActor{Customer: customer}, billing.OrderID(billed.ID))
+	invoice, err := s.GetInvoice(ctx, InvoiceActor{Customer: customer}, billing.InvoiceID(billed.ID))
 	if err != nil {
 		return nil, err
 	}
-	return order, nil
+	return invoice, nil
 }
 
 // endAgreement revokes the agreement and tells the merchant, with the

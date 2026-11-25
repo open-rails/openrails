@@ -67,16 +67,16 @@ func (b *book) countUpTo(_ context.Context, _ billing.MerchantID, n int) (int, e
 
 func (b *book) newest(_ context.Context, _ billing.MerchantID, after *customerRow, limit int) ([]customerRow, error) {
 	rows := slices.Clone(b.rows)
-	order := func(a, c customerRow) int {
+	invoice := func(a, c customerRow) int {
 		if n := c.createdAt.Compare(a.createdAt); n != 0 {
 			return n
 		}
 		return bytes.Compare(c.id[:], a.id[:])
 	}
-	slices.SortFunc(rows, order)
+	slices.SortFunc(rows, invoice)
 	var out []customerRow
 	for _, row := range rows {
-		if after != nil && order(*after, row) >= 0 {
+		if after != nil && invoice(*after, row) >= 0 {
 			continue
 		}
 		if len(out) == limit {

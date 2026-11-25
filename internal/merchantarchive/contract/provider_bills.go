@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/orders/observed"
+	"github.com/open-rails/openrails/internal/modules/invoices/observed"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -42,7 +42,7 @@ func providerBillJSON(schedule bool) jsonRule {
 			return false
 		}
 		var bill observed.Bill
-		if json.Unmarshal(raw, &bill) != nil || bill.PSPID == uuid.Nil || bill.CustomerID == uuid.Nil || bill.ExistingOrderID != nil || bill.Payment != nil || bill.Settled || bill.SettlementSource != "" || bill.NonCashAmount != 0 || bill.Total < 0 {
+		if json.Unmarshal(raw, &bill) != nil || bill.PSPID == uuid.Nil || bill.CustomerID == uuid.Nil || bill.ExistingInvoiceID != nil || bill.Payment != nil || bill.Settled || bill.SettlementSource != "" || bill.NonCashAmount != 0 || bill.Total < 0 {
 			return false
 		}
 		if bill.CalendarAnchor != nil && (bill.CalendarAnchor.IsZero() || !schedule && bill.CalendarAnchor.After(bill.PeriodStart)) {

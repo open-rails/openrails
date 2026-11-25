@@ -25,14 +25,14 @@ func declared(t *testing.T, key string) Route {
 // The catalog refuses a route on a tier that checks a permission but names
 // none, and a route naming one its tier never checks.
 func TestCatalogRefusesRouteWithoutPermission(t *testing.T) {
-	application := declared(t, "POST /v1/app/orders")
+	application := declared(t, "POST /v1/app/invoices")
 	application.Permission = Pair{}
 	provisioning := declared(t, "DELETE /v1/app/scim/v2/Users/{id}")
 	provisioning.Permission = Pair{}
-	merchant := declared(t, "GET /v1/admin/orders")
+	merchant := declared(t, "GET /v1/admin/invoices")
 	merchant.Group, merchant.Level, merchant.Name, merchant.Doc, merchant.Args, merchant.Cache = Customer, "", "", "", nil, ""
-	customer := declared(t, "GET /v1/me/orders")
-	customer.Permission = needOrders
+	customer := declared(t, "GET /v1/me/invoices")
+	customer.Permission = needInvoices
 	for name, c := range map[string]struct {
 		route Route
 		want  string
@@ -47,7 +47,7 @@ func TestCatalogRefusesRouteWithoutPermission(t *testing.T) {
 			t.Errorf("%s: %s: validate() = %v, want a refusal that %s", name, c.route.Key(), err, c.want)
 		}
 	}
-	unknown := declared(t, "GET /v1/admin/orders")
+	unknown := declared(t, "GET /v1/admin/invoices")
 	unknown.Auth = "optional"
 	if err := unknown.authority(); err == nil || !strings.Contains(err.Error(), "unknown auth tier") {
 		t.Errorf("an unknown tier: authority() = %v", err)
@@ -124,7 +124,7 @@ func TestCatalogRefusesMisdeclaredTiers(t *testing.T) {
 	unlisted.Path = "/v1/merchant/psps/routing-dry-run"
 	readWrite := declared(t, "POST /v1/merchant/psps")
 	readWrite.Level = LevelRead
-	sensitive := declared(t, "GET /v1/me/orders/{id}")
+	sensitive := declared(t, "GET /v1/me/invoices/{id}")
 	sensitive.Sensitive = true
 	callback := declared(t, "POST /v1/webhooks/{rail}/{account_id}")
 	callback.Group = Payment

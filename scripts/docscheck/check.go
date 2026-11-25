@@ -381,7 +381,7 @@ func checkSpan(idx *Index, d *doc, s span, bad func(class, format string, args .
 	}
 	if dotted.MatchString(text) {
 		family, name, _ := strings.Cut(text, ".")
-		// order.pay_url is a JSON path, not an event type
+		// invoice.pay_url is a JSON path, not an event type
 		if idx.eventFamily(family) && !strings.Contains(name, ".") && !idx.JSONFields[name] && !idx.Events[text] {
 			bad(cEvent, "%s is not a billing.HostEventType", text)
 		}
@@ -611,7 +611,7 @@ func (x *goIndex) listed(sc subject, n string) bool {
 }
 
 // twoHumps: an exported CamelCase name with a lower-case letter and at
-// least two capitals, e.g. CreateOrder or PSPConfig, not NMI or Allowed.
+// least two capitals, e.g. CreateInvoice or PSPConfig, not NMI or Allowed.
 func twoHumps(s string) bool {
 	if !humps.MatchString(s) {
 		return false

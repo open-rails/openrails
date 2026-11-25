@@ -17,12 +17,12 @@ func TestRefundBoundaryContract(t *testing.T) {
 	t.Run("OR-J20-S04/foreign-account-and-off-rail-refunds-have-no-effect", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "owned-refund-boundary"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "owned-refund-boundary"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.NotNil(t, order.Payment.PaymentID)
-		paymentID := *order.Payment.PaymentID
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.NotNil(t, invoice.Payment.PaymentID)
+		paymentID := *invoice.Payment.PaymentID
 		before, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Limit: 100})
 		require.NoError(t, err)
 		_, err = a.beta.RefundPayment(t.Context(), "foreign-refund", paymentID, billing.RefundPaymentParams{Full: true})
@@ -40,9 +40,9 @@ func TestRefundBoundaryContract(t *testing.T) {
 		require.Len(t, p.effects(t), 1)
 		require.EqualValues(t, 3000, p.effects(t)[0].Amount)
 
-		manualOrder, err := a.alpha.CreateOrder(t.Context(), "off-rail-refund-boundary", billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: input.Lines})
+		manualInvoice, err := a.alpha.CreateInvoice(t.Context(), "off-rail-refund-boundary", billing.CreateInvoiceParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: input.Lines})
 		require.NoError(t, err)
-		manual, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: manualOrder.ID, Amount: 30_000_000, TransactionID: "wire-not-card-refund"})
+		manual, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: manualInvoice.ID, Amount: 30_000_000, TransactionID: "wire-not-card-refund"})
 		require.NoError(t, err)
 		before, err = a.alpha.ListEvents(t.Context(), billing.EventListParams{Limit: 100})
 		require.NoError(t, err)

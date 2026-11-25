@@ -1,6 +1,6 @@
 {{if .Event.Voided}}<p style="margin:0 0 16px;">Your payment of <strong>{{.Event.Amount}}</strong>{{with .Event.ProductName}} for {{.}}{{end}} was canceled; you weren't charged.</p>{{else}}<p style="margin:0 0 16px;">We refunded <strong>{{.Event.Amount}}</strong>{{with .Event.ProductName}} for {{.}}{{end}}.</p>{{end}}
 <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;">
-{{with .Event.OrderNumber}}<tr><td style="padding:2px 16px 2px 0;color:#616e7c;">Order</td><td style="padding:2px 0;">{{.}}</td></tr>{{end}}
+{{with .Event.InvoiceNumber}}<tr><td style="padding:2px 16px 2px 0;color:#616e7c;">Invoice</td><td style="padding:2px 0;">{{.}}</td></tr>{{end}}
 <tr><td style="padding:2px 16px 2px 0;color:#616e7c;">{{if .Event.Voided}}Canceled{{else}}Refunded{{end}}</td><td style="padding:2px 0;"><strong>{{.Event.Amount}}</strong></td></tr>
 <tr><td style="padding:2px 16px 2px 0;color:#616e7c;">Date</td><td style="padding:2px 0;">{{.Event.OccurredAt}}</td></tr>
 </table>

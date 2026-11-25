@@ -20,8 +20,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// ApplyOrder applies a completed bill's money to its lines, once per line:
-// each payment's cash, the order's own first, until the bill is paid (DR
+// ApplyInvoice applies a completed bill's money to its lines, once per line:
+// each payment's cash, the invoice's own first, until the bill is paid (DR
 // unapplied_cash), then each line's share of the bill's non-cash settlement
 // (DR revenue_adjustments), CR deferred_revenue, into a revenue schedule over
 // the service the line sells, funded with exactly what it was applied. The
@@ -29,51 +29,51 @@ import (
 // provider's negative adjustment lines reduce the others in proportion; a
 // positive one (tax or shipping) is no revenue and waits, unapplied, with a
 // finding. Money beyond the bill stays unapplied; a credit line's waits for
-// its credit lot, and a usage order's settles its receivable. A purchase's
+// its credit lot, and a usage invoice's settles its receivable. A purchase's
 // timed line with no access granted is left unapplied with a finding.
-// services names the service of a line its caller knows better than the order
+// services names the service of a line its caller knows better than the invoice
 // does.
-func ApplyOrder(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.UUID]Service) error {
-	return apply(ctx, d, orderID, services, true)
+func ApplyInvoice(ctx context.Context, d *db.DB, invoiceID uuid.UUID, services map[uuid.UUID]Service) error {
+	return apply(ctx, d, invoiceID, services, true)
 }
 
-// ApplyRecorded applies a provider bill as it is recorded: as ApplyOrder,
+// ApplyRecorded applies a provider bill as it is recorded: as ApplyInvoice,
 // except that a timed line waits silently for the access its caller grants
-// next, when the caller applies the order again (ApplyOrder).
-func ApplyRecorded(ctx context.Context, d *db.DB, orderID uuid.UUID) error {
-	return apply(ctx, d, orderID, nil, false)
+// next, when the caller applies the invoice again (ApplyInvoice).
+func ApplyRecorded(ctx context.Context, d *db.DB, invoiceID uuid.UUID) error {
+	return apply(ctx, d, invoiceID, nil, false)
 }
 
-func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.UUID]Service, final bool) error {
+func apply(ctx context.Context, d *db.DB, invoiceID uuid.UUID, services map[uuid.UUID]Service, final bool) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	q := d.Gen(ctx)
-	// One application of an order at a time: each allocates what the ones
+	// One application of an invoice at a time: each allocates what the ones
 	// before it left.
-	order, err := q.LockOrder(ctx, gen.LockOrderParams{MerchantID: mid.UUID(), ID: orderID})
+	invoice, err := q.LockInvoice(ctx, gen.LockInvoiceParams{MerchantID: mid.UUID(), ID: invoiceID})
 	if err != nil {
 		return err
 	}
-	if order.Status != "complete" || order.CompletedAt == nil || order.Origin == "usage" || order.Total <= 0 {
+	if invoice.Status != "complete" || invoice.CompletedAt == nil || invoice.Origin == "usage" || invoice.Total <= 0 {
 		return nil
 	}
-	if CheckCurrency(order.Currency) != nil {
-		if !unit.IsUnitCode(order.Currency) {
+	if CheckCurrency(invoice.Currency) != nil {
+		if !unit.IsUnitCode(invoice.Currency) {
 			return nil
 		}
-		return applyUnitOrder(ctx, d, q, order, services, final)
+		return applyUnitInvoice(ctx, d, q, invoice, services, final)
 	}
-	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{orderID}})
+	lines, err := q.ListInvoiceLines(ctx, gen.ListInvoiceLinesParams{MerchantID: mid.UUID(), InvoiceIds: []uuid.UUID{invoiceID}})
 	if err != nil {
 		return err
 	}
-	receipts, err := q.ListOrderReceipts(ctx, gen.ListOrderReceiptsParams{MerchantID: mid.UUID(), OrderID: orderID})
+	receipts, err := q.ListInvoiceReceipts(ctx, gen.ListInvoiceReceiptsParams{MerchantID: mid.UUID(), InvoiceID: invoiceID})
 	if err != nil {
 		return err
 	}
-	nonCash, err := q.GetOrderNonCashSettlement(ctx, gen.GetOrderNonCashSettlementParams{MerchantID: mid.UUID(), OrderID: orderID})
+	nonCash, err := q.GetInvoiceNonCashSettlement(ctx, gen.GetInvoiceNonCashSettlementParams{MerchantID: mid.UUID(), InvoiceID: invoiceID})
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 	for i, l := range lines {
 		ids[i] = l.ID
 	}
-	scheduled, err := q.ListScheduledOrderLines(ctx, gen.ListScheduledOrderLinesParams{MerchantID: mid.UUID(), OrderLineIds: ids})
+	scheduled, err := q.ListScheduledInvoiceLines(ctx, gen.ListScheduledInvoiceLinesParams{MerchantID: mid.UUID(), InvoiceLineIds: ids})
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 	for i, p := range receipts {
 		payments[i] = p.ID.String()
 	}
-	earlier, err := q.ListOrderApplications(ctx, gen.ListOrderApplicationsParams{MerchantID: mid.UUID(), PaymentIds: payments, OrderID: orderID.String()})
+	earlier, err := q.ListInvoiceApplications(ctx, gen.ListInvoiceApplicationsParams{MerchantID: mid.UUID(), PaymentIds: payments, InvoiceID: invoiceID.String()})
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		}
 		paid[i], before[i] = p.Amount, pb.used()
 	}
-	a := allocateRest(amounts, done, paid, before, nonCash, applied["order:"+orderID.String()])
+	a := allocateRest(amounts, done, paid, before, nonCash, applied["order:"+invoiceID.String()])
 	// The bill is paid when the last money it took arrived, and applied when
 	// it completed, whichever is first.
 	var last time.Time
@@ -137,7 +137,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 			last = p.PurchasedAt
 		}
 	}
-	at := *order.CompletedAt
+	at := *invoice.CompletedAt
 	if !last.IsZero() && last.Before(at) {
 		at = last
 	}
@@ -158,13 +158,13 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		if funded <= 0 {
 			continue
 		}
-		plan, ready, err := planLine(ctx, q, order, line, services, at)
+		plan, ready, err := planLine(ctx, q, invoice, line, services, at)
 		if err != nil {
-			return fmt.Errorf("books: order line %s: %w", line.ID, err)
+			return fmt.Errorf("books: invoice line %s: %w", line.ID, err)
 		}
 		if !ready {
 			if final {
-				if err := unappliedLine(ctx, q, order, line); err != nil {
+				if err := unappliedLine(ctx, q, invoice, line); err != nil {
 					return err
 				}
 			}
@@ -175,7 +175,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 				return err
 			}
 		}
-		params, steps := newSchedule(order, line, plan, uuidutil.NewV7(), order.Currency, funded, at, loc)
+		params, steps := newSchedule(invoice, line, plan, uuidutil.NewV7(), invoice.Currency, funded, at, loc)
 		row, err := q.CreateRevenueSchedule(ctx, params)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
@@ -189,7 +189,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 		schedules = append(schedules, made{index: i, row: row, steps: steps})
 	}
 	if unbooked > 0 {
-		if err := unbookedAdjustment(ctx, q, order, unbooked); err != nil {
+		if err := unbookedAdjustment(ctx, q, invoice, unbooked); err != nil {
 			return err
 		}
 	}
@@ -219,7 +219,7 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 	}
 	for _, m := range schedules {
 		if amount := a.nonCash[m.index]; amount > 0 {
-			if err := b.fund(ctx, m.row, Ref{Type: RevenueAdjustments}, RevenueAdjusted, Coord{Operation: OpApplication, Source: "order", SourceID: order.ID.String()}, amount, at); err != nil {
+			if err := b.fund(ctx, m.row, Ref{Type: RevenueAdjustments}, RevenueAdjusted, Coord{Operation: OpApplication, Source: "order", SourceID: invoice.ID.String()}, amount, at); err != nil {
 				return err
 			}
 		}
@@ -232,14 +232,14 @@ func apply(ctx context.Context, d *db.DB, orderID uuid.UUID, services map[uuid.U
 	return nil
 }
 
-// applyUnitOrder schedules the revenue of an order priced in a merchant's own
+// applyUnitInvoice schedules the revenue of an invoice priced in a merchant's own
 // unit, which the customer's balance paid: each line's spends released its
 // lots' money into deferred_revenue, in each lot's paid currency, naming the
 // schedule CreditLineSchedule(line, currency). One schedule per currency
 // recognises it over the line's service, funded with exactly what the spends
-// released; the units book's spends were the order's payment.
-func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.BillingOrder, services map[uuid.UUID]Service, final bool) error {
-	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: order.MerchantID, OrderIds: []uuid.UUID{order.ID}})
+// released; the units book's spends were the invoice's payment.
+func applyUnitInvoice(ctx context.Context, d *db.DB, q *gen.Queries, invoice gen.BillingInvoice, services map[uuid.UUID]Service, final bool) error {
+	lines, err := q.ListInvoiceLines(ctx, gen.ListInvoiceLinesParams{MerchantID: invoice.MerchantID, InvoiceIds: []uuid.UUID{invoice.ID}})
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,7 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 	for i, l := range lines {
 		ids[i] = l.ID.String()
 	}
-	released, err := q.ListCreditLineReleases(ctx, gen.ListCreditLineReleasesParams{MerchantID: order.MerchantID, OrderLineIds: ids})
+	released, err := q.ListCreditLineReleases(ctx, gen.ListCreditLineReleasesParams{MerchantID: invoice.MerchantID, InvoiceLineIds: ids})
 	if err != nil {
 		return err
 	}
@@ -255,7 +255,7 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 	for i, r := range released {
 		schedules[i] = r.RevenueScheduleID
 	}
-	money, err := q.ListScheduleLotMoney(ctx, gen.ListScheduleLotMoneyParams{MerchantID: order.MerchantID, RevenueScheduleIds: schedules, OrderLineIds: ids})
+	money, err := q.ListScheduleLotMoney(ctx, gen.ListScheduleLotMoneyParams{MerchantID: invoice.MerchantID, RevenueScheduleIds: schedules, InvoiceLineIds: ids})
 	if err != nil {
 		return err
 	}
@@ -263,28 +263,28 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 	for _, m := range money {
 		held[m.RevenueScheduleID] = m.Held
 	}
-	at := order.CompletedAt.UTC().Truncate(time.Microsecond)
-	b := New(q, order.MerchantID)
+	at := invoice.CompletedAt.UTC().Truncate(time.Microsecond)
+	b := New(q, invoice.MerchantID)
 	var loc *time.Location
 	for _, line := range lines {
 		for _, r := range released {
-			if r.OrderLineID != line.ID || r.Amount <= 0 {
+			if r.InvoiceLineID != line.ID || r.Amount <= 0 {
 				continue
 			}
 			if r.RevenueScheduleID != CreditLineSchedule(line.ID, r.Currency) {
-				return fmt.Errorf("books: order line %s released %s under schedule %s", line.ID, r.Currency, r.RevenueScheduleID)
+				return fmt.Errorf("books: invoice line %s released %s under schedule %s", line.ID, r.Currency, r.RevenueScheduleID)
 			}
 			// Money its reversals took all of back has nothing to schedule.
 			if held[r.RevenueScheduleID] <= 0 {
 				continue
 			}
-			plan, ready, err := planLine(ctx, q, order, line, services, at)
+			plan, ready, err := planLine(ctx, q, invoice, line, services, at)
 			if err != nil {
-				return fmt.Errorf("books: order line %s: %w", line.ID, err)
+				return fmt.Errorf("books: invoice line %s: %w", line.ID, err)
 			}
 			if !ready {
 				if final {
-					if err := unappliedLine(ctx, q, order, line); err != nil {
+					if err := unappliedLine(ctx, q, invoice, line); err != nil {
 						return err
 					}
 				}
@@ -295,7 +295,7 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 					return err
 				}
 			}
-			params, steps := newSchedule(order, line, plan, r.RevenueScheduleID, r.Currency, held[r.RevenueScheduleID], at, loc)
+			params, steps := newSchedule(invoice, line, plan, r.RevenueScheduleID, r.Currency, held[r.RevenueScheduleID], at, loc)
 			row, err := q.CreateRevenueSchedule(ctx, params)
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Money released into it since it was made adds to its funding.
@@ -312,7 +312,7 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 			if err != nil {
 				return err
 			}
-			if _, err := q.ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: order.MerchantID, FindingType: findingUnappliedLine, SubjectKey: "order_line:" + line.ID.String()}); err != nil {
+			if _, err := q.ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: invoice.MerchantID, FindingType: findingUnappliedLine, SubjectKey: "order_line:" + line.ID.String()}); err != nil {
 				return err
 			}
 			if err := b.recognize(ctx, row, steps); err != nil {
@@ -326,7 +326,7 @@ func applyUnitOrder(ctx context.Context, d *db.DB, q *gen.Queries, order gen.Bil
 // pendingTax is a provider's positive adjustment line: its tax, discounts and
 // shipping beyond the catalog lines. It is no revenue, and the tax in it is
 // not yet told apart.
-func pendingTax(l gen.BillingOrderLine) bool {
+func pendingTax(l gen.BillingInvoiceLine) bool {
 	return l.Amount > 0 && l.Source != nil && *l.Source == "provider_adjustment"
 }
 
@@ -337,13 +337,13 @@ const (
 
 // unappliedLine records a paid timed line whose access was never granted: its
 // money stays unapplied, with no service to recognise over.
-func unappliedLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, line gen.BillingOrderLine) error {
-	evidence, err := json.Marshal(map[string]any{"order_id": order.ID.String(), "order_line_id": line.ID.String(), "currency": order.Currency, "amount": strconv.FormatInt(line.Amount, 10)})
+func unappliedLine(ctx context.Context, q *gen.Queries, invoice gen.BillingInvoice, line gen.BillingInvoiceLine) error {
+	evidence, err := json.Marshal(map[string]any{"invoice_id": invoice.ID.String(), "invoice_line_id": line.ID.String(), "currency": invoice.Currency, "amount": strconv.FormatInt(line.Amount, 10)})
 	if err != nil {
 		return err
 	}
-	action := "The line's timed access was never granted, so its money stays in unapplied_cash: grant the access and apply the order again, or refund it."
-	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: order.MerchantID, FindingType: findingUnappliedLine,
+	action := "The line's timed access was never granted, so its money stays in unapplied_cash: grant the access and apply the invoice again, or refund it."
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: invoice.MerchantID, FindingType: findingUnappliedLine,
 		SubjectKey: "order_line:" + line.ID.String(), Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
 	return err
 }
@@ -351,18 +351,18 @@ func unappliedLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, 
 // unbookedAdjustment records that money a provider billed beyond the catalog
 // lines stays unapplied until its tax is booked: raised once, so a later
 // application never reopens one a person settled.
-func unbookedAdjustment(ctx context.Context, q *gen.Queries, order gen.BillingOrder, amount int64) error {
-	subject := "order:" + order.ID.String()
-	_, err := q.GetPSPFindingByIdentity(ctx, gen.GetPSPFindingByIdentityParams{MerchantID: order.MerchantID, FindingType: findingUnappliedAdjustment, SubjectKey: subject})
+func unbookedAdjustment(ctx context.Context, q *gen.Queries, invoice gen.BillingInvoice, amount int64) error {
+	subject := "order:" + invoice.ID.String()
+	_, err := q.GetPSPFindingByIdentity(ctx, gen.GetPSPFindingByIdentityParams{MerchantID: invoice.MerchantID, FindingType: findingUnappliedAdjustment, SubjectKey: subject})
 	if err == nil || !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	evidence, err := json.Marshal(map[string]any{"order_id": order.ID.String(), "currency": order.Currency, "amount": strconv.FormatInt(amount, 10)})
+	evidence, err := json.Marshal(map[string]any{"invoice_id": invoice.ID.String(), "currency": invoice.Currency, "amount": strconv.FormatInt(amount, 10)})
 	if err != nil {
 		return err
 	}
-	action := "The provider billed tax, discounts or shipping beyond the order's catalog lines; that money stays in unapplied_cash until its tax is booked."
-	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: order.MerchantID, FindingType: findingUnappliedAdjustment,
+	action := "The provider billed tax, discounts or shipping beyond the invoice's catalog lines; that money stays in unapplied_cash until its tax is booked."
+	_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: invoice.MerchantID, FindingType: findingUnappliedAdjustment,
 		SubjectKey: subject, Severity: "medium", Status: "requires_review", RecommendedAction: &action, Evidence: evidence})
 	return err
 }
@@ -371,7 +371,7 @@ func unbookedAdjustment(ctx context.Context, q *gen.Queries, order gen.BillingOr
 func (b *Books) fund(ctx context.Context, row gen.BillingRevenueSchedule, debit Ref, typ TransferType, coord Coord, amount int64, at time.Time) error {
 	_, _, err := b.Post(ctx, Posting{
 		Debit: debit, Credit: Ref{Type: DeferredRevenue}, Amount: amount, Currency: row.Currency, Type: typ, Coord: coord, EffectiveAt: at,
-		Customer: &row.CustomerID, Order: &row.OrderID, OrderLine: &row.OrderLineID, Product: row.ProductID, RevenueSchedule: &row.ID,
+		Customer: &row.CustomerID, Invoice: &row.InvoiceID, InvoiceLine: &row.InvoiceLineID, Product: row.ProductID, RevenueSchedule: &row.ID,
 	})
 	return err
 }
@@ -392,7 +392,7 @@ func (b *Books) recognize(ctx context.Context, row gen.BillingRevenueSchedule, s
 		}
 		_, applied, err := b.Post(ctx, Posting{
 			Debit: debit, Credit: credit, Amount: st.amount, Currency: row.Currency, Type: RevenueRecognized, Coord: coord,
-			EffectiveAt: st.dated, Customer: &row.CustomerID, Order: &row.OrderID, OrderLine: &row.OrderLineID, Product: row.ProductID, RevenueSchedule: &row.ID,
+			EffectiveAt: st.dated, Customer: &row.CustomerID, Invoice: &row.InvoiceID, InvoiceLine: &row.InvoiceLineID, Product: row.ProductID, RevenueSchedule: &row.ID,
 		})
 		if err != nil {
 			return err
@@ -474,7 +474,7 @@ func sum(parts []int64) int64 {
 }
 
 // creditLine reports a line that buys credit: its money is its credit lot's.
-func creditLine(ctx context.Context, q *gen.Queries, line gen.BillingOrderLine) (bool, error) {
+func creditLine(ctx context.Context, q *gen.Queries, line gen.BillingInvoiceLine) (bool, error) {
 	if granted(line.CreditGrant) {
 		return true, nil
 	}
@@ -493,12 +493,12 @@ func granted(raw []byte) bool { return len(raw) > 0 && string(raw) != "null" }
 // linePlan is how a line's revenue is recognised.
 // newSchedule is a line's schedule in currency as its application makes it,
 // funded with funded and recognised to at, and the recognition that
-// application posts: one builder for a bill's lines and a unit order's.
-func newSchedule(order gen.BillingOrder, line gen.BillingOrderLine, plan linePlan, id uuid.UUID, currency string, funded int64, at time.Time, loc *time.Location) (gen.CreateRevenueScheduleParams, []recognition) {
+// application posts: one builder for a bill's lines and a unit invoice's.
+func newSchedule(invoice gen.BillingInvoice, line gen.BillingInvoiceLine, plan linePlan, id uuid.UUID, currency string, funded int64, at time.Time, loc *time.Location) (gen.CreateRevenueScheduleParams, []recognition) {
 	s := schedule{service: plan.service, funded: funded, through: plan.service.Starts, ended: plan.ended}
 	steps, next := s.catchUp(at, loc)
 	params := gen.CreateRevenueScheduleParams{
-		MerchantID: order.MerchantID, ID: id, CustomerID: order.CustomerID, Currency: currency, OrderID: order.ID, OrderLineID: line.ID,
+		MerchantID: invoice.MerchantID, ID: id, CustomerID: invoice.CustomerID, Currency: currency, InvoiceID: invoice.ID, InvoiceLineID: line.ID,
 		SubscriptionID: plan.subscription, ProductAccessID: plan.access, ProductID: line.ProductID, PriceID: line.PriceID,
 		Method: string(plan.method), RevenueAccount: string(plan.account), Funded: s.funded, RecognizedNet: s.recognized,
 		ServiceStartsAt: plan.service.Starts, ServiceEndsAt: plan.service.Ends, EndedAt: s.ended, RecognizedThroughAt: s.through, NextRecognitionAt: next,
@@ -526,13 +526,13 @@ type linePlan struct {
 // once (one-time revenue, point in time). ready is false for timed access not
 // yet granted. An end already reached (a subscription's, revoked access)
 // carries over.
-func planLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, line gen.BillingOrderLine, services map[uuid.UUID]Service, at time.Time) (p linePlan, ready bool, err error) {
+func planLine(ctx context.Context, q *gen.Queries, invoice gen.BillingInvoice, line gen.BillingInvoiceLine, services map[uuid.UUID]Service, at time.Time) (p linePlan, ready bool, err error) {
 	p = linePlan{method: Ratable, account: OneTimeRevenue}
 	switch {
-	case line.BillingIntervalHours != nil || line.BillingIntervalMonths != nil || order.PeriodStartsAt != nil:
+	case line.BillingIntervalHours != nil || line.BillingIntervalMonths != nil || invoice.PeriodStartsAt != nil:
 		p.account, p.subscription = SubscriptionRevenue, line.SubscriptionID
 		if p.subscription == nil {
-			p.subscription = order.SubscriptionID
+			p.subscription = invoice.SubscriptionID
 		}
 		months := 0
 		if line.BillingIntervalMonths != nil {
@@ -541,12 +541,12 @@ func planLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, line 
 		switch svc, known := services[line.ID]; {
 		case known:
 			p.service = svc
-		case order.PeriodStartsAt != nil && order.PeriodEndsAt != nil:
-			p.service = Service{Starts: *order.PeriodStartsAt, Ends: *order.PeriodEndsAt, Months: months}
+		case invoice.PeriodStartsAt != nil && invoice.PeriodEndsAt != nil:
+			p.service = Service{Starts: *invoice.PeriodStartsAt, Ends: *invoice.PeriodEndsAt, Months: months}
 		case months > 0:
-			p.service = Service{Starts: *order.CompletedAt, Ends: calendarutil.AddMonths(*order.CompletedAt, months), Months: months}
+			p.service = Service{Starts: *invoice.CompletedAt, Ends: calendarutil.AddMonths(*invoice.CompletedAt, months), Months: months}
 		case line.BillingIntervalHours != nil:
-			p.service = Service{Starts: *order.CompletedAt, Ends: order.CompletedAt.Add(time.Duration(*line.BillingIntervalHours) * time.Hour)}
+			p.service = Service{Starts: *invoice.CompletedAt, Ends: invoice.CompletedAt.Add(time.Duration(*line.BillingIntervalHours) * time.Hour)}
 		}
 		p.service = p.service.calendar()
 		// An end before the schedule existed (a charge after cancellation, a
@@ -554,7 +554,7 @@ func planLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, line 
 		// trigger, and an undone one is taken back. A replaced subscription
 		// (an upgrade) keeps its periods running.
 		if p.subscription != nil {
-			sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: order.MerchantID, ID: *p.subscription})
+			sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: invoice.MerchantID, ID: *p.subscription})
 			switch {
 			case err == nil && sub.EndedAt != nil && (sub.CancelType == nil || *sub.CancelType != "upgrade"):
 				p.ended = sub.EndedAt
@@ -566,9 +566,9 @@ func planLine(ctx context.Context, q *gen.Queries, order gen.BillingOrder, line 
 		var access gen.BillingProductAccess
 		switch {
 		case line.ProductAccessID != nil:
-			access, err = q.GetProductAccessByID(ctx, gen.GetProductAccessByIDParams{MerchantID: order.MerchantID, ID: *line.ProductAccessID})
-		case order.PaymentID != nil && line.ProductID != nil:
-			access, err = q.GetPurchaseAccessByPayment(ctx, gen.GetPurchaseAccessByPaymentParams{MerchantID: order.MerchantID, PaymentID: *order.PaymentID, ProductID: *line.ProductID})
+			access, err = q.GetProductAccessByID(ctx, gen.GetProductAccessByIDParams{MerchantID: invoice.MerchantID, ID: *line.ProductAccessID})
+		case invoice.PaymentID != nil && line.ProductID != nil:
+			access, err = q.GetPurchaseAccessByPayment(ctx, gen.GetPurchaseAccessByPaymentParams{MerchantID: invoice.MerchantID, PaymentID: *invoice.PaymentID, ProductID: *line.ProductID})
 		default:
 			return p, false, nil
 		}

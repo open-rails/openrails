@@ -244,7 +244,7 @@ func TestPublicSDK(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		// A malformed query value is refused before any handler, the same way
 		// on every route.
-		for _, path := range []string{"/v1/admin/orders?overdue=maybe", "/v1/admin/payment-attempts?since=yesterday", "/v1/admin/orders?ids=ord_nonsense"} {
+		for _, path := range []string{"/v1/admin/invoices?overdue=maybe", "/v1/admin/payment-attempts?since=yesterday", "/v1/admin/invoices?ids=in_nonsense"} {
 			status, raw := a.request(t, http.MethodGet, path, a.alphaKey.Secret, nil)
 			require.Equal(t, http.StatusBadRequest, status, path+": "+string(raw))
 			require.Contains(t, string(raw), `"code":"invalid_query"`, path)
@@ -257,7 +257,7 @@ func TestPublicSDK(t *testing.T) {
 			require.ErrorAs(t, err, &refused)
 			require.Equal(t, billing.CodeInvalidParam, refused.Code)
 			// No URL carries an empty path segment: refused before any I/O.
-			_, err = client.GetOrder(t.Context(), billing.OrderID{})
+			_, err = client.GetInvoice(t.Context(), billing.InvoiceID{})
 			require.ErrorIs(t, err, billing.ErrInvalid)
 		}
 		require.Empty(t, p.effects(t))
@@ -276,7 +276,7 @@ func TestPublicSDK(t *testing.T) {
 		defer remote.Close(context.Background())
 		client, err := remote.Merchant(a.alpha.MerchantID())
 		require.NoError(t, err)
-		_, err = client.ListOrders(t.Context(), billing.OrderListParams{})
+		_, err = client.ListInvoices(t.Context(), billing.InvoiceListParams{})
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.ErrorIs(t, err, billing.ErrUnreachable)
 		select {
@@ -286,14 +286,14 @@ func TestPublicSDK(t *testing.T) {
 		}
 		require.Empty(t, p.effects(t))
 	})
-	t.Run("OR-J04-S04/expired-token-retry-commits-only-one-order", func(t *testing.T) {
+	t.Run("OR-J04-S04/expired-token-retry-commits-only-one-invoice", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		publicBrowser(t, a, p, "OR-UI-05")
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{})
 		require.NoError(t, err)
-		require.Len(t, orders.Items, 1)
-		require.EqualValues(t, 19_980_000, orders.Items[0].Total)
-		require.Equal(t, billing.OrderOpen, orders.Items[0].Status)
+		require.Len(t, invoices.Items, 1)
+		require.EqualValues(t, 19_980_000, invoices.Items[0].Total)
+		require.Equal(t, billing.InvoiceOpen, invoices.Items[0].Status)
 		require.Empty(t, p.effects(t))
 	})
 }

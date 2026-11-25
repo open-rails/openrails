@@ -1,6 +1,6 @@
 # Refunds and disputes
 
-This system reverses charges: a staff refund OpenRails sends to the provider, a refund made at the provider, a chargeback, and a won dispute that returns the money. Each reversal is a `payments` row linked to its charge, and posts to the [books](books.md): the general ledger and, for a payment that bought credit, its share to the units book. It also records external payments: money a merchant received outside OpenRails, booked against an order with no provider call.
+This system reverses charges: a staff refund OpenRails sends to the provider, a refund made at the provider, a chargeback, and a won dispute that returns the money. Each reversal is a `payments` row linked to its charge, and posts to the [books](books.md): the general ledger and, for a payment that bought credit, its share to the units book. It also records external payments: money a merchant received outside OpenRails, booked against an invoice with no provider call.
 
 ## Concepts
 
@@ -14,8 +14,8 @@ This system reverses charges: a staff refund OpenRails sends to the provider, a 
 - **Refund intent**: a `provider_intents` row of type `nmi_refund` or
   `stripe_refund` carrying `intents.RefundPayload`, keyed by
   `intents.RefundIdempotencyKey`.
-- **Refundable** (`PaymentService.ValidateRefund`): a succeeded charge with `money_movement = 'rail'` whose non-failed reversals plus this amount stay within it. A usage order's payment (`ledger_transfer_id`) is refundable and can be charged back: a refund leaves its owed settled, a chargeback owes it again (`owed.SyncUsageReversals`, [books](books.md)).
-- **Credit line**: the order line that bought a credit lot; reversals return its money first ([credits](credits.md)).
+- **Refundable** (`PaymentService.ValidateRefund`): a succeeded charge with `money_movement = 'rail'` whose non-failed reversals plus this amount stay within it. A usage invoice's payment (`ledger_transfer_id`) is refundable and can be charged back: a refund leaves its owed settled, a chargeback owes it again (`owed.SyncUsageReversals`, [books](books.md)).
+- **Credit line**: the invoice line that bought a credit lot; reversals return its money first ([credits](credits.md)).
 - **External payment**: a `payments` row with `channel = 'manual'`.
 - **Dispute**: a `disputes` row per provider case (`disputes.Service.Record`):
   `kind` `inquiry` (nothing withdrawn), `chargeback`, or `prevented` (an RDR
@@ -73,8 +73,8 @@ A retry with the same key reuses the reservation and intent
 
 System refunds use the same reservation and intents with `OriginSystem`
 (`queueFullRefund`): a renewal charged after cancellation
-(`queueChargeAfterCancelRefund`) and an order paid after it closed
-(`RefundLateOrderPayment`).
+(`queueChargeAfterCancelRefund`) and an invoice paid after it closed
+(`RefundLateInvoicePayment`).
 
 ### Provider-side reversals
 
@@ -85,14 +85,14 @@ System refunds use the same reservation and intents with `OriginSystem`
   id with the same facts and refuses one with other facts, defers while an
   OpenRails refund of the payment is pending (`ErrRefundReservationPending`), and
   applies the merchant's `provider_refund_access` (`ApplyRefundAccessPolicy`).
-- Disputes come from Stripe's `charge.dispute.*` events (classified by status and card `case_type`, `disputerules.StripeKind`), the reconcile pull's `/v1/disputes` read (`reconcile.DisputeRecorder`), NMI chargeback batches (every entry, matched or not) and CCBill `Chargeback` notices. Each is recorded; a case is acted on by the kind its notice reports. A chargeback (`ReversalChargeback`) records the reversal on whichever notice says so first, cancels the subscription (`CancelTypeChargeback`) or ends a one-off purchase's access; its response blocks the card the charge was taken from (`payments.payment_method_id`, `disputes.Service.BlockCard`): the method is `disputed` and its mandates end (`disputed`). A charge names its card when OpenRails charged a saved one, when a Stripe Billing invoice's charge names a saved payment method, and when an NMI schedule's sale names the vault of the customer's one card in it; one that names none blocks none, and the customer review says so. An inquiry, a status Stripe had not reported before (`unknown`) and a CE 3.0 block book nothing; an RDR resolution books one refund (`dispute_prevention`), whichever of it and Stripe's refund arrives first: a Stripe refund of the whole charge made no earlier than five minutes before the case, which OpenRails did not ask for, is absorbed, its id recorded on the case (`absorbed_refund_ref`), each refund by one case. Stripe's order of the two is unconfirmed. A won, lost or closed case stays so against a later notice from before the decision, and a chargeback or a prevented case keeps its kind against a stale notice. A reversal it cannot book (no matching charge, more than remains) raises `consistency.ledger.unbooked`; access still ends. A dispute or fraud report on a charge OpenRails has no record of raises `life.disputes.unknown_charge` and is answered.
+- Disputes come from Stripe's `charge.dispute.*` events (classified by status and card `case_type`, `disputerules.StripeKind`), the reconcile pull's `/v1/disputes` read (`reconcile.DisputeRecorder`), NMI chargeback batches (every entry, matched or not) and CCBill `Chargeback` notices. Each is recorded; a case is acted on by the kind its notice reports. A chargeback (`ReversalChargeback`) records the reversal on whichever notice says so first, cancels the subscription (`CancelTypeChargeback`) or ends a one-off purchase's access; its response blocks the card the charge was taken from (`payments.payment_method_id`, `disputes.Service.BlockCard`): the method is `disputed` and its mandates end (`disputed`). A charge names its card when OpenRails charged a saved one, when a Stripe Billing invoice's charge names a saved payment method, and when an NMI schedule's sale names the vault of the customer's one card in it; one that names none blocks none, and the customer review says so. An inquiry, a status Stripe had not reported before (`unknown`) and a CE 3.0 block book nothing; an RDR resolution books one refund (`dispute_prevention`), whichever of it and Stripe's refund arrives first: a Stripe refund of the whole charge made no earlier than five minutes before the case, which OpenRails did not ask for, is absorbed, its id recorded on the case (`absorbed_refund_ref`), each refund by one case. Stripe's invoice of the two is unconfirmed. A won, lost or closed case stays so against a later notice from before the decision, and a chargeback or a prevented case keeps its kind against a stale notice. A reversal it cannot book (no matching charge, more than remains) raises `consistency.ledger.unbooked`; access still ends. A dispute or fraud report on a charge OpenRails has no record of raises `life.disputes.unknown_charge` and is answered.
 - A won Stripe dispute (`handleStripeDisputeWon`) records a positive
   `dispute_reversal` whose `metadata.reverses_payment_id` names the chargeback,
   and reactivates a provider-managed subscription this dispute canceled. The
   dispute's `won` status is final against later notices. An engine-collected
   subscription stays canceled, and a one-off purchase's access is not restored;
   it is only logged for review.
-- A Stripe early fraud warning (`handleEarlyFraudWarning`) is recorded once, from whichever event reports it, and stays actionable only while every event says so. An actionable one received while `fraud_warning_refund` is `refund` is `pending` and queues `openrails.dispute_response`, which refunds its charge in full (`intents.QueueFraudWarningRefund`, `fraud_warning`, sent to Stripe as `fraudulent`), ends what it paid for and blocks its card, unless an open dispute (or an unbooked chargeback) decides the charge, checked under the report's lock. A charge no refund can reach (nothing left, no money moved at the rail, a usage order's settlement, credits bought and spent, no provider target) is `nothing_to_refund` and still ended. A report received while the merchant recorded reports only stays recorded when the setting changes.
+- A Stripe early fraud warning (`handleEarlyFraudWarning`) is recorded once, from whichever event reports it, and stays actionable only while every event says so. An actionable one received while `fraud_warning_refund` is `refund` is `pending` and queues `openrails.dispute_response`, which refunds its charge in full (`intents.QueueFraudWarningRefund`, `fraud_warning`, sent to Stripe as `fraudulent`), ends what it paid for and blocks its card, unless an open dispute (or an unbooked chargeback) decides the charge, checked under the report's lock. A charge no refund can reach (nothing left, no money moved at the rail, a usage invoice's settlement, credits bought and spent, no provider target) is `nothing_to_refund` and still ended. A report received while the merchant recorded reports only stays recorded when the setting changes.
 - `openrails.dispute_response` also answers each chargeback: it blocks the card. Both then cancel at period end the customer's other provider-billed subscriptions on the card. Each step runs in one transaction as an autonomous `dispute_response` command (`destructive.Admissions.AdmitAutonomous`; the block is `block_payment_method`), keyed on its case and step, under a `full` write posture and an allowance of its own (`dispute:<merchant>`, apart from the merchant's other autonomous work); a case a reconcile pull found waits for the merchant to be armed or a provider's notice of it. The refund, the end and the block are protective and do not wait for the merchant's destructive arming; the period-end cancels are destructive and do. A failed wake is retried with backoff, and an unreadable posture is retried as an error, not waited on. A held response raises `life.disputes.response_waiting` (high, alerting once) and ends; a change of the merchant's writes or destructive arming, the book identity or a cleared hold notifies `openrails_dispute_responses`, and `disputes.Service.Run` queues every waiting response again, as on every start.
 
 ### General ledger
@@ -110,9 +110,9 @@ then recoveries, until none posts.
 ### External payments
 
 `POST /v1/admin/payments` records money received outside OpenRails for one
-engine-collected order: up to what a usage order owes (`RecordUsageRemittance`,
-an `owed_payment` at `manual_invoice_payment`), or exactly another order's total
-(`orders.Service.RecordRemittance`). `transaction_id` is its identity
+engine-collected invoice: up to what a usage invoice owes (`RecordUsageRemittance`,
+an `owed_payment` at `manual_invoice_payment`), or exactly another invoice's total
+(`invoices.Service.RecordRemittance`). `transaction_id` is its identity
 (`payments_channel_transaction_id_key`). Its `money_movement` is `none`, so it is
 never refundable through OpenRails.
 
@@ -127,7 +127,7 @@ never refundable through OpenRails.
 - Error codes: `idempotency_key_required`, `idempotency_key_reused`,
   `invalid_param`, `payment_not_found`, `payment_not_refundable`,
   `refund_unsupported`, `refund_rail_unavailable`, `refund_failed`,
-  `payment_exceeds_due`, `order_not_payable`, `order_has_recurring_line`.
+  `payment_exceeds_due`, `invoice_not_payable`, `invoice_has_recurring_line`.
 - Merchant settings: `provider_refund_access` (`revoke_on_full`, `revoke_on_any`,
   `keep`), `fraud_warning_refund` (`refund`, `record`); PSP setting
   `dispute_ratio_limit`. Events: none of its own; `payment.settled` fires only for charges.
@@ -255,7 +255,7 @@ Checks:
 - J21: OR-J21-S01 to S03 external payments (`TestExternalPayments`); OR-J21-S04
   imported refund allowance (`TestImportedReceipt`).
 - J46 (`TestDisputes`): OR-J46-S01 a chargeback; S02 an inquiry, its escalation and the reconcile pull; S03 RDR and CE 3.0; S04 won and lost disputes stay decided; S06 CCBill; S07 early fraud warnings; S08 the monitor's findings, alerts and resolution; S09 Mastercard's previous-month basis; S10 the levels in force; S11 the blocked card; S05 an NMI batch; S12 the dispute metrics; S13 the rollup across a restore; S14 refund reasons; S15 only the charged card is blocked; S16 reports on unknown charges.
-- Credit-line reversals (`TestMixedOrderCreditRefunds`): OR-J22-S07 (a pending
+- Credit-line reversals (`TestMixedInvoiceCreditRefunds`): OR-J22-S07 (a pending
   refund holds the lot), S08 (refunds, chargeback, won dispute), S09 (dispute credit).
 - OR-J27-S04: a staff refund's `revoke_access`, and a full revoking refund ends
   the membership; OR-J27-S07 repair after a chargeback; OR-J38-S37 (CCBill

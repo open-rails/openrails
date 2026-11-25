@@ -24,7 +24,7 @@ func (e *CardAttemptsBlockedError) Error() string {
 }
 
 // SetCardFailureLedger arms card-testing blocks on every purchase path.
-func (s *OrderAttemptService) SetCardFailureLedger(l *abuse.FailureLedger) {
+func (s *InvoiceAttemptService) SetCardFailureLedger(l *abuse.FailureLedger) {
 	if s != nil {
 		s.cardFailures = l
 	}
@@ -32,7 +32,7 @@ func (s *OrderAttemptService) SetCardFailureLedger(l *abuse.FailureLedger) {
 
 // GuardCardAttempt refuses a card attempt while the customer or their client
 // address is blocked by the card-testing ledger.
-func (s *OrderAttemptService) GuardCardAttempt(ctx context.Context, user *UserIdentity) error {
+func (s *InvoiceAttemptService) GuardCardAttempt(ctx context.Context, user *UserIdentity) error {
 	if s == nil || s.cardFailures == nil || user == nil {
 		return nil
 	}
@@ -48,7 +48,7 @@ func (s *OrderAttemptService) GuardCardAttempt(ctx context.Context, user *UserId
 
 // NoteCardAttempt counts a declined card against the customer, their client
 // address and the merchant.
-func (s *OrderAttemptService) NoteCardAttempt(ctx context.Context, user *UserIdentity) {
+func (s *InvoiceAttemptService) NoteCardAttempt(ctx context.Context, user *UserIdentity) {
 	if s == nil || s.cardFailures == nil || user == nil {
 		return
 	}
@@ -68,10 +68,10 @@ func cardAttemptFailed(err error) bool {
 	return false
 }
 
-// paymentPage reports an order page of the payment page (/pay/...): a
+// paymentPage reports an invoice page of the payment page (/pay/...): a
 // redirect PSP or bank challenge started there comes back inside it, framed
 // or not.
-func (s *OrderAttemptService) paymentPage(raw string) bool {
+func (s *InvoiceAttemptService) paymentPage(raw string) bool {
 	if s.checkoutOrigin == nil {
 		return false
 	}
@@ -82,7 +82,7 @@ func (s *OrderAttemptService) paymentPage(raw string) bool {
 
 // validateReturnURLs refuses redirect targets outside the merchant's return
 // origins and the payment page.
-func (s *OrderAttemptService) validateReturnURLs(ctx context.Context, urls ...string) error {
+func (s *InvoiceAttemptService) validateReturnURLs(ctx context.Context, urls ...string) error {
 	var allowed []string
 	if s != nil && s.returnOrigins == nil {
 		allowed = config.ReturnOrigins(s.config, "", nil)
@@ -100,7 +100,7 @@ func (s *OrderAttemptService) validateReturnURLs(ctx context.Context, urls ...st
 			continue
 		}
 		if s == nil || !config.ReturnURLAllowed(allowed, raw) && !s.paymentPage(raw) {
-			return fmt.Errorf("%w: return URL origin is not allowed", ErrOrderAttemptValidation)
+			return fmt.Errorf("%w: return URL origin is not allowed", ErrInvoiceAttemptValidation)
 		}
 	}
 	return nil

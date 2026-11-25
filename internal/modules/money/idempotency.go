@@ -42,11 +42,11 @@ const (
 	OpCreditRevoke    = ledger.OpCreditRevoke
 	OpCreditReinstate = ledger.OpCreditReinstate
 
-	OpArrearsAccrual     = ledger.OpArrearsAccrual
-	OpUsagePosting       = ledger.OpUsagePosting
-	OpOrderPayment       = ledger.OpOrderPayment
-	OpManualOrderPayment = ledger.OpManualOrderPayment
-	OpOrderVoid          = ledger.OpOrderVoid
+	OpArrearsAccrual       = ledger.OpArrearsAccrual
+	OpUsagePosting         = ledger.OpUsagePosting
+	OpInvoicePayment       = ledger.OpInvoicePayment
+	OpManualInvoicePayment = ledger.OpManualInvoicePayment
+	OpInvoiceVoid          = ledger.OpInvoiceVoid
 )
 
 // UsageOperation is the operation kind of a charged failure (usage:<event_type>).

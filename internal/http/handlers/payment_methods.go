@@ -268,13 +268,13 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 			custodianKind = custodian.Kind
 		}
 		if custodianKind == models.CustodianHyperSwitch {
-			if r.State.OrderAttemptService == nil {
+			if r.State.InvoiceAttemptService == nil {
 				r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 				return
 			}
 			ctx, cancel := r.Budget(createPaymentMethodTimeout)
 			defer cancel()
-			saved, err := r.State.OrderAttemptService.SaveCustodianCard(ctx, req, r.Header("Idempotency-Key"), user, billingDetailsInput(req.BillingDetails).metadata())
+			saved, err := r.State.InvoiceAttemptService.SaveCustodianCard(ctx, req, r.Header("Idempotency-Key"), user, billingDetailsInput(req.BillingDetails).metadata())
 			writeSavedCard(r, user, http.StatusCreated, saved, err)
 			return
 		}
@@ -405,13 +405,13 @@ func ConfirmPaymentMethod(r *httprequest.Request) {
 		return
 	}
 	if method.Custodian == models.CustodianHyperSwitch {
-		if r.State.OrderAttemptService == nil {
+		if r.State.InvoiceAttemptService == nil {
 			r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 			return
 		}
 		ctx, cancel := r.Budget(createPaymentMethodTimeout)
 		defer cancel()
-		saved, err := r.State.OrderAttemptService.ConfirmCustodianCard(ctx, id.UUID(), user, req.Capture)
+		saved, err := r.State.InvoiceAttemptService.ConfirmCustodianCard(ctx, id.UUID(), user, req.Capture)
 		writeSavedCard(r, user, http.StatusOK, saved, err)
 		return
 	}
@@ -441,16 +441,16 @@ func writeSavedCard(r *httprequest.Request, user *payment.UserIdentity, status i
 	case errors.Is(err, payment.ErrPaymentMethodStale):
 		writePaymentMethodStale(r)
 		return
-	case errors.Is(err, payment.ErrOrderAttemptValidation):
+	case errors.Is(err, payment.ErrInvoiceAttemptValidation):
 		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid card save request").WithParam("psp_id"))
 		return
 	case errors.Is(err, payment.ErrCardCaptureUnavailable):
 		r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 		return
-	case errors.Is(err, payment.ErrOrderAttemptConflict):
+	case errors.Is(err, payment.ErrInvoiceAttemptConflict):
 		r.ErrorCode(billing.CodeResourceConflict, "card save conflicts with its accepted request")
 		return
-	case errors.Is(err, payment.ErrOrderAttemptExpired):
+	case errors.Is(err, payment.ErrInvoiceAttemptExpired):
 		r.ErrorCode(billing.CodePaymentMethodStale, "card save expired")
 		return
 	case err != nil:

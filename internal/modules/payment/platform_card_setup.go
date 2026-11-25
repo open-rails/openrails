@@ -28,7 +28,7 @@ func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.C
 	token := strings.TrimSpace(req.Token)
 	collectedID, err := uuid.Parse(token)
 	if err != nil || collectedID == uuid.Nil || req.Card != nil || req.PSPID.IsZero() {
-		return SavedCard{}, ErrOrderAttemptValidation
+		return SavedCard{}, ErrInvoiceAttemptValidation
 	}
 	token = collectedID.String()
 	mid, err := merchant.Require(ctx)
@@ -62,7 +62,7 @@ func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.C
 		return SavedCard{}, err
 	}
 	if cfg.Custody.Custodian != models.CustodianPlatform && cfg.Custody.Custodian != models.CustodianBasisTheory {
-		return SavedCard{}, ErrOrderAttemptValidation
+		return SavedCard{}, ErrInvoiceAttemptValidation
 	}
 
 	// The token's fixed ID recovers a conversion even after BT's idempotency
@@ -96,7 +96,7 @@ func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.C
 		return SavedCard{}, err
 	}
 	if saved.ID != id.String() || saved.Type != "card" || saved.TenantID != cfg.Custody.AccountID || cfg.Custody.Container != "" && (len(saved.Containers) != 1 || saved.Containers[0] != cfg.Custody.Container) || saved.Metadata["customer_id"] != customer.String() || saved.Metadata["psp_id"] != req.PSPID.String() || saved.Metadata["account_id"] != cfg.Scope.AccountID || saved.Metadata["verification_id"] == "" {
-		return SavedCard{}, ErrOrderAttemptConflict
+		return SavedCard{}, ErrInvoiceAttemptConflict
 	}
 	if saved.Card == nil || saved.Card.Last4 == "" || saved.Card.ExpirationMonth < 1 || saved.Card.ExpirationMonth > 12 || saved.Card.ExpirationYear < 2000 {
 		return SavedCard{}, errors.New("platform vault returned incomplete card details")
@@ -146,7 +146,7 @@ func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.C
 
 func platformSetupResult(row gen.BillingPaymentMethod, customer uuid.UUID) (SavedCard, error) {
 	if row.CustomerID != customer {
-		return SavedCard{}, ErrOrderAttemptConflict
+		return SavedCard{}, ErrInvoiceAttemptConflict
 	}
 	if !paymentmethods.Chargeable(row) {
 		return SavedCard{}, ErrPaymentMethodStale

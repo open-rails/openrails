@@ -189,9 +189,9 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		}
 		var subjects []string
 		if customer {
-			subjects = OrderCaptchaSubjects(ctx)
+			subjects = InvoiceCaptchaSubjects(ctx)
 		}
-		p := subscriptions.ManualRebillPayload{OrderCaptchaSubjects: subjects, Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: instrument, Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.ObligationOrderReference(sub.ID, terms.PeriodStart), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
+		p := subscriptions.ManualRebillPayload{InvoiceCaptchaSubjects: subjects, Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: instrument, Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.ObligationOrderReference(sub.ID, terms.PeriodStart), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
 		policy, err := subscriptions.CasePolicy(ctx, d, sub)
 		if err != nil {
 			return err

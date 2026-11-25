@@ -14,14 +14,14 @@ import (
 
 func validatePriceSelector(id, productKey, key string) error {
 	if (strings.TrimSpace(id) == "") == (strings.TrimSpace(key) == "") {
-		return fmt.Errorf("%w: exactly one of price_id or price_key is required", ErrOrderAttemptValidation)
+		return fmt.Errorf("%w: exactly one of price_id or price_key is required", ErrInvoiceAttemptValidation)
 	}
 	if (strings.TrimSpace(productKey) != "") != (strings.TrimSpace(key) != "") {
-		return fmt.Errorf("%w: product_key and price_key must be supplied together", ErrOrderAttemptValidation)
+		return fmt.Errorf("%w: product_key and price_key must be supplied together", ErrInvoiceAttemptValidation)
 	}
 	if id != "" {
 		if parsed, err := billing.ParsePriceID(id); err != nil || parsed.IsZero() {
-			return fmt.Errorf("%w: price_id must be a valid price ID; use price_key for an opaque key", ErrOrderAttemptValidation)
+			return fmt.Errorf("%w: price_id must be a valid price ID; use price_key for an opaque key", ErrInvoiceAttemptValidation)
 		}
 	}
 	return nil
@@ -46,25 +46,25 @@ func resolvePurchasePrice(ctx context.Context, prices *catalog.PriceService, id,
 // the catalog price. Fixed prices do not accept an amount override.
 func PurchasePriceForAmount(price *models.Price, amount *int64) (*models.Price, error) {
 	if price == nil {
-		return nil, fmt.Errorf("%w: price is required", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: price is required", ErrInvoiceAttemptValidation)
 	}
 	if price.CustomerAmount == nil {
 		if amount != nil {
-			return nil, fmt.Errorf("%w: amount is only allowed for customer_amount prices", ErrOrderAttemptValidation)
+			return nil, fmt.Errorf("%w: amount is only allowed for customer_amount prices", ErrInvoiceAttemptValidation)
 		}
 		return price, nil
 	}
 	if amount == nil {
-		return nil, fmt.Errorf("%w: amount is required for this price", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: amount is required for this price", ErrInvoiceAttemptValidation)
 	}
 	if price.IsRecurring() || price.TrialUnitAmount != nil || price.TrialDurationHours != nil {
-		return nil, fmt.Errorf("%w: customer_amount requires a one-time price without trial terms", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: customer_amount requires a one-time price without trial terms", ErrInvoiceAttemptValidation)
 	}
 	if price.CustomerAmount.MinAmount <= 0 || price.CustomerAmount.MaxAmount < price.CustomerAmount.MinAmount || *amount < price.CustomerAmount.MinAmount || *amount > price.CustomerAmount.MaxAmount {
-		return nil, fmt.Errorf("%w: amount is outside this price's minimum and maximum", ErrOrderAttemptValidation)
+		return nil, fmt.Errorf("%w: amount is outside this price's minimum and maximum", ErrInvoiceAttemptValidation)
 	}
 	if _, err := moneyutil.NativeToRailMinorExact(price.Currency, *amount); err != nil {
-		return nil, fmt.Errorf("%w: amount must use whole currency minor units: %v", ErrOrderAttemptValidation, err)
+		return nil, fmt.Errorf("%w: amount must use whole currency minor units: %v", ErrInvoiceAttemptValidation, err)
 	}
 	selected := *price
 	selected.Amount = *amount

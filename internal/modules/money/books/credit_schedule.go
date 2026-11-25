@@ -13,24 +13,24 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// A lot's spends into an order line priced in its unit fund that line's
+// A lot's spends into an invoice line priced in its unit fund that line's
 // revenue schedules. A reversal of the lot's payment takes the consumed share
 // of its cash from what the lot's money funds, pro rata: each schedule, as a
 // price reduction with catch-up, and usage revenue, as contra. A won dispute
 // brings back, pro rata, what its reversal took.
 
 // scheduleShare is one schedule's part of a lot reversal or recovery, and the
-// order line it schedules: what it moves, and of a recovery the part that
+// invoice line it schedules: what it moves, and of a recovery the part that
 // returns to recognised revenue.
 type scheduleShare struct {
-	id, order, line uuid.UUID
-	amount, contra  int64
+	id, invoice, line uuid.UUID
+	amount, contra    int64
 }
 
-func shareOf(id, order, line *uuid.UUID) scheduleShare {
+func shareOf(id, invoice, line *uuid.UUID) scheduleShare {
 	sh := scheduleShare{id: *id}
-	if order != nil {
-		sh.order = *order
+	if invoice != nil {
+		sh.invoice = *invoice
 	}
 	if line != nil {
 		sh.line = *line
@@ -58,7 +58,7 @@ func (b *Books) lotTakes(ctx context.Context, l CreditLot, cash, consumedUnits, 
 			usage += r.Held
 			continue
 		}
-		shares, weights = append(shares, shareOf(r.RevenueScheduleID, r.OrderID, r.OrderLineID)), append(weights, max(r.Held, 0))
+		shares, weights = append(shares, shareOf(r.RevenueScheduleID, r.InvoiceID, r.InvoiceLineID)), append(weights, max(r.Held, 0))
 	}
 	if len(shares) == 0 {
 		return nil, nil
@@ -95,7 +95,7 @@ func (b *Books) lotRestores(ctx context.Context, l CreditLot, origin uuid.UUID, 
 			other += r.Contra
 			continue
 		}
-		shares = append(shares, shareOf(r.RevenueScheduleID, r.OrderID, r.OrderLineID))
+		shares = append(shares, shareOf(r.RevenueScheduleID, r.InvoiceID, r.InvoiceLineID))
 		weights = append(weights, max(r.Contra, 0)+max(r.Deferred, 0))
 		contras = append(contras, max(r.Contra, 0))
 	}
@@ -148,9 +148,9 @@ func (b *Books) changeSchedule(ctx context.Context, sh scheduleShare, reduce boo
 			coord.Source = legs.deferredSource
 		}
 		p := Posting{Debit: debit, Credit: credit, Amount: amount, Currency: currency, Type: typ, Coord: coord, EffectiveAt: legs.at,
-			Customer: &customer, OrderLine: &sh.line, Product: product, RevenueSchedule: &sh.id}
-		if sh.order != uuid.Nil {
-			p.Order = &sh.order
+			Customer: &customer, InvoiceLine: &sh.line, Product: product, RevenueSchedule: &sh.id}
+		if sh.invoice != uuid.Nil {
+			p.Invoice = &sh.invoice
 		}
 		if lot {
 			p.CreditGrant = &legs.lot.ID
@@ -222,7 +222,7 @@ func (b *Books) fundMore(ctx context.Context, id uuid.UUID, held, released int64
 		coord := Coord{Operation: OpApplication, Source: "revenue_schedule", SourceID: id.String() + "@released:" + strconv.FormatInt(released, 10)}
 		_, applied, err := b.Post(ctx, Posting{
 			Debit: Ref{Type: DeferredRevenue}, Credit: Ref{Type: AccountType(row.RevenueAccount)}, Amount: amount, Currency: row.Currency, Type: RevenueRecognized,
-			Coord: coord, EffectiveAt: maxTime(at, s.through), Customer: &row.CustomerID, Order: &row.OrderID, OrderLine: &row.OrderLineID, Product: row.ProductID,
+			Coord: coord, EffectiveAt: maxTime(at, s.through), Customer: &row.CustomerID, Invoice: &row.InvoiceID, InvoiceLine: &row.InvoiceLineID, Product: row.ProductID,
 			RevenueSchedule: &row.ID,
 		})
 		if err != nil {

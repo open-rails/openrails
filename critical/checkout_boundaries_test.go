@@ -23,11 +23,11 @@ func TestCheckoutBoundaries(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
 		p.core.SetDecline("4242", "auth")
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "challenged-purchase"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "challenged-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var waiting billing.Order
+		var waiting billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &waiting))
-		require.Equal(t, billing.OrderPaymentRequiresAction, waiting.Payment.Status)
+		require.Equal(t, billing.InvoicePaymentRequiresAction, waiting.Payment.Status)
 		require.NotNil(t, waiting.Payment.NextAction)
 		require.Empty(t, p.effects(t))
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Entitlements: []string{"sale:owned"}})
@@ -40,12 +40,12 @@ func TestCheckoutBoundaries(t *testing.T) {
 		intent, _, ok := strings.Cut(waiting.Payment.NextAction.Payload["client_secret"], "_secret_")
 		require.True(t, ok, "the challenge must carry the provider's client capability")
 		require.True(t, p.core.Authenticate(intent))
-		var completed billing.Order
+		var completed billing.Invoice
 		for range 2 {
-			status, raw = a.request(t, http.MethodPost, "/v1/me/orders/"+waiting.ID.String()+"/confirm", a.aliceToken, map[string]any{})
+			status, raw = a.request(t, http.MethodPost, "/v1/me/invoices/"+waiting.ID.String()+"/confirm", a.aliceToken, map[string]any{})
 			require.Equal(t, http.StatusOK, status, string(raw))
 			require.NoError(t, json.Unmarshal(raw, &completed))
-			require.Equal(t, billing.OrderComplete, completed.Status)
+			require.Equal(t, billing.InvoiceComplete, completed.Status)
 			require.Equal(t, waiting.ID, completed.ID)
 		}
 		require.Len(t, p.effects(t), 1)
@@ -58,18 +58,18 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, access.Entitlements["sale:owned"])
 	})
-	t.Run("OR-J09-S03/definitive-decline-keeps-order-unpaid", func(t *testing.T) {
+	t.Run("OR-J09-S03/definitive-decline-keeps-invoice-unpaid", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
 		p.core.SetDecline("4242", "insufficient_funds")
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "declined-purchase"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "declined-purchase"})
 		require.Equal(t, http.StatusPaymentRequired, status, string(raw))
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 		require.NoError(t, err)
-		require.Len(t, orders.Items, 1)
-		require.NotEqual(t, billing.OrderComplete, orders.Items[0].Status)
-		require.NotEqual(t, billing.OrderPaymentProcessing, orders.Items[0].Payment.Status)
+		require.Len(t, invoices.Items, 1)
+		require.NotEqual(t, billing.InvoiceComplete, invoices.Items[0].Status)
+		require.NotEqual(t, billing.InvoicePaymentProcessing, invoices.Items[0].Payment.Status)
 		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
 		require.NoError(t, err)
 		for _, payment := range payments.Items {
@@ -79,7 +79,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, access.Entitlements["sale:owned"])
 		require.Empty(t, p.effects(t))
-		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 
@@ -93,17 +93,17 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		dear, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: pass.ID, Key: "nmi-pass", UnitAmount: 23_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		// As BuyButton buys: the customer's order of the lines, then its payment.
-		buy := func(price billing.PriceID, total int64, card nmimock.Card, key string) (int, billing.Order) {
+		// As BuyButton buys: the customer's invoice of the lines, then its payment.
+		buy := func(price billing.PriceID, total int64, card nmimock.Card, key string) (int, billing.Invoice) {
 			t.Helper()
-			status, raw := nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}})
+			status, raw := nmi.request(t, http.MethodPost, "/v1/me/invoices", nmi.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}})
 			require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
-			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(card), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: total, Reusable: ptr(false)}
-			status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": key})
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			pay := billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: journal.core.Tokenize(card), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: total, Reusable: ptr(false)}
+			status, raw = nmi.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": key})
 			require.Contains(t, []int{http.StatusOK, http.StatusPaymentRequired}, status, string(raw))
-			current, err := nmi.alpha.GetOrder(t.Context(), order.ID)
+			current, err := nmi.alpha.GetInvoice(t.Context(), invoice.ID)
 			require.NoError(t, err)
 			return status, *current
 		}
@@ -111,7 +111,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 		declined.AVS = "Z" // the ZIP matched; no street was sent
 		_, first := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-matched")
 		require.Equal(t, billing.DeclineGeneric, first.Payment.LastPaymentError.Reason, "a matched ZIP is no address fault")
-		tried, err := nmi.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{OrderID: first.ID})
+		tried, err := nmi.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{InvoiceID: first.ID})
 		require.NoError(t, err)
 		require.Len(t, tried.Items, 1)
 		require.NotNil(t, tried.Items[0].Card, "the declined new card is named from NMI's report")
@@ -119,56 +119,56 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.Equal(t, "1111", *tried.Items[0].Card.Last4)
 		declined.AVS = "N"
 		_, again := buy(cheap.ID, 500_000, declined, "nmi-decline-zip-unmatched")
-		require.Equal(t, first.ID, again.ID, "the same price pays the same order")
+		require.Equal(t, first.ID, again.ID, "the same price pays the same invoice")
 		require.Equal(t, billing.DeclineIncorrectZip, again.Payment.LastPaymentError.Reason, "an unmatched ZIP is named")
-		// The preview agrees: the customer's unpaid order is no conflict for
+		// The preview agrees: the customer's unpaid invoice is no conflict for
 		// another price, but still one for the merchant, who replaces nothing.
-		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/preview", nmi.aliceToken, billing.PreviewMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: dear.ID}}})
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/invoices/preview", nmi.aliceToken, billing.PreviewMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: dear.ID}}})
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var preview billing.OrderPreview
+		var preview billing.InvoicePreview
 		require.NoError(t, json.Unmarshal(raw, &preview))
-		require.Nil(t, preview.Lines[0].Refusal, "the unpaid order of the other price is replaced")
+		require.Nil(t, preview.Lines[0].Refusal, "the unpaid invoice of the other price is replaced")
 		require.EqualValues(t, 23_000_000, preview.Total)
 		require.NotEmpty(t, preview.PaymentOptions)
 		aliceID := billing.CustomerID(uuid.MustParse(nmi.alice.ID))
-		merchantPreview, err := nmi.alphaRemote.PreviewOrder(t.Context(), billing.PreviewOrderParams{CustomerID: aliceID, Lines: []billing.OrderLineParams{{PriceID: dear.ID}}})
+		merchantPreview, err := nmi.alphaRemote.PreviewInvoice(t.Context(), billing.PreviewInvoiceParams{CustomerID: aliceID, Lines: []billing.InvoiceLineParams{{PriceID: dear.ID}}})
 		require.NoError(t, err)
 		require.NotNil(t, merchantPreview.Lines[0].Refusal)
 		require.Equal(t, "already_owned", merchantPreview.Lines[0].Refusal.Code)
-		// An order the merchant made is not the customer's to replace.
+		// An invoice the merchant made is not the customer's to replace.
 		extra, err := nmi.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "nmi-extra", DisplayName: "NMI extra", Entitlements: []string{"extra:owned"}})
 		require.NoError(t, err)
 		extraA, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: extra.ID, Key: "nmi-extra-a", UnitAmount: 500_000, Currency: "USD"})
 		require.NoError(t, err)
 		extraB, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: extra.ID, Key: "nmi-extra-b", UnitAmount: 900_000, Currency: "USD"})
 		require.NoError(t, err)
-		_, err = nmi.alphaRemote.CreateOrder(t.Context(), "nmi-merchant-extra", billing.CreateOrderParams{CustomerID: aliceID, Lines: []billing.OrderLineParams{{PriceID: extraA.ID}}})
+		_, err = nmi.alphaRemote.CreateInvoice(t.Context(), "nmi-merchant-extra", billing.CreateInvoiceParams{CustomerID: aliceID, Lines: []billing.InvoiceLineParams{{PriceID: extraA.ID}}})
 		require.NoError(t, err)
-		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/preview", nmi.aliceToken, billing.PreviewMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: extraB.ID}}})
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/invoices/preview", nmi.aliceToken, billing.PreviewMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: extraB.ID}}})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.NoError(t, json.Unmarshal(raw, &preview))
-		require.NotNil(t, preview.Lines[0].Refusal, "the merchant's order still holds it")
+		require.NotNil(t, preview.Lines[0].Refusal, "the merchant's invoice still holds it")
 		require.Equal(t, "already_owned", preview.Lines[0].Refusal.Code)
 		// Another price, by BuyButton's two calls, then by one: each pays the
-		// price chosen and releases the unpaid order of the other.
+		// price chosen and releases the unpaid invoice of the other.
 		_, other := buy(dear.ID, 23_000_000, declined, "nmi-other-price")
 		require.NotEqual(t, first.ID, other.ID)
 		require.EqualValues(t, 23_000_000, other.Total)
-		replaced, err := nmi.alpha.GetOrder(t.Context(), first.ID)
+		replaced, err := nmi.alpha.GetInvoice(t.Context(), first.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderCanceled, replaced.Status, "the unpaid order of the other price is released")
-		in := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: cheap.ID}}, ExpectedTotal: ptr(int64(500_000)), Reusable: ptr(false),
-			Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", AVS: "Z", CVV: "M"}), BillingDetails: billedTo("US", "10001")}}
-		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, in, map[string]string{"Idempotency-Key": "nmi-one-call"})
+		require.Equal(t, billing.InvoiceCanceled, replaced.Status, "the unpaid invoice of the other price is released")
+		in := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: cheap.ID}}, ExpectedTotal: ptr(int64(500_000)), Reusable: ptr(false),
+			Payment: &billing.InvoicePaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", AVS: "Z", CVV: "M"}), BillingDetails: billedTo("US", "10001")}}
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/invoices", nmi.aliceToken, in, map[string]string{"Idempotency-Key": "nmi-one-call"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var paid billing.Order
+		var paid billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &paid))
-		require.Equal(t, billing.OrderComplete, paid.Status)
+		require.Equal(t, billing.InvoiceComplete, paid.Status)
 		require.EqualValues(t, 500_000, paid.Total, "the customer pays the price they chose")
 		require.Equal(t, "0.50", journal.core.LastSale().Amount)
-		replaced, err = nmi.alpha.GetOrder(t.Context(), other.ID)
+		replaced, err = nmi.alpha.GetInvoice(t.Context(), other.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderCanceled, replaced.Status)
+		require.Equal(t, billing.InvoiceCanceled, replaced.Status)
 		fleet := hostFleet(t, nmi.world)
 		fleet.PeriodicJobs().Clear()
 		require.NoError(t, nmi.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
@@ -181,7 +181,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 	})
 	t.Run("OR-J09-S05/lost-sale-answer-settles-from-the-provider", func(t *testing.T) {
 		// A sale whose answer is lost waits for NMI's own record: a decline
-		// there reopens the order for another card, and a charge NMI can't yet
+		// there reopens the invoice for another card, and a charge NMI can't yet
 		// show stays unknown as an operator finding until its receipt appears.
 		nmi, journal := newNMIWorld(t)
 		fleet := hostFleet(t, nmi.world)
@@ -192,39 +192,39 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		lostPrice, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: lost.ID, Key: "nmi-lost", UnitAmount: 700_000, Currency: "USD"})
 		require.NoError(t, err)
-		settle := func(order billing.OrderID, done func(billing.Order) bool) billing.Order {
+		settle := func(invoice billing.InvoiceID, done func(billing.Invoice) bool) billing.Invoice {
 			t.Helper()
 			nmi.clock.Advance(6 * time.Minute)
-			var current *billing.Order
+			var current *billing.Invoice
 			require.Eventually(t, func() bool {
 				wakeJobs(t, fleet, "openrails.provider_operation")
-				current, err = nmi.alpha.GetOrder(t.Context(), order)
+				current, err = nmi.alpha.GetInvoice(t.Context(), invoice)
 				return err == nil && done(*current)
 			}, 20*time.Second, 50*time.Millisecond)
 			return *current
 		}
-		unresolved := func(order billing.Order) []billing.Finding {
+		unresolved := func(invoice billing.Invoice) []billing.Finding {
 			t.Helper()
 			findings, err := nmi.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.sale.unresolved"})
 			require.NoError(t, err)
 			var out []billing.Finding
 			for _, f := range findings.Items {
-				if f.Evidence["order_id"] == order.ID.String() {
+				if f.Evidence["invoice_id"] == invoice.ID.String() {
 					out = append(out, f)
 				}
 			}
 			return out
 		}
-		buy := func(price billing.PriceID, total int64, card nmimock.Card, key string) (int, billing.Order) {
+		buy := func(price billing.PriceID, total int64, card nmimock.Card, key string) (int, billing.Invoice) {
 			t.Helper()
-			status, raw := nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}})
+			status, raw := nmi.request(t, http.MethodPost, "/v1/me/invoices", nmi.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}})
 			require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
-			pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(card), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: total, Reusable: ptr(false)}
-			status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": key})
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			pay := billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: journal.core.Tokenize(card), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: total, Reusable: ptr(false)}
+			status, raw = nmi.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": key})
 			require.Equal(t, http.StatusOK, status, string(raw))
-			current, err := nmi.alpha.GetOrder(t.Context(), order.ID)
+			current, err := nmi.alpha.GetInvoice(t.Context(), invoice.ID)
 			require.NoError(t, err)
 			return status, *current
 		}
@@ -232,10 +232,10 @@ func TestCheckoutBoundaries(t *testing.T) {
 		journal.core.DropSaleResponses(1)
 		status, waiting := buy(lostPrice.ID, 700_000, declined, "nmi-lost-decline")
 		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, billing.OrderProcessing, waiting.Status)
-		status, raw := nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: lostPrice.ID}}})
-		require.Equal(t, http.StatusConflict, status, "the unknown sale still holds its order: %s", raw)
-		reopened := settle(waiting.ID, func(o billing.Order) bool { return o.Status == billing.OrderOpen })
+		require.Equal(t, billing.InvoiceProcessing, waiting.Status)
+		status, raw := nmi.request(t, http.MethodPost, "/v1/me/invoices", nmi.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: lostPrice.ID}}})
+		require.Equal(t, http.StatusConflict, status, "the unknown sale still holds its invoice: %s", raw)
+		reopened := settle(waiting.ID, func(o billing.Invoice) bool { return o.Status == billing.InvoiceOpen })
 		require.NotNil(t, reopened.Payment.LastPaymentError)
 		require.Equal(t, billing.DeclineGeneric, reopened.Payment.LastPaymentError.Reason)
 		require.Empty(t, unresolved(waiting), "NMI's decline settles the sale; nobody has to")
@@ -243,18 +243,18 @@ func TestCheckoutBoundaries(t *testing.T) {
 		journal.core.HideSales(1)
 		status, waiting = buy(lostPrice.ID, 700_000, nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"}, "nmi-lost-charge")
 		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, waiting.ID, reopened.ID, "the declined order is paid again")
-		require.Equal(t, billing.OrderProcessing, waiting.Status)
-		settle(waiting.ID, func(o billing.Order) bool { return len(unresolved(o)) == 1 })
+		require.Equal(t, waiting.ID, reopened.ID, "the declined invoice is paid again")
+		require.Equal(t, billing.InvoiceProcessing, waiting.Status)
+		settle(waiting.ID, func(o billing.Invoice) bool { return len(unresolved(o)) == 1 })
 		raised := unresolved(waiting)[0]
 		require.Equal(t, "high", raised.Severity)
 		require.Equal(t, billing.FindingStatus("requires_review"), raised.Status)
 		require.Contains(t, *raised.RecommendedAction, "openrails intents resolve")
-		current, err := nmi.alpha.GetOrder(t.Context(), waiting.ID)
+		current, err := nmi.alpha.GetInvoice(t.Context(), waiting.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderProcessing, current.Status, "a charge NMI can't show is never assumed absent")
+		require.Equal(t, billing.InvoiceProcessing, current.Status, "a charge NMI can't show is never assumed absent")
 		journal.core.Reveal()
-		settle(waiting.ID, func(o billing.Order) bool { return o.Status == billing.OrderComplete })
+		settle(waiting.ID, func(o billing.Invoice) bool { return o.Status == billing.InvoiceComplete })
 		require.Empty(t, unresolved(waiting), "the receipt closes the finding")
 		closed, err := nmi.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.sale.unresolved", Status: "fixed"})
 		require.NoError(t, err)
@@ -268,17 +268,17 @@ func TestCheckoutBoundaries(t *testing.T) {
 		journal.core.HideSales(1)
 		status, waiting = buy(latePrice.ID, 700_000, nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"}, "nmi-late-receipt")
 		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, billing.OrderProcessing, waiting.Status)
+		require.Equal(t, billing.InvoiceProcessing, waiting.Status)
 		wakeJobs(t, fleet, "openrails.provider_operation")
 		require.Never(t, func() bool { return len(unresolved(waiting)) > 0 }, time.Second, 100*time.Millisecond, "no finding inside the observation delay")
 		journal.core.Reveal()
-		settle(waiting.ID, func(o billing.Order) bool { return o.Status == billing.OrderComplete })
+		settle(waiting.ID, func(o billing.Invoice) bool { return o.Status == billing.InvoiceComplete })
 		require.Empty(t, unresolved(waiting))
 		journal.money(t, 2, 140) // neither sale is ever resent
 	})
-	t.Run("OR-J09-S06/partial-approval-never-pays-the-order", func(t *testing.T) {
+	t.Run("OR-J09-S06/partial-approval-never-pays-the-invoice", func(t *testing.T) {
 		// An issuer approving part of a sale is no payment: NMI is asked to
-		// settle it only in full, the order stays unpaid, an operator finding
+		// settle it only in full, the invoice stays unpaid, an operator finding
 		// stands, and the sale is never resent.
 		nmi, journal := newNMIWorld(t)
 		fleet := hostFleet(t, nmi.world)
@@ -291,18 +291,18 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		customer := billing.CustomerID(uuid.MustParse(nmi.alice.ID))
 		journal.core.ApprovePartially("4242", "0.30")
-		status, raw := nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		status, raw := nmi.request(t, http.MethodPost, "/v1/me/invoices", nmi.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
 		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"}), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: 700_000, Reusable: ptr(false)}
-		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders/"+order.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": "nmi-partial-approval"})
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		pay := billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", AVS: "Z", CVV: "M"}), BillingDetails: billedTo("US", "10001")}, ExpectedTotal: 700_000, Reusable: ptr(false)}
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", nmi.aliceToken, pay, map[string]string{"Idempotency-Key": "nmi-partial-approval"})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		unpaid := func() {
 			t.Helper()
-			current, err := nmi.alpha.GetOrder(t.Context(), order.ID)
+			current, err := nmi.alpha.GetInvoice(t.Context(), invoice.ID)
 			require.NoError(t, err)
-			require.Equal(t, billing.OrderProcessing, current.Status, "a partial approval is neither a payment nor a decline")
+			require.Equal(t, billing.InvoiceProcessing, current.Status, "a partial approval is neither a payment nor a decline")
 			payments, err := nmi.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
 			require.NoError(t, err)
 			for _, payment := range payments.Items {
@@ -327,7 +327,7 @@ func TestCheckoutBoundaries(t *testing.T) {
 			}
 			raised = raised[:0]
 			for _, f := range findings.Items {
-				if f.Evidence["order_id"] == order.ID.String() {
+				if f.Evidence["invoice_id"] == invoice.ID.String() {
 					raised = append(raised, f)
 				}
 			}
@@ -366,19 +366,19 @@ func TestCheckoutBoundaries(t *testing.T) {
 		}))
 		defer proxy.Close()
 		a.server = proxy
-		_, _, err := a.do(t.Context(), http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "lost-client-answer"})
+		_, _, err := a.do(t.Context(), http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "lost-client-answer"})
 		a.server = origin
 		require.Error(t, err, "the client must actually lose the committed answer")
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 		require.NoError(t, err)
-		require.Len(t, orders.Items, 1)
-		require.Equal(t, billing.OrderComplete, orders.Items[0].Status)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "lost-client-answer"})
+		require.Len(t, invoices.Items, 1)
+		require.Equal(t, billing.InvoiceComplete, invoices.Items[0].Status)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "lost-client-answer"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var replay billing.Order
+		var replay billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &replay))
-		require.Equal(t, orders.Items[0].ID, replay.ID)
-		require.Equal(t, orders.Items[0].Payment.PaymentID, replay.Payment.PaymentID)
+		require.Equal(t, invoices.Items[0].ID, replay.ID)
+		require.Equal(t, invoices.Items[0].Payment.PaymentID, replay.Payment.PaymentID)
 		require.Len(t, p.effects(t), 1)
 		require.EqualValues(t, 3000, p.effects(t)[0].Amount)
 	})

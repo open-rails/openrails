@@ -26,7 +26,7 @@ import (
 
 // RetrySubscriptionNow charges a provider-scheduled subscription's missed
 // renewal now, in the customer's presence. An engine-owned one's renewal is
-// an order the customer pays instead.
+// an invoice the customer pays instead.
 func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, subscription billing.SubscriptionID, idempotencyKey string, request billing.RetrySubscriptionNowParams, principal billingauth.Payer) (*billing.SubscriptionRetryNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
@@ -44,8 +44,8 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 			return err
 		}
 		if owned.CollectionPolicy == models.CollectionPolicyEngine {
-			// Its renewal is an order: the customer pays that.
-			return fmt.Errorf("%w: an engine subscription's renewal is paid as its order (recovery.order_id)", intents.ErrRebillUnsupported)
+			// Its renewal is an invoice: the customer pays that.
+			return fmt.Errorf("%w: an engine subscription's renewal is paid as its invoice (recovery.invoice_id)", intents.ErrRebillUnsupported)
 		}
 		h := intents.NewManualRebillHandler(rt.DB, rt.Config, rt.CollectionResolver, rt.Clock)
 		h.DeferDelete = rt.DeferredDeletes

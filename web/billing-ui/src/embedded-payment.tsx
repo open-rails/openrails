@@ -1,37 +1,37 @@
-// An order's pay URL framed on the merchant's own page, as Stripe's
-// embedded Checkout: the order's pay URL (embedded) in an
+// An invoice's pay URL framed on the merchant's own page, as Stripe's
+// embedded Checkout: the invoice's pay URL (embedded) in an
 // iframe the checkout origin allows only on the merchant's registered origins.
-// The framed page reports its height and the order's completion, and only
+// The framed page reports its height and the invoice's completion, and only
 // messages from the pay URL's origin and this iframe are heard. Fulfil
-// on order.completed, never on the completion message. Fallbacks reach the
+// on invoice.completed, never on the completion message. Fallbacks reach the
 // framed page in the URL fragment, never through the server.
 import * as React from "react"
 
 import { withPaymentFallbacks, type PaymentFallbacks } from "./fallbacks"
 
-/** The framed page's message once the order completes. */
+/** The framed page's message once the invoice completes. */
 export const PAYMENT_COMPLETE_MESSAGE = "openrails.payment.complete"
 /** The framed page's message when its height changes. */
 export const PAYMENT_RESIZE_MESSAGE = "openrails.payment.resize"
 
 export interface EmbeddedPaymentCompletion {
-  orderId: string
+  invoiceId: string
   /**
-   * The order's success_url, with the order id filled in; "" for a
+   * The invoice's success_url, with the invoice id filled in; "" for a
    * customer's own pay URL, which returns nowhere (the frame says it is paid).
    */
   successUrl: string
 }
 
 export interface EmbeddedPaymentProps {
-  /** The order's pay_url, secret and all. */
+  /** The invoice's pay_url, secret and all. */
   url: string
   /**
-   * Called once the order completes. Without it the page goes to the
-   * order's success_url, if it has one.
+   * Called once the invoice completes. Without it the page goes to the
+   * invoice's success_url, if it has one.
    */
   onComplete?: (completion: EmbeddedPaymentCompletion) => void
-  /** As OrderPayment's: the framed page keeps these PSPs back the same way. */
+  /** As InvoicePayment's: the framed page keeps these PSPs back the same way. */
   fallbacks?: PaymentFallbacks
   /** Called once when the pay page never loads (no message from the frame). */
   onLoadFailure?: () => void
@@ -71,17 +71,17 @@ function PaymentFrame({
   const destination = React.useMemo(() => {
     try {
       const parsed = new URL(url)
-      const orderId = /^\/pay\/([^/]+)$/.exec(parsed.pathname)?.[1]
+      const invoiceId = /^\/pay\/([^/]+)$/.exec(parsed.pathname)?.[1]
       return (parsed.protocol === "https:" || parsed.protocol === "http:") &&
-        orderId
-        ? { origin: parsed.origin, orderId }
+        invoiceId
+        ? { origin: parsed.origin, invoiceId }
         : null
     } catch {
       return null
     }
   }, [url])
   const origin = destination?.origin
-  const orderId = destination?.orderId
+  const invoiceId = destination?.invoiceId
 
   React.useEffect(() => {
     if (!origin) return
@@ -108,8 +108,8 @@ function PaymentFrame({
       }
       if (
         message.type !== PAYMENT_COMPLETE_MESSAGE ||
-        typeof message.order_id !== "string" ||
-        message.order_id !== orderId ||
+        typeof message.invoice_id !== "string" ||
+        message.invoice_id !== invoiceId ||
         done
       )
         return
@@ -117,13 +117,13 @@ function PaymentFrame({
       const successUrl =
         typeof message.success_url === "string" ? message.success_url : ""
       if (completed.current)
-        completed.current({ orderId: message.order_id, successUrl })
+        completed.current({ invoiceId: message.invoice_id, successUrl })
       else if (/^https?:\/\//i.test(successUrl))
         window.location.assign(successUrl)
     }
     window.addEventListener("message", heard)
     return () => window.removeEventListener("message", heard)
-  }, [origin, orderId])
+  }, [origin, invoiceId])
 
   React.useEffect(() => {
     if (!origin || loaded || failed) return

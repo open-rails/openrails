@@ -34,9 +34,9 @@ type NMIInitialScheduleTerms struct {
 
 // InitialMembershipPayload is one accepted operation with mutually exclusive
 // native-schedule and engine-custody legs. Terms and Instrument own payment and
-// access authority; OrderAttemptID binds only the terminal session projection.
+// access authority; InvoiceAttemptID binds only the terminal session projection.
 type InitialMembershipPayload struct {
-	OrderAttemptID         *uuid.UUID                 `json:"order_attempt_id,omitempty"`
+	InvoiceAttemptID       *uuid.UUID                 `json:"order_attempt_id,omitempty"`
 	Terms                  InitialMembershipTerms     `json:"terms"`
 	Instrument             charge.FrozenInstrument    `json:"instrument"`
 	RequestFingerprint     string                     `json:"request_fingerprint"`
@@ -101,11 +101,11 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 		return p, errors.New("initial membership payload has trailing data")
 	}
 
-	if p.OrderAttemptID != nil && (*p.OrderAttemptID == uuid.Nil || p.Terms.CollectionPolicy != models.CollectionPolicyEngine) {
+	if p.InvoiceAttemptID != nil && (*p.InvoiceAttemptID == uuid.Nil || p.Terms.CollectionPolicy != models.CollectionPolicyEngine) {
 		return p, errors.New("initial membership has invalid quoted-session binding")
 	}
 	changed, change := p.Terms.Changed()
-	if (p.Upgrade() && p.RequestedPrice == "") || (!change && p.RequestedPrice != "") || (change && (p.OrderAttemptID != nil || !strings.HasPrefix(p.PurchaseIdempotencyKey, TierChangeKeyPrefix) || in.SubscriptionID == nil || *in.SubscriptionID != changed)) {
+	if (p.Upgrade() && p.RequestedPrice == "") || (!change && p.RequestedPrice != "") || (change && (p.InvoiceAttemptID != nil || !strings.HasPrefix(p.PurchaseIdempotencyKey, TierChangeKeyPrefix) || in.SubscriptionID == nil || *in.SubscriptionID != changed)) {
 		return p, errors.New("engine change has no exact subscription-change binding")
 	}
 	if err := p.Terms.Validate(); err != nil {

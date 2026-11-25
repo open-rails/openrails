@@ -29,11 +29,11 @@ var saleRails = map[string]bool{"nmi": true, "stripe": true}
 // and benefits. Recovery never reloads a current catalog or extends these
 // windows from the time a delayed provider receipt becomes visible.
 type NMISalePayload struct {
-	// OrderCaptchaSubjects preserves the initiating HTTP address for worker completion.
-	OrderCaptchaSubjects []string `json:"order_captcha_subjects,omitempty"`
+	// InvoiceCaptchaSubjects preserves the initiating HTTP address for worker completion.
+	InvoiceCaptchaSubjects []string `json:"order_captcha_subjects,omitempty"`
 
 	LegacyEntitlements map[string]*int             `json:"legacy_entitlements,omitzero"`
-	OrderAttemptID     uuid.UUID                   `json:"order_attempt_id,omitempty"`
+	InvoiceAttemptID   uuid.UUID                   `json:"order_attempt_id,omitempty"`
 	RequestFingerprint string                      `json:"request_fingerprint"`
 	Provider           string                      `json:"provider"`
 	PSP                string                      `json:"psp"`
@@ -58,22 +58,22 @@ type NMISalePayload struct {
 	OwnershipStart      time.Time       `json:"ownership_start"`
 	OwnershipEnd        *time.Time      `json:"ownership_end"`
 	Eligibility         string          `json:"eligibility"`
-	// OrderID is the order the sale pays, through its order attempt
-	// OrderAttemptID. An order sale carries no price, product or benefit:
-	// paying settles the order's own frozen lines.
-	OrderID uuid.UUID `json:"order_id,omitzero"`
-	// Recurring: the order has a recurring line, so the charge stores the
+	// InvoiceID is the invoice the sale pays, through its invoice attempt
+	// InvoiceAttemptID. An invoice sale carries no price, product or benefit:
+	// paying settles the invoice's own frozen lines.
+	InvoiceID uuid.UUID `json:"order_id,omitzero"`
+	// Recurring: the invoice has a recurring line, so the charge stores the
 	// card for a recurring agreement.
 	Recurring bool `json:"recurring,omitempty"`
 	// ReuseConsent permits presenting a saved platform card to open a new
 	// recurring agreement. Its one-time reference does not authorize renewals.
 	ReuseConsent *charge.Mandate `json:"reuse_consent,omitempty"`
 	// NewCard: the sale saved its card from the buyer's token, so a decline
-	// removes it. On an order it is a card just entered: the charge saves it
+	// removes it. On an invoice it is a card just entered: the charge saves it
 	// and is its storing transaction (Token on NMI, Instrument's pm_ on
 	// Stripe), and PaymentMethodID names the method its success creates.
 	NewCard bool `json:"new_card,omitempty"`
-	// Token is an order's NMI Collect.js token, or the Basis Theory token
+	// Token is an invoice's NMI Collect.js token, or the Basis Theory token
 	// intent that collected a custodian-held card; Billing the vault's
 	// details.
 	Token   string          `json:"token,omitempty"`
@@ -82,12 +82,12 @@ type NMISalePayload struct {
 	// it; Fingerprint is a new Stripe card's.
 	Card        *models.Card `json:"card,omitempty"`
 	Fingerprint string       `json:"fingerprint,omitempty"`
-	// Reuse: the customer keeps the order's new card for one-click buys.
+	// Reuse: the customer keeps the invoice's new card for one-click buys.
 	// PurchaseScoped: a new card kept for this purchase only (one-time lines,
 	// no Reuse): no stored-credential agreement, and nothing is saved.
 	Reuse          bool `json:"reuse,omitempty"`
 	PurchaseScoped bool `json:"purchase_scoped,omitempty"`
-	// HyperSwitch binds an order's HyperSwitch-held card to the custodian
+	// HyperSwitch binds an invoice's HyperSwitch-held card to the custodian
 	// account that holds it: the sale goes through its NMI proxy.
 	HyperSwitch *charge.HyperSwitchBinding `json:"hyperswitch,omitempty"`
 }
@@ -107,7 +107,7 @@ type NewCardBilling struct {
 }
 
 // Agreement is the stored-credential agreement the sale charges under: a
-// recurring one for an order with a recurring line, none for a
+// recurring one for an invoice with a recurring line, none for a
 // purchase-scoped card, else the card's card-on-file reuse.
 func (p NMISalePayload) Agreement() charge.Agreement {
 	switch {
@@ -119,9 +119,9 @@ func (p NMISalePayload) Agreement() charge.Agreement {
 	return charge.AgreementCardOnFile
 }
 
-// SavesCard reports a new card the order's charge stores.
+// SavesCard reports a new card the invoice's charge stores.
 func (p NMISalePayload) SavesCard() bool {
-	return p.OrderID != uuid.Nil && p.NewCard && !p.PurchaseScoped
+	return p.InvoiceID != uuid.Nil && p.NewCard && !p.PurchaseScoped
 }
 
 func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) {
@@ -133,8 +133,8 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 		return p, err
 	}
 	customer, err := uuid.Parse(p.UserID)
-	if p.OrderID != uuid.Nil {
-		return p, validateOrderSale(in, p, customer, err)
+	if p.InvoiceID != uuid.Nil {
+		return p, validateInvoiceSale(in, p, customer, err)
 	}
 	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() {
 		return p, errors.New("sale operation contradicts its accepted purchase")
@@ -177,23 +177,23 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 	return p, nil
 }
 
-// validateOrderSale checks an order sale: money, instrument and binding, and
+// validateInvoiceSale checks an invoice sale: money, instrument and binding, and
 // none of a price sale's benefits.
-func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer uuid.UUID, parseErr error) error {
-	if parseErr != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || invalidOrderCustodianAddress(in, p.Instrument) || in.PriceID != nil ||
-		p.OrderAttemptID == uuid.Nil || p.PriceID != uuid.Nil || p.ProductID != uuid.Nil || p.CreditGrant != nil || p.AccessDurationHours != nil || p.OwnershipEnd != nil || len(p.Entitlements) > 0 ||
+func validateInvoiceSale(in gen.BillingProviderIntent, p NMISalePayload, customer uuid.UUID, parseErr error) error {
+	if parseErr != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || invalidInvoiceCustodianAddress(in, p.Instrument) || in.PriceID != nil ||
+		p.InvoiceAttemptID == uuid.Nil || p.PriceID != uuid.Nil || p.ProductID != uuid.Nil || p.CreditGrant != nil || p.AccessDurationHours != nil || p.OwnershipEnd != nil || len(p.Entitlements) > 0 ||
 		p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount != p.Amount || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || !p.AcceptedAt.Equal(p.AcceptedAt.Truncate(time.Microsecond)) {
-		return errors.New("order sale contradicts its order")
+		return errors.New("invoice sale contradicts its invoice")
 	}
 	digest, err := hex.DecodeString(p.RequestFingerprint)
 	if err != nil || len(digest) != 32 || p.RequestFingerprint != strings.ToLower(p.RequestFingerprint) {
-		return errors.New("order sale has no canonical request binding")
+		return errors.New("invoice sale has no canonical request binding")
 	}
 	if err := p.Instrument.Validate(); err != nil {
 		return err
 	}
 	nmiToken := in.Rail != "stripe" && p.NewCard
-	// A HyperSwitch-held card pays an order that opens a subscription, as its
+	// A HyperSwitch-held card pays an invoice that opens a subscription, as its
 	// recurring storing charge. A merchant Basis Theory card pays one-time lines as
 	// its token intent presents it: a new card, or one the customer holds.
 	custody := true
@@ -218,12 +218,12 @@ func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer 
 		return errors.New("reuse consent is only for a saved platform card opening a recurring agreement")
 	}
 	if !custody {
-		return errors.New("order sale custody contradicts its order")
+		return errors.New("invoice sale custody contradicts its invoice")
 	}
 	bt := p.Instrument.Custodian == models.CustodianBasisTheory || p.Instrument.Custodian == models.CustodianPlatform
 	if p.Provider != in.Rail || !bt && ((p.Instrument.RailCustomerRef == "") != nmiToken || (p.Token != "") != nmiToken) || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" ||
 		p.PurchaseScoped != (p.NewCard && !p.Recurring && !p.Reuse) || p.Reuse && !p.NewCard || p.NewCard && p.Instrument.Mandate != nil {
-		return errors.New("order sale instrument contradicts its order")
+		return errors.New("invoice sale instrument contradicts its invoice")
 	}
 	_, err = moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
 	return err
@@ -250,9 +250,9 @@ func (p *NMISalePayload) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Platform custody is independent of the PSP: accepted orders must retain its
+// Platform custody is independent of the PSP: accepted invoices must retain its
 // exact address. Older merchant-custodian sales keep their existing PSP address.
-func invalidOrderCustodianAddress(in gen.BillingProviderIntent, instrument charge.FrozenInstrument) bool {
+func invalidInvoiceCustodianAddress(in gen.BillingProviderIntent, instrument charge.FrozenInstrument) bool {
 	if instrument.Custodian == models.CustodianBasisTheory && in.CustodianID == nil {
 		return false
 	} // Historical accepted merchant-vault sales.

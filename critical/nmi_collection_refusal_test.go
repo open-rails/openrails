@@ -56,9 +56,9 @@ func TestNMICollectionRefusal(t *testing.T) {
 				runUsageDue(t, fleet)
 				var state string
 				var evidence []byte
-				// A refused collection leaves the order due at once, so each
+				// A refused collection leaves the invoice due at once, so each
 				// usage scan that finds it open queues another. Every scan has
-				// run once the fleet's start-up pass ends, and the order is
+				// run once the fleet's start-up pass ends, and the invoice is
 				// open again once none of their collections is running.
 				operations := pgx.Identifier{a.schema, "provider_intents"}.Sanitize()
 				require.Eventually(t, func() bool {
@@ -67,7 +67,7 @@ func TestNMICollectionRefusal(t *testing.T) {
 						return false
 					}
 					var running int
-					err = a.pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM "+operations+" WHERE merchant_id=$1 AND intent_type=$2 AND status IN ('pending','in_flight')),status,result_evidence FROM "+operations+" WHERE merchant_id=$1 AND intent_type=$2 ORDER BY created_at,id LIMIT 1", a.alpha.MerchantID().UUID(), intents.TypeOrderCollection).Scan(&running, &state, &evidence)
+					err = a.pool.QueryRow(t.Context(), "SELECT (SELECT count(*) FROM "+operations+" WHERE merchant_id=$1 AND intent_type=$2 AND status IN ('pending','in_flight')),status,result_evidence FROM "+operations+" WHERE merchant_id=$1 AND intent_type=$2 ORDER BY created_at,id LIMIT 1", a.alpha.MerchantID().UUID(), intents.TypeInvoiceCollection).Scan(&running, &state, &evidence)
 					return err == nil && running == 0
 				}, 20*time.Second, 20*time.Millisecond, "the registered worker must finish its first collection")
 				p.money(t, 0, 0)
@@ -90,7 +90,7 @@ func TestNMICollectionRefusal(t *testing.T) {
 					a.clock.Advance(time.Hour)
 					require.Eventually(t, func() bool {
 						wakeJobs(t, fleet, "openrails.provider_operation")
-						err := a.pool.QueryRow(t.Context(), "SELECT status,result_evidence FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" WHERE merchant_id=$1 AND intent_type=$2 ORDER BY created_at,id LIMIT 1", a.alpha.MerchantID().UUID(), intents.TypeOrderCollection).Scan(&state, &evidence)
+						err := a.pool.QueryRow(t.Context(), "SELECT status,result_evidence FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" WHERE merchant_id=$1 AND intent_type=$2 ORDER BY created_at,id LIMIT 1", a.alpha.MerchantID().UUID(), intents.TypeInvoiceCollection).Scan(&state, &evidence)
 						return err == nil && state == intents.StatusFailedTerminal
 					}, 15*time.Second, 20*time.Millisecond)
 					p.money(t, 0, 0)
@@ -99,13 +99,13 @@ func TestNMICollectionRefusal(t *testing.T) {
 				require.Equal(t, intents.StatusFailedTerminal, state, "a proven unsent charge must not wait for a nonexistent provider receipt")
 				require.True(t, proof.NotExecuted)
 				require.Equal(t, "not_dispatched", proof.Code)
-				order := oneUsageOrder(t, a, customer)
-				require.Equal(t, billing.OrderOpen, order.Status)
-				require.Zero(t, order.Usage.AmountPaid)
-				require.EqualValues(t, 30_000_000, order.Usage.AmountDue)
+				invoice := oneUsageInvoice(t, a, customer)
+				require.Equal(t, billing.InvoiceOpen, invoice.Status)
+				require.Zero(t, invoice.Usage.AmountPaid)
+				require.EqualValues(t, 30_000_000, invoice.Usage.AmountDue)
 				restore()
 				runUsageDue(t, fleet)
-				require.Eventually(t, func() bool { return oneUsageOrder(t, a, customer).Status == billing.OrderComplete }, 15*time.Second, 20*time.Millisecond)
+				require.Eventually(t, func() bool { return oneUsageInvoice(t, a, customer).Status == billing.InvoiceComplete }, 15*time.Second, 20*time.Millisecond)
 				runUsageDue(t, fleet)
 				p.money(t, 1, 3000)
 			})

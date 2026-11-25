@@ -163,8 +163,8 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 	if deps.Runtime.PurchaseService == nil {
 		return nil, fmt.Errorf("server runtime purchase service is required")
 	}
-	if deps.Runtime.OrderAttemptService == nil {
-		return nil, fmt.Errorf("server runtime order attempt service is required")
+	if deps.Runtime.InvoiceAttemptService == nil {
+		return nil, fmt.Errorf("server runtime invoice attempt service is required")
 	}
 	if deps.Runtime.SubscriptionService == nil {
 		return nil, fmt.Errorf("server runtime subscription service is required")

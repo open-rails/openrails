@@ -117,7 +117,7 @@ redis:
 # Requests per minute per client, by bucket; 0 leaves a bucket unlimited.
 rate_limits:
   purchase:
-    requests_per_minute: 10   # buying: checkout and paying an order
+    requests_per_minute: 10   # buying: checkout and paying an invoice
   payment:
     requests_per_minute: 40   # a customer's payment-method routes
   subscribe:
@@ -162,7 +162,7 @@ admin_console:
   disabled: false
 
 # The checkout origin, needed only to serve OpenRails' own hosted pay page:
-# an order's pay URL (/pay/<order>#<secret>) is on it, where the customer
+# an invoice's pay URL (/pay/<invoice>#<secret>) is on it, where the customer
 # pays. Leave it unset with the embedded checkout or your own card form; pay
 # URLs then answer pay_url_unavailable. It must be an origin of its own (not
 # public_url's, the console's or AuthKit's); the server serves

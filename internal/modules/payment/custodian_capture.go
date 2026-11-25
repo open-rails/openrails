@@ -71,7 +71,7 @@ func captureMethodID(owner billing.MerchantID, customer uuid.UUID, key string) u
 func captureCustomerReference(owner billing.MerchantID, customer uuid.UUID) string {
 	return uuid.NewHash(sha256.New(), uuid.NameSpaceURL, captureScopedName("openrails/custody-customer/v1", owner, customer, ""), 8).String()
 }
-func (s *OrderAttemptService) captureBinding(owner billing.MerchantID, psp merchants.PSPScope, custodian merchants.CustodianScope) (models.CardCapture, error) {
+func (s *InvoiceAttemptService) captureBinding(owner billing.MerchantID, psp merchants.PSPScope, custodian merchants.CustodianScope) (models.CardCapture, error) {
 	var empty models.CardCapture
 	if s.config == nil || s.config.HyperSwitch == (billing.HyperSwitchConfig{}) || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != config.EnvironmentClass(psp.Rail, psp.Environment) {
 		return empty, ErrCardCaptureUnavailable
@@ -85,7 +85,7 @@ func (s *OrderAttemptService) captureBinding(owner billing.MerchantID, psp merch
 
 // captureAccounts is the PSP and the custodian holding its cards, as the
 // merchant's configuration has them.
-func (s *OrderAttemptService) captureAccounts(ctx context.Context, owner billing.MerchantID, pspID uuid.UUID) (merchants.PSPScope, merchants.CustodianScope, error) {
+func (s *InvoiceAttemptService) captureAccounts(ctx context.Context, owner billing.MerchantID, pspID uuid.UUID) (merchants.PSPScope, merchants.CustodianScope, error) {
 	svc := merchants.Of(s.db)
 	if svc == nil {
 		return merchants.PSPScope{}, merchants.CustodianScope{}, ErrCardCaptureUnavailable
@@ -100,7 +100,7 @@ func (s *OrderAttemptService) captureAccounts(ctx context.Context, owner billing
 	}
 	return psp, custodian, nil
 }
-func (s *OrderAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUID) (models.CardCapture, *hyperswitch.Client, *crypto.Sealer, error) {
+func (s *InvoiceAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUID) (models.CardCapture, *hyperswitch.Client, *crypto.Sealer, error) {
 	var state models.CardCapture
 	owner, err := merchant.Require(ctx)
 	if err != nil {
@@ -144,7 +144,7 @@ func captureContact(details *billing.BillingDetails, user *UserIdentity) (string
 	}
 	address, err := mail.ParseAddress(email)
 	if name == "" || len(name) > 200 || strings.IndexFunc(name, unicode.IsControl) >= 0 || len(email) > 320 || err != nil || address.Name != "" || address.Address != email || cardguard.ContainsPAN(name) || cardguard.ContainsPAN(email) {
-		return "", "", fmt.Errorf("%w: capture requires a valid contact email and name", ErrOrderAttemptValidation)
+		return "", "", fmt.Errorf("%w: capture requires a valid contact email and name", ErrInvoiceAttemptValidation)
 	}
 	return name, email, nil
 }
@@ -154,12 +154,12 @@ func captureFromMethod(owner billing.MerchantID, method *models.PaymentMethod) (
 	if err := json.Unmarshal(method.Capture, &state); err != nil {
 		return state, err
 	}
-	status := models.OrderAttemptStatusRequiresAction
+	status := models.InvoiceAttemptStatusRequiresAction
 	switch {
 	case state.PaymentMethodID != uuid.Nil:
-		status = models.OrderAttemptStatusSucceeded
+		status = models.InvoiceAttemptStatusSucceeded
 	case method.Status == "removed":
-		status = models.OrderAttemptStatusExpired
+		status = models.InvoiceAttemptStatusExpired
 	}
 	decoded, err := models.DecodeCardCapture(method.Capture, owner.UUID(), method.CustomerID, state.PSPID, status, &state.ExpiresAt)
 	if err != nil {
@@ -174,9 +174,9 @@ func captureFromMethod(owner billing.MerchantID, method *models.PaymentMethod) (
 // SaveCustodianCard opens hosted card fields for this customer's pending
 // payment method. Only the first accepted vendor session is exposed. Competing
 // vendor preparations may expire unused; none can charge a card.
-func (s *OrderAttemptService) SaveCustodianCard(ctx context.Context, req billing.CreatePaymentMethodParams, key string, user *UserIdentity, metadata map[string]any) (SavedCard, error) {
+func (s *InvoiceAttemptService) SaveCustodianCard(ctx context.Context, req billing.CreatePaymentMethodParams, key string, user *UserIdentity, metadata map[string]any) (SavedCard, error) {
 	if strings.TrimSpace(key) == "" || cardguard.ContainsPAN(key) || req.Token != "" || req.Card != nil || req.PSPID.IsZero() {
-		return SavedCard{}, fmt.Errorf("%w: custodian capture requires PSP id and Idempotency-Key, without a token or card", ErrOrderAttemptValidation)
+		return SavedCard{}, fmt.Errorf("%w: custodian capture requires PSP id and Idempotency-Key, without a token or card", ErrInvoiceAttemptValidation)
 	}
 	name, email, err := captureContact(req.BillingDetails, user)
 	if err != nil {
@@ -200,7 +200,7 @@ func (s *OrderAttemptService) SaveCustodianCard(ctx context.Context, req billing
 			return SavedCard{}, err
 		}
 		if method.CustomerID != customer || state.RequestFingerprint != fingerprint {
-			return SavedCard{}, ErrOrderAttemptConflict
+			return SavedCard{}, ErrInvoiceAttemptConflict
 		}
 		return s.renderCapturedCard(ctx, method)
 	} else if !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
@@ -226,7 +226,7 @@ func (s *OrderAttemptService) SaveCustodianCard(ctx context.Context, req billing
 	}
 	now := s.now().UTC().Truncate(time.Microsecond)
 	state.CustomerID, state.RequestFingerprint = customer, fingerprint
-	state.ExpiresAt = now.Add(defaultOrderAttemptTTL)
+	state.ExpiresAt = now.Add(defaultInvoiceAttemptTTL)
 	if vendorSession.ExpiresAt.Before(state.ExpiresAt) {
 		state.ExpiresAt = vendorSession.ExpiresAt.UTC().Truncate(time.Microsecond)
 	}
@@ -253,12 +253,12 @@ func (s *OrderAttemptService) SaveCustodianCard(ctx context.Context, req billing
 		return SavedCard{}, err
 	}
 	if method.CustomerID != customer || accepted.RequestFingerprint != fingerprint {
-		return SavedCard{}, ErrOrderAttemptConflict
+		return SavedCard{}, ErrInvoiceAttemptConflict
 	}
 	return s.renderCapturedCard(ctx, method)
 }
 
-func (s *OrderAttemptService) renderCapturedCard(ctx context.Context, method *models.PaymentMethod) (SavedCard, error) {
+func (s *InvoiceAttemptService) renderCapturedCard(ctx context.Context, method *models.PaymentMethod) (SavedCard, error) {
 	owner, err := merchant.Require(ctx)
 	if err != nil {
 		return SavedCard{}, err
@@ -281,7 +281,7 @@ func (s *OrderAttemptService) renderCapturedCard(ctx context.Context, method *mo
 		if err != nil {
 			return SavedCard{}, err
 		}
-		return SavedCard{}, ErrOrderAttemptExpired
+		return SavedCard{}, ErrInvoiceAttemptExpired
 	}
 	current, client, sealer, err := s.resolveCapture(ctx, state.PSPID)
 	if err != nil || !sameCaptureAccount(state, current) {
@@ -304,9 +304,9 @@ func (s *OrderAttemptService) renderCapturedCard(ctx context.Context, method *mo
 // ConfirmCustodianCard reads the token back from its exact vendor session,
 // then attaches the instrument under the customer and custodian handle locks.
 // It never charges or creates a card-on-file mandate.
-func (s *OrderAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.UUID, user *UserIdentity, reference *billing.CustodianCaptureReference) (SavedCard, error) {
+func (s *InvoiceAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.UUID, user *UserIdentity, reference *billing.CustodianCaptureReference) (SavedCard, error) {
 	if reference == nil {
-		return SavedCard{}, fmt.Errorf("%w: capture reference required", ErrOrderAttemptValidation)
+		return SavedCard{}, fmt.Errorf("%w: capture reference required", ErrInvoiceAttemptValidation)
 	}
 	owner, err := merchant.Require(ctx)
 	if err != nil {
@@ -325,12 +325,12 @@ func (s *OrderAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.
 		return SavedCard{}, err
 	}
 	if reference.CustodianID != state.CustodianID.String() || reference.SessionID != state.VendorSessionID || reference.Token == "" || cardguard.ContainsPAN(reference.Token) {
-		return SavedCard{}, ErrOrderAttemptConflict
+		return SavedCard{}, ErrInvoiceAttemptConflict
 	}
 	tokenHash := captureTokenHash(reference.Token)
 	if state.PaymentMethodID != uuid.Nil {
 		if state.AcceptedTokenHash != tokenHash {
-			return SavedCard{}, ErrOrderAttemptConflict
+			return SavedCard{}, ErrInvoiceAttemptConflict
 		}
 		return s.renderCapturedCard(ctx, method)
 	}
@@ -342,18 +342,18 @@ func (s *OrderAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.
 		return SavedCard{}, err
 	}
 	if !sameCaptureAccount(state, current) {
-		return SavedCard{}, ErrOrderAttemptConflict
+		return SavedCard{}, ErrInvoiceAttemptConflict
 	}
 	if err = client.CheckCaptureContract(ctx); err != nil {
 		return SavedCard{}, ErrCardCaptureUnavailable
 	}
 	vendorSession, err := client.GetSession(ctx, state.VendorSessionID, state.VendorCustomerID)
 	if err != nil || !vendorSession.OwnsToken(reference.Token) || !s.now().Before(vendorSession.ExpiresAt.Time) {
-		return SavedCard{}, ErrOrderAttemptConflict
+		return SavedCard{}, ErrInvoiceAttemptConflict
 	}
 	instrument, err := client.GetMethod(ctx, reference.Token, state.VendorCustomerID)
 	if err != nil {
-		return SavedCard{}, ErrOrderAttemptConflict
+		return SavedCard{}, ErrInvoiceAttemptConflict
 	}
 	err = s.db.MerchantTx(ctx, func(c context.Context, tx pgx.Tx) error {
 		q := s.db.NewWithPgxTx(tx).Gen(c)
@@ -366,7 +366,7 @@ func (s *OrderAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.
 		}
 		if err := paymentmethods.RequireCustodianHandleAvailable(c, q, owner.UUID(), handle); err != nil {
 			if errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing) || errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe) {
-				return ErrOrderAttemptConflict
+				return ErrInvoiceAttemptConflict
 			}
 			return err
 		}
@@ -383,34 +383,34 @@ func (s *OrderAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.
 			return err
 		}
 		if canonical.VendorSessionID != state.VendorSessionID || !sameCaptureAccount(canonical, state) {
-			return ErrOrderAttemptConflict
+			return ErrInvoiceAttemptConflict
 		}
 		if canonical.PaymentMethodID != uuid.Nil {
 			if canonical.AcceptedTokenHash == tokenHash {
 				return nil
 			}
-			return ErrOrderAttemptConflict
+			return ErrInvoiceAttemptConflict
 		}
 		if locked.Status != "requires_action" || !s.now().Before(canonical.ExpiresAt) {
-			return ErrOrderAttemptExpired
+			return ErrInvoiceAttemptExpired
 		}
 		if _, err = q.GetCardCaptureAccountsForShare(c, gen.GetCardCaptureAccountsForShareParams{MerchantID: owner.UUID(), PspID: canonical.PSPID, CustodianID: canonical.CustodianID}); err != nil {
 			return err
 		}
 		psp, custodian, err := s.captureAccounts(c, owner, canonical.PSPID)
 		if err != nil {
-			return ErrOrderAttemptConflict
+			return ErrInvoiceAttemptConflict
 		}
 		current, err := s.captureBinding(owner, psp, custodian)
 		if err != nil || !sameCaptureAccount(canonical, current) {
-			return ErrOrderAttemptConflict
+			return ErrInvoiceAttemptConflict
 		}
 		canonical.PaymentMethodID = id
 		var replacement *uuid.UUID
 		existing, err := q.GetCapturedInstrument(c, gen.GetCapturedInstrumentParams{MerchantID: owner.UUID(), CustodianID: canonical.CustodianID, VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: instrument.ID})
 		if err == nil {
 			if existing.CustomerID != method.CustomerID {
-				return ErrOrderAttemptConflict
+				return ErrInvoiceAttemptConflict
 			}
 			if existing.Status != "active" || existing.ParkReason != nil {
 				return ErrPaymentMethodStale
@@ -428,7 +428,7 @@ func (s *OrderAttemptService) ConfirmCustodianCard(ctx context.Context, id uuid.
 			return err
 		}
 		if changed != 1 {
-			return ErrOrderAttemptConflict
+			return ErrInvoiceAttemptConflict
 		}
 		return nil
 	})

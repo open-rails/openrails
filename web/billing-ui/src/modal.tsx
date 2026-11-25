@@ -1,7 +1,7 @@
-// The payment dialogs — hosts, not flows: one Dialog around OrderPayment, or
-// around the order's embedded payment page on the checkout origin. Closing is always
+// The payment dialogs — hosts, not flows: one Dialog around InvoicePayment, or
+// around the invoice's embedded payment page on the checkout origin. Closing is always
 // possible; an accepted payment settles on the server whether or not the
-// dialog stays open, and the order stays the customer's to pay.
+// dialog stays open, and the invoice stays the customer's to pay.
 import type { ReactNode } from "react"
 
 import {
@@ -19,7 +19,7 @@ import {
   EmbeddedPayment,
   type EmbeddedPaymentProps,
 } from "#orck/embedded-payment"
-import { OrderPayment, type OrderPaymentProps } from "#orck/order-payment"
+import { InvoicePayment, type InvoicePaymentProps } from "#orck/invoice-payment"
 
 interface DialogProps {
   open: boolean
@@ -52,20 +52,20 @@ function PayDialog({
   )
 }
 
-export interface OrderModalProps extends OrderPaymentProps, DialogProps {}
+export interface InvoiceModalProps extends InvoicePaymentProps, DialogProps {}
 
-export function OrderModal({
+export function InvoiceModal({
   open,
   onOpenChange,
   ...payment
-}: OrderModalProps) {
+}: InvoiceModalProps) {
   return (
     <PayDialog
       open={open}
       onOpenChange={onOpenChange}
       appearance={payment.appearance}
     >
-      <OrderPayment {...payment} />
+      <InvoicePayment {...payment} />
     </PayDialog>
   )
 }

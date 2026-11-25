@@ -97,7 +97,7 @@ for _, p := range bill.Probes() { // optional parts: report them, never fail on 
 
 `openrails_job_progress` fails with no River leader, an overrunning job, or a
 billing pass that has not finished within a day or left critical work (usage
-postings, renewals and retries, balance watches, delinquency, order expiry,
+postings, renewals and retries, balance watches, delinquency, invoice expiry,
 usage billing) due since before yesterday (UTC).
 
 ## Config
@@ -158,7 +158,7 @@ and closes none.
 Usage needs an event store on ClickHouse: `Deps.ClickHouse`, with `Config.ClickHouse.Database` naming its database. Money stays in PostgreSQL. Whether `Deps.ClickHouse` is set decides what is served; no setting does.
 
 - **With ClickHouse:** usage reporting (`SyncLeases` and the `Gate`), meters, limits, usage rate cards, spend windows, failed-usage grace and cutoffs, the accrual-rate cap, usage history and usage metrics.
-- **With PostgreSQL only:** subscriptions, one-time purchases, carts and checkout, entitlements, credit packs and balances, running charges, usage orders (billing what running charges leave owed), customer messages and the books.
+- **With PostgreSQL only:** subscriptions, one-time purchases, carts and checkout, entitlements, credit packs and balances, running charges, usage invoices (billing what running charges leave owed), customer messages and the books.
 
 Without ClickHouse every usage route stays mounted and answers 409 `event_store_required` once its caller is authenticated, and the `Client`'s methods return the same error (`billing.ErrEventStoreRequired`). `ApplyCatalog` refuses a document declaring meters, limits, a product's `limits` or `rate_cards`, and `UpdateMerchantConfiguration` refuses the settings only usage reads. `NewGate` over the engine returns `billing.ErrEventStoreRequired`. Meters and limits already stored stay dormant: `New` names them in one log line and a `consistency.dormant_usage` finding, and the next document `ApplyCatalog` applies removes them. `GET /v1/config` reports `usage: false`.
 
@@ -434,19 +434,19 @@ OpenRails storing the relationship:
 - `Engine.CustomerRoutes(selection)` returns customer operations under its
   `Prefix`: `Auth` verifies once, and `Resolve` maps the request to one existing
   `CustomerBinding` (return `billing.ErrNotFound` to hide a relationship).
-  Covered: config, payments, entitlements, orders (list, detail, payment
+  Covered: config, payments, entitlements, invoices (list, detail, payment
   attempt, pay, confirm), subscriptions (list, detail, cancel, resume, payment
   method), payment methods and agreements. Every mutation asks for a recent
-  sign-in (`step_up_required`, RFC 9470); order creation is not mapped.
+  sign-in (`step_up_required`, RFC 9470); invoice creation is not mapped.
 
 ## Checkout page
 
-A pay URL is a page on an origin of its own where the customer pays one order:
-your backend creates the order with `pay_url` and redirects the customer
-([orders and checkout](client.md#orders-and-checkout)). The origin must differ
+A pay URL is a page on an origin of its own where the customer pays one invoice:
+your backend creates the invoice with `pay_url` and redirects the customer
+([invoices and checkout](client.md#invoices-and-checkout)). The origin must differ
 from the API's, your app's, the frontend's and every declared issuer's: the page
 runs the PSPs' scripts and never shares an origin with them. Without it,
-an order asking for a pay URL is `400 pay_url_unavailable`.
+an invoice asking for a pay URL is `400 pay_url_unavailable`.
 
 Set `Config.CheckoutOrigin` and `Deps.CheckoutAssets`, then route that origin's
 requests to `Engine.CheckoutPage()`'s handler ahead of everything else. With Gin:

@@ -13,9 +13,9 @@ type PaymentRecovery struct {
 	// can remain paused. Commands recheck all eligibility before charging.
 	Retryable     bool   `json:"retryable"`
 	BlockedReason string `json:"blocked_reason,omitempty"`
-	// OrderID is an engine-owned subscription's unpaid renewal: the order its
-	// customer pays (POST /v1/me/orders/{id}/pay) or confirms.
-	OrderID *OrderID `json:"order_id,omitempty"`
+	// InvoiceID is an engine-owned subscription's unpaid renewal: the invoice its
+	// customer pays (POST /v1/me/invoices/{id}/pay) or confirms.
+	InvoiceID *InvoiceID `json:"invoice_id,omitempty"`
 }
 
 type RetrySubscriptionNowParams struct {

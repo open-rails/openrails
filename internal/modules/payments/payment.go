@@ -278,7 +278,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		ID:             uuidutil.NewV7(),
 		CustomerID:     orig.CustomerID,
 		SubscriptionID: orig.SubscriptionID,
-		OrderID:        orig.OrderID,
+		InvoiceID:      orig.InvoiceID,
 		RefundedPaymentID: func() *uuid.UUID {
 			id := orig.ID
 			return &id
@@ -358,7 +358,7 @@ func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymen
 		ID:             uuidutil.NewV7(),
 		CustomerID:     orig.CustomerID,
 		SubscriptionID: orig.SubscriptionID,
-		OrderID:        orig.OrderID,
+		InvoiceID:      orig.InvoiceID,
 		RefundedPaymentID: func() *uuid.UUID {
 			id := orig.ID
 			return &id
@@ -424,9 +424,9 @@ func (s *PaymentService) CompleteRefundReservation(ctx context.Context, reservat
 }
 
 // syncReversals books what a payment's settled reversals do beyond the cash:
-// to the credit lot it bought, and to the owed a usage order's payment paid
+// to the credit lot it bought, and to the owed a usage invoice's payment paid
 // (owed.SyncUsageReversals), before current's own general-ledger posting
-// (books.PostReversal), which finds a usage order payment's reversal booked.
+// (books.PostReversal), which finds a usage invoice payment's reversal booked.
 func (s *PaymentService) syncReversals(ctx context.Context, paymentID, current uuid.UUID) error {
 	if err := s.syncPurchasedCreditRefund(ctx, paymentID, current); err != nil {
 		return err

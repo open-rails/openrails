@@ -2,4 +2,4 @@
 
 ## Methods
 
-`CreateOrder` makes an order; `ListProducts` reads the catalog.
+`CreateInvoice` makes an invoice; `ListProducts` reads the catalog.

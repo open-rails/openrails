@@ -103,7 +103,7 @@ def main():
                         if time.monotonic() >= deadline:
                             raise RuntimeError("native server readiness timed out; see " + str(log_path))
                         time.sleep(0.2)
-                content_type, html = get("/pay/ord_00000000-0000-4000-8000-000000000001", checkout)
+                content_type, html = get("/pay/in_00000000-0000-4000-8000-000000000001", checkout)
                 assert content_type == "text/html", "checkout returned no HTML"
                 page = PageAssets()
                 page.feed(html.decode("utf-8"))

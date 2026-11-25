@@ -306,8 +306,8 @@ func TestMRRRisk(t *testing.T) {
 		runUsageDue(t, fleet)
 		a.clock.Advance(24 * time.Hour)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		order := usageOrderOf(t, a, customer)
-		require.True(t, order.Usage.Delinquent)
+		invoice := usageInvoiceOf(t, a, customer)
+		require.True(t, invoice.Usage.Delinquent)
 		// The delinquency queued the customer; its commit wakes the risk drain.
 		require.Eventually(t, func() bool {
 			risk := mrrRiskOf(t, a.alpha, sub.ID)
@@ -318,10 +318,10 @@ func TestMRRRisk(t *testing.T) {
 			" WHERE merchant_id = $1 AND subscription_id = $2 AND reason = 'delinquent'", a.alpha.MerchantID().UUID(), sub.ID.UUID()).Scan(&overdue))
 		require.Positive(t, overdue, "the overdue amount sits beside the at-risk MRR")
 
-		_, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: "bank-cleared"})
+		_, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: "bank-cleared"})
 		require.NoError(t, err)
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
-		require.False(t, usageOrderOf(t, a, customer).Usage.Delinquent)
+		require.False(t, usageInvoiceOf(t, a, customer).Usage.Delinquent)
 		require.Eventually(t, func() bool { return mrrRiskOf(t, a.alpha, sub.ID) == nil }, 20*time.Second, 20*time.Millisecond)
 		require.Equal(t, []string{"delinquent recovered [delinquent]"}, riskCases(t, a.world, a.alpha, sub.ID))
 	})
@@ -625,15 +625,15 @@ func TestMRRRisk(t *testing.T) {
 	})
 }
 
-// usageOrderOf is the customer's one usage order.
-func usageOrderOf(t *testing.T, a *authorityWorld, customer billing.CustomerID) billing.Order {
+// usageInvoiceOf is the customer's one usage invoice.
+func usageInvoiceOf(t *testing.T, a *authorityWorld, customer billing.CustomerID) billing.Invoice {
 	t.Helper()
-	rows, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+	rows, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 	require.NoError(t, err)
-	var usage []billing.Order
-	for _, order := range rows.Items {
-		if order.Usage != nil {
-			usage = append(usage, order)
+	var usage []billing.Invoice
+	for _, invoice := range rows.Items {
+		if invoice.Usage != nil {
+			usage = append(usage, invoice)
 		}
 	}
 	require.Len(t, usage, 1)

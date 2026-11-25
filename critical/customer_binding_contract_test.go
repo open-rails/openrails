@@ -44,7 +44,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{})
 		require.NoError(t, err)
 		price := hostProduct(t, a.alpha, "mapped-customer")
-		order, err := a.alpha.CreateOrder(t.Context(), "mapped-order", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		invoice, err := a.alpha.CreateInvoice(t.Context(), "mapped-invoice", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
 		link := uuid.NewString()
 		credential := &bindingAuthenticator{Authenticator: a.auth.Authenticator()}
@@ -84,17 +84,17 @@ func TestCustomerBindingContracts(t *testing.T) {
 			require.NotContains(t, route.Path, "/admin/")
 			mux.Handle(route.Method+" "+route.Path, route.Handler)
 		}
-		request := httptest.NewRequest(http.MethodGet, "/account/links/"+link+"/me/orders/"+order.ID.String(), nil)
+		request := httptest.NewRequest(http.MethodGet, "/account/links/"+link+"/me/invoices/"+invoice.ID.String(), nil)
 		request.Header.Set("Authorization", "Bearer "+a.aliceToken)
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, request)
 		require.EqualValues(t, 1, credential.calls.Load(), "the actual credential is authenticated once")
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		var got billing.Order
+		var got billing.Invoice
 		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
 		require.Equal(t, customer, got.CustomerID)
 		require.NotEqual(t, a.alice.ID, got.CustomerID.String())
-		require.Equal(t, order.ID, got.ID)
+		require.Equal(t, invoice.ID, got.ID)
 		server := httptest.NewServer(mux)
 		defer server.Close()
 		a.server = server
@@ -107,23 +107,23 @@ func TestCustomerBindingContracts(t *testing.T) {
 			sdk, err = filepath.Abs("../web/billing-ui/dist/client.js")
 			require.NoError(t, err)
 		}
-		sdkInput, err := json.Marshal(map[string]string{"sdk": sdk, "base": server.URL + "/account/links/" + link, "token": a.aliceToken, "order": order.ID.String(), "customer": customer.String()})
+		sdkInput, err := json.Marshal(map[string]string{"sdk": sdk, "base": server.URL + "/account/links/" + link, "token": a.aliceToken, "order": invoice.ID.String(), "customer": customer.String()})
 		require.NoError(t, err)
 		sdkCall := exec.CommandContext(t.Context(), "node", "customer_binding_sdk.mjs")
 		sdkCall.Stdin = bytes.NewReader(sdkInput)
 		output, err := sdkCall.CombinedOutput()
 		require.NoError(t, err, string(output))
-		require.Contains(t, string(output), "/account/links/"+link+"/me/orders/"+order.ID.String())
+		require.Contains(t, string(output), "/account/links/"+link+"/me/invoices/"+invoice.ID.String())
 		status, raw = a.request(t, http.MethodGet, request.URL.Path, a.bobToken, nil)
 		require.Equal(t, http.StatusNotFound, status, string(raw))
 		require.NotContains(t, string(raw), customer.String())
 		for _, foreign := range []string{"other-merchant", "missing-customer", "unknown-link"} {
-			status, raw = a.request(t, http.MethodGet, "/account/links/"+foreign+"/me/orders/"+order.ID.String(), a.aliceToken, nil)
+			status, raw = a.request(t, http.MethodGet, "/account/links/"+foreign+"/me/invoices/"+invoice.ID.String(), a.aliceToken, nil)
 			require.Equal(t, http.StatusNotFound, status, string(raw))
 			require.NotContains(t, string(raw), customer.String())
 		}
 		for _, unavailable := range []string{"resolver-outage", "empty-binding"} {
-			status, raw = a.request(t, http.MethodGet, "/account/links/"+unavailable+"/me/orders/"+order.ID.String(), a.aliceToken, nil)
+			status, raw = a.request(t, http.MethodGet, "/account/links/"+unavailable+"/me/invoices/"+invoice.ID.String(), a.aliceToken, nil)
 			require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
 			require.NotContains(t, string(raw), "private resolver failure")
 			require.NotContains(t, string(raw), customer.String())
@@ -131,11 +131,11 @@ func TestCustomerBindingContracts(t *testing.T) {
 		_, err = a.alpha.GetCustomer(t.Context(), missing)
 		require.ErrorIs(t, err, billing.ErrNotFound, "mapping does not provision a customer")
 		otherCustomer := billing.CustomerID(uuid.New())
-		otherOrder, err := a.alpha.CreateOrder(t.Context(), "other-customer-order", billing.CreateOrderParams{CustomerID: otherCustomer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		otherInvoice, err := a.alpha.CreateInvoice(t.Context(), "other-customer-invoice", billing.CreateInvoiceParams{CustomerID: otherCustomer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
-		payment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 10_000_000, TransactionID: "mapped-owned-receipt"})
+		payment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 10_000_000, TransactionID: "mapped-owned-receipt"})
 		require.NoError(t, err)
-		foreignPayment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: otherOrder.ID, Amount: 10_000_000, TransactionID: "mapped-foreign-receipt"})
+		foreignPayment, err := a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: otherInvoice.ID, Amount: 10_000_000, TransactionID: "mapped-foreign-receipt"})
 		require.NoError(t, err)
 		for _, view := range []string{"config", "payments", "entitlements"} {
 			path := "/account/links/" + link + "/me/" + view
@@ -166,12 +166,12 @@ func TestCustomerBindingContracts(t *testing.T) {
 			require.Equal(t, http.StatusNotFound, status, view+": "+string(raw))
 			require.NotContains(t, string(raw), customer.String())
 		}
-		status, raw = a.request(t, http.MethodGet, "/account/links/"+link+"/me/orders/"+otherOrder.ID.String(), a.aliceToken, nil)
+		status, raw = a.request(t, http.MethodGet, "/account/links/"+link+"/me/invoices/"+otherInvoice.ID.String(), a.aliceToken, nil)
 		require.Equal(t, http.StatusNotFound, status, string(raw))
 		status, raw = a.request(t, http.MethodGet, request.URL.Path, a.aliceToken, nil, map[string]string{"OpenRails-Expected-Merchant": a.beta.MerchantID().String()})
 		require.Equal(t, http.StatusPreconditionFailed, status, string(raw))
 		require.Contains(t, string(raw), "merchant_mismatch")
-		status, raw = a.request(t, http.MethodPost, "/account/links/"+link+"/me/orders", a.aliceToken, map[string]any{})
+		status, raw = a.request(t, http.MethodPost, "/account/links/"+link+"/me/invoices", a.aliceToken, map[string]any{})
 		require.Equal(t, http.StatusMethodNotAllowed, status, "unclassified writes are unavailable: "+string(raw))
 		expired := a.signedToken(t, func(_ map[string]any, claims map[string]any) {
 			claims["exp"], claims["iat"], claims["nbf"] = time.Now().Add(-time.Hour).Unix(), time.Now().Add(-2*time.Hour).Unix(), time.Now().Add(-2*time.Hour).Unix()
@@ -212,12 +212,12 @@ func TestCustomerBindingContracts(t *testing.T) {
 		_, err := w.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{})
 		require.NoError(t, err)
 		price := hostProduct(t, w.alpha, "standalone-mapped")
-		order, err := w.alpha.CreateOrder(t.Context(), "standalone-mapped-order", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		invoice, err := w.alpha.CreateInvoice(t.Context(), "standalone-mapped-invoice", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
-		path := "/__mapped/alpha/me/orders/" + order.ID.String()
+		path := "/__mapped/alpha/me/invoices/" + invoice.ID.String()
 		status, raw := w.request(t, http.MethodGet, path, w.AliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var got billing.Order
+		var got billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &got))
 		require.Equal(t, customer, got.CustomerID)
 		require.NotEqual(t, w.AliceID, got.CustomerID.String())
@@ -240,7 +240,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 		require.NoError(t, err)
 		price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(24), AccessDurationHours: ptr(24)})
 		require.NoError(t, err)
-		order, err := a.alpha.CreateOrder(t.Context(), "mapped-membership-order", billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		invoice, err := a.alpha.CreateInvoice(t.Context(), "mapped-membership-invoice", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
 		require.NoError(t, err)
 		routes, err := a.engine.CustomerRoutes(openrails.CustomerRoutes{Prefix: "/mapped", Auth: a.auth.Authenticator(), Resolve: func(r *http.Request, v auth.Verified) (openrails.CustomerBinding, error) {
 			actor, err := a.auth.ResolveTenantActor(r.Context(), v)
@@ -260,10 +260,10 @@ func TestCustomerBindingContracts(t *testing.T) {
 		a.server = httptest.NewServer(mux)
 		defer a.server.Close()
 		stale := authtest.StaleSession(t, a.auth, a.aliceToken)
-		path := "/mapped/orders/" + order.ID.String()
+		path := "/mapped/invoices/" + invoice.ID.String()
 		status, raw := a.request(t, http.MethodGet, path, stale, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
-		payment := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242", Decline: "auth"})}, ExpectedTotal: 10_000_000, Reusable: ptr(true)}
+		payment := billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242", Decline: "auth"})}, ExpectedTotal: 10_000_000, Reusable: ptr(true)}
 		status, raw = a.request(t, http.MethodPost, path+"/pay", stale, payment, map[string]string{"Idempotency-Key": "mapped-pay"})
 		require.Equal(t, http.StatusUnauthorized, status, string(raw))
 		require.Contains(t, string(raw), "step_up_required")
@@ -304,19 +304,19 @@ func TestCustomerBindingContracts(t *testing.T) {
 			require.Nil(t, confirmed.NextAction)
 		}
 		require.Empty(t, provider.effects(t), "saved-card authentication must never collect money")
-		var waiting billing.Order
+		var waiting billing.Invoice
 		for range 2 {
 			status, raw = a.request(t, http.MethodPost, path+"/pay", fresh, payment, map[string]string{"Idempotency-Key": "mapped-pay"})
 			require.Equal(t, http.StatusOK, status, string(raw))
 			require.NoError(t, json.Unmarshal(raw, &waiting))
 			require.Equal(t, customer, waiting.CustomerID)
-			require.Equal(t, billing.OrderPaymentRequiresAction, waiting.Payment.Status)
+			require.Equal(t, billing.InvoicePaymentRequiresAction, waiting.Payment.Status)
 		}
 		status, raw = a.request(t, http.MethodGet, path, fresh, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.NoError(t, json.Unmarshal(raw, &waiting))
 		require.NotNil(t, waiting.Payment.NextAction, "customer view carries its own provider continuation")
-		staff, err := a.alpha.GetOrder(t.Context(), order.ID)
+		staff, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
 		require.Nil(t, staff.Payment.NextAction)
 		secret := waiting.Payment.NextAction.Payload["client_secret"]
@@ -326,12 +326,12 @@ func TestCustomerBindingContracts(t *testing.T) {
 		intent, _, ok := strings.Cut(secret, "_secret_")
 		require.True(t, ok)
 		require.True(t, provider.core.Authenticate(intent))
-		var completed billing.Order
+		var completed billing.Invoice
 		for range 2 {
 			status, raw = a.request(t, http.MethodPost, path+"/confirm", fresh, map[string]any{})
 			require.Equal(t, http.StatusOK, status, string(raw))
 			require.NoError(t, json.Unmarshal(raw, &completed))
-			require.Equal(t, billing.OrderComplete, completed.Status)
+			require.Equal(t, billing.InvoiceComplete, completed.Status)
 		}
 		require.Len(t, provider.effects(t), 1)
 		require.EqualValues(t, 1000, provider.effects(t)[0].Amount)

@@ -109,9 +109,9 @@ func TestDunningSchedule(t *testing.T) {
 					sub.ID.UUID()).Scan(&frozen))
 				require.NotNil(t, frozen)
 				require.Equal(t, tc.limit, *frozen)
-				order := myRenewalOrder(t, a, sub.ID)
+				invoice := myRenewalInvoice(t, a, sub.ID)
 				for i := range tc.limit {
-					status, raw := payMyRenewal(t, a, order, *sub.PaymentMethodID, fmt.Sprintf("corrected-address-%d", i))
+					status, raw := payMyRenewal(t, a, invoice, *sub.PaymentMethodID, fmt.Sprintf("corrected-address-%d", i))
 					require.Equal(t, http.StatusPaymentRequired, status, string(raw))
 					require.Contains(t, string(raw), `"code":"card_declined"`)
 				}
@@ -119,19 +119,19 @@ func TestDunningSchedule(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, retried.Items, tc.limit)
 				creates := paymentIntentCreates(p)
-				status, raw := payMyRenewal(t, a, order, *sub.PaymentMethodID, "past-the-cap")
+				status, raw := payMyRenewal(t, a, invoice, *sub.PaymentMethodID, "past-the-cap")
 				require.Equal(t, http.StatusConflict, status, string(raw))
-				require.Contains(t, string(raw), `"code":"order_not_payable"`)
+				require.Contains(t, string(raw), `"code":"invoice_not_payable"`)
 				require.Equal(t, creates, paymentIntentCreates(p), "past the cap the card never reaches the provider")
 				subscriptionState(t, a, sub.ID, "awaiting_method")
 				require.Len(t, p.effects(t), 1)
 				// Another card is admitted whatever the cap.
 				replacement := saveMethod(t, a, p, a.aliceToken, "5556")
-				status, raw = payMyRenewal(t, a, order, replacement.ID, "replacement-card")
+				status, raw = payMyRenewal(t, a, invoice, replacement.ID, "replacement-card")
 				require.Equal(t, http.StatusOK, status, string(raw))
-				var paid billing.Order
+				var paid billing.Invoice
 				require.NoError(t, json.Unmarshal(raw, &paid))
-				require.Equal(t, billing.OrderComplete, paid.Status)
+				require.Equal(t, billing.InvoiceComplete, paid.Status)
 				subscriptionState(t, a, sub.ID, "active")
 				require.Len(t, p.effects(t), 2, "enrollment and the renewal on the new card")
 			})

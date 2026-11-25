@@ -26,7 +26,7 @@ type hyperSwitchCollectionAdapter struct {
 }
 
 // PrepareHyperSwitchCharge reuses the existing scoped account/credential armer
-// without invoking usage order preparation or choosing an unscheduled agreement.
+// without invoking usage invoice preparation or choosing an unscheduled agreement.
 // The caller rechecks method ownership against its frozen instrument and owns
 // the durable submission fence. This helper compares the retained HS binding.
 func PrepareHyperSwitchCharge(ctx context.Context, resolver *MerchantCollectionAdapterBuilder, method gen.BillingPaymentMethod, psp uuid.UUID, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {

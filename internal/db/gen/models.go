@@ -53,7 +53,7 @@ type BillingBookIdentity struct {
 	TaggingStartedAt time.Time
 }
 
-// One row per merchant: when its general ledger booked its first receipt, by the clock that stamps payments and orders. ledger-audit checks the postings of what was stored since; what came before waits for the books' rebuild. Retention: permanent, never pruned.
+// One row per merchant: when its general ledger booked its first receipt, by the clock that stamps payments and invoices. ledger-audit checks the postings of what was stored since; what came before waits for the books' rebuild. Retention: permanent, never pruned.
 type BillingBooksStart struct {
 	MerchantID uuid.UUID
 	// When the first receipt was booked, by the payment writer's clock.
@@ -61,11 +61,11 @@ type BillingBooksStart struct {
 	CreatedAt time.Time
 }
 
-// A customer's cart: up to 100 lines ({price_id, quantity, amount}, in the order added), priced live as an order preview. Every change goes through one function in one transaction and sets last_changed_at; an order made from the cart takes its lines. Retention: carts are deleted 30 days after last_changed_at.
+// A customer's cart: up to 100 lines ({price_id, quantity, amount}, in the order added), priced live as an invoice preview. Every change goes through one function in one transaction and sets last_changed_at; an invoice made from the cart takes its lines. Retention: carts are deleted 30 days after last_changed_at.
 type BillingCart struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	// JSON array of {price_id, quantity, amount}: quantity and amount as on an order line, absent when not given.
+	// JSON array of {price_id, quantity, amount}: quantity and amount as on an invoice line, absent when not given.
 	Lines         []byte
 	LastChangedAt time.Time
 	CreatedAt     time.Time
@@ -201,7 +201,7 @@ type BillingCreditGrant struct {
 	// What the lot counts: a registry currency, or a merchant-defined unit.
 	Unit  string
 	Units int64
-	// purchase and recurring were paid (a one-off order line, or a recurring price's cycle); grant and promotion were given; import came from another system and may declare what was paid.
+	// purchase and recurring were paid (a one-off invoice line, or a recurring price's cycle); grant and promotion were given; import came from another system and may declare what was paid.
 	FundingSource string
 	// What was paid for the lot, in paid_currency (a registry currency); NULL for a gift. A pack of a merchant's unit is paid in any currency: its rate is paid_amount over units, bonus units included.
 	PaidAmount   *int64
@@ -211,13 +211,13 @@ type BillingCreditGrant struct {
 	// The funding's own id: the caller's key, or the payment that bought the lot. Unique per customer.
 	SourceID *string
 	// Who funded the lot: the customer, or the staff or host that granted it.
-	Invoker     string
-	ProductID   *uuid.UUID
-	OrderLineID *uuid.UUID
-	PaymentID   *uuid.UUID
-	Description *string
-	StartsAt    time.Time
-	ExpiresAt   *time.Time
+	Invoker       string
+	ProductID     *uuid.UUID
+	InvoiceLineID *uuid.UUID
+	PaymentID     *uuid.UUID
+	Description   *string
+	StartsAt      time.Time
+	ExpiresAt     *time.Time
 	// When the lot's live revocation took effect; kept by its credit_grant_events.
 	RevokedAt *time.Time
 	// Units the ledger credited to the lot on its balance account: deposits, bonuses, restores and reinstatements. Kept by ledger_transfers_apply_lot_counters.
@@ -307,7 +307,7 @@ type BillingCustomerContact struct {
 	UpdatedAt time.Time
 }
 
-// Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open usage orders against the merchant's declared grace window and amount floor. Evaluated when a usage order of the payer changes and at next_evaluation_at; a payer with an open usage order has a row. A projection of order truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement: it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
+// Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open usage invoices against the merchant's declared grace window and amount floor. Evaluated when a usage invoice of the payer changes and at next_evaluation_at; a payer with an open usage invoice has a row. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement: it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
 type BillingCustomerDelinquency struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -317,13 +317,13 @@ type BillingCustomerDelinquency struct {
 	OverdueStartedAt *time.Time
 	EnteredAt        time.Time
 	OverdueAmount    int64
-	OverdueOrders    int64
+	OverdueInvoices  int64
 	// Bumped only when state changes; the idempotency coordinate of the emitted host_outbox row.
 	TransitionSeq int64
 	EvaluatedAt   time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
-	// The next instant time alone changes this payer's delinquency in the currency: a usage order falling due or its grace window running out. Null: only a change to its usage orders or policy does.
+	// The next instant time alone changes this payer's delinquency in the currency: a usage invoice falling due or its grace window running out. Null: only a change to its usage invoices or policy does.
 	NextEvaluationAt *time.Time
 }
 
@@ -782,12 +782,12 @@ type BillingLedgerTransfer struct {
 	// Opaque origin key (e.g. 'grant'/grant_id, 'payment'/transaction_id). Ledger purity: business joins live in control-plane tables.
 	Source   string
 	SourceID string
-	// The credit lot the leg moves units of, or attributes money to. order_id and customer_id carry no foreign keys: the append-only ledger never blocks or cascades on business rows.
+	// The credit lot the leg moves units of, or attributes money to. invoice_id and customer_id carry no foreign keys: the append-only ledger never blocks or cascades on business rows.
 	CreditGrantID *uuid.UUID
 	CustomerID    *uuid.UUID
 	InvokerID     *string
 	Resource      *string
-	OrderID       *uuid.UUID
+	InvoiceID     *uuid.UUID
 	CreatedAt     time.Time
 	// Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.
 	Operation string
@@ -795,8 +795,8 @@ type BillingLedgerTransfer struct {
 	Book string
 	// When the transfer takes effect, its business date: when it posted, for the units book; the event's own instant, for the general ledger. ledger_daily counts it in its 15-minute UTC bucket.
 	EffectiveAt time.Time
-	// The order line a general-ledger transfer belongs to. No foreign key (ledger purity).
-	OrderLineID *uuid.UUID
+	// The invoice line a general-ledger transfer belongs to. No foreign key (ledger purity).
+	InvoiceLineID *uuid.UUID
 	// The product a general-ledger transfer belongs to. No foreign key (ledger purity).
 	ProductID *uuid.UUID
 	// The revenue schedule whose deferred revenue a general-ledger transfer funds, recognises or reduces. No foreign key (ledger purity).
@@ -1305,25 +1305,25 @@ type BillingOperationLog struct {
 	SubscriptionID *uuid.UUID
 }
 
-// One payable (ord_ id): frozen lines and total in one currency, paid by at most one live order attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from order_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 397 days after they closed; every other order is permanent.
-type BillingOrder struct {
+// One payable (in_ id): frozen lines and total in one currency, paid by at most one live invoice attempt at a time: a purchase, or a renewal of an engine-owned subscription. A decline leaves it open with last_payment_error; it is numbered from invoice_number_seq when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the invoice. Retention: unpaid canceled and expired invoices that never started a payment attempt are deleted 397 days after they closed; every other invoice is permanent.
+type BillingInvoice struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
 	CustomerID uuid.UUID
-	// customer (the customer's own purchase), merchant (an unpaid order the merchant created for them), subscription (a renewal of an engine-owned subscription) or usage (owed charges billed in arrears for a period).
+	// customer (the customer's own purchase), merchant (an unpaid invoice the merchant created for them), subscription (a renewal of an engine-owned subscription) or usage (owed charges billed in arrears for a period).
 	Origin string
-	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired (a purchase closed unpaid), void (a renewal its subscription's end left unowed, or a usage order the merchant voided), uncollectible (a usage order the merchant wrote off; collecting it reopens it).
+	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired (a purchase closed unpaid), void (a renewal its subscription's end left unowed, or a usage invoice the merchant voided), uncollectible (a usage invoice the merchant wrote off; collecting it reopens it).
 	Status   string
 	Currency string
 	Total    int64
-	// The order number, taken from order_number_seq when the order completes; unique per merchant, not consecutive.
+	// The invoice number, taken from invoice_number_seq when the invoice completes; unique per merchant, not consecutive.
 	Number         *int64
 	IdempotencyKey *string
 	RequestDigest  []byte
 	// The card the latest attempt charged; a card the attempt saved from the customer's token stays as evidence after it is removed.
 	PaymentMethodID *uuid.UUID
 	PspID           *uuid.UUID
-	// The order attempt last started for the order.
+	// The invoice attempt last started for the invoice.
 	AttemptID        *uuid.UUID
 	PaymentID        *uuid.UUID
 	LastPaymentError []byte
@@ -1334,47 +1334,47 @@ type BillingOrder struct {
 	ExpiredAt   *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed order paid late is succeeded with its payment refunded.
+	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed invoice paid late is succeeded with its payment refunded.
 	PaymentStatus string
-	// sha256 of the pay URL's secret; the secret is never stored. Set once on a merchant order; on a customer's own order, again each time the customer asks for its pay URL, which ends the last.
+	// sha256 of the pay URL's secret; the secret is never stored. Set once on a merchant invoice; on a customer's own invoice, again each time the customer asks for its pay URL, which ends the last.
 	PayUrlSecretHash []byte
-	// When the pay URL stops working; no later than the order's own expiry.
+	// When the pay URL stops working; no later than the invoice's own expiry.
 	PayUrlExpiresAt *time.Time
-	// Where a merchant order's pay URL returns once paid. NULL on a customer's own embedded pay URL, which returns nowhere: the frame tells its page.
+	// Where a merchant invoice's pay URL returns once paid. NULL on a customer's own embedded pay URL, which returns nowhere: the frame tells its page.
 	SuccessUrl          *string
 	CancelUrl           *string
 	SavedPaymentMethods *bool
 	SubscriptionID      *uuid.UUID
 	PeriodStartsAt      *time.Time
 	PeriodEndsAt        *time.Time
-	// When a renewal is owed: its period's start. An open order past it is overdue.
+	// When a renewal is owed: its period's start. An open invoice past it is overdue.
 	DueAt    *time.Time
 	VoidedAt *time.Time
-	// A usage order's paid part: its payments, remittances and the funded balance that repaid it. Complete once it is the total.
+	// A usage invoice's paid part: its payments, remittances and the funded balance that repaid it. Complete once it is the total.
 	AmountPaid      *int64
 	UncollectibleAt *time.Time
-	// A usage order's collection: charge_automatically (charged to the currency's collection card) or send_invoice (the customer remits).
+	// A usage invoice's collection: charge_automatically (charged to the currency's collection card) or send_invoice (the customer remits).
 	CollectionMethod       *string
 	PoNumber               *string
 	Memo                   *string
 	Tax                    []byte
 	BillingContacts        []byte
 	CollectionFailureCount *int32
-	// A usage order's first declined collection, which its retry schedule counts from.
+	// A usage invoice's first declined collection, which its retry schedule counts from.
 	CollectionFailedAt *time.Time
-	// When a usage order's next scheduled charge runs: its due date when it opens, then the retry schedule's; NULL while none is scheduled (stopped until the customer designates a card).
+	// When a usage invoice's next scheduled charge runs: its due date when it opens, then the retry schedule's; NULL while none is scheduled (stopped until the customer designates a card).
 	NextCollectionAttemptAt *time.Time
 	// Frozen collection authority: engine, NMI schedule with existing OpenRails dunning, or provider billing. A provider bill is never a generic local charge command.
 	CollectionOwner string
 	// Initial observed enrollment, renewal, or a separate adjustment bill. Provider bills use scoped provider identity rather than period timestamps as document identity.
 	SubscriptionBillKind *string
-	// sha256 of a customer order's lines (prices, quantities, amounts), which POST /v1/me/orders finds its open order by. NULL on a cart's order and every other origin.
+	// sha256 of a customer invoice's lines (prices, quantities, amounts), which POST /v1/me/invoices finds its open invoice by. NULL on a cart's invoice and every other origin.
 	LinesDigest []byte
 	// The merchant's page frames the pay URL, only on its registered origins (settings payment_page.embed_origins); otherwise the customer is sent to it.
 	Embedded *bool
 	// Set on a checkout when it was created: reactivated when the customer had MRR with the merchant and has none now, new on a first purchase without MRR history, returning otherwise.
 	CustomerType *string
-	// Set on a checkout (an order OpenRails started for its customer to pay): 1 + the customer's paid purchases when it was created. Two checkouts open at once can share one. NULL on every other order and on checkouts created before it was recorded.
+	// Set on a checkout (an invoice OpenRails started for its customer to pay): 1 + the customer's paid purchases when it was created. Two checkouts open at once can share one. NULL on every other invoice and on checkouts created before it was recorded.
 	PurchaseNumber *int32
 	// When the customer first read the open checkout in person (the payment form loaded), or created it with its payment.
 	OpenedAt *time.Time
@@ -1397,11 +1397,11 @@ type BillingOrder struct {
 	AttributionReferrer  *string
 	AttributionAffiliate *string
 	// On a subscription's bill: the checkout that bought the subscription, whose facts its money is reported under.
-	CheckoutOrderID *uuid.UUID
+	CheckoutInvoiceID *uuid.UUID
 }
 
-// An order payment attempt: provider execution and any customer action are tied to the order. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
-type BillingOrderAttempt struct {
+// An invoice payment attempt: provider execution and any customer action are tied to the invoice. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
+type BillingInvoiceAttempt struct {
 	ID             uuid.UUID
 	Rail           string
 	Status         string
@@ -1425,15 +1425,15 @@ type BillingOrderAttempt struct {
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
-	// The order this payment attempt pays.
-	OrderID *uuid.UUID
+	// The invoice this payment attempt pays.
+	InvoiceID *uuid.UUID
 }
 
-// One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.
-type BillingOrderLine struct {
+// One line of an invoice, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their invoice.
+type BillingInvoiceLine struct {
 	MerchantID  uuid.UUID
 	ID          uuid.UUID
-	OrderID     uuid.UUID
+	InvoiceID   uuid.UUID
 	CustomerID  uuid.UUID
 	Position    int32
 	PriceID     *uuid.UUID
@@ -1443,7 +1443,7 @@ type BillingOrderLine struct {
 	UnitAmount  int64
 	Amount      int64
 	Ownership   *string
-	// product:<id> or tier_group:<group>: the ownership a unique line claims while its order is live.
+	// product:<id> or tier_group:<group>: the ownership a unique line claims while its invoice is live.
 	ClaimKey             *string
 	BillingIntervalHours *int32
 	AccessDurationHours  *int32
@@ -1457,17 +1457,17 @@ type BillingOrderLine struct {
 	ProviderAmount bool
 	// Frozen access choice accepted on a provider bill: use its verified service-period end, otherwise the explicit hourly duration.
 	ProviderAccessDefault bool
-	// Accepted calendar-month cadence. NULL preserves historical fixed-hour and one-time lines. The initial completed order fixes the UTC calendar anchor.
+	// Accepted calendar-month cadence. NULL preserves historical fixed-hour and one-time lines. The initial completed invoice fixes the UTC calendar anchor.
 	BillingIntervalMonths *int32
 }
 
-// Owed charges awaiting their usage order: an accrual is born pending and gates arrears exposure; finalization moves it onto an order (order_id, status billed), so it bills once. Retention: permanent, never pruned.
+// Owed charges awaiting their usage invoice: an accrual is born pending and gates arrears exposure; finalization moves it onto an invoice (invoice_id, status billed), so it bills once. Retention: permanent, never pruned.
 type BillingOwedItem struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
-	OrderID    *uuid.UUID
+	InvoiceID  *uuid.UUID
 	SourceType string
 	SourceID   string
 	AccruedAt  time.Time
@@ -1478,12 +1478,12 @@ type BillingOwedItem struct {
 	UpdatedAt  time.Time
 }
 
-// At most one live ownership per customer and key (product or tier group). An order claims its unique lines when created; paying hands each claim to the subscription or product access it produced; cancel, expiry, the subscription's end or the access's revocation deletes it.
+// At most one live ownership per customer and key (product or tier group). An invoice claims its unique lines when created; paying hands each claim to the subscription or product access it produced; cancel, expiry, the subscription's end or the access's revocation deletes it.
 type BillingOwnershipClaim struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	ClaimKey   string
-	OrderID    uuid.UUID
+	InvoiceID  uuid.UUID
 	HolderType string
 	HolderID   uuid.UUID
 	CreatedAt  time.Time
@@ -1556,9 +1556,9 @@ type BillingPayment struct {
 	MoneyMovement string
 	// Accepted credit promise and first successful fulfillment dates; independent of subsequent catalog edits.
 	CreditGrantSnapshot []byte
-	// Required immutable bill identity for every payment and reversal. Prices and products belong to the order lines.
-	OrderID *uuid.UUID
-	// The owed payment that settled a usage order's charge or remittance. A balance repayment moves no money and is only its ledger transfer.
+	// Required immutable bill identity for every payment and reversal. Prices and products belong to the invoice lines.
+	InvoiceID *uuid.UUID
+	// The owed payment that settled a usage invoice's charge or remittance. A balance repayment moves no money and is only its ledger transfer.
 	LedgerTransferID *uuid.UUID
 	// Seats a per-seat subscription payment billed: a period at that many seats, or the seats a mid-period increase added. NULL otherwise.
 	Quantity *int32
@@ -1611,7 +1611,7 @@ type BillingPaymentAttempt struct {
 	MandateID *uuid.UUID
 	// The initial transaction id the attempt sent the provider, verbatim.
 	SentInitialTransactionID *string
-	OrderID                  *uuid.UUID
+	InvoiceID                *uuid.UUID
 	// approved; declined (the issuer said no); refused (the merchant or its gateway refused it before the issuer); error (it did not complete).
 	Outcome string
 	// Who or what refused it: customer, issuer (discretion), fraud, merchant (or its gateway), processing or unknown. Follows the reason; null on approvals.
@@ -1874,13 +1874,13 @@ type BillingProductEntitlement struct {
 	RemovedBy *string
 }
 
-// Scoped immutable provider bill identity and accepted order snapshot. Multiple verified aliases can name one order. Settlement proof never executes collection. Retention: permanent with the financial order.
+// Scoped immutable provider bill identity and accepted invoice snapshot. Multiple verified aliases can name one invoice. Settlement proof never executes collection. Retention: permanent with the financial invoice.
 type BillingProviderBill struct {
 	MerchantID        uuid.UUID
 	PspID             uuid.UUID
 	SourceKind        string
 	SourceKey         string
-	OrderID           uuid.UUID
+	InvoiceID         uuid.UUID
 	CustomerID        uuid.UUID
 	Snapshot          []byte
 	ProviderReference string
@@ -1999,7 +1999,7 @@ type BillingProviderSchedule struct {
 	SubscriptionID    uuid.UUID
 	CustomerID        uuid.UUID
 	PspID             uuid.UUID
-	InitialOrderID    *uuid.UUID
+	InitialInvoiceID  *uuid.UUID
 	AcceptedVersion   int64
 	SourceReference   string
 	ProviderReference string
@@ -2215,14 +2215,14 @@ type BillingReconciliationState struct {
 	UpdatedAt       time.Time
 }
 
-// One row per paid order line, and per currency its money was paid in, whose revenue the general ledger defers: what was funded (credited to deferred_revenue), what has been recognised, and over what service. A line priced in a merchant's own unit is funded by its lots' money, in each lot's paid currency. A ratable schedule recognises by elapsed service at every midnight on the 1st in the merchant's accounting timezone and at its end; a point-in-time one at once. Retention: permanent, never pruned.
+// One row per paid invoice line, and per currency its money was paid in, whose revenue the general ledger defers: what was funded (credited to deferred_revenue), what has been recognised, and over what service. A line priced in a merchant's own unit is funded by its lots' money, in each lot's paid currency. A ratable schedule recognises by elapsed service at every midnight on the 1st in the merchant's accounting timezone and at its end; a point-in-time one at once. Retention: permanent, never pruned.
 type BillingRevenueSchedule struct {
 	MerchantID      uuid.UUID
 	ID              uuid.UUID
 	CustomerID      uuid.UUID
 	Currency        string
-	OrderID         uuid.UUID
-	OrderLineID     uuid.UUID
+	InvoiceID       uuid.UUID
+	InvoiceLineID   uuid.UUID
 	SubscriptionID  *uuid.UUID
 	ProductAccessID *uuid.UUID
 	ProductID       *uuid.UUID
@@ -2307,31 +2307,31 @@ type BillingSolanaCranker struct {
 	PinnedAt  time.Time
 }
 
-// Every signature observed on a Solana Pay reference, recorded once. credited = the order attempt was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.
+// Every signature observed on a Solana Pay reference, recorded once. credited = the invoice attempt was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.
 type BillingSolanaPayReceipt struct {
-	MerchantID     uuid.UUID
-	Reference      string
-	Signature      string
-	OrderAttemptID uuid.UUID
-	Disposition    string
-	ReviewReason   *string
-	Recipient      string
-	TokenMint      string
-	ExpectedAmount int64
-	ReceivedAmount int64
-	Payer          *string
-	LandedAt       *time.Time
-	PaymentID      *uuid.UUID
-	ResolvedAt     *time.Time
-	Resolution     *string
-	CreatedAt      time.Time
+	MerchantID       uuid.UUID
+	Reference        string
+	Signature        string
+	InvoiceAttemptID uuid.UUID
+	Disposition      string
+	ReviewReason     *string
+	Recipient        string
+	TokenMint        string
+	ExpectedAmount   int64
+	ReceivedAmount   int64
+	Payer            *string
+	LandedAt         *time.Time
+	PaymentID        *uuid.UUID
+	ResolvedAt       *time.Time
+	Resolution       *string
+	CreatedAt        time.Time
 }
 
-// One Solana Pay reference per order attempt. pending = awaiting a transfer landed by expires_at; confirmed = one signature credited (or mirrored); expired = nothing credited by expires_at. Purchase references stay watched until watch_ends_at so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.
+// One Solana Pay reference per invoice attempt. pending = awaiting a transfer landed by expires_at; confirmed = one signature credited (or mirrored); expired = nothing credited by expires_at. Purchase references stay watched until watch_ends_at so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.
 type BillingSolanaPayReference struct {
 	MerchantID       uuid.UUID
 	Reference        string
-	OrderAttemptID   uuid.UUID
+	InvoiceAttemptID uuid.UUID
 	Kind             string
 	Status           string
 	ExpiresAt        time.Time
@@ -2449,7 +2449,7 @@ type BillingSubscription struct {
 	// The earliest retry the network's advice allowed, when that advice set the scheduled retry: at or past the next renewal it deferred every retry, and the case ends at grace_ends_at. NULL when the dunning policy set it.
 	RetryAdvisedAt *time.Time
 	// The checkout whose payment created the subscription; NULL for one bought before checkouts were recorded, imported or started at its provider.
-	CheckoutOrderID *uuid.UUID
+	CheckoutInvoiceID *uuid.UUID
 }
 
 // Append-only observed subscription card and retry changes. References and before/after values are snapshots, not charging instructions. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

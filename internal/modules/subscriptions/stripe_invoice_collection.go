@@ -28,7 +28,7 @@ type StripeInvoiceCollectionParams struct {
 	Currency            string
 	Description         string
 	IdempotencyKey      string
-	OpenRailsOrderID    string
+	OpenRailsInvoiceID  string
 	OpenRailsMerchantID string
 	OpenRailsCustomerID string
 }
@@ -207,8 +207,8 @@ func addStripeCollectionMetadata(values url.Values, p StripeInvoiceCollectionPar
 	if key := strings.TrimSpace(p.IdempotencyKey); key != "" {
 		values.Set("metadata["+StripeCollectionKeyMetadata+"]", key)
 	}
-	if orderID := strings.TrimSpace(p.OpenRailsOrderID); orderID != "" {
-		values.Set("metadata[openrails_order_id]", orderID)
+	if invoiceID := strings.TrimSpace(p.OpenRailsInvoiceID); invoiceID != "" {
+		values.Set("metadata[openrails_invoice_id]", invoiceID)
 	}
 	if merchantID := strings.TrimSpace(p.OpenRailsMerchantID); merchantID != "" {
 		values.Set("metadata[openrails_merchant_id]", merchantID)

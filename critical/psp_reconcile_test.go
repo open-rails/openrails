@@ -63,8 +63,8 @@ func (iw *importWorld) held(t *testing.T, ref string) heldRow {
 func (iw *importWorld) book(t *testing.T) string {
 	t.Helper()
 	var out string
-	agg := func(table, order string) string {
-		return fmt.Sprintf("(SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY %s), '[]') FROM %s x WHERE x.merchant_id = $1)", order, iw.table(table))
+	agg := func(table, invoice string) string {
+		return fmt.Sprintf("(SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY %s), '[]') FROM %s x WHERE x.merchant_id = $1)", invoice, iw.table(table))
 	}
 	subs := fmt.Sprintf(`(SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'customer_id', x.customer_id, 'price_id', x.price_id, 'product_id', x.product_id,
 		'rail_subscription_id', x.rail_subscription_id, 'payment_method_id', x.payment_method_id, 'started_at', x.started_at, 'facts_authority', x.facts_authority,
@@ -211,7 +211,7 @@ func TestPSPReconcile(t *testing.T) {
 		iw.nmi.DeleteSchedule(gone)
 		vault := iw.nmi.Schedule(recarded).Vault
 		iw.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Card = nmimock.Card{Brand: "visa", Last4: "1111", Exp: "0131"} })
-		added := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "silver", Amount: "10.00", Days: 30, Created: iw.clock.Now(), NextBilling: iw.clock.Now().AddDate(0, 0, 30), Order: "order-silver-" + vault})
+		added := iw.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "silver", Amount: "10.00", Days: 30, Created: iw.clock.Now(), NextBilling: iw.clock.Now().AddDate(0, 0, 30), Order: "invoice-silver-" + vault})
 		iw.nmi.AddScheduleSale(added, iw.clock.Now())
 		iw.nmi.RemovePlan("retired")
 

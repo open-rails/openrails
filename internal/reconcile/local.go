@@ -101,8 +101,8 @@ type LocalPayment struct {
 	ReversalKind  string
 	Currency      string
 	Status        string
-	// UsageOrderID is the usage order a ledger-settled payment paid.
-	UsageOrderID      *uuid.UUID
+	// UsageInvoiceID is the usage invoice a ledger-settled payment paid.
+	UsageInvoiceID    *uuid.UUID
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
@@ -410,7 +410,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 			p.Rail = *row.Rail
 		}
 		if row.LedgerTransferID != nil {
-			p.UsageOrderID = row.OrderID
+			p.UsageInvoiceID = row.InvoiceID
 		}
 		out = append(out, p)
 	}
@@ -512,8 +512,8 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 	}
 }
 
-// SolanaLocalRecordResolverFromDB resolves pull-intent memo ids. Order
-// transfers settle through their reference ledger and order attempts; the
+// SolanaLocalRecordResolverFromDB resolves pull-intent memo ids. Invoice
+// transfers settle through their reference ledger and invoice attempts; the
 // retired price-purchase backfill is not reconstructed. (nil,nil) leaves an
 // unmatched wallet scan for operator review.
 func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {

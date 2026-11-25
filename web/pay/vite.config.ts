@@ -13,7 +13,7 @@ const keepGoEmbedPlaceholder: Plugin = {
   },
 }
 
-// The page owns its origin: index.html at /pay/{order_id}, files under /assets/.
+// The page owns its origin: index.html at /pay/{invoice_id}, files under /assets/.
 export default defineConfig({
   base: "/",
   plugins: [react(), keepGoEmbedPlaceholder],

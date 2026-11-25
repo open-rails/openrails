@@ -1,23 +1,23 @@
 // A checkout's fallback PSPs: one kept back until the PSPs it stands in for
-// are not offered, or have failed often enough on the order. The checkout
+// are not offered, or have failed often enough on the invoice. The checkout
 // decides this, never the merchant's PSP configuration.
 import { z } from "zod"
 
-import type { Order } from "./client/types"
+import type { Invoice } from "./client/types"
 import type { PspConfig } from "./psp"
 
 /** A PSP kept back for others, named by key. */
 export interface PaymentFallback {
   /** The PSP keys it stands in for, e.g. `["mobius"]`. */
   for: string[]
-  /** Failed attempts through them on the order, combined, that reveal it. */
+  /** Failed attempts through them on the invoice, combined, that reveal it. */
   afterFailures: number
 }
 
 /** Fallback PSPs by key: `{ ccbill: { for: ["mobius"], afterFailures: 2 } }`. */
 export type PaymentFallbacks = Record<string, PaymentFallback>
 
-type Option = Order["payment_options"][number]
+type Option = Invoice["payment_options"][number]
 
 /**
  * The psp_ids of the options a fallback keeps back: one of its `for` PSPs is

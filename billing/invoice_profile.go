@@ -1,6 +1,6 @@
 package billing
 
-// InvoiceCollectionMethod is how a customer's usage orders are paid:
+// InvoiceCollectionMethod is how a customer's usage invoices are paid:
 // charged to their collection card, or sent for them to remit.
 type InvoiceCollectionMethod string
 
@@ -16,7 +16,7 @@ type InvoiceContact struct {
 }
 
 // InvoiceProfile is a customer's invoice terms and document fields, copied
-// onto each usage order when it is billed.
+// onto each usage invoice when it is billed.
 type InvoiceProfile struct {
 	NetTermsDays     int                     `json:"net_terms_days"`
 	CollectionMethod InvoiceCollectionMethod `json:"collection_method"`

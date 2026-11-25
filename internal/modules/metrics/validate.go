@@ -288,21 +288,21 @@ func ValidateIn(q *Query, now time.Time, zone *time.Location) (*Plan, *Validatio
 
 	for i, o := range q.Order {
 		if (o.Measure == "") == (o.Dimension == "") {
-			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d]", i),
-				Message: `each order term needs exactly one of "measure" or "dimension"`})
+			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("invoice[%d]", i),
+				Message: `each invoice term needs exactly one of "measure" or "dimension"`})
 			continue
 		}
 		if o.Dir != "" && o.Dir != "asc" && o.Dir != "desc" {
-			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d].dir", i),
+			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("invoice[%d].dir", i),
 				Message: fmt.Sprintf("invalid dir %q", o.Dir), Valid: []string{"asc", "desc"}})
 		}
 		if o.Measure != "" && !seenMeasure[o.Measure] {
-			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d].measure", i),
-				Message: fmt.Sprintf("order measure %q is not in measures", o.Measure), Valid: q.Measures})
+			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("invoice[%d].measure", i),
+				Message: fmt.Sprintf("invoice measure %q is not in measures", o.Measure), Valid: q.Measures})
 		}
 		if o.Dimension != "" && o.Dimension != "time" && !seenDim[o.Dimension] {
-			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d].dimension", i),
-				Message: fmt.Sprintf("order dimension %q is not in by", o.Dimension), Valid: q.By})
+			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("invoice[%d].dimension", i),
+				Message: fmt.Sprintf("invoice dimension %q is not in by", o.Dimension), Valid: q.By})
 		}
 	}
 

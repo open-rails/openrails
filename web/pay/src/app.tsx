@@ -3,11 +3,11 @@ import {
   BillingProvider,
   PAYMENT_COMPLETE_MESSAGE,
   PAYMENT_RESIZE_MESSAGE,
-  OrderPayment,
+  InvoicePayment,
   createBillingClient,
   type PaymentFallbacks,
 } from "@openrails/billing-ui"
-import { isBillingError, type CustomerConfig, type Order, type PublicConfig } from "@openrails/billing-ui/client"
+import { isBillingError, type CustomerConfig, type Invoice, type PublicConfig } from "@openrails/billing-ui/client"
 
 import { paymentPageFetch } from "./api"
 import { CaptchaPrompt, captchaFetch } from "./captcha"
@@ -17,11 +17,11 @@ type Ended = "not_found" | "expired" | "canceled" | "unavailable"
 type State =
   | { kind: "loading" }
   | { kind: "ended"; reason: Ended }
-  | { kind: "ready"; config: PublicConfig; customer: CustomerConfig; order: Order }
+  | { kind: "ready"; config: PublicConfig; customer: CustomerConfig; invoice: Invoice }
 
 // Paid, or with the provider (Stripe redirects on a complete session even
 // while an asynchronous payment settles): the customer goes back to the
-// merchant, who fulfils on order.completed, never on this redirect.
+// merchant, who fulfils on invoice.completed, never on this redirect.
 const settled = (status: string) => status === "complete" || status === "processing"
 
 // An embedded payment page runs in the merchant's frame; opened on its own it
@@ -36,7 +36,7 @@ const tellFrame = (origins: string[], message: Record<string, unknown>) => {
 
 // fallbacks are the checkout's, from the pay URL's fragment: applied as on
 // the merchant's own page.
-export function App({ orderId, secret, fallbacks }: { orderId: string; secret: string | null; fallbacks?: PaymentFallbacks }) {
+export function App({ invoiceId, secret, fallbacks }: { invoiceId: string; secret: string | null; fallbacks?: PaymentFallbacks }) {
   const config = useRef<PublicConfig | null>(null)
   // billing-ui's client: every call carries the secret, and a pay the server
   // challenges is resent with the customer's captcha token.
@@ -49,12 +49,12 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
   useEffect(() => {
     if (!client) return
     const abort = new AbortController()
-    // The deployment's configuration, and the order's merchant's: the secret
+    // The deployment's configuration, and the invoice's merchant's: the secret
     // reads both, once, for the page and the payment form.
-    Promise.all([client.getConfig(abort.signal), client.getCustomerConfig(abort.signal), client.getOrder(orderId, abort.signal)]).then(
-      ([loaded, customer, order]) => {
+    Promise.all([client.getConfig(abort.signal), client.getCustomerConfig(abort.signal), client.getInvoice(invoiceId, abort.signal)]).then(
+      ([loaded, customer, invoice]) => {
         config.current = loaded
-        setState({ kind: "ready", config: loaded, customer, order })
+        setState({ kind: "ready", config: loaded, customer, invoice })
       },
       (err: unknown) => {
         if (abort.signal.aborted) return
@@ -63,29 +63,29 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
       }
     )
     return () => abort.abort()
-  }, [client, orderId])
+  }, [client, invoiceId])
 
-  const embedded = state.kind === "ready" && framed && state.order.embedded
+  const embedded = state.kind === "ready" && framed && state.invoice.embedded
   // The frame sizes itself to the page, so the page never scrolls inside it.
   useEffect(() => {
     document.documentElement.classList.toggle("framed", embedded)
   }, [embedded])
   const origins = state.kind === "ready" ? state.customer.merchant.embed_origins : []
-  // The order as it settled in the frame.
-  const [finished, setFinished] = useState<Order>()
-  const done = (order: Order) => {
-    if (!order.pay_url_expires_at) return
+  // The invoice as it settled in the frame.
+  const [finished, setFinished] = useState<Invoice>()
+  const done = (invoice: Invoice) => {
+    if (!invoice.pay_url_expires_at) return
     if (embedded) {
-      setFinished(order)
-      tellFrame(origins, { type: PAYMENT_COMPLETE_MESSAGE, order_id: order.id, success_url: order.success_url ?? null })
+      setFinished(invoice)
+      tellFrame(origins, { type: PAYMENT_COMPLETE_MESSAGE, invoice_id: invoice.id, success_url: invoice.success_url ?? null })
       return
     }
     // A customer's own pay URL returns nowhere: the page says it is paid.
-    if (order.success_url) window.location.replace(order.success_url)
-    else setFinished(order)
+    if (invoice.success_url) window.location.replace(invoice.success_url)
+    else setFinished(invoice)
   }
   useEffect(() => {
-    if (state.kind === "ready" && settled(state.order.status)) done(state.order)
+    if (state.kind === "ready" && settled(state.invoice.status)) done(state.invoice)
   }, [state])
   // The frame follows the page's height.
   useEffect(() => {
@@ -100,31 +100,31 @@ export function App({ orderId, secret, fallbacks }: { orderId: string; secret: s
   if (state.kind === "loading") return <Shell><p className="muted">Loading…</p></Shell>
   if (state.kind === "ended") return <Shell><Notice reason={state.reason} /></Shell>
 
-  const { customer, order } = state
+  const { customer, invoice } = state
   const merchant = customer.merchant
-  const leaving = !embedded && !!order.success_url
+  const leaving = !embedded && !!invoice.success_url
   return (
     <Shell
       merchant={merchant.display_name}
       logo={merchant.logo_url ?? undefined}
-      back={embedded ? undefined : (order.cancel_url ?? undefined)}
+      back={embedded ? undefined : (invoice.cancel_url ?? undefined)}
     >
-      {order.status === "canceled" || order.status === "expired" ? (
-        <Notice reason={order.status === "expired" ? "expired" : "canceled"} />
-      ) : settled(order.status) || finished ? (
+      {invoice.status === "canceled" || invoice.status === "expired" ? (
+        <Notice reason={invoice.status === "expired" ? "expired" : "canceled"} />
+      ) : settled(invoice.status) || finished ? (
         <p className="muted" role="status">
           {leaving
             ? `Returning you to ${merchant.display_name || "the merchant"}…`
-            : (finished ?? order).status === "processing"
+            : (finished ?? invoice).status === "processing"
               ? "Your payment is processing."
               : "Payment complete."}
         </p>
       ) : (
         <BillingProvider client={client!} config={state.config} customerConfig={customer}>
-          <OrderPayment
-            orderId={order.id}
+          <InvoicePayment
+            invoiceId={invoice.id}
             client={client!}
-            savedPaymentMethods={order.saved_payment_methods}
+            savedPaymentMethods={invoice.saved_payment_methods}
             serverCardEntry={false}
             wallets
             fallbacks={fallbacks}
@@ -141,7 +141,7 @@ function Notice({ reason }: { reason: Ended }) {
   const text = {
     not_found: "This payment link is not valid.",
     expired: "This payment link has expired. Return to the store to start again.",
-    canceled: "This order was canceled.",
+    canceled: "This invoice was canceled.",
     unavailable: "Payment is unavailable right now. Try again in a moment.",
   }[reason]
   return (

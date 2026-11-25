@@ -26,7 +26,7 @@ import (
 // receipt. The only errors returned are ones worth retrying; anything that
 // would fail the same way again is recorded for review instead, so one bad
 // transfer never blocks the reference.
-func (s *OrderAttemptService) SettleSolanaTransfer(ctx context.Context, reference string, t solanamodule.ObservedTransfer) (*solanamodule.Receipt, error) {
+func (s *InvoiceAttemptService) SettleSolanaTransfer(ctx context.Context, reference string, t solanamodule.ObservedTransfer) (*solanamodule.Receipt, error) {
 	if s.db == nil {
 		return nil, errors.New("purchase settlement database unavailable")
 	}
@@ -45,7 +45,7 @@ func (s *OrderAttemptService) SettleSolanaTransfer(ctx context.Context, referenc
 			out = seen
 			return err
 		}
-		session, err := NewOrderAttemptRepo(d).GetByID(ctx, ref.OrderAttemptID)
+		session, err := NewInvoiceAttemptRepo(d).GetByID(ctx, ref.InvoiceAttemptID)
 		if err != nil {
 			return err
 		}
@@ -56,11 +56,11 @@ func (s *OrderAttemptService) SettleSolanaTransfer(ctx context.Context, referenc
 			ExpectedAmount: getUint64Field(session.RailState, "token_amount"),
 			ReceivedAmount: t.Amount, Payer: t.Payer, LandedAt: t.LandedAt,
 		}
-		open := session.Status == models.OrderAttemptStatusCreated || session.Status == models.OrderAttemptStatusRequiresAction || session.Status == models.OrderAttemptStatusExpired
-		if open && session.OrderID != nil {
-			// A transfer pays the order only on its current attempt while it
+		open := session.Status == models.InvoiceAttemptStatusCreated || session.Status == models.InvoiceAttemptStatusRequiresAction || session.Status == models.InvoiceAttemptStatusExpired
+		if open && session.InvoiceID != nil {
+			// A transfer pays the invoice only on its current attempt while it
 			// takes payment; any other is money to review.
-			if open, err = solanaOrderLive(ctx, d, session, now); err != nil {
+			if open, err = solanaInvoiceLive(ctx, d, session, now); err != nil {
 				return err
 			}
 		}
@@ -96,17 +96,17 @@ func (s *OrderAttemptService) SettleSolanaTransfer(ctx context.Context, referenc
 // creditSolanaTransfer credits the purchase from its accepted terms, confirms
 // the reference and records the credit, all inside a savepoint: a transfer
 // already recorded elsewhere, or a purchase that refuses, leaves nothing.
-func (s *OrderAttemptService) creditSolanaTransfer(ctx context.Context, d *db.DB, session *models.OrderAttempt, receipt *solanamodule.Receipt, t solanamodule.ObservedTransfer, now time.Time) error {
+func (s *InvoiceAttemptService) creditSolanaTransfer(ctx context.Context, d *db.DB, session *models.InvoiceAttempt, receipt *solanamodule.Receipt, t solanamodule.ObservedTransfer, now time.Time) error {
 	return d.RunInTx(ctx, func(ctx context.Context, sp pgx.Tx) error {
 		inner := s.db.NewWithPgxTx(sp)
 		// One landed transfer settles at most one purchase, across merchants
 		// and PSPs, and a purchase at most one transfer.
-		if err := settlement.ClaimOrder(ctx, inner, session.ID, t.Signature); errors.Is(err, settlement.ErrClaimed) {
+		if err := settlement.ClaimInvoice(ctx, inner, session.ID, t.Signature); errors.Is(err, settlement.ErrClaimed) {
 			return solanamodule.ErrSignatureClaimed
 		} else if err != nil {
 			return err
 		}
-		paymentID, err := s.creditSolanaOrder(ctx, inner, session, receipt.Reference, t)
+		paymentID, err := s.creditSolanaInvoice(ctx, inner, session, receipt.Reference, t)
 		// Under the reference lock, the transfer's payment or purchase
 		// transaction id already taken means it settled something else.
 		var pgErr *pgconn.PgError
@@ -128,10 +128,10 @@ func (s *OrderAttemptService) creditSolanaTransfer(ctx context.Context, d *db.DB
 // transactionIDConstraints are the unique indexes a transfer's transaction id
 // collides with when it already settled another payment or purchase.
 var transactionIDConstraints = map[string]bool{
-	"payments_channel_transaction_id_key":      true,
-	"payments_psp_id_transaction_id_key":       true,
-	"order_attempts_psp_id_transaction_id_key": true,
-	"order_attempts_transaction_id_key":        true,
+	"payments_channel_transaction_id_key":        true,
+	"payments_psp_id_transaction_id_key":         true,
+	"invoice_attempts_psp_id_transaction_id_key": true,
+	"invoice_attempts_transaction_id_key":        true,
 }
 
 // transientSettleError is a failure another attempt can get past: the
@@ -160,13 +160,13 @@ func transientSettleError(err error) bool {
 
 // ResolveSolanaPayReview closes a review receipt once an operator refunded
 // or otherwise settled its money.
-func (s *OrderAttemptService) ResolveSolanaPayReview(ctx context.Context, signature, resolution string) error {
+func (s *InvoiceAttemptService) ResolveSolanaPayReview(ctx context.Context, signature, resolution string) error {
 	resolved, err := solanamodule.NewPayLedger(s.db).Resolve(ctx, strings.TrimSpace(signature), resolution, s.now())
 	if err != nil {
 		return err
 	}
 	if !resolved {
-		return fmt.Errorf("%w: no open Solana Pay review for signature %s", ErrOrderAttemptNotFound, signature)
+		return fmt.Errorf("%w: no open Solana Pay review for signature %s", ErrInvoiceAttemptNotFound, signature)
 	}
 	return nil
 }

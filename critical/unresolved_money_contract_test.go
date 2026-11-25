@@ -33,7 +33,7 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		defer gate.unblock()
 		body, err := json.Marshal(input)
 		require.NoError(t, err)
-		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, child.url+"/v1/me/orders", bytes.NewReader(body))
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, child.url+"/v1/me/invoices", bytes.NewReader(body))
 		require.NoError(t, err)
 		request.Header.Set("Authorization", "Bearer "+a.aliceToken)
 		request.Header.Set("Content-Type", "application/json")
@@ -56,10 +56,10 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		}
 		require.Len(t, p.effects(t), 1)
 		require.EqualValues(t, 3000, p.effects(t)[0].Amount)
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 		require.NoError(t, err)
-		require.Len(t, orders.Items, 1)
-		require.NotEqual(t, billing.OrderComplete, orders.Items[0].Status)
+		require.Len(t, invoices.Items, 1)
+		require.NotEqual(t, billing.InvoiceComplete, invoices.Items[0].Status)
 		jobs, err := queue.JobList(t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation"))
 		require.NoError(t, err)
 		require.NotEmpty(t, jobs.Jobs, "accepted checkout must have a durable recovery job before the external request")
@@ -74,14 +74,14 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 				require.NoError(t, err)
 			}
 		}
-		settled := settledSale(t, a, p, orders.Items[0].ID)
-		require.Equal(t, orders.Items[0].ID, settled.ID)
+		settled := settledSale(t, a, p, invoices.Items[0].ID)
+		require.Equal(t, invoices.Items[0].ID, settled.ID)
 		require.Len(t, p.core.Submitted("/v1/payment_intents"), 1, "a replacement process must observe the accepted debit, never create another")
 		replacement.kill(t)
 	})
 	t.Run("OR-J29-S05/catalog-and-account-retirement-preserve-accepted-terms", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
-		_, order, _ := unknownSale(t, a, p)
+		_, invoice, _ := unknownSale(t, a, p)
 		products, err := a.alpha.ListProducts(t.Context(), billing.ProductListParams{})
 		require.NoError(t, err)
 		require.Len(t, products.Items, 1)
@@ -107,9 +107,9 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		a.alpha, err = declaredMerchant(a.engine, "alpha")
 		require.NoError(t, err)
 		queue := hostFleet(t, a.world)
-		settled := recoverSale(t, a, p, queue, order.ID)
+		settled := recoverSale(t, a, p, queue, invoice.ID)
 		require.EqualValues(t, 30_000_000, settled.Total)
-		require.Equal(t, order.ID, settled.ID)
+		require.Equal(t, invoice.ID, settled.ID)
 		current, err := a.alpha.GetProduct(t.Context(), product.ID)
 		require.NoError(t, err)
 		require.True(t, current.Archived)
@@ -120,8 +120,8 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 	})
 	t.Run("OR-J29-S06/retention-and-export-cannot-discard-unknown-money", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) { w.clock.Advance(-400 * 24 * time.Hour) })
-		queue, order, _ := unknownSale(t, a, p)
-		require.True(t, order.CreatedAt.Before(time.Now().Add(-399*24*time.Hour)), "the pending order must actually predate the retention window")
+		queue, invoice, _ := unknownSale(t, a, p)
+		require.True(t, invoice.CreatedAt.Before(time.Now().Add(-399*24*time.Hour)), "the pending invoice must actually predate the retention window")
 		p.mu.Lock()
 		p.evidenceUnavailable = true
 		p.mu.Unlock()
@@ -131,13 +131,13 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		for _, kind := range []string{"openrails.billing_pass", "openrails.cleanup_expired_data"} {
 			runRegistered(t, queue, kind, 2)
 		}
-		retained, err := a.alpha.GetOrder(t.Context(), order.ID)
+		retained, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderPaymentProcessing, retained.Payment.Status)
+		require.Equal(t, billing.InvoicePaymentProcessing, retained.Payment.Status)
 		require.EqualValues(t, 30_000_000, retained.Total)
 		var archive bytes.Buffer
 		require.Error(t, a.alpha.ExportBillingArchive(t.Context(), &archive), "export cannot turn unresolved money into an apparently complete book")
-		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: order.CustomerID})
+		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: invoice.CustomerID})
 		require.NoError(t, err)
 		require.Empty(t, payments.Items, "an unverified accepted debit is retained as pending work, not fabricated settled money")
 		p.mu.Lock()
@@ -153,6 +153,6 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 				require.NoError(t, err)
 			}
 		}
-		settledSale(t, a, p, order.ID)
+		settledSale(t, a, p, invoice.ID)
 	})
 }

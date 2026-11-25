@@ -23,7 +23,7 @@ func TestPersonalAccessTokens(t *testing.T) {
 		a, provider := newPaymentWorldWithAuth(t, func(c *authkit.Config) { c.PersonalAccessTokens.Enabled = true })
 		input := saleInput(t, a, provider)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		order, err := a.alpha.CreateOrder(t.Context(), "pat-order", billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines})
+		invoice, err := a.alpha.CreateInvoice(t.Context(), "pat-invoice", billing.CreateInvoiceParams{CustomerID: customer, Lines: input.Lines})
 		require.NoError(t, err)
 		session, _ := authenticateCustomerProof(t, a.auth.Authenticator(), a.aliceToken, nil)
 		pat, err := a.auth.CreatePersonalAccessToken(t.Context(), session.Identity(), iam.NewPersonalAccessToken{
@@ -32,25 +32,25 @@ func TestPersonalAccessTokens(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		path := "/v1/me/orders/" + order.ID.String()
+		path := "/v1/me/invoices/" + invoice.ID.String()
 		status, raw := a.request(t, http.MethodGet, path, pat.Secret, nil)
 		require.Equal(t, http.StatusOK, status, "a personal access token reads as its customer: %s", raw)
-		pay := func() billing.PayOrderParams {
+		pay := func() billing.PayInvoiceParams {
 			token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-			return billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: token}, ExpectedTotal: 30_000_000, Reusable: ptr(true)}
+			return billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: token}, ExpectedTotal: 30_000_000, Reusable: ptr(true)}
 		}
 		status, raw = a.request(t, http.MethodPost, path+"/pay", pat.Secret, pay(), map[string]string{"Idempotency-Key": "pat-pay"})
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 		require.Contains(t, string(raw), `"code":"customer_action_required"`)
 		require.Empty(t, provider.effects(t), "a refused token charges nothing")
-		unpaid, err := a.alpha.GetOrder(t.Context(), order.ID)
+		unpaid, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, billing.OrderOpen, unpaid.Status)
+		require.Equal(t, billing.InvoiceOpen, unpaid.Status)
 		status, raw = a.request(t, http.MethodPost, path+"/pay", a.aliceToken, pay(), map[string]string{"Idempotency-Key": "session-pay"})
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var paid billing.Order
+		var paid billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &paid))
-		require.Equal(t, billing.OrderComplete, paid.Status)
+		require.Equal(t, billing.InvoiceComplete, paid.Status)
 		require.Len(t, provider.effects(t), 1)
 
 		status, raw = a.request(t, http.MethodGet, "/v1/merchant/proposals", pat.Secret, nil)

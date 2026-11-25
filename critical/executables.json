@@ -32,7 +32,7 @@
       "TestTenantBinding/OR-J01-S19/a-customer-of-another-tenant-is-refused-at-me"
     ],
     "OR-J03-S01": [
-      "TestHostedCheckout/OR-J03-S01/capability-pays-only-its-order"
+      "TestHostedCheckout/OR-J03-S01/capability-pays-only-its-invoice"
     ],
     "OR-J03-S02": [
       "TestHostedCheckout/OR-J03-S02/foreign-tampered-and-expired-capability-refused"
@@ -41,7 +41,7 @@
       "TestHostedCheckout/OR-J03-S03/checkout-and-api-authority-stay-separate"
     ],
     "OR-J03-S04": [
-      "TestHostedBrowser/OR-J03-S04/built-iframe-origin-source-order-and-fallback-boundaries"
+      "TestHostedBrowser/OR-J03-S04/built-iframe-origin-source-invoice-and-fallback-boundaries"
     ],
     "OR-J03-S05": [
       "TestHostedCheckout/OR-J03-S05/real-assets-and-config-redact-private-state"
@@ -59,7 +59,7 @@
       "TestPublicSDK/OR-J04-S03/browser-network-retry-and-cancellation-stay-bounded"
     ],
     "OR-J04-S04": [
-      "TestPublicSDK/OR-J04-S04/expired-token-retry-commits-only-one-order"
+      "TestPublicSDK/OR-J04-S04/expired-token-retry-commits-only-one-invoice"
     ],
     "OR-J04-S05": [
       "TestPublicLifecycle/OR-J04-S05/close-preserves-borrowed-pool-and-worker-fleet"
@@ -80,7 +80,7 @@
       "TestPublicCatalog/OR-J05-S04/archive-keeps-purchased-access-and-money-history"
     ],
     "OR-J05-S05": [
-      "TestPublicCatalog/OR-J05-S05/accepted-order-terms-survive-price-and-PSP-edits"
+      "TestPublicCatalog/OR-J05-S05/accepted-invoice-terms-survive-price-and-PSP-edits"
     ],
     "OR-J05-S06": [
       "TestMerchantCurrencies/OR-J05-S06/declared-units-are-served-to-the-merchant-at-their-scale"
@@ -145,22 +145,22 @@
       "TestPublicCart/OR-J08-S01/cart-preview-and-consumption-have-exact-totals"
     ],
     "OR-J08-S02": [
-      "TestPublicCart/OR-J08-S02/application-order-never-charges-the-saved-card"
+      "TestPublicCart/OR-J08-S02/application-invoice-never-charges-the-saved-card"
     ],
     "OR-J08-S03": [
       "TestPublicCart/OR-J08-S03/unavailable-quantity-and-stale-total-cannot-charge"
     ],
     "OR-J08-S04": [
-      "TestPublicCart/OR-J08-S04/cancel-and-expiry-preserve-settled-order"
+      "TestPublicCart/OR-J08-S04/cancel-and-expiry-preserve-settled-invoice"
     ],
     "OR-J09-S01": [
-      "TestCheckout/OR-J09-S01/real-charge-order-access-and-committed-event"
+      "TestCheckout/OR-J09-S01/real-charge-invoice-access-and-committed-event"
     ],
     "OR-J09-S02": [
       "TestCheckoutBoundaries/OR-J09-S02/customer-challenge-settles-only-after-confirmation"
     ],
     "OR-J09-S03": [
-      "TestCheckoutBoundaries/OR-J09-S03/definitive-decline-keeps-order-unpaid"
+      "TestCheckoutBoundaries/OR-J09-S03/definitive-decline-keeps-invoice-unpaid"
     ],
     "OR-J09-S04": [
       "TestFinancialFailures/OR-J09-S04/database-abort-rolls-back-money-access-and-event-together"
@@ -169,7 +169,7 @@
       "TestCheckoutBoundaries/OR-J09-S05/lost-sale-answer-settles-from-the-provider"
     ],
     "OR-J09-S06": [
-      "TestCheckoutBoundaries/OR-J09-S06/partial-approval-never-pays-the-order"
+      "TestCheckoutBoundaries/OR-J09-S06/partial-approval-never-pays-the-invoice"
     ],
     "OR-J10-S01": [
       "TestPaymentReplay/OR-J10-S01/concurrent-identical-purchase-has-one-economic-debit"
@@ -181,7 +181,7 @@
       "TestPaymentReplay/OR-J10-S03/accepted-key-refuses-changed-purchase"
     ],
     "OR-J10-S04": [
-      "TestPaymentReplay/OR-J10-S04/different-orders-remain-independent-obligations"
+      "TestPaymentReplay/OR-J10-S04/different-invoices-remain-independent-obligations"
     ],
     "OR-J10-S06": [
       "TestRequestIdempotency/OR-J10-S06/a-card-save-key-answers-one-saved-card"
@@ -657,7 +657,7 @@
       "TestRequestIdempotency/OR-J27-S15/a-grant-needs-its-key-and-replays-under-it"
     ],
     "OR-J28-S01": [
-      "TestCallbackContracts/OR-J28-S01/signed-account-bound-evidence-settles-the-original-order"
+      "TestCallbackContracts/OR-J28-S01/signed-account-bound-evidence-settles-the-original-invoice"
     ],
     "OR-J28-S02": [
       "TestCallbackContracts/OR-J28-S02/invalid-signature-and-account-cannot-admit-money/missing",
@@ -719,7 +719,7 @@
       "TestBillingArchive/OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book"
     ],
     "OR-J31-S40": [
-      "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers"
+      "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-invoices-its-own-producers"
     ],
     "OR-J31-S15": [
       "TestCreditGrantsMigration/OR-J31-S15/credit-lots-leave-grants-with-their-old-remainders/moves-every-lot",
@@ -823,10 +823,10 @@
       "TestDestructiveSafeguards/OR-J34-S38/an-abandon-waiting-on-its-actions-stalls-no-other-admission"
     ],
     "OR-J37-S01": [
-      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order",
-      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/foreign-treasury",
-      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/wrong-mint",
-      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-order/underpaid"
+      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-invoice",
+      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-invoice/foreign-treasury",
+      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-invoice/wrong-mint",
+      "TestSolanaContracts/OR-J37-S01/foreign-or-underpaid-transfer-cannot-settle-the-invoice/underpaid"
     ],
     "OR-J37-S02": [
       "TestSolanaContracts/OR-J37-S02/signed-pull-survives-process-death-before-network-submission"
@@ -885,10 +885,10 @@
       "TestMerchantCustodyConfiguration/OR-J06-S06/merchant-custody-settings-preserve-ownership-and-secrets"
     ],
     "OR-J10-S05": [
-      "TestOrderPaymentReceipts/OR-J10-S05/exact-payment-key-cannot-claim-another-attempt"
+      "TestInvoicePaymentReceipts/OR-J10-S05/exact-payment-key-cannot-claim-another-attempt"
     ],
     "OR-J10-S07": [
-      "TestPaymentReplay/OR-J10-S07/a-merchant-order-key-names-one-order-whichever-customer"
+      "TestPaymentReplay/OR-J10-S07/a-merchant-invoice-key-names-one-invoice-whichever-customer"
     ],
     "OR-J12-S06": [
       "TestMerchantOwnedBasisTheoryCardLifecycle/OR-J12-S06/merchant-owned-vault",
@@ -1088,7 +1088,7 @@
       "TestCreditExpiry/OR-J22-S06/lapsed-credit-leaves-available-at-its-lapse-and-its-watch-expires-it"
     ],
     "OR-J29-S08": [
-      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-orders-leases-and-orphan-state"
+      "TestBackgroundJobs/OR-J29-S08/cleanup-alone-ages-out-unpaid-invoices-leases-and-orphan-state"
     ],
     "OR-J19-S05": [
       "TestPriceMigrationContracts/OR-J19-S05/move-that-no-longer-applies-is-skipped-and-settles-its-migration"
@@ -1118,7 +1118,7 @@
       "TestUsageBillingContracts/OR-J26-S50"
     ],
     "OR-J26-S51": [
-      "TestUsageBillingContracts/OR-J26-S51/an-overdue-order-is-told-once-by-the-billing-pass"
+      "TestUsageBillingContracts/OR-J26-S51/an-overdue-invoice-is-told-once-by-the-billing-pass"
     ],
     "OR-J26-S52": [
       "TestUsageBillingContracts/OR-J26-S52/an-account-billed-in-full-waits-for-its-next-spend"
@@ -1136,7 +1136,7 @@
       "TestNMICollectionRefusal/OR-J26-S55/a-never-sent-collection-retains-its-proof"
     ],
     "OR-J26-S56": [
-      "TestUsageBillingContracts/OR-J26-S56/usage-reported-after-its-days-order-is-owed-after-that-order"
+      "TestUsageBillingContracts/OR-J26-S56/usage-reported-after-its-days-invoice-is-owed-after-that-invoice"
     ],
     "OR-J26-S57": [
       "TestUsageBillingContracts/OR-J26-S57/a-period-that-ends-within-a-day-bills-that-days-usage-in-it"
@@ -1154,10 +1154,10 @@
       "TestUsageBillingContracts/OR-J26-S61/a-policys-cap-in-another-currency-binds-no-dollar-money"
     ],
     "OR-J26-S62": [
-      "TestCreditLotCounters/OR-J26-S62/fractional-cent-order-paid-by-card-books-its-change-as-a-bought-lot"
+      "TestCreditLotCounters/OR-J26-S62/fractional-cent-invoice-paid-by-card-books-its-change-as-a-bought-lot"
     ],
     "OR-J26-S63": [
-      "TestUsageBillingContracts/OR-J26-S63/a-usage-orders-period-covers-the-usage-it-bills"
+      "TestUsageBillingContracts/OR-J26-S63/a-usage-invoices-period-covers-the-usage-it-bills"
     ],
     "OR-J37-S60": [
       "TestSolanaPulls/OR-J37-S60/a-due-pull-runs-as-the-operation-its-period-scheduled"
@@ -1271,7 +1271,7 @@
       "TestStripeCustomerPerAccount/OR-J12-S13/each-stripe-account-resolves-its-own-customer"
     ],
     "OR-J12-S14": [
-      "TestCardGuard/OR-J12-S14/a-card-number-in-any-field-of-a-card-save-or-order-payment-is-refused"
+      "TestCardGuard/OR-J12-S14/a-card-number-in-any-field-of-a-card-save-or-invoice-payment-is-refused"
     ],
     "OR-J12-S15": [
       "TestPaymentMethodContracts/OR-J12-S15/a-hyperswitch-card-save-consults-the-card-testing-ledger"
@@ -1312,7 +1312,7 @@
       "TestCCBillIdentity/OR-J38-S40/enforce-without-insert-matches-by-identity"
     ],
     "OR-J38-S43": [
-      "TestCCBillIdentity/OR-J38-S43/a-late-sale-on-an-order-paid-by-card-is-kept-for-refund"
+      "TestCCBillIdentity/OR-J38-S43/a-late-sale-on-an-invoice-paid-by-card-is-kept-for-refund"
     ],
     "OR-J38-S41": [
       "TestMerchantConsole/OR-J38-S41/console-cancel-says-what-ends-and-a-cleared-hold-confirms"
@@ -1363,7 +1363,7 @@
       "TestBillingPass/OR-J04-S45/a-delinquency-grace-ends-on-the-next-pass"
     ],
     "OR-J04-S46": [
-      "TestBillingPass/OR-J04-S46/an-order-past-its-expiry-is-tidied-by-the-next-pass"
+      "TestBillingPass/OR-J04-S46/an-invoice-past-its-expiry-is-tidied-by-the-next-pass"
     ],
     "OR-J04-S47": [
       "TestBillingPass/OR-J04-S47/the-next-pass-takes-what-a-failed-or-missed-pass-left-due"
@@ -1384,19 +1384,19 @@
       "TestBalanceLooks/OR-J25-S42/a-look-that-fails-is-taken-by-the-next-billing-pass"
     ],
     "OR-J37-S70": [
-      "TestOrderExpiryClock/OR-J37-S70/transfer-after-order-expiry-goes-to-review-before-the-pass"
+      "TestInvoiceExpiryClock/OR-J37-S70/transfer-after-invoice-expiry-goes-to-review-before-the-pass"
     ],
     "OR-J09-S70": [
-      "TestOrderExpiryClock/OR-J09-S70/challenge-and-hosted-confirm-after-expiry-close-the-order-before-the-pass"
+      "TestInvoiceExpiryClock/OR-J09-S70/challenge-and-hosted-confirm-after-expiry-close-the-invoice-before-the-pass"
     ],
     "OR-J08-S70": [
-      "TestOrderExpiryClock/OR-J08-S70/expired-open-order-claims-nothing-before-the-pass"
+      "TestInvoiceExpiryClock/OR-J08-S70/expired-open-invoice-claims-nothing-before-the-pass"
     ],
     "OR-J08-S71": [
-      "TestOrderExpiryClock/OR-J08-S71/expired-open-order-reads-expired-everywhere-before-the-pass"
+      "TestInvoiceExpiryClock/OR-J08-S71/expired-open-invoice-reads-expired-everywhere-before-the-pass"
     ],
     "OR-J12-S70": [
-      "TestOrderExpiryClock/OR-J12-S70/card-save-past-its-cutoff-is-removed-before-the-pass"
+      "TestInvoiceExpiryClock/OR-J12-S70/card-save-past-its-cutoff-is-removed-before-the-pass"
     ],
     "OR-J12-S71": [
       "TestMerchantCardRemoval/OR-J12-S71/nmi-erasure-requires-confirmed-absence"
@@ -1408,16 +1408,16 @@
       "TestMerchantCardRemoval/OR-J12-S73/a-card-an-unverified-membership-bills-is-kept"
     ],
     "OR-J22-S07": [
-      "TestMixedOrderCreditRefunds/OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot"
+      "TestMixedInvoiceCreditRefunds/OR-J22-S07/pending-credit-line-refund-holds-the-whole-lot"
     ],
     "OR-J22-S08": [
-      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/full-refund",
-      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/credit-line-first-then-the-rest",
-      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/chargeback-then-won-dispute",
-      "TestMixedOrderCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first"
+      "TestMixedInvoiceCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/full-refund",
+      "TestMixedInvoiceCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/credit-line-first-then-the-rest",
+      "TestMixedInvoiceCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first/chargeback-then-won-dispute",
+      "TestMixedInvoiceCreditRefunds/OR-J22-S08/refunds-and-chargebacks-reverse-the-credit-line-first"
     ],
     "OR-J22-S09": [
-      "TestMixedOrderCreditRefunds/OR-J22-S09/won-dispute-credit-stays-when-a-refund-found-none"
+      "TestMixedInvoiceCreditRefunds/OR-J22-S09/won-dispute-credit-stays-when-a-refund-found-none"
     ],
     "OR-J22-S12": [
       "TestCredits/OR-J22-S12/a-staff-member-grants-a-full-batch-once-a-minute"
@@ -1447,13 +1447,13 @@
       "TestPriceMigrationContracts/OR-J19-S07/stripe-push-keeps-the-seats-and-replays-a-lost-schedule-create"
     ],
     "OR-J28-S08": [
-      "TestCallbackContracts/OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-order"
+      "TestCallbackContracts/OR-J28-S08/a-thin-checkout-session-event-hydrates-and-settles-its-invoice"
     ],
     "OR-J31-S09": [
-      "TestBillingArchive/OR-J31-S09/a-paid-stripe-hosted-page-order-moves-with-the-book"
+      "TestBillingArchive/OR-J31-S09/a-paid-stripe-hosted-page-invoice-moves-with-the-book"
     ],
     "OR-J04-S37": [
-      "TestBillingPass/OR-J04-S37/an-order-expiry-backlog-past-one-batch-drains-in-one-pass"
+      "TestBillingPass/OR-J04-S37/an-invoice-expiry-backlog-past-one-batch-drains-in-one-pass"
     ],
     "OR-J04-S38": [
       "TestBillingPass/OR-J04-S38/a-pass-that-starts-while-one-runs-exits"
@@ -1634,7 +1634,7 @@
       "TestProviderTime/OR-J28-S15/a-strangers-refused-ccbill-logins-hold-only-their-own-login"
     ],
     "OR-J39-S01": [
-      "TestCustomerMessages/OR-J39-S01/a-paid-order-sends-one-receipt-across-retries"
+      "TestCustomerMessages/OR-J39-S01/a-paid-invoice-sends-one-receipt-across-retries"
     ],
     "OR-J39-S02": [
       "TestCustomerMessages/OR-J39-S02/a-fact-a-billing-restore-writes-queues-no-message"
@@ -1661,7 +1661,7 @@
       "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words",
       "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/the-customer-canceled",
       "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/staff-canceled",
-      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/a-usage-orders-collection-stopped-after-failed-payments"
+      "TestCustomerMessages/OR-J39-S09/each-cancellation-cause-sends-one-confirmation-in-its-words/a-usage-invoices-collection-stopped-after-failed-payments"
     ],
     "OR-J39-S10": [
       "TestCustomerMessages/OR-J39-S10/a-scheduled-price-change-sends-its-notice"
@@ -1723,7 +1723,7 @@
       "TestProviderTime/OR-J28-S16/access-restored-after-an-nmi-chargeback-survives-a-replayed-batch"
     ],
     "OR-J48-S13": [
-      "TestMerchantUnits/OR-J48-S13/a-unit-priced-orders-revenue-is-its-lots-money-scheduled-per-currency"
+      "TestMerchantUnits/OR-J48-S13/a-unit-priced-invoices-revenue-is-its-lots-money-scheduled-per-currency"
     ],
     "OR-J48-S14": [
       "TestMerchantUnits/OR-J48-S14/a-chargeback-of-a-pack-reduces-the-schedules-its-spends-funded"
@@ -1890,7 +1890,7 @@
       "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-catalog-routes-client-and-gate",
       "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-settings",
       "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/subscriptions-credit-packs-and-running-charges",
-      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-orders",
+      "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works/usage-invoices",
       "TestEventStore/OR-J24-S39/without-clickhouse-usage-answers-event-store-required-and-the-rest-works"
     ],
     "OR-J24-S40": [
@@ -2024,7 +2024,7 @@
     "OR-J45-S02": [
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code",
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/pick-up-card-waits-for-a-new-card",
-      "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/stop-order-waits-and-never-cancels",
+      "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/stop-invoice-waits-and-never-cancels",
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/insufficient-funds-is-retried",
       "TestDeclineCauses/OR-J45-S02/an-nmi-catch-all-decline-is-classified-by-the-issuers-code/suspected-fraud-is-retried"
     ],
@@ -2081,7 +2081,7 @@
     "OR-J45-S11": [
       "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code",
       "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code/a-never-retry-code-behind-200-waits-for-a-new-card",
-      "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code/a-lost-answer-takes-the-issuers-code-from-the-order-read",
+      "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code/a-lost-answer-takes-the-issuers-code-from-the-invoice-read",
       "TestDeclineCauses/OR-J45-S11/an-engine-nmi-renewal-reads-the-issuers-code/a-failed-issuer-read-keeps-nmis-own-code"
     ],
     "OR-J45-S12": [
@@ -2115,16 +2115,16 @@
       "TestBooks/OR-J40-S07/an-archive-written-before-the-books-restores-as-the-units-book"
     ],
     "OR-J40-S08": [
-      "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-order-both-commit"
+      "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-invoice-both-commit"
     ],
     "OR-J40-S09": [
-      "TestBooks/OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-orders-all-commit"
+      "TestBooks/OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-invoices-all-commit"
     ],
     "OR-J40-S23": [
       "TestBooks/OR-J40-S23/an-event-queued-before-or-after-a-ledger-transfer-both-commit"
     ],
     "OR-J40-S24": [
-      "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit"
+      "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-invoice-both-commit"
     ],
     "OR-J40-S40": [
       "TestProcessorFees/OR-J40-S40/a-stripe-charge-fee-and-a-dispute-fee-post-once-exactly"
@@ -2157,16 +2157,16 @@
       "TestRevenueRecognition/OR-J41-S08/an-immediate-cancellation-without-a-refund-forfeits-the-remainder"
     ],
     "OR-J41-S09": [
-      "TestRevenueRecognition/OR-J41-S09/a-usage-orders-payment-books-its-cash-and-applies-it-to-the-receivable"
+      "TestRevenueRecognition/OR-J41-S09/a-usage-invoices-payment-books-its-cash-and-applies-it-to-the-receivable"
     ],
     "OR-J41-S10": [
       "TestRevenueRecognition/OR-J41-S10/revoked-access-ends-its-schedule-and-an-undone-revocation-takes-the-forfeit-back"
     ],
     "OR-J41-S11": [
-      "TestRevenueRecognition/OR-J41-S11/a-late-payment-on-an-order-another-holds-stays-unapplied"
+      "TestRevenueRecognition/OR-J41-S11/a-late-payment-on-an-invoice-another-holds-stays-unapplied"
     ],
     "OR-J41-S12": [
-      "TestRevenueRecognition/OR-J41-S12/a-purchase-is-applied-over-the-access-its-grant-gives-and-a-replay-applies-an-order-with-no-schedule"
+      "TestRevenueRecognition/OR-J41-S12/a-purchase-is-applied-over-the-access-its-grant-gives-and-a-replay-applies-an-invoice-with-no-schedule"
     ],
     "OR-J41-S13": [
       "TestRevenueRecognition/OR-J41-S13/a-prune-that-hides-booked-money-or-a-recognising-subscription-raises-a-finding-its-undo-resolves"
@@ -2178,7 +2178,7 @@
       "TestRevenueRecognition/OR-J41-S15/ledger-audit-warns-of-lines-from-before-the-books-and-a-tax-line-and-fails-a-later-unscheduled-line"
     ],
     "OR-J41-S16": [
-      "TestRevenueRecognition/OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-order-is-applied-again"
+      "TestRevenueRecognition/OR-J41-S16/no-payment-is-applied-beyond-what-it-brought-when-its-invoice-is-applied-again"
     ],
     "OR-J41-S17": [
       "TestRevenueRecognition/OR-J41-S17/an-imported-purchase-is-applied-over-the-access-its-import-grants"
@@ -2245,7 +2245,7 @@
       "TestRevenueReversals/OR-J41-S23/a-refund-of-a-payment-from-before-the-books-is-never-refused"
     ],
     "OR-J41-S24": [
-      "TestRevenueReversals/OR-J41-S24/a-usage-orders-refund-is-contra-and-its-chargeback-reopens-the-owed"
+      "TestRevenueReversals/OR-J41-S24/a-usage-invoices-refund-is-contra-and-its-chargeback-reopens-the-owed"
     ],
     "OR-J41-S25": [
       "TestRevenueReversals/OR-J41-S25/refunds-in-pieces-each-reduce-the-price-from-where-the-last-left-it"
@@ -2254,7 +2254,7 @@
       "TestRevenueReversals/OR-J41-S26/a-refund-of-a-two-line-bill-takes-each-line-pro-rata"
     ],
     "OR-J41-S27": [
-      "TestRevenueReversals/OR-J41-S27/a-mixed-credit-orders-reversals-move-each-dollar-once"
+      "TestRevenueReversals/OR-J41-S27/a-mixed-credit-invoices-reversals-move-each-dollar-once"
     ],
     "OR-J41-S28": [
       "TestRevenueReversals/OR-J41-S28/an-end-undone-after-a-refund-reinstates-no-forfeit-it-never-made"
@@ -2421,10 +2421,10 @@
       "TestPriceMigrationScale/OR-J19-S14/an-interrupted-create-records-nothing-and-its-retry-moves-everyone-once"
     ],
     "OR-J04-S78": [
-      "TestOrderPaymentBrowser/OR-J04-S78/a-lost-pay-answer-is-read-back-under-its-key-and-a-retry-keeps-it"
+      "TestInvoicePaymentBrowser/OR-J04-S78/a-lost-pay-answer-is-read-back-under-its-key-and-a-retry-keeps-it"
     ],
     "OR-J04-S79": [
-      "TestOrderPaymentBrowser/OR-J04-S79/an-order-awaiting-its-wallet-is-read-and-confirmed-well-under-the-purchase-limit"
+      "TestInvoicePaymentBrowser/OR-J04-S79/an-invoice-awaiting-its-wallet-is-read-and-confirmed-well-under-the-purchase-limit"
     ],
     "OR-J07-S11": [
       "TestCustomerDirectory/OR-J07-S11/a-kept-search-lists-the-exact-match-first-then-the-newest"
@@ -2479,10 +2479,10 @@
       "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance"
     ],
     "OR-J40-S21": [
-      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/waived",
-      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/uncollectible-then-collected",
-      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived/uncollectible-then-waived",
-      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-order-collected-or-waived"
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-invoice-collected-or-waived/waived",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-invoice-collected-or-waived/uncollectible-then-collected",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-invoice-collected-or-waived/uncollectible-then-waived",
+      "TestUsageReceivable/OR-J40-S21/a-waiver-and-an-uncollectible-invoice-collected-or-waived"
     ],
     "OR-J40-S22": [
       "TestUsageReceivable/OR-J40-S22/units-owed-equal-the-receivable-after-every-path/invoiced",

@@ -105,25 +105,25 @@
     },
     {
       "method": "GET",
-      "path": "/v1/admin/orders",
+      "path": "/v1/admin/invoices",
       "auth": "merchant",
       "feature": ""
     },
     {
       "method": "GET",
-      "path": "/v1/admin/orders/{id}",
+      "path": "/v1/admin/invoices/{id}",
       "auth": "merchant",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/admin/orders/{id}/mark-uncollectible",
+      "path": "/v1/admin/invoices/{id}/mark-uncollectible",
       "auth": "merchant",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/admin/orders/{id}/waive-balance",
+      "path": "/v1/admin/invoices/{id}/waive-balance",
       "auth": "merchant",
       "feature": ""
     },
@@ -273,19 +273,19 @@
     },
     {
       "method": "POST",
-      "path": "/v1/app/orders",
+      "path": "/v1/app/invoices",
       "auth": "application",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/app/orders/preview",
+      "path": "/v1/app/invoices/preview",
       "auth": "application",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/app/orders/{id}/cancel",
+      "path": "/v1/app/invoices/{id}/cancel",
       "auth": "application",
       "feature": ""
     },
@@ -609,49 +609,49 @@
     },
     {
       "method": "GET",
-      "path": "/v1/me/orders",
+      "path": "/v1/me/invoices",
       "auth": "customer",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/me/orders",
+      "path": "/v1/me/invoices",
       "auth": "customer",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/me/orders/preview",
+      "path": "/v1/me/invoices/preview",
       "auth": "customer",
       "feature": ""
     },
     {
       "method": "GET",
-      "path": "/v1/me/orders/{id}",
+      "path": "/v1/me/invoices/{id}",
       "auth": "customer",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/me/orders/{id}/cancel",
+      "path": "/v1/me/invoices/{id}/cancel",
       "auth": "customer",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/me/orders/{id}/confirm",
+      "path": "/v1/me/invoices/{id}/confirm",
       "auth": "customer",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/me/orders/{id}/pay",
+      "path": "/v1/me/invoices/{id}/pay",
       "auth": "customer",
       "feature": ""
     },
     {
       "method": "POST",
-      "path": "/v1/me/orders/{id}/pay-url-failure",
+      "path": "/v1/me/invoices/{id}/pay-url-failure",
       "auth": "customer",
       "feature": ""
     },
@@ -993,13 +993,13 @@
     },
     {
       "method": "GET",
-      "path": "/v1/orders/{id}/solana-pay",
+      "path": "/v1/invoices/{id}/solana-pay",
       "auth": "public",
       "feature": "solana"
     },
     {
       "method": "POST",
-      "path": "/v1/orders/{id}/solana-pay",
+      "path": "/v1/invoices/{id}/solana-pay",
       "auth": "public",
       "feature": "solana"
     },
@@ -1017,13 +1017,13 @@
     },
     {
       "method": "GET",
-      "path": "/v1/app/orders/{id}/payment-attempt",
+      "path": "/v1/app/invoices/{id}/payment-attempt",
       "auth": "application",
       "feature": ""
     },
     {
       "method": "GET",
-      "path": "/v1/me/orders/{id}/payment-attempt",
+      "path": "/v1/me/invoices/{id}/payment-attempt",
       "auth": "customer",
       "feature": ""
     }

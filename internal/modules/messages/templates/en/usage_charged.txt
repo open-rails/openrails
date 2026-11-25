@@ -1,6 +1,6 @@
 We charged {{.Event.Amount}} for your usage.
 
-{{with .Event.OrderNumber}}Order: {{.}}
+{{with .Event.InvoiceNumber}}Invoice: {{.}}
 {{end}}Amount paid: {{.Event.Amount}}
 Date: {{.Event.OccurredAt}}
 {{with .Merchant.StatementDescriptor}}

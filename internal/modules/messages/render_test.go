@@ -90,12 +90,12 @@ func requireText(t *testing.T, got billing.MessageContent, subject string, text 
 func amount(v int64) *int64 { return &v }
 
 func TestReceipts(t *testing.T) {
-	purchase := alpha(t, models.NotificationOneOffPurchaseCompleted, billing.NotificationData{Amount: amount(12_500_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001})
-	requireText(t, purchase, "Your receipt from Alpha", "Purchased: Guide\nAmount paid: 12.50 USD\nOrder: 1001\nDate: November 23, 2026", "Questions? https://alpha.example/help\nAlpha\n")
+	purchase := alpha(t, models.NotificationOneOffPurchaseCompleted, billing.NotificationData{Amount: amount(12_500_000), Currency: "USD", ProductName: "Guide", InvoiceNumber: 1001})
+	requireText(t, purchase, "Your receipt from Alpha", "Purchased: Guide\nAmount paid: 12.50 USD\nInvoice: 1001\nDate: November 23, 2026", "Questions? https://alpha.example/help\nAlpha\n")
 	jpy := alpha(t, models.NotificationOneOffPurchaseCompleted, billing.NotificationData{Amount: amount(5_000_000), Currency: "JPY", ProductName: "Guide"})
 	requireText(t, jpy, "Your receipt from Alpha", "Amount paid: 500 JPY")
-	refund := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001})
-	requireText(t, refund, "Your refund from Alpha", "We refunded 4.00 USD for Guide.", "Order: 1001\nRefunded: 4.00 USD\nDate: November 23, 2026")
+	refund := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", InvoiceNumber: 1001})
+	requireText(t, refund, "Your refund from Alpha", "We refunded 4.00 USD for Guide.", "Invoice: 1001\nRefunded: 4.00 USD\nDate: November 23, 2026")
 	start, end := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC), time.Date(2026, 12, 23, 0, 0, 0, 0, time.UTC)
 	subscribed := alpha(t, models.NotificationPremiumStarted, billing.NotificationData{Amount: amount(9_990_000), Currency: "USD", ProductName: "Pro", PeriodStartsAt: &start, PeriodEndsAt: &end})
 	requireText(t, subscribed, "Your subscription to Alpha has started", "Thank you for subscribing to Pro.",
@@ -104,8 +104,8 @@ func TestReceipts(t *testing.T) {
 	if strings.Contains(resumed.Text, "Amount paid") || strings.Contains(resumed.Text, "Billing period") {
 		t.Errorf("a start without a charge shows none:\n%s", resumed.Text)
 	}
-	void := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", OrderNumber: 1001, Voided: true})
-	requireText(t, void, "Your payment to Alpha was canceled", "Your payment of 4.00 USD for Guide was canceled; you weren't charged.", "Order: 1001\nCanceled: 4.00 USD")
+	void := alpha(t, models.NotificationRefundCompleted, billing.NotificationData{Amount: amount(4_000_000), Currency: "USD", ProductName: "Guide", InvoiceNumber: 1001, Voided: true})
+	requireText(t, void, "Your payment to Alpha was canceled", "Your payment of 4.00 USD for Guide was canceled; you weren't charged.", "Invoice: 1001\nCanceled: 4.00 USD")
 	if strings.Contains(void.Text+void.HTML, "refund") || !strings.Contains(void.HTML, "Canceled</td>") {
 		t.Errorf("a void is no refund:\n%s\n%s", void.Text, void.HTML)
 	}
@@ -122,10 +122,10 @@ func TestCancellationsSayTheirCause(t *testing.T) {
 		"Your subscription to Pro was canceled by Alpha.", "If you didn't expect this, please contact us: https://alpha.example/help")
 	other := alpha(t, models.NotificationSubscriptionCanceled, billing.NotificationData{Reason: "rail_cancel"})
 	requireText(t, other, "Your subscription to Alpha is canceled", "Your subscription is canceled.", "You won't be charged again.", "You can subscribe again any time: https://alpha.example/plans")
-	failed := alpha(t, models.NotificationOrderCollectionStopped, billing.NotificationData{Reason: "schedule_exhausted", AmountDue: amount(30_000_000), Currency: "USD"})
+	failed := alpha(t, models.NotificationInvoiceCollectionStopped, billing.NotificationData{Reason: "schedule_exhausted", AmountDue: amount(30_000_000), Currency: "USD"})
 	requireText(t, failed, "We stopped charging your card for Alpha",
 		"Your payments failed several times, so we have stopped trying to collect the 30.00 USD you owe.", "Pay it or add another payment method: https://alpha.example/billing")
-	dead := alpha(t, models.NotificationOrderCollectionStopped, billing.NotificationData{Reason: "non_recoverable", AmountDue: amount(30_000_000), Currency: "USD"})
+	dead := alpha(t, models.NotificationInvoiceCollectionStopped, billing.NotificationData{Reason: "non_recoverable", AmountDue: amount(30_000_000), Currency: "USD"})
 	requireText(t, dead, "We stopped charging your card for Alpha", "Your bank told us your card can no longer be charged")
 	if customer.Text == staff.Text || staff.Text == failed.Text || customer.Text == failed.Text {
 		t.Error("each cause has its own wording")

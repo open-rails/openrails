@@ -16,11 +16,11 @@ func fixtureIndex(t *testing.T) *Index {
 		t.Fatal(err)
 	}
 	return &Index{
-		Routes:      map[string]bool{"GET /v1/me/orders": true},
-		Paths:       [][]string{{"v1", "me", "orders"}},
+		Routes:      map[string]bool{"GET /v1/me/invoices": true},
+		Paths:       [][]string{{"v1", "me", "invoices"}},
 		Codes:       map[string]int{"merchant_unresolved": 403},
 		Permissions: map[string]bool{"merchant:catalog:read": true},
-		Events:      map[string]bool{"order.completed": true},
+		Events:      map[string]bool{"invoice.completed": true},
 		JSONFields:  map[string]bool{},
 		Schema:      map[string]map[string]bool{},
 		Go:          parseGoTxt(string(goTxt)),
@@ -136,7 +136,7 @@ func TestMemberOfAnotherTypeFails(t *testing.T) {
 
 func TestMissingMethodFailsCoverage(t *testing.T) {
 	idx := fixtureIndex(t)
-	idx.Coverage = &Coverage{Methods: map[string][]string{"CreateOrder": {"Client"}, "ListProducts": {"Client"}, "RefundPayment": {"Client"}}}
+	idx.Coverage = &Coverage{Methods: map[string][]string{"CreateInvoice": {"Client"}, "ListProducts": {"Client"}, "RefundPayment": {"Client"}}}
 	wantOnly(t, run1(t, fixture(t, nil), idx, false), cCoverage, "RefundPayment")
 }
 

@@ -119,7 +119,7 @@ func accountingDays(t *testing.T) {
 	}, units, "usage at 23:30 counts on its local day")
 }
 
-// Alice buys a $10 daily membership and four $100 orders: one refunded $30,
+// Alice buys a $10 daily membership and four $100 invoices: one refunded $30,
 // one charged back and the dispute won, one declined then paid by another
 // card, one declined and left. Nothing renews the membership, so its renewal
 // is missed.
@@ -141,12 +141,12 @@ func consolidatedMeasures(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, read.Refunds, 2, "the chargeback and the won dispute are recorded")
 	recovered := m.decline(t, "j53-recovered")
-	pay := billing.PayOrderParams{Payment: billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}, ExpectedTotal: 100_000_000, Reusable: ptr(true)}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders/"+recovered.String()+"/pay", a.aliceToken, pay, map[string]string{"Idempotency-Key": "j53-recovered-pay"})
+	pay := billing.PayInvoiceParams{Payment: billing.InvoicePaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}, ExpectedTotal: 100_000_000, Reusable: ptr(true)}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/"+recovered.String()+"/pay", a.aliceToken, pay, map[string]string{"Idempotency-Key": "j53-recovered-pay"})
 	require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
-	paid, err := a.alpha.GetOrder(t.Context(), recovered)
+	paid, err := a.alpha.GetInvoice(t.Context(), recovered)
 	require.NoError(t, err)
-	require.Equal(t, billing.OrderComplete, paid.Status)
+	require.Equal(t, billing.InvoiceComplete, paid.Status)
 	m.decline(t, "j53-failed")
 
 	from := a.clock.Now().Add(-time.Hour)
@@ -193,7 +193,7 @@ func consolidatedMeasures(t *testing.T) {
 	require.Equal(t, int64(1), purchases["recovered"])
 	require.Equal(t, int64(1), purchases["failed"])
 	require.Zero(t, purchases["open"])
-	require.GreaterOrEqual(t, purchases["approved"], int64(3), "the membership and two orders were approved at once")
+	require.GreaterOrEqual(t, purchases["approved"], int64(3), "the membership and two invoices were approved at once")
 	total := whole(t, only(t, query([]string{"purchases"}, closed))["purchases"])
 	require.Equal(t, purchases["approved"]+2, total)
 
@@ -224,20 +224,20 @@ func consolidatedMeasures(t *testing.T) {
 	require.Equal(t, "unknown_measure", refusals["measures[0]"]["code"])
 }
 
-// decline posts an order the issuer declines; the 402 names the order it
+// decline posts an invoice the issuer declines; the 402 names the invoice it
 // left open.
-func (m *mixedSale) decline(t *testing.T, key string) billing.OrderID {
+func (m *mixedSale) decline(t *testing.T, key string) billing.InvoiceID {
 	t.Helper()
-	input := billing.CreateMyOrderParams{Lines: m.lines, ExpectedTotal: ptr(int64(100_000_000)), Reusable: ptr(true),
-		Payment: &billing.OrderPaymentParams{Token: m.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "0002", Decline: "insufficient_funds"})}}
-	status, raw := m.a.request(t, http.MethodPost, "/v1/me/orders", m.a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+	input := billing.CreateMyInvoiceParams{Lines: m.lines, ExpectedTotal: ptr(int64(100_000_000)), Reusable: ptr(true),
+		Payment: &billing.InvoicePaymentParams{Token: m.p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "0002", Decline: "insufficient_funds"})}}
+	status, raw := m.a.request(t, http.MethodPost, "/v1/me/invoices", m.a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusPaymentRequired, status, string(raw))
 	var refused struct {
 		Error billing.ErrorDetails `json:"error"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &refused))
-	require.NotNil(t, refused.Error.Order, string(raw))
-	return refused.Error.Order.ID
+	require.NotNil(t, refused.Error.Invoice, string(raw))
+	return refused.Error.Invoice.ID
 }
 
 // Alpha sells a membership by card; beta has nothing yet.
@@ -404,13 +404,13 @@ func sellOnce(t *testing.T, a *authorityWorld, p *providerLedger, key string, cu
 	require.NoError(t, err)
 	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key, UnitAmount: amount, Currency: currency})
 	require.NoError(t, err)
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(amount), Reusable: ptr(true),
-		Payment: &billing.OrderPaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
-	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
+	input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(amount), Reusable: ptr(true),
+		Payment: &billing.InvoicePaymentParams{Token: p.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})}}
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": key})
 	require.Equal(t, http.StatusCreated, status, string(raw))
-	var order billing.Order
-	require.NoError(t, json.Unmarshal(raw, &order))
-	require.Equal(t, billing.OrderComplete, order.Status)
+	var invoice billing.Invoice
+	require.NoError(t, json.Unmarshal(raw, &invoice))
+	require.Equal(t, billing.InvoiceComplete, invoice.Status)
 }
 
 // A USD membership and a EUR sale, and prepaid credit held in both.

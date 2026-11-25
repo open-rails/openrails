@@ -3,7 +3,7 @@
 OpenRails billing in the browser: purchase, the customer's account billing,
 and staff administration, inside your app. Card data is tokenized in the PSP's
 own fields (Collect.js, Stripe Elements) and never enters your app. How it fits
-an integration: the [client guide](https://github.com/open-rails/openrails/blob/master/docs/client.md#orders-and-checkout).
+an integration: the [client guide](https://github.com/open-rails/openrails/blob/master/docs/client.md#invoices-and-checkout).
 
 | Import | Contents |
 |---|---|
@@ -63,25 +63,25 @@ The browser never reads the catalog: your server reads the products it sells
   onSignInRequired={openSignIn} onPaid={() => navigate("/courses/css-101")} />
 ```
 
-- A button creates the signed-in customer's order and pays it in a dialog. On
-  a site the merchant registered to frame its pay URLs, it frames the order's
+- A button creates the signed-in customer's invoice and pays it in a dialog. On
+  a site the merchant registered to frame its pay URLs, it frames the invoice's
   `pay_url` instead (`<EmbeddedPayment>`). OpenRails answers the customer's open
-  order of the same lines, so a second click, a reopened dialog or a reload pays
-  one order.
+  invoice of the same lines, so a second click, a reopened dialog or a reload pays
+  one invoice.
 - `onPaid` is a hint. Grant access from your server's own check, or from the
-  `order.completed` event, never from the browser.
-- `<OrderPayment orderId>` pays an order your server created (`CreateOrder`):
+  `invoice.completed` event, never from the browser.
+- `<InvoicePayment invoiceId>` pays an invoice your server created (`CreateInvoice`):
   saved cards, a new card, a hosted page, a Solana wallet, Apple and Google Pay
   through Stripe. `onSettled` follows completion. `returnUrl` must be on one of
   your app's return origins.
-- A rail's own step is the order's `payment.next_action`: `redirect_to_url`
+- A rail's own step is the invoice's `payment.next_action`: `redirect_to_url`
   (top window), `solana_pay` (a QR code or wallet link) or `authenticate` (the
   bank's challenge, in the page). In the EEA and UK a new card is kept only with
   `reusable: true`, the customer's own opt-in.
 - `fallbacks` keeps a PSP back until the PSPs it stands in for fail
   (`{ ccbill: { for: ["nmi-main"], afterFailures: 2 } }`), then offers it under
   "Card payment isn't working?". `BuyButton`, `ProductList`, `Cart`,
-  `OrderPayment` and `EmbeddedPayment` take it.
+  `InvoicePayment` and `EmbeddedPayment` take it.
 - A `customer_amount` price takes the buyer's `amount`: parse it with
   `decimalToAmount(text, currency.decimals)` and check the price's bounds with
   `BigInt`. `<Cart>` sells the customer's cart.

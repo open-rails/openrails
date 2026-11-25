@@ -65,15 +65,15 @@ products:
 		require.Nil(t, price.BillingIntervalHours)
 		require.Equal(t, 1, *price.BillingIntervalMonths)
 		token := provider.core.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
-		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "calendar-purchase"})
+		input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.InvoicePaymentParams{Token: token}}
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "calendar-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		require.Equal(t, billing.OrderComplete, order.Status)
-		require.Nil(t, order.Lines[0].BillingIntervalHours)
-		require.Equal(t, 1, *order.Lines[0].BillingIntervalMonths)
-		subID := *order.Lines[0].SubscriptionID
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		require.Equal(t, billing.InvoiceComplete, invoice.Status)
+		require.Nil(t, invoice.Lines[0].BillingIntervalHours)
+		require.Equal(t, 1, *invoice.Lines[0].BillingIntervalMonths)
+		subID := *invoice.Lines[0].SubscriptionID
 		sub, err := a.alpha.GetSubscription(t.Context(), subID)
 		require.NoError(t, err)
 		require.Equal(t, time.Date(2025, 2, 28, 12, 34, 56, 0, time.UTC), *sub.CurrentPeriodEndsAt)
@@ -167,12 +167,12 @@ products:
 		require.NoError(t, err)
 		require.Equal(t, march, *copy.CurrentPeriodStartsAt)
 		require.Equal(t, april, *copy.CurrentPeriodEndsAt)
-		copyOrder, err := restored.GetOrder(t.Context(), order.ID)
+		copyInvoice, err := restored.GetInvoice(t.Context(), invoice.ID)
 		require.NoError(t, err)
-		require.Equal(t, 1, *copyOrder.Lines[0].BillingIntervalMonths)
-		require.Nil(t, copyOrder.Lines[0].BillingIntervalHours)
+		require.Equal(t, 1, *copyInvoice.Lines[0].BillingIntervalMonths)
+		require.Nil(t, copyInvoice.Lines[0].BillingIntervalHours)
 		require.Len(t, provider.effects(t), 3, "archive transfer never collects a payment")
-		refund, err := a.alpha.RefundPayment(t.Context(), "calendar-first-refund", *order.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund the initial calendar period"})
+		refund, err := a.alpha.RefundPayment(t.Context(), "calendar-first-refund", *invoice.Payment.PaymentID, billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund the initial calendar period"})
 		require.NoError(t, err)
 		require.EqualValues(t, -10_000_000, refund.Amount)
 		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "consistency.refund_access"})

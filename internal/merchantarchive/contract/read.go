@@ -15,9 +15,9 @@ import (
 // failure or missing table discovered after the final row.
 func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile, []*string) error) (archivewire.Info, error) {
 	table := -1
-	// An archive from before usage orders (migration 61) names invoices,
-	// skipped and refused with rows, and the tables usage orders renamed.
-	invoices, preUsage := false, false
+	// An archive from before usage invoices (migration 61) names the tables
+	// usage invoices renamed.
+	preUsage := false
 	// An archive from before migration 207 carries the custody migration
 	// record, and one from before migration 208 the usage collection cadence:
 	// skipped.
@@ -53,9 +53,8 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			if store >= 0 {
 				return fmt.Errorf("invalid archive table order")
 			}
-			invoices = r.Table == "invoices"
 			cadence = r.Table == "usage_collection_cadence" || r.Table == "invoice_collection_cadence"
-			if invoices || cadence {
+			if cadence {
 				preUsage = preUsage || r.Table != "usage_collection_cadence"
 				return nil
 			}
@@ -82,9 +81,6 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return fmt.Errorf("invalid archive table order")
 			}
 			return nil
-		}
-		if invoices {
-			return errArchivedInvoices
 		}
 		if accruals && len(r.Values) > 8 && r.Values[7] != nil && r.Values[8] != nil && *r.Values[7] != *r.Values[8] {
 			return errArchivedUnpostedUsage
@@ -158,42 +154,42 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "catalog_rate_cards" {
 			ClearMeteredPaymentTerm(p, r.Values)
 		}
-		// Orders before checkout facts had none of their columns; before
-		// usage orders none of theirs; before embedded pay URLs hosted ones
+		// Invoices before checkout facts had none of their columns; before
+		// usage invoices none of theirs; before embedded pay URLs hosted ones
 		// only; before renewals none of their columns; before pay URLs none
 		// of theirs; before the payment axis one status. Before migration 89,
 		// embedded was a ui_mode.
-		if p.Name == "orders" && len(r.Values) < len(p.Columns) {
-			base := Profile{Name: p.Name, Columns: p.Columns[:len(p.Columns)-orderCheckoutColumns]}
+		if p.Name == "invoices" && len(r.Values) < len(p.Columns) {
+			base := Profile{Name: p.Name, Columns: p.Columns[:len(p.Columns)-invoiceCheckoutColumns]}
 			missing := len(base.Columns) - 2 - len(r.Values)
-			if missing == orderUsageColumns+1+orderRenewalColumns+orderPayURLColumns+1 {
-				r.Values = splitOrderStatus(base, r.Values)
+			if missing == invoiceUsageColumns+1+invoiceRenewalColumns+invoicePayURLColumns+1 {
+				r.Values = splitInvoiceStatus(base, r.Values)
 				missing--
 			}
 			switch missing {
-			case orderUsageColumns:
-				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
-			case orderUsageColumns + 1, orderUsageColumns + 1 + orderRenewalColumns, orderUsageColumns + 1 + orderRenewalColumns + orderPayURLColumns:
-				r.Values = append(r.Values, make([]*string, missing-orderUsageColumns-1)...)
+			case invoiceUsageColumns:
+				r.Values = append(r.Values, make([]*string, invoiceUsageColumns)...)
+			case invoiceUsageColumns + 1, invoiceUsageColumns + 1 + invoiceRenewalColumns, invoiceUsageColumns + 1 + invoiceRenewalColumns + invoicePayURLColumns:
+				r.Values = append(r.Values, make([]*string, missing-invoiceUsageColumns-1)...)
 				r.Values = append(r.Values, hostedIfPayURL(base, r.Values))
-				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
+				r.Values = append(r.Values, make([]*string, invoiceUsageColumns)...)
 			}
 			if len(r.Values) == len(base.Columns)-2 {
 				r.Values = append(r.Values, new("engine"), nil)
 			}
 			if len(r.Values) == len(base.Columns) {
-				r.Values = append(r.Values, make([]*string, orderCheckoutColumns)...)
+				r.Values = append(r.Values, make([]*string, invoiceCheckoutColumns)...)
 			}
 		}
-		if p.Name == "orders" {
+		if p.Name == "invoices" {
 			embeddedFromUIMode(p, r.Values)
 		}
 		// Subscriptions before checkout facts named no checkout.
 		if p.Name == "subscriptions" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)
 		}
-		// Order lines before usage orders named no accrual source.
-		if p.Name == "order_lines" {
+		// Invoice lines before usage invoices named no accrual source.
+		if p.Name == "invoice_lines" {
 			if len(r.Values) == len(p.Columns)-3 {
 				r.Values = append(r.Values, nil)
 			}
@@ -252,16 +248,16 @@ var retiredTables = map[string]bool{"usage_daily": true, "usage_accruals": true,
 
 var errArchivedUnpostedUsage = fmt.Errorf("an archive with usage accruals the ledger had not taken: restore it on the release that wrote it, post them, and export it again")
 
-// The column groups later migrations appended to orders, in order: the pay
-// URL's, renewals', embedded, usage orders', checkout facts.
+// The column groups later migrations appended to invoices, in order: the pay
+// URL's, renewals', embedded, usage invoices', checkout facts.
 const (
-	orderPayURLColumns   = 5
-	orderRenewalColumns  = 5
-	orderUsageColumns    = 10
-	orderCheckoutColumns = 16
+	invoicePayURLColumns   = 5
+	invoiceRenewalColumns  = 5
+	invoiceUsageColumns    = 10
+	invoiceCheckoutColumns = 16
 )
 
-// hostedIfPayURL is embedded for an order archived before it had one: false
+// hostedIfPayURL is embedded for an invoice archived before it had one: false
 // (hosted) when it has a pay URL.
 func hostedIfPayURL(p Profile, values []*string) *string {
 	for i, c := range p.Columns[:len(values)] {
@@ -272,7 +268,7 @@ func hostedIfPayURL(p Profile, values []*string) *string {
 	return nil
 }
 
-// embeddedFromUIMode reads an order archived before migration 89, whose
+// embeddedFromUIMode reads an invoice archived before migration 89, whose
 // embedded column was its ui_mode, hosted or embedded.
 func embeddedFromUIMode(p Profile, values []*string) {
 	for i, c := range p.Columns[:min(len(p.Columns), len(values))] {
@@ -297,7 +293,7 @@ var addedTables = map[string]bool{"change_log": true, "catalog_limits": true, "c
 	"mrr_product_totals": true, "mrr_customer_totals": true, "mrr_customer_flows": true, "subscription_cancellations": true,
 	"mrr_risk_cases": true, "mrr_risk_episodes": true, "mrr_risk_flows": true, "mrr_risk_totals": true, "revenue_schedules": true, "books_starts": true, "credit_reversal_shares": true}
 
-// usageRenames are the tables usage orders renamed.
+// usageRenames are the tables usage invoices renamed.
 var usageRenames = map[string]string{"invoice_items": "owed_items"}
 
 // dropUnreadColumns removes from a row exported before migration 208 the
@@ -308,7 +304,7 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 	case p.Name == "maintenance_runs" && len(*values) == len(p.Columns)+5:
 		// mode, rails, window_starts_at, window_ends_at; dry_run.
 		empty = map[int]*string{5: nil, 6: new("{}"), 7: nil, 8: nil, 12: new("false")}
-	case p.Name == "order_attempts" && len(*values) == len(p.Columns)+1:
+	case p.Name == "invoice_attempts" && len(*values) == len(p.Columns)+1:
 		empty = map[int]*string{len(p.Columns) - 1: nil} // routing_reason
 	case p.Name == "payment_methods" && len(*values) == len(p.Columns)+1:
 		empty = map[int]*string{len(p.Columns): nil} // wallet_card_id
@@ -335,18 +331,18 @@ func dropUnreadColumns(p Profile, values *[]*string) error {
 	return nil
 }
 
-var errArchivedInvoices = fmt.Errorf("an archive with invoices: restore it on a release before usage orders, then export it again")
+var errArchivedInvoices = fmt.Errorf("an archive with invoices: restore it on a release before usage invoices, then export it again")
 
 var errArchivedCreditGrants = fmt.Errorf("an archive with credit lots among its grants: restore it on a release before credit_grants, then export it again")
 
-// normalizePreUsage moves a row exported before usage orders to their
+// normalizePreUsage moves a row exported before usage invoices to their
 // shapes, as migration 61 moved the database. Rows naming an invoice are
 // refused with the invoices.
 func normalizePreUsage(p Profile, values *[]*string) error {
 	row := *values
 	switch p.Name {
 	case "owed_items":
-		if v := value(p, row, "order_id"); v != nil {
+		if v := value(p, row, "invoice_id"); v != nil {
 			return errArchivedInvoices
 		}
 	case "payments":
@@ -382,9 +378,9 @@ func setValue(p Profile, values []*string, name, v string) {
 	}
 }
 
-// splitOrderStatus is an order of one status as migration 49 split it: the
-// order's own status and its payment's.
-func splitOrderStatus(p Profile, values []*string) []*string {
+// splitInvoiceStatus is an invoice of one status as migration 49 split it: the
+// invoice's own status and its payment's.
+func splitInvoiceStatus(p Profile, values []*string) []*string {
 	status, payment := "", "requires_payment_method"
 	for i, c := range p.Columns[:len(values)] {
 		if c.Name == "status" && values[i] != nil {

@@ -696,7 +696,7 @@ type ListAbandonedProviderIntentsRow struct {
 
 // life.provider_intent.abandoned: provider actions that will not auto-retry:
 // ended failed or expired since since, or past their deadline while live.
-// A provider's decline is no abandoned action: nothing moved, and the order
+// A provider's decline is no abandoned action: nothing moved, and the invoice
 // or dunning that asked for it owns what follows.
 func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAbandonedProviderIntentsParams) ([]ListAbandonedProviderIntentsRow, error) {
 	rows, err := q.db.Query(ctx, listAbandonedProviderIntents,
@@ -1676,8 +1676,8 @@ LEFT JOIN billing.subscriptions s
        ON e.source_type = 'subscription' AND s.id::text = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN billing.payments pay
        ON e.source_type = 'purchase' AND pay.id = e.payment_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
-LEFT JOIN LATERAL (SELECT l.product_id FROM billing.order_lines l
-       WHERE l.merchant_id=e.merchant_id AND l.order_id=pay.order_id AND l.product_id=e.product_id
+LEFT JOIN LATERAL (SELECT l.product_id FROM billing.invoice_lines l
+       WHERE l.merchant_id=e.merchant_id AND l.invoice_id=pay.invoice_id AND l.product_id=e.product_id
        LIMIT 1) paid_line ON true
 LEFT JOIN LATERAL (SELECT true AS settled FROM billing.payments r
        WHERE r.merchant_id = pay.merchant_id AND r.refunded_payment_id = pay.id
@@ -2215,7 +2215,7 @@ SELECT p.live::boolean AS live,
      OR EXISTS(SELECT 1 FROM billing.payments pay
             WHERE pay.merchant_id=p.merchant_id AND pay.psp_id=p.id AND $4::text IS NOT NULL
               AND pay.transaction_id=$4::text)
-     OR EXISTS(SELECT 1 FROM billing.orders o
+     OR EXISTS(SELECT 1 FROM billing.invoices o
             WHERE o.merchant_id=p.merchant_id AND $5::uuid IS NOT NULL AND o.id=$5::uuid)
      OR EXISTS(SELECT 1 FROM billing.provider_intents i
             WHERE i.merchant_id=p.merchant_id AND $5::uuid IS NOT NULL AND i.id=$5::uuid)
@@ -2243,7 +2243,7 @@ type PSPForeignObjectCheckRow struct {
 
 // Whether the PSP moves real money, and whether anything of the merchant names a
 // provider object: a subscription or plan by id, a vault or customer
-// reference, or an order or operation by uuid. Each probe is a key lookup.
+// reference, or an invoice or operation by uuid. Each probe is a key lookup.
 func (q *Queries) PSPForeignObjectCheck(ctx context.Context, arg PSPForeignObjectCheckParams) (PSPForeignObjectCheckRow, error) {
 	row := q.db.QueryRow(ctx, pSPForeignObjectCheck,
 		arg.SubscriptionRef,
@@ -2484,7 +2484,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
-       subscription_id, refunded_payment_id, purchased_at, order_id, ledger_transfer_id, reversal_kind
+       subscription_id, refunded_payment_id, purchased_at, invoice_id, ledger_transfer_id, reversal_kind
 FROM billing.payments
 WHERE payments.merchant_id = $1::uuid AND rail::text = ANY ($2::text[])
   AND deleted_at IS NULL
@@ -2510,7 +2510,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
-	OrderID           *uuid.UUID
+	InvoiceID         *uuid.UUID
 	LedgerTransferID  *uuid.UUID
 	ReversalKind      *string
 }
@@ -2540,7 +2540,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 			&i.SubscriptionID,
 			&i.RefundedPaymentID,
 			&i.PurchasedAt,
-			&i.OrderID,
+			&i.InvoiceID,
 			&i.LedgerTransferID,
 			&i.ReversalKind,
 		); err != nil {

@@ -12,16 +12,16 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// An engine-owned subscription's unpaid renewal is an order: the recovery
+// An engine-owned subscription's unpaid renewal is an invoice: the recovery
 // names it, and its payment says what the customer can do. A view, never
-// authority to charge: paying the order checks everything again.
+// authority to charge: paying the invoice checks everything again.
 func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Subscription) (*billing.PaymentRecovery, error) {
 	out := &billing.PaymentRecovery{}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	order, err := s.rt.DB.Gen(ctx).GetOpenRenewalOrder(ctx, gen.GetOpenRenewalOrderParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID})
+	invoice, err := s.rt.DB.Gen(ctx).GetOpenRenewalInvoice(ctx, gen.GetOpenRenewalInvoiceParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
@@ -29,17 +29,17 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 	if err != nil {
 		return nil, err
 	}
-	id := billing.OrderID(order.ID)
-	out.OrderID = &id
-	switch billing.OrderPaymentStatus(order.PaymentStatus) {
-	case billing.OrderPaymentRequiresAction:
+	id := billing.InvoiceID(invoice.ID)
+	out.InvoiceID = &id
+	switch billing.InvoicePaymentStatus(invoice.PaymentStatus) {
+	case billing.InvoicePaymentRequiresAction:
 		out.BlockedReason = "authentication_required"
-	case billing.OrderPaymentProcessing:
+	case billing.InvoicePaymentProcessing:
 		out.BlockedReason = "payment_in_progress"
 	default:
 		out.Retryable = true
 		var failure billing.PaymentFailure
-		if len(order.LastPaymentError) > 0 && json.Unmarshal(order.LastPaymentError, &failure) == nil {
+		if len(invoice.LastPaymentError) > 0 && json.Unmarshal(invoice.LastPaymentError, &failure) == nil {
 			out.LastFailureReason = failure.Reason
 		}
 	}

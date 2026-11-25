@@ -18,7 +18,7 @@ import (
 
 const (
 	// Version is the merchant export format, the only one import reads.
-	Version              = 3
+	Version              = 4
 	MaxBytes       int64 = 1 << 30
 	MaxRecordBytes       = 8 << 20
 )
@@ -89,7 +89,7 @@ func parseHeader(line []byte) (Header, error) {
 // Read verifies the complete stream, invoking callbacks while it reads. Callers
 // performing writes MUST roll back when Read returns any error, including a
 // missing footer or trailing bytes. Record callbacks receive table and row records;
-// storage-specific table order, row widths and values belong to the caller.
+// storage-specific table invoice, row widths and values belong to the caller.
 // Callbacks do not receive unrecognized fields.
 func Read(src io.Reader, header func(Header) error, record func(Record) error) (Info, error) {
 	return read(src, nil, header, record)

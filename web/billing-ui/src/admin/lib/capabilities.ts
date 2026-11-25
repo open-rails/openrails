@@ -27,7 +27,7 @@ export function hasAnyArea(access: AdminAccess): boolean {
 }
 
 // useAdminArea reports customer support: customers, subscriptions, payments,
-// and orders.
+// and invoices.
 export function useAdminArea(): boolean {
   const level = useAccess()?.admin
   return level === "read" || level === "update"

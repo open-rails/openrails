@@ -86,7 +86,7 @@ func providerBilledOnCard(ctx context.Context, d *db.DB, payment *models.Payment
 }
 
 // ChargeSubscriptions are the subscriptions a charge paid for: its own and
-// its order's.
+// its invoice's.
 func ChargeSubscriptions(ctx context.Context, d *db.DB, payment *models.Payment) ([]uuid.UUID, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -96,12 +96,12 @@ func ChargeSubscriptions(ctx context.Context, d *db.DB, payment *models.Payment)
 	if payment.SubscriptionID != nil {
 		ids = append(ids, *payment.SubscriptionID)
 	}
-	if payment.OrderID == nil {
+	if payment.InvoiceID == nil {
 		return ids, nil
 	}
-	lines, err := d.Gen(ctx).ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{*payment.OrderID}})
+	lines, err := d.Gen(ctx).ListInvoiceLines(ctx, gen.ListInvoiceLinesParams{MerchantID: mid.UUID(), InvoiceIds: []uuid.UUID{*payment.InvoiceID}})
 	if err != nil {
-		return nil, fmt.Errorf("load the charge's order lines: %w", err)
+		return nil, fmt.Errorf("load the charge's invoice lines: %w", err)
 	}
 	for _, line := range lines {
 		if line.SubscriptionID != nil && !slices.Contains(ids, *line.SubscriptionID) {

@@ -2,7 +2,6 @@ package messages
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/mail"
 	"net/textproto"
@@ -65,7 +64,7 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 		return err
 	}
 	var data billing.NotificationData
-	unreadable := m.Data != nil && json.Unmarshal(m.Data, &data) != nil
+	unreadable := m.Data != nil && models.DecodeNotificationData(m.Data, &data) != nil
 	if !Enabled(settings, m.EventType, data) {
 		return end(statusDisabled, "")
 	}
@@ -77,7 +76,7 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 	}
 	test, err := s.DB.Gen(ctx).CustomerMessageOnTestPSP(ctx, gen.CustomerMessageOnTestPSPParams{
 		MerchantID: m.MerchantID, PaymentID: optional(data.PaymentID.UUID()),
-		OrderID: optional(data.OrderID.UUID()), SubscriptionID: optional(data.SubscriptionID.UUID()), PspID: optional(data.PSPID.UUID()),
+		InvoiceID: optional(data.InvoiceID.UUID()), SubscriptionID: optional(data.SubscriptionID.UUID()), PspID: optional(data.PSPID.UUID()),
 	})
 	if err != nil {
 		return err

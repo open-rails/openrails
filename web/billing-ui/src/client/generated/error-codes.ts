@@ -73,6 +73,15 @@ export type OpenRailsErrorCode =
   | "invalid_query"
   | "invalid_request_body"
   | "invalid_settlement_status_request"
+  | "invoice_action_not_allowed"
+  | "invoice_attempt_closed"
+  | "invoice_attempt_expired"
+  | "invoice_has_recurring_line"
+  | "invoice_line_unavailable"
+  | "invoice_not_cancelable"
+  | "invoice_not_payable"
+  | "invoice_payment_in_progress"
+  | "invoice_total_changed"
   | "invoker_scoped_principal"
   | "lease_not_found"
   | "limit_not_found"
@@ -86,15 +95,6 @@ export type OpenRailsErrorCode =
   | "meter_rate_card_conflict"
   | "method_not_allowed"
   | "metrics_query_invalid"
-  | "order_action_not_allowed"
-  | "order_attempt_closed"
-  | "order_attempt_expired"
-  | "order_has_recurring_line"
-  | "order_line_unavailable"
-  | "order_not_cancelable"
-  | "order_not_payable"
-  | "order_payment_in_progress"
-  | "order_total_changed"
   | "pay_url_attempts_exhausted"
   | "pay_url_expired"
   | "pay_url_not_found"
@@ -282,6 +282,15 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invalid_query: { status: 400, type: "invalid_request_error", meaning: "A query parameter is malformed or out of range; param is the parameter." },
   invalid_request_body: { status: 400, type: "invalid_request_error", meaning: "The request body could not be read or is not one JSON value." },
   invalid_settlement_status_request: { status: 400, type: "invalid_request_error", meaning: "A settlement status read needs a customer and a price." },
+  invoice_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The invoice's origin or status does not allow this action." },
+  invoice_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The invoice attempt already completed or was canceled." },
+  invoice_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The invoice attempt expired before it was paid." },
+  invoice_has_recurring_line: { status: 409, type: "invalid_request_error", meaning: "An invoice with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid." },
+  invoice_line_unavailable: { status: 422, type: "invalid_request_error", meaning: "A line cannot be bought; param names it and metadata.code says why." },
+  invoice_not_cancelable: { status: 409, type: "invalid_request_error", meaning: "Only an open invoice, or one awaiting the customer's action, can be canceled." },
+  invoice_not_payable: { status: 409, type: "invalid_request_error", meaning: "The invoice takes no payment: it is paid, canceled or expired." },
+  invoice_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this invoice is unresolved; read the invoice." },
+  invoice_total_changed: { status: 409, type: "invalid_request_error", meaning: "The invoice's total is not expected_total; preview it again." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
   lease_not_found: { status: 404, type: "invalid_request_error", meaning: "No lease of the merchant has this id, which is older than the replay horizon; start a new lease." },
   limit_not_found: { status: 404, type: "invalid_request_error", meaning: "The catalog declares no limit under this key." },
@@ -295,21 +304,12 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   meter_rate_card_conflict: { status: 409, type: "invalid_request_error", meaning: "The meter and its rate card disagree." },
   method_not_allowed: { status: 405, type: "invalid_request_error", meaning: "The path exists but not for this method; Allow lists its methods." },
   metrics_query_invalid: { status: 400, type: "invalid_request_error", meaning: "The metrics query is invalid; metadata.errors lists why." },
-  order_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The order's origin or status does not allow this action." },
-  order_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The order attempt already completed or was canceled." },
-  order_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The order attempt expired before it was paid." },
-  order_has_recurring_line: { status: 409, type: "invalid_request_error", meaning: "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid." },
-  order_line_unavailable: { status: 422, type: "invalid_request_error", meaning: "A line cannot be bought; param names it and metadata.code says why." },
-  order_not_cancelable: { status: 409, type: "invalid_request_error", meaning: "Only an open order, or one awaiting the customer's action, can be canceled." },
-  order_not_payable: { status: 409, type: "invalid_request_error", meaning: "The order takes no payment: it is paid, canceled or expired." },
-  order_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this order is unresolved; read the order." },
-  order_total_changed: { status: 409, type: "invalid_request_error", meaning: "The order's total is not expected_total; preview it again." },
-  pay_url_attempts_exhausted: { status: 409, type: "invalid_request_error", meaning: "The pay URL took its most card attempts; the merchant creates a new order." },
-  pay_url_expired: { status: 410, type: "invalid_request_error", meaning: "The pay URL expired; the merchant creates a new order." },
+  pay_url_attempts_exhausted: { status: 409, type: "invalid_request_error", meaning: "The pay URL took its most card attempts; the merchant creates a new invoice." },
+  pay_url_expired: { status: 410, type: "invalid_request_error", meaning: "The pay URL expired; the merchant creates a new invoice." },
   pay_url_not_found: { status: 404, type: "invalid_request_error", meaning: "The pay URL is unknown or no longer valid." },
-  pay_url_unavailable: { status: 400, type: "invalid_request_error", meaning: "This deployment serves no checkout origin, or the order cannot take a pay URL." },
+  pay_url_unavailable: { status: 400, type: "invalid_request_error", meaning: "This deployment serves no checkout origin, or the invoice cannot take a pay URL." },
   payment_duplicate_refused: { status: 409, type: "invalid_request_error", meaning: "The provider refused an identical charge it had just made; retry after its duplicate window." },
-  payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "The recorded payment exceeds what the usage order has due, or is not the order's total." },
+  payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "The recorded payment exceeds what the usage invoice has due, or is not the invoice's total." },
   payment_failed: { status: 402, type: "card_error", meaning: "The payment was not made." },
   payment_idempotency_conflict: { status: 409, type: "invalid_request_error", meaning: "The idempotency key belongs to another payment request." },
   payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment is already unresolved; read the resource before retrying." },
@@ -326,7 +326,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_not_found: { status: 404, type: "invalid_request_error", meaning: "The payment does not exist." },
   payment_not_refundable: { status: 400, type: "invalid_request_error", meaning: "The payment is not a completed rail charge, or the amount exceeds what remains refundable." },
   payment_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The resource is not payable now." },
-  payment_option_unavailable: { status: 422, type: "invalid_request_error", meaning: "No PSP that can take the order's lines accepts this payment." },
+  payment_option_unavailable: { status: 422, type: "invalid_request_error", meaning: "No PSP that can take the invoice's lines accepts this payment." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
   person_required: { status: 403, type: "authorization_error", meaning: "Only a person signed in, or the embedding host in process, may take this action; an API key or service token may not." },

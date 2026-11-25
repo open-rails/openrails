@@ -97,8 +97,8 @@ type Attempt struct {
 	// or CardSave. Empty for rebills.
 	Target                                                       string
 	SubscriptionID, PaymentMethodID, PaymentID, ProviderIntentID *uuid.UUID
-	// OrderID is the order the attempt tried to pay.
-	OrderID *uuid.UUID
+	// InvoiceID is the invoice the attempt tried to pay.
+	InvoiceID *uuid.UUID
 	// Step keys an operation's attempts that carry no transaction id.
 	Step      string
 	TokenType string
@@ -164,7 +164,7 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		Kind: string(a.Kind), Owner: string(OwnerNone), CardEntry: "saved", Source: "openrails", ObservedVia: "response",
 		Amount: a.Amount, Currency: optional(strings.ToUpper(a.Currency)), AttemptedAt: a.At.UTC(),
 		SubscriptionID: a.SubscriptionID, PaymentMethodID: a.PaymentMethodID, PaymentID: a.PaymentID,
-		ProviderIntentID: a.ProviderIntentID, Step: a.Step, OrderID: a.OrderID,
+		ProviderIntentID: a.ProviderIntentID, Step: a.Step, InvoiceID: a.InvoiceID,
 		TransactionID: optional(a.TransactionID), ResponseText: optional(truncate(a.Answer.Text, 128)),
 	}
 	c := cardOf(a.Answer)
@@ -299,7 +299,7 @@ func cardFromMethod(ctx context.Context, q *gen.Queries, a Attempt, row *gen.Ins
 // purchaseFor continues the buyer's open purchase on this target, or opens a
 // new one. A purchase ends when its target is approved or it goes quiet.
 func purchaseFor(ctx context.Context, q *gen.Queries, a Attempt) (uuid.UUID, error) {
-	last, err := q.LatestPaymentOrderAttempt(ctx, gen.LatestPaymentOrderAttemptParams{
+	last, err := q.LatestPaymentInvoiceAttempt(ctx, gen.LatestPaymentInvoiceAttemptParams{
 		MerchantID: a.MerchantID, CustomerID: a.CustomerID, PurchaseTarget: a.Target, Since: a.At.Add(-purchaseGap),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

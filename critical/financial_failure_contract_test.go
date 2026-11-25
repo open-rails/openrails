@@ -47,24 +47,24 @@ func TestFinancialFailures(t *testing.T) {
 			return err
 		}
 		t.Cleanup(func() { require.NoError(t, remove(context.Background())) })
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "storage-abort-sale"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "storage-abort-sale"})
 		if status < 400 {
-			var response billing.Order
+			var response billing.Invoice
 			require.NoError(t, json.Unmarshal(raw, &response))
-			require.NotEqual(t, billing.OrderComplete, response.Status, "a processing receipt cannot report rolled-back settlement as complete")
-			require.NotEqual(t, billing.OrderPaymentSucceeded, response.Payment.Status)
+			require.NotEqual(t, billing.InvoiceComplete, response.Status, "a processing receipt cannot report rolled-back settlement as complete")
+			require.NotEqual(t, billing.InvoicePaymentSucceeded, response.Payment.Status)
 		}
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		orders, err := a.alpha.ListOrders(t.Context(), billing.OrderListParams{CustomerID: customer})
+		invoices, err := a.alpha.ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: customer})
 		require.NoError(t, err)
-		require.Len(t, orders.Items, 1)
-		require.NotEqual(t, billing.OrderComplete, orders.Items[0].Status)
+		require.Len(t, invoices.Items, 1)
+		require.NotEqual(t, billing.InvoiceComplete, invoices.Items[0].Status)
 		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
 		require.NoError(t, err)
 		for _, payment := range payments.Items {
 			require.NotEqual(t, billing.PaymentSucceeded, payment.Status)
 		}
-		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 		access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"sale:owned"}})
@@ -72,7 +72,7 @@ func TestFinancialFailures(t *testing.T) {
 		require.False(t, access.Entitlements["sale:owned"])
 		require.Len(t, p.effects(t), 1, "the storage abort occurs after the actual external debit")
 		require.NoError(t, remove(t.Context()))
-		recoverSale(t, a, p, fleet, orders.Items[0].ID)
+		recoverSale(t, a, p, fleet, invoices.Items[0].ID)
 	})
 	t.Run("OR-J12-S05/capture-values-and-private-provider-secrets-never-escape", func(t *testing.T) {
 		// Every record at debug, and every statement through the SQL tracer
@@ -95,12 +95,12 @@ func TestFinancialFailures(t *testing.T) {
 		status, refused := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, map[string]any{"psp_id": psps.Items[0].ID, "pan": pan, "cvc": cvc})
 		require.Equal(t, http.StatusBadRequest, status, string(refused))
 		input := saleInput(t, a, p)
-		status, purchase := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "redacted-purchase"})
+		status, purchase := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "redacted-purchase"})
 		require.Equal(t, http.StatusCreated, status, string(purchase))
 		var outputs bytes.Buffer
 		outputs.Write(refused)
 		outputs.Write(purchase)
-		for _, path := range []string{"/v1/config", "/v1/me/config", "/v1/me/payment-methods", "/v1/me/orders", "/v1/me/agreements"} {
+		for _, path := range []string{"/v1/config", "/v1/me/config", "/v1/me/payment-methods", "/v1/me/invoices", "/v1/me/agreements"} {
 			status, raw := a.request(t, http.MethodGet, path, a.aliceToken, nil)
 			require.Equal(t, http.StatusOK, status, string(raw))
 			outputs.Write(raw)

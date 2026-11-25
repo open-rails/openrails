@@ -72,7 +72,7 @@ const (
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
 	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at)
 	FamFindings       Family = "findings"        // snapshot over reconciliation_findings: open at t
-	FamCheckouts      Family = "checkouts"       // flow over checkouts: orders started for a customer to pay (created_at)
+	FamCheckouts      Family = "checkouts"       // flow over checkouts: invoices started for a customer to pay (created_at)
 	FamSales          Family = "sales"           // flow over paid checkouts (completed_at)
 	FamDisputes       Family = "disputes"        // flow over disputes (a chargeback when it became one, else disputed_at)
 	FamFraudReports   Family = "fraud_reports"   // flow over fraud_reports (reported_at)
@@ -240,7 +240,7 @@ var Dimensions = []Dimension{
 	// Checkouts: from a checkout's creation to its payment, and who paid.
 	{Name: "step", Description: "how far a checkout got as of the range end: created | opened (its payment form loaded) | submitted (its customer asked to pay) | paid", Values: checkoutSteps},
 	{Name: "surface", Description: "where a checkout was paid: direct (the merchant's page, billing-ui or its own) | pay_url (the hosted payment page) | embedded (the payment page framed on the merchant's site)", Values: []string{"direct", "pay_url", "embedded"}},
-	{Name: "origin", Description: "who started a checkout: customer (their own order) | merchant (an order the merchant created for them)", Values: []string{"customer", "merchant"}},
+	{Name: "origin", Description: "who started a checkout: customer (their own invoice) | merchant (an invoice the merchant created for them)", Values: []string{"customer", "merchant"}},
 	{Name: "purchase_number", Description: "which paid purchase a checkout is for its customer: 1 (their first) | 2 | 3 | 4 | 5+", Values: []string{"1", "2", "3", "4", "5+"}},
 	{Name: "country", Description: "the customer's ISO 3166-1 alpha-2 country: the billing address's, else the card's, else the IP's a Cloudflare proxy reported; empty when none. On cash, the country of the checkout that bought the subscription"},
 	{Name: "country_source", Description: "which evidence gave country: billing_address | card | ip (empty when none)", Values: []string{"", "billing_address", "card", "ip"}},
@@ -261,7 +261,7 @@ var Dimensions = []Dimension{
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
 	{Name: "limit", Description: "a declared usage limit's key (limit measures)"},
 	{Name: "owner", Description: "who collects the subscription: engine (OpenRails) | nmi_schedule (NMI charges, OpenRails duns) | provider (Stripe Billing, CCBill) | none (no subscription)", Values: []string{"engine", "nmi_schedule", "provider", "none"}},
-	{Name: "kind", Description: "what was charged; on attempts verify ($0 card verification) | initial | upgrade | rebill (a cycle's first try) | dunning_retry | customer_retry | collection (a usage order's); on cash, payments and disputes (the disputed charge) initial | renewal | unknown (imported or pre-instrumentation rows)"},
+	{Name: "kind", Description: "what was charged; on attempts verify ($0 card verification) | initial | upgrade | rebill (a cycle's first try) | dunning_retry | customer_retry | collection (a usage invoice's); on cash, payments and disputes (the disputed charge) initial | renewal | unknown (imported or pre-instrumentation rows)"},
 	{Name: "network", Description: "card network: visa | mastercard | amex | discover | jcb | diners | unionpay | other | unknown", Values: networkValues},
 	{Name: "refund_reason", Description: "why a refund was made (empty on other rows): requested_by_customer | duplicate | fraudulent | fraud_warning (an issuer's fraud report) | dispute_prevention (an RDR resolution) | charged_after_cancel | other | unknown", Values: refundReasonValues},
 	{Name: "dispute_kind", Description: "what a dispute case is: inquiry (nothing withdrawn) | chargeback | prevented (resolved before it was filed) | unknown", Values: []string{"inquiry", "chargeback", "prevented", "unknown"}},
@@ -296,12 +296,12 @@ var Dimensions = []Dimension{
 	{Name: "nmi_kind", Description: "what NMI's own history tells apart: verification ($0 card verification) | one_off_sale (initial sales, upgrades and retries of declined rebills, whoever sent them) | scheduled_rebill (NMI's own schedule charge)", Values: []string{"verification", "one_off_sale", "scheduled_rebill"}},
 }
 
-// A payment settles its whole order, not each line independently. Attribute
+// A payment settles its whole invoice, not each line independently. Attribute
 // it to a price only when every line names the same price. Multi-price and
 // non-catalog bills remain unassigned rather than multiplying payment money.
 const paymentPriceJoin = `LEFT JOIN LATERAL (
   SELECT min(l.price_id::text)::uuid AS price_id
-  FROM billing.order_lines l WHERE l.merchant_id=p.merchant_id AND l.order_id=p.order_id
+  FROM billing.invoice_lines l WHERE l.merchant_id=p.merchant_id AND l.invoice_id=p.invoice_id
   HAVING count(*) = count(l.price_id) AND count(DISTINCT l.price_id)=1
 ) paid_line ON true
 LEFT JOIN billing.prices pr ON pr.merchant_id=p.merchant_id AND pr.id=paid_line.price_id`
@@ -315,7 +315,7 @@ var (
 	disputeReasonValues = []string{"fraud", "unrecognized", "not_received", "canceled_recurring", "not_as_described", "credit_not_processed", "duplicate", "processing_error", "authorization", "other", "unknown"}
 )
 
-// A checkout's facts as dimensions of the order aliased o.
+// A checkout's facts as dimensions of the invoice aliased o.
 func checkoutFacts(o string) map[string]string {
 	return map[string]string{
 		"customer_type": `COALESCE(` + o + `.customer_type, '')`,
@@ -332,17 +332,17 @@ func checkoutFacts(o string) map[string]string {
 }
 
 // checkoutOf is the checkout a payment's money is reported under: its own
-// order when that is a checkout, else the checkout that bought the
-// subscription its order bills.
-const checkoutOf = `LEFT JOIN billing.orders paid_order ON paid_order.merchant_id = p.merchant_id AND paid_order.id = p.order_id
-LEFT JOIN billing.orders co ON co.merchant_id = p.merchant_id
-	AND co.id = COALESCE(paid_order.checkout_order_id, CASE WHEN paid_order.purchase_number IS NOT NULL THEN paid_order.id END)`
+// invoice when that is a checkout, else the checkout that bought the
+// subscription its invoice bills.
+const checkoutOf = `LEFT JOIN billing.invoices paid_invoice ON paid_invoice.merchant_id = p.merchant_id AND paid_invoice.id = p.invoice_id
+LEFT JOIN billing.invoices co ON co.merchant_id = p.merchant_id
+	AND co.id = COALESCE(paid_invoice.checkout_invoice_id, CASE WHEN paid_invoice.purchase_number IS NOT NULL THEN paid_invoice.id END)`
 
 // checkoutPriceJoin attributes a checkout to a price when every line names
 // the same one, as payments do.
 const checkoutPriceJoin = `LEFT JOIN LATERAL (
   SELECT min(l.price_id::text)::uuid AS price_id
-  FROM billing.order_lines l WHERE l.merchant_id=o.merchant_id AND l.order_id=o.id
+  FROM billing.invoice_lines l WHERE l.merchant_id=o.merchant_id AND l.invoice_id=o.id
   HAVING count(*) = count(l.price_id) AND count(DISTINCT l.price_id)=1
 ) checkout_line ON true
 LEFT JOIN billing.prices opr ON opr.merchant_id=o.merchant_id AND opr.id=checkout_line.price_id`
@@ -382,7 +382,7 @@ func checkoutJoins() map[string]string {
 	return map[string]string{"product_id": checkoutPriceJoin, "price_id": checkoutPriceJoin}
 }
 
-// paymentJoins are the payments family's joins: the price a payment's order
+// paymentJoins are the payments family's joins: the price a payment's invoice
 // sold, and the checkout it is reported under.
 func paymentJoins() map[string]string {
 	out := map[string]string{"product_id": paymentPriceJoin, "price_id": paymentPriceJoin, "billing_cycle": paymentPriceJoin}
@@ -413,7 +413,7 @@ func paymentDimExprs() map[string]string {
 		"network":       `billing.card_network(p.card_brand)`,
 		"refund_reason": `COALESCE(p.refund_reason, '')`,
 		// A renewal's payment bought nothing new: no customer type.
-		"customer_type": `COALESCE(CASE WHEN co.id = paid_order.id THEN co.customer_type END, '')`,
+		"customer_type": `COALESCE(CASE WHEN co.id = paid_invoice.id THEN co.customer_type END, '')`,
 	} {
 		out[k] = v
 	}
@@ -533,7 +533,7 @@ var families = map[Family]familySpec{
 	},
 	FamCheckouts: {
 		Kind:     "flow",
-		From:     `billing.orders o`,
+		From:     `billing.invoices o`,
 		TimeExpr: `o.created_at`,
 		// Checkouts from their instrumentation, with something to pay.
 		BaseWhere: `o.purchase_number IS NOT NULL AND o.total > 0`,
@@ -543,7 +543,7 @@ var families = map[Family]familySpec{
 	},
 	FamSales: {
 		Kind:      "flow",
-		From:      `billing.orders o`,
+		From:      `billing.invoices o`,
 		TimeExpr:  `o.completed_at`,
 		BaseWhere: `o.purchase_number IS NOT NULL AND o.status = 'complete'`,
 		DimJoins:  checkoutJoins(),
@@ -1062,7 +1062,7 @@ var declared = []Measure{
 		Dims:        reversalRateDims},
 	// --- checkouts: from opening a checkout to paying it, and who buys --------------
 	{Name: "checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Direction: Neutral,
-		Description: "checkouts (orders OpenRails started for a customer to pay, with a total) created in the bucket, by the step they reached (created, opened, submitted, paid) and their outcome as of the range end (paid, abandoned, open)",
+		Description: "checkouts (invoices OpenRails started for a customer to pay, with a total) created in the bucket, by the step they reached (created, opened, submitted, paid) and their outcome as of the range end (paid, abandoned, open)",
 		Formula:     "COUNT(checkouts)",
 		Agg:         count(""),
 		Dims:        with(checkoutDims, "step", "outcome")},
@@ -1264,7 +1264,7 @@ var declared = []Measure{
 		Description: "declines at the issuer's discretion (do not honor, generic, not permitted, restricted, suspected fraud) / authorizations the issuer answered",
 		Formula:     "attempts(declined: issuer, fraud) / attempts(approved, declined)"},
 	{Name: "purchases", Class: ClassAdditive, Family: FamPurchases, Unit: "count", Direction: Neutral,
-		Description: "purchases (a buyer's attempts on one order or card save) started in the bucket, by outcome as of the range end: approved at the first try, recovered after a failure, failed (no approval and quiet for an hour), open",
+		Description: "purchases (a buyer's attempts on one invoice or card save) started in the bucket, by outcome as of the range end: approved at the first try, recovered after a failure, failed (no approval and quiet for an hour), open",
 		Formula:     "COUNT(purchases)",
 		Agg:         count(""),
 		Dims:        with(purchaseDims, "outcome")},

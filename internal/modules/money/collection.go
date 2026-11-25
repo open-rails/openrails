@@ -126,7 +126,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 		return nil, fmt.Errorf("payment method rail required")
 	}
 	if d, ok := rails.Lookup(models.Rail(rail)); ok && !d.SupportsChargeSavedMethod {
-		return nil, fmt.Errorf("rail %q does not support usage order collection", rail)
+		return nil, fmt.Errorf("rail %q does not support usage invoice collection", rail)
 	}
 
 	// Store-armed per-merchant credentials are the ONLY source once a resolver
@@ -152,7 +152,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 		return nil, err
 	}
 	return PreparedCharge(func(ctx context.Context) (ChargeResult, error) {
-		// Admission freezes under the same customer/method order as deletion.
+		// Admission freezes under the same customer/method invoice as deletion.
 		// Recheck immediately before first send; after this transaction the
 		// unresolved accepted intent pins the method against supported removal
 		// and custody remap. No provider request runs while these locks are held.

@@ -638,7 +638,7 @@ func (s *PriceMigrationService) Record(ctx context.Context, pending *PendingMigr
 			params.FromProductID, params.FromPriceKey = &plan.product.ID, &plan.key
 		}
 		if pending.Action != nil {
-			// The command's row orders identical requests: the second finds
+			// The command's row invoices identical requests: the second finds
 			// the first's migration. One already ended records nothing.
 			locked, err := q.LockDestructiveAction(ctx, gen.LockDestructiveActionParams{MerchantID: mid.UUID(), ID: pending.Action.ID})
 			if err != nil {

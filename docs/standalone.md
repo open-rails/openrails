@@ -264,7 +264,7 @@ A merchant renames at most every 72 hours, and a former name forwards and stays 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `rate_limits.purchase.requests_per_minute` | `10` | buying: checkout and paying an order ([abuse limits](#abuse-limits)) |
+| `rate_limits.purchase.requests_per_minute` | `10` | buying: checkout and paying an invoice ([abuse limits](#abuse-limits)) |
 | `rate_limits.payment.requests_per_minute` | `40` | a customer's payment-method routes |
 | `rate_limits.subscribe.requests_per_minute` | `20` | a customer's subscription changes |
 | `rate_limits.webhook.requests_per_minute` | `1200` | provider callbacks |
@@ -520,7 +520,7 @@ prefix `openrails_st_<key_id>` identifies it. Grant a backend only what it needs
 | read or change configuration and archives | `merchant:config:read`, `merchant:config:manage` |
 | admit and report usage, limits and running charges (a gate needs both) | `merchant:usage:read`, `merchant:usage:manage` |
 | check entitlements | `merchant:entitlements:read` |
-| create orders | `merchant:orders:manage` |
+| create invoices | `merchant:invoices:manage` |
 | read the event log | `merchant:events:read` |
 | read or act on customers | `merchant:customer:read`, `merchant:customer:manage` |
 
@@ -545,13 +545,13 @@ The server mounts none of OpenRails' own SCIM routes (`/v1/app/scim/v2`, [client
 
 ## The payment page
 
-An order's pay URL is a page on an origin of its own, `/pay/<order>#<secret>`,
-where the customer pays that one order. The server serves it at
+An invoice's pay URL is a page on an origin of its own, `/pay/<invoice>#<secret>`,
+where the customer pays that one invoice. The server serves it at
 `checkout_origin` (the engine's `Config.CheckoutOrigin`), answering by `Host`: point
 that origin's DNS and TLS at the same server. The checkout origin has no path
 and must differ from `public_url`, the server's issuer and the
 frontend's origin: the page runs the PSPs' scripts and never shares an origin
-with the API or the console. Boot refuses otherwise. It is needed only for this page: with the embedded checkout or your own card form leave it unset, and an order asking for a pay URL is `400 pay_url_unavailable`.
+with the API or the console. Boot refuses otherwise. It is needed only for this page: with the embedded checkout or your own card form leave it unset, and an invoice asking for a pay URL is `400 pay_url_unavailable`.
 
 The page is built from `web/pay` and embedded in the release binary and image.
 A host building its own binary on `server` builds it with
@@ -604,7 +604,7 @@ Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' 
 
 Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 90 days: what was reported, its identity and its priced meter cells), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and history by UTC hour, kept with no TTL and grouped into the merchant's `accounting.timezone` days as it is read). PostgreSQL keeps what the ledger took (`usage_postings`), who has usage it has not taken yet (`usage_unposted`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_close`), and before any other movement of a customer's balance, so up to a month of usage is only in ClickHouse: back it up nightly ([backup and restore](#backup-and-restore)).
 
-Without an event store (`clickhouse.url` empty, or the default one unreachable at boot) the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.unposted_usage` finding, and the customers it belongs to can neither read nor move their balances (`event_store_required`) until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
+Without an event store (`clickhouse.url` empty, or the default one unreachable at boot) the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage invoices, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.unposted_usage` finding, and the customers it belongs to can neither read nor move their balances (`event_store_required`) until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
 
 The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 
@@ -700,7 +700,7 @@ with the command ([provider refresh](#provider-refresh)).
 
 `openrails_job_progress` fails with no River leader, an overrunning job, or a
 billing pass that has not finished within a day or left critical work (usage
-postings, renewals and retries, balance watches, delinquency, order expiry,
+postings, renewals and retries, balance watches, delinquency, invoice expiry,
 usage billing) due since before the start of yesterday (UTC).
 
 On SIGTERM the server fails readiness at once, keeps serving for 5 seconds,
@@ -731,7 +731,7 @@ Each merchant has three operator controls, one row of `billing.merchant_controls
 | customer purchase, card save, tier change, resume, refund | yes | yes | refused |
 | customer or staff cancel, and its provider delete | yes | yes | intent parks |
 | dunning charges and window-expiry cancellations | yes | intents park | no |
-| usage-order collection, Solana pulls | yes | no | no |
+| usage-invoice collection, Solana pulls | yes | no | no |
 | `catalog apply` publishing a recurring Solana plan | yes | binds an existing plan, else refuses the price | as `limited` |
 | `catalog apply` local changes, provider reads, webhooks | yes | yes | yes |
 
@@ -739,7 +739,7 @@ Each merchant has three operator controls, one row of `billing.merchant_controls
 
 Each PSP's environment decides whether money is real, and the provider must agree before it arms; no setting redirects a provider, and a non-live PSP relaxes no other protection.
 
-**Rebills.** Held, the charges OpenRails initiates for the merchant wait: engine renewals (with any scheduled plan change they apply), dunning retries, NMI recurring recovery, scheduled usage collection and Solana renewal pulls. The due pass does not select them and an accepted one parks unsent; access is kept as for any renewal that has not been attempted. Released, they run at the next billing pass. What the customer starts never waits: a purchase and its first charge, an immediate plan or seat change, paying a renewal or usage order now. Refunds, card refreshes and deletes follow writes, not rebills. A hold longer than a whole period leaves that period to the operator, as any missed period is.
+**Rebills.** Held, the charges OpenRails initiates for the merchant wait: engine renewals (with any scheduled plan change they apply), dunning retries, NMI recurring recovery, scheduled usage collection and Solana renewal pulls. The due pass does not select them and an accepted one parks unsent; access is kept as for any renewal that has not been attempted. Released, they run at the next billing pass. What the customer starts never waits: a purchase and its first charge, an immediate plan or seat change, paying a renewal or usage invoice now. Refunds, card refreshes and deletes follow writes, not rebills. A hold longer than a whole period leaves that period to the operator, as any missed period is.
 
 **Importing a merchant with production credentials.** Hold it before its subscriptions arrive: imported `past_due` subscriptions are due at once.
 
@@ -799,12 +799,12 @@ Redis when configured, otherwise in each process's memory; never in PostgreSQL.
 
 | Bucket | Default per minute | Routes |
 |---|---|---|
-| `purchase` | 10 | `POST /v1/me/orders`, an order's pay and confirm, `POST /v1/orders/{id}/solana-pay` |
+| `purchase` | 10 | `POST /v1/me/invoices`, an invoice's pay and confirm, `POST /v1/invoices/{id}/solana-pay` |
 | `subscribe` | 20 | the `/v1/me/subscriptions` writes |
 | `payment` | 40 | `/v1/me/payment-methods` |
 | `webhook` | 1200 | `/v1/webhooks/{rail}/{account_id}` |
 
-Counting is per minute, per bucket and per client IP; a request over the limit is refused with `429 rate_limit_exceeded`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` and `Retry-After`. Other routes are not limited here: a per-address ceiling belongs to your proxy. A pay URL is also limited per order (120 reads and 10 pays a minute). A declared `Content-Length` over 64 KiB is refused 413 before counting for purchase, subscriptions and payment methods; webhook bodies have per-rail caps.
+Counting is per minute, per bucket and per client IP; a request over the limit is refused with `429 rate_limit_exceeded`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` and `Retry-After`. Other routes are not limited here: a per-address ceiling belongs to your proxy. A pay URL is also limited per invoice (120 reads and 10 pays a minute). A declared `Content-Length` over 64 KiB is refused 413 before counting for purchase, subscriptions and payment methods; webhook bodies have per-rail caps.
 
 - **Captcha.** With captcha on, a subject reaching three times a purchase, payment or subscribe limit in a window is challenged for 15 minutes: `403 captcha_required` with `X-Captcha-Required: true` until it sends a valid `X-Captcha-Token`. Staff, console and server-to-server routes never see a captcha.
 - **Card testing.** A decline counts against the customer and the client address (IPv6: the /64). Before any provider call, a card save or payment is refused (`429 card_attempts_blocked`) when its customer or its address has 6 declines in 15 minutes (blocked for the window) or 10 in 24 hours (for the day): a customer with no declines of its own is refused from a blocked address. 100 declines in 24 hours from at least 25 customers and 25 addresses is attack mode for the merchant: with captcha on, every request to its card routes must solve one, and a single decline in the last 15 minutes, by the customer or from its address, refuses the attempt, so a customer without a recent decline is still refused from an address that has one.
@@ -918,7 +918,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 | `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
-| `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 397 days |
+| `invoice_attempts`; `invoices`, `invoice_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed invoices with no attempt, 397 days |
 | `parked_provider_subscriptions` | 90 days after release |
 | `carts` | 30 days after `last_changed_at` |
 | `notification_events`, `host_outbox`, the event log | 90 days |

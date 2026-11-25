@@ -23,85 +23,86 @@ func (c *Client) GetPublicConfig(ctx context.Context) (*billing.PublicConfig, er
 	return &out, nil
 }
 
-// PreviewOrder prices lines for one customer, as a merchant order would
+// PreviewInvoice prices lines for one customer, as a merchant invoice would
 // freeze them: per-line refusals, the total and what can pay it.
-func (c *Client) PreviewOrder(ctx context.Context, params billing.PreviewOrderParams) (*billing.OrderPreview, error) {
-	var out billing.OrderPreview
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/orders/preview", body: params}, &out); err != nil {
+func (c *Client) PreviewInvoice(ctx context.Context, params billing.PreviewInvoiceParams) (*billing.InvoicePreview, error) {
+	var out billing.InvoicePreview
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/invoices/preview", body: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// GetOrderPaymentAttempt reads one retained purchase payment attempt by
-// idempotencyKey, its original POST /me/orders/{id}/pay Idempotency-Key. It
-// does not look up create-order-with-payment or renewal/usage keys, retry or
-// perform a provider write.
-func (c *Client) GetOrderPaymentAttempt(ctx context.Context, idempotencyKey string, id billing.OrderID) (*billing.OrderPaymentAttempt, error) {
-	var out billing.OrderPaymentAttempt
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/app/orders/{id}/payment-attempt", idempotencyKey: idempotencyKey, args: []string{id.String()}}, &out); err != nil {
+// GetInvoicePaymentAttempt reads one retained purchase payment attempt by
+// idempotencyKey, its original POST /me/invoices/{id}/pay Idempotency-Key.
+// It does not look up create-invoice-with-payment or renewal/usage keys,
+// retry or perform a provider write.
+func (c *Client) GetInvoicePaymentAttempt(ctx context.Context, idempotencyKey string, id billing.InvoiceID) (*billing.InvoicePaymentAttempt, error) {
+	var out billing.InvoicePaymentAttempt
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/app/invoices/{id}/payment-attempt", idempotencyKey: idempotencyKey, args: []string{id.String()}}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// CreateOrder creates a merchant order: an unpaid order for one customer,
-// which they pay on your site (POST /v1/me/orders/{id}/pay, or billing-ui's
-// OrderPayURL). It never charges a card. An order in one of the merchant's
-// own units is paid from the customer's balance in it as it is created
-// (insufficient_credits when the balance does not cover it). idempotencyKey
-// is required: a retry with it answers the same order.
-func (c *Client) CreateOrder(ctx context.Context, idempotencyKey string, params billing.CreateOrderParams) (*billing.Order, error) {
-	var out billing.Order
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/orders", idempotencyKey: idempotencyKey, body: params}, &out); err != nil {
+// CreateInvoice creates a merchant invoice: an unpaid invoice for one
+// customer, which they pay on your site (POST /v1/me/invoices/{id}/pay, or
+// billing-ui's InvoicePayURL). It never charges a card. An invoice in one of
+// the merchant's own units is paid from the customer's balance in it as it
+// is created (insufficient_credits when the balance does not cover it).
+// idempotencyKey is required: a retry with it answers the same invoice.
+func (c *Client) CreateInvoice(ctx context.Context, idempotencyKey string, params billing.CreateInvoiceParams) (*billing.Invoice, error) {
+	var out billing.Invoice
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/invoices", idempotencyKey: idempotencyKey, body: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// CancelOrder withdraws an open order you created.
-func (c *Client) CancelOrder(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
-	var out billing.Order
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/orders/{id}/cancel", args: []string{id.String()}}, &out); err != nil {
+// CancelInvoice withdraws an open invoice you created.
+func (c *Client) CancelInvoice(ctx context.Context, id billing.InvoiceID) (*billing.Invoice, error) {
+	var out billing.Invoice
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/invoices/{id}/cancel", args: []string{id.String()}}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// ListOrders is one page of the merchant's orders, newest first. Status
+// ListInvoices is one page of the merchant's invoices, newest first. Status
 // complete with PriceID answers whether a customer bought a price.
-func (c *Client) ListOrders(ctx context.Context, params billing.OrderListParams) (*billing.ListPage[billing.Order], error) {
-	var out billing.ListPage[billing.Order]
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/orders", query: params}, &out); err != nil {
+func (c *Client) ListInvoices(ctx context.Context, params billing.InvoiceListParams) (*billing.ListPage[billing.Invoice], error) {
+	var out billing.ListPage[billing.Invoice]
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/invoices", query: params}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// GetOrder reads one order. Staff never pay, so it carries no next_action.
-func (c *Client) GetOrder(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
-	var out billing.Order
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/orders/{id}", args: []string{id.String()}}, &out); err != nil {
+// GetInvoice reads one invoice. Staff never pay, so it carries no
+// next_action.
+func (c *Client) GetInvoice(ctx context.Context, id billing.InvoiceID) (*billing.Invoice, error) {
+	var out billing.Invoice
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/admin/invoices/{id}", args: []string{id.String()}}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// WaiveOrderBalance forgives the unpaid balance of a usage order. Existing
-// payments remain recorded. Repeating it changes nothing.
-func (c *Client) WaiveOrderBalance(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
-	var out billing.Order
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/orders/{id}/waive-balance", args: []string{id.String()}}, &out); err != nil {
+// WaiveInvoiceBalance forgives the unpaid balance of a usage invoice.
+// Existing payments remain recorded. Repeating it changes nothing.
+func (c *Client) WaiveInvoiceBalance(ctx context.Context, id billing.InvoiceID) (*billing.Invoice, error) {
+	var out billing.Invoice
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/invoices/{id}/waive-balance", args: []string{id.String()}}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// MarkOrderUncollectible stops scheduled collection while retaining the
+// MarkInvoiceUncollectible stops scheduled collection while retaining the
 // debt. A customer payment can reopen it. Repeating it changes nothing.
-func (c *Client) MarkOrderUncollectible(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
-	var out billing.Order
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/orders/{id}/mark-uncollectible", args: []string{id.String()}}, &out); err != nil {
+func (c *Client) MarkInvoiceUncollectible(ctx context.Context, id billing.InvoiceID) (*billing.Invoice, error) {
+	var out billing.Invoice
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/admin/invoices/{id}/mark-uncollectible", args: []string{id.String()}}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -696,8 +697,8 @@ func (c *Client) AdjustCustomerLimit(ctx context.Context, customerID billing.Cus
 }
 
 // RecordExternalPayment records money the merchant received outside
-// OpenRails for one order: part or all of what a usage order owes, or
-// another order's total. Recording the same TransactionID again with the
+// OpenRails for one invoice: part or all of what a usage invoice owes, or
+// another invoice's total. Recording the same TransactionID again with the
 // same terms answers the first payment; with other terms it is
 // billing.ErrIdempotencyKeyReused.
 func (c *Client) RecordExternalPayment(ctx context.Context, params billing.RecordExternalPaymentParams) (*billing.Payment, error) {

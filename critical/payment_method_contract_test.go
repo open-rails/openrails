@@ -87,7 +87,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 		setup := p.core.Submitted("/v1/setup_intents")
 		require.Len(t, setup, 1)
 		input := saleInput(t, a, p)
-		input.Payment, input.Reusable = &billing.OrderPaymentParams{PaymentMethodID: &saved.ID}, nil
+		input.Payment, input.Reusable = &billing.InvoicePaymentParams{PaymentMethodID: &saved.ID}, nil
 		gate := &wireGate{arrived: make(chan struct{}), release: make(chan struct{})}
 		p.mu.Lock()
 		p.responseGate = gate
@@ -100,13 +100,13 @@ func TestPaymentMethodContracts(t *testing.T) {
 		}
 		finished := make(chan response, 1)
 		go func() {
-			status, raw, err := a.do(t.Context(), http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "owned-card-sale"})
+			status, raw, err := a.do(t.Context(), http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "owned-card-sale"})
 			finished <- response{status, raw, err}
 		}()
 		select {
 		case <-gate.arrived:
 		case <-time.After(10 * time.Second):
-			t.Fatal("order did not reach the provider acceptance barrier")
+			t.Fatal("invoice did not reach the provider acceptance barrier")
 		}
 		require.Len(t, p.effects(t), 1)
 		status, raw := a.request(t, http.MethodDelete, "/v1/me/payment-methods/"+saved.ID.String(), a.aliceToken, nil)
@@ -119,12 +119,12 @@ func TestPaymentMethodContracts(t *testing.T) {
 		answer := <-finished
 		require.NoError(t, answer.err)
 		require.Equal(t, http.StatusCreated, answer.status, string(answer.raw))
-		var accepted billing.Order
+		var accepted billing.Invoice
 		require.NoError(t, json.Unmarshal(answer.raw, &accepted))
-		require.Equal(t, billing.OrderComplete, accepted.Status)
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "owned-card-sale"})
+		require.Equal(t, billing.InvoiceComplete, accepted.Status)
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, input, map[string]string{"Idempotency-Key": "owned-card-sale"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var replay billing.Order
+		var replay billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &replay))
 		require.Equal(t, accepted.ID, replay.ID)
 		require.Equal(t, accepted.Payment.PaymentID, replay.Payment.PaymentID)
@@ -165,7 +165,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &methods))
 		require.Empty(t, methods.Items)
 		require.Empty(t, p.effects(t))
-		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err := a.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 
@@ -186,12 +186,12 @@ func TestPaymentMethodContracts(t *testing.T) {
 		require.NoError(t, err)
 		price, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: 30_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(30_000_000)), Payment: &billing.OrderPaymentParams{PaymentMethodID: &old.ID}}
-		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, input, map[string]string{"Idempotency-Key": "removed-card-purchase"})
+		input := billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(30_000_000)), Payment: &billing.InvoicePaymentParams{PaymentMethodID: &old.ID}}
+		status, raw = nmi.request(t, http.MethodPost, "/v1/me/invoices", nmi.aliceToken, input, map[string]string{"Idempotency-Key": "removed-card-purchase"})
 		require.Equal(t, http.StatusPaymentRequired, status, string(raw))
 		require.Contains(t, string(raw), `"code":"payment_method_stale"`)
 		journal.money(t, 0, 0)
-		facts, err = nmi.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "order.completed"}, Limit: 100})
+		facts, err = nmi.alpha.ListEvents(t.Context(), billing.EventListParams{Types: []string{"payment.settled", "invoice.completed"}, Limit: 100})
 		require.NoError(t, err)
 		require.Empty(t, facts.Events)
 	})

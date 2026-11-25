@@ -29,7 +29,7 @@ func prints(cards ...catalog.RatePrice) usagePrints {
 	out := usagePrints{}
 	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	for i, price := range cards {
-		out[string(rune('a'+i))] = printCard{card: ratingCard{MeterKey: "work", Aggregation: catalog.AggregationSum, Price: price}, order: base.Add(time.Duration(i) * time.Hour)}
+		out[string(rune('a'+i))] = printCard{card: ratingCard{MeterKey: "work", Aggregation: catalog.AggregationSum, Price: price}, invoice: base.Add(time.Duration(i) * time.Hour)}
 	}
 	return out
 }
@@ -49,7 +49,7 @@ func TestCellPriceIsThePriceOfTheTotal(t *testing.T) {
 	revised := prints(graduated(10, 5, 100), perUnit(2))
 	amounts, err := revised.cellPrice("", []printQuantity{{print: "b", quantity: 30}, {print: "a", quantity: 120}})
 	require.NoError(t, err)
-	require.Equal(t, []int64{100*10 + 20*5, 30 * 2}, amounts, "print order, not the order given")
+	require.Equal(t, []int64{100*10 + 20*5, 30 * 2}, amounts, "print order, not the invoice given")
 
 	// A volume crossing: 90 units cost 90 each; at 110 the whole period
 	// costs the cheaper band.

@@ -31,13 +31,13 @@ import (
 const receiptEvent = "one_off_purchase_completed"
 
 func TestCustomerMessages(t *testing.T) {
-	t.Run("OR-J39-S01/a-paid-order-sends-one-receipt-across-retries", func(t *testing.T) {
+	t.Run("OR-J39-S01/a-paid-invoice-sends-one-receipt-across-retries", func(t *testing.T) {
 		mail := &alertMailbox{refuse: 1}
 		a, _ := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
 		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		order, err := a.alpha.CreateOrder(t.Context(), "receipt-order", billing.CreateOrderParams{CustomerID: alice, Lines: messageSale(t, a)})
+		invoice, err := a.alpha.CreateInvoice(t.Context(), "receipt-invoice", billing.CreateInvoiceParams{CustomerID: alice, Lines: messageSale(t, a)})
 		require.NoError(t, err)
-		paid := billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 10_000_000, TransactionID: "receipt-bank-transfer"}
+		paid := billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 10_000_000, TransactionID: "receipt-bank-transfer"}
 		first, err := a.alpha.RecordExternalPayment(t.Context(), paid)
 		require.NoError(t, err)
 		replay, err := a.alpha.RecordExternalPayment(t.Context(), paid)
@@ -110,7 +110,7 @@ func TestCustomerMessages(t *testing.T) {
 		mail := &alertMailbox{}
 		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
 		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "test-psp-receipt"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "test-psp-receipt"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.Len(t, p.effects(t), 1, "the test PSP took the payment")
 		startFleet(t, a.world)
@@ -245,7 +245,7 @@ func TestCustomerMessages(t *testing.T) {
 			require.Contains(t, confirmation.Text, "If you didn't expect this, please contact us: https://alpha.example/help")
 			require.NotContains(t, confirmation.Text, "resume")
 		})
-		t.Run("a-usage-orders-collection-stopped-after-failed-payments", func(t *testing.T) {
+		t.Run("a-usage-invoices-collection-stopped-after-failed-payments", func(t *testing.T) {
 			mail := &alertMailbox{}
 			a, p, customer := usageBillingWorld(t, false, func(w *world) { w.deps.Email = mail; alphaProfile(w) })
 			p.core.SetDecline("4242", "252")
@@ -257,18 +257,18 @@ func TestCustomerMessages(t *testing.T) {
 			runUsageDue(t, fleet)
 			require.Eventually(t, func() bool {
 				log, err := customerMessages(t, a.alpha, customer)
-				return err == nil && len(ofType(log, "order_collection_stopped")) == 1
+				return err == nil && len(ofType(log, "invoice_collection_stopped")) == 1
 			}, 30*time.Second, 20*time.Millisecond, "the stopped collection queues its message")
 			liveMoney(t, a.world)
 			dispatchMessages(t, fleet)
-			confirmation := sentAbout(t, a, mail, "order_collection_stopped", "We stopped charging your card for Alpha")
+			confirmation := sentAbout(t, a, mail, "invoice_collection_stopped", "We stopped charging your card for Alpha")
 			require.Contains(t, confirmation.Text, "Your bank told us your card can no longer be charged, so we have stopped trying to collect the 30.00 USD you owe.")
 			require.Contains(t, confirmation.Text, "Pay it or add another payment method: https://alpha.example/billing")
 			// The collection attempt names its outcome's fact, so a replayed
 			// outcome records the same one.
 			log, err := customerMessages(t, a.alpha, customer)
 			require.NoError(t, err)
-			stopped := ofType(log, "order_collection_stopped")[0].EventID.UUID()
+			stopped := ofType(log, "invoice_collection_stopped")[0].EventID.UUID()
 			rows, err := a.pool.Query(t.Context(), "SELECT id FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" WHERE merchant_id = $1", a.alpha.MerchantID().UUID())
 			require.NoError(t, err)
 			intents, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
@@ -296,16 +296,16 @@ func TestCustomerMessages(t *testing.T) {
 		t.Run("staff-refund", func(t *testing.T) {
 			mail := &alertMailbox{}
 			a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-purchase"})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-purchase"})
 			require.Equal(t, http.StatusCreated, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
-			require.NotNil(t, order.Payment.PaymentID)
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
+			require.NotNil(t, invoice.Payment.PaymentID)
 			params := billing.RefundPaymentParams{Amount: 10_000_000, Reason: "Customer asked"}
-			first, err := a.alpha.RefundPayment(t.Context(), "receipt-refund", *order.Payment.PaymentID, params)
+			first, err := a.alpha.RefundPayment(t.Context(), "receipt-refund", *invoice.Payment.PaymentID, params)
 			require.NoError(t, err)
 			require.Equal(t, billing.PaymentSucceeded, first.Status)
-			replay, err := a.alpha.RefundPayment(t.Context(), "receipt-refund", *order.Payment.PaymentID, params)
+			replay, err := a.alpha.RefundPayment(t.Context(), "receipt-refund", *invoice.Payment.PaymentID, params)
 			require.NoError(t, err)
 			require.Equal(t, first.ID, replay.ID)
 			liveMoney(t, a.world)
@@ -352,7 +352,7 @@ func TestCustomerMessages(t *testing.T) {
 			}
 		})
 		alice := billing.CustomerID(uuid.MustParse(a.alice.ID))
-		paidExternally(t, a, alice, []billing.OrderLineParams{{PriceID: hostProduct(t, a.alpha, "host-item").ID}}, "host-rendered")
+		paidExternally(t, a, alice, []billing.InvoiceLineParams{{PriceID: hostProduct(t, a.alpha, "host-item").ID}}, "host-rendered")
 		paidExternally(t, a, alice, messageSale(t, a), "template-rendered")
 		startFleet(t, a.world)
 		for _, m := range settledMessages(t, a.world, alice, 2) {
@@ -450,7 +450,7 @@ func TestCustomerMessages(t *testing.T) {
 		mail := &alertMailbox{}
 		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
 		alice := customerOf(a.alice)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "logged-on-test-psp"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "logged-on-test-psp"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		paidExternally(t, a, alice, messageSale(t, a), "logged-receipt")
 		startFleet(t, a.world)
@@ -519,7 +519,7 @@ func TestCustomerMessages(t *testing.T) {
 		require.Equal(t, billing.CodeMessageTemplateInvalid, refusal.Code)
 		require.Equal(t, "template", deref(refusal.Param))
 		require.Contains(t, refusal.Message, "can't evaluate field Total")
-		_, err = a.alpha.PreviewMessage(t.Context(), billing.PreviewMessageParams{EventType: "order.completed"})
+		_, err = a.alpha.PreviewMessage(t.Context(), billing.PreviewMessageParams{EventType: "invoice.completed"})
 		require.ErrorAs(t, err, &refusal)
 		require.Equal(t, billing.CodeInvalidParam, refusal.Code)
 		require.Equal(t, "event_type", deref(refusal.Param))
@@ -676,10 +676,10 @@ func TestCustomerMessages(t *testing.T) {
 			t.Helper()
 			mail := &alertMailbox{}
 			a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail })
-			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-at-the-provider"})
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-at-the-provider"})
 			require.Equal(t, http.StatusCreated, status, string(raw))
-			var order billing.Order
-			require.NoError(t, json.Unmarshal(raw, &order))
+			var invoice billing.Invoice
+			require.NoError(t, json.Unmarshal(raw, &invoice))
 			var charge string
 			for _, effect := range p.effects(t) {
 				if effect.Kind == "charge" {
@@ -701,7 +701,7 @@ func TestCustomerMessages(t *testing.T) {
 			// from the last one's watermark, the refund's window included.
 			a.clock.Advance(late)
 			refreshMerchant(t, fleet, merchant)
-			paid, err := a.alpha.GetPayment(t.Context(), *order.Payment.PaymentID)
+			paid, err := a.alpha.GetPayment(t.Context(), *invoice.Payment.PaymentID)
 			require.NoError(t, err)
 			require.Len(t, paid.Refunds, 1, "the refresh records the refund")
 			liveMoney(t, a.world)
@@ -760,11 +760,11 @@ func TestCustomerMessages(t *testing.T) {
 		// Begun nine days ago: the refund settles eight days on, never in
 		// the future.
 		a, p := newPaymentWorld(t, func(w *world) { w.deps.Email = mail; w.clock.Advance(-9 * 24 * time.Hour) })
-		status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-late-by-staff"})
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, saleInput(t, a, p), map[string]string{"Idempotency-Key": "refunded-late-by-staff"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
-		var order billing.Order
-		require.NoError(t, json.Unmarshal(raw, &order))
-		payment := *order.Payment.PaymentID
+		var invoice billing.Invoice
+		require.NoError(t, json.Unmarshal(raw, &invoice))
+		payment := *invoice.Payment.PaymentID
 		// The provider refunds, but its answer is lost: the refund completes
 		// only when recovery finds it, eight days later.
 		p.mu.Lock()
@@ -868,19 +868,19 @@ func ended(log []billing.CustomerMessage) bool {
 	return true
 }
 
-// messageSale is a one-off price alpha sells, as order lines.
-func messageSale(t *testing.T, a *authorityWorld) []billing.OrderLineParams {
+// messageSale is a one-off price alpha sells, as invoice lines.
+func messageSale(t *testing.T, a *authorityWorld) []billing.InvoiceLineParams {
 	t.Helper()
-	return []billing.OrderLineParams{{PriceID: hostProduct(t, a.alpha, "receipt-item").ID}}
+	return []billing.InvoiceLineParams{{PriceID: hostProduct(t, a.alpha, "receipt-item").ID}}
 }
 
-// paidExternally creates an order of lines for customer and records its
+// paidExternally creates an invoice of lines for customer and records its
 // payment outside any PSP.
-func paidExternally(t *testing.T, a *authorityWorld, customer billing.CustomerID, lines []billing.OrderLineParams, key string) {
+func paidExternally(t *testing.T, a *authorityWorld, customer billing.CustomerID, lines []billing.InvoiceLineParams, key string) {
 	t.Helper()
-	order, err := a.alpha.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: customer, Lines: lines})
+	invoice, err := a.alpha.CreateInvoice(t.Context(), key, billing.CreateInvoiceParams{CustomerID: customer, Lines: lines})
 	require.NoError(t, err)
-	_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 10_000_000, TransactionID: "bank-" + key})
+	_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 10_000_000, TransactionID: "bank-" + key})
 	require.NoError(t, err)
 }
 

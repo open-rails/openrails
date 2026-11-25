@@ -109,7 +109,7 @@ func TestApplicationsStayWithinReceipts(t *testing.T) {
 		receipts []int64
 		second   second
 	}{
-		// The order's own 5.00 and another 15.00 paid 20.00 of 36.00; a
+		// The invoice's own 5.00 and another 15.00 paid 20.00 of 36.00; a
 		// 12.50 reported late sorts between them.
 		{[]int64{22_000_000, 14_000_000}, []int64{5_000_000, 15_000_000}, second{[]int64{5_000_000, 12_500_000, 15_000_000}, []int{0, -1, 1}}},
 		{[]int64{4_000_000, 23_000_000}, []int64{7_500_000, 12_000_000}, second{[]int64{7_500_000, 2_000_000, 12_000_000}, []int{0, -1, 1}}},

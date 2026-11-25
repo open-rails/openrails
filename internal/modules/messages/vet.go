@@ -23,7 +23,7 @@ const (
 // functions are what a template may call: Go's comparisons and logic, len
 // and funcs. print, printf, println, html, js, urlquery and call are refused,
 // since each can repeat or grow what it is given; index and slice, since
-// version 1 data needs neither.
+// the data needs neither.
 var functions = map[string]bool{
 	"and": true, "or": true, "not": true, "eq": true, "ne": true, "lt": true, "le": true, "gt": true, "ge": true,
 	"len": true, "default": true, "upper": true, "lower": true,
@@ -412,7 +412,7 @@ func (c *checker) compared(fn *parse.IdentifierNode, args []reflect.Type) error 
 		k0, k0b := comparison(first)
 		switch {
 		case ordered && (!kb || k == reflect.Bool || k == reflect.Complex128):
-			return c.errorf(fn, "%s cannot order a %s", fn.Ident, t)
+			return c.errorf(fn, "%s cannot invoice a %s", fn.Ident, t)
 		case kb && k0b && k != k0, kb != k0b, !kb && (t != first || !t.Comparable()):
 			return c.errorf(fn, "incompatible types for comparison: %s and %s", first, t)
 		}

@@ -26,7 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/collection"
-	"github.com/open-rails/openrails/internal/modules/orders/usage"
+	"github.com/open-rails/openrails/internal/modules/invoices/usage"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -34,18 +34,18 @@ import (
 
 var (
 	ErrCustomerPaymentUnsupported    = errors.New("customer-present payment is not supported for this rail")
-	ErrUsageNotCollectible           = errors.New("the usage order takes no collection now")
+	ErrUsageNotCollectible           = errors.New("the usage invoice takes no collection now")
 	ErrDefaultPaymentMethodRequired  = errors.New("no default payment method for the currency")
-	ErrDefaultPaymentMethodInvalid   = errors.New("the default payment method cannot pay this order")
-	ErrCollectionInProgress          = errors.New("a collection of the order is in progress")
-	ErrCollectionOutcomeUnknown      = errors.New("the order's collection outcome is unknown; resolve the operation before another attempt")
+	ErrDefaultPaymentMethodInvalid   = errors.New("the default payment method cannot pay this invoice")
+	ErrCollectionInProgress          = errors.New("a collection of the invoice is in progress")
+	ErrCollectionOutcomeUnknown      = errors.New("the invoice's collection outcome is unknown; resolve the operation before another attempt")
 	ErrCollectionIdempotencyConflict = errors.New("the key names another collection")
 )
 
-// UsageCollectionRequest charges a usage order to one of its customer's
+// UsageCollectionRequest charges a usage invoice to one of its customer's
 // saved cards; one IdempotencyKey is one collection.
 type UsageCollectionRequest struct {
-	OrderID         uuid.UUID
+	InvoiceID       uuid.UUID
 	IdempotencyKey  string
 	PaymentMethodID uuid.UUID
 }
@@ -83,12 +83,12 @@ func (s *MoneyService) DefaultPaymentMethodCurrencies(ctx context.Context, payer
 	return out, nil
 }
 
-// CollectDueUsageOrder queues the scheduled collection of a usage order whose
+// CollectDueUsageInvoice queues the scheduled collection of a usage invoice whose
 // next charge is due: one order_collection operation, which its own job
-// charges. An order whose customer has no card that can pay it waits until a
+// charges. An invoice whose customer has no card that can pay it waits until a
 // card is designated; one of a merchant whose rebills are held waits for
 // their release.
-func (s *MoneyService) CollectDueUsageOrder(ctx context.Context, payer identity.CustomerID, orderID uuid.UUID) error {
+func (s *MoneyService) CollectDueUsageInvoice(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
@@ -99,11 +99,11 @@ func (s *MoneyService) CollectDueUsageOrder(ctx context.Context, payer identity.
 	if c, err := (controls.View{DB: s.db}).Get(ctx, mid.UUID()); err != nil || c.RebillsHeld {
 		return err
 	}
-	_, _, err = s.enqueueUsageCollection(ctx, payer, orderID, usageCollectionEnqueue{origin: intents.OriginSystem, originReason: "scheduled usage collection"})
+	_, _, err = s.enqueueUsageCollection(ctx, payer, invoiceID, usageCollectionEnqueue{origin: intents.OriginSystem, originReason: "scheduled usage collection"})
 	return err
 }
 
-// PayUsageNow is the customer paying their usage order with a saved card,
+// PayUsageNow is the customer paying their usage invoice with a saved card,
 // in person. It is called only by the verified-customer command; its
 // customer-present posture is frozen in the accepted operation.
 func (s *MoneyService) PayUsageNow(ctx context.Context, runner *intents.Runner, principal billingauth.Payer, request UsageCollectionRequest) (*UsageCollection, error) {
@@ -128,16 +128,16 @@ func (s *MoneyService) collectUsage(ctx context.Context, runner *intents.Runner,
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	if request.OrderID == uuid.Nil || request.PaymentMethodID == uuid.Nil {
-		return nil, fmt.Errorf("order and payment method required")
+	if request.InvoiceID == uuid.Nil || request.PaymentMethodID == uuid.Nil {
+		return nil, fmt.Errorf("invoice and payment method required")
 	}
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 255 {
 		return nil, fmt.Errorf("idempotency_key must be between 1 and 255 bytes")
 	}
-	key := charge.CustomerPaymentKey(TypeOrderCollection, payer.UUID(), request.IdempotencyKey)
+	key := charge.CustomerPaymentKey(TypeInvoiceCollection, payer.UUID(), request.IdempotencyKey)
 	pm := request.PaymentMethodID
-	intentID, replayed, err := s.enqueueUsageCollection(ctx, payer, request.OrderID, usageCollectionEnqueue{
+	intentID, replayed, err := s.enqueueUsageCollection(ctx, payer, request.InvoiceID, usageCollectionEnqueue{
 		manual: true, paymentMethodID: &pm, operationKey: key, origin: intents.OriginUser, originReason: "verified customer usage payment", initiator: charge.InitiatorCustomer,
 	})
 	if err != nil {
@@ -148,21 +148,21 @@ func (s *MoneyService) collectUsage(ctx context.Context, runner *intents.Runner,
 	}
 	operation, err := runner.ExecuteFirstByID(ctx, intentID)
 	if err != nil {
-		return nil, fmt.Errorf("collect usage order: %w", err)
+		return nil, fmt.Errorf("collect usage invoice: %w", err)
 	}
 	return &UsageCollection{Replayed: replayed, Operation: operation}, nil
 }
 
-func scheduledUsageCollectionKey(orderID uuid.UUID, ordinal int64) string {
-	return fmt.Sprintf("%s:%s:attempt:%d", TypeOrderCollection, orderID, ordinal)
+func scheduledUsageCollectionKey(invoiceID uuid.UUID, ordinal int64) string {
+	return fmt.Sprintf("%s:%s:attempt:%d", TypeInvoiceCollection, invoiceID, ordinal)
 }
 
-func scheduledUsageCollectionEligible(order gen.BillingOrder, now time.Time) bool {
-	if order.CollectionOwner != string(billing.OrderCollectionEngine) || order.Status != string(billing.OrderOpen) || order.CollectionMethod == nil || *order.CollectionMethod != CollectionChargeAutomatically ||
-		usage.Due(order) <= 0 {
+func scheduledUsageCollectionEligible(invoice gen.BillingInvoice, now time.Time) bool {
+	if invoice.CollectionOwner != string(billing.InvoiceCollectionEngine) || invoice.Status != string(billing.InvoiceOpen) || invoice.CollectionMethod == nil || *invoice.CollectionMethod != CollectionChargeAutomatically ||
+		usage.Due(invoice) <= 0 {
 		return false
 	}
-	return order.NextCollectionAttemptAt != nil && !order.NextCollectionAttemptAt.After(now)
+	return invoice.NextCollectionAttemptAt != nil && !invoice.NextCollectionAttemptAt.After(now)
 }
 
 type usageCollectionEnqueue struct {
@@ -178,12 +178,12 @@ type usageCollectionEnqueue struct {
 }
 
 // enqueueUsageCollection freezes one collection atomically: the intent and
-// the order's live attempt commit together, or nothing does. A client key is
-// looked up under the order lock, so two equal concurrent requests serialize
+// the invoice's live attempt commit together, or nothing does. A client key is
+// looked up under the invoice lock, so two equal concurrent requests serialize
 // on the row and the second replays the first's operation (replayed=true).
-// intentID == Nil means the order was not eligible (scheduled path); the
+// intentID == Nil means the invoice was not eligible (scheduled path); the
 // manual path reports why.
-func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identity.CustomerID, orderID uuid.UUID, opts usageCollectionEnqueue) (intentID uuid.UUID, replayed bool, err error) {
+func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, opts usageCollectionEnqueue) (intentID uuid.UUID, replayed bool, err error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return uuid.Nil, false, err
@@ -197,14 +197,14 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: tid.UUID(), ID: payer.UUID()}); err != nil {
 			return fmt.Errorf("lock usage payer: %w", err)
 		}
-		order, err := q.LockUsageOrder(ctx, gen.LockUsageOrderParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), ID: orderID})
+		invoice, err := q.LockUsageInvoice(ctx, gen.LockUsageInvoiceParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), ID: invoiceID})
 		if errors.Is(err, pgx.ErrNoRows) && !opts.manual {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("lock usage order: %w", err)
+			return fmt.Errorf("lock usage invoice: %w", err)
 		}
-		if order.CollectionOwner != string(billing.OrderCollectionEngine) {
+		if invoice.CollectionOwner != string(billing.InvoiceCollectionEngine) {
 			if opts.manual {
 				return ErrUsageActionNotAllowed
 			}
@@ -214,11 +214,11 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 			prior, err := q.GetProviderIntentByIdempotencyKey(ctx, gen.GetProviderIntentByIdempotencyKeyParams{MerchantID: tid.UUID(), IdempotencyKey: opts.operationKey})
 			switch {
 			case err == nil:
-				frozen, err := intents.DecodeOrderCollectionPayload(prior)
+				frozen, err := intents.DecodeInvoiceCollectionPayload(prior)
 				if err != nil {
 					return err
 				}
-				if frozen.OrderID != orderID || frozen.CustomerID != payer.UUID() || opts.paymentMethodID == nil || frozen.PaymentMethodID != *opts.paymentMethodID || frozen.Initiator != opts.initiator {
+				if frozen.InvoiceID != invoiceID || frozen.CustomerID != payer.UUID() || opts.paymentMethodID == nil || frozen.PaymentMethodID != *opts.paymentMethodID || frozen.Initiator != opts.initiator {
 					return ErrCollectionIdempotencyConflict
 				}
 				intentID, replayed = prior.ID, true
@@ -227,33 +227,33 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 				return fmt.Errorf("load collection operation: %w", err)
 			}
 		}
-		if order.Status == string(billing.OrderProcessing) {
+		if invoice.Status == string(billing.InvoiceProcessing) {
 			if !opts.manual {
 				return nil
 			}
-			if order.AttemptID != nil {
-				live, err := q.GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: tid.UUID(), ID: *order.AttemptID})
+			if invoice.AttemptID != nil {
+				live, err := q.GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: tid.UUID(), ID: *invoice.AttemptID})
 				if err == nil && live.Status == intents.StatusUnknownNeedsVerify {
 					return ErrCollectionOutcomeUnknown
 				}
 			}
 			return ErrCollectionInProgress
 		}
-		eligible := scheduledUsageCollectionEligible(order, now)
+		eligible := scheduledUsageCollectionEligible(invoice, now)
 		if opts.manual {
-			eligible = opts.initiator == charge.InitiatorCustomer && usage.Due(order) > 0 &&
-				(order.Status == string(billing.OrderOpen) || order.Status == string(billing.OrderUncollectible))
+			eligible = opts.initiator == charge.InitiatorCustomer && usage.Due(invoice) > 0 &&
+				(invoice.Status == string(billing.InvoiceOpen) || invoice.Status == string(billing.InvoiceUncollectible))
 		}
 		if !eligible {
 			return nil
 		}
-		method, err := s.collectionMethodFor(ctx, q, tid.UUID(), payer.UUID(), order.Currency, opts)
+		method, err := s.collectionMethodFor(ctx, q, tid.UUID(), payer.UUID(), invoice.Currency, opts)
 		if errors.Is(err, charge.ErrAgreementRequired) && !opts.manual {
-			return stopCollectionForAgreement(ctx, s.db.NewWithPgxTx(tx), order, now)
+			return stopCollectionForAgreement(ctx, s.db.NewWithPgxTx(tx), invoice, now)
 		}
 		if !opts.manual && (err == nil && method == nil || errors.Is(err, ErrDefaultPaymentMethodInvalid)) {
 			// No card can pay it: charging waits until one is designated.
-			_, err := q.ParkUsageCollection(ctx, gen.ParkUsageCollectionParams{MerchantID: tid.UUID(), ID: order.ID, Now: now})
+			_, err := q.ParkUsageCollection(ctx, gen.ParkUsageCollectionParams{MerchantID: tid.UUID(), ID: invoice.ID, Now: now})
 			return err
 		}
 		if err != nil || method == nil {
@@ -263,9 +263,9 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 		// PSP of its rail that reaches its custodian.
 		psp, err := charge.RoutePSP(ctx, charge.CustodyOf(s.db), *method)
 		if err != nil {
-			return fmt.Errorf("route order %s collection: %w", order.ID, err)
+			return fmt.Errorf("route invoice %s collection: %w", invoice.ID, err)
 		}
-		receipt, found, err := s.findObservedUsagePayment(ctx, q, tid.UUID(), order.ID, psp)
+		receipt, found, err := s.findObservedUsagePayment(ctx, q, tid.UUID(), invoice.ID, psp)
 		if err != nil {
 			return err
 		}
@@ -282,14 +282,14 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 			}
 			custody = &binding
 		}
-		instrument, err := collectionInstrument(ctx, q, *method, psp, order.Currency, opts.initiator)
+		instrument, err := collectionInstrument(ctx, q, *method, psp, invoice.Currency, opts.initiator)
 		if err != nil {
 			return err
 		}
-		due := usage.Due(order)
-		amountMinor, err := moneyutil.NativeToRailMinor(order.Currency, due)
+		due := usage.Due(invoice)
+		amountMinor, err := moneyutil.NativeToRailMinor(invoice.Currency, due)
 		if err != nil {
-			return fmt.Errorf("order %s amount is not representable on rail %s: %w", order.ID, method.Rail, err)
+			return fmt.Errorf("invoice %s amount is not representable on rail %s: %w", invoice.ID, method.Rail, err)
 		}
 		providerCustomerRef := ""
 		if normalizeRail(method.Rail) == "stripe" {
@@ -301,30 +301,30 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 				return errors.New("Stripe collection customer mapping is empty")
 			}
 		}
-		if _, err := moneyutil.RailMinorToNative(order.Currency, amountMinor); err != nil {
-			return fmt.Errorf("order %s rounded charge is not representable: %w", order.ID, err)
+		if _, err := moneyutil.RailMinorToNative(invoice.Currency, amountMinor); err != nil {
+			return fmt.Errorf("invoice %s rounded charge is not representable: %w", invoice.ID, err)
 		}
 		key := opts.operationKey
 		if key == "" {
-			ordinal, err := q.CountOrderAttempts(ctx, gen.CountOrderAttemptsParams{MerchantID: tid.UUID(), OrderID: orderID})
+			ordinal, err := q.CountInvoiceAttempts(ctx, gen.CountInvoiceAttemptsParams{MerchantID: tid.UUID(), InvoiceID: invoiceID})
 			if err != nil {
 				return err
 			}
-			key = scheduledUsageCollectionKey(orderID, ordinal)
+			key = scheduledUsageCollectionKey(invoiceID, ordinal)
 		}
 		paymentID := uuidutil.NewV7()
 		intent, err := intents.NewStore(s.db.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
-			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: psp, IntentType: TypeOrderCollection,
-			Payload: intents.OrderCollectionPayload{
-				OrderCaptchaSubjects: intents.OrderCaptchaSubjects(ctx),
-				OrderID:              orderID, CustomerID: payer.UUID(), PaymentID: paymentID, PaymentMethodID: method.ID, Initiator: opts.initiator,
+			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: psp, IntentType: TypeInvoiceCollection,
+			Payload: intents.InvoiceCollectionPayload{
+				InvoiceCaptchaSubjects: intents.InvoiceCaptchaSubjects(ctx),
+				InvoiceID:              invoiceID, CustomerID: payer.UUID(), PaymentID: paymentID, PaymentMethodID: method.ID, Initiator: opts.initiator,
 				Rail: normalizeRail(method.Rail), Instrument: instrument,
 				HyperSwitch: custody,
-				Currency:    order.Currency, Amount: due, AmountMinor: amountMinor,
+				Currency:    invoice.Currency, Amount: due, AmountMinor: amountMinor,
 				ProviderCustomerRef: providerCustomerRef,
-				// The provider's description names the order as the invoice it
+				// The provider's description names the invoice as the invoice it
 				// renders; recovery finds a collection's sale by it.
-				Description: fmt.Sprintf("invoice %s", orderID),
+				Description: fmt.Sprintf("invoice %s", invoiceID),
 			},
 			// A customer's own payment runs in its request; a scheduled one in
 			// its operation's job.
@@ -337,20 +337,20 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 			}(),
 		})
 		if err != nil {
-			return fmt.Errorf("enqueue order collection: %w", err)
+			return fmt.Errorf("enqueue invoice collection: %w", err)
 		}
-		canonical, err := intents.DecodeOrderCollectionPayload(intent)
+		canonical, err := intents.DecodeInvoiceCollectionPayload(intent)
 		if err != nil {
 			return err
 		}
-		if canonical.OrderID != orderID || canonical.CustomerID != payer.UUID() || canonical.PaymentMethodID != method.ID || canonical.Initiator != opts.initiator {
+		if canonical.InvoiceID != invoiceID || canonical.CustomerID != payer.UUID() || canonical.PaymentMethodID != method.ID || canonical.Initiator != opts.initiator {
 			return ErrCollectionIdempotencyConflict
 		}
 		if canonical.PaymentID != paymentID {
 			intentID, replayed = intent.ID, true
 			return nil
 		}
-		if err := usage.StartCollection(ctx, s.db.NewWithPgxTx(tx), order, intent.ID, psp, normalizeRail(method.Rail), method.ID, due, now); err != nil {
+		if err := usage.StartCollection(ctx, s.db.NewWithPgxTx(tx), invoice, intent.ID, psp, normalizeRail(method.Rail), method.ID, due, now); err != nil {
 			return err
 		}
 		intentID = intent.ID
@@ -439,18 +439,18 @@ func requireCollectionAgreement(ctx context.Context, q *gen.Queries, custody *me
 	return err
 }
 
-// stopCollectionForAgreement stops collecting a usage order whose collection
+// stopCollectionForAgreement stops collecting a usage invoice whose collection
 // card carries no agreement for a merchant-initiated charge, and asks the
 // customer to act. Designating a card resumes it.
-func stopCollectionForAgreement(ctx context.Context, d *db.DB, order gen.BillingOrder, now time.Time) error {
+func stopCollectionForAgreement(ctx context.Context, d *db.DB, invoice gen.BillingInvoice, now time.Time) error {
 	failure := billing.PaymentFailure{Reason: charge.AgreementRequiredCode, Message: charge.ErrAgreementRequired.Error()}
-	if err := usage.StopCollection(ctx, d.Gen(ctx), order.MerchantID, order.ID, failure, now); err != nil {
+	if err := usage.StopCollection(ctx, d.Gen(ctx), invoice.MerchantID, invoice.ID, failure, now); err != nil {
 		return err
 	}
 	action := collection.Action{Decline: decline.Result{Action: decline.FixPaymentMethod}}
-	// No attempt or decline names this stop: once stopped, the order is not
+	// No attempt or decline names this stop: once stopped, the invoice is not
 	// stopped again until a card resumes it.
-	return queueCollectionOutcome(ctx, d, uuidutil.NewV7(), order, action, charge.AgreementRequiredCode, now)
+	return queueCollectionOutcome(ctx, d, uuidutil.NewV7(), invoice, action, charge.AgreementRequiredCode, now)
 }
 
 // collectionInstrument freezes a collection's card and the mandate it cites:

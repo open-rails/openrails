@@ -54,7 +54,7 @@ type Address struct {
 // Provenance is who made a set of changes, how and when.
 type Provenance struct {
 	// At is when; zero stamps the database's clock as each entry is written,
-	// which orders an operation's entries with the holds SQL records.
+	// which invoices an operation's entries with the holds SQL records.
 	At          time.Time
 	Actor       billing.LogActor
 	Source      billing.LogSource

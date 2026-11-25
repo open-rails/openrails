@@ -21,7 +21,7 @@ func TestSolanaPlanIDIsNotACardNumber(t *testing.T) {
 	}{
 		{"change_log", map[string]string{"changes": `{"version": 1, "revision": 1, "fields": {"plans": {"after": {"solana": {"rail": "solana", "plan_id": "` + plan + `", "token": "USDC", ` + owner + `}}}}}`}},
 		{"price_psp_bindings", map[string]string{"plan_id": plan, "configuration": `{"token": "USDC", ` + owner + `}`}},
-		{"order_attempts", map[string]string{"order_id": "01a211d7-a76c-7291-9740-dfd33f683595", "amount": "10000000", "currency": "USD", "rail": "solana",
+		{"invoice_attempts", map[string]string{"invoice_id": "01a211d7-a76c-7291-9740-dfd33f683595", "amount": "10000000", "currency": "USD", "rail": "solana",
 			"rail_state": `{"flow": "subscribe", "plan_id": "` + plan + `"}`}},
 	}
 	for _, c := range accepted {

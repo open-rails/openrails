@@ -12,28 +12,28 @@ import (
 	"github.com/google/uuid"
 )
 
-const bindObservedOrderOwner = `-- name: BindObservedOrderOwner :execrows
-UPDATE billing.orders o SET collection_owner = $1::text, psp_id = $2::uuid
+const bindObservedInvoiceOwner = `-- name: BindObservedInvoiceOwner :execrows
+UPDATE billing.invoices o SET collection_owner = $1::text, psp_id = $2::uuid
 WHERE o.merchant_id = $3::uuid AND o.id = $4::uuid
   AND (o.psp_id IS NULL OR o.psp_id = $2::uuid)
   AND (o.collection_owner = $1::text OR
       (o.origin IN ('customer', 'merchant') AND NOT EXISTS (
-       SELECT 1 FROM billing.provider_bills b WHERE b.merchant_id = o.merchant_id AND b.order_id = o.id)))
+       SELECT 1 FROM billing.provider_bills b WHERE b.merchant_id = o.merchant_id AND b.invoice_id = o.id)))
 `
 
-type BindObservedOrderOwnerParams struct {
+type BindObservedInvoiceOwnerParams struct {
 	CollectionOwner string
 	PspID           uuid.UUID
 	MerchantID      uuid.UUID
-	OrderID         uuid.UUID
+	InvoiceID       uuid.UUID
 }
 
-func (q *Queries) BindObservedOrderOwner(ctx context.Context, arg BindObservedOrderOwnerParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bindObservedOrderOwner,
+func (q *Queries) BindObservedInvoiceOwner(ctx context.Context, arg BindObservedInvoiceOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, bindObservedInvoiceOwner,
 		arg.CollectionOwner,
 		arg.PspID,
 		arg.MerchantID,
-		arg.OrderID,
+		arg.InvoiceID,
 	)
 	if err != nil {
 		return 0, err
@@ -41,18 +41,18 @@ func (q *Queries) BindObservedOrderOwner(ctx context.Context, arg BindObservedOr
 	return result.RowsAffected(), nil
 }
 
-const createObservedOrder = `-- name: CreateObservedOrder :one
-INSERT INTO billing.orders (merchant_id, id, customer_id, origin, status, payment_status, currency, total,
+const createObservedInvoice = `-- name: CreateObservedInvoice :one
+INSERT INTO billing.invoices (merchant_id, id, customer_id, origin, status, payment_status, currency, total,
     psp_id, collection_owner, subscription_bill_kind, subscription_id, period_starts_at, period_ends_at, due_at, expires_at, created_at, updated_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text,
     'open', 'requires_payment_method', $5::text, $6::bigint, $7::uuid,
     $8::text, $9::text, $10::uuid,
     $11::timestamptz, $12::timestamptz, $13::timestamptz,
     $14::timestamptz, $15::timestamptz, $15::timestamptz)
-RETURNING merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded, customer_type, purchase_number, opened_at, submitted_at, billing_country, card_country, ip_country, language, attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content, attribution_referrer, attribution_affiliate, checkout_order_id
+RETURNING merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, pay_url_secret_hash, pay_url_expires_at, success_url, cancel_url, saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at, collection_owner, subscription_bill_kind, lines_digest, embedded, customer_type, purchase_number, opened_at, submitted_at, billing_country, card_country, ip_country, language, attribution_source, attribution_medium, attribution_campaign, attribution_term, attribution_content, attribution_referrer, attribution_affiliate, checkout_invoice_id
 `
 
-type CreateObservedOrderParams struct {
+type CreateObservedInvoiceParams struct {
 	MerchantID           uuid.UUID
 	ID                   uuid.UUID
 	CustomerID           uuid.UUID
@@ -70,8 +70,8 @@ type CreateObservedOrderParams struct {
 	Now                  time.Time
 }
 
-func (q *Queries) CreateObservedOrder(ctx context.Context, arg CreateObservedOrderParams) (BillingOrder, error) {
-	row := q.db.QueryRow(ctx, createObservedOrder,
+func (q *Queries) CreateObservedInvoice(ctx context.Context, arg CreateObservedInvoiceParams) (BillingInvoice, error) {
+	row := q.db.QueryRow(ctx, createObservedInvoice,
 		arg.MerchantID,
 		arg.ID,
 		arg.CustomerID,
@@ -88,7 +88,7 @@ func (q *Queries) CreateObservedOrder(ctx context.Context, arg CreateObservedOrd
 		arg.ExpiresAt,
 		arg.Now,
 	)
-	var i BillingOrder
+	var i BillingInvoice
 	err := row.Scan(
 		&i.MerchantID,
 		&i.ID,
@@ -151,13 +151,13 @@ func (q *Queries) CreateObservedOrder(ctx context.Context, arg CreateObservedOrd
 		&i.AttributionContent,
 		&i.AttributionReferrer,
 		&i.AttributionAffiliate,
-		&i.CheckoutOrderID,
+		&i.CheckoutInvoiceID,
 	)
 	return i, err
 }
 
-const createObservedOrderLine = `-- name: CreateObservedOrderLine :exec
-INSERT INTO billing.order_lines (merchant_id, id, order_id, customer_id, "position", price_id, product_id, description,
+const createObservedInvoiceLine = `-- name: CreateObservedInvoiceLine :exec
+INSERT INTO billing.invoice_lines (merchant_id, id, invoice_id, customer_id, "position", price_id, product_id, description,
     quantity, unit_amount, amount, ownership, claim_key, billing_interval_hours, access_duration_hours, provider_access_default, subscription_id, source, provider_amount, created_at)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::int,
     $6::uuid, $7::uuid, $8::text, $9::int,
@@ -166,10 +166,10 @@ VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::int,
     $18::text, true, $19::timestamptz)
 `
 
-type CreateObservedOrderLineParams struct {
+type CreateObservedInvoiceLineParams struct {
 	MerchantID            uuid.UUID
 	ID                    uuid.UUID
-	OrderID               uuid.UUID
+	InvoiceID             uuid.UUID
 	CustomerID            uuid.UUID
 	Position              int32
 	PriceID               *uuid.UUID
@@ -188,11 +188,11 @@ type CreateObservedOrderLineParams struct {
 	Now                   time.Time
 }
 
-func (q *Queries) CreateObservedOrderLine(ctx context.Context, arg CreateObservedOrderLineParams) error {
-	_, err := q.db.Exec(ctx, createObservedOrderLine,
+func (q *Queries) CreateObservedInvoiceLine(ctx context.Context, arg CreateObservedInvoiceLineParams) error {
+	_, err := q.db.Exec(ctx, createObservedInvoiceLine,
 		arg.MerchantID,
 		arg.ID,
-		arg.OrderID,
+		arg.InvoiceID,
 		arg.CustomerID,
 		arg.Position,
 		arg.PriceID,
@@ -214,7 +214,7 @@ func (q *Queries) CreateObservedOrderLine(ctx context.Context, arg CreateObserve
 }
 
 const createProviderBill = `-- name: CreateProviderBill :exec
-INSERT INTO billing.provider_bills (merchant_id, psp_id, source_kind, source_key, order_id, customer_id, snapshot, provider_reference, created_at)
+INSERT INTO billing.provider_bills (merchant_id, psp_id, source_kind, source_key, invoice_id, customer_id, snapshot, provider_reference, created_at)
 VALUES ($1::uuid, $2::uuid, $3::text, $4::text,
         $5::uuid, $6::uuid, $7::jsonb, $8::text, $9::timestamptz)
 `
@@ -224,7 +224,7 @@ type CreateProviderBillParams struct {
 	PspID             uuid.UUID
 	SourceKind        string
 	SourceKey         string
-	OrderID           uuid.UUID
+	InvoiceID         uuid.UUID
 	CustomerID        uuid.UUID
 	Snapshot          []byte
 	ProviderReference string
@@ -237,7 +237,7 @@ func (q *Queries) CreateProviderBill(ctx context.Context, arg CreateProviderBill
 		arg.PspID,
 		arg.SourceKind,
 		arg.SourceKey,
-		arg.OrderID,
+		arg.InvoiceID,
 		arg.CustomerID,
 		arg.Snapshot,
 		arg.ProviderReference,
@@ -247,7 +247,7 @@ func (q *Queries) CreateProviderBill(ctx context.Context, arg CreateProviderBill
 }
 
 const getProviderBill = `-- name: GetProviderBill :one
-SELECT merchant_id, psp_id, source_kind, source_key, order_id, customer_id, snapshot, provider_reference, settlement_source, non_cash_amount, settled_at, created_at FROM billing.provider_bills
+SELECT merchant_id, psp_id, source_kind, source_key, invoice_id, customer_id, snapshot, provider_reference, settlement_source, non_cash_amount, settled_at, created_at FROM billing.provider_bills
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
   AND source_kind = $3::text AND source_key = $4::text
 `
@@ -272,7 +272,7 @@ func (q *Queries) GetProviderBill(ctx context.Context, arg GetProviderBillParams
 		&i.PspID,
 		&i.SourceKind,
 		&i.SourceKey,
-		&i.OrderID,
+		&i.InvoiceID,
 		&i.CustomerID,
 		&i.Snapshot,
 		&i.ProviderReference,
@@ -284,47 +284,47 @@ func (q *Queries) GetProviderBill(ctx context.Context, arg GetProviderBillParams
 	return i, err
 }
 
-const linkAcceptedRenewalPaymentOrder = `-- name: LinkAcceptedRenewalPaymentOrder :execrows
-UPDATE billing.payments p SET order_id = $1::uuid
+const linkAcceptedRenewalPaymentInvoice = `-- name: LinkAcceptedRenewalPaymentInvoice :execrows
+UPDATE billing.payments p SET invoice_id = $1::uuid
 WHERE p.merchant_id = $2::uuid AND p.id = $3::uuid AND p.deleted_at IS NULL
-  AND (p.order_id IS NULL OR p.order_id = $1::uuid)
-  AND EXISTS (SELECT 1 FROM billing.orders o WHERE o.merchant_id = p.merchant_id AND o.id = $1::uuid
+  AND (p.invoice_id IS NULL OR p.invoice_id = $1::uuid)
+  AND EXISTS (SELECT 1 FROM billing.invoices o WHERE o.merchant_id = p.merchant_id AND o.id = $1::uuid
     AND o.customer_id = p.customer_id AND o.currency = p.currency AND o.subscription_id = p.subscription_id
     AND o.collection_owner = 'engine')
 `
 
-type LinkAcceptedRenewalPaymentOrderParams struct {
-	OrderID    uuid.UUID
+type LinkAcceptedRenewalPaymentInvoiceParams struct {
+	InvoiceID  uuid.UUID
 	MerchantID uuid.UUID
 	PaymentID  uuid.UUID
 }
 
-func (q *Queries) LinkAcceptedRenewalPaymentOrder(ctx context.Context, arg LinkAcceptedRenewalPaymentOrderParams) (int64, error) {
-	result, err := q.db.Exec(ctx, linkAcceptedRenewalPaymentOrder, arg.OrderID, arg.MerchantID, arg.PaymentID)
+func (q *Queries) LinkAcceptedRenewalPaymentInvoice(ctx context.Context, arg LinkAcceptedRenewalPaymentInvoiceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkAcceptedRenewalPaymentInvoice, arg.InvoiceID, arg.MerchantID, arg.PaymentID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const listProviderBillsForOrders = `-- name: ListProviderBillsForOrders :many
-SELECT b.order_id, b.psp_id, b.source_kind, b.provider_reference, b.settlement_source, b.non_cash_amount, b.settled_at
-FROM unnest($1::uuid[]) AS orders(id)
+const listProviderBillsForInvoices = `-- name: ListProviderBillsForInvoices :many
+SELECT b.invoice_id, b.psp_id, b.source_kind, b.provider_reference, b.settlement_source, b.non_cash_amount, b.settled_at
+FROM unnest($1::uuid[]) AS invoices(id)
 CROSS JOIN LATERAL (
-    SELECT order_id, psp_id, source_kind, source_key, provider_reference, settlement_source, non_cash_amount, settled_at, created_at
+    SELECT invoice_id, psp_id, source_kind, source_key, provider_reference, settlement_source, non_cash_amount, settled_at, created_at
     FROM billing.provider_bills
-    WHERE merchant_id = $2::uuid AND order_id = orders.id
+    WHERE merchant_id = $2::uuid AND invoice_id = invoices.id
     ORDER BY created_at, source_kind, source_key LIMIT 100
 ) b
 `
 
-type ListProviderBillsForOrdersParams struct {
-	OrderIds   []uuid.UUID
+type ListProviderBillsForInvoicesParams struct {
+	InvoiceIds []uuid.UUID
 	MerchantID uuid.UUID
 }
 
-type ListProviderBillsForOrdersRow struct {
-	OrderID           uuid.UUID
+type ListProviderBillsForInvoicesRow struct {
+	InvoiceID         uuid.UUID
 	PspID             uuid.UUID
 	SourceKind        string
 	ProviderReference string
@@ -333,17 +333,17 @@ type ListProviderBillsForOrdersRow struct {
 	SettledAt         *time.Time
 }
 
-func (q *Queries) ListProviderBillsForOrders(ctx context.Context, arg ListProviderBillsForOrdersParams) ([]ListProviderBillsForOrdersRow, error) {
-	rows, err := q.db.Query(ctx, listProviderBillsForOrders, arg.OrderIds, arg.MerchantID)
+func (q *Queries) ListProviderBillsForInvoices(ctx context.Context, arg ListProviderBillsForInvoicesParams) ([]ListProviderBillsForInvoicesRow, error) {
+	rows, err := q.db.Query(ctx, listProviderBillsForInvoices, arg.InvoiceIds, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListProviderBillsForOrdersRow
+	var items []ListProviderBillsForInvoicesRow
 	for rows.Next() {
-		var i ListProviderBillsForOrdersRow
+		var i ListProviderBillsForInvoicesRow
 		if err := rows.Scan(
-			&i.OrderID,
+			&i.InvoiceID,
 			&i.PspID,
 			&i.SourceKind,
 			&i.ProviderReference,
@@ -382,38 +382,38 @@ func (q *Queries) LockProviderBillIdentity(ctx context.Context, arg LockProvider
 	return err
 }
 
-const observedOrderCaptured = `-- name: ObservedOrderCaptured :one
+const observedInvoiceCaptured = `-- name: ObservedInvoiceCaptured :one
 SELECT COALESCE(sum(amount), 0)::bigint FROM billing.payments
-WHERE merchant_id = $1::uuid AND order_id = $2::uuid
+WHERE merchant_id = $1::uuid AND invoice_id = $2::uuid
   AND refunded_payment_id IS NULL AND money_movement = 'rail' AND amount > 0
   AND status IN ('succeeded', 'refunded') AND deleted_at IS NULL
 `
 
-type ObservedOrderCapturedParams struct {
+type ObservedInvoiceCapturedParams struct {
 	MerchantID uuid.UUID
-	OrderID    uuid.UUID
+	InvoiceID  uuid.UUID
 }
 
-func (q *Queries) ObservedOrderCaptured(ctx context.Context, arg ObservedOrderCapturedParams) (int64, error) {
-	row := q.db.QueryRow(ctx, observedOrderCaptured, arg.MerchantID, arg.OrderID)
+func (q *Queries) ObservedInvoiceCaptured(ctx context.Context, arg ObservedInvoiceCapturedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, observedInvoiceCaptured, arg.MerchantID, arg.InvoiceID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
 }
 
-const paymentMatchesOrderPrice = `-- name: PaymentMatchesOrderPrice :one
-SELECT EXISTS (SELECT 1 FROM billing.payments p JOIN billing.order_lines l ON l.merchant_id = p.merchant_id AND l.order_id = p.order_id
+const paymentMatchesInvoicePrice = `-- name: PaymentMatchesInvoicePrice :one
+SELECT EXISTS (SELECT 1 FROM billing.payments p JOIN billing.invoice_lines l ON l.merchant_id = p.merchant_id AND l.invoice_id = p.invoice_id
  WHERE p.merchant_id = $1::uuid AND p.id = $2::uuid AND l.price_id = $3::uuid AND p.deleted_at IS NULL)::boolean
 `
 
-type PaymentMatchesOrderPriceParams struct {
+type PaymentMatchesInvoicePriceParams struct {
 	MerchantID uuid.UUID
 	PaymentID  uuid.UUID
 	PriceID    uuid.UUID
 }
 
-func (q *Queries) PaymentMatchesOrderPrice(ctx context.Context, arg PaymentMatchesOrderPriceParams) (bool, error) {
-	row := q.db.QueryRow(ctx, paymentMatchesOrderPrice, arg.MerchantID, arg.PaymentID, arg.PriceID)
+func (q *Queries) PaymentMatchesInvoicePrice(ctx context.Context, arg PaymentMatchesInvoicePriceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, paymentMatchesInvoicePrice, arg.MerchantID, arg.PaymentID, arg.PriceID)
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err

@@ -58,18 +58,18 @@ func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.
 	if refund.SubscriptionID != nil {
 		data.SubscriptionID = billing.SubscriptionID(*refund.SubscriptionID)
 	}
-	if refund.OrderID != nil {
-		order, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: *refund.OrderID})
+	if refund.InvoiceID != nil {
+		invoice, err := q.GetInvoice(ctx, gen.GetInvoiceParams{MerchantID: mid.UUID(), ID: *refund.InvoiceID})
 		if err != nil {
-			return fmt.Errorf("refund receipt: order %s: %w", *refund.OrderID, err)
+			return fmt.Errorf("refund receipt: invoice %s: %w", *refund.InvoiceID, err)
 		}
-		lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: []uuid.UUID{order.ID}})
+		lines, err := q.ListInvoiceLines(ctx, gen.ListInvoiceLinesParams{MerchantID: mid.UUID(), InvoiceIds: []uuid.UUID{invoice.ID}})
 		if err != nil {
-			return fmt.Errorf("refund receipt: order %s lines: %w", order.ID, err)
+			return fmt.Errorf("refund receipt: invoice %s lines: %w", invoice.ID, err)
 		}
-		data.OrderID, data.ProductName = billing.OrderID(order.ID), OrderItems(lines)
-		if order.Number != nil {
-			data.OrderNumber = *order.Number
+		data.InvoiceID, data.ProductName = billing.InvoiceID(invoice.ID), InvoiceItems(lines)
+		if invoice.Number != nil {
+			data.InvoiceNumber = *invoice.Number
 		}
 	}
 	raw, err := json.Marshal(data)
@@ -83,8 +83,8 @@ func (s *PaymentService) queueRefundReceipt(ctx context.Context, refund *models.
 	})
 }
 
-// OrderItems names what an order's lines bought, as its receipts do.
-func OrderItems(lines []gen.BillingOrderLine) string {
+// InvoiceItems names what an invoice's lines bought, as its receipts do.
+func InvoiceItems(lines []gen.BillingInvoiceLine) string {
 	names := make([]string, 0, len(lines))
 	for _, l := range lines {
 		if l.Quantity != nil && *l.Quantity > 1 {

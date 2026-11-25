@@ -46,7 +46,7 @@ type RecurringDecline struct {
 	Reference    string
 	Issuer       decline.Evidence
 	// At is when the charge was declined: when NMI answered, or the time an
-	// order read reports.
+	// invoice read reports.
 	At time.Time
 }
 

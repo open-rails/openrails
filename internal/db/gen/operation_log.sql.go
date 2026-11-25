@@ -70,7 +70,7 @@ type InsertOperationLogEntryParams struct {
 }
 
 // Stamped by the database clock when the writer names no time, so entries
-// order with the holds below.
+// invoice with the holds below.
 func (q *Queries) InsertOperationLogEntry(ctx context.Context, arg InsertOperationLogEntryParams) error {
 	_, err := q.db.Exec(ctx, insertOperationLogEntry,
 		arg.MerchantID,
@@ -192,7 +192,7 @@ type RecordSubscriptionOperationHoldParams struct {
 	ID         uuid.UUID
 }
 
-// Timestamp after acquiring the row lock: transaction start time could order
+// Timestamp after acquiring the row lock: transaction start time could invoice
 // a waiting transaction before the hold it followed.
 // The caller already updated (and therefore locked) the intent in this transaction.
 // Unknown readbacks do not end a hold. Only attempted execution or a terminal

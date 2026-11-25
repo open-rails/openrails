@@ -148,7 +148,7 @@ usage_billing:
     - currency: ""
       # CreditLimit is the unpaid usage a customer may run up, in the currency's units.
       credit_limit: "0"
-      # MinimumInvoiceAmount is the smallest usage order invoiced.
+      # MinimumInvoiceAmount is the smallest usage invoice invoiced.
       minimum_invoice_amount: "0"
       # CollectionThreshold invoices arrears in the currency once they reach it, before the credit limit: nil is the credit limit.
       collection_threshold: "0"
@@ -182,7 +182,7 @@ reprice_notice_window_days: 0
 provider_refund_access: ""
 # FraudWarningRefund decides what an actionable early fraud warning does: FraudWarningRefundCharge (default) or FraudWarningRecord.
 fraud_warning_refund: ""
-# ArrearsGraceDays is how long an unpaid usage order may be overdue before the customer is delinquent.
+# ArrearsGraceDays is how long an unpaid usage invoice may be overdue before the customer is delinquent.
 arrears_grace_days: 0
 # PSPRouting are ordered rules that pick one PSP before a purchase is attempted.
 psp_routing:
@@ -210,7 +210,7 @@ dunning_policy:
       retry_after_hours: []
   # TransientRetryMinutes are the quick retries after a transient decline, in minutes.
   transient_retry_minutes: []
-  # CustomerRetries is how many declined attempts of the customer's own (retry-now, or paying the renewal order) one renewal takes on one card before only another card is charged.
+  # CustomerRetries is how many declined attempts of the customer's own (retry-now, or paying the renewal invoice) one renewal takes on one card before only another card is charged.
   customer_retries: 0
   # AccessDuringDunning is DunningAccessKeep (default: members keep access until a confirmed outcome ends it) or DunningAccessSuspend (access ends with the paid period while a declined renewal is retried).
   access_during_dunning: ""

@@ -19,7 +19,7 @@ export interface StripeCardHandle {
   save(): Promise<string>
   /**
    * The entered card as Stripe's single-use payment method (`pm_`), for an
-   * order to charge and save in one call.
+   * invoice to charge and save in one call.
    */
   tokenize(): Promise<string>
   /** Answers the bank's authentication of a payment or a card save. */

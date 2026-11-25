@@ -267,7 +267,7 @@ func (g *recipientGate) wrap(w *world) {
 func (g *recipientGate) open() { g.once.Do(func() { close(g.release) }) }
 
 func TestNotificationAdoptionExport(t *testing.T) {
-	t.Run("OR-J31-S40/export-holds-back-no-other-merchant-and-orders-its-own-producers", func(t *testing.T) {
+	t.Run("OR-J31-S40/export-holds-back-no-other-merchant-and-invoices-its-own-producers", func(t *testing.T) {
 		var inbox *notifypg.Store
 		lookup := &recipientGate{entered: make(chan struct{}), release: make(chan struct{})}
 		defer lookup.open()
@@ -292,11 +292,11 @@ func TestNotificationAdoptionExport(t *testing.T) {
 		alphaSale, betaSale := sale(a.alpha), sale(a.beta)
 		paid := func(client *openrails.Client, customer string, price billing.PriceID, key string) func() error {
 			return func() error {
-				order, err := client.CreateOrder(ctx, key, billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(customer)), Lines: []billing.OrderLineParams{{PriceID: price}}})
+				invoice, err := client.CreateInvoice(ctx, key, billing.CreateInvoiceParams{CustomerID: billing.CustomerID(uuid.MustParse(customer)), Lines: []billing.InvoiceLineParams{{PriceID: price}}})
 				if err != nil {
 					return err
 				}
-				_, err = client.RecordExternalPayment(ctx, billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 30_000_000, TransactionID: key})
+				_, err = client.RecordExternalPayment(ctx, billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 30_000_000, TransactionID: key})
 				return err
 			}
 		}
@@ -325,7 +325,7 @@ func TestNotificationAdoptionExport(t *testing.T) {
 			exported <- exportResult{adoption, err}
 		}
 
-		// Host recipient lookups hold nothing: the merchant's own order lands.
+		// Host recipient lookups hold nothing: the merchant's own invoice lands.
 		lookup.armed.Store(true)
 		go export()
 		select {
@@ -334,7 +334,7 @@ func TestNotificationAdoptionExport(t *testing.T) {
 			t.Fatal("the export never looked up its recipient")
 		}
 		if !committed(paid(a.alpha, a.alice.ID, alphaSale, "alpha-during-lookups"), lookup.open) {
-			t.Error("the merchant's own order waited behind the export's host recipient lookups")
+			t.Error("the merchant's own invoice waited behind the export's host recipient lookups")
 		}
 		lookup.open()
 		first := <-exported
@@ -357,7 +357,7 @@ func TestNotificationAdoptionExport(t *testing.T) {
 			return a.pool.QueryRow(ctx, "SELECT pid FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))", holder).Scan(&exporter) == nil
 		}, 30*time.Second, 20*time.Millisecond, "the export must reach its revision write")
 		if !committed(paid(a.beta, a.bob.ID, betaSale, "beta-during-export"), release) {
-			t.Error("another merchant's order waited behind this merchant's export")
+			t.Error("another merchant's invoice waited behind this merchant's export")
 			require.NoError(t, (<-exported).err)
 			return
 		}
@@ -402,51 +402,51 @@ func TestNotificationAdoptionExport(t *testing.T) {
 		}
 		require.NotNil(t, withdrawn)
 		require.True(t, withdrawn.Current.Withdrawn)
-		require.Greater(t, withdrawn.Current.Revision, revision, "the later withdrawal orders after the exported revision")
+		require.Greater(t, withdrawn.Current.Revision, revision, "the later withdrawal invoices after the exported revision")
 	})
 }
 
-func TestOrderNotificationRecovery(t *testing.T) {
+func TestInvoiceNotificationRecovery(t *testing.T) {
 	for _, disposition := range []string{"partial-then-paid", "waived", "uncollectible", "funded-credit"} {
 		t.Run(disposition, func(t *testing.T) {
 			var inbox *notifypg.Store
 			a, p, customer := usageBillingWorld(t, false, accountInbox(t, &inbox))
 			p.core.SetDecline("4242", "202")
 			oneUsage(t, a.alpha, usageInput(customer, "declined-usage", 3))
-			// The day's usage posts as its threshold order is billed: the
-			// order covers one instant and still duns on the shortest cycle.
+			// The day's usage posts as its threshold invoice is billed: the
+			// invoice covers one instant and still duns on the shortest cycle.
 			a.clock.Advance(time.Hour)
 			fleet := startFleet(t, a.world)
 			runUsageDue(t, fleet)
 			require.Eventually(t, func() bool { return len(accountNotices(t, inbox, a.alice.ID)) == 1 }, 20*time.Second, 20*time.Millisecond)
 			item := accountNotices(t, inbox, a.alice.ID)[0]
-			order := oneUsageOrder(t, a, customer)
-			require.Equal(t, "order:"+order.ID.UUID().String()+":"+item.Kind, item.Origin.ID)
+			invoice := oneUsageInvoice(t, a, customer)
+			require.Equal(t, "order:"+invoice.ID.UUID().String()+":"+item.Kind, item.Origin.ID)
 			require.Nil(t, item.ReadAt)
 			var err error
 			switch disposition {
 			case "partial-then-paid":
-				_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 10_000_000, TransactionID: "bank-part-one"})
+				_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 10_000_000, TransactionID: "bank-part-one"})
 				require.NoError(t, err)
 				require.Len(t, accountNotices(t, inbox, a.alice.ID), 1, "partial payment leaves an unresolved amount")
-				_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{OrderID: order.ID, Amount: 20_000_000, TransactionID: "bank-part-two"})
+				_, err = a.alpha.RecordExternalPayment(t.Context(), billing.RecordExternalPaymentParams{InvoiceID: invoice.ID, Amount: 20_000_000, TransactionID: "bank-part-two"})
 			case "waived":
-				_, err = a.alpha.WaiveOrderBalance(t.Context(), order.ID)
+				_, err = a.alpha.WaiveInvoiceBalance(t.Context(), invoice.ID)
 			case "uncollectible":
-				_, err = a.alpha.MarkOrderUncollectible(t.Context(), order.ID)
+				_, err = a.alpha.MarkInvoiceUncollectible(t.Context(), invoice.ID)
 			case "funded-credit":
 				_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 30_000_000, Source: "notification-test", SourceID: "repay-usage"}})
 			}
 			require.NoError(t, err)
-			after := oneUsageOrder(t, a, customer)
+			after := oneUsageInvoice(t, a, customer)
 			if disposition == "uncollectible" {
-				require.Equal(t, billing.OrderUncollectible, after.Status)
+				require.Equal(t, billing.InvoiceUncollectible, after.Status)
 				require.EqualValues(t, 30_000_000, after.Usage.AmountDue)
 				require.Len(t, accountNotices(t, inbox, a.alice.ID), 1, "stopped collection does not erase debt")
 			} else {
-				expected := billing.OrderComplete
+				expected := billing.InvoiceComplete
 				if disposition == "waived" {
-					expected = billing.OrderVoid
+					expected = billing.InvoiceVoid
 				}
 				require.Equal(t, expected, after.Status)
 				require.Zero(t, after.Usage.AmountDue)
@@ -471,19 +471,19 @@ func TestOrderNotificationRecovery(t *testing.T) {
 		require.Equal(t, "payment_authentication_required", item.Kind)
 		var data billing.NotificationData
 		require.NoError(t, json.Unmarshal(item.Data, &data))
-		status, raw := a.request(t, http.MethodGet, "/v1/me/orders/"+data.OrderID.String(), a.aliceToken, nil)
+		status, raw := a.request(t, http.MethodGet, "/v1/me/invoices/"+data.InvoiceID.String(), a.aliceToken, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var waiting billing.Order
+		var waiting billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &waiting))
 		require.NotNil(t, waiting.Payment.NextAction)
 		intent, _, ok := strings.Cut(waiting.Payment.NextAction.Payload["client_secret"], "_secret_")
 		require.True(t, ok)
 		require.True(t, p.core.Authenticate(intent))
-		status, raw = a.request(t, http.MethodPost, "/v1/me/orders/"+waiting.ID.String()+"/confirm", a.aliceToken, map[string]any{})
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices/"+waiting.ID.String()+"/confirm", a.aliceToken, map[string]any{})
 		require.Equal(t, http.StatusOK, status, string(raw))
-		var paid billing.Order
+		var paid billing.Invoice
 		require.NoError(t, json.Unmarshal(raw, &paid))
-		require.Equal(t, billing.OrderComplete, paid.Status)
+		require.Equal(t, billing.InvoiceComplete, paid.Status)
 		require.Empty(t, accountNotices(t, inbox, a.alice.ID))
 		require.Len(t, p.effects(t), 2, "only enrollment and confirmed renewal charge money")
 	})

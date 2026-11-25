@@ -32,10 +32,10 @@ WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.customer_id=sqlc.arg(custo
  AND s.cancel_type NOT IN ('chargeback','upgrade')
 ORDER BY s.current_period_ends_at DESC, s.id LIMIT 1;
 
--- name: GetConflictingOrderClaim :one
--- An unpaid order of the customer claiming the product or its tier group.
-SELECT c.order_id FROM billing.ownership_claims c
+-- name: GetConflictingInvoiceClaim :one
+-- An unpaid invoice of the customer claiming the product or its tier group.
+SELECT c.invoice_id FROM billing.ownership_claims c
 JOIN billing.products accepted ON accepted.merchant_id=c.merchant_id AND accepted.id=sqlc.arg(product_id)::uuid
-WHERE c.merchant_id=sqlc.arg(merchant_id)::uuid AND c.customer_id=sqlc.arg(customer_id)::uuid AND c.holder_type='order'
+WHERE c.merchant_id=sqlc.arg(merchant_id)::uuid AND c.customer_id=sqlc.arg(customer_id)::uuid AND c.holder_type='invoice'
  AND c.claim_key IN ('product:' || accepted.id::text, 'tier_group:' || accepted.tier_group)
 LIMIT 1;

@@ -10,8 +10,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(payment_id)::u
 SELECT s.id FROM billing.subscriptions s
 WHERE s.deleted_at IS NULL AND s.merchant_id=sqlc.arg(merchant_id)::uuid AND EXISTS (
  SELECT 1 FROM billing.payments p
- LEFT JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id
- LEFT JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
+ LEFT JOIN billing.invoices o ON o.merchant_id=p.merchant_id AND o.id=p.invoice_id
+ LEFT JOIN billing.invoice_lines l ON l.merchant_id=o.merchant_id AND l.invoice_id=o.id
  WHERE p.deleted_at IS NULL AND p.merchant_id=s.merchant_id AND p.id=sqlc.arg(payment_id)::uuid
    AND p.customer_id=s.customer_id AND s.id IN (p.subscription_id,o.subscription_id,l.subscription_id)
 )
@@ -30,12 +30,12 @@ SELECT p.id AS payment_id, p.merchant_id, p.customer_id,
          coalesce(o.period_ends_at, ps.first_due_at, s.started_at + l.billing_interval_hours * interval '1 hour')
        ELSE coalesce(o.period_starts_at, s.started_at) + l.access_duration_hours * interval '1 hour' END AS ends_at
 FROM billing.payments p
-JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id AND o.customer_id=p.customer_id
-JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
+JOIN billing.invoices o ON o.merchant_id=p.merchant_id AND o.id=p.invoice_id AND o.customer_id=p.customer_id
+JOIN billing.invoice_lines l ON l.merchant_id=o.merchant_id AND l.invoice_id=o.id
 JOIN billing.subscriptions s ON s.merchant_id=p.merchant_id AND s.customer_id=p.customer_id
   AND s.deleted_at IS NULL AND s.id=coalesce(o.subscription_id,l.subscription_id)
 LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
-  AND ps.subscription_id=s.id AND ps.initial_order_id=o.id
+  AND ps.subscription_id=s.id AND ps.initial_invoice_id=o.id
   AND ps.source_reference='order:' || o.id::text
 WHERE p.deleted_at IS NULL AND p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
 )
@@ -62,12 +62,12 @@ SELECT p.id AS payment_id, p.merchant_id, p.customer_id,
          coalesce(o.period_ends_at, ps.first_due_at, s.started_at + l.billing_interval_hours * interval '1 hour')
        ELSE coalesce(o.period_starts_at, s.started_at) + l.access_duration_hours * interval '1 hour' END AS ends_at
 FROM billing.payments p
-JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id AND o.customer_id=p.customer_id
-JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
+JOIN billing.invoices o ON o.merchant_id=p.merchant_id AND o.id=p.invoice_id AND o.customer_id=p.customer_id
+JOIN billing.invoice_lines l ON l.merchant_id=o.merchant_id AND l.invoice_id=o.id
 JOIN billing.subscriptions s ON s.merchant_id=p.merchant_id AND s.customer_id=p.customer_id
   AND s.id=coalesce(o.subscription_id,l.subscription_id)
 LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
-  AND ps.subscription_id=s.id AND ps.initial_order_id=o.id
+  AND ps.subscription_id=s.id AND ps.initial_invoice_id=o.id
   AND ps.source_reference='order:' || o.id::text
 WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.customer_id=sqlc.arg(customer_id)::uuid
   AND p.metadata->>'refund_access_revoked'='true'
@@ -98,12 +98,12 @@ SELECT p.id AS payment_id, p.merchant_id, p.customer_id,
          coalesce(o.period_ends_at, ps.first_due_at, s.started_at + l.billing_interval_hours * interval '1 hour')
        ELSE coalesce(o.period_starts_at, s.started_at) + l.access_duration_hours * interval '1 hour' END AS ends_at
 FROM billing.payments p
-JOIN billing.orders o ON o.merchant_id=p.merchant_id AND o.id=p.order_id AND o.customer_id=p.customer_id
-JOIN billing.order_lines l ON l.merchant_id=o.merchant_id AND l.order_id=o.id
+JOIN billing.invoices o ON o.merchant_id=p.merchant_id AND o.id=p.invoice_id AND o.customer_id=p.customer_id
+JOIN billing.invoice_lines l ON l.merchant_id=o.merchant_id AND l.invoice_id=o.id
 JOIN billing.subscriptions s ON s.merchant_id=p.merchant_id AND s.customer_id=p.customer_id
   AND s.deleted_at IS NULL AND s.id=coalesce(o.subscription_id,l.subscription_id)
 LEFT JOIN billing.provider_schedules ps ON ps.merchant_id=p.merchant_id
-  AND ps.subscription_id=s.id AND ps.initial_order_id=o.id
+  AND ps.subscription_id=s.id AND ps.initial_invoice_id=o.id
   AND ps.source_reference='order:' || o.id::text
 WHERE p.deleted_at IS NULL AND p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(payment_id)::uuid
 )

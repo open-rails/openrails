@@ -83,8 +83,8 @@ export const billingAdminMessages = {
   ": yours ": ": yours ",
   "A CSV file with the header mapping,key,customer maps your own identifiers to customers. An empty customer deletes that mapping.":
     "A CSV file with the header mapping,key,customer maps your own identifiers to customers. An empty customer deletes that mapping.",
-  "A collection of this order is in progress. It must finish, or be resolved with ":
-    "A collection of this order is in progress. It must finish, or be resolved with ",
+  "A collection of this invoice is in progress. It must finish, or be resolved with ":
+    "A collection of this invoice is in progress. It must finish, or be resolved with ",
   "A manual link wins over every rule.": "A manual link wins over every rule.",
   "A newer import of this PSP supersedes this one: link and apply ":
     "A newer import of this PSP supersedes this one: link and apply ",
@@ -447,8 +447,8 @@ export const billingAdminMessages = {
   "Included usage": "Included usage",
   "Invoice memo": "Invoice memo",
   "Invoice profile": "Invoice profile",
-  "Invoice profile saved. Billed orders were not changed.":
-    "Invoice profile saved. Billed orders were not changed.",
+  "Invoice profile saved. Billed invoices were not changed.":
+    "Invoice profile saved. Billed invoices were not changed.",
   "Keep it": "Keep it",
   "Keep its own range": "Keep its own range",
   "Kept with the scheduled change.": "Kept with the scheduled change.",
@@ -476,7 +476,7 @@ export const billingAdminMessages = {
   "Loading billing…": "Loading billing…",
   "Loading grants…": "Loading grants…",
   "Loading invoice profile…": "Loading invoice profile…",
-  "Loading order…": "Loading order…",
+  "Loading invoice…": "Loading invoice…",
   "Loading products…": "Loading products…",
   "Loading transactions…": "Loading transactions…",
   "Loading plans…": "Loading plans…",
@@ -536,8 +536,8 @@ export const billingAdminMessages = {
   "No NMI history yet: it is read daily.":
     "No NMI history yet: it is read daily.",
   "No PSPs configured.": "No PSPs configured.",
-  "No actions are available for your permissions and this order's state.":
-    "No actions are available for your permissions and this order's state.",
+  "No actions are available for your permissions and this invoice's state.":
+    "No actions are available for your permissions and this invoice's state.",
   "No active products are available.": "No active products are available.",
   "No active subscriptions.": "No active subscriptions.",
   "No allowance": "No allowance",
@@ -601,15 +601,15 @@ export const billingAdminMessages = {
   Ops: "Ops",
   "Optional. Only events with one of the listed dimension values are rated.":
     "Optional. Only events with one of the listed dimension values are rated.",
-  Order: "Order",
-  "Order not found.": "Order not found.",
-  Orders: "Orders",
+  Invoice: "Invoice",
+  "Invoice not found.": "Invoice not found.",
+  Invoices: "Invoices",
   Origin: "Origin",
   Original: "Original",
   Outcome: "Outcome",
   "Overdue only: still owed past the due date":
     "Overdue only: still owed past the due date",
-  "Overdue usage orders": "Overdue usage orders",
+  "Overdue usage invoices": "Overdue usage invoices",
   Overview: "Overview",
   "Overwrite edits": "Overwrite edits",
   Owner: "Owner",
@@ -816,8 +816,8 @@ export const billingAdminMessages = {
   "Tax details": "Tax details",
   "Terminal cancellation at the payment rail. This is a last resort. Dunning parks subscriptions as past_due without losing entitlements.":
     "Terminal cancellation at the payment rail. This is a last resort. Dunning parks subscriptions as past_due without losing entitlements.",
-  "Terms and billing facts for future usage orders. Billed orders keep their original snapshots. Tax details are recorded; no tax is calculated.":
-    "Terms and billing facts for future usage orders. Billed orders keep their original snapshots. Tax details are recorded; no tax is calculated.",
+  "Terms and billing facts for future usage invoices. Billed invoices keep their original snapshots. Tax details are recorded; no tax is calculated.":
+    "Terms and billing facts for future usage invoices. Billed invoices keep their original snapshots. Tax details are recorded; no tax is calculated.",
   "The accounts this merchant takes payments through, one or more per rail.":
     "The accounts this merchant takes payments through, one or more per rail.",
   "The customer loses its entitlements now. The grant stays on record with your reason.":
@@ -828,13 +828,13 @@ export const billingAdminMessages = {
     "The keys of the products this customer holds now.",
   "The payment provider calculates the final prorated amount.":
     "The payment provider calculates the final prorated amount.",
-  "The payment provider hasn't confirmed this order's payment yet. It settles once the provider shows the result, or when it is resolved with ":
-    "The payment provider hasn't confirmed this order's payment yet. It settles once the provider shows the result, or when it is resolved with ",
+  "The payment provider hasn't confirmed this invoice's payment yet. It settles once the provider shows the result, or when it is resolved with ":
+    "The payment provider hasn't confirmed this invoice's payment yet. It settles once the provider shows the result, or when it is resolved with ",
   "Their reference": "Their reference",
   "There were no providers to consider.":
     "There were no providers to consider.",
-  "These are the customer's invoice profile when the order was billed. Editing the profile affects later orders.":
-    "These are the customer's invoice profile when the order was billed. Editing the profile affects later orders.",
+  "These are the customer's invoice profile when the invoice was billed. Editing the profile affects later invoices.":
+    "These are the customer's invoice profile when the invoice was billed. Editing the profile affects later invoices.",
   "These terms cannot be changed later. To charge a different amount, create another price and deactivate this one.":
     "These terms cannot be changed later. To charge a different amount, create another price and deactivate this one.",
   "This billing page does not exist.": "This billing page does not exist.",
@@ -882,7 +882,7 @@ export const billingAdminMessages = {
   View: "View",
   "View all ": "View all ",
   "View billing details": "View billing details",
-  "View customer usage orders": "View customer usage orders",
+  "View customer usage invoices": "View customer usage invoices",
   "View user account": "View user account",
   Volume: "Volume",
   Webhook: "Webhook",
@@ -971,7 +971,7 @@ export const billingAdminMessages = {
   "waiting for import": "waiting for import",
   "why is this being canceled?": "why is this being canceled?",
   "· owed ": "· owed ",
-  "← Orders": "← Orders",
+  "← Invoices": "← Invoices",
   Succeeded: "Succeeded",
   Completed: "Completed",
   Complete: "Complete",
@@ -1017,7 +1017,7 @@ export const billingAdminMessages = {
   "Code:": "Code:",
   "Subscription not found": "Subscription not found",
   "Payment not found": "Payment not found",
-  "Order not found": "Order not found",
+  "Invoice not found": "Invoice not found",
   "Customer not found": "Customer not found",
   "Refunds, revokes and cancels are paused for you after several in a short time. Someone else can clear the hold on the Ops page.":
     "Refunds, revokes and cancels are paused for you after several in a short time. Someone else can clear the hold on the Ops page.",

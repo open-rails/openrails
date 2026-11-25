@@ -111,17 +111,20 @@ type adoptionGroup struct {
 func adoptionGroups(ctx context.Context, q gen.DBTX, id billing.MerchantID) (map[string]*adoptionGroup, error) {
 	rows, err := q.Query(ctx, `SELECT id,customer_id,event_type,data,created_at FROM billing.notification_events
 WHERE merchant_id=$1 AND event_type=ANY($2) ORDER BY created_at DESC,id DESC`, id.UUID(),
-		[]string{"payment_method_failed", "payment_method_update_required", "payment_authentication_required", "order_collection_stopped", "premium_ended", "premium_renewed"})
+		models.StoredNotificationTypes(models.NotificationPaymentMethodFailed, models.NotificationPaymentMethodUpdateRequired, models.NotificationPaymentAuthenticationRequired,
+			models.NotificationInvoiceCollectionStopped, models.NotificationPremiumEnded, models.NotificationPremiumRenewed))
 	if err != nil {
 		return nil, err
 	}
 	facts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*models.NotificationEvent, error) {
 		n := &models.NotificationEvent{}
 		var data []byte
-		if err := row.Scan(&n.ID, &n.CustomerID, &n.EventType, &data, &n.CreatedAt); err != nil {
+		var stored string
+		if err := row.Scan(&n.ID, &n.CustomerID, &stored, &data, &n.CreatedAt); err != nil {
 			return nil, err
 		}
-		return n, json.Unmarshal(data, &n.Data)
+		n.EventType = models.NotificationType(stored)
+		return n, models.DecodeNotificationData(data, &n.Data)
 	})
 	if err != nil {
 		return nil, err
@@ -186,9 +189,9 @@ func notificationResolved(ctx context.Context, d *db.DB, n *models.NotificationE
 		// Unverified collection is not evidence of successful recovery.
 		return sub.Status == models.StatusActive, nil
 	}
-	if !n.Data.OrderID.IsZero() {
+	if !n.Data.InvoiceID.IsZero() {
 		var status string
-		err := d.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.orders WHERE merchant_id=$1 AND customer_id=$2 AND id=$3`, mid.UUID(), n.CustomerID, n.Data.OrderID.UUID()).Scan(&status)
+		err := d.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.invoices WHERE merchant_id=$1 AND customer_id=$2 AND id=$3`, mid.UUID(), n.CustomerID, n.Data.InvoiceID.UUID()).Scan(&status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return true, nil
 		}

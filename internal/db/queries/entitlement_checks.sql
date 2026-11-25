@@ -85,7 +85,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- The reverse lookup: customers holding a key at at_time, with the most seats
 -- a live window gives (0: none per seat), keyset by customer id after
 -- after_id. Key-first: the products granting it, then each product's first
--- row_limit holders in customer order. The cursor bounds (product, customer)
+-- row_limit holders in customer invoice. The cursor bounds (product, customer)
 -- rows, so only the per-product index serves the probe.
 SELECT x.customer_id, COALESCE(max(x.quantity), 0)::int AS quantity FROM billing.product_entitlements pe
 CROSS JOIN LATERAL (
@@ -127,8 +127,8 @@ ORDER BY k.key COLLATE "C", pa.starts_at, pa.id;
 
 -- name: PermanentBenefitsCovered :one
 -- A partial bundle remains useful; refuse only when every key of the product
--- is already held indefinitely. Pending order purchases are excluded by
--- their ownership claims at order admission.
+-- is already held indefinitely. Pending invoice purchases are excluded by
+-- their ownership claims at invoice admission.
 WITH wanted AS (
     SELECT pe.entitlement FROM billing.product_entitlements pe
     WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.product_id = sqlc.arg(product_id)::uuid AND pe.removed_at IS NULL

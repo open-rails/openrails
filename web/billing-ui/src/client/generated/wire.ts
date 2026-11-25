@@ -27,7 +27,7 @@ export type AdminAccess = {
   merchant_config: "none" | "read" | "update"
   metrics: boolean
   scope_id: string
-  application_permissions: ("merchant:catalog:manage" | "merchant:catalog:read" | "merchant:config:manage" | "merchant:config:read" | "merchant:customer:manage" | "merchant:customer:read" | "merchant:entitlements:read" | "merchant:events:read" | "merchant:metrics:read" | "merchant:orders:manage" | "merchant:provisioning:manage" | "merchant:provisioning:read" | "merchant:usage:manage" | "merchant:usage:read" | "root:admin-rate-limits:unlock" | "root:catalog:manage" | "root:catalog:read" | "root:config:manage" | "root:config:read" | "root:customer:manage" | "root:customer:read" | "root:entitlements:read" | "root:events:read" | "root:merchants:delete" | "root:merchants:read" | "root:merchants:restore" | "root:metrics:read" | "root:orders:manage" | "root:provisioning:manage" | "root:provisioning:read" | "root:usage:manage" | "root:usage:read" | "root:worker-health:read")[]
+  application_permissions: ("merchant:catalog:manage" | "merchant:catalog:read" | "merchant:config:manage" | "merchant:config:read" | "merchant:customer:manage" | "merchant:customer:read" | "merchant:entitlements:read" | "merchant:events:read" | "merchant:invoices:manage" | "merchant:metrics:read" | "merchant:provisioning:manage" | "merchant:provisioning:read" | "merchant:usage:manage" | "merchant:usage:read" | "root:admin-rate-limits:unlock" | "root:catalog:manage" | "root:catalog:read" | "root:config:manage" | "root:config:read" | "root:customer:manage" | "root:customer:read" | "root:entitlements:read" | "root:events:read" | "root:invoices:manage" | "root:merchants:delete" | "root:merchants:read" | "root:merchants:restore" | "root:metrics:read" | "root:provisioning:manage" | "root:provisioning:read" | "root:usage:manage" | "root:usage:read" | "root:worker-health:read")[]
 }
 
 export type Agreement = {
@@ -45,7 +45,7 @@ export type Agreement = {
 export type AgreementRevocation = {
   agreement: Agreement
   subscription: Subscription | null
-  usage_order: Order | null
+  usage_invoice: Invoice | null
 }
 
 export type AgreementSubscription = {
@@ -295,8 +295,8 @@ export type CardEntry = {
 export type Cart = {
   currency: string
   total: string
-  lines: OrderPreviewLine[]
-  payment_options: OrderPaymentOption[]
+  lines: InvoicePreviewLine[]
+  payment_options: InvoicePaymentOption[]
   last_changed_at: string | null
   expires_at: string | null
 }
@@ -387,7 +387,7 @@ export type ClearDestructiveHoldParams = {
   reason?: string
 }
 
-export type ConfirmOrderParams = {
+export type ConfirmInvoiceParams = {
   signature?: string
 }
 
@@ -422,22 +422,22 @@ export type CreateCreditGrantParams = {
   description?: string
 }
 
-export type CreateMyOrderParams = {
-  lines?: OrderLineParams[]
-  cart?: boolean
-  expected_total?: string
-  payment?: OrderPaymentParams
-  reusable?: boolean
-  pay_url?: MyOrderPayURLParams
-  attribution?: OrderAttribution
+export type CreateInvoiceParams = {
+  customer_id?: string
+  lines?: InvoiceLineParams[]
+  expires_at?: string
+  pay_url?: InvoicePayURLParams
+  attribution?: InvoiceAttribution
 }
 
-export type CreateOrderParams = {
-  customer_id?: string
-  lines?: OrderLineParams[]
-  expires_at?: string
-  pay_url?: OrderPayURLParams
-  attribution?: OrderAttribution
+export type CreateMyInvoiceParams = {
+  lines?: InvoiceLineParams[]
+  cart?: boolean
+  expected_total?: string
+  payment?: InvoicePaymentParams
+  reusable?: boolean
+  pay_url?: MyInvoicePayURLParams
+  attribution?: InvoiceAttribution
 }
 
 export type CreatePSPImportParams = {
@@ -807,7 +807,7 @@ export type DeclaredHistoricalRefund = {
   refunded_at?: string
 }
 
-export type DeclaredOrderLine = {
+export type DeclaredInvoiceLine = {
   price?: string
   quantity?: number
   unit_amount?: string
@@ -853,7 +853,7 @@ export type DeclaredPurchase = {
   currency?: string
   amount?: string
   paid_at?: string
-  lines?: DeclaredOrderLine[]
+  lines?: DeclaredInvoiceLine[]
   settlement?: DeclaredSettlement
   evidence?: unknown
 }
@@ -1058,12 +1058,12 @@ export type EntitlementReplacement = {
 
 export type ErrorDetails = {
   type: "api_error" | "authentication_error" | "authorization_error" | "card_error" | "invalid_request_error" | "rate_limit_error"
-  code: "alert_email_required" | "already_owned" | "application_required" | "as_of_required" | "authentication_required" | "authentication_unavailable" | "authorization_unavailable" | "billing_archive_integrity" | "billing_archive_invalid_artifact" | "billing_archive_merchant_mismatch" | "billing_archive_not_empty" | "billing_archive_platform_cards" | "billing_archive_unavailable" | "billing_archive_unsupported_state" | "billing_details_required" | "billing_policy_not_found" | "cancel_unsupported_on_rail" | "captcha_invalid" | "captcha_required" | "card_attempts_blocked" | "card_declined" | "card_not_saved" | "card_requires_https" | "card_vault_unknown" | "catalog_benefit_overlap" | "catalog_revision_conflict" | "charge_psp_incompatible" | "charge_psp_unknown" | "credential_expired" | "credential_revoked" | "credit_grant_held" | "credit_grant_not_found" | "credit_grant_unavailable" | "csrf_origin_denied" | "currency_unsupported" | "custodian_capture_unavailable" | "customer_action_required" | "customer_email_required" | "customer_issuer_mismatch" | "customer_not_found" | "customer_payment_unsupported" | "customer_session_required" | "customer_tenant_mismatch" | "dashboard_invalid" | "database_busy" | "default_payment_method_invalid" | "default_payment_method_required" | "default_rate_card_not_found" | "destructive_actions_held" | "embed_origins_required" | "entitlement_required" | "event_cursor_expired" | "event_store_required" | "finding_action_failed" | "finding_not_actionable" | "finding_requires_merchant_config" | "host_event_not_found" | "host_principal_invalid" | "idempotency_key_in_use" | "idempotency_key_required" | "idempotency_key_reused" | "insufficient_credits" | "insufficient_funds" | "internal_error" | "invalid_cursor" | "invalid_customer_id" | "invalid_param" | "invalid_payment_method" | "invalid_psp_reference" | "invalid_query" | "invalid_request_body" | "invalid_settlement_status_request" | "invoker_scoped_principal" | "lease_not_found" | "limit_not_found" | "merchant_config_read_only" | "merchant_mismatch" | "merchant_unit_unsupported" | "merchant_unresolved" | "message_send_failed" | "message_template_invalid" | "meter_in_use" | "meter_rate_card_conflict" | "method_not_allowed" | "metrics_query_invalid" | "order_action_not_allowed" | "order_attempt_closed" | "order_attempt_expired" | "order_has_recurring_line" | "order_line_unavailable" | "order_not_cancelable" | "order_not_payable" | "order_payment_in_progress" | "order_total_changed" | "pay_url_attempts_exhausted" | "pay_url_expired" | "pay_url_not_found" | "pay_url_unavailable" | "payment_duplicate_refused" | "payment_exceeds_due" | "payment_failed" | "payment_idempotency_conflict" | "payment_in_progress" | "payment_method_delete_failed" | "payment_method_delete_unsupported" | "payment_method_not_psp_vaulted" | "payment_method_not_usable" | "payment_method_psp_mismatch" | "payment_method_required" | "payment_method_same_vault" | "payment_method_stale" | "payment_method_update_failed" | "payment_method_update_unsupported" | "payment_not_found" | "payment_not_refundable" | "payment_not_retryable" | "payment_option_unavailable" | "payment_provider_rejected" | "permission_required" | "person_required" | "platform_vault_mixed_class" | "platform_vault_unavailable" | "platform_vault_unreachable" | "price_change_currency_mismatch" | "price_change_target_archived" | "price_increase_notice_too_short" | "price_key_cadence_conflict" | "price_key_not_found" | "price_migration_in_progress" | "price_migration_not_found" | "price_not_found" | "price_not_sellable" | "product_in_use" | "product_not_found" | "product_tier_group_conflict" | "product_tier_group_in_use" | "provider_cancel_held" | "provider_outcome_unknown" | "provider_price_unreadable" | "provider_writes_disabled" | "provider_writes_held" | "psp_claim_requires_proof" | "psp_credentials_rejected" | "psp_environment_refused" | "psp_exists" | "psp_import_in_progress" | "psp_key_taken" | "psp_last_active" | "psp_not_found" | "psp_probe_limited" | "purchase_review_resolved" | "quantity_not_allowed" | "rate_card_product_not_found" | "rate_limit_exceeded" | "rebill_terms_committed" | "refund_failed" | "refund_rail_unavailable" | "refund_unsupported" | "request_body_too_large" | "resource_access_denied" | "resource_conflict" | "resource_not_found" | "revision_mismatch" | "route_not_found" | "running_charge_not_found" | "scheduled_change_exists" | "service_credential_customer_scope_denied" | "service_unavailable" | "solana_rpc_unavailable" | "solana_transaction_refused" | "step_up_required" | "step_up_unavailable" | "stored_credential_required" | "subscription_change_already_scheduled" | "subscription_change_cadence_unsupported" | "subscription_change_credit_exceeds_price" | "subscription_change_cycle_unknown" | "subscription_change_idempotency_conflict" | "subscription_change_idempotency_key_required" | "subscription_change_in_flight" | "subscription_change_period_unknown" | "subscription_change_provider_conflict" | "subscription_change_refused" | "subscription_change_renewal_due" | "subscription_change_requires_linked_plan" | "subscription_change_target_inactive" | "subscription_change_unsupported_on_rail" | "subscription_not_active" | "subscription_not_found" | "subscription_paid_through" | "subscription_resumable" | "trial_unsupported_on_rail" | "unknown_field" | "unsupported_media_type" | "usage_meter_invalid" | "usage_meter_not_found" | "usage_not_priced" | "usage_out_of_order" | "usage_rate_card_invalid" | "webhook_account_mismatch" | "webhook_invalid"
+  code: "alert_email_required" | "already_owned" | "application_required" | "as_of_required" | "authentication_required" | "authentication_unavailable" | "authorization_unavailable" | "billing_archive_integrity" | "billing_archive_invalid_artifact" | "billing_archive_merchant_mismatch" | "billing_archive_not_empty" | "billing_archive_platform_cards" | "billing_archive_unavailable" | "billing_archive_unsupported_state" | "billing_details_required" | "billing_policy_not_found" | "cancel_unsupported_on_rail" | "captcha_invalid" | "captcha_required" | "card_attempts_blocked" | "card_declined" | "card_not_saved" | "card_requires_https" | "card_vault_unknown" | "catalog_benefit_overlap" | "catalog_revision_conflict" | "charge_psp_incompatible" | "charge_psp_unknown" | "credential_expired" | "credential_revoked" | "credit_grant_held" | "credit_grant_not_found" | "credit_grant_unavailable" | "csrf_origin_denied" | "currency_unsupported" | "custodian_capture_unavailable" | "customer_action_required" | "customer_email_required" | "customer_issuer_mismatch" | "customer_not_found" | "customer_payment_unsupported" | "customer_session_required" | "customer_tenant_mismatch" | "dashboard_invalid" | "database_busy" | "default_payment_method_invalid" | "default_payment_method_required" | "default_rate_card_not_found" | "destructive_actions_held" | "embed_origins_required" | "entitlement_required" | "event_cursor_expired" | "event_store_required" | "finding_action_failed" | "finding_not_actionable" | "finding_requires_merchant_config" | "host_event_not_found" | "host_principal_invalid" | "idempotency_key_in_use" | "idempotency_key_required" | "idempotency_key_reused" | "insufficient_credits" | "insufficient_funds" | "internal_error" | "invalid_cursor" | "invalid_customer_id" | "invalid_param" | "invalid_payment_method" | "invalid_psp_reference" | "invalid_query" | "invalid_request_body" | "invalid_settlement_status_request" | "invoice_action_not_allowed" | "invoice_attempt_closed" | "invoice_attempt_expired" | "invoice_has_recurring_line" | "invoice_line_unavailable" | "invoice_not_cancelable" | "invoice_not_payable" | "invoice_payment_in_progress" | "invoice_total_changed" | "invoker_scoped_principal" | "lease_not_found" | "limit_not_found" | "merchant_config_read_only" | "merchant_mismatch" | "merchant_unit_unsupported" | "merchant_unresolved" | "message_send_failed" | "message_template_invalid" | "meter_in_use" | "meter_rate_card_conflict" | "method_not_allowed" | "metrics_query_invalid" | "pay_url_attempts_exhausted" | "pay_url_expired" | "pay_url_not_found" | "pay_url_unavailable" | "payment_duplicate_refused" | "payment_exceeds_due" | "payment_failed" | "payment_idempotency_conflict" | "payment_in_progress" | "payment_method_delete_failed" | "payment_method_delete_unsupported" | "payment_method_not_psp_vaulted" | "payment_method_not_usable" | "payment_method_psp_mismatch" | "payment_method_required" | "payment_method_same_vault" | "payment_method_stale" | "payment_method_update_failed" | "payment_method_update_unsupported" | "payment_not_found" | "payment_not_refundable" | "payment_not_retryable" | "payment_option_unavailable" | "payment_provider_rejected" | "permission_required" | "person_required" | "platform_vault_mixed_class" | "platform_vault_unavailable" | "platform_vault_unreachable" | "price_change_currency_mismatch" | "price_change_target_archived" | "price_increase_notice_too_short" | "price_key_cadence_conflict" | "price_key_not_found" | "price_migration_in_progress" | "price_migration_not_found" | "price_not_found" | "price_not_sellable" | "product_in_use" | "product_not_found" | "product_tier_group_conflict" | "product_tier_group_in_use" | "provider_cancel_held" | "provider_outcome_unknown" | "provider_price_unreadable" | "provider_writes_disabled" | "provider_writes_held" | "psp_claim_requires_proof" | "psp_credentials_rejected" | "psp_environment_refused" | "psp_exists" | "psp_import_in_progress" | "psp_key_taken" | "psp_last_active" | "psp_not_found" | "psp_probe_limited" | "purchase_review_resolved" | "quantity_not_allowed" | "rate_card_product_not_found" | "rate_limit_exceeded" | "rebill_terms_committed" | "refund_failed" | "refund_rail_unavailable" | "refund_unsupported" | "request_body_too_large" | "resource_access_denied" | "resource_conflict" | "resource_not_found" | "revision_mismatch" | "route_not_found" | "running_charge_not_found" | "scheduled_change_exists" | "service_credential_customer_scope_denied" | "service_unavailable" | "solana_rpc_unavailable" | "solana_transaction_refused" | "step_up_required" | "step_up_unavailable" | "stored_credential_required" | "subscription_change_already_scheduled" | "subscription_change_cadence_unsupported" | "subscription_change_credit_exceeds_price" | "subscription_change_cycle_unknown" | "subscription_change_idempotency_conflict" | "subscription_change_idempotency_key_required" | "subscription_change_in_flight" | "subscription_change_period_unknown" | "subscription_change_provider_conflict" | "subscription_change_refused" | "subscription_change_renewal_due" | "subscription_change_requires_linked_plan" | "subscription_change_target_inactive" | "subscription_change_unsupported_on_rail" | "subscription_not_active" | "subscription_not_found" | "subscription_paid_through" | "subscription_resumable" | "trial_unsupported_on_rail" | "unknown_field" | "unsupported_media_type" | "usage_meter_invalid" | "usage_meter_not_found" | "usage_not_priced" | "usage_out_of_order" | "usage_rate_card_invalid" | "webhook_account_mismatch" | "webhook_invalid"
   message: string
   request_id?: string
   param?: string
   metadata?: Record<string, unknown>
-  order?: Order
+  invoice?: Invoice
 }
 
 export type Event = {
@@ -1157,9 +1157,164 @@ export type InFlight = {
   amount?: string
 }
 
+export type Invoice = {
+  id: string
+  customer_id: string
+  customer_contact?: CustomerContact
+  origin: "customer" | "merchant" | "subscription" | "usage"
+  status: "canceled" | "complete" | "expired" | "open" | "processing" | "uncollectible" | "void"
+  collection_owner: "engine" | "nmi_schedule" | "provider"
+  collection_psp_id: string | null
+  provider_bills: InvoiceProviderBill[]
+  number: number | null
+  currency: string
+  total: string
+  lines: InvoiceLine[]
+  payment: InvoicePayment
+  payment_options: InvoicePaymentOption[]
+  pay_url: string | null
+  pay_url_expires_at: string | null
+  embedded: boolean
+  success_url: string | null
+  cancel_url: string | null
+  saved_payment_methods: boolean
+  renewal: InvoiceRenewal | null
+  usage: InvoiceUsage | null
+  expires_at: string | null
+  completed_at: string | null
+  canceled_at: string | null
+  expired_at: string | null
+  voided_at: string | null
+  uncollectible_at: string | null
+  created_at: string
+  checkout: InvoiceCheckout | null
+}
+
+export type InvoiceAttribution = {
+  source: string | null
+  medium: string | null
+  campaign: string | null
+  term: string | null
+  content: string | null
+  referrer: string | null
+  affiliate: string | null
+}
+
+export type InvoiceCheckout = {
+  customer_type: "new" | "reactivated" | "returning"
+  purchase_number: number
+  opened_at: string | null
+  submitted_at: string | null
+  country: string | null
+  country_source: "billing_address" | "card" | "ip" | null
+  billing_country: string | null
+  card_country: string | null
+  ip_country: string | null
+  language: string | null
+  attribution: InvoiceAttribution
+}
+
 export type InvoiceContact = {
   name: string
   email: string
+}
+
+export type InvoiceLine = {
+  id: string
+  price_id: string | null
+  product_id: string | null
+  source: string | null
+  description: string
+  quantity: number | null
+  unit_amount: string
+  amount: string
+  ownership: "consumable" | "extend" | "unique" | null
+  billing_interval_hours: number | null
+  billing_interval_months: number | null
+  access_duration_hours: number | null
+  subscription_id: string | null
+  product_access_id: string | null
+}
+
+export type InvoiceLineParams = {
+  price_id?: string
+  quantity?: number
+  amount?: string
+}
+
+export type InvoiceLineRefusal = {
+  code: string
+  message: string
+  owned_by: string | null
+  hint: string | null
+  missing?: string[]
+}
+
+export type InvoicePayURLParams = {
+  embedded?: boolean
+  success_url?: string
+  cancel_url?: string
+  expires_at?: string
+  saved_payment_methods?: boolean
+}
+
+export type InvoicePayment = {
+  status: "processing" | "requires_action" | "requires_payment_method" | "succeeded"
+  next_action: NextAction | null
+  last_payment_error: PaymentFailure | null
+  payment_method_id: string | null
+  payment_id: string | null
+}
+
+export type InvoicePaymentAttempt = {
+  invoice_id: string
+  customer_id: string
+  attempt_id: string
+  state: string
+  payment_id?: string
+  payment_method_id?: string
+  psp_id: string
+  amount: string
+  currency: string
+}
+
+export type InvoicePaymentOption = {
+  saved_payment_method_ids?: string[]
+  psp_id: string
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  accepts: string[]
+  failed_attempts: number
+  requires?: string[]
+}
+
+export type InvoicePaymentParams = {
+  payment_method_id?: string
+  token?: string
+  psp_id?: string
+  billing_details?: BillingDetails
+  token_symbol?: string
+  return_url?: string
+}
+
+export type InvoicePreview = {
+  currency: string
+  total: string
+  lines: InvoicePreviewLine[]
+  payment_options: InvoicePaymentOption[]
+}
+
+export type InvoicePreviewLine = {
+  price_id: string
+  product_id: string
+  description: string
+  quantity: number | null
+  unit_amount: string
+  amount: string
+  ownership: "consumable" | "extend" | "unique"
+  billing_interval_hours: number | null
+  billing_interval_months: number | null
+  access_duration_hours: number | null
+  refusal: InvoiceLineRefusal | null
 }
 
 export type InvoiceProfile = {
@@ -1169,6 +1324,38 @@ export type InvoiceProfile = {
   tax: Record<string, unknown> | null
   billing_contacts: InvoiceContact[]
   memo: string
+}
+
+export type InvoiceProviderBill = {
+  psp_id: string
+  kind: string
+  reference: string
+  settlement_source: string | null
+  non_cash_amount: string
+  settled_at: string | null
+}
+
+export type InvoiceRenewal = {
+  subscription_id: string
+  period_starts_at: string
+  period_ends_at: string
+  due_at: string
+  checkout_invoice_id: string | null
+}
+
+export type InvoiceUsage = {
+  period_starts_at: string
+  period_ends_at: string
+  due_at: string
+  amount_paid: string
+  amount_due: string
+  collection_method: "charge_automatically" | "send_invoice"
+  next_collection_attempt_at: string | null
+  po_number: string | null
+  memo: string | null
+  tax: Record<string, unknown> | null
+  billing_contacts: InvoiceContact[]
+  delinquent: boolean
 }
 
 export type Lease = {
@@ -1255,7 +1442,7 @@ export type LimitSet = {
   limits: string[]
   capacities: LimitCapacity[]
   credit_line: string
-  balance_deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
+  balance_deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
   refusal: Refusal | null
 }
 
@@ -1499,7 +1686,7 @@ export type MetricsThreshold = {
   until?: string
 }
 
-export type MyOrderPayURLParams = {
+export type MyInvoicePayURLParams = {
   embedded?: boolean
 }
 
@@ -1509,193 +1696,6 @@ export type NextAction = {
   transactions: string[]
   psp_id: string | null
   payload: Record<string, string> | null
-}
-
-export type Order = {
-  id: string
-  customer_id: string
-  customer_contact?: CustomerContact
-  origin: "customer" | "merchant" | "subscription" | "usage"
-  status: "canceled" | "complete" | "expired" | "open" | "processing" | "uncollectible" | "void"
-  collection_owner: "engine" | "nmi_schedule" | "provider"
-  collection_psp_id: string | null
-  provider_bills: OrderProviderBill[]
-  number: number | null
-  currency: string
-  total: string
-  lines: OrderLine[]
-  payment: OrderPayment
-  payment_options: OrderPaymentOption[]
-  pay_url: string | null
-  pay_url_expires_at: string | null
-  embedded: boolean
-  success_url: string | null
-  cancel_url: string | null
-  saved_payment_methods: boolean
-  renewal: OrderRenewal | null
-  usage: OrderUsage | null
-  expires_at: string | null
-  completed_at: string | null
-  canceled_at: string | null
-  expired_at: string | null
-  voided_at: string | null
-  uncollectible_at: string | null
-  created_at: string
-  checkout: OrderCheckout | null
-}
-
-export type OrderAttribution = {
-  source: string | null
-  medium: string | null
-  campaign: string | null
-  term: string | null
-  content: string | null
-  referrer: string | null
-  affiliate: string | null
-}
-
-export type OrderCheckout = {
-  customer_type: "new" | "reactivated" | "returning"
-  purchase_number: number
-  opened_at: string | null
-  submitted_at: string | null
-  country: string | null
-  country_source: "billing_address" | "card" | "ip" | null
-  billing_country: string | null
-  card_country: string | null
-  ip_country: string | null
-  language: string | null
-  attribution: OrderAttribution
-}
-
-export type OrderLine = {
-  id: string
-  price_id: string | null
-  product_id: string | null
-  source: string | null
-  description: string
-  quantity: number | null
-  unit_amount: string
-  amount: string
-  ownership: "consumable" | "extend" | "unique" | null
-  billing_interval_hours: number | null
-  billing_interval_months: number | null
-  access_duration_hours: number | null
-  subscription_id: string | null
-  product_access_id: string | null
-}
-
-export type OrderLineParams = {
-  price_id?: string
-  quantity?: number
-  amount?: string
-}
-
-export type OrderLineRefusal = {
-  code: string
-  message: string
-  owned_by: string | null
-  hint: string | null
-  missing?: string[]
-}
-
-export type OrderPayURLParams = {
-  embedded?: boolean
-  success_url?: string
-  cancel_url?: string
-  expires_at?: string
-  saved_payment_methods?: boolean
-}
-
-export type OrderPayment = {
-  status: "processing" | "requires_action" | "requires_payment_method" | "succeeded"
-  next_action: NextAction | null
-  last_payment_error: PaymentFailure | null
-  payment_method_id: string | null
-  payment_id: string | null
-}
-
-export type OrderPaymentAttempt = {
-  order_id: string
-  customer_id: string
-  attempt_id: string
-  state: string
-  payment_id?: string
-  payment_method_id?: string
-  psp_id: string
-  amount: string
-  currency: string
-}
-
-export type OrderPaymentOption = {
-  saved_payment_method_ids?: string[]
-  psp_id: string
-  rail: "ccbill" | "nmi" | "solana" | "stripe"
-  accepts: string[]
-  failed_attempts: number
-  requires?: string[]
-}
-
-export type OrderPaymentParams = {
-  payment_method_id?: string
-  token?: string
-  psp_id?: string
-  billing_details?: BillingDetails
-  token_symbol?: string
-  return_url?: string
-}
-
-export type OrderPreview = {
-  currency: string
-  total: string
-  lines: OrderPreviewLine[]
-  payment_options: OrderPaymentOption[]
-}
-
-export type OrderPreviewLine = {
-  price_id: string
-  product_id: string
-  description: string
-  quantity: number | null
-  unit_amount: string
-  amount: string
-  ownership: "consumable" | "extend" | "unique"
-  billing_interval_hours: number | null
-  billing_interval_months: number | null
-  access_duration_hours: number | null
-  refusal: OrderLineRefusal | null
-}
-
-export type OrderProviderBill = {
-  psp_id: string
-  kind: string
-  reference: string
-  settlement_source: string | null
-  non_cash_amount: string
-  settled_at: string | null
-}
-
-export type OrderRenewal = {
-  subscription_id: string
-  period_starts_at: string
-  period_ends_at: string
-  due_at: string
-  checkout_order_id: string | null
-}
-
-export type OrderUsage = {
-  period_starts_at: string
-  period_ends_at: string
-  due_at: string
-  amount_paid: string
-  amount_due: string
-  collection_method: "charge_automatically" | "send_invoice"
-  next_collection_attempt_at: string | null
-  po_number: string | null
-  memo: string | null
-  tax: Record<string, unknown> | null
-  billing_contacts: InvoiceContact[]
-  delinquent: boolean
 }
 
 export type PSP = {
@@ -1878,8 +1878,8 @@ export type ParkedSubscription = {
   subscription_id: string | null
 }
 
-export type PayOrderParams = {
-  payment?: OrderPaymentParams
+export type PayInvoiceParams = {
+  payment?: InvoicePaymentParams
   expected_total?: string
   reusable?: boolean
 }
@@ -1894,7 +1894,7 @@ export type Payment = {
   customer_id: string
   customer_contact?: CustomerContact
   subscription_id: string | null
-  order_id: string | null
+  invoice_id: string | null
   quantity: number | null
   channel: "manual" | "rail"
   rail: "ccbill" | "nmi" | "solana" | "stripe" | null
@@ -1938,7 +1938,7 @@ export type PaymentAttempt = {
   amount: string
   currency: string
   attempted_at: string
-  order_id: string | null
+  invoice_id: string | null
   cycle_id: string | null
   subscription_id: string | null
   payment_method_id: string | null
@@ -2001,7 +2001,7 @@ export type PaymentRecovery = {
   last_failure_reason?: "authentication_required" | "blocked_by_psp" | "brand_not_accepted" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "payment_page_expired" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "stored_credential_required" | "suspected_fraud" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data"
   retryable: boolean
   blocked_reason?: string
-  order_id?: string
+  invoice_id?: string
 }
 
 export type PerUnitPrice = {
@@ -2016,20 +2016,20 @@ export type PlatformVaultState = {
   available: boolean
 }
 
+export type PreviewInvoiceParams = {
+  customer_id?: string
+  lines?: InvoiceLineParams[]
+}
+
 export type PreviewMessageParams = {
   event_type?: string
   language?: string
   template?: MessageTemplate | null
 }
 
-export type PreviewMyOrderParams = {
-  lines?: OrderLineParams[]
+export type PreviewMyInvoiceParams = {
+  lines?: InvoiceLineParams[]
   cart?: boolean
-}
-
-export type PreviewOrderParams = {
-  customer_id?: string
-  lines?: OrderLineParams[]
 }
 
 export type PreviewPSPRoutingParams = {
@@ -2192,7 +2192,7 @@ export type ProductSummary = {
 }
 
 export type ProposalError = {
-  code: "alert_email_required" | "already_owned" | "application_required" | "as_of_required" | "authentication_required" | "authentication_unavailable" | "authorization_unavailable" | "billing_archive_integrity" | "billing_archive_invalid_artifact" | "billing_archive_merchant_mismatch" | "billing_archive_not_empty" | "billing_archive_platform_cards" | "billing_archive_unavailable" | "billing_archive_unsupported_state" | "billing_details_required" | "billing_policy_not_found" | "cancel_unsupported_on_rail" | "captcha_invalid" | "captcha_required" | "card_attempts_blocked" | "card_declined" | "card_not_saved" | "card_requires_https" | "card_vault_unknown" | "catalog_benefit_overlap" | "catalog_revision_conflict" | "charge_psp_incompatible" | "charge_psp_unknown" | "credential_expired" | "credential_revoked" | "credit_grant_held" | "credit_grant_not_found" | "credit_grant_unavailable" | "csrf_origin_denied" | "currency_unsupported" | "custodian_capture_unavailable" | "customer_action_required" | "customer_email_required" | "customer_issuer_mismatch" | "customer_not_found" | "customer_payment_unsupported" | "customer_session_required" | "customer_tenant_mismatch" | "dashboard_invalid" | "database_busy" | "default_payment_method_invalid" | "default_payment_method_required" | "default_rate_card_not_found" | "destructive_actions_held" | "embed_origins_required" | "entitlement_required" | "event_cursor_expired" | "event_store_required" | "finding_action_failed" | "finding_not_actionable" | "finding_requires_merchant_config" | "host_event_not_found" | "host_principal_invalid" | "idempotency_key_in_use" | "idempotency_key_required" | "idempotency_key_reused" | "insufficient_credits" | "insufficient_funds" | "internal_error" | "invalid_cursor" | "invalid_customer_id" | "invalid_param" | "invalid_payment_method" | "invalid_psp_reference" | "invalid_query" | "invalid_request_body" | "invalid_settlement_status_request" | "invoker_scoped_principal" | "lease_not_found" | "limit_not_found" | "merchant_config_read_only" | "merchant_mismatch" | "merchant_unit_unsupported" | "merchant_unresolved" | "message_send_failed" | "message_template_invalid" | "meter_in_use" | "meter_rate_card_conflict" | "method_not_allowed" | "metrics_query_invalid" | "order_action_not_allowed" | "order_attempt_closed" | "order_attempt_expired" | "order_has_recurring_line" | "order_line_unavailable" | "order_not_cancelable" | "order_not_payable" | "order_payment_in_progress" | "order_total_changed" | "pay_url_attempts_exhausted" | "pay_url_expired" | "pay_url_not_found" | "pay_url_unavailable" | "payment_duplicate_refused" | "payment_exceeds_due" | "payment_failed" | "payment_idempotency_conflict" | "payment_in_progress" | "payment_method_delete_failed" | "payment_method_delete_unsupported" | "payment_method_not_psp_vaulted" | "payment_method_not_usable" | "payment_method_psp_mismatch" | "payment_method_required" | "payment_method_same_vault" | "payment_method_stale" | "payment_method_update_failed" | "payment_method_update_unsupported" | "payment_not_found" | "payment_not_refundable" | "payment_not_retryable" | "payment_option_unavailable" | "payment_provider_rejected" | "permission_required" | "person_required" | "platform_vault_mixed_class" | "platform_vault_unavailable" | "platform_vault_unreachable" | "price_change_currency_mismatch" | "price_change_target_archived" | "price_increase_notice_too_short" | "price_key_cadence_conflict" | "price_key_not_found" | "price_migration_in_progress" | "price_migration_not_found" | "price_not_found" | "price_not_sellable" | "product_in_use" | "product_not_found" | "product_tier_group_conflict" | "product_tier_group_in_use" | "provider_cancel_held" | "provider_outcome_unknown" | "provider_price_unreadable" | "provider_writes_disabled" | "provider_writes_held" | "psp_claim_requires_proof" | "psp_credentials_rejected" | "psp_environment_refused" | "psp_exists" | "psp_import_in_progress" | "psp_key_taken" | "psp_last_active" | "psp_not_found" | "psp_probe_limited" | "purchase_review_resolved" | "quantity_not_allowed" | "rate_card_product_not_found" | "rate_limit_exceeded" | "rebill_terms_committed" | "refund_failed" | "refund_rail_unavailable" | "refund_unsupported" | "request_body_too_large" | "resource_access_denied" | "resource_conflict" | "resource_not_found" | "revision_mismatch" | "route_not_found" | "running_charge_not_found" | "scheduled_change_exists" | "service_credential_customer_scope_denied" | "service_unavailable" | "solana_rpc_unavailable" | "solana_transaction_refused" | "step_up_required" | "step_up_unavailable" | "stored_credential_required" | "subscription_change_already_scheduled" | "subscription_change_cadence_unsupported" | "subscription_change_credit_exceeds_price" | "subscription_change_cycle_unknown" | "subscription_change_idempotency_conflict" | "subscription_change_idempotency_key_required" | "subscription_change_in_flight" | "subscription_change_period_unknown" | "subscription_change_provider_conflict" | "subscription_change_refused" | "subscription_change_renewal_due" | "subscription_change_requires_linked_plan" | "subscription_change_target_inactive" | "subscription_change_unsupported_on_rail" | "subscription_not_active" | "subscription_not_found" | "subscription_paid_through" | "subscription_resumable" | "trial_unsupported_on_rail" | "unknown_field" | "unsupported_media_type" | "usage_meter_invalid" | "usage_meter_not_found" | "usage_not_priced" | "usage_out_of_order" | "usage_rate_card_invalid" | "webhook_account_mismatch" | "webhook_invalid"
+  code: "alert_email_required" | "already_owned" | "application_required" | "as_of_required" | "authentication_required" | "authentication_unavailable" | "authorization_unavailable" | "billing_archive_integrity" | "billing_archive_invalid_artifact" | "billing_archive_merchant_mismatch" | "billing_archive_not_empty" | "billing_archive_platform_cards" | "billing_archive_unavailable" | "billing_archive_unsupported_state" | "billing_details_required" | "billing_policy_not_found" | "cancel_unsupported_on_rail" | "captcha_invalid" | "captcha_required" | "card_attempts_blocked" | "card_declined" | "card_not_saved" | "card_requires_https" | "card_vault_unknown" | "catalog_benefit_overlap" | "catalog_revision_conflict" | "charge_psp_incompatible" | "charge_psp_unknown" | "credential_expired" | "credential_revoked" | "credit_grant_held" | "credit_grant_not_found" | "credit_grant_unavailable" | "csrf_origin_denied" | "currency_unsupported" | "custodian_capture_unavailable" | "customer_action_required" | "customer_email_required" | "customer_issuer_mismatch" | "customer_not_found" | "customer_payment_unsupported" | "customer_session_required" | "customer_tenant_mismatch" | "dashboard_invalid" | "database_busy" | "default_payment_method_invalid" | "default_payment_method_required" | "default_rate_card_not_found" | "destructive_actions_held" | "embed_origins_required" | "entitlement_required" | "event_cursor_expired" | "event_store_required" | "finding_action_failed" | "finding_not_actionable" | "finding_requires_merchant_config" | "host_event_not_found" | "host_principal_invalid" | "idempotency_key_in_use" | "idempotency_key_required" | "idempotency_key_reused" | "insufficient_credits" | "insufficient_funds" | "internal_error" | "invalid_cursor" | "invalid_customer_id" | "invalid_param" | "invalid_payment_method" | "invalid_psp_reference" | "invalid_query" | "invalid_request_body" | "invalid_settlement_status_request" | "invoice_action_not_allowed" | "invoice_attempt_closed" | "invoice_attempt_expired" | "invoice_has_recurring_line" | "invoice_line_unavailable" | "invoice_not_cancelable" | "invoice_not_payable" | "invoice_payment_in_progress" | "invoice_total_changed" | "invoker_scoped_principal" | "lease_not_found" | "limit_not_found" | "merchant_config_read_only" | "merchant_mismatch" | "merchant_unit_unsupported" | "merchant_unresolved" | "message_send_failed" | "message_template_invalid" | "meter_in_use" | "meter_rate_card_conflict" | "method_not_allowed" | "metrics_query_invalid" | "pay_url_attempts_exhausted" | "pay_url_expired" | "pay_url_not_found" | "pay_url_unavailable" | "payment_duplicate_refused" | "payment_exceeds_due" | "payment_failed" | "payment_idempotency_conflict" | "payment_in_progress" | "payment_method_delete_failed" | "payment_method_delete_unsupported" | "payment_method_not_psp_vaulted" | "payment_method_not_usable" | "payment_method_psp_mismatch" | "payment_method_required" | "payment_method_same_vault" | "payment_method_stale" | "payment_method_update_failed" | "payment_method_update_unsupported" | "payment_not_found" | "payment_not_refundable" | "payment_not_retryable" | "payment_option_unavailable" | "payment_provider_rejected" | "permission_required" | "person_required" | "platform_vault_mixed_class" | "platform_vault_unavailable" | "platform_vault_unreachable" | "price_change_currency_mismatch" | "price_change_target_archived" | "price_increase_notice_too_short" | "price_key_cadence_conflict" | "price_key_not_found" | "price_migration_in_progress" | "price_migration_not_found" | "price_not_found" | "price_not_sellable" | "product_in_use" | "product_not_found" | "product_tier_group_conflict" | "product_tier_group_in_use" | "provider_cancel_held" | "provider_outcome_unknown" | "provider_price_unreadable" | "provider_writes_disabled" | "provider_writes_held" | "psp_claim_requires_proof" | "psp_credentials_rejected" | "psp_environment_refused" | "psp_exists" | "psp_import_in_progress" | "psp_key_taken" | "psp_last_active" | "psp_not_found" | "psp_probe_limited" | "purchase_review_resolved" | "quantity_not_allowed" | "rate_card_product_not_found" | "rate_limit_exceeded" | "rebill_terms_committed" | "refund_failed" | "refund_rail_unavailable" | "refund_unsupported" | "request_body_too_large" | "resource_access_denied" | "resource_conflict" | "resource_not_found" | "revision_mismatch" | "route_not_found" | "running_charge_not_found" | "scheduled_change_exists" | "service_credential_customer_scope_denied" | "service_unavailable" | "solana_rpc_unavailable" | "solana_transaction_refused" | "step_up_required" | "step_up_unavailable" | "stored_credential_required" | "subscription_change_already_scheduled" | "subscription_change_cadence_unsupported" | "subscription_change_credit_exceeds_price" | "subscription_change_cycle_unknown" | "subscription_change_idempotency_conflict" | "subscription_change_idempotency_key_required" | "subscription_change_in_flight" | "subscription_change_period_unknown" | "subscription_change_provider_conflict" | "subscription_change_refused" | "subscription_change_renewal_due" | "subscription_change_requires_linked_plan" | "subscription_change_target_inactive" | "subscription_change_unsupported_on_rail" | "subscription_not_active" | "subscription_not_found" | "subscription_paid_through" | "subscription_resumable" | "trial_unsupported_on_rail" | "unknown_field" | "unsupported_media_type" | "usage_meter_invalid" | "usage_meter_not_found" | "usage_not_priced" | "usage_out_of_order" | "usage_rate_card_invalid" | "webhook_account_mismatch" | "webhook_invalid"
   message: string
 }
 
@@ -2309,7 +2309,7 @@ export type RateTier = {
 }
 
 export type RecordExternalPaymentParams = {
-  order_id?: string
+  invoice_id?: string
   amount?: string
   transaction_id?: string
   paid_at?: string
@@ -2324,7 +2324,7 @@ export type RefundPaymentParams = {
 }
 
 export type Refusal = {
-  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_order" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
+  deny_code: "accrual_rate_cap_reached" | "budget_exceeded" | "delegated_spend_not_allowed" | "delinquent_unpaid_invoice" | "failure_rate_limited" | "insufficient_balance" | "insufficient_credit" | "limit_reached" | "outstanding_cap_reached"
   limit: string | null
   resets_at: string | null
   retry_after_seconds: number | null
@@ -2624,7 +2624,7 @@ export type SubscriptionHistoryAttempt = {
   amount: string
   currency: string
   psp_id: string
-  order_id?: string
+  invoice_id?: string
   payment_id?: string
   renewal_id?: string
   payment_method_id?: string

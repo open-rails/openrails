@@ -493,8 +493,8 @@ func (e *Env) customerCheck(route Route, a billingauth.Authenticator) router.Mid
 				}
 			}
 			if e.payURL {
-				// A pay URL acts as its order's customer, whose row the
-				// order holds, whatever its issuer: nothing to admit.
+				// A pay URL acts as its invoice's customer, whose row the
+				// invoice holds, whatever its issuer: nothing to admit.
 				bindCustomer(r, c, id, target)
 				next(r)
 				return

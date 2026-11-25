@@ -66,15 +66,15 @@ func (s *Service) requirePriceService() (*catalog.PriceService, error) {
 	return rt.PriceService, nil
 }
 
-func (s *Service) requireOrderAttemptService() (*payment.OrderAttemptService, error) {
+func (s *Service) requireInvoiceAttemptService() (*payment.InvoiceAttemptService, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	if rt.OrderAttemptService == nil {
+	if rt.InvoiceAttemptService == nil {
 		return nil, fmt.Errorf("billing service: not initialized")
 	}
-	return rt.OrderAttemptService, nil
+	return rt.InvoiceAttemptService, nil
 }
 
 func (s *Service) requireDB() (*db.DB, error) {

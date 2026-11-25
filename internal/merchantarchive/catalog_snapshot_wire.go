@@ -45,7 +45,7 @@ type CatalogPSPIdentity struct {
 	AccountID   string `json:"account_id"`
 }
 
-// The order is also the foreign-key insertion order. These are all ten
+// The invoice is also the foreign-key insertion order. These are all ten
 // persisted catalog tables; product/rate-card state prior to updates was never
 // retained and cannot be reconstructed by an export, and a snapshot carries no
 // configuration history. Price keys are rebuilt by the prices triggers.

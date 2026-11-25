@@ -1,6 +1,6 @@
 -- name: InsertOperationLogEntry :exec
 -- Stamped by the database clock when the writer names no time, so entries
--- order with the holds below.
+-- invoice with the holds below.
 INSERT INTO billing.operation_log (merchant_id, occurred_at, actor, source, object_type, object_id, action, changes, reason, request_id, operation_id,
     rail, psp_id, custodian_id, subscription_id)
 VALUES (sqlc.arg(merchant_id)::uuid, COALESCE(sqlc.narg(occurred_at)::timestamptz, clock_timestamp()), sqlc.arg(actor)::text, sqlc.arg(source)::text,
@@ -9,7 +9,7 @@ VALUES (sqlc.arg(merchant_id)::uuid, COALESCE(sqlc.narg(occurred_at)::timestampt
     sqlc.arg(rail)::text, sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid, sqlc.narg(subscription_id)::uuid);
 
 -- name: RecordSubscriptionOperationHold :exec
--- Timestamp after acquiring the row lock: transaction start time could order
+-- Timestamp after acquiring the row lock: transaction start time could invoice
 -- a waiting transaction before the hold it followed.
 -- The caller already updated (and therefore locked) the intent in this transaction.
 -- Unknown readbacks do not end a hold. Only attempted execution or a terminal
