@@ -73,7 +73,7 @@ def main():
             checkout = f"127.0.0.1:{checkout_port}"
             config = {
                 "host": "127.0.0.1", "port": api_port,
-                "db": {"url": owned_dsn}, "redis": {"addr": redis},
+                "database": {"url": owned_dsn}, "redis": {"addr": redis},
                 "public_billing_base_url": origin,
                 "checkout_origin": "http://" + checkout, "route_groups": {"admin": True},
                 "local_sign_in": True,

@@ -56,9 +56,12 @@ func TestOneDatabaseSection(t *testing.T) {
 		}
 		return configPath
 	}
-	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\n  lease_conns: 2\nevent_retention: 48h\n"))
+	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\n  lease_conns: 2\nevent_retention: 48h\nroute_groups:\n  merchant_config: true\n"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !cfg.Server.RouteGroups.MerchantConfig {
+		t.Error("route_groups.merchant_config is read")
 	}
 	if e := cfg.Server.Engine; cfg.Database.URL != "postgres://u:p@db.internal:5432/x" || e.Database.Schema != "shop" || e.Database.RiverSchema != "shop_river" || e.Database.LeaseConns != 2 || e.EventRetention != 48*time.Hour {
 		t.Fatalf("connection %+v, engine %+v, retention %s", cfg.Database, e.Database, e.EventRetention)

@@ -89,6 +89,19 @@ func topLevelKeys(types ...reflect.Type) (scalar, nested map[string]bool) {
 	return scalar, nested
 }
 
+// envNames are the variables whose key is not their mechanical spelling:
+// HashiCorp's VAULT_ADDR and VAULT_CACERT, AuthKit's AUTHKIT_* inline key (the
+// unprefixed names refuse boot), and naming's nested former_names.
+var envNames = map[string]string{
+	"vault_addr":                     "vault.address",
+	"vault_cacert":                   "vault.ca_cert",
+	"naming_former_names_mode":       "naming.former_names.mode",
+	"naming_former_names_duration":   "naming.former_names.duration",
+	"authkit_active_key_id":          "signing_key.active_key_id",
+	"authkit_active_private_key_pem": "signing_key.active_private_key_pem",
+	"authkit_public_keys":            "signing_key.public_keys",
+}
+
 // envKeyToConfigKey maps an environment variable's name to its key:
 // PUBLIC_BILLING_BASE_URL is public_billing_base_url, DATABASE_URL
 // database.url. A name that routes to no section is "" and never loaded (the
@@ -98,31 +111,8 @@ func topLevelKeys(types ...reflect.Type) (scalar, nested map[string]bool) {
 func envKeyToConfigKey(s string) string {
 	s = strings.ToLower(s)
 
-	// VAULT_ADDR and VAULT_CACERT are HashiCorp's canonical names for the
-	// server URL and its CA file (the mechanical split would yield vault.addr
-	// and vault.cacert).
-	switch s {
-	case "vault_addr":
-		return "vault.address"
-	case "vault_cacert":
-		return "vault.ca_cert"
-	}
-
-	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
-	// AUTHKIT_PUBLIC_KEYS are AuthKit's canonical inline-key env names
-	// (mirrored by cmd/authkit-server). The unprefixed names are poison: Load
-	// refuses boot on them.
-	switch s {
-	case "naming_former_names_mode":
-		return "naming.former_names.mode"
-	case "naming_former_names_duration":
-		return "naming.former_names.duration"
-	case "authkit_active_key_id":
-		return "signing_key.active_key_id"
-	case "authkit_active_private_key_pem":
-		return "signing_key.active_private_key_pem"
-	case "authkit_public_keys":
-		return "signing_key.public_keys"
+	if key, ok := envNames[s]; ok {
+		return key
 	}
 	// AUTH_* is AuthKit's configuration, by AuthKit's keys.
 	if rest, ok := strings.CutPrefix(s, "auth_"); ok && rest != "" {

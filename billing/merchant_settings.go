@@ -8,6 +8,7 @@ import "github.com/open-rails/openrails/catalog"
 // winning rule does not name is not eligible, so a rule can constrain a
 // product to one rail.
 type PSPRoutingRule struct {
+	// Match is the purchases the rule applies to; empty matches every one.
 	Match PSPRoutingMatch `json:"match,omitempty"`
 	// Prefer are purchase selectors in preference order: PSP keys ("mobius"),
 	// or a rail kind, which resolves to that rail's one armed PSP.
@@ -49,10 +50,14 @@ const (
 // 10^-Scale units: Scale 0 (the default) counts whole units, at most 6.
 // Each merchant's units are its own: another merchant does not know them.
 type MerchantCurrency struct {
-	Code   catalog.Currency `json:"code"`
-	Name   string           `json:"name"`
-	Symbol string           `json:"symbol,omitempty"`
-	Scale  int              `json:"scale"`
+	// Code is the unit's code: up to twelve upper-case letters or digits, starting with a letter.
+	Code catalog.Currency `json:"code"`
+	// Name is how it reads ("Gold coins").
+	Name string `json:"name"`
+	// Symbol is its display mark; the code when omitted.
+	Symbol string `json:"symbol,omitempty"`
+	// Scale is its decimal places: 0 counts whole units, at most 6.
+	Scale int `json:"scale"`
 }
 
 // FraudWarningRefund is what an actionable early fraud warning (an issuer's

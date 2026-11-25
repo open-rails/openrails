@@ -186,7 +186,12 @@ declared environment does ([merchant configuration](client.md#merchant-configura
 
 ## Configuration reference
 
-[`config.example.yaml`](../config.example.yaml) is an annotated file. Durations
+[`config.example.yaml`](../config.example.yaml) is an annotated file;
+[`.env.example`](../.env.example) lists every environment variable with its
+default and [`merchant.example.yaml`](../merchant.example.yaml) every key of a
+merchant's document, both generated from the configuration types (`go run
+./internal/examplegen -write` in `server/`; `scripts/check.sh guards` refuses
+them stale). Durations
 are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
 (`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
