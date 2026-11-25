@@ -92,14 +92,14 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 
 	target, err := url.Parse(a.server.URL)
 	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy := browserSession(t, a.auth, httputil.NewSingleHostReverseProxy(target))
 	var mu sync.Mutex
 	counts := map[string]int{}
 	mux := http.NewServeMux()
 	if cards != nil {
 		cardURL, err := url.Parse(cards.server.URL)
 		require.NoError(t, err)
-		cardProxy := httputil.NewSingleHostReverseProxy(cardURL)
+		cardProxy := browserSession(t, cards.auth, httputil.NewSingleHostReverseProxy(cardURL))
 		mux.HandleFunc("/__nmi/", func(w http.ResponseWriter, r *http.Request) {
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/__nmi")
 			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/__nmi")

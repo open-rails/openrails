@@ -1,25 +1,12 @@
-import * as React from "react"
 import { SignInPanel } from "@openrails/auth-ui"
 import { useSearchParams } from "react-router-dom"
 
-import type { ConsoleIssuer } from "@/config"
-import { ISSUER_REDIRECT_KEY, useIdentity } from "@/lib/identity"
+import { useIdentity } from "@/lib/identity"
 import { Redirect, useRedirect } from "@/lib/redirect"
 
-// Sign-in is AuthKit's own form, beside a button for each trusted issuer the
-// server offers, or, once staff chose an issuer, a redirect there. A tab
-// re-authorizes at the issuer silently (prompt=none) once; after that, or
-// when the issuer needs the user, the button does.
-export function LoginPage({
-  issuers,
-  choose,
-}: {
-  issuers: ConsoleIssuer[]
-  choose: (key: string) => void
-}) {
-  const { issuer, status } = useIdentity()
-  const signedIn = status === "signed_in"
-  const ready = status === "signed_out" || signedIn
+// Sign-in is AuthKit's own form: the server's own accounts.
+export function LoginPage() {
+  const { status } = useIdentity()
   const redirect = useRedirect()
   const [params] = useSearchParams()
   const requested = params.get("return_to") ?? "/"
@@ -29,19 +16,9 @@ export function LoginPage({
     !requested.includes("\\")
       ? requested
       : "/"
-  const signInAtIssuer = issuer?.signIn
-  React.useEffect(() => {
-    if (!ready || signedIn || !signInAtIssuer) return
-    if (sessionStorage.getItem(ISSUER_REDIRECT_KEY)) return
-    sessionStorage.setItem(ISSUER_REDIRECT_KEY, "1")
-    void signInAtIssuer(returnTo, true)
-  }, [ready, signedIn, signInAtIssuer, returnTo])
-  if (!ready) {
+  if (status === "signed_in") return <Redirect to={returnTo} />
+  if (status !== "signed_out") {
     return <div className="console-sign-in">Loading…</div>
-  }
-  if (signedIn) {
-    sessionStorage.removeItem(ISSUER_REDIRECT_KEY)
-    return <Redirect to={returnTo} />
   }
   return (
     <div className="console-sign-in">
@@ -50,42 +27,11 @@ export function LoginPage({
         <p className="console-description">
           The merchant console for your OpenRails deployment.
         </p>
-        {issuer ? (
-          <>
-            <button
-              type="button"
-              className="console-sign-in-action"
-              onClick={() => void issuer.signIn(returnTo)}
-            >
-              Sign in with {issuer.name}
-            </button>
-            <button
-              type="button"
-              className="console-other-sign-in"
-              onClick={() => choose("local")}
-            >
-              Sign in with an OpenRails account
-            </button>
-          </>
-        ) : (
-          <>
-            <SignInPanel
-              providers={[]}
-              className="console-sign-in-action"
-              onSignedIn={() => redirect(returnTo)}
-            />
-            {issuers.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                className="console-sign-in-action"
-                onClick={() => choose(item.key)}
-              >
-                Sign in with {item.name}
-              </button>
-            ))}
-          </>
-        )}
+        <SignInPanel
+          providers={[]}
+          className="console-sign-in-action"
+          onSignedIn={() => redirect(returnTo)}
+        />
       </div>
     </div>
   )

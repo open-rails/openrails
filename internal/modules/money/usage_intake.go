@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/http"
 	"slices"
@@ -260,24 +261,26 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 	slices.SortFunc(accounts, func(x, y account) int {
 		return cmp.Or(compareUUID(x.customer, y.customer), strings.Compare(x.currency, y.currency))
 	})
-	ensured := map[uuid.UUID]bool{}
-	anchors := map[account]periodAnchor{}
-	l := ledger.New(q, merchantID)
-	for _, a := range accounts {
-		if !ensured[a.customer] {
-			if err := ensureCustomer(ctx, q, merchantID, a.customer); err != nil {
-				return nil, err
+	// Rows, accounts and anchors are made and read for all customers at once.
+	if len(accounts) > 0 {
+		var customers []uuid.UUID
+		balances := make([]ledger.CustomerCurrency, len(accounts))
+		for i, a := range accounts {
+			if i == 0 || a.customer != accounts[i-1].customer {
+				customers = append(customers, a.customer)
 			}
-			ensured[a.customer] = true
+			balances[i] = ledger.CustomerCurrency{Customer: a.customer, Currency: a.currency}
 		}
-		if _, err := l.EnsureCustomerBalance(ctx, a.customer, a.currency); err != nil {
+		if err := q.EnsureCustomerRows(ctx, gen.EnsureCustomerRowsParams{MerchantID: merchantID, Ids: customers}); err != nil {
 			return nil, err
 		}
-		anchor, err := s.periodAnchorFor(ctx, q, merchantID, a.customer, a.currency)
-		if err != nil {
+		if err := ledger.New(q, merchantID).EnsureCustomerBalances(ctx, balances); err != nil {
 			return nil, err
 		}
-		anchors[a] = anchor
+	}
+	anchors, err := s.periodAnchors(ctx, q, merchantID, accounts)
+	if err != nil {
+		return nil, err
 	}
 	// What an earlier attempt inserted is not inserted again, and keeps the
 	// instants it was taken in with: its pricing period and the session and
@@ -998,16 +1001,20 @@ func (b *UsageIntake) markUnposted(ctx context.Context, q *gen.Queries, accounts
 		for _, h := range held {
 			have[h.CustomerID] = h
 		}
+		write := gen.UpsertUsageUnpostedParams{MerchantID: b.merchant, Currency: currency, Now: b.now}
 		for _, c := range byCurrency[currency] {
 			since, due := mark(account{c, currency})
 			due = later(due, since.Add(time.Microsecond))
 			if h, ok := have[c]; ok && !since.Before(h.SinceAt) && !due.Before(h.DueAt) {
 				continue
 			}
-			if err := q.UpsertUsageUnposted(ctx, gen.UpsertUsageUnpostedParams{MerchantID: b.merchant, CustomerID: c, Currency: currency,
-				SinceAt: since, DueAt: due, Now: b.now}); err != nil {
-				return err
-			}
+			write.CustomerIds, write.SinceAts, write.DueAts = append(write.CustomerIds, c), append(write.SinceAts, since), append(write.DueAts, due)
+		}
+		if len(write.CustomerIds) == 0 {
+			continue
+		}
+		if err := q.UpsertUsageUnposted(ctx, write); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1094,28 +1101,73 @@ func (p periodAnchor) period(at time.Time) (time.Time, time.Time, error) {
 
 // periodAnchorFor is a customer's period anchor and boundary in a currency.
 func (s *MoneyService) periodAnchorFor(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string) (periodAnchor, error) {
-	cfg, cur, err := s.usageBillingConfig(ctx, currency)
-	if err != nil {
-		return periodAnchor{}, err
+	a := account{customerID, currency}
+	anchors, err := s.periodAnchors(ctx, q, merchantID, []account{a})
+	return anchors[a], err
+}
+
+// periodAnchors are accounts' period anchors and boundaries: the merchant's
+// terms are read once per currency, the customers' anchors in one read.
+func (s *MoneyService) periodAnchors(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, accounts []account) (map[account]periodAnchor, error) {
+	out := make(map[account]periodAnchor, len(accounts))
+	byCurrency := map[string][]uuid.UUID{}
+	var currencies []string
+	for _, a := range accounts {
+		if _, ok := byCurrency[a.currency]; !ok {
+			currencies = append(currencies, a.currency)
+		}
+		byCurrency[a.currency] = append(byCurrency[a.currency], a.customer)
 	}
-	if cur != nil {
-		row, err := s.ensureUsageBillingAccount(ctx, q, customerID, currency, cfg)
+	boundary := ""
+	for _, currency := range currencies {
+		customers := byCurrency[currency]
+		cfg, cur, err := s.usageBillingConfig(ctx, currency)
 		if err != nil {
-			return periodAnchor{}, err
+			return nil, err
 		}
-		return periodAnchor{anchor: *row.UsageBillingAnchor, boundary: BillingBoundaryAnniversary}, nil
-	}
-	boundary, err := s.billingPeriodBoundary(ctx)
-	if err != nil && !errors.Is(err, merchantconfig.ErrNoSettings) {
-		return periodAnchor{}, err
-	}
-	var anchor time.Time
-	if boundary == BillingBoundaryAnniversary {
-		if anchor, err = q.GetCustomerPeriodAnchor(ctx, gen.GetCustomerPeriodAnchorParams{MerchantID: merchantID, CustomerID: customerID, Currency: currency}); err != nil {
-			return periodAnchor{}, fmt.Errorf("customer period anchor: %w", err)
+		if cur != nil {
+			rows, err := q.ListCustomersMoneySettings(ctx, gen.ListCustomersMoneySettingsParams{MerchantID: merchantID, CustomerIds: customers,
+				RowLimit: int32(min(len(customers)*len(catalog.Currencies()), math.MaxInt32))}) // #nosec G115 -- clamped to int32
+			if err != nil {
+				return nil, err
+			}
+			have := map[uuid.UUID]gen.BillingMoneySetting{}
+			for _, r := range rows {
+				if r.Currency == currency {
+					have[r.CustomerID] = r
+				}
+			}
+			for _, c := range customers {
+				row, ok := have[c]
+				if !ok || row.UsageBillingAnchor == nil || row.UsageNextBillAt == nil {
+					if row, err = s.ensureUsageBillingAccount(ctx, q, c, currency, cfg); err != nil {
+						return nil, err
+					}
+				}
+				out[account{c, currency}] = periodAnchor{anchor: *row.UsageBillingAnchor, boundary: BillingBoundaryAnniversary}
+			}
+			continue
+		}
+		if boundary == "" {
+			if boundary, err = s.billingPeriodBoundary(ctx); err != nil && !errors.Is(err, merchantconfig.ErrNoSettings) {
+				return nil, err
+			}
+		}
+		if boundary != BillingBoundaryAnniversary {
+			for _, c := range customers {
+				out[account{c, currency}] = periodAnchor{boundary: boundary}
+			}
+			continue
+		}
+		rows, err := q.ListCustomerPeriodAnchors(ctx, gen.ListCustomerPeriodAnchorsParams{MerchantID: merchantID, Currency: currency, CustomerIds: customers})
+		if err != nil {
+			return nil, fmt.Errorf("customer period anchor: %w", err)
+		}
+		for _, r := range rows {
+			out[account{r.CustomerID, currency}] = periodAnchor{anchor: r.PeriodAnchor, boundary: boundary}
 		}
 	}
-	return periodAnchor{anchor: anchor, boundary: boundary}, nil
+	return out, nil
 }
 
 // UsageCurrencies answers what usage may be priced and spent in: a

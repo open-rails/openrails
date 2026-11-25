@@ -2,41 +2,21 @@ package hostconfig
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
-
-	"github.com/open-rails/authkit"
-
-	"github.com/open-rails/openrails/server"
 )
 
-// authPath is the auth section key an AUTH_* environment variable names:
-// its rest after AUTH_, matched against server.AuthConfig's keys (keys_path
-// is keys.path). A rest naming no key stays whole, and retiredAuth refuses
-// it.
-func authPath(rest string) string {
-	if p := yamlPath(reflect.TypeFor[server.AuthConfig](), rest); p != "" {
-		return p
-	}
-	return rest
-}
-
-// retiredAuth refuses every auth key outside server.AuthConfig, from the
-// file, a mounted secret file or the environment: OpenRails derives the
+// retiredAuth refuses every auth key but auth.keys.path, from the file, a
+// mounted secret file or the environment (AUTH_*): OpenRails derives the
 // rest of the server's AuthKit configuration.
 func retiredAuth(keys []string) error {
 	var found []string
 	for _, key := range keys {
 		rest, ok := strings.CutPrefix(key, "auth.")
-		if !ok || yamlPath(reflect.TypeFor[server.AuthConfig](), strings.ReplaceAll(rest, ".", "_")) == rest {
+		if !ok || key == "auth.keys.path" {
 			continue
 		}
-		// An environment variable's rest is its AuthKit key, underscored.
-		if p := yamlPath(reflect.TypeFor[authkit.Config](), strings.ReplaceAll(rest, ".", "_")); p != "" {
-			rest = p
-		}
-		line := fmt.Sprintf("auth.%s (AUTH_%s)", rest, strings.ToUpper(strings.ReplaceAll(rest, ".", "_")))
+		line := fmt.Sprintf("%s (AUTH_%s)", key, strings.ToUpper(strings.ReplaceAll(rest, ".", "_")))
 		if hint := retiredAuthHint(rest); hint != "" {
 			line += ": " + hint
 		}
@@ -69,30 +49,6 @@ func retiredAuthHint(key string) string {
 		return "staff sessions last 30 days"
 	case key == "active_key_id" || key == "active_private_key_pem" || key == "public_keys" || key == "keys_path" || section == "keys":
 		return "AuthKit's keys are keys.json and totp.key under auth.keys.path (AUTH_KEYS_PATH)"
-	}
-	return ""
-}
-
-func yamlPath(t reflect.Type, rest string) string {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return ""
-	}
-	for i := 0; i < t.NumField(); i++ {
-		name, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
-		if name == "" || name == "-" {
-			continue
-		}
-		if rest == name {
-			return name
-		}
-		if sub, ok := strings.CutPrefix(rest, name+"_"); ok {
-			if p := yamlPath(t.Field(i).Type, sub); p != "" {
-				return name + "." + p
-			}
-		}
 	}
 	return ""
 }

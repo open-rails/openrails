@@ -31,7 +31,7 @@ type MetricsRange struct {
 	Next string `json:"next,omitempty"`
 }
 
-// MetricsOrder invoices rows by a requested measure or dimension; Dir is asc
+// MetricsOrder orders rows by a requested measure or dimension; Dir is asc
 // (default) or desc.
 type MetricsOrder struct {
 	Measure   string `json:"measure,omitempty"`

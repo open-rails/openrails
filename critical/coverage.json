@@ -791,7 +791,7 @@
     {
       "id": "OR-J24-S34",
       "journey": "J24",
-      "name": "A sync settles all the usage it carries, a thousand customers' in one insert, refusing an item only on its own, and a resend settles each item once"
+      "name": "A full backlog of a thousand customers' usage settles whole across as many syncs as their time needs, each settling at least a chunk, every item once, and a resend charges nothing again"
     },
     {
       "id": "OR-J24-S36",
@@ -1036,7 +1036,7 @@
     {
       "id": "OR-J28-S04",
       "journey": "J28",
-      "name": "Duplicate and out-of-invoice callback settles once without regression"
+      "name": "Duplicate and out-of-order callback settles once without regression"
     },
     {
       "id": "OR-J28-S05",
@@ -1356,7 +1356,7 @@
     {
       "id": "OR-J01-S28",
       "journey": "J01",
-      "name": "Every account of the standalone server's own needs a second factor: a password alone gets no session until it enrolls an authenticator app, and every later sign-in asks for it"
+      "name": "Every account of the standalone server's own needs a second factor: a password alone gets no session until it enrolls an authenticator app, and every later sign-in asks for it; every sign-in proves a DPoP key, and its tokens are refused as bearer tokens"
     },
     {
       "id": "OR-J01-S30",
@@ -1371,7 +1371,7 @@
     {
       "id": "OR-J01-S32",
       "journey": "J01",
-      "name": "The console's sign-in offers the server's own accounts alone until root trusts an issuer, never a merchant's app, and then a button per root issuer whose sign-in a probe shows works: discovery naming it exactly, authorization, token and key endpoints, the code flow with PKCE S256 and published keys; a mismatched, unreachable, keyless or PKCE-less issuer is hidden and reported with why among the configuration's refusals"
+      "name": "The console signs staff in only with the server's own accounts: its config names no issuer even when root trusts applications, and none is probed or reported among the configuration's refusals"
     },
     {
       "id": "OR-J22-S05",
@@ -3696,7 +3696,7 @@
     {
       "id": "OR-J06-S84",
       "journey": "J06",
-      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and say what OpenRails derives instead; the key path alone loads"
+      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and name what is refused; the key path alone loads"
     },
     {
       "id": "OR-J06-S85",
@@ -3832,6 +3832,11 @@
       "id": "OR-J24-S69",
       "journey": "J24",
       "name": "With no clickhouse.url and nothing on the default's port, the standalone server serves with usage off and logs one line saying so; a clickhouse.url the operator names that does not answer keeps it from serving"
+    },
+    {
+      "id": "OR-J24-S70",
+      "journey": "J24",
+      "name": "A sync past its usage budget after a chunk starts no other: it answers through_n at the chunk's end, leaves the rest neither settled nor refused (a gap past them too), and the next sync continues there, refusing an item alone and the gap once all before it settled; a resend answers both settlements from their receipts"
     },
     {
       "id": "OR-J40-S20",

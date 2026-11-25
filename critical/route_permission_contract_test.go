@@ -154,7 +154,7 @@ func (p *catalogProbe) rootPerson(t *testing.T, role iam.Role) string {
 	t.Helper()
 	user := authtest.NewUser(t, p.auth)
 	authtest.GrantRole(t, p.auth, iam.RootGroup(), iam.UserSubject(user.ID), role)
-	return authtest.SignIn(t, p.auth, user).AccessToken
+	return signIn(t, p.auth, user).AccessToken
 }
 
 // probe sends every mounted catalog route on a tier that checks a permission:
@@ -715,7 +715,7 @@ func TestDirectoryAuthority(t *testing.T) {
 		require.NotEqual(t, hold.ID, again.ID, "a second erasure hold")
 		user := authtest.NewUser(t, a.auth)
 		authtest.GrantRole(t, a.auth, iam.RootGroup(), iam.UserSubject(user.ID), operator)
-		status, raw = a.request(t, "POST", "/v1/merchant/destructive-holds/"+again.ID.String()+"/clear", authtest.SignIn(t, a.auth, user).AccessToken, billing.ClearDestructiveHoldParams{Reason: "reviewed by the operator"})
+		status, raw = a.request(t, "POST", "/v1/merchant/destructive-holds/"+again.ID.String()+"/clear", signIn(t, a.auth, user).AccessToken, billing.ClearDestructiveHoldParams{Reason: "reviewed by the operator"})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Eventually(t, func() bool {
 			_, _, state := erasure(users[4])

@@ -78,10 +78,9 @@ server's resource, its `public_url`, and its permissions are what
 your issuer grants the client, within the merchant's owner role:
 
 ```go guide:standalone-client
-cc := backendCredentials(s)
 tokens := (&clientcredentials.Config{
-	ClientID: cc.ClientID, ClientSecret: cc.ClientSecret, TokenURL: cc.TokenURL, Scopes: cc.Scopes,
-	EndpointParams: url.Values{"resource": {cc.Resource}},
+	ClientID: backendClient, ClientSecret: s.ClientSecret, TokenURL: s.PublicURL + "/oauth2/token",
+	Scopes: []string{"openrails:merchant"}, EndpointParams: url.Values{"resource": {s.OpenRailsURL}},
 }).TokenSource(context.WithoutCancel(ctx)) // caches each token until it expires
 remote, err := openrails.NewRemote(s.OpenRailsURL, openrails.RemoteOptions{Credentials: map[billing.MerchantID]openrails.RemoteCredential{
 	s.Merchant: {Token: func(context.Context) (string, error) {
@@ -805,7 +804,7 @@ gate with its own lease.
 
 Usage needs the deployment's event store (ClickHouse). Without one `GET /v1/config` reports `usage: false`, and lease syncs, `GET /v1/me/usage`, customer limits and their adjustments, meter and limit edits and usage metrics answer `409 event_store_required` (`billing.ErrEventStoreRequired`); running charges and usage invoices still work.
 
-`SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends it for you. A batch job picks one `lse_` lease id for its stream and sends up to 1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes a resend harmless, a changed item is `422 idempotency_key_reused`, a gap `409 usage_out_of_order`, and items past `usage.through_n` are resent. An item may be up to 35 days old, and its `metadata` at most 1,024 bytes as compact JSON (`billing.MaxUsageMetadataBytes`; a longer one is refused alone, `400 invalid_param` naming `metadata`). Usage counts toward every limit that applies to it: in the windows current when its request was admitted (`admitted_at`, else when it arrives), and in the spend windows of the invoker attributes it reports (`trust_level`, `roles`, `resource`; the customer's own trust level when absent; none while their billing policy cannot be resolved, as in an FX outage). It is priced by the rate cards in force when it arrives. A priced meter that cannot price an item refuses it alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up to the policy's `bad_spend_windows`, never charged to a delegated invoker, and what grace leaves posts at once.
+`SyncLeases` (`POST /v1/app/leases/sync`) is the only usage intake; a gate sends it for you. A batch job picks one `lse_` lease id for its stream and sends up to 1,000 numbered items per sync, in order, and nothing else; the lease's highest settled number makes a resend harmless, a changed item is `422 idempotency_key_reused`, a gap `409 usage_out_of_order`. A sync settles as much as its time allows, at least its first chunk (up to 100 customers and 250 items); items past `usage.through_n` that it did not refuse are sent again. An item may be up to 35 days old, and its `metadata` at most 1,024 bytes as compact JSON (`billing.MaxUsageMetadataBytes`; a longer one is refused alone, `400 invalid_param` naming `metadata`). Usage counts toward every limit that applies to it: in the windows current when its request was admitted (`admitted_at`, else when it arrives), and in the spend windows of the invoker attributes it reports (`trust_level`, `roles`, `resource`; the customer's own trust level when absent; none while their billing policy cannot be resolved, as in an FX outage). It is priced by the rate cards in force when it arrives. A priced meter that cannot price an item refuses it alone (`422 usage_not_priced`). `outcome: failed` states its own cost: forgiven up to the policy's `bad_spend_windows`, never charged to a delegated invoker, and what grace leaves posts at once.
 
 Each item is one event in the event store, written before the sync answers: once it answers, every view, limit and balance reads it. A resend after a lost reply inserts nothing twice. While the store is out of reach a sync answers `503 service_unavailable` and settles nothing; resend it.
 

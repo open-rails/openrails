@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@openrails/auth-ui':
-        specifier: 1.53.0
-        version: 1.53.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        specifier: 1.57.0
+        version: 1.57.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@openrails/billing-ui':
         specifier: file:../../../web/billing-ui
-        version: file:../../../web/billing-ui(@openrails/auth-ui@1.53.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
+        version: file:../../../web/billing-ui(@openrails/auth-ui@1.57.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)
       react:
         specifier: ^19.2.8
         version: 19.3.0
@@ -121,8 +121,8 @@ packages:
       '@emnapi/core': ^1.7.1 || 2.0.0-beta.2
       '@emnapi/runtime': ^1.7.1 || 2.0.0-beta.2
 
-  '@openrails/auth-ui@1.53.0':
-    resolution: {integrity: sha512-8Zvrpd1azQ9QWquNjfSzAhHn23eV9ClEYBhgxpFdTzMSORIGAX4ZIT1RI2DO8WGORh8RC6LjcFRyfxnyej0kpw==}
+  '@openrails/auth-ui@1.57.0':
+    resolution: {integrity: sha512-cRKYlUa+3BcM5BoQa+ltjKt9ZfAa4YC1Rey9/0Qr/nzQXFgj3RX7Sl65JRfss+QMiKxTMo/mVpBMNGXiB2KA6g==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@solana/wallet-adapter-react': '>=0.15 <1'
@@ -136,7 +136,7 @@ packages:
     resolution: {directory: ../../../web/billing-ui, type: directory}
     engines: {node: '>=22.12.0'}
     peerDependencies:
-      '@openrails/auth-ui': '>=1.53.0 <2'
+      '@openrails/auth-ui': '>=1.56.0 <2'
       '@tanstack/react-query': '>=5 <6'
       react: '>=19 <20'
       react-dom: '>=19 <20'
@@ -881,7 +881,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@openrails/auth-ui@1.53.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@openrails/auth-ui@1.57.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@hugeicons/core-free-icons': 4.3.5
@@ -897,7 +897,7 @@ snapshots:
       - '@types/react'
       - date-fns
 
-  '@openrails/billing-ui@file:../../../web/billing-ui(@openrails/auth-ui@1.53.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
+  '@openrails/billing-ui@file:../../../web/billing-ui(@openrails/auth-ui@1.57.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@16.13.1)(react@19.3.0)(redux@5.0.1)':
     dependencies:
       '@base-ui/react': 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@basis-theory/web-elements': 3.2.0
@@ -918,7 +918,7 @@ snapshots:
       tailwind-merge: 3.7.0
       zod: 4.6.6
     optionalDependencies:
-      '@openrails/auth-ui': 1.53.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@openrails/auth-ui': 1.57.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
     transitivePeerDependencies:
       - '@date-fns/tz'
       - '@tanstack/react-start'

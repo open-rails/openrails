@@ -369,7 +369,7 @@ func TestProviderTime(t *testing.T) {
 		// now.
 		reads := func(from int) (bounded, open []string) {
 			for _, q := range p.core.Searches()[from:] {
-				if q.Get("start_date") == "" || q.Get("subscription_id") != "" || q.Get("transaction_id") != "" || q.Get("invoice_id") != "" {
+				if q.Get("start_date") == "" || q.Get("subscription_id") != "" || q.Get("transaction_id") != "" || q.Get("order_id") != "" {
 					continue
 				}
 				if q.Get("end_date") != "" {

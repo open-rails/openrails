@@ -138,38 +138,67 @@ func (w *standaloneWorld) request(t *testing.T, method, path, token string, body
 	t.Helper()
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(t.Context(), method, w.URL+path, bytes.NewReader(raw))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	require.NoError(t, err)
-	defer response.Body.Close()
-	data, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	return response.StatusCode, data
+	status, _, data := w.exchange(t, method, path, token, raw, map[string]string{"Content-Type": "application/json"})
+	return status, data
 }
 
 // send is a bodiless request with headers, answering the response's.
 func (w *standaloneWorld) send(t *testing.T, method, path, token string, headers map[string]string) (int, http.Header, []byte) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), method, w.URL+path, nil)
-	require.NoError(t, err)
+	return w.exchange(t, method, path, token, nil, headers)
+}
+
+// exchange sends one request, and once more with the server's DPoP nonce
+// when a bound token's proof needs one (RFC 9449 §8), as a browser does.
+func (w *standaloneWorld) exchange(t *testing.T, method, path, token string, body []byte, headers map[string]string) (int, http.Header, []byte) {
+	t.Helper()
+	nonce := ""
+	for attempt := 0; ; attempt++ {
+		var reader io.Reader
+		if body != nil {
+			reader = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(t.Context(), method, w.URL+path, reader)
+		require.NoError(t, err)
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
+		w.authorize(t, req, token, nonce)
+		response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+		require.NoError(t, err)
+		data, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		require.NoError(t, err)
+		if next := response.Header.Get("DPoP-Nonce"); attempt == 0 && response.StatusCode == http.StatusUnauthorized && next != "" && confirmation(token) != "" {
+			nonce = next
+			continue
+		}
+		return response.StatusCode, response.Header, data
+	}
+}
+
+// authorize presents token on req as a browser does: a token the server's
+// AuthKit bound to a DPoP key goes with a fresh proof (with nonce, when the
+// server asked for one) the fixture makes, as it holds the key; any other
+// token as Bearer.
+func (w *standaloneWorld) authorize(t *testing.T, req *http.Request, token, nonce string) {
+	t.Helper()
+	if token == "" {
+		return
+	}
+	if confirmation(token) == "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+		return
+	}
+	target := *req.URL
+	target.RawQuery = ""
+	var headers map[string]string
+	w.command(t, map[string]any{"Op": "dpop", "Body": map[string]string{"Method": req.Method, "URL": target.String(), "Token": token, "Nonce": nonce}}, &headers)
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	require.NoError(t, err)
-	defer response.Body.Close()
-	data, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	return response.StatusCode, response.Header, data
 }
+
 func (w *standaloneWorld) command(t *testing.T, in any, out any) {
 	t.Helper()
 	data, err := json.Marshal(in)

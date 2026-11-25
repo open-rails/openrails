@@ -135,10 +135,11 @@ func TestWorkerProcess(t *testing.T) {
 		signer, err := keys.SignerFromKey("critical-issuer", ed25519.PrivateKey(config.HTTPAuthPrivate))
 		require.NoError(t, err)
 		realAuth, _ = authtest.New(t, authtest.WithConfig(func(c *authkit.Config) {
-			c.DefaultTenantID = config.HTTPAuthTenant
+			// The parent's directory: merchants bind one per tenant.
+			c.Tenancy, c.DefaultTenantID = authkit.TenancyMulti, config.HTTPAuthTenant
 			c.Database.Schema, c.Database.RiverSchema = config.Config.Database.Schema+"_auth", config.Config.Database.Schema+"_auth"
 			c.Roles = roles
-			c.TwoFactor.Mode = iam.TwoFactorDisabled
+			c.TwoFactor = iam.TwoFactorDisabled
 		}), authtest.WithDeps(func(d *authkit.Deps) {
 			d.Postgres = pool
 			d.KeySource = keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}

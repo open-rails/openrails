@@ -142,7 +142,7 @@ type SortedTimeID struct {
 	ID   uuid.UUID `json:"i"`
 }
 
-// AfterSorted reads a SortedTimeID cursor of invoice sort as a keyset query's
+// AfterSorted reads a SortedTimeID cursor of order sort as a keyset query's
 // nullable arguments: both nil on the first page.
 func AfterSorted(cursor, sort string) (at *time.Time, id *uuid.UUID, err error) {
 	var position SortedTimeID

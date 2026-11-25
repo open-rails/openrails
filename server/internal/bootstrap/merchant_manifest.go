@@ -289,11 +289,11 @@ func remoteApplicationStaticPublicKeys(app *RemoteApplicationConfig) []iam.Remot
 	return out
 }
 
-// configureMerchantRemoteApplication registers or updates the merchant's
-// manifest remote_application under its group, holding the merchant owner role:
-// full `merchant:*` authority over this merchant alone. The system registers
-// it (trust root manual). opts places it in the merchant's creation
-// transaction.
+// configureMerchantRemoteApplication declares the merchant's manifest
+// remote_application in its group, holding the merchant owner role: full
+// `merchant:*` authority over this merchant alone. The operator declares it,
+// so its keys may be on a private network. opts places it in the merchant's
+// creation transaction.
 func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.ControlPlane, group iam.GroupRef, app *RemoteApplicationConfig, opts ...authkit.Option) error {
 	if app == nil {
 		return nil
@@ -302,13 +302,9 @@ func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.Co
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: remote_application for group %s: %w", group.ID(), err)
 	}
-	core := cp.Core()
-	stored, err := core.UpsertRemoteApplication(ctx, iam.SystemIdentity(), group, ra, opts...)
-	if err != nil {
-		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", group.ID(), err)
-	}
-	if _, err := core.SetGroupRole(ctx, iam.SystemIdentity(), group, iam.RemoteApplicationSubject(stored.ID), controlplane.MerchantOwner, opts...); err != nil {
-		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", group.ID(), err)
+	ra.Role = controlplane.MerchantOwner
+	if err := cp.Core().DeclareRemoteApplications(ctx, group, []iam.RemoteApplication{ra}, opts...); err != nil {
+		return fmt.Errorf("merchant bootstrap: declare remote_application for group %s: %w", group.ID(), err)
 	}
 	return nil
 }

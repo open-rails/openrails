@@ -4,10 +4,11 @@ package admission
 
 import (
 	"context"
-	"errors"
+	"math"
+	"slices"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/google/uuid"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -88,36 +89,52 @@ func (p ResolvedPolicy) RateWindow() time.Duration {
 // default. None yields a zero ResolvedPolicy, which the admission path reads as
 // outstanding-cap semantics over the payer's own arrears credit limit.
 func (s *BillingPolicyStore) Resolve(ctx context.Context, payer identity.CustomerID, tier string) (ResolvedPolicy, error) {
-	tid, err := merchant.Require(ctx)
+	r, err := s.resolver(ctx, []uuid.UUID{payer.UUID()})
 	if err != nil {
 		return ResolvedPolicy{}, err
+	}
+	return r.resolve(payer.UUID(), tier), nil
+}
+
+// policyResolver resolves payers' policies from one read of the merchant's
+// settings and of the payers' own assignments.
+type policyResolver struct {
+	settings merchantconfig.Settings
+	assigned map[uuid.UUID]string
+}
+
+func (s *BillingPolicyStore) resolver(ctx context.Context, payers []uuid.UUID) (*policyResolver, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
 	}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 	if err != nil {
-		return ResolvedPolicy{}, err
+		return nil, err
 	}
-	if len(settings.Policies) == 0 {
-		return ResolvedPolicy{}, nil
+	r := &policyResolver{settings: settings, assigned: map[uuid.UUID]string{}}
+	ids := slices.DeleteFunc(slices.Clone(payers), func(id uuid.UUID) bool { return id == uuid.Nil })
+	if len(settings.Policies) == 0 || len(ids) == 0 {
+		return r, nil
 	}
-	var assigned string
-	if !payer.IsZero() {
-		err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-			v, err := s.db.Gen(ctx).GetCustomerBillingPolicy(ctx, gen.GetCustomerBillingPolicyParams{MerchantID: tid.UUID(), CustomerID: payer.UUID()})
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil
-			}
-			if v != nil {
-				assigned = *v
-			}
-			return err
-		})
-		if err != nil {
-			return ResolvedPolicy{}, err
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		rows, err := s.db.Gen(ctx).ListCustomerBillingPolicyAssignments(ctx, gen.ListCustomerBillingPolicyAssignmentsParams{MerchantID: tid.UUID(),
+			CustomerIds: ids, RowLimit: int32(min(len(ids), math.MaxInt32))}) // #nosec G115 -- clamped to int32
+		for _, row := range rows {
+			r.assigned[row.CustomerID] = row.PolicyName
 		}
-	}
-	name, body, ok, _ := settings.Policy(assigned, tier)
+		return err
+	})
+	return r, err
+}
+
+// declares reports whether the merchant declares any policy.
+func (r *policyResolver) declares() bool { return len(r.settings.Policies) > 0 }
+
+func (r *policyResolver) resolve(payer uuid.UUID, tier string) ResolvedPolicy {
+	name, body, ok, _ := r.settings.Policy(r.assigned[payer], tier)
 	if !ok {
-		return ResolvedPolicy{}, nil
+		return ResolvedPolicy{}
 	}
 	return ResolvedPolicy{
 		Name:                      name,
@@ -131,7 +148,7 @@ func (s *BillingPolicyStore) Resolve(ctx context.Context, payer identity.Custome
 		CollectionThresholdAmount: body.CollectionThresholdAmount,
 		DelinquencyGraceDays:      body.DelinquencyGraceDays,
 		DelinquencyAmountFloor:    body.DelinquencyAmountFloor,
-	}, nil
+	}
 }
 
 func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {

@@ -48,7 +48,7 @@ func invoicePaymentBrowser(t *testing.T, browserCase string) (*solanaWorld, bill
 		_ = json.NewEncoder(w).Encode(map[string]string{"invoiceId": invoice.ID.String(), "token": s.aliceToken})
 	})
 	mux.HandleFunc("GET /app.js", func(w http.ResponseWriter, r *http.Request) { http.ServeFile(w, r, app) })
-	mux.Handle("/v1/", api)
+	mux.Handle("/v1/", browserSession(t, s.auth, api))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.FileServer(http.Dir(filepath.Dir(app))).ServeHTTP(w, r)

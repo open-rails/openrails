@@ -2,8 +2,10 @@
 package openrailsfiber
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -37,12 +39,20 @@ func mount(app *fiber.App, routes []openrails.Route) error {
 		}
 	}
 	for _, route := range routes {
-		h := adaptor.HTTPHandlerWithContext(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		adapted := adaptor.HTTPHandlerWithContext(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ctx, ok := adaptor.LocalContextFromHTTPRequest(r); ok {
 				r = r.WithContext(ctx)
+				if original, ok := ctx.Value(originalTarget{}).(string); ok {
+					keepSpelling(r, original)
+				}
 			}
 			route.Handler.ServeHTTP(w, r)
 		}))
+		h := func(c fiber.Ctx) error {
+			// A copy: the request line's storage is rewritten to the routed path.
+			c.SetContext(context.WithValue(c.Context(), originalTarget{}, strings.Clone(c.OriginalURL())))
+			return adapted(c)
+		}
 		methods := []string{route.Method}
 		if route.Method == http.MethodGet && !heads[route.Path] {
 			methods = append(methods, http.MethodHead)
@@ -69,4 +79,18 @@ func nativePath(path string) string {
 		}
 	}
 	return strings.Join(parts, "/")
+}
+
+// originalTarget carries the request line as the client sent it.
+type originalTarget struct{}
+
+// keepSpelling keeps the escaped path the client sent where Fiber hands on
+// the equivalent path it routed ("%69n_" as "in_"), as net/http keeps it in
+// RawPath: a DPoP proof names the client's spelling (RFC 9449 §4.3).
+func keepSpelling(r *http.Request, original string) {
+	u, err := url.ParseRequestURI(original)
+	if err != nil || u.Path != r.URL.Path {
+		return
+	}
+	r.URL.RawPath = u.RawPath
 }

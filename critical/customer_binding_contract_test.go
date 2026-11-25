@@ -85,7 +85,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 			mux.Handle(route.Method+" "+route.Path, route.Handler)
 		}
 		request := httptest.NewRequest(http.MethodGet, "/account/links/"+link+"/me/invoices/"+invoice.ID.String(), nil)
-		request.Header.Set("Authorization", "Bearer "+a.aliceToken)
+		present(t, a.auth, request, a.aliceToken)
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, request)
 		require.EqualValues(t, 1, credential.calls.Load(), "the actual credential is authenticated once")
@@ -95,7 +95,8 @@ func TestCustomerBindingContracts(t *testing.T) {
 		require.Equal(t, customer, got.CustomerID)
 		require.NotEqual(t, a.alice.ID, got.CustomerID.String())
 		require.Equal(t, invoice.ID, got.ID)
-		server := httptest.NewServer(mux)
+		// The built SDK in node is a browser holding alice's key.
+		server := httptest.NewServer(browserSession(t, a.auth, mux))
 		defer server.Close()
 		a.server = server
 		status, raw := a.request(t, http.MethodGet, request.URL.Path, a.aliceToken, nil)
@@ -107,7 +108,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 			sdk, err = filepath.Abs("../web/billing-ui/dist/client.js")
 			require.NoError(t, err)
 		}
-		sdkInput, err := json.Marshal(map[string]string{"sdk": sdk, "base": server.URL + "/account/links/" + link, "token": a.aliceToken, "order": invoice.ID.String(), "customer": customer.String()})
+		sdkInput, err := json.Marshal(map[string]string{"sdk": sdk, "base": server.URL + "/account/links/" + link, "token": a.aliceToken, "invoice": invoice.ID.String(), "customer": customer.String()})
 		require.NoError(t, err)
 		sdkCall := exec.CommandContext(t.Context(), "node", "customer_binding_sdk.mjs")
 		sdkCall.Stdin = bytes.NewReader(sdkInput)
@@ -268,7 +269,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, status, string(raw))
 		require.Contains(t, string(raw), "step_up_required")
 		require.Empty(t, provider.effects(t))
-		fresh := authtest.SignIn(t, a.auth, a.alice).AccessToken
+		fresh := signIn(t, a.auth, a.alice).AccessToken
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)

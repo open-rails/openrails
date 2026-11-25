@@ -46,7 +46,7 @@ func NormalizeStripeCard(d StripeCardDetails) *models.Card {
 }
 
 // SnapshotPaymentCard fills card_brand/card_last4 on any matching Stripe payment
-// rows that don't yet have them. Idempotent and invoice-independent: whichever of
+// rows that don't yet have them. Idempotent and order-independent: whichever of
 // charge.succeeded / invoice.paid / the backfill completes last fills the gap.
 func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, card *models.Card) error {
 	if database == nil || card == nil || len(txnIDs) == 0 {

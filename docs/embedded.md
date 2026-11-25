@@ -314,8 +314,12 @@ whether they hold a permission in a scope; OpenRails decides what to admit and
 answers every refusal itself (401 with `WWW-Authenticate`, 403
 `permission_required` or `application_required`, 503 when your auth cannot answer).
 
-**With AuthKit**, pass `ak.Authenticator()` and build roles from OpenRails'
-permission constants, so a renamed one fails your build:
+**With AuthKit**, pass `ak.Authenticator()`. Its sign-in sessions are bound
+to the browser's DPoP key (RFC 9449): the browser calls your mount with
+auth-ui's `authFetch`, which adds each request's proof, and the proof names the
+path the browser called, so mount with `Prefix` rather than behind a stripped
+prefix. Build roles from OpenRails' permission constants, so a renamed one fails
+your build:
 
 ```go guide:embedded-roles
 // OpenRails' permissions, by its own names. Held on root, they reach every

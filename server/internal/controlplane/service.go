@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/internal/merchants"
 
@@ -19,7 +18,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/shared/iputil"
@@ -38,9 +36,9 @@ type ControlPlane struct {
 	registration iam.RegistrationMode
 	// console is Options.Console.
 	console bool
-	// secondFactor: AuthKit's accounts need a second factor (TwoFactor.Mode
-	// is not disabled); totp: authenticator apps are one of its methods.
-	secondFactor, totp bool
+	// secondFactor: AuthKit's accounts need a second factor (TwoFactor is not
+	// disabled).
+	secondFactor bool
 	// merchantCreation is the hosted policy for user-claimed merchant names
 	// (or#914); nil otherwise.
 	merchantCreation *MerchantCreationConfig
@@ -61,9 +59,6 @@ type ControlPlane struct {
 // Options is what the server decides about its control plane and its
 // AuthKit beside the engine's configuration.
 type Options struct {
-	// KeysPath is the directory of AuthKit's keys.json and totp.key; empty is
-	// /vault/auth, or development keys for a loopback issuer.
-	KeysPath string
 	// Naming is the rename policy for merchant names.
 	Naming billing.NamingConfig
 	// MerchantCreation is the hosted policy for merchant names users claim
@@ -80,15 +75,6 @@ type Options struct {
 // ConsoleClientID is the admin console's public OAuth client at the server's
 // AuthKit, and its client id at every trusted issuer staff sign in at.
 const ConsoleClientID = adminconsole.ClientID
-
-// StaffSessionLifetime is how long a sign-in to the server's own accounts
-// lasts.
-const StaffSessionLifetime = 30 * 24 * time.Hour
-
-// AccessTokenTTL is how long the access tokens of the server's resource
-// last: customer tokens redeemed from a merchant backend's assertion and
-// console tokens.
-const AccessTokenTTL = 15 * time.Minute
 
 // merchantCeiling is what a token granted openrails:merchant may hold: every
 // merchant permission in its merchant's group and, for a person, OpenRails'
@@ -116,7 +102,8 @@ var ResourceScopes = map[string][]string{
 // three steps: the facts its settings already state, the rules of the
 // server's own accounts (staff, by invitation, with a second factor), then,
 // after opts.Configure, the product's invariants. Its jobs run on the
-// engine's River fleet.
+// engine's River fleet. Keys are AuthKit's own (Deps.KeySource; nil reads
+// /vault/auth, or generates development keys for a loopback issuer).
 func AuthKit(cfg *billing.Config, opts Options) (authkit.Config, error) {
 	if cfg == nil {
 		return authkit.Config{}, errors.New("controlplane: the engine's configuration is required")
@@ -126,22 +113,14 @@ func AuthKit(cfg *billing.Config, opts Options) (authkit.Config, error) {
 		return authkit.Config{}, fmt.Errorf("controlplane: public_url %q must be an https URL, or http on a loopback host: it is the server's issuer and resource", cfg.PublicURL)
 	}
 	var a authkit.Config
-	a.Token.Issuer = base
-	a.Resource.ID, a.Resource.PublicURL = base, base
-	a.Frontend.BaseURL = origin(base)
-	a.Keys.Path = strings.TrimSpace(opts.KeysPath)
+	a.Issuer = base
+	a.Resource.ID = base
 	a.Database.Schema = config.SchemaName(cfg) + "_auth"
-	// Everything is local to a loopback issuer. Elsewhere an application's
-	// keys on a private network are the operator's to declare (Configure).
-	a.Token.AllowPrivateNetworkJWKS = loopback(base)
-
-	a.Registration.NativeUserMode = iam.RegistrationModeInviteOnly
-	a.Registration.Verification = iam.RegistrationVerificationRequired
-	a.TwoFactor.Mode = iam.TwoFactorRequired
-	a.TwoFactor.Methods = []iam.TwoFactorMethod{iam.TwoFactorTOTP}
-	a.Token.RefreshTokenDuration = StaffSessionLifetime
+	a.Registration = iam.RegistrationModeInviteOnly
+	a.TwoFactor = iam.TwoFactorRequired
 	if opts.Console {
-		consoleFrontend(&a.Frontend)
+		// AuthKit's emailed links land on the console's pages.
+		a.FrontendURL = origin(base) + adminconsole.Path
 	}
 
 	if opts.Configure != nil {
@@ -151,8 +130,7 @@ func AuthKit(cfg *billing.Config, opts Options) (authkit.Config, error) {
 		return authkit.Config{}, err
 	}
 	a.Roles = Roles
-	a.APIKeys.Prefix = APIKeyPrefix
-	a.Token.IssuedAudiences = []string{billingauth.TokenAudience}
+	a.APIKeyPrefix = APIKeyPrefix
 	a.Database.RiverSchema = config.RiverSchemaName(cfg)
 	// The billing scopes keep their fixed permission ceilings beside a
 	// hosted product's own; copies, so the globals never change.
@@ -164,9 +142,6 @@ func AuthKit(cfg *billing.Config, opts Options) (authkit.Config, error) {
 		scopes[name] = slices.Clone(permissions)
 	}
 	a.Resource.Scopes = scopes
-	if a.AuthorizationServer.AccessTokenTTL == 0 {
-		a.AuthorizationServer.AccessTokenTTL = AccessTokenTTL
-	}
 	if opts.Console {
 		if err := declareConsoleClient(&a); err != nil {
 			return authkit.Config{}, err
@@ -180,12 +155,8 @@ func AuthKit(cfg *billing.Config, opts Options) (authkit.Config, error) {
 	// ranges, whose CF-Connecting-IP AuthKit takes.
 	http.TrustedProxies, http.CloudflareProxies, http.DirectPeerIP = slices.Clone(cfg.TrustedProxies), slices.Clone(iputil.CloudflareRanges), false
 	if http.Groups == nil {
-		http.Groups = routeGroups(a.Registration.NativeUserMode, a.Resource.Enabled())
+		http.Groups = routeGroups(a.Registration, a.Resource.Enabled())
 	}
-	http.APIPath = authAPIPath(a.Token.Issuer)
-	// Same-origin browser clients, auth-ui among them, keep refresh
-	// credentials in AuthKit's protected cookie, not in script.
-	http.RefreshCookie = true
 	a.HTTP = &http
 	return a, nil
 }
@@ -265,7 +236,7 @@ func (c *ControlPlane) TokenEndpoint() string {
 
 // validate refuses registration the server cannot serve.
 func validate(auth authkit.Config, opts Options) error {
-	switch mode := auth.Registration.NativeUserMode; mode {
+	switch mode := auth.Registration; mode {
 	case iam.RegistrationModeInviteOnly, iam.RegistrationModeClosed:
 	case iam.RegistrationModeOpen:
 		if opts.MerchantCreation == nil {
@@ -275,12 +246,6 @@ func validate(auth authkit.Config, opts Options) error {
 		return fmt.Errorf("controlplane: native registration mode %q is not one of open, invite_only, closed", mode)
 	}
 	return nil
-}
-
-// consoleFrontend points AuthKit's emailed links at the console's landings.
-func consoleFrontend(front *authkit.FrontendConfig) {
-	front.InvitePath, front.PasswordResetPath = "/admin/invite", "/admin/reset"
-	front.VerifyPath, front.PasswordlessPath = "/admin/verify", "/admin/passwordless"
 }
 
 // New is the control plane over client, the AuthKit client built from
@@ -310,10 +275,10 @@ func New(logger *slog.Logger, client *authkit.Client, cfg *billing.Config, auth 
 		return nil, fmt.Errorf("controlplane: naming policy: %w", err)
 	}
 	return &ControlPlane{
-		client: client, issuer: strings.TrimSpace(auth.Token.Issuer), registration: auth.Registration.NativeUserMode,
-		console: opts.Console, secondFactor: auth.TwoFactor.Mode != iam.TwoFactorDisabled,
-		totp: len(auth.TwoFactor.Methods) == 0 || slices.Contains(auth.TwoFactor.Methods, iam.TwoFactorTOTP), merchantCreation: opts.MerchantCreation, merchantCreationPattern: pattern, naming: naming,
-		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Token.Issuer),
+		client: client, issuer: strings.TrimSpace(auth.Issuer), registration: auth.Registration,
+		console: opts.Console, secondFactor: auth.TwoFactor != iam.TwoFactorDisabled,
+		merchantCreation: opts.MerchantCreation, merchantCreationPattern: pattern, naming: naming,
+		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Issuer),
 		Log: logger,
 	}, nil
 }

@@ -1,6 +1,6 @@
 // Package leases syncs gates' leases: in one transaction per sync it settles
-// their usage in order and keeps their in-flight reports; once it committed
-// it answers views of the customers they serve.
+// their usage in order, as far as its time allows, and keeps their in-flight
+// reports; once it committed it answers views of the customers they serve.
 //
 // A sync takes no customer's lock. Its transaction locks its own lease row
 // and shares the merchant's catalog fence; its intake is append-only (events
@@ -37,6 +37,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/eventstore"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/admission"
@@ -66,7 +67,21 @@ const (
 	// lockBudget is how long a sync's statement may wait for a lock: a
 	// posting holding an unposted mark, or a customer whose window opens.
 	lockBudget = workBudget - 500*time.Millisecond
+	// usageChunkItems is the most items one chunk of usage takes in.
+	usageChunkItems = 250
 )
+
+// A sync settles its new usage in chunks of at most UsageChunkCustomers
+// customers, each one intake, and starts no chunk after the first once
+// UsageBudget of it has passed: the rest is left for the next sync. A chunk
+// takes well under commitMargin.
+const (
+	UsageBudget         = 2 * time.Second
+	UsageChunkCustomers = 100
+)
+
+// FailpointKind names a lease sync at failpoint.AfterChunk.
+const FailpointKind = "lease-sync"
 
 // Syncer syncs leases of the context's merchant.
 type Syncer struct {
@@ -232,10 +247,12 @@ func (s Syncer) Sync(ctx context.Context, p billing.SyncLeasesParams) (*billing.
 // lockBudget: it committed nothing and is sent again.
 var errLockBudget = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the sync could not take its locks in time; retry it")
 
-// lockTimedOut reports a statement that waited out lock_timeout.
+// lockTimedOut reports a statement that waited out lock_timeout, or was
+// chosen to break a deadlock: chunks of two syncs may take the same
+// customers' rows in different orders.
 func lockTimedOut(err error) bool {
 	var pg *pgconn.PgError
-	return errors.As(err, &pg) && pg.Code == "55P03"
+	return errors.As(err, &pg) && (pg.Code == "55P03" || pg.Code == "40P01")
 }
 
 func setLockTimeout(ctx context.Context, q *gen.Queries, d time.Duration) error {
@@ -281,10 +298,9 @@ type syncRun struct {
 	viewable map[string]bool
 }
 
-// prefix is the run of new usage items a sync settles, in one intake (one
-// event store insert): from first, the items whose numbers follow on (end
-// exclusive). gap is an item at end that skips a number. A gate reports
-// none of them in flight, so all of them settle together.
+// prefix is the run of new usage items a sync may settle: from first, the
+// items whose numbers follow on (end exclusive). gap is an item at end that
+// skips a number.
 type prefix struct {
 	first, end int
 	gap        bool
@@ -503,16 +519,27 @@ func (r *syncRun) settle() (int64, []receipt, error) {
 			}
 		}
 	}
-	// New items settle in order, in one intake; a gap stops them once every
-	// item before it settled.
+	// New items settle in order, chunk by chunk while the sync has time; a
+	// gap stops them once every item before it settled.
 	var refusals []billing.LeaseUsageRefusal
 	refuseNew := func(i int, err error) {
 		status, details := Details(err)
 		refusals = append(refusals, billing.LeaseUsageRefusal{N: r.p.Usage[i].N, Status: status, Error: &details})
 	}
 	end := first
-	if end < r.prefix.end {
-		stop := r.prefix.end
+	for end < r.prefix.end {
+		if end > first {
+			if err := failpoint.Hit(r.ctx, failpoint.Site{Point: failpoint.AfterChunk, Kind: FailpointKind, Operation: r.lease.ID}); err != nil {
+				return 0, nil, err
+			}
+			if time.Since(r.began) > UsageBudget {
+				break
+			}
+		}
+		stop := r.chunkEnd(end)
+		if err := r.resolveSpend(r.p.Usage[end:stop]); err != nil {
+			return 0, nil, err
+		}
 		var items []money.UsageItem
 		var index []int
 		for i := end; i < stop; i++ {
@@ -619,13 +646,84 @@ func request(u billing.LeaseUsage, currency string) admission.AdmitRequest {
 		Roles: u.Roles, Resource: strings.TrimSpace(deref(u.Resource)), Currency: currency}
 }
 
+// chunkEnd is where the chunk of the prefix from start ends: at most
+// usageChunkItems items naming at most UsageChunkCustomers customers.
+func (r *syncRun) chunkEnd(start int) int {
+	seen := map[billing.CustomerID]bool{}
+	i := start
+	for ; i < r.prefix.end && i-start < usageChunkItems; i++ {
+		if c := r.p.Usage[i].CustomerID; !seen[c] {
+			if len(seen) == UsageChunkCustomers {
+				break
+			}
+			seen[c] = true
+		}
+	}
+	return i
+}
+
+// spendRequest is the admission request whose billing policy counts an
+// item's spend, and its key among the sync's policies; none for an item not
+// in a registry currency.
+func spendRequest(u billing.LeaseUsage) (string, admission.AdmitRequest, bool) {
+	currency := money.NormalizeCurrency(string(u.Currency))
+	if moneyutil.ValidateCurrency(currency) != nil {
+		return "", admission.AdmitRequest{}, false
+	}
+	req := request(u, currency)
+	roles := make([]string, len(req.Roles))
+	for i, role := range req.Roles {
+		roles[i] = role.String()
+	}
+	slices.Sort(roles)
+	return strings.Join([]string{u.CustomerID.String(), req.Invoker, req.InvokerType, req.TrustLevel, strings.Join(roles, ","), req.Resource, currency}, "\x00"), req, true
+}
+
+// resolveSpend resolves in one batch the billing policies of the items'
+// attributes the sync has not resolved yet. A policy that cannot be resolved
+// now (an FX outage, a policy the deployment cannot enforce) counts its
+// customer's usage in no spend window, as before usage had any: it still
+// settles.
+func (r *syncRun) resolveSpend(usage []billing.LeaseUsage) error {
+	var keys []string
+	var reqs []admission.AdmitRequest
+	asked := map[string]bool{}
+	for _, u := range usage {
+		if r.checkItem(u) != nil {
+			continue
+		}
+		key, req, ok := spendRequest(u)
+		if _, done := r.spend[key]; !ok || done || asked[key] {
+			continue
+		}
+		asked[key] = true
+		keys, reqs = append(keys, key), append(reqs, req)
+	}
+	if len(reqs) == 0 {
+		return nil
+	}
+	policies, errs, err := r.admitter.SpendPolicies(r.ctx, reqs)
+	if err != nil {
+		return err
+	}
+	for i, key := range keys {
+		if errs[i] != nil {
+			if !isolated(errs[i]) {
+				return errs[i]
+			}
+			policies[i] = nil
+		}
+		r.spend[key] = policies[i]
+	}
+	return nil
+}
+
 // usageItem is a lease's usage report as intake takes it, priced by the
 // cards in force and counted in the spend windows its attributes resolve to.
 func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 	if err := r.checkItem(u); err != nil {
 		return money.UsageItem{}, err
 	}
-	currency := money.NormalizeCurrency(string(u.Currency))
 	item := money.UsageItem{Customer: identity.CustomerID(u.CustomerID), Invoker: u.Invoker, Delegated: u.InvokerType == billing.InvokerTypeDelegated,
 		Currency: string(u.Currency), EventType: u.EventType, Dimensions: u.Dimensions, Metadata: u.Metadata, Amount: u.Amount,
 		Failed: u.Outcome == billing.UsageFailed, OccurredAt: u.OccurredAt, AdmittedAt: u.AdmittedAt, Source: u.Source, SourceID: u.SourceID}
@@ -639,33 +737,20 @@ func (r *syncRun) usageItem(u billing.LeaseUsage) (money.UsageItem, error) {
 			item.FailedKey = key
 		}
 	}
-	if moneyutil.ValidateCurrency(currency) != nil {
+	key, _, ok := spendRequest(u)
+	if !ok {
 		return item, nil
 	}
 	at := r.now
 	if u.AdmittedAt != nil && u.AdmittedAt.Before(r.now) {
 		at = u.AdmittedAt.UTC()
 	}
-	req := request(u, currency)
-	roles := make([]string, len(req.Roles))
-	for i, role := range req.Roles {
-		roles[i] = role.String()
-	}
-	slices.Sort(roles)
-	key := strings.Join([]string{u.CustomerID.String(), req.Invoker, req.InvokerType, req.TrustLevel, strings.Join(roles, ","), req.Resource, currency}, "\x00")
-	policy, ok := r.spend[key]
-	if !ok {
-		var err error
-		if policy, err = r.admitter.SpendPolicy(r.ctx, req); err != nil {
-			if !isolated(err) {
-				return money.UsageItem{}, err
-			}
-			// A policy that cannot be resolved now (an FX outage, a policy
-			// the deployment cannot enforce) counts this customer's usage in
-			// no spend window, as before usage had any: it still settles.
-			policy = nil
+	policy, resolved := r.spend[key]
+	if !resolved {
+		if err := r.resolveSpend([]billing.LeaseUsage{u}); err != nil {
+			return money.UsageItem{}, err
 		}
-		r.spend[key] = policy
+		policy = r.spend[key]
 	}
 	spend, err := policy.Windows(at)
 	if err != nil {

@@ -104,7 +104,7 @@ func isHistoryRead(r *http.Request) bool {
 		return false
 	}
 	_ = r.ParseForm()
-	return r.Form.Get("start_date") != "" && r.Form.Get("invoice_id") == "" && r.Form.Get("subscription_id") == "" &&
+	return r.Form.Get("start_date") != "" && r.Form.Get("order_id") == "" && r.Form.Get("subscription_id") == "" &&
 		r.Form.Get("customer_vault_id") == "" && r.Form.Get("transaction_id") == ""
 }
 

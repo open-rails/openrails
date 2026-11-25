@@ -53,8 +53,34 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		w := newStandaloneWorld(t, func(c map[string]any) { c["StaffMFA"] = true })
 		var user struct{ ID, Email, Password string }
 		w.command(t, map[string]any{"Op": "new-user"}, &user)
+		// The browser's key: a sign-in proves it, and the session's tokens
+		// go with its proofs.
+		key := authtest.NewDPoPKey(t)
+		call := func(path, token string, body any, prove bool) (int, []byte) {
+			data, err := json.Marshal(body)
+			require.NoError(t, err)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.URL+path, bytes.NewReader(data))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			switch {
+			case token != "":
+				key.Authorize(t, req, token, "")
+			case prove:
+				req.Header.Set("DPoP", key.Proof(t, http.MethodPost, w.URL+path, "", ""))
+			}
+			response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+			require.NoError(t, err)
+			defer response.Body.Close()
+			raw, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			return response.StatusCode, raw
+		}
+		credentials := map[string]string{"identifier": user.Email, "password": user.Password}
+		status, raw := call("/auth/v1/password/login", "", credentials, false)
+		require.Equal(t, http.StatusUnauthorized, status, "a sign-in proves a DPoP key: %s", raw)
+		require.Contains(t, string(raw), "sender_proof_required")
 		login := func() map[string]any {
-			status, raw := w.request(t, http.MethodPost, "/auth/v1/password/login", "", map[string]string{"identifier": user.Email, "password": user.Password})
+			status, raw := call("/auth/v1/password/login", "", credentials, true)
 			require.Equal(t, http.StatusOK, status, string(raw))
 			var out map[string]any
 			require.NoError(t, json.Unmarshal(raw, &out))
@@ -66,14 +92,16 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		step := first["enrollment"].(map[string]any)
 		require.Contains(t, step["allowed_methods"], "totp")
 		enrollment := step["token_set"].(map[string]any)["access_token"].(string)
-		status, raw := w.request(t, http.MethodGet, "/auth/v1/capabilities", "", nil)
+		status, raw = w.request(t, http.MethodGet, "/auth/v1/capabilities", "", nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Contains(t, string(raw), `"totp"`, "authenticator apps are offered")
 		status, raw = w.request(t, http.MethodPost, "/auth/v1/me/2fa/setup", enrollment, map[string]string{"method": "totp"})
+		require.Equal(t, http.StatusUnauthorized, status, "a bound token is no bearer: %s", raw)
+		status, raw = call("/auth/v1/me/2fa/setup", enrollment, map[string]string{"method": "totp"}, false)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var setup struct{ Secret string }
 		require.NoError(t, json.Unmarshal(raw, &setup))
-		status, raw = w.request(t, http.MethodPost, "/auth/v1/me/2fa/factors", enrollment, map[string]string{"method": "totp", "code": authtest.TOTPCode(t, setup.Secret, time.Now())})
+		status, raw = call("/auth/v1/me/2fa/factors", enrollment, map[string]string{"method": "totp", "code": authtest.TOTPCode(t, setup.Secret, time.Now())}, false)
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.Contains(t, string(raw), `"access_token"`, "enrolling finishes the sign-in")
 		second := login()
@@ -144,73 +172,22 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.Contains(t, string(raw), string(billing.CodeMerchantMismatch))
 	})
 
-	t.Run("OR-J01-S32/the-console-offers-only-trusted-issuers-whose-sign-in-works", func(t *testing.T) {
+	t.Run("OR-J01-S32/the-console-signs-staff-in-only-with-the-servers-own-accounts", func(t *testing.T) {
 		w := newStandaloneWorld(t, func(c map[string]any) { c["Console"] = true })
-		type button struct {
-			Key, URL, Name, Resource, Scope string
-			ClientID                        string `json:"client_id"`
-			RedirectURI                     string `json:"redirect_uri"`
-		}
-		read := func() (map[string]json.RawMessage, []button) {
-			status, raw := w.request(t, http.MethodGet, "/admin/config.json", "", nil)
-			require.Equal(t, http.StatusOK, status, string(raw))
-			var cfg map[string]json.RawMessage
-			require.NoError(t, json.Unmarshal(raw, &cfg))
-			var buttons []button
-			require.NoError(t, json.Unmarshal(cfg["issuers"], &buttons))
-			return cfg, buttons
-		}
-		// Nothing configured: the server's own accounts alone, and no
-		// merchant's app to look up.
-		cfg, buttons := read()
-		require.NotNil(t, buttons)
-		require.Empty(t, buttons)
+		// Root trusts applications, one working and one not: the console
+		// offers neither and the server probes neither.
+		trustApplication(t, w, "root", oidcIssuer(t, nil))
+		trustApplication(t, w, "root", oidcIssuer(t, func(m map[string]any) { m["issuer"] = "https://elsewhere.critical.invalid" }))
+		status, raw := w.request(t, http.MethodGet, "/admin/config.json", "", nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var cfg map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &cfg))
+		require.NotContains(t, cfg, "issuers")
 		require.NotContains(t, cfg, "app_sign_in")
 		require.Contains(t, string(cfg["exchange"]), `"openrails-console"`)
-		// Root's issuers: two that work, and four that would not.
-		working, second := oidcIssuer(t, nil), oidcIssuer(t, nil)
-		mismatched := oidcIssuer(t, func(m map[string]any) { m["issuer"] = "https://elsewhere.critical.invalid" })
-		plain := oidcIssuer(t, func(m map[string]any) { m["code_challenge_methods_supported"] = []string{"plain"} })
-		keyless := oidcIssuer(t, func(m map[string]any) { m["jwks_uri"] = m["issuer"].(string) + "/empty-jwks.json" })
-		gone := httptest.NewServer(http.NotFoundHandler())
-		unreachable := gone.URL
-		gone.Close()
-		for _, issuer := range []string{working, second, mismatched, plain, keyless, unreachable} {
-			trustApplication(t, w, "root", issuer)
-		}
-		// A merchant's own app is never a console button.
-		trustApplication(t, w, w.Merchants["beta"].ID.String(), oidcIssuer(t, nil))
-		require.Eventually(t, func() bool {
-			_, buttons = read()
-			return len(buttons) == 2
-		}, 30*time.Second, 200*time.Millisecond)
-		got := []string{buttons[0].URL, buttons[1].URL}
-		require.ElementsMatch(t, []string{working, second}, got)
-		for _, b := range buttons {
-			require.Equal(t, b.URL, b.Key)
-			require.Equal(t, strings.TrimPrefix(b.URL, "http://"), b.Name)
-			require.Equal(t, "openrails-console", b.ClientID)
-			require.Equal(t, w.URL, b.Resource)
-			require.Equal(t, "openid profile email openrails:merchant", b.Scope)
-			require.Equal(t, w.URL+"/admin/callback", b.RedirectURI)
-		}
-		// Each hidden issuer is a refusal the operator sees, with why.
 		var refusals map[string]string
 		w.command(t, map[string]any{"Op": "refusals"}, &refusals)
-		for issuer, why := range map[string]string{
-			mismatched:  `names the issuer "https://elsewhere.critical.invalid"`,
-			plain:       "PKCE S256",
-			keyless:     "has no keys",
-			unreachable: "OpenID Connect discovery",
-		} {
-			subject := "console.issuers." + issuer + ": "
-			at := strings.Index(refusals["configuration"], subject)
-			require.GreaterOrEqual(t, at, 0, "%s: %s", issuer, refusals["configuration"])
-			refusal, _, _ := strings.Cut(refusals["configuration"][at:], "; ")
-			require.Contains(t, refusal, why)
-		}
-		require.NotContains(t, refusals["configuration"], "console.issuers."+working+":")
-		require.NotContains(t, refusals["configuration"], "console.issuers."+second+":")
+		require.NotContains(t, refusals["configuration"], "console.issuers.")
 	})
 
 	t.Run("OR-J01-S30/run-time-applications-name-only-public-key-urls", func(t *testing.T) {
@@ -249,10 +226,10 @@ func TestStandaloneAuthSurface(t *testing.T) {
 			says  []string
 		}{
 			{"key", map[string]any{"auth": map[string]any{"password": map[string]any{"min_length": 12}}}, "", []string{"auth.password.min_length (AUTH_PASSWORD_MIN_LENGTH)", derived}},
-			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", []string{"auth.token.issuer (AUTH_TOKEN_ISSUER): set public_url", derived}},
-			{"private", nil, "AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS=true", []string{"auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)", derived}},
+			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", []string{"auth.token_issuer (AUTH_TOKEN_ISSUER)", derived}},
+			{"private", nil, "AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS=true", []string{"auth.token_allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)", derived}},
 			{"local", map[string]any{"local_sign_in": true}, "", []string{"local_sign_in / LOCAL_SIGN_IN was removed"}},
-			{"console", map[string]any{"admin_console": map[string]any{"issuers": map[string]any{}}}, "", []string{"admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed", "openrails-console"}},
+			{"console", map[string]any{"admin_console": map[string]any{"issuers": map[string]any{}}}, "", []string{"admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed", "the server's own accounts"}},
 		} {
 			cmd := hostCLICommand(t, w, c.extra, "book", "status")
 			if c.env != "" {

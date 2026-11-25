@@ -767,34 +767,36 @@ func (q *Queries) ShareUsageUnposted(ctx context.Context, arg ShareUsageUnposted
 const upsertUsageUnposted = `-- name: UpsertUsageUnposted :exec
 
 INSERT INTO billing.usage_unposted AS u (merchant_id, customer_id, currency, since_at, due_at, updated_at)
-VALUES ($1::uuid, $2::uuid, $3::text, $4::timestamptz,
-    $5::timestamptz, $6::timestamptz)
+SELECT $1::uuid, m.customer_id, $2::text, m.since_at, m.due_at, $3::timestamptz
+FROM unnest($4::uuid[], $5::timestamptz[], $6::timestamptz[]) AS m(customer_id, since_at, due_at)
+ORDER BY m.customer_id
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     since_at = LEAST(u.since_at, EXCLUDED.since_at), due_at = LEAST(u.due_at, EXCLUDED.due_at), updated_at = EXCLUDED.updated_at
 `
 
 type UpsertUsageUnpostedParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	SinceAt    time.Time
-	DueAt      time.Time
-	Now        time.Time
+	MerchantID  uuid.UUID
+	Currency    string
+	Now         time.Time
+	CustomerIds []uuid.UUID
+	SinceAts    []time.Time
+	DueAts      []time.Time
 }
 
 // What the ledger took of usage, which lives in the event store: who has
 // usage not yet posted, each posting, and the rate cards usage was priced
 // under.
-// Intake marks a customer's usage in a currency unposted, in the transaction
-// that commits it: the oldest instant and the earliest due date win.
+// Intake marks customers' usage in a currency unposted, in the transaction
+// that commits it, in customer order: the oldest instant and the earliest
+// due date win.
 func (q *Queries) UpsertUsageUnposted(ctx context.Context, arg UpsertUsageUnpostedParams) error {
 	_, err := q.db.Exec(ctx, upsertUsageUnposted,
 		arg.MerchantID,
-		arg.CustomerID,
 		arg.Currency,
-		arg.SinceAt,
-		arg.DueAt,
 		arg.Now,
+		arg.CustomerIds,
+		arg.SinceAts,
+		arg.DueAts,
 	)
 	return err
 }
