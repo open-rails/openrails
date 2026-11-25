@@ -81,75 +81,136 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.Nil(t, second["token_set"])
 	})
 
-	t.Run("OR-J01-S29/console-app-sign-in-is-found-by-merchant-name", func(t *testing.T) {
-		w := newStandaloneWorld(t, func(c map[string]any) { c["Console"] = true })
-		trust := func(merchant string) string {
-			var issuer string
-			metadata := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/.well-known/openid-configuration" {
-					http.NotFound(rw, r)
-					return
-				}
-				rw.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(rw).Encode(map[string]string{"issuer": issuer, "authorization_endpoint": issuer + "/oauth2/authorize", "token_endpoint": issuer + "/oauth2/token"})
-			}))
-			t.Cleanup(metadata.Close)
-			issuer = metadata.URL
-			_, signer, err := ed25519.GenerateKey(rand.Reader)
-			require.NoError(t, err)
-			der, err := x509.MarshalPKIXPublicKey(signer.Public())
-			require.NoError(t, err)
-			body, err := json.Marshal(iam.RemoteApplication{Issuer: issuer, Mode: iam.RemoteApplicationModeStatic, PublicKeys: []iam.RemoteApplicationKey{{KID: "app", PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}})
-			require.NoError(t, err)
-			var stored iam.RemoteApplication
-			w.command(t, map[string]any{"Op": "trust-application", "Merchant": merchant, "Body": json.RawMessage(body)}, &stored)
-			return issuer
+	t.Run("OR-J01-S31/a-merchants-own-site-runs-the-admin-screens-with-its-staff-token", func(t *testing.T) {
+		w := newStandaloneWorld(t)
+		// Each merchant has a customer.
+		for _, slug := range []string{"alpha", "beta"} {
+			status, raw := w.request(t, http.MethodGet, "/v1/me", w.Merchants[slug].CustomerToken, nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
 		}
-		beta, operators := trust(w.Merchants["beta"].ID.String()), trust("root")
+		alphaCustomer, betaCustomer := w.Merchants["alpha"].CustomerID.String(), w.Merchants["beta"].CustomerID.String()
+		// The merchant's app, its declared issuer, mints its staff member a
+		// token for the server: openrails:merchant and their permissions.
+		staff := func(permissions ...string) string {
+			var token billing.CustomerToken
+			w.command(t, map[string]any{"Op": "external-user-token", "Merchant": "alpha", "ID": uuid.NewString(), "Scopes": []string{billing.ScopeMerchant}, "Permissions": append([]string{}, permissions...)}, &token)
+			return token.AccessToken
+		}
+		const site = "https://shop.alpha.critical.invalid"
+		// The admin screens on the merchant's page call each staff group
+		// cross-origin: any origin, never with credentials.
+		for _, path := range []string{"/v1/admin/access", "/v1/admin/customers", "/v1/catalog/products", "/v1/merchant/psps", "/v1/metrics/schema"} {
+			status, headers, _ := w.send(t, http.MethodOptions, path, "", map[string]string{"Origin": site, "Access-Control-Request-Method": http.MethodGet, "Access-Control-Request-Headers": "authorization"})
+			require.Equal(t, http.StatusNoContent, status, path)
+			require.Equal(t, "*", headers.Get("Access-Control-Allow-Origin"), path)
+			require.Empty(t, headers.Get("Access-Control-Allow-Credentials"), path)
+			require.Contains(t, strings.ToLower(headers.Get("Access-Control-Allow-Headers")), "authorization", path)
+		}
+		reader := staff(string(billing.MerchantCustomerRead))
+		origin := map[string]string{"Origin": site}
+		status, headers, raw := w.send(t, http.MethodGet, "/v1/admin/access", reader, origin)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Equal(t, "*", headers.Get("Access-Control-Allow-Origin"))
+		var access billing.AdminAccess
+		require.NoError(t, json.Unmarshal(raw, &access))
+		require.Equal(t, billing.AccessRead, access.Admin)
+		require.Equal(t, billing.AccessNone, access.Catalog)
+		require.Equal(t, billing.AccessNone, access.MerchantConfig)
+		require.Equal(t, w.Merchants["alpha"].ID.String(), access.ScopeID)
+		status, _, raw = w.send(t, http.MethodGet, "/v1/admin/customers", reader, origin)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Contains(t, string(raw), alphaCustomer)
+		require.NotContains(t, string(raw), betaCustomer)
+		status, _, raw = w.send(t, http.MethodGet, "/v1/admin/customers/"+alphaCustomer, reader, origin)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		// A staff member without the permission is refused.
+		for _, token := range []string{staff(), staff(string(billing.MerchantCatalogRead))} {
+			status, _, raw = w.send(t, http.MethodGet, "/v1/admin/customers", token, origin)
+			require.Equal(t, http.StatusForbidden, status, string(raw))
+			require.Contains(t, string(raw), string(billing.CodePermissionRequired))
+		}
+		status, _, raw = w.send(t, http.MethodGet, "/v1/catalog/products", reader, origin)
+		require.Equal(t, http.StatusForbidden, status, string(raw))
+		// Another merchant's data stays out of reach: its customer is not
+		// found, a root: permission the app writes into its token reaches no
+		// merchant, and naming the other merchant refuses the request.
+		status, _, raw = w.send(t, http.MethodGet, "/v1/admin/customers/"+betaCustomer, reader, origin)
+		require.Equal(t, http.StatusNotFound, status, string(raw))
+		status, _, raw = w.send(t, http.MethodGet, "/v1/admin/customers", staff(string(billing.RootCustomerRead)), origin)
+		require.Equal(t, http.StatusForbidden, status, string(raw))
+		require.Contains(t, string(raw), string(billing.CodePermissionRequired))
+		status, _, raw = w.send(t, http.MethodGet, "/v1/admin/customers", reader, map[string]string{"Origin": site, "OpenRails-Expected-Merchant": w.Merchants["beta"].ID.String()})
+		require.Equal(t, http.StatusPreconditionFailed, status, string(raw))
+		require.Contains(t, string(raw), string(billing.CodeMerchantMismatch))
+	})
+
+	t.Run("OR-J01-S32/the-console-offers-only-trusted-issuers-whose-sign-in-works", func(t *testing.T) {
+		w := newStandaloneWorld(t, func(c map[string]any) { c["Console"] = true })
 		type button struct {
 			Key, URL, Name, Resource, Scope string
 			ClientID                        string `json:"client_id"`
+			RedirectURI                     string `json:"redirect_uri"`
 		}
-		status, raw := w.request(t, http.MethodGet, "/admin/config.json", "", nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		var cfg struct {
-			Issuers   []button `json:"issuers"`
-			AppSignIn bool     `json:"app_sign_in"`
-			Exchange  *struct {
-				ClientID string `json:"client_id"`
-			} `json:"exchange"`
-			LocalSignIn *bool `json:"local_sign_in"`
+		read := func() (map[string]json.RawMessage, []button) {
+			status, raw := w.request(t, http.MethodGet, "/admin/config.json", "", nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var cfg map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(raw, &cfg))
+			var buttons []button
+			require.NoError(t, json.Unmarshal(cfg["issuers"], &buttons))
+			return cfg, buttons
 		}
-		require.NoError(t, json.Unmarshal(raw, &cfg))
-		// The public page shows the deployment's own issuer, never a
-		// merchant's.
-		require.Len(t, cfg.Issuers, 1, string(raw))
-		require.Equal(t, operators, cfg.Issuers[0].URL)
-		require.NotContains(t, string(raw), beta)
-		require.NotContains(t, string(raw), "beta")
-		require.True(t, cfg.AppSignIn)
-		require.NotNil(t, cfg.Exchange, "the server's own accounts always sign staff in")
-		require.Equal(t, "openrails-console", cfg.Exchange.ClientID)
-		require.Nil(t, cfg.LocalSignIn)
-		// Naming the merchant finds its app's issuer.
-		status, raw = w.request(t, http.MethodGet, "/admin/sign-in?merchant=beta", "", nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		var found struct{ Issuers []button }
-		require.NoError(t, json.Unmarshal(raw, &found))
-		require.Len(t, found.Issuers, 1, string(raw))
-		got := found.Issuers[0]
-		require.Equal(t, beta, got.URL)
-		require.Equal(t, "beta", got.Name)
-		require.Equal(t, "openrails-console", got.ClientID)
-		require.Equal(t, w.URL, got.Resource)
-		require.Equal(t, "openid profile email openrails:merchant", got.Scope)
-		// A merchant whose issuers only sign assertions and an unknown name
-		// answer alike.
-		status, none := w.request(t, http.MethodGet, "/admin/sign-in?merchant=alpha", "", nil)
-		require.Equal(t, http.StatusNotFound, status, string(none))
-		status, unknown := w.request(t, http.MethodGet, "/admin/sign-in?merchant=no-such-merchant", "", nil)
-		require.Equal(t, http.StatusNotFound, status, string(unknown))
-		require.JSONEq(t, string(none), string(unknown))
+		// Nothing configured: the server's own accounts alone, and no
+		// merchant's app to look up.
+		cfg, buttons := read()
+		require.NotNil(t, buttons)
+		require.Empty(t, buttons)
+		require.NotContains(t, cfg, "app_sign_in")
+		require.Contains(t, string(cfg["exchange"]), `"openrails-console"`)
+		// Root's issuers: two that work, and four that would not.
+		working, second := oidcIssuer(t, nil), oidcIssuer(t, nil)
+		mismatched := oidcIssuer(t, func(m map[string]any) { m["issuer"] = "https://elsewhere.critical.invalid" })
+		plain := oidcIssuer(t, func(m map[string]any) { m["code_challenge_methods_supported"] = []string{"plain"} })
+		keyless := oidcIssuer(t, func(m map[string]any) { m["jwks_uri"] = m["issuer"].(string) + "/empty-jwks.json" })
+		gone := httptest.NewServer(http.NotFoundHandler())
+		unreachable := gone.URL
+		gone.Close()
+		for _, issuer := range []string{working, second, mismatched, plain, keyless, unreachable} {
+			trustApplication(t, w, "root", issuer)
+		}
+		// A merchant's own app is never a console button.
+		trustApplication(t, w, w.Merchants["beta"].ID.String(), oidcIssuer(t, nil))
+		require.Eventually(t, func() bool {
+			_, buttons = read()
+			return len(buttons) == 2
+		}, 30*time.Second, 200*time.Millisecond)
+		got := []string{buttons[0].URL, buttons[1].URL}
+		require.ElementsMatch(t, []string{working, second}, got)
+		for _, b := range buttons {
+			require.Equal(t, b.URL, b.Key)
+			require.Equal(t, strings.TrimPrefix(b.URL, "http://"), b.Name)
+			require.Equal(t, "openrails-console", b.ClientID)
+			require.Equal(t, w.URL, b.Resource)
+			require.Equal(t, "openid profile email openrails:merchant", b.Scope)
+			require.Equal(t, w.URL+"/admin/callback", b.RedirectURI)
+		}
+		// Each hidden issuer is a refusal the operator sees, with why.
+		var refusals map[string]string
+		w.command(t, map[string]any{"Op": "refusals"}, &refusals)
+		for issuer, why := range map[string]string{
+			mismatched:  `names the issuer "https://elsewhere.critical.invalid"`,
+			plain:       "PKCE S256",
+			keyless:     "has no keys",
+			unreachable: "OpenID Connect discovery",
+		} {
+			subject := "console.issuers." + issuer + ": "
+			at := strings.Index(refusals["configuration"], subject)
+			require.GreaterOrEqual(t, at, 0, "%s: %s", issuer, refusals["configuration"])
+			refusal, _, _ := strings.Cut(refusals["configuration"][at:], "; ")
+			require.Contains(t, refusal, why)
+		}
+		require.NotContains(t, refusals["configuration"], "console.issuers."+working+":")
+		require.NotContains(t, refusals["configuration"], "console.issuers."+second+":")
 	})
 
 	t.Run("OR-J01-S30/run-time-applications-name-only-public-key-urls", func(t *testing.T) {
@@ -294,4 +355,46 @@ func writeSigningKeys(t *testing.T, dir string) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "keys.json"), data, 0o600))
+}
+
+// oidcIssuer serves an OpenID Connect issuer's metadata and keys, as change
+// leaves them; its URL is the issuer.
+func oidcIssuer(t *testing.T, change func(map[string]any)) string {
+	t.Helper()
+	var issuer string
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			m := map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/oauth2/authorize", "token_endpoint": issuer + "/oauth2/token", "jwks_uri": issuer + "/jwks.json",
+				"response_types_supported": []string{"code"}, "code_challenge_methods_supported": []string{"S256"}}
+			if change != nil {
+				change(m)
+			}
+			_ = json.NewEncoder(rw).Encode(m)
+		case "/jwks.json":
+			_ = json.NewEncoder(rw).Encode(map[string]any{"keys": []map[string]string{{"kty": "OKP", "crv": "Ed25519", "kid": "app", "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}}})
+		case "/empty-jwks.json":
+			_ = json.NewEncoder(rw).Encode(map[string]any{"keys": []any{}})
+		default:
+			http.NotFound(rw, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	issuer = server.URL
+	return issuer
+}
+
+// trustApplication declares issuer the trusted application of group, a
+// merchant's id or "root", with a static key.
+func trustApplication(t *testing.T, w *standaloneWorld, group, issuer string) {
+	t.Helper()
+	_, signer, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKIXPublicKey(signer.Public())
+	require.NoError(t, err)
+	body, err := json.Marshal(iam.RemoteApplication{Issuer: issuer, Mode: iam.RemoteApplicationModeStatic, PublicKeys: []iam.RemoteApplicationKey{{KID: "app", PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}})
+	require.NoError(t, err)
+	var stored iam.RemoteApplication
+	w.command(t, map[string]any{"Op": "trust-application", "Merchant": group, "Body": json.RawMessage(body)}, &stored)
 }

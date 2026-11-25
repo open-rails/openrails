@@ -1,52 +1,26 @@
 package controlplane
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"slices"
 
 	"github.com/open-rails/authkit/iam"
 
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/server/internal/adminconsole"
 )
 
-// RootConsoleSources are root's enabled trusted applications, declared in
-// the bootstrap manifest: the deployment's own, which the console's sign-in
-// page may show to anyone.
+// RootConsoleSources are root's enabled trusted applications: the
+// deployment's own, declared in the bootstrap manifest or by root's
+// credential managers, which the console's sign-in page offers once they
+// pass its probe.
 func (c *ControlPlane) RootConsoleSources(ctx context.Context) ([]adminconsole.Source, error) {
 	if c == nil || c.client == nil {
 		return nil, ErrNoControlPlane
 	}
-	return c.groupSources(ctx, iam.RootGroup(), "root", "")
-}
-
-// MerchantConsoleSources are the enabled trusted applications of the live
-// merchant named name (its current or a former name); none for an unknown
-// or inactive one, alike.
-func (c *ControlPlane) MerchantConsoleSources(ctx context.Context, name string) ([]adminconsole.Source, error) {
-	dir, err := c.directory()
-	if err != nil {
-		return nil, err
-	}
-	m, err := dir.GetBySlug(ctx, name)
-	switch {
-	case errors.Is(err, billing.ErrMerchantNotFound):
-		return nil, nil
-	case err != nil:
-		return nil, err
-	case m.Status != merchants.StatusActive:
-		return nil, nil
-	}
-	return c.groupSources(ctx, iam.GroupByID(m.ID.String()), m.ID.String(), cmp.Or(dir.DisplayName(ctx, m.ID), m.Slug))
-}
-
-func (c *ControlPlane) groupSources(ctx context.Context, group iam.GroupRef, key, name string) ([]adminconsole.Source, error) {
 	var out []adminconsole.Source
 	for app, err := range iam.All(func(p iam.PageRequest) (iam.ListPage[iam.RemoteApplication], error) {
-		return c.client.ListRemoteApplications(ctx, group, p)
+		return c.client.ListRemoteApplications(ctx, iam.RootGroup(), p)
 	}) {
 		if errors.Is(err, iam.ErrGroupNotFound) {
 			return nil, nil
@@ -55,7 +29,7 @@ func (c *ControlPlane) groupSources(ctx context.Context, group iam.GroupRef, key
 			return nil, err
 		}
 		if app.Enabled {
-			out = append(out, adminconsole.Source{Key: key, Name: name, Issuer: app.Issuer, Operator: app.TrustRoot != iam.ApplicationTrustRootUser})
+			out = append(out, adminconsole.Source{Issuer: app.Issuer, Operator: app.TrustRoot != iam.ApplicationTrustRootUser})
 		}
 	}
 	return out, nil

@@ -21,12 +21,9 @@ type Config struct {
 	AuthBaseURL string `json:"auth_base_url"`
 	// APIBaseURL is the admin API base, default "/v1".
 	APIBaseURL string `json:"api_base_url"`
-	// Issuers are root's sign-in buttons beside the server's own accounts:
-	// its trusted issuers that sign people in (Directory), read per request.
+	// Issuers are the sign-in buttons beside the server's own accounts:
+	// root's trusted issuers whose sign-in works (Directory). None without one.
 	Issuers []Issuer `json:"issuers"`
-	// AppSignIn offers sign-in at a merchant's own app: the console asks for
-	// the merchant's name and reads its buttons from SignInPath.
-	AppSignIn bool `json:"app_sign_in"`
 	// Exchange is where the console trades an own account's token for one
 	// bound to the merchant staff choose (RFC 8693, the merchant's id as
 	// group_id). An issuer's token is bound already.
@@ -57,18 +54,14 @@ type Issuer struct {
 	ClientID string `json:"client_id"`
 	Name     string `json:"name"`
 	// Resource is this deployment's resource identifier, Scope what the
-	// console asks for.
-	Resource string `json:"resource"`
-	Scope    string `json:"scope"`
+	// console asks for, RedirectURI where the issuer returns staff.
+	Resource    string `json:"resource"`
+	Scope       string `json:"scope"`
+	RedirectURI string `json:"redirect_uri"`
 }
 
 // Path is where the standalone server serves the console, apart from /v1.
 const Path = "/admin"
-
-// SignInPath, beneath Path, answers ?merchant=<name> with that merchant's
-// sign-in buttons, {"issuers": [...]}; an unknown name and a merchant whose
-// issuers sign nobody in are the same 404.
-const SignInPath = "/sign-in"
 
 // DefaultScope is what the console asks a trusted issuer for. With openid it
 // checks the ID token, which it uses only to name the person and to end the
@@ -91,7 +84,7 @@ var baseTag = regexp.MustCompile(`<base\s+href="/admin/"\s*/?>`)
 
 // Handler serves the console from assets (a Vite build rooted at index.html)
 // at path, a validated mount path such as "/billing/admin":
-// path/config.json from cfg with issuers' buttons, static files, and index.html — its <base href>
+// path/config.json from cfg with the buttons of issuers (nil: none), static files, and index.html — its <base href>
 // rewritten to path/ — as the SPA fallback for client routes; bare path
 // redirects to path/. Mount it at path without stripping the prefix (ServeMux
 // "path/", gin "path/*any" and chi Mount all keep it): the build's URLs resolve
@@ -136,37 +129,13 @@ func Handler(logger *slog.Logger, path string, cfg Config, issuers *Directory, a
 
 		if rel == "config.json" {
 			out := cfg
-			out.Issuers, out.AppSignIn = []Issuer{}, issuers != nil
+			out.Issuers = []Issuer{}
 			if issuers != nil {
-				list, err := issuers.Root(r.Context())
-				if err != nil {
-					// The server's own accounts still sign in.
-					logger.WarnContext(r.Context(), "admin console: listing root's trusted issuers failed", "error", err)
-				}
-				out.Issuers = append(out.Issuers, list...)
+				out.Issuers = issuers.Issuers()
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
 			_ = json.NewEncoder(w).Encode(out)
-			return
-		}
-		if "/"+rel == SignInPath {
-			w.Header().Set("Cache-Control", "no-store")
-			var list []Issuer
-			var err error
-			if name := strings.TrimSpace(r.URL.Query().Get("merchant")); issuers != nil && name != "" {
-				list, err = issuers.Merchant(r.Context(), name)
-			}
-			switch {
-			case err != nil:
-				logger.ErrorContext(r.Context(), "admin console: reading a merchant's trusted issuers failed", "error", err)
-				writeError(w, http.StatusServiceUnavailable, "app sign-in is unavailable; try again")
-			case len(list) == 0:
-				writeError(w, http.StatusNotFound, "no app sign-in for that merchant name")
-			default:
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string][]Issuer{"issuers": list})
-			}
 			return
 		}
 

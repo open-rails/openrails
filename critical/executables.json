@@ -1932,11 +1932,14 @@
     "OR-J01-S28": [
       "TestStandaloneAuthSurface/OR-J01-S28/own-accounts-need-a-second-factor"
     ],
-    "OR-J01-S29": [
-      "TestStandaloneAuthSurface/OR-J01-S29/console-app-sign-in-is-found-by-merchant-name"
-    ],
     "OR-J01-S30": [
       "TestStandaloneAuthSurface/OR-J01-S30/run-time-applications-name-only-public-key-urls"
+    ],
+    "OR-J01-S31": [
+      "TestStandaloneAuthSurface/OR-J01-S31/a-merchants-own-site-runs-the-admin-screens-with-its-staff-token"
+    ],
+    "OR-J01-S32": [
+      "TestStandaloneAuthSurface/OR-J01-S32/the-console-offers-only-trusted-issuers-whose-sign-in-works"
     ],
     "OR-J24-S42": [
       "TestLeaseSyncs/OR-J24-S42/a-view-request-is-refused-alone-and-the-sync-stands"

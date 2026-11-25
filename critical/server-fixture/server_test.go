@@ -62,7 +62,7 @@ type ready struct {
 }
 type command struct {
 	Op, Merchant, Account, Nonce string
-	Scopes                       []string
+	Scopes, Permissions          []string
 	ID                           string
 	Body                         json.RawMessage
 	reply                        chan answer
@@ -323,7 +323,12 @@ func TestServerFixture(t *testing.T) {
 				if len(cmd.Scopes) > 0 {
 					scope = strings.Join(cmd.Scopes, " ")
 				}
-				token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{"iss": "https://" + cmd.Merchant + ".critical.invalid", "aud": httpServer.URL, "sub": cmd.ID, "client_id": "critical-directory-client", "scope": scope, "iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(), "jti": uuid.NewString()})
+				claims := jwt.MapClaims{"iss": "https://" + cmd.Merchant + ".critical.invalid", "aud": httpServer.URL, "sub": cmd.ID, "client_id": "critical-directory-client", "scope": scope, "iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(), "jti": uuid.NewString()}
+				if cmd.Permissions != nil {
+					// A staff member's permissions at the merchant's app (RFC 9068 §2.2.3.1).
+					claims["permissions"] = cmd.Permissions
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 				token.Header["kid"] = "merchant-key"
 				token.Header["typ"] = "at+jwt"
 				signed, err := token.SignedString(issuerKeys[cmd.Merchant])

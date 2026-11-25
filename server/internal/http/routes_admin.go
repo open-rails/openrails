@@ -18,6 +18,11 @@ func (s *Server) routeOptions() httproutes.Options {
 	}
 }
 
+// The staff and programmatic routes are browser tier: a merchant's own site
+// renders billing-ui's admin screens and calls them cross-origin with the
+// access token its trusted issuer mints for this server. That bearer token is
+// their only credential (cookies never reach an Authenticator), so allowing
+// every origin without credentials exposes nothing a stolen token would not.
 func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix string) {
 	opts := s.routeOptions()
 	httproutes.RegisterStaffRoutes(s.Log, router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, opts)

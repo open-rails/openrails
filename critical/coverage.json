@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 781,
+  "scenario_count": 782,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1349,14 +1349,19 @@
       "name": "Every account of the standalone server's own needs a second factor: a password alone gets no session until it enrolls an authenticator app, and every later sign-in asks for it"
     },
     {
-      "id": "OR-J01-S29",
-      "journey": "J01",
-      "name": "The console's public sign-in shows the server's own accounts and root's issuer, never a merchant's; naming a merchant finds its trusted issuers whose metadata names an authorization endpoint, at the client openrails-console; a merchant whose issuers only sign assertions and an unknown name answer alike"
-    },
-    {
       "id": "OR-J01-S30",
       "journey": "J01",
       "name": "An application registered at run time names only https key URLs on public hosts: a loopback, private or cluster-internal jwks_uri, or such an issuer to discover keys from, is refused; the operator declares one on a private network"
+    },
+    {
+      "id": "OR-J01-S31",
+      "journey": "J01",
+      "name": "A merchant's own site runs the admin screens against the standalone server with the token its declared issuer mints for a staff member: every staff group answers a cross-origin preflight for any origin without credentials, the token reads what its permissions name at its merchant alone, a staff member without the permission is refused, and another merchant's customers, a root: permission the app writes into its token, and naming the other merchant reach nothing"
+    },
+    {
+      "id": "OR-J01-S32",
+      "journey": "J01",
+      "name": "The console's sign-in offers the server's own accounts alone until root trusts an issuer, never a merchant's app, and then a button per root issuer whose sign-in a probe shows works: discovery naming it exactly, authorization, token and key endpoints, the code flow with PKCE S256 and published keys; a mismatched, unreachable, keyless or PKCE-less issuer is hidden and reported with why among the configuration's refusals"
     },
     {
       "id": "OR-J22-S05",

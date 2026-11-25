@@ -37,7 +37,7 @@ export function createConsoleSession(
     const client = createIssuerClient({
       issuer: issuer.url,
       clientId: issuer.client_id,
-      redirectUri: consoleURL("/callback"),
+      redirectUri: issuer.redirect_uri,
       resource: issuer.resource,
       scope: issuer.scope,
       postLogoutRedirectUri: consoleURL("/login"),

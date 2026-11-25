@@ -77,7 +77,7 @@ Without the default manifest the server boots control-plane only.
 
 ### HTTP
 
-`server/internal/http` builds one public handler: health and meta, the engine's route groups (all of them), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`, AuthKit's routes, `/admin`, and the payment page on `CheckoutOrigin` by Host. Every native route passes `wrapHandler`: recovery, request log, security headers, CORS for browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing credentials (`billingauth.ExplicitCredentials`) and the engine's `RateLimitHTTP`.
+`server/internal/http` builds one public handler: health and meta, the engine's route groups (all of them), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`, AuthKit's routes, `/admin`, and the payment page on `CheckoutOrigin` by Host. Every native route passes `wrapHandler`: recovery, request log, security headers, CORS for browser-tier routes only (`BrowserTierRoutes`: the API routes, staff and programmatic included, so a merchant's own site runs the admin screens; not webhooks, AuthKit's routes or `/admin`), `RequestLimitsHTTP`, explicit billing credentials (`billingauth.ExplicitCredentials`) and the engine's `RateLimitHTTP`.
 
 `MetricsHandler` is the metrics listener on `MetricsPort`: the operator's Prometheus `GET /metrics` (dependency up/down, abuse-state fallbacks, per-job-kind health), apart from the public handler so it is never public; zero serves none, and the chart sets 9090 with its own ClusterIP Service. It is not the merchant dashboard's business metrics, the `/v1/metrics` route group on the public handler.
 
@@ -89,7 +89,7 @@ adds `RiverJobs` to its fleet.
 
 ### Console
 
-`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base, the token exchange for `ConsoleClientID`, and the sign-in issuers) under `adminconsole.Path` (`/admin`). `adminconsole.Directory` keeps the trusted issuers whose OpenID Connect metadata names an authorization endpoint (cached 10 minutes): root's (`ControlPlane.RootConsoleSources`, cached 30 s) in `config.json`, and one named merchant's (`ControlPlane.MerchantConsoleSources`) at `adminconsole.SignInPath`, which answers an unknown name and a merchant without one with the same 404. The SPA's `/m/<merchant>` route reads it at once. `AdminConsole.OwnAccountsOnly` turns both off. Readiness also runs `ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
+`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base, the token exchange for `ConsoleClientID`, and the sign-in issuers) under `adminconsole.Path` (`/admin`). `adminconsole.Directory` holds root's trusted issuers (`ControlPlane.RootConsoleSources`) whose probe passed, never a merchant's: discovery naming the issuer exactly, authorization, token and key endpoints, the code flow and PKCE `S256` where listed, a non-empty key set, and a well-formed redirect URI (`public_url`'s origin plus `/admin/callback`, sent as each button's `redirect_uri`). It probes in the background, at construction and when `config.json` is read and a pass is due (root listed again after 5 s, an issuer probed again 10 minutes after passing, a minute after failing); a request never waits. Each change is `Runtime.Refuse`/`Unrefuse` of `console.issuers.<issuer>`, so a hidden issuer is among the configuration's refusals. `AdminConsole.OwnAccountsOnly` turns it off. Readiness also runs `ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
 
 ### Binary, image and chart
 
@@ -197,7 +197,7 @@ Checks:
 
 ## Tests
 
-- **Server fixture.** `critical/server-fixture` is built once as a test binary (`OPENRAILS_CRITICAL_SERVER_BINARY`) around `server.New` and driven over HTTP and a command channel (`newStandaloneWorld`): OR-J01-S09, OR-J01-S16, OR-J01-S27 to S30, OR-J04-S76, OR-J07-S01 to S03, OR-J07-S05, OR-J32-S01 to S04. It runs with the console disabled unless a scenario asks (OR-J01-S29), and with the second factor off unless one asks (OR-J01-S28).
+- **Server fixture.** `critical/server-fixture` is built once as a test binary (`OPENRAILS_CRITICAL_SERVER_BINARY`) around `server.New` and driven over HTTP and a command channel (`newStandaloneWorld`): OR-J01-S09, OR-J01-S16, OR-J01-S27, S28 and S30 to S32, OR-J04-S76, OR-J07-S01 to S03, OR-J07-S05, OR-J32-S01 to S04. It runs with the console disabled unless a scenario asks (OR-J01-S32), and with the second factor off unless one asks (OR-J01-S28).
 - **CLI.** The built binary (`OPENRAILS_CRITICAL_CLI_BINARY`, `hostCLI`) runs
   OR-J04-S41, OR-J22-S04, OR-J31-S03, OR-J31-S10, OR-J32-S05, OR-J38-S21 and
   OR-J38-S72, OR-J06-S84, OR-J06-S85, and the archive tests' `billing prepare-target`.

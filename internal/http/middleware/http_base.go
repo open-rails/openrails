@@ -151,8 +151,9 @@ func (b *BrowserTierRoutes) Match(r *http.Request) bool {
 func AllRequests(*http.Request) bool { return true }
 
 // PermissiveCORSHTTP is the static browser-tier CORS policy. Bearer tokens
-// authorize these requests (cookie admission checks Origin itself), so an
-// origin allow-list protects nothing: a stolen token replays from curl. A
+// authorize these requests (billingauth.ExplicitCredentials drops cookies
+// before any Authenticator), so an origin allow-list protects nothing: a
+// stolen token replays from curl. A
 // browser-tier request gets `Access-Control-Allow-Origin: *` and never
 // Allow-Credentials; every other request gets no CORS headers. The header
 // lists add the ones credentials travels in when it advertises them

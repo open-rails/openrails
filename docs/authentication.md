@@ -125,7 +125,8 @@ your backend                                           OpenRails
 |---|---|---|---|---|
 | Embedded | your app's own session credential | your app's auth | the roles you build from the `billing.Permission` constants | its `BoundScope`, else the declared `Issuer`; `root:` permissions reach every merchant |
 | Standalone, the server's own accounts | the server's own account, then a token exchanged for the chosen merchant | the server's AuthKit | the person's role in that merchant, or their root role | the merchant's id, named in the exchange |
-| Standalone, at your app's issuer | an `openrails:merchant` access token, by authorization code with PKCE | the merchant's trusted issuer | the person's permissions there, within the application's role | the issuer's merchant (root's applications: every merchant) |
+| Standalone, in your own site | an `openrails:merchant` access token your app gives its signed-in staff | the merchant's trusted issuer | the person's permissions there, within the application's role | the issuer's merchant |
+| Standalone, the console at a trusted issuer | an `openrails:merchant` access token, by authorization code with PKCE | one of root's trusted issuers | the person's permissions there, within the application's role | the issuer's group |
 | SaaS | the platform's own account, then the same exchange | the platform | the person's role in that merchant | the merchant's id, named in the exchange |
 
 ### Embedded
@@ -141,36 +142,56 @@ staff browser                your app (Routes.Auth)                  engine
   |                                |------------------------------------->| admit, or 403 permission_required
 ```
 
-### Standalone, at your app's issuer
+### Standalone, in your own site
 
-A trusted issuer signs staff in when its OpenID Connect metadata (`/.well-known/openid-configuration`) names an authorization endpoint; one that only signs assertions does not. Root's (from the bootstrap manifest) are buttons on the console's sign-in page. A merchant's (its manifest `remote_application`, or one registered at run time) are never listed there: staff type the merchant's name under **Sign in with your app**, or open `/admin/m/<merchant>`, and get its buttons, labeled with the merchant's name; an unknown name and a merchant without such an issuer get the same answer. Being the merchant's trusted issuer is what makes the button, so its tokens are always the ones OpenRails accepts for that merchant.
+Staff signed in to your app use the admin screens in your own pages: they render billing-ui's `BillingAdmin` and call the server's staff routes cross-origin, which answer any origin without credentials. There is no second sign-in, no redirect and no exchange at the server. Your app, the merchant's trusted issuer, gives the person an RFC 9068 access token (`typ: at+jwt`) for the server:
 
-The console is the OAuth 2.0 public client `openrails-console` at that issuer: the authorization code flow with PKCE (RFC 6749, RFC 7636) and OpenRails' resource as the resource indicator (RFC 8707). The access token it receives is already bound: minted for the server's resource by the merchant's trusted issuer, carrying the person's permissions there, which count within the application's role. There is no token exchange: the console calls OpenRails with that token and renews it with the issuer's refresh token.
+- `iss` your issuer, signed with a key it registered; `aud` the server's `public_url`; `sub` the person; `exp`;
+- `scope` including `openrails:merchant`;
+- `permissions`: the person's `merchant:` permissions by name, or `roles` the application's role map names.
+
+The token is bound to its issuer's merchant, and each permission counts within the application's role there (the merchant's owner, from the manifest's `remote_application`); `root:` permissions never count. With AuthKit, your app registers the server as a resource with `openrails:merchant` and your browser client exchanges the person's session for its token (RFC 8693, resource indicator RFC 8707). Set-up: [standalone](standalone.md#admin-screens-in-your-own-site).
+
+```text
+staff browser (your page)            your app (the merchant's issuer)        OpenRails
+  | signed in to your app                     |                                   |
+  | token for <public_url>, openrails:merchant|                                   |
+  |------------------------------------------>| the person's merchant: permissions|
+  |<------------------------------------------| access token (aud=<public_url>)   |
+  | OPTIONS, then GET /v1/admin/…  Authorization: Bearer <token> ---------------->| issuer → merchant M;
+  |                                           |                                   | holds the route's permission?
+```
+
+### Standalone, the console at a trusted issuer
+
+Root's trusted issuers (from the bootstrap manifest) that sign people in are buttons beside the server's own accounts on the console's sign-in page, each shown only while a probe says its sign-in works ([standalone](standalone.md#the-console)). A merchant's trusted issuer is never one.
+
+The console is the OAuth 2.0 public client `openrails-console` at that issuer: the authorization code flow with PKCE (RFC 6749, RFC 7636) and OpenRails' resource as the resource indicator (RFC 8707). The access token it receives is minted for the server's resource by the issuer, carrying the person's permissions there, which count within the application's role. There is no token exchange: the console calls OpenRails with that token and renews it with the issuer's refresh token.
 
 The issuer registers:
 
-- OpenRails' resource, the server's `public_url`, with the scope `openrails:merchant` and a permission ceiling covering what staff do: the same resource customer tokens from path (a) and backend tokens use;
+- OpenRails' resource, the server's `public_url`, with the scope `openrails:merchant` and a permission ceiling covering what staff do;
 - the public client `openrails-console`, with the redirect URI `<origin>/admin/callback`, the post-logout redirect URI `<origin>/admin/login`, the authorization code grant (with refresh tokens) and that resource;
-- roles granting staff OpenRails' `merchant:` permissions by name, which its tokens for the resource carry.
+- roles granting staff OpenRails' permissions by name, which its tokens for the resource carry.
 
-The console asks for `openid profile email openrails:merchant`. It checks the OpenID Connect ID token and uses it only to name the person and to end the issuer's session at sign-out; OpenRails accepts only the access token. People, roles and second factors are your app's to manage.
+The console asks for `openid profile email openrails:merchant`. It checks the OpenID Connect ID token and uses it only to name the person and to end the issuer's session at sign-out; OpenRails accepts only the access token. People, roles and second factors are the issuer's to manage.
 
 ```text
-staff browser (/admin)            your app's issuer                    OpenRails
+staff browser (/admin)            root's trusted issuer                OpenRails
   | GET /.well-known/openid-configuration |                                 |
   | authorization_endpoint: client_id,    |                                 |
   |   redirect_uri=<origin>/admin/callback|                                 |
   |   code_challenge (S256),              |                                 |
   |   resource=<server URL>,              |                                 |
   |   scope=openid profile email openrails:merchant                         |
-  |-------------------------------------->| the person signs in at your app |
+  |-------------------------------------->| the person signs in there       |
   |<--------------------------------------| /admin/callback?code=…          |
   | token_endpoint: code, code_verifier   |                                 |
   |-------------------------------------->|                                 |
   |<--------------------------------------| access token (aud=resource,     |
   |                                       | permissions), ID token, refresh |
   | GET /v1/admin/…  Authorization: Bearer <access token>                   |
-  |------------------------------------------------------------------------>| issuer → merchant M
+  |------------------------------------------------------------------------>| issuer → its group
 ```
 
 ### Standalone, the server's own accounts
@@ -204,7 +225,7 @@ The console offers both.
 
 ### SaaS
 
-Staff sign in with the hosted platform's own accounts. An owner invites a person to a merchant with a role (`owner`, `support` or `viewer`) on the console's **Team** page: an account that verified that email joins at once, anyone else registers from the emailed link. The console binds each session to the chosen merchant by the same exchange as the standalone server's own accounts. Sign-in at your app's issuer isn't offered on the platform.
+Staff sign in with the hosted platform's own accounts. An owner invites a person to a merchant with a role (`owner`, `support` or `viewer`) on the console's **Team** page: an account that verified that email joins at once, anyone else registers from the emailed link. The console binds each session to the chosen merchant by the same exchange as the standalone server's own accounts. Sign-in at a trusted issuer isn't offered on the platform.
 
 ## The standalone server's AuthKit
 

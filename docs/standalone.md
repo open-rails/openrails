@@ -464,7 +464,7 @@ The server accepts RFC 9068 access tokens (`typ: at+jwt`) minted for its resourc
 | `openrails:merchant` | merchant permissions, within the application's role: your backend |
 | `openrails:self` | none: a customer's own billing at `/v1/me`, which refuses any other token of a trusted issuer (`403 permission_required`) |
 
-When your app runs AuthKit, it is the authorization server: it registers the server as a resource, a public client for the browser's token exchange and a confidential client for the backend's client credentials; for staff to sign in to the console there too, also the console's public client ([authentication](authentication.md#standalone-at-your-apps-issuer)). In the example's app:
+When your app runs AuthKit, it is the authorization server: it registers the server as a resource, a public client for the browser's token exchange and a confidential client for the backend's client credentials; the same exchange gives your staff their tokens for the [admin screens in your own site](#admin-screens-in-your-own-site). In the example's app:
 
 ```go guide:standalone-issuer
 // OpenRails is a resource server this AuthKit mints tokens for.
@@ -532,12 +532,24 @@ refused on `/v1/app` (`403 application_required`).
 
 ### The console
 
-`/admin` is the staff console. Staff sign in with the server's own accounts, always offered, or at a trusted issuer that signs people in: one whose OpenID Connect metadata names an authorization endpoint (one that only signs assertions does not). The sign-in page shows root's issuers, the deployment's own (from the bootstrap manifest), and a **Sign in with your app** field: staff type their merchant's name and get its issuers' buttons, labeled with the merchant's name. `/admin/m/<merchant>` shows them at once, for a bookmark. The page never lists merchants: an unknown name and a merchant with no such issuer get the same answer. The server reads the metadata (an operator-declared issuer's on any network, a run-time one's on public hosts only), so the buttons follow the issuers registered at run time.
+`/admin` is the staff console. Staff sign in with the server's own accounts, always offered as AuthKit's sign-in form. Beside it the page shows a **Sign in with** button, named for the issuer's host, for each of root's trusted issuers (the deployment's own, from the bootstrap manifest) whose sign-in works, and nothing else: with none, the form alone. A merchant's trusted issuer is never a button; its staff use the admin screens in its own site instead ([below](#admin-screens-in-your-own-site)).
+
+The server probes each of root's issuers in the background, at boot and as the sign-in page is loaded, never while it waits: its OpenID Connect metadata names it exactly and names authorization, token and key endpoints, it offers the authorization code flow with PKCE `S256` where it lists what it supports, and its key set has keys (an operator-declared issuer is read on any network, a run-time one on public hosts only). A working issuer is probed again after 10 minutes, a failing one after a minute, so one that recovers comes back. A failing issuer is hidden and is a refusal of the configuration, `console.issuers.<issuer>` with why: logged when it changes, a degraded `configuration` in readiness and `openrails_dependency_up`, and named by the `openrails_configuration` probe ([health](#health-and-monitoring)). Whether the issuer registered the console's client only a sign-in shows.
 
 - **With the server's own accounts** the console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
-- **At a trusted issuer** the console is the OAuth 2.0 public client `openrails-console` there (authorization code with PKCE, redirect URI `<origin>/admin/callback`). The token it receives is already bound to OpenRails' resource and the issuer's merchant, so there is no exchange; people, roles and second factors are the app's.
+- **At a trusted issuer** the console is the OAuth 2.0 public client `openrails-console` there (authorization code with PKCE, redirect URI `<origin>/admin/callback`, `<origin>` being `public_url`'s). The token it receives is minted for OpenRails' resource by the issuer, so there is no exchange; people, roles and second factors are the issuer's.
 
-Each flow, and what the app's issuer registers, is in [authentication](authentication.md#staff-and-operators). `admin_console.disabled` omits the console.
+Each flow, and what the issuer registers, is in [authentication](authentication.md#staff-and-operators). `admin_console.disabled` omits the console.
+
+### Admin screens in your own site
+
+A merchant's staff can work in your own admin pages, signed in to your app, with no second sign-in and no redirect. Your page renders billing-ui's `BillingAdmin` ([staff administration](../web/billing-ui/README.md#staff-administration)) and it calls the server's staff routes (`/v1/admin`, `/v1/catalog`, `/v1/merchant`, `/v1/metrics`) cross-origin, which answer any origin without credentials ([CORS](#tls-proxies-cors-and-webhooks)).
+
+1. Declare your app the merchant's trusted issuer: `remote_application` in the merchant manifest, or one registered at run time. Its role there, the merchant's owner, is the most its tokens may do.
+2. Your app gives the signed-in staff member an access token for the server: an RFC 9068 access token (`typ: at+jwt`) from your issuer, its `aud` the server's `public_url`, its `scope` including `openrails:merchant`, and the person's `merchant:` permissions in `permissions` (or `roles` the application's role map names). With AuthKit, register the server as a resource with `openrails:merchant` and your browser client exchanges the person's session for it (RFC 8693, resource indicator RFC 8707), as for customer tokens.
+3. Pass `BillingAdmin` the server's API base (`<public_url>/v1`) as `baseUrl`, the merchant as `merchant`, and an `auth` whose `authFetch` sends that token.
+
+There is no exchange at the server: the token is bound to its issuer's merchant already. Each permission counts within the application's role; a `root:` permission never counts, another merchant's records are not found, and a request naming another merchant in `OpenRails-Expected-Merchant` is `412 merchant_mismatch`. The flow is in [authentication](authentication.md#standalone-in-your-own-site).
 
 ### Customer contacts
 
@@ -572,7 +584,7 @@ the checkout origin. Give one public origin to `public_url`, which is also the s
 - **Body size.** Requests are capped at 1 MiB (`413 request_body_too_large`),
   but a billing archive import (`POST /v1/merchant/billing-archive`) streams up
   to 1 GiB: raise the proxy's limit if you import over HTTP.
-- **CORS** is fixed: the API answers any origin without credentials
+- **CORS** is fixed: the API, the staff routes included, answers any origin without credentials
   (`Access-Control-Allow-Origin: *`, `WWW-Authenticate` exposed, 12 h max-age);
   the console, webhooks and the server's AuthKit routes send no CORS headers.
   OpenRails sets no cookies on the API.

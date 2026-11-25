@@ -111,12 +111,12 @@ func (s *Server) recordRoute(pattern string) {
 	s.routeTable = append(s.routeTable, pattern)
 }
 
-// recordBrowserRoute is recordRoute plus browser-tier CORS registration
-// (#765): used ONLY by the purchase + self-service
-// registration call sites, so PermissiveCORSHTTP grants the static `*` policy
-// on exactly those routes and nothing else. Lazily initializes
-// browserTierRoutes so hand-built *Server{} unit tests that skip New() still
-// behave correctly.
+// recordBrowserRoute is recordRoute plus browser-tier CORS registration: the
+// API routes browsers call with a bearer credential (configuration,
+// purchase, self-service, staff and programmatic) get PermissiveCORSHTTP's
+// static `*` policy; webhooks, AuthKit's own routes and the console are
+// recorded without it. Lazily initializes browserTierRoutes so hand-built
+// *Server{} unit tests that skip New() still behave correctly.
 func (s *Server) recordBrowserRoute(pattern string) {
 	if s.nativeBrowser == nil {
 		s.nativeBrowser = map[string]bool{}

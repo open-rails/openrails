@@ -2,13 +2,21 @@ import * as React from "react"
 import { SignInPanel } from "@openrails/auth-ui"
 import { useSearchParams } from "react-router-dom"
 
+import type { ConsoleIssuer } from "@/config"
 import { ISSUER_REDIRECT_KEY, useIdentity } from "@/lib/identity"
 import { Redirect, useRedirect } from "@/lib/redirect"
 
-// Sign-in is AuthKit's own form or, with a trusted issuer, a redirect there.
-// A tab re-authorizes at the issuer silently (prompt=none) once; after that,
-// or when the issuer needs the user, the button does.
-export function LoginPage() {
+// Sign-in is AuthKit's own form, beside a button for each trusted issuer the
+// server offers, or, once staff chose an issuer, a redirect there. A tab
+// re-authorizes at the issuer silently (prompt=none) once; after that, or
+// when the issuer needs the user, the button does.
+export function LoginPage({
+  issuers,
+  choose,
+}: {
+  issuers: ConsoleIssuer[]
+  choose: (key: string) => void
+}) {
   const { issuer, status } = useIdentity()
   const signedIn = status === "signed_in"
   const ready = status === "signed_out" || signedIn
@@ -43,19 +51,40 @@ export function LoginPage() {
           The merchant console for your OpenRails deployment.
         </p>
         {issuer ? (
-          <button
-            type="button"
-            className="console-sign-in-action"
-            onClick={() => void issuer.signIn(returnTo)}
-          >
-            Sign in with {issuer.name}
-          </button>
+          <>
+            <button
+              type="button"
+              className="console-sign-in-action"
+              onClick={() => void issuer.signIn(returnTo)}
+            >
+              Sign in with {issuer.name}
+            </button>
+            <button
+              type="button"
+              className="console-other-sign-in"
+              onClick={() => choose("local")}
+            >
+              Sign in with an OpenRails account
+            </button>
+          </>
         ) : (
-          <SignInPanel
-            providers={[]}
-            className="console-sign-in-action"
-            onSignedIn={() => redirect(returnTo)}
-          />
+          <>
+            <SignInPanel
+              providers={[]}
+              className="console-sign-in-action"
+              onSignedIn={() => redirect(returnTo)}
+            />
+            {issuers.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className="console-sign-in-action"
+                onClick={() => choose(item.key)}
+              >
+                Sign in with {item.name}
+              </button>
+            ))}
+          </>
         )}
       </div>
     </div>

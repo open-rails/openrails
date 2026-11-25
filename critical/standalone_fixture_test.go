@@ -151,6 +151,25 @@ func (w *standaloneWorld) request(t *testing.T, method, path, token string, body
 	require.NoError(t, err)
 	return response.StatusCode, data
 }
+
+// send is a bodiless request with headers, answering the response's.
+func (w *standaloneWorld) send(t *testing.T, method, path, token string, headers map[string]string) (int, http.Header, []byte) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, w.URL+path, nil)
+	require.NoError(t, err)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	return response.StatusCode, response.Header, data
+}
 func (w *standaloneWorld) command(t *testing.T, in any, out any) {
 	t.Helper()
 	data, err := json.Marshal(in)

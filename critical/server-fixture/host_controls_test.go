@@ -56,6 +56,18 @@ func hostCommand(t *testing.T, srv *server.Server, clock *clockwork.FakeClock, c
 		}
 		app.Enabled = true
 		result, err = srv.AuthKit().UpsertRemoteApplication(t.Context(), iam.SystemIdentity(), group, app)
+	case "refusals":
+		// What the configuration does not serve, as the engine's probe
+		// reports it to the operator.
+		out := map[string]string{}
+		for _, p := range srv.Engine().Probes() {
+			if p.Name == "openrails_configuration" {
+				if err := p.Check(t.Context()); err != nil {
+					out["configuration"] = err.Error()
+				}
+			}
+		}
+		result = out
 	case "revoke-directory-key":
 		err = srv.AuthKit().RevokeAPIKey(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), cmd.ID)
 		result = true
