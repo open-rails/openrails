@@ -1,16 +1,16 @@
 name: Go caches
 description: >-
   Restores a family of Go build/module caches. Only a push to rc/** or master
-  saves one, in that branch's scope: pull requests restore their base's, and
-  everything else master's. Other events saving would evict those from the
-  repository's cache quota.
+  saves one, in that branch's scope, and then deletes the family's older
+  entries there: one current entry per family and base. Pull requests restore
+  their base's; dispatches on the RC its own; everything else master's.
 
 inputs:
   family:
     description: Cache family; jobs that build the same way share one.
     required: true
   save:
-    description: "'true' saves (end of job, pushes only); otherwise restores (after setup-go)."
+    description: "'true' saves (end of job, pushes only; the job needs actions: write); otherwise restores (after setup-go)."
     default: "false"
 runs:
   using: composite
@@ -19,20 +19,25 @@ runs:
       id: name
       if: ${{ !cancelled() }}
       shell: bash
+      env:
+        FAMILY: ${{ inputs.family }}
       run: |
-        printf 'build=%s\nmodules=%s\n' "$(go env GOCACHE)" "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        modules="$(go env GOMODCACHE)"
+        # setup-go installs go.mod's go line; its own go env then downloads the
+        # toolchain line's release into the module cache. Restoring that over
+        # itself fails, so the toolchain stays out of the cache.
+        printf 'paths<<EOF\n%s\n%s\n!%s/golang.org/toolchain@*\nEOF\n' "$(go env GOCACHE)" "$modules" "$modules" >> "$GITHUB_OUTPUT"
         sum="$(cat go.sum server/go.sum examples/go.sum | sha256sum | cut -c1-16)"
         # cgo objects differ between runner images, and so does everything built on them.
-        prefix="go-v3-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-${{ inputs.family }}-$(go env GOVERSION)"
-        printf 'prefix=%s\nsum=%s\nkey=%s\n' "$prefix-" "$prefix-$sum-" "$prefix-$sum-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+        family="go-v4-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-$FAMILY-"
+        prefix="$family$(go env GOVERSION)-"
+        printf 'family=%s\nprefix=%s\nsum=%s\nkey=%s\n' "$family" "$prefix" "$prefix$sum-" "$prefix$sum-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
     - name: Restore Go caches
       id: restore
       if: ${{ inputs.save != 'true' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: |
-          ${{ steps.name.outputs.build }}
-          ${{ steps.name.outputs.modules }}
+        path: ${{ steps.name.outputs.paths }}
         key: ${{ steps.name.outputs.key }}
         restore-keys: |
           ${{ steps.name.outputs.sum }}
@@ -46,10 +51,22 @@ runs:
         echo "GO_CACHE_RESTORED=${MATCHED:-none}" >> "$GITHUB_ENV"
         echo "Restored ${MATCHED:-no Go cache}"
     - name: Save Go caches
+      id: save
       if: ${{ !cancelled() && inputs.save == 'true' && github.event_name == 'push' && env.GO_CACHE_RESTORED != steps.name.outputs.key }}
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: |
-          ${{ steps.name.outputs.build }}
-          ${{ steps.name.outputs.modules }}
+        path: ${{ steps.name.outputs.paths }}
         key: ${{ steps.name.outputs.key }}
+    - name: Delete the family's older entries on this branch
+      if: ${{ !cancelled() && steps.save.outcome == 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        FAMILY: ${{ steps.name.outputs.family }}
+        KEY: ${{ steps.name.outputs.key }}
+      run: |
+        gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?ref=$GITHUB_REF&key=$FAMILY" \
+          --jq '.actions_caches[] | select(.key != env.KEY) | .id' |
+          while read -r id; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent || echo "::warning::could not delete cache $id"
+          done

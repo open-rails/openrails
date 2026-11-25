@@ -553,7 +553,7 @@ func stripeWebhookPasses(t *testing.T, fleet *river.Client[pgx.Tx], states ...ri
 // engineFleet is a host fleet composed with engine's jobs in w's River schema.
 func engineFleet(t *testing.T, w *world, engine *openrails.Engine) *river.Client[pgx.Tx] {
 	t.Helper()
-	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}}}, engine.RiverJobs())
+	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}}}, engine.RiverJobs())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

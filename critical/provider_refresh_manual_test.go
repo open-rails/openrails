@@ -27,7 +27,7 @@ func TestManualProviderRefresh(t *testing.T) {
 	t.Run("OR-J38-S72/operator-refresh-replaces-legacy-work-and-retries", func(t *testing.T) {
 		a, p, _ := nmiMembership(t)
 		ctx := t.Context()
-		queue, err := river.NewClient(riverpgxv5.New(a.pool), &river.Config{Schema: a.schema, SkipUnknownJobCheck: true})
+		queue, err := river.NewClient(riverpgxv5.New(a.pool), &river.Config{Schema: a.schema + "_river", SkipUnknownJobCheck: true})
 		require.NoError(t, err)
 		legacyScheduler := priorRefreshJob("openrails.provider_refresh")
 		legacyMerchant := priorRefreshJob("openrails.provider_refresh_merchant")

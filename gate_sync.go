@@ -653,13 +653,14 @@ func (g *gateState) syncOnce() {
 	build := g.builds
 	// A sync carrying usage waits for its insert, which a request waiting
 	// for its first view need not: such a sync leaves the usage to the next,
-	// which carries it, so every other sync at worst does. What it leaves is
-	// neither sent nor settled, never lost or counted twice.
-	coldOnly := len(g.waiters) > 0 && !closing && !g.deferred
+	// which carries it, so every other sync at worst does. A full batch is
+	// carried anyway: behind a backlog, settling comes first. What a sync
+	// leaves is neither sent nor settled, never lost or counted twice.
+	head := headLocked(g.queues[g.lease], billing.MaxSyncUsageItems)
+	coldOnly := len(g.waiters) > 0 && !closing && !g.deferred && len(head) < billing.MaxSyncUsageItems
 	g.deferred = coldOnly
-	var head []*queued
-	if !coldOnly {
-		head = headLocked(g.queues[g.lease], billing.MaxSyncUsageItems)
+	if coldOnly {
+		head = nil
 	}
 	carried := map[*queued]bool{}
 	usage := make([]billing.LeaseUsage, len(head))

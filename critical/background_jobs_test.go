@@ -98,7 +98,7 @@ func TestBackgroundJobs(t *testing.T) {
 		chores := &hostChoreWorker{ran: make(chan int64, 4)}
 		workers := river.NewWorkers()
 		river.AddWorker(workers, chores)
-		fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Workers: workers, RescueStuckJobsAfter: time.Minute,
+		fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", Workers: workers, RescueStuckJobsAfter: time.Minute,
 			Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}, "host": {MaxWorkers: 1}}}, w.engine.RiverJobs())
 		require.NoError(t, err)
 		t.Cleanup(func() {
@@ -127,7 +127,7 @@ func TestBackgroundJobs(t *testing.T) {
 		workers := river.NewWorkers()
 		river.AddWorker(workers, chores)
 		// The host sets no rescue window, so OpenRails' ten minutes applies.
-		fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Workers: workers,
+		fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", Workers: workers,
 			Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}, "host": {MaxWorkers: 1}}}, w.engine.RiverJobs())
 		require.NoError(t, err)
 		t.Cleanup(func() {
@@ -167,7 +167,7 @@ func TestBackgroundJobs(t *testing.T) {
 	t.Run("OR-J04-S41/job-health-reads-overrunning-discarded-and-completed-jobs-from-river", func(t *testing.T) {
 		w := newWorld(t)
 		// A long rescue window keeps the overrunning job running.
-		fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, RescueStuckJobsAfter: 2 * time.Hour,
+		fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", RescueStuckJobsAfter: 2 * time.Hour,
 			Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}}}, w.engine.RiverJobs())
 		require.NoError(t, err)
 		t.Cleanup(func() {

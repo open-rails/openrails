@@ -139,8 +139,9 @@ jobs:
             VERSION=${{ needs.verify-source.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ needs.verify-source.outputs.date }}
+          # Only a tag build saves layers; a pull request's would be readable by that PR alone.
           cache-from: type=gha,scope=openrails-amd64
-          cache-to: type=gha,mode=max,scope=openrails-amd64
+          cache-to: ${{ startsWith(github.ref, 'refs/tags/') && 'type=gha,mode=max,scope=openrails-amd64' || '' }}
 
       # ci.yaml's Required Security job only scans the Go dependency graph
       # (go.sum) -- never the image contents, so base-image/OS-package CVEs
@@ -241,7 +242,7 @@ jobs:
             COMMIT=${{ github.sha }}
             DATE=${{ needs.verify-source.outputs.date }}
           cache-from: type=gha,scope=openrails-arm64
-          cache-to: type=gha,mode=max,scope=openrails-arm64
+          cache-to: ${{ startsWith(github.ref, 'refs/tags/') && 'type=gha,mode=max,scope=openrails-arm64' || '' }}
 
       - name: Report version
         run: |

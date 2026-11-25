@@ -172,7 +172,7 @@ func TestWorkerProcess(t *testing.T) {
 			ignored[id] = true
 		}
 		fleet, err := riverhelpers.New(t.Context(), pool, &river.Config{
-			Schema: w.schema,
+			Schema: w.schema + "_river",
 			Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
 			Hooks:  []rivertype.Hook{&afterWorkBarrier{path: config.AfterWork, ignore: ignored}},
 		}, engine.RiverJobs())
