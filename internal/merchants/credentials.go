@@ -351,7 +351,7 @@ func (s *Service) PSPScopeByAccountID(ctx context.Context, id billing.MerchantID
 }
 
 // NMIWebhookSecrets are the secrets an NMI webhook may be signed with: the
-// current one and, only during its bounded overlap (SEC-29), the previous one.
+// current one and, only during its bounded overlap, the previous one.
 type NMIWebhookSecrets struct {
 	Current, Previous string
 }
@@ -366,6 +366,32 @@ func (s *Service) LoadNMIWebhookSecrets(ctx context.Context, id billing.Merchant
 	out := NMIWebhookSecrets{Current: scope.Secret("webhook_signing_secret")}
 	if s.overlapOpen(scope) {
 		out.Previous = scope.Secret("webhook_signing_secret_previous")
+	}
+	return out, nil
+}
+
+// CCBillWebhookTokens are the tokens a CCBill webhook URL may end in: the
+// current one and, only during its bounded overlap, the previous
+// one. Required false still admits the tokenless URL. Declared false (no
+// document names the PSP) and Duplicate (its account is another PSP's, whose
+// secrets are not read) admit nothing.
+type CCBillWebhookTokens struct {
+	Current, Previous   string
+	Required            bool
+	Declared, Duplicate bool
+}
+
+// LoadCCBillWebhookTokens loads a CCBill PSP's webhook tokens; none when no
+// document declares it.
+func (s *Service) LoadCCBillWebhookTokens(ctx context.Context, id billing.MerchantID, pspID uuid.UUID) (CCBillWebhookTokens, error) {
+	scope, ok, err := s.PSPScopeByID(ctx, id, pspID)
+	if err != nil || !ok || scope.Rail != string(models.RailCCBill) {
+		return CCBillWebhookTokens{}, err
+	}
+	required, set := scope.Settings[config.RequireWebhookTokenKey].(bool)
+	out := CCBillWebhookTokens{Current: scope.Secret("webhook_token"), Required: required || !set, Declared: scope.Declared, Duplicate: scope.DuplicateAccount}
+	if s.overlapOpen(scope) {
+		out.Previous = scope.Secret("webhook_token_previous")
 	}
 	return out, nil
 }
