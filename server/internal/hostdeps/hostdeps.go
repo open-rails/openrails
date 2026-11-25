@@ -1,7 +1,7 @@
 // Package hostdeps opens what the standalone server reaches outside its
 // process, from its configuration: the Postgres pool, Redis, ClickHouse, the
-// Vault session and the SMTP sender. The engine borrows them; Close closes
-// them.
+// Vault session, the SMTP sender and AuthKit's key directory. The server
+// borrows them; Close closes them.
 package hostdeps
 
 import (
@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit/keys"
 	"github.com/open-rails/helpers/deps"
 	"github.com/open-rails/helpers/vault"
 	"github.com/redis/go-redis/v9"
@@ -53,6 +54,9 @@ type Opened struct {
 	Deps openrails.Deps
 	// Degraded are the optional sections that are not served, with why.
 	Degraded []config.Degradation
+	// Keys is AuthKit's key source: auth.keys.path's directory; nil without
+	// one.
+	Keys keys.Source
 
 	vault  *vault.Session
 	closes []func()
@@ -110,7 +114,29 @@ func Open(ctx context.Context, logger *slog.Logger, cfg *hostconfig.Config) (*Op
 			o.Deps.Email = sender
 		}
 	}
+	source, closeKeys, err := AuthKeys(logger, cfg)
+	if err != nil {
+		o.Close()
+		return nil, err
+	}
+	o.Keys = source
+	o.closes = append(o.closes, closeKeys)
 	return o, nil
+}
+
+// AuthKeys watches auth.keys.path's keys.json and totp.key. Without the
+// setting it is nil: AuthKit reads /vault/auth, or generates development
+// keys for a loopback issuer.
+func AuthKeys(logger *slog.Logger, cfg *hostconfig.Config) (keys.Source, func(), error) {
+	path := strings.TrimSpace(cfg.Auth.Keys.Path)
+	if path == "" {
+		return nil, func() {}, nil
+	}
+	source, err := keys.Watch(path, logger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("auth.keys.path: %w", err)
+	}
+	return source, source.Close, nil
 }
 
 func (o *Opened) degrade(field string, err error) {

@@ -208,7 +208,7 @@ func addStripeCollectionMetadata(values url.Values, p StripeInvoiceCollectionPar
 		values.Set("metadata["+StripeCollectionKeyMetadata+"]", key)
 	}
 	if invoiceID := strings.TrimSpace(p.OpenRailsInvoiceID); invoiceID != "" {
-		values.Set("metadata[openrails_invoice_id]", invoiceID)
+		values.Set("metadata[openrails_order_id]", invoiceID)
 	}
 	if merchantID := strings.TrimSpace(p.OpenRailsMerchantID); merchantID != "" {
 		values.Set("metadata[openrails_merchant_id]", merchantID)

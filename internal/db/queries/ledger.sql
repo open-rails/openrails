@@ -48,6 +48,29 @@ INSERT INTO billing.ledger_accounts (
 ON CONFLICT DO NOTHING
 RETURNING *;
 
+-- name: EnsureCustomerBalanceAccounts :exec
+-- Customers' balance accounts, made in (customer, currency) order: each one
+-- this creates is watched as InsertPrepaidBalanceWatch watches it.
+WITH created AS (
+    INSERT INTO billing.ledger_accounts (merchant_id, book, class, customer_id, account_type, currency,
+        debits_must_not_exceed_credits, credits_must_not_exceed_debits)
+    SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(book)::text, sqlc.arg(class)::text, a.customer_id, sqlc.arg(account_type)::text, a.currency,
+        sqlc.arg(debits_must_not_exceed_credits)::boolean, sqlc.arg(credits_must_not_exceed_debits)::boolean
+    FROM unnest(sqlc.arg(customer_ids)::uuid[], sqlc.arg(currencies)::text[]) AS a(customer_id, currency)
+    ORDER BY a.customer_id, a.currency
+    ON CONFLICT DO NOTHING
+    RETURNING customer_id, currency
+)
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, look_each_change)
+SELECT sqlc.arg(merchant_id)::uuid, c.customer_id, c.currency, NULL::timestamptz, 0, true
+FROM created c
+WHERE NOT EXISTS (
+    SELECT 1 FROM billing.money_settings s
+    WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = c.customer_id
+      AND s.currency = c.currency AND s.billing_mode = 'arrears' AND s.collection_revoked_at IS NULL)
+ORDER BY c.customer_id, c.currency
+ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
+
 -- InsertLedgerTransfer is the units book's one durable write, effective when
 -- it posts. ON CONFLICT DO NOTHING on
 -- ledger_transfers_operation_once_key makes once-only a database fact: a

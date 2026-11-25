@@ -494,15 +494,14 @@ func TestInvoiceNotificationRecovery(t *testing.T) {
 // before an unchanged source revision is retried through the real publisher.
 func assertAdoptionPublisherReplay(t *testing.T, a *authorityWorld, snapshot billing.NotificationAdoption) {
 	t.Helper()
-	schema := a.schema + "_adoption"
-	t.Cleanup(func() {
-		_, err := a.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
-		require.NoError(t, err)
-	})
-	accounts := authtest.Replica(t, a.auth, authtest.WithConfig(func(c *authkit.Config) {
-		c.Notifications = &authkit.NotificationsConfig{Schema: schema, Scopes: map[string]string{a.tenant.String(): "accounts"}, Producers: []authkit.NotificationProducer{{Name: "openrails", TenantID: a.tenant, Origin: notify.OriginScope{System: "openrails", Scope: a.alpha.MerchantID().String()}, Visibility: notify.VisibilityTenant}}}
-	}))
-	raw, err := notifypg.New(a.pool, notifypg.Config{Schema: schema, Scope: "accounts"})
+	// AuthKit's inbox, in its own schema: the producer registers in the
+	// tenant, and a raw store on the same scope plays the legacy writer.
+	accounts := a.auth
+	publisher, err := accounts.Notifications(authkit.NotificationProducer{Name: "openrails", Origin: notify.OriginScope{System: "openrails", Scope: a.alpha.MerchantID().String()}, Visibility: notify.VisibilityTenant})
+	require.NoError(t, err)
+	scope, err := accounts.NotificationScope()
+	require.NoError(t, err)
+	raw, err := notifypg.New(a.pool, notifypg.Config{Schema: a.schema + "_auth", Scope: scope})
 	require.NoError(t, err)
 	adoption := snapshot.Adoptions[0]
 	legacy := adoption.Current.Input
@@ -517,8 +516,6 @@ func assertAdoptionPublisherReplay(t *testing.T, a *authorityWorld, snapshot bil
 	before, err := accounts.GetNotification(t.Context(), a.alice.ID, prior.ID)
 	require.NoError(t, err)
 	require.NotNil(t, before.ReadAt)
-	publisher, err := accounts.Notifications("openrails")
-	require.NoError(t, err)
 	m := adoption.Current
 	require.NoError(t, publisher.Publish(t.Context(), []notify.Publication{{RecipientID: m.Recipient.ID, ID: m.Origin.ID, Revision: m.Revision, Kind: m.Kind, Data: m.Data, CreatedAt: m.CreatedAt, ActionRequested: m.ActionRequested, Severity: m.Severity}}))
 	after, err := accounts.GetNotification(t.Context(), a.alice.ID, prior.ID)

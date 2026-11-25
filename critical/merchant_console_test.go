@@ -71,7 +71,7 @@ func consoleStaff(t *testing.T, a *authorityWorld, name string, perms ...billing
 	require.NoError(t, err)
 	_, err = a.auth.SetGroupRole(t.Context(), iam.SystemIdentity(), a.alphaGroup, iam.UserSubject(user.ID), role.Name)
 	require.NoError(t, err)
-	return authtest.SignIn(t, a.auth, user).AccessToken
+	return signIn(t, a.auth, user).AccessToken
 }
 
 // consoleOperator holds what a person reviewing an import needs: merchant
@@ -95,7 +95,7 @@ func consoleBrowser(t *testing.T, a *authorityWorld, config map[string]any, acti
 	require.NoError(t, err, "critical:build must build the console browser bundle")
 	target, err := url.Parse(a.server.URL)
 	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy := browserSession(t, a.auth, httputil.NewSingleHostReverseProxy(target))
 	var mu sync.Mutex
 	counts := map[string]int{}
 	mux := http.NewServeMux()

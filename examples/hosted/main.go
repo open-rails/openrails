@@ -66,11 +66,10 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 		return nil, err
 	}
 	return authkit.New(ctx, authkit.Config{
-		Database:     authkit.DatabaseConfig{Schema: "profiles"},
-		Token:        authkit.TokenConfig{Issuer: s.PublicURL, IssuedAudiences: []string{"onlydemo"}},
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true},
-		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
-		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		Database:  authkit.DatabaseConfig{Schema: "profiles"},
+		Issuer:    s.PublicURL,
+		HTTP:      &authkit.HTTPConfig{DirectPeerIP: true},
+		TwoFactor: iam.TwoFactorDisabled,
 	}, authkit.Deps{Postgres: db, Email: email})
 }
 
@@ -168,7 +167,7 @@ func newApp(ctx context.Context, db *pgxpool.Pool, s settings, media mediaKey) (
 		return nil, nil, nil, err
 	}
 	r := gin.Default()
-	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /api/v1
+	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /auth/v1
 		_ = ak.Close(context.WithoutCancel(ctx))
 		return nil, nil, nil, err
 	}

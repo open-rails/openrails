@@ -128,7 +128,5 @@ func (s *Server) CompletePendingMerchantRetirements(ctx context.Context, limit i
 // ConsoleClientID is the admin console's public OAuth client. At the
 // server's AuthKit, which declares it while the console is on, it exchanges
 // an own account's session token for one bound to the merchant they act on
-// (RFC 8693, the merchant's id as group_id), with a DPoP proof. A trusted
-// issuer staff sign in at registers it with the redirect URI
-// <origin>/admin/callback.
+// (RFC 8693, the merchant's id as group_id), with a DPoP proof.
 const ConsoleClientID = "openrails-console"

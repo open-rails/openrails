@@ -3,7 +3,7 @@
 import { createAuthClient } from "@openrails/auth-ui/client"
 import { createBillingClient } from "@openrails/billing-ui"
 
-// AuthKit's browser client, at /api/v1: authFetch attaches the signed-in
+// AuthKit's browser client, at /auth/v1: authFetch attaches the signed-in
 // user's token. It also trades that session, as the courses-web OAuth
 // client, for DPoP-bound access tokens to the OpenRails server.
 export const auth = createAuthClient({ resourceTokens: { clientId: "courses-web" } })
@@ -13,12 +13,12 @@ export const auth = createAuthClient({ resourceTokens: { clientId: "courses-web"
 const server: { base_url: string; resource: string } = await fetch("/api/billing").then((res) => res.json())
 
 // The browser calls the server directly. Signed in, each call carries an
-// openrails:self token for the server and a DPoP proof; signed out, the
-// public routes need neither.
+// openrails:self token for the server, with the user's proven email, and a
+// DPoP proof; signed out, the public routes need neither.
 export const billing = createBillingClient({
   baseUrl: server.base_url,
   fetch: (input, init) =>
     auth.getAccessToken()
-      ? auth.resourceFetch(input, { ...init, resource: server.resource, scope: "openrails:self" })
+      ? auth.resourceFetch(input, { ...init, resource: server.resource, scope: "openrails:self email" })
       : fetch(input, init),
 })

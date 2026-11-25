@@ -20,12 +20,12 @@ import (
 // action. The user's own session does both.
 func TestPersonalAccessTokens(t *testing.T) {
 	t.Run("OR-J01-S17/personal-access-token-never-acts-in-person", func(t *testing.T) {
-		a, provider := newPaymentWorldWithAuth(t, func(c *authkit.Config) { c.PersonalAccessTokens.Enabled = true })
+		a, provider := newPaymentWorldWithAuth(t, personalAccessTokens)
 		input := saleInput(t, a, provider)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		invoice, err := a.alpha.CreateInvoice(t.Context(), "pat-invoice", billing.CreateInvoiceParams{CustomerID: customer, Lines: input.Lines})
 		require.NoError(t, err)
-		session, _ := authenticateCustomerProof(t, a.auth.Authenticator(), a.aliceToken, nil)
+		session, _ := authenticateCustomerProof(t, a.auth, a.auth.Authenticator(), a.aliceToken, nil)
 		pat, err := a.auth.CreatePersonalAccessToken(t.Context(), session.Identity(), iam.NewPersonalAccessToken{
 			Name: "ci", GroupID: a.alpha.MerchantID().String(),
 			Permissions: []iam.Perm{mustPermission(t, string(billing.MerchantConfigRead)), mustPermission(t, string(billing.MerchantConfigManage))},
@@ -68,4 +68,10 @@ func TestPersonalAccessTokens(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, status, "a session reaches the handler's own checks: %s", raw)
 		require.Contains(t, string(raw), `"code":"invalid_param"`)
 	})
+}
+
+// personalAccessTokens mounts AuthKit's personal access tokens, an opt-in
+// route group.
+func personalAccessTokens(c *authkit.Config) {
+	c.HTTP.Groups = append(iam.DefaultRouteGroups(), iam.RoutePersonalAccessTokens)
 }

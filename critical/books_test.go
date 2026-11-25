@@ -614,7 +614,7 @@ func TestBooks(t *testing.T) {
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
 
-	t.Run("OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-invoice-both-commit", func(t *testing.T) {
+	t.Run("OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-order-both-commit", func(t *testing.T) {
 		a := ccbillWebhookWorld(t)
 		w := a.world
 		mid := w.alpha.MerchantID().UUID()
@@ -678,7 +678,7 @@ func TestBooks(t *testing.T) {
 		require.Contains(t, hostCLI(t, w, "ledger-audit", "--merchant", "id:"+w.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
 
-	t.Run("OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-invoices-all-commit", func(t *testing.T) {
+	t.Run("OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-orders-all-commit", func(t *testing.T) {
 		w := newWorld(t)
 		mid := w.alpha.MerchantID().UUID()
 		customer := billing.CustomerID(uuid.New())
@@ -886,7 +886,7 @@ products:
 		require.ErrorContains(t, err, "ledger or MRR work queued after the event log flushed")
 	})
 
-	t.Run("OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-invoice-both-commit", func(t *testing.T) {
+	t.Run("OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit", func(t *testing.T) {
 		w := newWorld(t)
 		merchants := []uuid.UUID{w.alpha.MerchantID().UUID(), w.beta.MerchantID().UUID()}
 		slices.SortFunc(merchants, func(x, y uuid.UUID) int { return bytes.Compare(x[:], y[:]) })

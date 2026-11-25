@@ -80,9 +80,6 @@ func run(root string, write bool) error {
 // sentence of each.
 type docs map[string]string
 
-// authkitDefaults are defaults AuthKit applies itself and exports none of.
-var authkitDefaults = map[string]string{"auth.keys.path": "/vault/auth"}
-
 // overrides replace a field's comment where the reference says more.
 var overrides = map[string]string{}
 
@@ -228,9 +225,6 @@ func envExample(settings []hostconfig.Setting, d docs) ([]byte, error) {
 			missing = append(missing, s.Path)
 		}
 		value := s.Default
-		if value == "" {
-			value = authkitDefaults[s.Path]
-		}
 		sections[name] = append(sections[name], fmt.Sprintf("# %s\n%s=%s\n", doc, s.Env, value))
 	}
 	for _, name := range order {

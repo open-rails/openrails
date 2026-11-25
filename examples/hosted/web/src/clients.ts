@@ -3,7 +3,7 @@
 import { createAuthClient } from "@openrails/auth-ui/client"
 import { createBillingClient, tokenSource } from "@openrails/billing-ui"
 
-// AuthKit's browser client, at /api/v1: authFetch attaches the signed-in user's token.
+// AuthKit's browser client, at /auth/v1: authFetch attaches the signed-in user's token.
 export const auth = createAuthClient()
 
 // The platform's API, which the app's server names.

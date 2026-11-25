@@ -1,10 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
-// Who the console's operator is, whichever way they signed in: the
-// deployment's own accounts (auth-ui's AuthKit session) or a trusted issuer
-// (auth-ui's issuer client, an OAuth 2.0 code flow).
+// Who the console's operator is: the deployment's own account, from
+// auth-ui's AuthKit session.
 import * as React from "react"
 import { useAuth as useSession } from "@openrails/auth-ui/react"
-import { useIssuerAuth } from "@openrails/auth-ui/react"
 import type { AuthStatus } from "@openrails/auth-ui/react"
 
 export interface ConsoleUser {
@@ -17,18 +15,7 @@ export interface ConsoleIdentity {
   status: AuthStatus
   user: ConsoleUser | null
   signOut: () => Promise<void>
-  // Set when staff sign in at a trusted issuer.
-  issuer?: {
-    name: string
-    // silent: prompt=none, answered without UI while the issuer session
-    // lasts.
-    signIn: (returnTo?: string, silent?: boolean) => Promise<void>
-  }
 }
-
-// Marks a tab that has re-authorized at the issuer on its own; cleared by a
-// completed sign-in, so the next expiry re-authorizes again.
-export const ISSUER_REDIRECT_KEY = "openrails.admin.issuer-redirected"
 
 const IdentityContext = React.createContext<ConsoleIdentity | null>(null)
 
@@ -55,41 +42,6 @@ export function LocalIdentity({ children }: { children: React.ReactNode }) {
       signOut,
     }),
     [status, userId, user, signOut]
-  )
-  return (
-    <IdentityContext.Provider value={value}>
-      {children}
-    </IdentityContext.Provider>
-  )
-}
-
-export function IssuerIdentity({
-  name,
-  children,
-}: {
-  name: string
-  children: React.ReactNode
-}) {
-  const { status, userId, user, signIn, signOut } = useIssuerAuth()
-  const value = React.useMemo<ConsoleIdentity>(
-    () => ({
-      status,
-      user:
-        status === "signed_in" && userId
-          ? {
-              id: userId,
-              email: user?.email,
-              username: user?.preferredUsername ?? user?.name,
-            }
-          : null,
-      signOut: () => signOut(),
-      issuer: {
-        name,
-        signIn: (returnTo, silent) =>
-          signIn({ returnTo, prompt: silent ? "none" : undefined }),
-      },
-    }),
-    [status, userId, user, signIn, signOut, name]
   )
   return (
     <IdentityContext.Provider value={value}>

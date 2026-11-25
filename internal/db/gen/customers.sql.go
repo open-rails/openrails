@@ -101,6 +101,24 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 	return err
 }
 
+const ensureCustomerRows = `-- name: EnsureCustomerRows :exec
+INSERT INTO billing.customers (id, merchant_id)
+SELECT c.id, $1::uuid FROM unnest($2::uuid[]) AS c(id)
+ORDER BY c.id
+ON CONFLICT (merchant_id, id) DO NOTHING
+`
+
+type EnsureCustomerRowsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+// EnsureCustomerRow for many customers, in id order.
+func (q *Queries) EnsureCustomerRows(ctx context.Context, arg EnsureCustomerRowsParams) error {
+	_, err := q.db.Exec(ctx, ensureCustomerRows, arg.MerchantID, arg.Ids)
+	return err
+}
+
 const getCustomer = `-- name: GetCustomer :one
 SELECT id, merchant_id, issuer, created_at, last_seen_at, billing_policy FROM billing.customers
 WHERE merchant_id = $1 AND id = $2

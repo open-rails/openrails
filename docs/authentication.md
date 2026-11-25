@@ -126,7 +126,6 @@ your backend                                           OpenRails
 | Embedded | your app's own session credential | your app's auth | the roles you build from the `billing.Permission` constants | its `BoundScope`, else the declared `Issuer`; `root:` permissions reach every merchant |
 | Standalone, the server's own accounts | the server's own account, then a token exchanged for the chosen merchant | the server's AuthKit | the person's role in that merchant, or their root role | the merchant's id, named in the exchange |
 | Standalone, in your own site | an `openrails:merchant` access token your app gives its signed-in staff | the merchant's trusted issuer | the person's permissions there, within the application's role | the issuer's merchant |
-| Standalone, the console at a trusted issuer | an `openrails:merchant` access token, by authorization code with PKCE | one of root's trusted issuers | the person's permissions there, within the application's role | the issuer's group |
 | SaaS | the platform's own account, then the same exchange | the platform | the person's role in that merchant | the merchant's id, named in the exchange |
 
 ### Embedded
@@ -162,52 +161,20 @@ staff browser (your page)            your app (the merchant's issuer)        Ope
   |                                           |                                   | holds the route's permission?
 ```
 
-### Standalone, the console at a trusted issuer
-
-Root's trusted issuers (from the bootstrap manifest) that sign people in are buttons beside the server's own accounts on the console's sign-in page, each shown only while a probe says its sign-in works ([standalone](standalone.md#the-console)). A merchant's trusted issuer is never one.
-
-The console is the OAuth 2.0 public client `openrails-console` at that issuer: the authorization code flow with PKCE (RFC 6749, RFC 7636) and OpenRails' resource as the resource indicator (RFC 8707). The access token it receives is minted for the server's resource by the issuer, carrying the person's permissions there, which count within the application's role. There is no token exchange: the console calls OpenRails with that token and renews it with the issuer's refresh token.
-
-The issuer registers:
-
-- OpenRails' resource, the server's `public_url`, with the scope `openrails:merchant` and a permission ceiling covering what staff do;
-- the public client `openrails-console`, with the redirect URI `<origin>/admin/callback`, the post-logout redirect URI `<origin>/admin/login`, the authorization code grant (with refresh tokens) and that resource;
-- roles granting staff OpenRails' permissions by name, which its tokens for the resource carry.
-
-The console asks for `openid profile email openrails:merchant`. It checks the OpenID Connect ID token and uses it only to name the person and to end the issuer's session at sign-out; OpenRails accepts only the access token. People, roles and second factors are the issuer's to manage.
-
-```text
-staff browser (/admin)            root's trusted issuer                OpenRails
-  | GET /.well-known/openid-configuration |                                 |
-  | authorization_endpoint: client_id,    |                                 |
-  |   redirect_uri=<origin>/admin/callback|                                 |
-  |   code_challenge (S256),              |                                 |
-  |   resource=<server URL>,              |                                 |
-  |   scope=openid profile email openrails:merchant                         |
-  |-------------------------------------->| the person signs in there       |
-  |<--------------------------------------| /admin/callback?code=…          |
-  | token_endpoint: code, code_verifier   |                                 |
-  |-------------------------------------->|                                 |
-  |<--------------------------------------| access token (aud=resource,     |
-  |                                       | permissions), ID token, refresh |
-  | GET /v1/admin/…  Authorization: Bearer <access token>                   |
-  |------------------------------------------------------------------------>| issuer → its group
-```
-
 ### Standalone, the server's own accounts
 
-People sign in at `/admin` with the server's own AuthKit accounts, always offered. Every account needs a second factor, a passkey or an authenticator app: a password alone gets no session until one is enrolled, and every later sign-in asks for it. Accounts join by invitation only:
+People sign in at `/admin` with the server's own AuthKit accounts, the console's only sign-in. Every account needs a second factor, a passkey or an authenticator app: a password alone gets no session until one is enrolled, and every later sign-in asks for it. Accounts join by invitation only:
 
 1. The first operator comes from `openrails push-auth-bootstrap`: a bootstrap manifest user with `root_role: root:owner`.
 2. A person who manages a merchant's people (or root's) invites someone by email with a role, in the console's **Access → People**.
 3. The invitee follows the emailed link to `/admin/invite` and creates an account, or accepts with the one they hold.
 
-The console then exchanges the session's token for one bound to the merchant the person picks: RFC 8693 at the server's token endpoint, as its `openrails-console` client, naming the merchant's id as `group_id` and binding the result to a DPoP key. The exchange is refused (`invalid_target`) where the person holds no role in that merchant and no root role. The session keeps its access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
+The console then exchanges the session's token for one bound to the merchant the person picks: RFC 8693 at the server's token endpoint, as its `openrails-console` client, naming the merchant's id as `group_id` and binding the result to a DPoP key. The exchange is refused (`invalid_target`) where the person holds no role in that merchant and no root role. Every sign-in proves the browser's DPoP key (RFC 9449), and the session is bound to it: its tokens go with a proof of that key, never as bearer tokens. The session keeps its access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
 
 ```text
 staff browser (/admin)                server's AuthKit                     OpenRails API
-  | sign in, second factor --------------->|                                     |
-  |<------------- session token, refresh cookie                                  |
+  | sign in (DPoP proof), second factor -->|                                     |
+  |<------------- DPoP-bound session token, refresh cookie                       |
   | pick merchant M                        |                                     |
   | POST /oauth2/token                     |                                     |
   |   grant_type=token-exchange            |                                     |
@@ -221,8 +188,6 @@ staff browser (/admin)                server's AuthKit                     OpenR
   | GET /v1/admin/…  Authorization: DPoP <token>, DPoP proof ------------------->| merchant M
 ```
 
-The console offers both.
-
 ### SaaS
 
 Staff sign in with the hosted platform's own accounts. An owner invites a person to a merchant with a role (`owner`, `support` or `viewer`) on the console's **Team** page: an account that verified that email joins at once, anyone else registers from the emailed link. The console binds each session to the chosen merchant by the same exchange as the standalone server's own accounts. Sign-in at a trusted issuer isn't offered on the platform.
@@ -235,6 +200,6 @@ The server always runs its own AuthKit, configured from the server's own setting
 - mints the tokens bound to OpenRails: customer tokens from assertions (RFC 7523) at its token endpoint, and the console's exchanged tokens;
 - holds each merchant's customer directory, which trusted issuers push to over SCIM at `/directory/scim/v2` ([customer contacts](standalone.md#customer-contacts));
 - serves its JWKS at its issuer plus `/.well-known/jwks.json`;
-- serves its staff accounts: sign-in, account security, invitations, and people, roles, API keys and signing keys under the console's **Access**.
+- serves its staff accounts at `/auth/v1`: sign-in, account security, invitations, and people, roles, API keys and signing keys under the console's **Access**.
 
 The hosted platform runs the same server with its own account policy.

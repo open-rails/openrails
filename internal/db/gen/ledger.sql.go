@@ -12,6 +12,55 @@ import (
 	"github.com/google/uuid"
 )
 
+const ensureCustomerBalanceAccounts = `-- name: EnsureCustomerBalanceAccounts :exec
+WITH created AS (
+    INSERT INTO billing.ledger_accounts (merchant_id, book, class, customer_id, account_type, currency,
+        debits_must_not_exceed_credits, credits_must_not_exceed_debits)
+    SELECT $1::uuid, $2::text, $3::text, a.customer_id, $4::text, a.currency,
+        $5::boolean, $6::boolean
+    FROM unnest($7::uuid[], $8::text[]) AS a(customer_id, currency)
+    ORDER BY a.customer_id, a.currency
+    ON CONFLICT DO NOTHING
+    RETURNING customer_id, currency
+)
+INSERT INTO billing.balance_watches (merchant_id, customer_id, currency, next_check_at, usage_rate_per_hour, look_each_change)
+SELECT $1::uuid, c.customer_id, c.currency, NULL::timestamptz, 0, true
+FROM created c
+WHERE NOT EXISTS (
+    SELECT 1 FROM billing.money_settings s
+    WHERE s.merchant_id = $1::uuid AND s.customer_id = c.customer_id
+      AND s.currency = c.currency AND s.billing_mode = 'arrears' AND s.collection_revoked_at IS NULL)
+ORDER BY c.customer_id, c.currency
+ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING
+`
+
+type EnsureCustomerBalanceAccountsParams struct {
+	MerchantID                 uuid.UUID
+	Book                       string
+	Class                      string
+	AccountType                string
+	DebitsMustNotExceedCredits bool
+	CreditsMustNotExceedDebits bool
+	CustomerIds                []uuid.UUID
+	Currencies                 []string
+}
+
+// Customers' balance accounts, made in (customer, currency) order: each one
+// this creates is watched as InsertPrepaidBalanceWatch watches it.
+func (q *Queries) EnsureCustomerBalanceAccounts(ctx context.Context, arg EnsureCustomerBalanceAccountsParams) error {
+	_, err := q.db.Exec(ctx, ensureCustomerBalanceAccounts,
+		arg.MerchantID,
+		arg.Book,
+		arg.Class,
+		arg.AccountType,
+		arg.DebitsMustNotExceedCredits,
+		arg.CreditsMustNotExceedDebits,
+		arg.CustomerIds,
+		arg.Currencies,
+	)
+	return err
+}
+
 const getLedgerAccount = `-- name: GetLedgerAccount :one
 
 SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, created_at, book, class, psp_id FROM billing.ledger_accounts

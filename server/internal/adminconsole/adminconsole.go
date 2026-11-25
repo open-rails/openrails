@@ -21,12 +21,8 @@ type Config struct {
 	AuthBaseURL string `json:"auth_base_url"`
 	// APIBaseURL is the admin API base, default "/v1".
 	APIBaseURL string `json:"api_base_url"`
-	// Issuers are the sign-in buttons beside the server's own accounts:
-	// root's trusted issuers whose sign-in works (Directory). None without one.
-	Issuers []Issuer `json:"issuers"`
-	// Exchange is where the console trades an own account's token for one
-	// bound to the merchant staff choose (RFC 8693, the merchant's id as
-	// group_id). An issuer's token is bound already.
+	// Exchange is where the console trades its session's token for one bound
+	// to the merchant staff choose (RFC 8693, the merchant's id as group_id).
 	Exchange *Exchange `json:"exchange"`
 }
 
@@ -47,26 +43,12 @@ type Merchant struct {
 	Role        string `json:"role,omitempty"`
 }
 
-// Issuer is the console's OAuth 2.0 public client at a trusted issuer.
-type Issuer struct {
-	Key      string `json:"key"`
-	URL      string `json:"url"`
-	ClientID string `json:"client_id"`
-	Name     string `json:"name"`
-	// Resource is this deployment's resource identifier, Scope what the
-	// console asks for, RedirectURI where the issuer returns staff.
-	Resource    string `json:"resource"`
-	Scope       string `json:"scope"`
-	RedirectURI string `json:"redirect_uri"`
-}
-
 // Path is where the standalone server serves the console, apart from /v1.
 const Path = "/admin"
 
-// DefaultScope is what the console asks a trusted issuer for. With openid it
-// checks the ID token, which it uses only to name the person and to end the
-// issuer's session at sign-out; OpenRails accepts only the access token.
-const DefaultScope = "openid profile email openrails:merchant"
+// ClientID is the console's public OAuth client at the server's AuthKit, the
+// token exchange's client.
+const ClientID = "openrails-console"
 
 // Present reports whether assets hold a servable console build: a non-nil
 // fs.FS with index.html at its root. A source-only build without assets answers an explicit 503 at the console.
@@ -84,14 +66,14 @@ var baseTag = regexp.MustCompile(`<base\s+href="/admin/"\s*/?>`)
 
 // Handler serves the console from assets (a Vite build rooted at index.html)
 // at path, a validated mount path such as "/billing/admin":
-// path/config.json from cfg with the buttons of issuers (nil: none), static files, and index.html — its <base href>
+// path/config.json from cfg, static files, and index.html — its <base href>
 // rewritten to path/ — as the SPA fallback for client routes; bare path
 // redirects to path/. Mount it at path without stripping the prefix (ServeMux
 // "path/", gin "path/*any" and chi Mount all keep it): the build's URLs resolve
 // against path, so a request outside it is a mount mistake, answered 500 and
 // logged. Without a build
 // every request answers 503 naming the build step.
-func Handler(logger *slog.Logger, path string, cfg Config, issuers *Directory, assets fs.FS) (http.Handler, error) {
+func Handler(logger *slog.Logger, path string, cfg Config, assets fs.FS) (http.Handler, error) {
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = "/auth/v1"
 	}
@@ -128,14 +110,9 @@ func Handler(logger *slog.Logger, path string, cfg Config, issuers *Directory, a
 		}
 
 		if rel == "config.json" {
-			out := cfg
-			out.Issuers = []Issuer{}
-			if issuers != nil {
-				out.Issuers = issuers.Issuers()
-			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
-			_ = json.NewEncoder(w).Encode(out)
+			_ = json.NewEncoder(w).Encode(cfg)
 			return
 		}
 

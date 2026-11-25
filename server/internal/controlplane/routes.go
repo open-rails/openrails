@@ -16,15 +16,16 @@ import (
 //   - RouteAccount: self-service account routes (me, sessions, password change).
 //   - RoutePermissionGroups: merchant membership and credentials, and explicit
 //     customer portal membership, authorized by AuthKit.
+//   - RouteInvitations: invitations into a merchant's group, and redeeming them.
 //
 // Registration, AuthKit's admin surface and browser OIDC are not mounted.
-var IntentionalRouteGroups = []iam.RouteGroup{iam.RouteAuth, iam.RouteAccount, iam.RoutePermissionGroups}
+var IntentionalRouteGroups = []iam.RouteGroup{iam.RouteAuth, iam.RouteAccount, iam.RoutePermissionGroups, iam.RouteInvitations}
 
 // registrationRouteGroups adds invitation enrollment to the staff account
 // and group surface. Site-wide administration and browser OIDC stay unmounted.
 var registrationRouteGroups = []iam.RouteGroup{
 	iam.RouteAuth, iam.RouteRegistration, iam.RouteAccount,
-	iam.RoutePermissionGroups,
+	iam.RoutePermissionGroups, iam.RouteInvitations,
 }
 
 // routeGroups is the explicit list of AuthKit route groups a control plane
@@ -53,14 +54,6 @@ var trustedIssuerRouteGroups = []iam.RouteGroup{iam.RouteAuthorizationServer, ia
 func authPrefix(issuer string) string {
 	if path := issuerPath(issuer); path != "" {
 		return path
-	}
-	return "/auth"
-}
-
-// authAPIPath is AuthKit's APIPath: authPrefix beneath AuthKit's base path.
-func authAPIPath(issuer string) string {
-	if issuerPath(issuer) != "" {
-		return "/"
 	}
 	return "/auth"
 }

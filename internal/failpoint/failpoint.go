@@ -34,6 +34,9 @@ const (
 	// BeforeLock fires inside an operation's transaction, before it locks the
 	// row it changes.
 	BeforeLock Point = "before-lock"
+	// AfterChunk fires after a lease sync settled a chunk of its usage,
+	// before it decides whether to start the next.
+	AfterChunk Point = "after-chunk"
 )
 
 // Site is one hit: the point, the operation and its subscription.

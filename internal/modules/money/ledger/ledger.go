@@ -211,6 +211,46 @@ func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, 
 	return id, nil
 }
 
+// CustomerCurrency names one customer's account in a currency.
+type CustomerCurrency struct {
+	Customer uuid.UUID
+	Currency string
+}
+
+// EnsureCustomerBalances is EnsureCustomerBalance for many accounts in one
+// statement, made in (customer, currency) order. The customers' rows must
+// exist.
+func (l *Ledger) EnsureCustomerBalances(ctx context.Context, accounts []CustomerCurrency) error {
+	if len(accounts) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(accounts)
+	slices.SortFunc(sorted, func(a, b CustomerCurrency) int {
+		if c := strings.Compare(string(a.Customer[:]), string(b.Customer[:])); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Currency, b.Currency)
+	})
+	sorted = slices.Compact(sorted)
+	acct, _ := books.Lookup(CustomerUnits)
+	p := gen.EnsureCustomerBalanceAccountsParams{MerchantID: l.merchant, Book: string(acct.Book), Class: string(acct.Class), AccountType: string(acct.Type),
+		DebitsMustNotExceedCredits: acct.DebitsMustNotExceedCredits, CreditsMustNotExceedDebits: acct.CreditsMustNotExceedDebits}
+	var currencies []string
+	for _, a := range sorted {
+		p.CustomerIds, p.Currencies = append(p.CustomerIds, a.Customer), append(p.Currencies, a.Currency)
+		if !slices.Contains(currencies, a.Currency) {
+			currencies = append(currencies, a.Currency)
+		}
+	}
+	if err := l.CountUnits(ctx, currencies...); err != nil {
+		return err
+	}
+	if err := l.q.EnsureCustomerBalanceAccounts(ctx, p); err != nil {
+		return fmt.Errorf("ledger: ensure balance accounts: %w", err)
+	}
+	return nil
+}
+
 // EnsureCustomerArrears get-or-creates the customer's own owed account, so
 // outstanding owed is one counter read, not a sum over history. Not
 // debits_must_not_exceed_credits: its negative balance IS the debt.

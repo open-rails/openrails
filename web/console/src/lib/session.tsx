@@ -1,26 +1,16 @@
 /* eslint-disable react-refresh/only-export-components */
 // AuthKit owns sign-in and refresh. Billing writes use their permissions directly.
 import * as React from "react"
-import {
-  createAuthClient,
-  createIssuerClient,
-  type AuthClient,
-  type IssuerClient,
-} from "@openrails/auth-ui/client"
+import { createAuthClient, type AuthClient } from "@openrails/auth-ui/client"
 import { AuthUiProvider } from "@openrails/auth-ui/provider"
-import { AuthProvider, IssuerAuthProvider } from "@openrails/auth-ui/react"
+import { AuthProvider } from "@openrails/auth-ui/react"
 
-import type { BootstrapConfig, ConsoleIssuer } from "../config"
-import { IssuerIdentity, LocalIdentity } from "@/lib/identity"
+import type { BootstrapConfig } from "../config"
+import { LocalIdentity } from "@/lib/identity"
 import { routerBasename } from "@/lib/mount"
 
-// The refresh token lives in sessionStorage: it stays with the tab. A
-// merchant's token never leaves memory.
-const REFRESH_KEY = "openrails.admin.refresh"
-
-export type ConsoleClient =
-  | { kind: "local"; client: AuthClient }
-  | { kind: "issuer"; client: IssuerClient; issuer: ConsoleIssuer }
+// The refresh token lives in AuthKit's HttpOnly cookie; access tokens and a
+// merchant's token stay in memory.
 
 // consoleURL is path beneath the console's mount, absolute.
 export function consoleURL(path: string): string {
@@ -29,25 +19,11 @@ export function consoleURL(path: string): string {
     .href
 }
 
-export function createConsoleSession(
-  config: BootstrapConfig,
-  issuer?: ConsoleIssuer
-): ConsoleClient {
-  if (issuer) {
-    const client = createIssuerClient({
-      issuer: issuer.url,
-      clientId: issuer.client_id,
-      redirectUri: issuer.redirect_uri,
-      resource: issuer.resource,
-      scope: issuer.scope,
-      postLogoutRedirectUri: consoleURL("/login"),
-    })
-    return { kind: "issuer", client, issuer }
-  }
-  // A merchant's token is exchanged through the console's own client, bound
-  // to this browser's key (a public client proves one), and kept in memory.
+// A merchant's token is exchanged through the console's own client, bound to
+// this browser's key (a public client proves one), and kept in memory.
+export function createConsoleSession(config: BootstrapConfig): AuthClient {
   const exchange = config.exchange
-  const client = createAuthClient({
+  return createAuthClient({
     baseUrl: config.auth_base_url,
     resourceTokens: exchange
       ? {
@@ -56,34 +32,19 @@ export function createConsoleSession(
           dpop: true,
         }
       : undefined,
-    storage: {
-      get: () => sessionStorage.getItem(REFRESH_KEY),
-      set: (token) =>
-        token
-          ? sessionStorage.setItem(REFRESH_KEY, token)
-          : sessionStorage.removeItem(REFRESH_KEY),
-    },
     sessionHint: false,
   })
-  return { kind: "local", client }
 }
 
 export function ConsoleSession({
-  session,
+  auth,
   children,
 }: {
-  session: ConsoleClient
+  auth: AuthClient
   children: React.ReactNode
 }) {
-  if (session.kind === "issuer") {
-    return (
-      <IssuerAuthProvider client={session.client}>
-        <IssuerIdentity name={session.issuer.name}>{children}</IssuerIdentity>
-      </IssuerAuthProvider>
-    )
-  }
   return (
-    <AuthProvider client={session.client}>
+    <AuthProvider client={auth}>
       <LocalIdentity>
         <AuthUiProvider appearance={{ theme: "light" }}>
           {children}

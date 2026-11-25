@@ -93,8 +93,9 @@ func topLevelKeys(types ...reflect.Type) (scalar, nested map[string]bool) {
 // HashiCorp's VAULT_ADDR and VAULT_CACERT, AuthKit's AUTHKIT_* inline key (the
 // unprefixed names refuse boot), and naming's nested former_names.
 var envNames = map[string]string{
-	"vault_addr":   "vault.address",
-	"vault_cacert": "vault.ca_cert",
+	"vault_addr":     "vault.address",
+	"vault_cacert":   "vault.ca_cert",
+	"auth_keys_path": "auth.keys.path",
 }
 
 // FileOnlySections are policy, set in config.yaml alone: the environment
@@ -124,9 +125,9 @@ func envKeyToConfigKey(s string) string {
 	if key, ok := envNames[s]; ok {
 		return key
 	}
-	// AUTH_* is AuthKit's configuration, by AuthKit's keys.
+	// Any other AUTH_* is a removed auth setting, which retiredAuth refuses.
 	if rest, ok := strings.CutPrefix(s, "auth_"); ok && rest != "" {
-		return "auth." + authPath(rest)
+		return "auth." + rest
 	}
 
 	if envTopLevelScalarKeys[s] || envTopLevelNestedKeys[s] {
@@ -295,7 +296,6 @@ func Load(configPath string) (*Config, error) {
 			return nil, fmt.Errorf("%s was removed: admin_console.disabled omits the console at /admin; its sign-in buttons are the merchants' trusted issuers", old)
 		}
 	}
-	// One rule for the auth section: only server.AuthConfig's keys are set.
 	if err := retiredAuth(k.Keys()); err != nil {
 		return nil, err
 	}
@@ -315,8 +315,8 @@ func Load(configPath string) (*Config, error) {
 	if os.Getenv("OPENRAILS_SQL_TRACE") != "" {
 		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was removed: trace statements in Postgres (log_statement, pg_stat_statements)")
 	}
-	// An inline signing key would otherwise be dropped silently for
-	// auth.keys.path: refuse, never lose key material unnoticed.
+	// An inline signing key would otherwise be dropped silently: refuse,
+	// never lose key material unnoticed.
 	for _, old := range []string{"ACTIVE_KEY_ID", "ACTIVE_PRIVATE_KEY_PEM", "PUBLIC_KEYS"} {
 		if os.Getenv(old) != "" {
 			return nil, fmt.Errorf("%s was removed: %s", old, signingKeyHint)
@@ -488,7 +488,7 @@ var retiredSettings = []retiredSetting{
 	{"return_origins", "RETURN_ORIGINS", "return URLs may name the billing origin, the merchant's issuer and its checkout.embed_origins"},
 	{"event_retention", "EVENT_RETENTION", "the event log keeps 90 days"},
 	{"local_sign_in", "LOCAL_SIGN_IN", "the server's own accounts always sign staff in to the console, by invitation"},
-	{"admin_console.issuers", "ADMIN_CONSOLE_ISSUERS", "staff sign in at root's trusted issuers (bootstrap.yaml) or at their merchant's, found by its name, as the client openrails-console"},
+	{"admin_console.issuers", "ADMIN_CONSOLE_ISSUERS", "staff sign in to the console with the server's own accounts; a merchant's own site embeds the admin screens with its own sign-in"},
 	{"resource_server", "RESOURCE_SERVER", "the server's resource is public_url, and each merchant's trusted issuers are its applications in AuthKit"},
 	{"llm.provider", "LLM_PROVIDER", noCatalogAssistant},
 	{"llm.model", "LLM_MODEL", noCatalogAssistant},

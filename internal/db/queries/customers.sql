@@ -25,6 +25,13 @@ INSERT INTO billing.customers (id, merchant_id)
 VALUES (sqlc.arg(id), sqlc.arg(merchant_id))
 ON CONFLICT (merchant_id, id) DO NOTHING;
 
+-- name: EnsureCustomerRows :exec
+-- EnsureCustomerRow for many customers, in id order.
+INSERT INTO billing.customers (id, merchant_id)
+SELECT c.id, sqlc.arg(merchant_id)::uuid FROM unnest(sqlc.arg(ids)::uuid[]) AS c(id)
+ORDER BY c.id
+ON CONFLICT (merchant_id, id) DO NOTHING;
+
 -- name: GetCustomer :one
 SELECT * FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);

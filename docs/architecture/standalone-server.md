@@ -31,13 +31,14 @@ The `server/` module (`github.com/open-rails/openrails/server`): the `openrails`
    migrates.
 3. Builds AuthKit, single-tenant (it creates or adopts its one account directory).
    `controlplane.AuthKit` derives its configuration in three steps: facts from the
-   engine's settings (issuer and resource from `PublicURL`, schema `<schema>_auth`,
-   `Auth.Keys.Path`), the rules of the server's own accounts (invite-only, a
-   required second factor by passkey or TOTP, 30-day sessions, the console's link
-   landings), then `Config.AuthKit`, a hosted product's hook, and the invariants:
-   merchant roles, the API-key prefix, the issued audience, the resource's scopes,
-   the console's client (`ConsoleClientID`), the client-IP posture, AuthKit's River
-   schema and mount. `RegistrationGuard` wraps AuthKit's run-time application and
+   engine's settings (issuer and resource from `PublicURL`, schema `<schema>_auth`),
+   the rules of the server's own accounts (invite-only, a required second factor,
+   the console's link landings beneath `FrontendURL`), then `Config.AuthKit`, a
+   hosted product's hook, and the invariants: merchant roles, the API-key prefix,
+   the resource's scopes, the console's client (`ConsoleClientID`), the client-IP
+   posture, AuthKit's River schema and route groups. AuthKit derives its surface
+   from the issuer and fixes lifetimes, limits and DPoP-bound sessions. Its keys
+   are `Deps.KeySource`: the binary watches `auth.keys.path` when set. `RegistrationGuard` wraps AuthKit's run-time application and
    OAuth-client registrations: their key and logout URLs must be https on public
    hosts. AuthKit gets its own pool on the engine's database unless one is given.
 4. `controlplane.New`, `operator.Join`, then `operator.StandaloneServer` builds the
@@ -45,7 +46,7 @@ The `server/` module (`github.com/open-rails/openrails/server`): the `openrails`
 
 ### Configuration
 
-`hostconfig.Load` (`server/internal/hostconfig`) layers `server.DefaultConfig()` (the engine's `billing.DefaultConfig()` with the server's own), `config.yaml` (`--config`, `OPENRAILS_CONFIG`), a logged `.env`, files under `VAULT_SECRETS_PATH` and the environment (`DATABASE_URL` is `database.url`). It decodes the one tree twice, into `server.Config` (the engine's keys inline) and the binary's own keys (connections and `logger`); a key neither reads, and a retired name (`ENV`, `API_URL`, `db`, …), refuses boot. One rule (`retiredAuth`) refuses every `auth` key and `AUTH_*` variable but `auth.keys.path`. The binary lets AuthKit read keys on a private network when the boot merchant manifest or the bootstrap manifest declares an application there (`bootstrap.PrivateNetworkApplications`). Every command loads the same way. `server.New` takes `server.Config` as decoded and passes its `Engine` to `openrails.New`.
+`hostconfig.Load` (`server/internal/hostconfig`) layers `server.DefaultConfig()` (the engine's `billing.DefaultConfig()` with the server's own), `config.yaml` (`--config`, `OPENRAILS_CONFIG`), a logged `.env`, files under `VAULT_SECRETS_PATH` and the environment (`DATABASE_URL` is `database.url`). It decodes the one tree twice, into `server.Config` (the engine's keys inline) and the binary's own keys (connections and `logger`); a key neither reads, and a retired name (`ENV`, `API_URL`, `db`, …), refuses boot. One rule (`retiredAuth`) refuses every `auth` key and `AUTH_*` variable but `auth.keys.path`, a key of the binary's own (`hostdeps.AuthKeys` watches it). An application the operator declares, in the merchant manifest (`DeclareRemoteApplications`) or the bootstrap manifest, may read its keys on a private network; one registered at run time may not. Every command loads the same way. `server.New` takes `server.Config` as decoded and passes its `Engine` to `openrails.New`.
 
 ### Boot merchants
 
@@ -89,7 +90,7 @@ adds `RiverJobs` to its fleet.
 
 ### Console
 
-`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base, the token exchange for `ConsoleClientID`, and the sign-in issuers) under `adminconsole.Path` (`/admin`). `adminconsole.Directory` holds root's trusted issuers (`ControlPlane.RootConsoleSources`) whose probe passed, never a merchant's: discovery naming the issuer exactly, authorization, token and key endpoints, the code flow and PKCE `S256` where listed, a non-empty key set, and a well-formed redirect URI (`public_url`'s origin plus `/admin/callback`, sent as each button's `redirect_uri`). It probes in the background, at construction and when `config.json` is read and a pass is due (root listed again after 5 s, an issuer probed again 10 minutes after passing, a minute after failing); a request never waits. Each change is `Runtime.Refuse`/`Unrefuse` of `console.issuers.<issuer>`, so a hidden issuer is among the configuration's refusals. `AdminConsole.OwnAccountsOnly` turns it off. Readiness also runs `ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
+`registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base and the token exchange for `ConsoleClientID`) under `adminconsole.Path` (`/admin`). Staff sign in with the server's own accounts only. Readiness also runs `ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's directory: it needs an explicit `Authorization` header and lists only merchants the credential's permissions reach. The SPA calls `/v1` with the staff token. `AdminConsole.Disabled` removes the subtree.
 
 ### Binary, image and chart
 

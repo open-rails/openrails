@@ -1,6 +1,7 @@
 package admission
 
 import (
+	"cmp"
 	"context"
 	"strings"
 	"time"
@@ -95,21 +96,68 @@ type SpendPolicy struct {
 	request            spendgate.Request
 }
 
-// SpendPolicy resolves req's billing policy; a delegated invoker spends
-// nothing of the customer's, so none.
-func (a *Admitter) SpendPolicy(ctx context.Context, req AdmitRequest) (*SpendPolicy, error) {
-	if !identity.IsDirectPayerInvoker(req.InvokerType) {
-		return nil, nil
-	}
+// SpendPolicies resolves each request's billing policy, reading the
+// merchant's settings, the customers' own policies and their trust levels
+// once for all: as a view resolves it, and none for a delegated invoker,
+// which spends nothing of the customer's. errs[i] is reqs[i]'s own failure.
+func (a *Admitter) SpendPolicies(ctx context.Context, reqs []AdmitRequest) ([]*SpendPolicy, []error, error) {
+	policies, errs := make([]*SpendPolicy, len(reqs)), make([]error, len(reqs))
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	sgReq, _, _, policy, err := a.policyOf(ctx, req, a.trustLevel(ctx, req))
-	if err != nil {
-		return nil, err
+	var payers []uuid.UUID
+	for _, req := range reqs {
+		if identity.IsDirectPayerInvoker(req.InvokerType) {
+			payers = append(payers, req.CustomerID.UUID())
+		}
 	}
-	return &SpendPolicy{merchant: tid.UUID(), customer: req.CustomerID.UUID(), currency: strings.TrimSpace(req.Currency), policy: policy, request: sgReq}, nil
+	if len(payers) == 0 {
+		return policies, errs, nil
+	}
+	r, rerr := a.loader.policies.resolver(ctx, payers)
+	// Trust levels matter only where a policy is declared.
+	tiers := map[string]map[uuid.UUID]string{}
+	if rerr == nil && r.declares() {
+		byCurrency := map[string][]uuid.UUID{}
+		for _, req := range reqs {
+			if identity.IsDirectPayerInvoker(req.InvokerType) && req.TrustLevel == "" {
+				cur := money.NormalizeCurrency(req.Currency)
+				byCurrency[cur] = append(byCurrency[cur], req.CustomerID.UUID())
+			}
+		}
+		for cur, customers := range byCurrency {
+			if tiers[cur], err = a.money.TrustLevels(ctx, customers, cur); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	for i, req := range reqs {
+		if !identity.IsDirectPayerInvoker(req.InvokerType) {
+			continue
+		}
+		if rerr != nil {
+			errs[i] = rerr
+			continue
+		}
+		trustLevel := req.TrustLevel
+		if trustLevel == "" {
+			trustLevel = cmp.Or(tiers[money.NormalizeCurrency(req.Currency)][req.CustomerID.UUID()], DefaultTrustLevel)
+		}
+		resolved, err := a.loader.InCurrency(ctx, r.resolve(req.CustomerID.UUID(), trustLevel), req.Currency)
+		if err != nil {
+			errs[i] = err
+			continue
+		}
+		policy, err := a.loader.Load(ctx, req.Currency, resolved)
+		if err != nil {
+			errs[i] = err
+			continue
+		}
+		policies[i] = &SpendPolicy{merchant: tid.UUID(), customer: req.CustomerID.UUID(), currency: strings.TrimSpace(req.Currency), policy: policy,
+			request: spendgate.Request{Invoker: req.Invoker, TrustLevel: trustLevel, Roles: roleStrings(req.Roles), Measure: req.Resource}}
+	}
+	return policies, errs, nil
 }
 
 // Windows are the policy's spend windows current at an instant; none for a

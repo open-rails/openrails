@@ -35,12 +35,15 @@ func (a *proofAuthenticator) RootScope(ctx context.Context) (auth.Scope, error) 
 	return a.Authenticator.(auth.Root).RootScope(ctx)
 }
 
-func authenticateCustomerProof(t *testing.T, provider auth.Authenticator, token string, sender *authtest.DPoPKey) (auth.Verified, *http.Request) {
+// authenticateCustomerProof authenticates token as a browser presents it: with
+// sender's proof, else as ak's sessions are (present).
+func authenticateCustomerProof(t *testing.T, ak *authkit.Client, provider auth.Authenticator, token string, sender *authtest.DPoPKey) (auth.Verified, *http.Request) {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "https://critical.invalid/customer-proof", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
 	if sender != nil {
 		sender.Authorize(t, request, token, "")
+	} else {
+		present(t, ak, request, token)
 	}
 	verified, err := provider.Authenticate(request)
 	var challenge *auth.Challenge
@@ -82,7 +85,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		provider := &proofAuthenticator{bindingAuthenticator{Authenticator: a.auth.Authenticator()}}
 		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://critical.invalid/customer-proof", nil)
 		require.NoError(t, err)
-		request.Header.Set("Authorization", "Bearer "+a.aliceToken)
+		present(t, a.auth, request, a.aliceToken)
 		verified, err := provider.Authenticate(request)
 		require.NoError(t, err)
 		for range 2 {
@@ -97,7 +100,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, before.LastSeenAt, after.LastSeenAt, "reading proof must not refresh or admit the customer")
 		other := billing.CustomerID(uuid.MustParse(a.bob.ID))
-		request.Header.Set("Authorization", "Bearer "+a.bobToken)
+		present(t, a.auth, request, a.bobToken)
 		missing, err := provider.Authenticate(request)
 		require.NoError(t, err)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, missing)
@@ -108,18 +111,18 @@ func TestCustomerProofResolution(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, events.Events, "proof resolution must not announce platform enrollment")
 		stale := authtest.StaleSession(t, a.auth, a.aliceToken)
-		older, _ := authenticateCustomerProof(t, provider, stale, nil)
+		older, _ := authenticateCustomerProof(t, a.auth, provider, stale, nil)
 		require.ErrorIs(t, older.(auth.RecentSignInChecker).CheckRecentSignIn(t.Context()), auth.ErrStepUpRequired)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, older)
 		require.NoError(t, err, "customer proof does not manufacture or require recent sign-in")
 	})
 	t.Run("OR-J01-S13/customer-proof-preserves-issuer-tenant-and-credential-boundaries", func(t *testing.T) {
-		a := newAuthorityWorldWithAuth(t, func(c *authkit.Config) { c.PersonalAccessTokens.Enabled = true })
+		a := newAuthorityWorldWithAuth(t, personalAccessTokens)
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{})
 		require.NoError(t, err)
 		provider := a.auth.Authenticator()
-		verified, _ := authenticateCustomerProof(t, provider, a.aliceToken, nil)
+		verified, _ := authenticateCustomerProof(t, a.auth, provider, a.aliceToken, nil)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, nil)
 		require.ErrorIs(t, err, auth.ErrUnauthenticated)
 		_, err = a.engine.ResolveCustomer(t.Context(), nil, verified)
@@ -128,15 +131,15 @@ func TestCustomerProofResolution(t *testing.T) {
 		// capability. Matching metadata alone must never grant proof.
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, struct{ auth.Verified }{verified})
 		require.ErrorIs(t, err, auth.ErrForbidden)
-		key, _ := authenticateCustomerProof(t, provider, a.alphaKey.Secret, nil)
+		key, _ := authenticateCustomerProof(t, a.auth, provider, a.alphaKey.Secret, nil)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, key)
 		require.ErrorIs(t, err, auth.ErrForbidden)
 		pat, err := a.auth.CreatePersonalAccessToken(t.Context(), verified.Identity(), iam.NewPersonalAccessToken{Name: "customer proof denial", GroupID: a.alpha.MerchantID().String(), Permissions: []iam.Perm{mustPermission(t, string(billing.MerchantCustomerRead))}})
 		require.NoError(t, err)
-		personal, _ := authenticateCustomerProof(t, provider, pat.Secret, nil)
+		personal, _ := authenticateCustomerProof(t, a.auth, provider, pat.Secret, nil)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, personal)
 		require.ErrorIs(t, err, auth.ErrForbidden)
-		bound, _ := authenticateCustomerProof(t, provider, a.signedToken(t, func(_ map[string]any, claims map[string]any) {
+		bound, _ := authenticateCustomerProof(t, a.auth, provider, a.signedToken(t, func(_ map[string]any, claims map[string]any) {
 			claims["group_id"] = a.beta.MerchantID().String()
 		}), nil)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, bound)
@@ -172,7 +175,7 @@ func TestCustomerProofResolution(t *testing.T) {
 	t.Run("OR-J01-S14/asserted-and-sender-bound-resource-proofs-retain-source-authority", func(t *testing.T) {
 		const resource = "https://critical.invalid"
 		a := newAuthorityWorldWithAuth(t, func(c *authkit.Config) {
-			c.Resource = authkit.ResourceConfig{ID: resource, PublicURL: resource, Scopes: map[string][]string{billing.ScopeSelf: {}}}
+			c.Resource = authkit.ResourceConfig{ID: resource, Scopes: map[string][]string{billing.ScopeSelf: {}}}
 		})
 		jwk := keys.PublicJWK(a.signer.Public(), a.signer.KID(), a.signer.Algorithm())
 		registration := iam.RemoteApplication{Issuer: "https://merchant-" + uuid.NewString() + ".example", Enabled: true, Mode: iam.RemoteApplicationModeStatic, PublicKeys: []iam.RemoteApplicationKey{{KID: a.signer.KID(), JWK: &jwk}}}
@@ -196,7 +199,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(raw, &token))
 		provider := &proofAuthenticator{bindingAuthenticator{Authenticator: a.auth.Authenticator()}}
-		asserted, _ := authenticateCustomerProof(t, provider, token.AccessToken, nil)
+		asserted, _ := authenticateCustomerProof(t, a.auth, provider, token.AccessToken, nil)
 		require.True(t, asserted.(auth.Asserted).Asserted())
 		binding, err := a.engine.ResolveCustomer(t.Context(), provider, asserted)
 		require.NoError(t, err)
@@ -204,7 +207,7 @@ func TestCustomerProofResolution(t *testing.T) {
 
 		sender := authtest.NewDPoPKey(t)
 		claims := map[string]any{"iss": app.Issuer, "sub": customer.String(), "aud": resource, "client_id": "merchant-ui", "scope": billing.ScopeSelf, "iat": now.Unix(), "exp": now.Add(10 * time.Minute).Unix(), "jti": uuid.NewString(), "cnf": map[string]any{"jkt": sender.Thumbprint()}}
-		foreign, request := authenticateCustomerProof(t, provider, signCustomerProof(t, a.signer, "at+jwt", claims), sender)
+		foreign, request := authenticateCustomerProof(t, a.auth, provider, signCustomerProof(t, a.signer, "at+jwt", claims), sender)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, foreign)
 		requireProofCode(t, err, billing.CodeCustomerIssuerMismatch)
 		// A direct foreign token retains its issuer even when its subject
@@ -221,18 +224,18 @@ func TestCustomerProofResolution(t *testing.T) {
 		_, err = provider.Authenticate(request)
 		require.ErrorIs(t, err, auth.ErrUnauthenticated, "the replay control proves the original sender proof was already spent")
 		claims["act"] = map[string]string{"sub": uuid.NewString()}
-		delegated, _ := authenticateCustomerProof(t, provider, signCustomerProof(t, a.signer, "at+jwt", claims), sender)
+		delegated, _ := authenticateCustomerProof(t, a.auth, provider, signCustomerProof(t, a.signer, "at+jwt", claims), sender)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, delegated)
 		requireProofCode(t, err, billing.CodeInvokerScopedPrincipal)
 		delete(claims, "act")
 		claims["sub"] = claims["client_id"]
-		application, _ := authenticateCustomerProof(t, provider, signCustomerProof(t, a.signer, "at+jwt", claims), sender)
+		application, _ := authenticateCustomerProof(t, a.auth, provider, signCustomerProof(t, a.signer, "at+jwt", claims), sender)
 		require.Equal(t, auth.SubjectApplication, application.Identity().SubjectKind)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, application)
 		require.ErrorIs(t, err, auth.ErrForbidden)
 		claims["sub"] = customer.String()
 		claims["scope"] = "openid"
-		console, _ := authenticateCustomerProof(t, provider, signCustomerProof(t, a.signer, "at+jwt", claims), sender)
+		console, _ := authenticateCustomerProof(t, a.auth, provider, signCustomerProof(t, a.signer, "at+jwt", claims), sender)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, console)
 		requireProofCode(t, err, billing.CodePermissionRequired)
 		app.Enabled = false
@@ -250,7 +253,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
 		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{})
 		require.NoError(t, err)
-		zero, err := a.auth.NewVerifier([]string{authtest.Audience}, verify.WithSkew(0))
+		zero, err := a.auth.NewVerifier([]string{authtest.Issuer}, verify.WithSkew(0))
 		require.NoError(t, err)
 		provider := zero.Authenticator()
 		for _, mode := range []string{"expiry", "revocation"} {
@@ -264,7 +267,7 @@ func TestCustomerProofResolution(t *testing.T) {
 						delete(claims, "nbf")
 					})
 				}
-				verified, _ := authenticateCustomerProof(t, provider, token, nil)
+				verified, _ := authenticateCustomerProof(t, a.auth, provider, token, nil)
 				tx, err := a.pool.Begin(t.Context())
 				require.NoError(t, err)
 				defer tx.Rollback(context.Background())
@@ -293,8 +296,8 @@ func TestCustomerProofResolution(t *testing.T) {
 				require.ErrorIs(t, <-done, want)
 			})
 		}
-		fresh := authtest.SignIn(t, a.auth, a.alice)
-		verified, _ := authenticateCustomerProof(t, provider, fresh.AccessToken, nil)
+		fresh := signIn(t, a.auth, a.alice)
+		verified, _ := authenticateCustomerProof(t, a.auth, provider, fresh.AccessToken, nil)
 		a.storage.cut()
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()

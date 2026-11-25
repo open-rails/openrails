@@ -164,7 +164,7 @@ func TestFindingAlerts(t *testing.T) {
 		a, p, first := purchasedMembershipWith(t, 24, alertEmail)
 		tokens := []string{a.aliceToken, a.bobToken}
 		for range 4 {
-			tokens = append(tokens, authtest.SignIn(t, a.auth, authtest.NewUser(t, a.auth)).AccessToken)
+			tokens = append(tokens, signIn(t, a.auth, authtest.NewUser(t, a.auth)).AccessToken)
 		}
 		subs := []*billing.Subscription{first}
 		for i, token := range tokens[1:] {

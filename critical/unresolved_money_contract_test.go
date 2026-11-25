@@ -35,7 +35,7 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		require.NoError(t, err)
 		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, child.url+"/v1/me/invoices", bytes.NewReader(body))
 		require.NoError(t, err)
-		request.Header.Set("Authorization", "Bearer "+a.aliceToken)
+		present(t, a.auth, request, a.aliceToken)
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Idempotency-Key", "checkout-process-death")
 		done := make(chan error, 1)

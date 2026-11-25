@@ -150,7 +150,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// listening, which is what "not ready" means to a probe.
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	srv, graph, cp, closeDeps, err := openServer(ctx, manifestPath)
+	srv, graph, cp, closeDeps, err := openServer(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			slog.Default().InfoContext(ctx, "Shutdown requested while booting; exiting", logx.Err(err))
@@ -200,7 +200,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer stop()
 	// The same server as run-server, without a listener: AuthKit's jobs run
 	// in the same fleet.
-	srv, graph, cp, closeDeps, err := openServer(ctx, manifestPath)
+	srv, graph, cp, closeDeps, err := openServer(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			slog.Default().InfoContext(ctx, "Shutdown requested while booting; exiting", logx.Err(err))
@@ -258,7 +258,7 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 	}
 	// The control plane owns the AuthKit/River schema selection. Preserve its
 	// configuration without building its roles, HTTP handler or job workers.
-	auth, err := controlplane.AuthKit(&host.Server.Engine, controlplane.Options{KeysPath: host.Server.Auth.Keys.Path})
+	auth, err := controlplane.AuthKit(&host.Server.Engine, controlplane.Options{})
 	if err != nil {
 		return err
 	}

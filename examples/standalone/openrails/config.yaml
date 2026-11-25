@@ -17,13 +17,9 @@ database:
 redis: # optional for one server; replicas share rate limits and spent proofs through it
   url: redis://redis:6379
 
-# The server's own AuthKit: its issuer and resource are
-# public_url, and its keys (keys.json, totp.key) live here. It
-# accepts the tokens of the app merchant.yaml declares the merchant's trusted
-# issuer; on a loopback URL that app's keys may be on localhost.
-auth:
-  keys:
-    path: /vault/auth
+# The server's own AuthKit takes its issuer and resource from public_url. On
+# a loopback URL it generates development keys; in production its keys are
+# keys.json and totp.key in /vault/auth (auth.keys.path).
 
 # Receipts and payment notices, sent from the merchant's from_email.
 email_smtp:

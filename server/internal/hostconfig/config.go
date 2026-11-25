@@ -35,6 +35,9 @@ type Config struct {
 	ClickHouse *ClickHouseConnection `yaml:"clickhouse"`
 	// SMTP is the email_smtp section; nil sends no email.
 	SMTP *SMTPConfig `yaml:"email_smtp"`
+	// Auth is where the server's AuthKit keeps its keys. OpenRails derives
+	// the rest of its configuration.
+	Auth AuthConfig `yaml:"auth"`
 	// Vault is the vault section's login: declaring any vault key connects;
 	// nil logs in to no Vault. Its mounts are Server.Engine.Vault.
 	Vault *VaultLogin `yaml:"vault"`
@@ -42,6 +45,21 @@ type Config struct {
 	Logger LoggerConfig `yaml:"logger"`
 	// EnvFile is the .env file the load consumed; empty when none.
 	EnvFile string `yaml:"-"`
+}
+
+// AuthConfig is the auth section.
+type AuthConfig struct {
+	// Keys is AuthKit's key directory.
+	Keys AuthKeys `yaml:"keys"`
+}
+
+// AuthKeys is AuthConfig.Keys.
+type AuthKeys struct {
+	// Path is the directory holding AuthKit's signing keys (keys.json) and its
+	// authenticator-app key (totp.key), reloaded when they change. Empty is
+	// /vault/auth, or for a loopback public_url development keys AuthKit
+	// generates beneath XDG_STATE_HOME.
+	Path string `yaml:"path"`
 }
 
 type contextKey struct{}

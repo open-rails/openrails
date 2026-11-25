@@ -9,8 +9,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/authkit v1.54.0
-	github.com/open-rails/helpers v1.22.0
+	github.com/open-rails/authkit v1.57.0
+	github.com/open-rails/helpers v1.22.1
 	github.com/open-rails/openrails v0.283.0
 	github.com/open-rails/openrails/server v0.283.0
 	github.com/redis/go-redis/v9 v9.23.0

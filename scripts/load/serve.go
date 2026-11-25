@@ -92,11 +92,9 @@ func serveCmd(ctx context.Context, args []string) error {
 		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: spec.Schema, RiverSchema: spec.Schema}, ClickHouse: billing.ClickHouseConfig{Database: spec.CHDatabase},
 			PublicURL: url, RateLimits: billing.RateLimitsConfig{}},
 		AuthKit: func(c *authkit.Config) {
-			c.DefaultTenantID = iam.NewTenantID()
 			c.AuthorizationServer = authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: url, Scopes: []string{billing.ScopeSelf}}},
 				GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: billing.ScopeSelf, Resource: url, Description: "Use own billing"}}}}
-			c.Registration.AllowMissingSenders = true
-			c.TwoFactor.Mode = iam.TwoFactorDisabled
+			c.TwoFactor = iam.TwoFactorDisabled
 		},
 		AdminConsole: server.AdminConsole{Disabled: true},
 		Port:         port,
