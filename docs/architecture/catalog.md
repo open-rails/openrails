@@ -32,9 +32,11 @@ What a merchant sells: products, prices, meters, rate cards and usage limits, an
 
 **History.** The commit compares the catalog before and after (`readCatalogState`) and appends one `change_log` entry per changed object ([history](history.md)) (`catalogHistory`, `internal/service/catalog_history.go`) through `history.Record`, in the same transaction, so an entry commits and rolls back with its change. A product, price key, meter or limit gets `create`, `update`, `archive`, `unarchive` or `delete` with each changed field before and after; a product's keys get `key_add`, `key_remove` and `key_rename` entries of their own (a rename is what `replaceEntitlements` reported); a price key records a move (`priceMove`) when it comes to name another of its versions, or none because the price, its product or both were archived or the price deleted; its object's entry adds `move: {price_id, archived}` to the fields payload, carrying the public id of the version it names or stopped naming. A move without another price change keeps its standalone `move` entry, and `ListPriceHistory` reads both. Every entry but a delete carries the object's revision after the change: a product's, which a price change never moves, or a price key's. The actor is the route gate's invoker (`staff:<id>`) or `system`; the source is `console` for a signed-in person, `api`, `catalog_apply` for a document (with its `application_id`) or `cli` for the operator's apply.
 
-The `catalog_authored_*` triggers advance `merchants.catalog_revision` on every
-row written, unless `openrails.catalog_batch_merchant_id` names the merchant (a
-document, which advances it once with `AdvanceCatalogRevision`).
+The `catalog_authored_*` triggers advance `merchants.catalog_revision` once per
+transaction for the first row written (`openrails.catalog_revision_merchant_ids`
+remembers it), unless `openrails.catalog_batch_merchant_id` names the merchant (a
+document, which advances it once with `AdvanceCatalogRevision`). A write that
+changes nothing advances nothing.
 
 **Prices are versions.** `writeCatalogPrice` archives the key's current row and creates or revives the row whose id derives from the terms (`RevivePrice`); the key's move is folded into its change's payload in `change_log`, while a product's archive makes a standalone `move` entry; a price migration archives its sources with the catalog command, as an edit. `immutable_price_terms` lets only `archived`, `updated_at`, `deleted_at` and `sell_via` change, so an invoice keeps its terms. Product keys are valid-time rows in `product_entitlements`; a change emits `product.entitlements_changed`. `DeleteProduct` soft-deletes only what nothing refers to (`ProductHoldsReferences`, `PricesHoldReferences`), else `409 product_in_use`.
 
@@ -48,8 +50,8 @@ document, which advances it once with `AdvanceCatalogRevision`).
 3. Commit: plan against `catalog_field_owners` (`planCatalogApplication`), apply
    products, prices, meters, rate cards and limits, prune, take ownership of the
    named fields (`recordCatalogApply`). Only a document that skipped and warned
-   nothing is stored in `catalog_applications`; any other runs again when
-   re-applied. A skip also raises `life.catalog.conflicts`, which the next apply
+   nothing, and changed the catalog or its ownership, is stored in
+   `catalog_applications`; any other runs again when re-applied. A skip also raises `life.catalog.conflicts`, which the next apply
    that skips nothing resolves.
 
 An object is skipped whole when a field it names has a live value an edit set

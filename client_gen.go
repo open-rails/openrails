@@ -115,11 +115,11 @@ func (c *Client) MarkInvoiceUncollectible(ctx context.Context, id billing.Invoic
 // applied, so applying it again retries the skipped objects. params.Force
 // overwrites those fields instead. The receipt lists deleted objects in
 // Changes with Deleted true, empty Fields and their last Revision before
-// deletion. A document that applied whole is remembered by its canonical
-// content hash: applying it again returns the original receipt even after
-// later catalog edits. It is an operator action, never a side effect of
-// starting: run it from a command (openrails catalog apply, or the host's
-// own) or the console.
+// deletion. A document that applied whole and changed the catalog or its
+// ownership is remembered by its canonical content hash: applying it again
+// returns the original receipt even after later catalog edits. It is an
+// operator action, never a side effect of starting: run it from a command
+// (openrails catalog apply, or the host's own) or the console.
 func (c *Client) ApplyCatalog(ctx context.Context, application *catalog.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
 	var out billing.CatalogApplicationReceipt
 	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/catalog/apply", body: application, query: params}, &out); err != nil {
