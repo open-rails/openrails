@@ -5170,6 +5170,8 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/service/catalog_sidecars.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "billing": "github.com/open-rails/openrails/billing",
       "bytes": "bytes",
       "catalog": "github.com/open-rails/openrails/catalog",
       "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
@@ -5177,6 +5179,7 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "money": "github.com/open-rails/openrails/internal/modules/money",
