@@ -63,7 +63,6 @@ var Tables = map[string]Table{
 	"catalog_applications":          {Permanent, permanent},
 	"change_log":                    {Permanent, permanent},
 	"maintenance_runs":              {Permanent, permanent},
-	"catalog_restore_receipts":      {Permanent, permanent},
 	"destructive_run_before_images": {Permanent, permanent},
 	"payment_method_versions":       {Permanent, permanent},
 	"mandates":                      {Permanent, permanent},

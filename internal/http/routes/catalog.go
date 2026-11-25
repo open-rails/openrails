@@ -28,7 +28,7 @@ var catalogRoutes = []Route{
 			"listed in the receipt's Conflicts, the rest applies, and the document is not recorded as applied, so " +
 			"applying it again retries the skipped objects. params.Force overwrites those fields instead. The " +
 			"receipt lists deleted objects in Changes with Deleted true, empty Fields and their last Revision before deletion. A " +
-			"document that applied whole is remembered by its canonical content hash: applying it again returns " +
+			"document that applied whole and changed the catalog or its ownership is remembered by its canonical content hash: applying it again returns " +
 			"the original receipt even after later catalog edits. It is an operator action, never a side effect " +
 			"of starting: run it from a command (openrails catalog apply, or the host's own) or the console.",
 		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "currency_unsupported", "event_store_required", "meter_in_use", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},

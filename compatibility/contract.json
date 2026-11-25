@@ -1602,10 +1602,10 @@
       "func (f *FieldChange) UnmarshalJSON(raw []byte) error {\n\tif bytes.Equal(bytes.TrimSpace(raw), []byte(changed)) {\n\t\t*f = Changed()\n\t\treturn nil\n\t}\n\tvar sides struct {\n\t\tBefore json.RawMessage `json:\"before\"`\n\t\tAfter  json.RawMessage `json:\"after\"`\n\t}\n\tif err := json.Unmarshal(raw, \u0026sides); err != nil {\n\t\treturn fmt.Errorf(\"history: field change: %w\", err)\n\t}\n\t*f = FieldChange{Before: sides.Before, After: sides.After}\n\treturn nil\n}",
       "func (f FieldChange) MarshalJSON() ([]byte, error) {\n\tif f.secret {\n\t\treturn []byte(changed), nil\n\t}\n\tsides := map[string]json.RawMessage{}\n\tif f.Before != nil {\n\t\tsides[\"before\"] = f.Before\n\t}\n\tif f.After != nil {\n\t\tsides[\"after\"] = f.After\n\t}\n\treturn json.Marshal(sides)\n}",
       "type Attribution struct {\n\tOrigin      string     `json:\"origin,omitempty\"`\n\tActor       string     `json:\"actor,omitempty\"`\n\tExecutor    string     `json:\"executor,omitempty\"`\n\tOperationID *uuid.UUID `json:\"operation_id,omitempty\"`\n}",
-      "type Fields struct {\n\tVersion       int                    `json:\"version\"`\n\tRevision      *int64                 `json:\"revision,omitempty\"`\n\tApplicationID string                 `json:\"application_id,omitempty\"`\n\tFields        map[string]FieldChange `json:\"fields\"`\n}",
+      "type Fields struct {\n\tVersion       int                    `json:\"version\"`\n\tRevision      *int64                 `json:\"revision,omitempty\"`\n\tApplicationID string                 `json:\"application_id,omitempty\"`\n\tFields        map[string]FieldChange `json:\"fields\"`\n\tMove          *Move                  `json:\"move,omitempty\"`\n}",
       "type KeyRename struct {\n\tVersion  int    `json:\"version\"`\n\tRevision *int64 `json:\"revision,omitempty\"`\n\tFrom     string `json:\"from\"`\n\tTo       string `json:\"to\"`\n}",
       "type Keys struct {\n\tVersion  int      `json:\"version\"`\n\tRevision *int64   `json:\"revision,omitempty\"`\n\tKeys     []string `json:\"keys\"`\n}",
-      "type Move struct {\n\tVersion  int             `json:\"version\"`\n\tRevision *int64          `json:\"revision,omitempty\"`\n\tPriceID  billing.PriceID `json:\"price_id\"`\n\tArchived bool            `json:\"archived\"`\n}",
+      "type Move struct {\n\tVersion  int             `json:\"version,omitempty\"`\n\tRevision *int64          `json:\"revision,omitempty\"`\n\tPriceID  billing.PriceID `json:\"price_id\"`\n\tArchived bool            `json:\"archived\"`\n}",
       "type Operation struct {\n\tVersion         int            `json:\"version\"`\n\tKind            string         `json:\"kind,omitempty\"`\n\tAttempt         int32          `json:\"attempt\"`\n\tOrigin          string         `json:\"origin,omitempty\"`\n\tExecutor        string         `json:\"executor,omitempty\"`\n\tIdempotencyKey  string         `json:\"idempotency_key,omitempty\"`\n\tReason          string         `json:\"reason,omitempty\"`\n\tReasonCode      string         `json:\"reason_code,omitempty\"`\n\tEvidence        map[string]any `json:\"evidence,omitempty\"`\n\tEvidenceExcerpt string         `json:\"evidence_excerpt,omitempty\"`\n\tTruncated       bool           `json:\"truncated,omitempty\"`\n}"
     ],
     "internal/hosttools": [
@@ -1722,9 +1722,6 @@
       "type Args struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tIntentID   uuid.UUID `json:\"intent_id\" river:\"unique\"`\n}"
     ],
     "internal/merchantarchive": [
-      "type CatalogDependencies struct {\n\tPSPs []CatalogPSPIdentity `json:\"psps\"`\n\n\tCustomers *[]string `json:\"customers,omitempty\"`\n}",
-      "type CatalogPSPIdentity struct {\n\tID          string `json:\"id\"`\n\tRail        string `json:\"rail\"`\n\tEnvironment string `json:\"environment\"`\n\tAccountID   string `json:\"account_id\"`\n}",
-      "type CatalogSnapshot struct {\n\tKind            string                                  `json:\"kind\"`\n\tSchemaVersion   int                                     `json:\"schema_version\"`\n\tMerchantID      string                                  `json:\"merchant_id\"`\n\tCatalogRevision int64                                   `json:\"catalog_revision,string\"`\n\tDependencies    CatalogDependencies                     `json:\"dependencies\"`\n\tTables          map[string][]map[string]json.RawMessage `json:\"tables\"`\n\tSHA256          string                                  `json:\"sha256,omitempty\"`\n}",
       "type Result struct {\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n\tReplayed   bool   `json:\"replayed\"`\n}"
     ],
     "internal/merchantdocs": [
@@ -2018,7 +2015,7 @@
       "type inspectionCursor struct {\n\tKind string    `json:\"kind\"`\n\tAt   time.Time `json:\"at\"`\n\tKey  string    `json:\"key\"`\n\tFrom time.Time `json:\"from\"`\n\tTo   time.Time `json:\"to\"`\n}",
       "type invoiceKeyResult struct {\n\tInvoiceID uuid.UUID         `json:\"invoice_id\"`\n\tDigest    []byte            `json:\"digest\"`\n\tStatus    int               `json:\"status,omitempty\"`\n\tCode      billing.ErrorCode `json:\"code,omitempty\"`\n\tInvoice   *billing.Invoice  `json:\"invoice,omitempty\"`\n}",
       "type limitPosition struct {\n\tKey string `json:\"k\"`\n}",
-      "type storedCatalogReceipt struct {\n\tApplicationID   string `json:\"application_id\"`\n\tBaseRevision    int64  `json:\"base_revision\"`\n\tAppliedRevision int64  `json:\"applied_revision\"`\n\tReplayed        bool   `json:\"replayed\"`\n\tProductsChanged int    `json:\"products_changed\"`\n\tPricesChanged   int    `json:\"prices_changed\"`\n}",
+      "type storedCatalogReceipt struct {\n\tReplayed        bool `json:\"replayed\"`\n\tProductsChanged int  `json:\"products_changed\"`\n\tPricesChanged   int  `json:\"prices_changed\"`\n}",
       "type usageCursor struct {\n\tAmount   int64                `json:\"a\"`\n\tKey      string               `json:\"k\"`\n\tCurrency string               `json:\"c\"`\n\tGroupBy  billing.UsageGroupBy `json:\"g\"`\n\tFrom     time.Time            `json:\"f\"`\n\tTo       time.Time            `json:\"t\"`\n}"
     ],
     "internal/usageerasure": [
@@ -3596,21 +3593,6 @@
       "v5": "github.com/jackc/pgx/v5",
       "wake": "github.com/open-rails/openrails/internal/intents/wake"
     },
-    "internal/merchantarchive/catalog_snapshot_wire.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "bytes": "bytes",
-      "configdocument": "github.com/open-rails/openrails/internal/configdocument",
-      "contract": "github.com/open-rails/openrails/internal/merchantarchive/contract",
-      "fmt": "fmt",
-      "go-yaml": "github.com/goccy/go-yaml",
-      "hex": "encoding/hex",
-      "io": "io",
-      "json": "encoding/json",
-      "maps": "maps",
-      "sha256": "crypto/sha256",
-      "slices": "slices",
-      "uuid": "github.com/google/uuid"
-    },
     "internal/merchantdocs/destructive.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "errors": "errors",
@@ -5172,8 +5154,6 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/service/catalog_sidecars.go": {
-      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
-      "billing": "github.com/open-rails/openrails/billing",
       "bytes": "bytes",
       "catalog": "github.com/open-rails/openrails/catalog",
       "catalogrules": "github.com/open-rails/openrails/internal/catalogrules",
@@ -5181,7 +5161,6 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "http": "net/http",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "money": "github.com/open-rails/openrails/internal/modules/money",

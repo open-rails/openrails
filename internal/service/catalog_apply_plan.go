@@ -234,13 +234,14 @@ func (s *Service) pruneCatalogObjects(ctx context.Context, objects []catalogObje
 // recordCatalogApply makes the document the owner of every field it set or
 // named equal; an edit keeps an equal field too, and loses one the document
 // changed (only force changes an edited field). A field an applied object
-// no longer names is relinquished. It returns the objects changed.
-func (s *Service) recordCatalogApply(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, before, after catalogState, plan catalogPlan, actor string) ([]billing.CatalogChange, error) {
+// no longer names is relinquished. It returns the objects changed and
+// whether ownership changed.
+func (s *Service) recordCatalogApply(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, before, after catalogState, plan catalogPlan, actor string) ([]billing.CatalogChange, bool, error) {
 	d := diffCatalogState(before, after)
 	var w catalogOwnerWrites
 	owners, err := readCatalogOwners(ctx, q, merchantID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	owned := func(obj catalogObject, field string) bool {
 		return !(field == "entitlements" && plan.renamed[obj])
@@ -255,7 +256,10 @@ func (s *Service) recordCatalogApply(ctx context.Context, q *gen.Queries, mercha
 	for _, obj := range slices.SortedFunc(maps.Keys(plan.named), compareCatalogObjects) {
 		named := plan.named[obj]
 		for _, field := range named {
-			w.take = append(w.take, catalogFieldRef{obj, field})
+			// An unchanged field keeps the document that last set it.
+			if _, held := owners[obj][field][catalogManagerApply]; !held || slices.Contains(d.changed[obj], field) {
+				w.take = append(w.take, catalogFieldRef{obj, field})
+			}
 		}
 		if !plan.declared[obj] {
 			continue // touched only by a replacement: it relinquishes nothing
@@ -283,13 +287,13 @@ func (s *Service) recordCatalogApply(ctx context.Context, q *gen.Queries, mercha
 			}
 		}
 	}
-	w.gone = d.gone
+	w.gone = slices.Clone(d.gone)
 	revisions, err := stepUnmovedRevisions(ctx, q, merchantID, before, after, d)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if err := w.write(ctx, q, merchantID, catalogManagerApply, actor, s.now().UTC()); err != nil {
-		return nil, err
+	if err := w.write(ctx, q, merchantID, owners, catalogManagerApply, actor, s.now().UTC()); err != nil {
+		return nil, false, err
 	}
 	changes := []billing.CatalogChange{}
 	objects := append(slices.Collect(maps.Keys(d.changed)), d.gone...)
@@ -305,7 +309,7 @@ func (s *Service) recordCatalogApply(ctx context.Context, q *gen.Queries, mercha
 		}
 		changes = append(changes, billing.CatalogChange{Object: obj.kind, Key: obj.ownKey(), ProductKey: obj.productKey(), Fields: fields, Revision: revision, Deleted: deleted})
 	}
-	return changes, nil
+	return changes, len(w.take)+len(w.release)+len(w.drop)+len(w.gone) > 0, nil
 }
 
 // FindingCatalogConflicts is the one finding that names the objects the

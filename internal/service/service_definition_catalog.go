@@ -743,7 +743,7 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 				return nil, priceLookup(err)
 			}
 		}
-		if req.Archived != nil {
+		if req.Archived != nil && *req.Archived != current.Archived {
 			lifecycle := *scoped
 			lifecycle.localCatalogOnly = true
 			if *req.Archived {

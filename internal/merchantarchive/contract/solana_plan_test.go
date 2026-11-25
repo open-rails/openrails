@@ -44,6 +44,37 @@ func TestSolanaPlanIDIsNotACardNumber(t *testing.T) {
 	}
 }
 
+func TestCatalogApplicationReceiptCompatibility(t *testing.T) {
+	cases := []struct {
+		name    string
+		result  string
+		wantErr bool
+	}{
+		{"compact", `{"catalog_id":"default","replayed":false,"products_changed":2,"prices_changed":3}`, false},
+		{"historical", `{"catalog_id":"default","replayed":false,"products_changed":2,"prices_changed":3,"application_id":"01a211d7-a76c-7291-9740-dfd33f683595","base_revision":0,"applied_revision":1}`, false},
+		{"contradictory application_id", `{"catalog_id":"default","replayed":false,"products_changed":2,"prices_changed":3,"application_id":"01a211d7-a76c-7291-9740-dfd33f683596","base_revision":0,"applied_revision":1}`, true},
+		{"contradictory base_revision", `{"catalog_id":"default","replayed":false,"products_changed":2,"prices_changed":3,"application_id":"01a211d7-a76c-7291-9740-dfd33f683595","base_revision":1,"applied_revision":1}`, true},
+		{"contradictory applied_revision", `{"catalog_id":"default","replayed":false,"products_changed":2,"prices_changed":3,"application_id":"01a211d7-a76c-7291-9740-dfd33f683595","base_revision":0,"applied_revision":2}`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			values := row(t, "catalog_applications", map[string]string{
+				"merchant_id":      "01a211d7-a76c-7291-9740-dfd33f683594",
+				"application_id":   "01a211d7-a76c-7291-9740-dfd33f683595",
+				"schema_version":   "1",
+				"request_sha256":   `\x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`,
+				"base_revision":    "0",
+				"applied_revision": "1",
+				"result":           c.result,
+				"applied_at":       "2026-11-25 00:00:00+00",
+			})
+			if err := ValidateValues(profile(t, "catalog_applications"), values); (err != nil) != c.wantErr {
+				t.Fatalf("ValidateValues() = %v, want error %v", err, c.wantErr)
+			}
+		})
+	}
+}
+
 func profile(t *testing.T, table string) Profile {
 	t.Helper()
 	for _, p := range Profiles {

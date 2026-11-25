@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -15,13 +14,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 type CatalogMeterSpec struct {
@@ -50,27 +47,21 @@ type SyncCatalogSidecarsRequest struct {
 	RateCards []CatalogRateCardSpec `json:"rate_cards,omitempty"`
 }
 
-// CatalogMutationOptions controls the private billing-definition merge.
-type CatalogMutationOptions struct{ Insert, Overwrite, Prune bool }
-
-func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) error {
-	_, err := catalogCommand(ctx, s, "catalog/billing", struct {
-		Desired SyncCatalogSidecarsRequest
-		Options CatalogMutationOptions
-	}{desired, opts}, "", sidecarPlan(desired, opts), func(ctx context.Context, s *Service) (struct{}, error) {
-		return struct{}{}, s.syncCatalogSidecarsCommand(ctx, desired, opts)
+func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSidecarsRequest) error {
+	_, err := catalogCommand(ctx, s, "catalog/billing", desired, "", sidecarPlan(desired), func(ctx context.Context, s *Service) (struct{}, error) {
+		return struct{}{}, s.syncCatalogSidecarsCommand(ctx, desired)
 	})
 	return err
 }
 
-func (s *Service) syncCatalogSidecarsCommand(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) error {
+func (s *Service) syncCatalogSidecarsCommand(ctx context.Context, desired SyncCatalogSidecarsRequest) error {
 	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
-		return struct{}{}, scoped.syncCatalogSidecars(ctx, desired, opts)
+		return struct{}{}, scoped.syncCatalogSidecars(ctx, desired)
 	})
 	return err
 }
 
-func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) error {
+func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSidecarsRequest) error {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return err
@@ -88,8 +79,7 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 		return err
 	}
 	return dbi.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		// Serializes declaration merges. Re-read after acquiring the lock so partial
-		// flags cannot restore state read by an earlier, now stale plan.
+		// Serializes declaration merges. Re-read after acquiring the lock.
 		q := gen.New(tx)
 		merchantID, err := q.LockMerchantSettings(ctx, tid.UUID())
 		if err != nil {
@@ -99,12 +89,10 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 		if err != nil {
 			return err
 		}
-		next := mergeCatalogBilling(current, desired, opts)
+		next := mergeCatalogBilling(current, desired)
 		if err := checkCatalogBillingChanges(ctx, tx, merchantID, current, next); err != nil {
 			return err
 		}
-		// A product excluded by Insert=false was deliberately not created by the
-		// product phase. Its declared cards cannot be inserted either.
 		cards := next.RateCards[:0]
 		for _, card := range next.RateCards {
 			if card.ProductKey != "" {
@@ -129,7 +117,14 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			if stored, ok := currentMeters[meter.Key]; ok && reflect.DeepEqual(stored, meter) {
 				continue
 			}
-			if err := syncMeter(ctx, q, merchantID, meter, opts.Overwrite); err != nil {
+			groupBy, err := json.Marshal(meter.GroupBy)
+			if err != nil {
+				return err
+			}
+			if err := q.UpsertUsageMeter(ctx, gen.UpsertUsageMeterParams{
+				MerchantID: merchantID, MeterKey: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty,
+				Aggregation: string(meter.Aggregation), Unit: meter.Unit, GroupBy: groupBy,
+			}); err != nil {
 				return err
 			}
 		}
@@ -164,7 +159,7 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			if stored, ok := currentCards[catalogCardKey(card)]; ok && sameCatalogCards([]CatalogRateCardSpec{stored}, []CatalogRateCardSpec{card}) {
 				continue
 			}
-			if err := syncRateCard(ctx, q, merchantID, card, opts.Overwrite); err != nil {
+			if err := syncRateCard(ctx, q, merchantID, card); err != nil {
 				return err
 			}
 		}
@@ -210,7 +205,7 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 			continue
 		}
 		replacement := catalogrules.Meter{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit, GroupBy: m.GroupBy}
-		if err := checkCatalogMeterLimitCounts(ctx, gen.New(tx), merchantID, replacement); err != nil {
+		if err := money.CheckCatalogMeterLimitCounts(ctx, gen.New(tx), merchantID, replacement); err != nil {
 			return err
 		}
 		if err := money.CheckCatalogMeterChange(ctx, tx, merchantID, m.Key, &replacement); err != nil {
@@ -240,23 +235,9 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 			return err
 		}
 		effective := catalogrules.Meter{Key: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty, Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: meter.GroupBy}
-		if err := money.CheckCatalogRateCardContracts(ctx, tx, merchantID, effective, c.Filter, price); err != nil {
+		if err := money.CheckCatalogRateCardContracts(effective, c.Filter, price); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func checkCatalogMeterLimitCounts(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, meter catalogrules.Meter) error {
-	if catalogrules.BillingSupported(meter.Aggregation) {
-		return nil
-	}
-	counted, err := q.ListCatalogLimitsUsingMeters(ctx, gen.ListCatalogLimitsUsingMetersParams{MerchantID: merchantID, MeterKeys: []string{meter.Key}})
-	if err != nil {
-		return err
-	}
-	if len(counted) > 0 {
-		return apperr.New(http.StatusConflict, billing.CodeMeterInUse, fmt.Sprintf("limit %q counts meter %q; its aggregation must remain sum or count", counted[0], meter.Key))
 	}
 	return nil
 }
@@ -369,7 +350,7 @@ func catalogCardKey(c CatalogRateCardSpec) string {
 	return fmt.Sprintf("product:%s:%d", c.ProductKey, c.Ordinal)
 }
 
-func mergeCatalogBilling(current, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) SyncCatalogSidecarsRequest {
+func mergeCatalogBilling(current, desired SyncCatalogSidecarsRequest) SyncCatalogSidecarsRequest {
 	meters := make(map[string]CatalogMeterSpec)
 	cards := make(map[string]CatalogRateCardSpec)
 	for _, m := range current.Meters {
@@ -382,33 +363,25 @@ func mergeCatalogBilling(current, desired SyncCatalogSidecarsRequest, opts Catal
 	wantedCards := make(map[string]bool)
 	for _, m := range desired.Meters {
 		wantedMeters[m.Key] = true
-		_, exists := meters[m.Key]
-		if (exists && opts.Overwrite) || (!exists && opts.Insert) {
-			meters[m.Key] = m
-		}
+		meters[m.Key] = m
 	}
 	for _, c := range desired.RateCards {
 		key := catalogCardKey(c)
 		wantedCards[key] = true
-		_, exists := cards[key]
-		if (exists && opts.Overwrite) || (!exists && opts.Insert) {
-			if previous, ok := cards[key]; ok {
-				c.id = previous.id
-				c.createdAt = previous.createdAt
-			}
-			cards[key] = c
+		if previous, ok := cards[key]; ok {
+			c.id = previous.id
+			c.createdAt = previous.createdAt
+		}
+		cards[key] = c
+	}
+	for key := range meters {
+		if !wantedMeters[key] {
+			delete(meters, key)
 		}
 	}
-	if opts.Prune {
-		for key := range meters {
-			if !wantedMeters[key] {
-				delete(meters, key)
-			}
-		}
-		for key := range cards {
-			if !wantedCards[key] {
-				delete(cards, key)
-			}
+	for key := range cards {
+		if !wantedCards[key] {
+			delete(cards, key)
 		}
 	}
 	var out SyncCatalogSidecarsRequest
@@ -431,18 +404,7 @@ func sameCatalogCards(a, b []CatalogRateCardSpec) bool {
 	return bytes.Equal(left, right)
 }
 
-func syncMeter(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, meter CatalogMeterSpec, overwrite bool) error {
-	groupBy, err := json.Marshal(meter.GroupBy)
-	if err != nil {
-		return err
-	}
-	return q.SyncCatalogMeter(ctx, gen.SyncCatalogMeterParams{
-		MerchantID: merchantID, MeterKey: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty,
-		Aggregation: string(meter.Aggregation), Unit: meter.Unit, GroupBy: groupBy, Overwrite: overwrite,
-	})
-}
-
-func syncRateCard(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, spec CatalogRateCardSpec, overwrite bool) error {
+func syncRateCard(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, spec CatalogRateCardSpec) error {
 	var productID *uuid.UUID
 	if spec.ProductKey != "" {
 		product, err := q.GetProductByKey(ctx, gen.GetProductByKeyParams{MerchantID: merchantID, Key: strings.TrimSpace(spec.ProductKey)})
@@ -461,10 +423,10 @@ func syncRateCard(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, spe
 		id = &spec.id
 		created = &spec.createdAt
 	}
-	return q.SyncCatalogRateCard(ctx, gen.SyncCatalogRateCardParams{
+	return q.UpsertUsageRateCard(ctx, gen.UpsertUsageRateCardParams{
 		MerchantID: merchantID, ProductID: productID, Ordinal: int64(spec.Ordinal), MeterKey: spec.MeterKey,
 		PaymentTerm: spec.PaymentTerm, Filter: filter, Allowance: spec.Allowance, Price: spec.Price,
-		ID: id, CreatedAt: created, Overwrite: overwrite,
+		ID: id, CreatedAt: created,
 	})
 }
 

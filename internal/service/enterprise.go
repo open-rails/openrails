@@ -9,7 +9,6 @@ import (
 
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -21,21 +20,6 @@ const (
 	CollectionSendInvoice         = money.CollectionSendInvoice
 )
 
-// EnsureUsageMeter idempotently declares a catalog meter.
-func (s *Service) EnsureUsageMeter(ctx context.Context, spec catalogrules.Meter) error {
-	_, err := catalogCommand(ctx, s, "meter/"+spec.Key, spec, "", meterEditPlan(spec, nil, false, nil), func(ctx context.Context, s *Service) (struct{}, error) {
-		return struct{}{}, s.ensureUsageMeterCommand(ctx, spec)
-	})
-	return err
-}
-
-func (s *Service) ensureUsageMeterCommand(ctx context.Context, spec catalogrules.Meter) error {
-	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
-		return struct{}{}, scoped.ensureUsageMeter(ctx, spec)
-	})
-	return err
-}
-
 func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -45,13 +29,6 @@ func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter)
 
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	if err := checkCatalogMeterLimitCounts(ctx, s.catalogDatabase().Gen(ctx), mid.UUID(), spec); err != nil {
-		return err
 	}
 	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, spec)
 }
