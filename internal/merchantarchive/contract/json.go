@@ -427,7 +427,7 @@ var jsonRules = map[string]jsonRule{
 		"fields": historyFields,
 		"move":   object(map[string]jsonRule{"price_id": textValue, "archived": booleanValue}),
 		"keys":   array(textValue), "from": textValue, "to": textValue, "price_id": textValue, "archived": booleanValue}),
-	"catalog_applications.result": object(map[string]jsonRule{"catalog_id": textValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
+	"catalog_applications.result": object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.
 	"subscriptions.gateway_response":   metadataJSON,
 	"subscriptions.dunning_policy":     dunningPolicyJSON,

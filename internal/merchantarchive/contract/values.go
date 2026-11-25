@@ -35,9 +35,12 @@ func ValidateValues(p Profile, values []*string) error {
 	}
 	if p.Name == "catalog_applications" {
 		var receipt struct {
-			Replayed        bool `json:"replayed"`
-			ProductsChanged int  `json:"products_changed"`
-			PricesChanged   int  `json:"prices_changed"`
+			ApplicationID   *string `json:"application_id"`
+			BaseRevision    *int64  `json:"base_revision"`
+			AppliedRevision *int64  `json:"applied_revision"`
+			Replayed        bool    `json:"replayed"`
+			ProductsChanged int     `json:"products_changed"`
+			PricesChanged   int     `json:"prices_changed"`
 		}
 		raw := value(p, values, "result")
 		id := value(p, values, "application_id")
@@ -54,6 +57,9 @@ func ValidateValues(p Profile, values []*string) error {
 		appliedRevision, err := strconv.ParseInt(*applied, 10, 64)
 		if err != nil || json.Unmarshal([]byte(*raw), &receipt) != nil {
 			return fmt.Errorf("invalid catalog application receipt")
+		}
+		if receipt.ApplicationID != nil && *receipt.ApplicationID != *id || receipt.BaseRevision != nil && *receipt.BaseRevision != baseRevision || receipt.AppliedRevision != nil && *receipt.AppliedRevision != appliedRevision {
+			return fmt.Errorf("contradictory catalog application receipt")
 		}
 		if strconv.FormatInt(baseRevision, 10) != *base || strconv.FormatInt(appliedRevision, 10) != *applied || baseRevision < 0 || appliedRevision != baseRevision+1 || receipt.Replayed || receipt.ProductsChanged < 0 || receipt.PricesChanged < 0 {
 			return fmt.Errorf("contradictory catalog application receipt")
