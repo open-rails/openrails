@@ -75,7 +75,7 @@ const storageAge = 36 * 24 * time.Hour
 
 func (e *env) runStorage(ctx context.Context) *StorageResult {
 	plan := e.plan
-	r := &StorageResult{Shape: fmt.Sprintf("%d customers, %d events a customer a day over %d days, at random instants, each from one of %d invokers (the customer and delegated keys); "+
+	r := &StorageResult{Shape: fmt.Sprintf("%d customers, %d events a customer a day over %d days, at random instants, each from one of %d invokers (the customer and its API keys); "+
 		"%d to %d units at %d micros a unit, a unique source_id, metadata {model, region}, and one daily spend window; %d reporters, each a lease a day, syncing its customers' items in time order",
 		plan.StorageCustomers, plan.StoragePerDay, plan.StorageDays, plan.StorageInvokers, plan.Units[0], plan.Units[1], plan.UnitPrice, plan.StorageReporters)}
 	end := time.Now().UTC().Add(-time.Hour).Truncate(time.Hour)
@@ -90,11 +90,6 @@ func (e *env) runStorage(ctx context.Context) *StorageResult {
 		r.Worlds = append(r.Worlds, e.storageWorld(ctx, s.name, s.end.Add(-span), s.end))
 	}
 	return r
-}
-
-type storageInvoker struct {
-	id  string
-	typ billing.InvokerType
 }
 
 func (e *env) storageWorld(ctx context.Context, name string, from, to time.Time) *StorageWorld {
@@ -129,17 +124,23 @@ func (e *env) storageWorld(ctx context.Context, name string, from, to time.Time)
 		return w
 	}
 	rng := rand.New(rand.NewPCG(1, 2))
-	invokers := make([][]storageInvoker, len(s.customers))
+	invokers := make([][]string, len(s.customers))
 	for i, cu := range s.customers {
-		invokers[i] = []storageInvoker{{cu.String(), billing.InvokerTypeCustomer}}
+		invokers[i] = []string{cu.String()}
 		for range plan.StorageInvokers - 1 {
-			invokers[i] = append(invokers[i], storageInvoker{fmt.Sprintf("key_%016x", rng.Uint64()), billing.InvokerTypeDelegated})
+			invokers[i] = append(invokers[i], fmt.Sprintf("key_%016x", rng.Uint64()))
 		}
 	}
 	models, regions := []string{"small", "medium", "large"}, []string{"us-east-1", "eu-west-1"}
 	reporters := max(plan.StorageReporters, 1)
 	start := time.Now()
+	budget := time.Duration(max(plan.StorageMinutes, 1)) * time.Minute
 	for day := from; day.Before(to) && ctx.Err() == nil; day = day.Add(24 * time.Hour) {
+		if time.Since(start) > budget {
+			logf("[storage/%s] out of time: usage to %s", name, day.Format(time.DateOnly))
+			w.To = day
+			break
+		}
 		end := day.Add(24 * time.Hour)
 		if end.After(to) {
 			end = to
@@ -147,9 +148,9 @@ func (e *env) storageWorld(ctx context.Context, name string, from, to time.Time)
 		shares := make([][]billing.LeaseUsage, reporters)
 		for ci, cu := range s.customers {
 			for range plan.StoragePerDay {
-				inv := invokers[ci][rng.IntN(len(invokers[ci]))]
+				invoker := invokers[ci][rng.IntN(len(invokers[ci]))]
 				units := plan.Units[0] + rng.Int64N(plan.Units[1]-plan.Units[0]+1)
-				shares[ci%reporters] = append(shares[ci%reporters], billing.LeaseUsage{CustomerID: cu, Invoker: inv.id, InvokerType: inv.typ, Currency: "USD",
+				shares[ci%reporters] = append(shares[ci%reporters], billing.LeaseUsage{CustomerID: cu, Invoker: invoker, InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
 					EventType: "compute", Dimensions: map[string]int64{"units": units}, Metadata: map[string]any{"model": models[rng.IntN(len(models))], "region": regions[rng.IntN(len(regions))]},
 					Source: "api", SourceID: uuid.NewString(), OccurredAt: day.Add(time.Duration(rng.Int64N(int64(end.Sub(day)))))})
 			}
