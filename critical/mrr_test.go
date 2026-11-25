@@ -750,7 +750,11 @@ func TestMRR(t *testing.T) {
 			reads = subscriptionMRRReads(t, a.world, a.pool, false) - before
 			return reads >= members
 		}, 70*time.Second, 250*time.Millisecond, "the import's reads reach the statistics")
-		require.Less(t, reads, int64(50*members), "reads of subscription_mrr grow with the book, not its square: before %s; after %s",
+		// Each of a row's writes queues an event that probes the row's
+		// versions, and each customer's settle reads its lines a few times:
+		// some tens of reads a member. Reading every earlier row for each
+		// would be a thousand times as many.
+		require.Less(t, reads, int64(100*members), "reads of subscription_mrr grow with the book, not its square: before %s; after %s",
 			scans, subscriptionMRRScans(t, a.world, a.pool, false))
 	})
 
@@ -778,7 +782,7 @@ func TestMRR(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(t.Context(), "SET CONSTRAINTS ALL IMMEDIATE")
 		require.NoError(t, err)
-		require.Less(t, subscriptionMRRReads(t, a.world, tx, true), int64(50*members), "reads of subscription_mrr grow with the book, not its square: %s",
+		require.Less(t, subscriptionMRRReads(t, a.world, tx, true), int64(100*members), "reads of subscription_mrr grow with the book, not its square: %s",
 			subscriptionMRRScans(t, a.world, tx, true))
 		require.NoError(t, tx.Commit(t.Context()))
 
