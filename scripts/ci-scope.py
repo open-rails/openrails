@@ -10,9 +10,9 @@ SOURCE = ("core", "runtime", "browser", "chart", "security")
 ALL = (*SOURCE, "artifacts")
 # The whole critical suite runs on this many runners (scripts/critical-results.py --shard).
 CRITICAL_SHARDS = 8
-# Merge groups run the whole critical suite once a full run of the open RC is green. While the RC
-# is red every group would fail, the fixes included.
-QUEUE_RUNS_CRITICAL = False
+# Merge groups run the whole critical suite. Turn it off while the RC is red: every group would
+# fail, the fixes included.
+QUEUE_RUNS_CRITICAL = True
 TIERS = ("light", "queue", "push", "full", "focused")
 
 
