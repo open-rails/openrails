@@ -69,9 +69,6 @@ const (
 	// Payments recorded outside OpenRails.
 	CodePaymentExceedsDue     ErrorCode = "payment_exceeds_due"
 	CodeOrderHasRecurringLine ErrorCode = "order_has_recurring_line"
-	// CodeModelUnavailable: the language model behind an ask or generate
-	// route did not answer.
-	CodeModelUnavailable ErrorCode = "model_unavailable"
 )
 
 // Refusals of buying a product again while a canceled subscription to it is
@@ -323,7 +320,6 @@ var errorCodes = []ErrorCodeInfo{
 	{CodeInsufficientCredits, 402, card, "The customer's credit balance does not cover the operation."},
 	{CodeInsufficientFunds, 402, card, "The payment instrument lacks funds."},
 	{CodeDatabaseBusy, 503, fault, "No database connection is available; retry shortly."},
-	{CodeModelUnavailable, 502, fault, "The language model did not answer; retry, or ask a narrower question."},
 
 	// Request shape and transport.
 	{CodeUnknownField, 400, invalid, "The JSON body names a field the route does not accept; param is the field."},

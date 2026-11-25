@@ -1856,59 +1856,6 @@
         ]
       }
     },
-    "/v1/console/catalog/ask": {
-      "post": {
-        "tags": [
-          "catalog"
-        ],
-        "x-openrails-console-only": true,
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AskCatalogParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogAnswer"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:catalog:read",
-          "root": "root:catalog:read"
-        },
-        "x-openrails-mounted-when": "catalog_copilot",
-        "x-openrails-errors": [
-          "invalid_param",
-          "model_unavailable",
-          "rate_limit_exceeded",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/catalog/products": {
       "post": {
         "tags": [
@@ -13537,9 +13484,6 @@
           "scope_id": {
             "type": "string"
           },
-          "assistants": {
-            "$ref": "#/components/schemas/AdminAssistants"
-          },
           "application_permissions": {
             "type": "array",
             "items": {
@@ -13588,23 +13532,7 @@
           "merchant_config",
           "metrics",
           "scope_id",
-          "assistants",
           "application_permissions"
-        ]
-      },
-      "AdminAssistants": {
-        "type": "object",
-        "properties": {
-          "catalog_copilot": {
-            "type": "boolean"
-          },
-          "catalog_drafting": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "catalog_copilot",
-          "catalog_drafting"
         ]
       },
       "Agreement": {
@@ -14418,14 +14346,6 @@
           }
         }
       },
-      "AskCatalogParams": {
-        "type": "object",
-        "properties": {
-          "question": {
-            "type": "string"
-          }
-        }
-      },
       "Balance": {
         "type": "object",
         "properties": {
@@ -15152,31 +15072,6 @@
           "expires_at"
         ]
       },
-      "CatalogAnswer": {
-        "type": "object",
-        "properties": {
-          "answer": {
-            "type": "string"
-          },
-          "evidence": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogEvidence"
-            }
-          },
-          "drafts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogDraft"
-            }
-          }
-        },
-        "required": [
-          "answer",
-          "evidence",
-          "drafts"
-        ]
-      },
       "CatalogApplicationReceipt": {
         "type": "object",
         "properties": {
@@ -15327,93 +15222,6 @@
           "product_key",
           "currency",
           "fields"
-        ]
-      },
-      "CatalogDraft": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "new_price",
-              "price_change",
-              "refused"
-            ]
-          },
-          "price_change": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PriceChangeDraft"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "new_price": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/NewPriceDraft"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "refusal": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/CatalogDraftRefusal"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "price_change",
-          "new_price",
-          "refusal"
-        ]
-      },
-      "CatalogDraftRefusal": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "workaround": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "reason",
-          "workaround"
-        ]
-      },
-      "CatalogEvidence": {
-        "type": "object",
-        "properties": {
-          "tool": {
-            "type": "string"
-          },
-          "args": {
-            "type": "string"
-          },
-          "summary": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "tool",
-          "args",
-          "summary"
         ]
       },
       "CatalogFieldConflict": {
@@ -15983,11 +15791,7 @@
           "expected_revision": {
             "type": "integer"
           }
-        },
-        "required": [
-          "unit_amount",
-          "currency"
-        ]
+        }
       },
       "CreatePriceProduct": {
         "type": "object",
@@ -16001,11 +15805,7 @@
           "description": {
             "type": "string"
           }
-        },
-        "required": [
-          "key",
-          "display_name"
-        ]
+        }
       },
       "CreateProductAccessBatchParams": {
         "type": "object",
@@ -18494,7 +18294,6 @@
               "meter_rate_card_conflict",
               "method_not_allowed",
               "metrics_query_invalid",
-              "model_unavailable",
               "order_action_not_allowed",
               "order_attempt_closed",
               "order_attempt_expired",
@@ -20704,25 +20503,6 @@
             "type": "boolean"
           }
         }
-      },
-      "NewPriceDraft": {
-        "type": "object",
-        "properties": {
-          "product_key": {
-            "type": "string"
-          },
-          "review_text": {
-            "type": "string"
-          },
-          "create_price": {
-            "$ref": "#/components/schemas/CreatePriceParams"
-          }
-        },
-        "required": [
-          "product_key",
-          "review_text",
-          "create_price"
-        ]
       },
       "NextAction": {
         "type": "object",
@@ -24036,58 +23816,6 @@
           "divide_by"
         ]
       },
-      "PriceChangeDraft": {
-        "type": "object",
-        "properties": {
-          "product_key": {
-            "type": "string"
-          },
-          "price_key": {
-            "type": "string"
-          },
-          "current_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "new_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "affected_count": {
-            "type": "integer"
-          },
-          "review_text": {
-            "type": "string"
-          },
-          "create_price": {
-            "$ref": "#/components/schemas/CreatePriceParams"
-          },
-          "migration": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/CreatePriceMigrationParams"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "product_key",
-          "price_key",
-          "current_amount",
-          "new_amount",
-          "currency",
-          "affected_count",
-          "review_text",
-          "create_price",
-          "migration"
-        ]
-      },
       "PriceKeyMovement": {
         "type": "object",
         "properties": {
@@ -24824,7 +24552,6 @@
               "meter_rate_card_conflict",
               "method_not_allowed",
               "metrics_query_invalid",
-              "model_unavailable",
               "order_action_not_allowed",
               "order_attempt_closed",
               "order_attempt_expired",
@@ -29233,11 +28960,6 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "The metrics query is invalid; metadata.errors lists why."
-    },
-    "model_unavailable": {
-      "status": 502,
-      "type": "api_error",
-      "meaning": "The language model did not answer; retry, or ask a narrower question."
     },
     "order_action_not_allowed": {
       "status": 409,

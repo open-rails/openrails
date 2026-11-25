@@ -76,10 +76,7 @@ when the customer entry pulls in admin modules or styles.
 
 - npm: `@openrails/billing-ui@X.Y.Z`, the entries above; peers React 19,
   optional TanStack Query 5 and `@openrails/auth-ui`.
-- HTTP used: `/v1/me/*`, `GET /v1/config`, `GET /v1/me/config`,
-  `GET /v1/admin/access`, the staff groups' routes, `POST /v1/metrics/query`,
-  `GET /v1/metrics/dashboard`, `PUT /v1/merchant/dashboard`,
-  `POST /v1/console/catalog/ask`.
+- HTTP used: `/v1/me/*`, `GET /v1/config`, `GET /v1/me/config`, `GET /v1/admin/access`, the staff groups' routes, `POST /v1/metrics/query`, `GET /v1/metrics/dashboard`, `PUT /v1/merchant/dashboard`.
 - Go: `Engine.PublicConfig` and `Engine.CustomerConfig` let a server-rendered page
   pass config into `BillingProvider`.
 

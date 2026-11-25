@@ -69,8 +69,14 @@ func (UsageOrderArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: "billing", MaxAttempts: 1, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: usageOutstanding}}
 }
 
+// usageBillingConfig is the merchant's usage_billing terms and its terms in
+// currency: none without terms, or on a handle with no merchant
+// configuration bound.
 func (s *MoneyService) usageBillingConfig(ctx context.Context, currency string) (*billing.UsageBillingSettings, *billing.UsageBillingCurrency, error) {
 	cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx)
+	if errors.Is(err, merchantconfig.ErrNoSettings) {
+		return nil, nil, nil
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -144,6 +150,17 @@ func usageMinimumInvoice(row gen.BillingMoneySetting, cfg *billing.UsageBillingC
 	return cfg.MinimumInvoiceAmount
 }
 
+// enrollUsageBilling gives the customer's account in currency its bill date
+// when the merchant's usage_billing terms cover the currency.
+func (s *MoneyService) enrollUsageBilling(ctx context.Context, q *gen.Queries, customer uuid.UUID, currency string) error {
+	cfg, cur, err := s.usageBillingConfig(ctx, currency)
+	if err != nil || cur == nil {
+		return err
+	}
+	_, err = s.ensureUsageBillingAccount(ctx, q, customer, currency, cfg)
+	return err
+}
+
 // queueUsageBilling runs inside the accrual transaction. The due record is the
 // source of work; the coalesced River job only wakes its processor.
 func (s *MoneyService) queueUsageBilling(ctx context.Context, q *gen.Queries, customer uuid.UUID, currency string) error {
@@ -202,6 +219,9 @@ func (s *MoneyService) MarkUsageAccountsDue(ctx context.Context) error {
 		return err
 	}
 	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
+	if errors.Is(err, merchantconfig.ErrNoSettings) {
+		return nil
+	}
 	if err != nil || settings.Config.UsageBilling == nil {
 		return err
 	}
