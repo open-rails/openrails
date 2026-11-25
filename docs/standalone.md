@@ -61,14 +61,11 @@ redis: # optional for one server; replicas share rate limits and spent proofs th
 # resource server it is. Its sign-in stays off: people sign in at the app,
 # which merchant.yaml declares the merchant's trusted issuer.
 auth:
-  # Stable example platform/operator directory, independent of the app's own.
-  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
   token:
     issuer: http://localhost:3053
     allow_private_network_jwks: true # local only: the app's keys at http://localhost:8080
   keys:
     path: /vault/auth
-    allow_ephemeral_dev_keys: true   # local only: generates its key under keys.path
   http:
     direct_peer_ip: true             # clients connect directly; behind a proxy, set trusted_proxies
   registration:
@@ -290,12 +287,10 @@ boot. The ones a deployment sets:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `auth.default_tenant_id` | `51336692-ef57-4cdb-a189-a8d388465c11` for a loopback issuer; else none, and boot refuses | the server's operator account directory: a UUID generated once for the deployment and never changed ([the account directory](#the-account-directory)) |
 | `auth.token.issuer` | `public_billing_base_url` | the server's own issuer, https (http only on a loopback host) |
 | `auth.token.refresh_token_duration` | `720h` | how long a session lasts from its sign-in; negative lasts until revoked |
 | `auth.token.allow_private_network_jwks` | `false` | fetch a trusted issuer's keys from a private address (local federation only) |
-| `auth.keys.path` | `/vault/auth`; a per-issuer local state directory with `allow_ephemeral_dev_keys` | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
-| `auth.keys.allow_ephemeral_dev_keys` | `false` | generate keys under `auth.keys.path`; one instance, local only |
+| `auth.keys.path` | `/vault/auth`; for a loopback issuer without keys, a per-issuer directory where AuthKit generates development keys | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
 | `auth.keys.verify_only` | `false` | verify tokens, mint none |
 | `auth.resource.id` | `public_billing_base_url` when https (http on a loopback host) | the resource trusted issuers mint tokens for: their `aud` (RFC 8707). Turns trusted-issuer tokens on |
 | `auth.resource.public_url` | none | the public origin DPoP proofs point at |
@@ -599,12 +594,7 @@ request selects the merchant, and a valid credential bound to none is
 
 ### The account directory
 
-`auth.default_tenant_id` (`AUTH_DEFAULT_TENANT_ID`) is the server's own operator
-account directory: generate a UUID once for the deployment, keep it in
-configuration and never change it. It is never inferred. `openrails migrate up`
-migrates OpenRails and AuthKit and passes it as AuthKit's adoption target for
-existing accounts, keeping their ids: review that mapping before migrating a
-populated database.
+The server's AuthKit is single-tenant: `openrails migrate up`, or the first boot, creates its one operator account directory on a fresh database and adopts the one an existing database holds; a database with several refuses to start. Nothing names it in configuration.
 
 ### Trusted issuers
 
@@ -793,7 +783,7 @@ count, primary or sticky session.
 - **Identical everywhere:** schemas, merchant configuration (the same manifest and overlays, or Vault mount),
   `rate_limits`, `captcha`, `trusted_proxies`, `return_origins`, `route_groups`
   (a route some instances lack is a 404 on them), the signing key and `totp.key`
-  (`auth.keys.allow_ephemeral_dev_keys` is one instance only), the captcha
+  (generated development keys are one instance only), the captcha
   secret, and the version outside a rolling upgrade.
 - **Background work:** every instance with workers takes River jobs, each job on
   one instance. River's leader alone schedules periodic work; a crashed leader
@@ -1316,7 +1306,6 @@ A minimal `values.yaml`:
 config:
   public_billing_base_url: https://billing.example.com
   auth:
-    default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11  # generate once
     token: {issuer: https://billing.example.com}
     resource: {id: https://billing.example.com}
   redis: {addr: redis:6379}

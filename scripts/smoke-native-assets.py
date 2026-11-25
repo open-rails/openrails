@@ -78,9 +78,8 @@ def main():
                 "checkout_origin": "http://" + checkout, "route_groups": {"admin": True},
                 "local_sign_in": True,
                 "auth": {
-                    "default_tenant_id": str(uuid.uuid4()),
                     "token": {"issuer": origin}, "resource": {"id": origin},
-                    "keys": {"path": str(temporary / "keys.json"), "allow_ephemeral_dev_keys": True},
+                    "keys": {"path": str(temporary / "keys.json")},
                     "http": {"direct_peer_ip": True},
                     "registration": {"native_user_mode": "closed", "allow_missing_senders": True},
                 },

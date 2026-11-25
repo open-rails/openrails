@@ -40,9 +40,6 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if h == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	if err := controlplane.RequireDefaultTenant(h.Server.Auth); err != nil {
-		return nil, err
-	}
 	c := &commandControlPlane{}
 	defer func() {
 		if err != nil {
@@ -79,7 +76,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 		return nil, err
 	}
 	c.cleanups = append(c.cleanups, pool.Close)
-	deps := authkit.Deps{Postgres: pool, KeySource: key}
+	deps := authkit.Deps{Postgres: pool, KeySource: key, Logger: slog.Default()}
 	if h.SMTP != nil {
 		sender, err := hostdeps.NewEmailSender(*h.SMTP)
 		if err != nil {

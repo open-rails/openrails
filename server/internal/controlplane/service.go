@@ -110,9 +110,6 @@ func AuthKit(cfg *billing.Config, auth authkit.Config, opts Options) (authkit.Co
 	if cfg == nil || strings.TrimSpace(auth.Token.Issuer) == "" {
 		return authkit.Config{}, errors.New("controlplane: auth.token.issuer is required")
 	}
-	if err := RequireDefaultTenant(auth); err != nil {
-		return authkit.Config{}, err
-	}
 	if err := validate(auth, opts); err != nil {
 		return authkit.Config{}, err
 	}
@@ -206,15 +203,6 @@ func sameCIDRs(a, b []string) bool {
 	slices.Sort(a)
 	slices.Sort(b)
 	return slices.Equal(slices.Compact(a), slices.Compact(b))
-}
-
-// RequireDefaultTenant refuses an unassigned platform account directory.
-// Merchant ownership is independent; it never supplies this identity.
-func RequireDefaultTenant(auth authkit.Config) error {
-	if auth.DefaultTenantID.IsZero() {
-		return errors.New("standalone: auth.default_tenant_id (AUTH_DEFAULT_TENANT_ID) must name the stable platform account tenant; generate it once and persist it in deployment configuration")
-	}
-	return nil
 }
 
 // defaultResource is the server's resource identifier (RFC 8707) when

@@ -89,7 +89,8 @@ func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config)
 			require.NoError(t, err)
 		})
 		a.auth, _ = authtest.New(t, authtest.WithConfig(func(c *authkit.Config) {
-			c.DefaultTenantID = a.tenant
+			// Merchants bind one per tenant: this world has several.
+			c.Tenancy, c.DefaultTenantID = authkit.TenancyMulti, a.tenant
 			c.Database.Schema, c.Database.RiverSchema = authSchema, authSchema
 			c.Roles = roles
 			c.TwoFactor.Mode = iam.TwoFactorDisabled

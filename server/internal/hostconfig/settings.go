@@ -57,6 +57,9 @@ func Settings() ([]Setting, error) {
 				continue
 			}
 			path := strings.TrimPrefix(prefix+"."+name, ".")
+			if _, retired := retiredAuthKeys[path]; retired {
+				continue
+			}
 			for fv.Kind() == reflect.Pointer {
 				if fv.IsNil() {
 					fv = reflect.Zero(fv.Type().Elem())

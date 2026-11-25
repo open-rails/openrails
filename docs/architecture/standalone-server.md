@@ -31,13 +31,13 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
 
 `server.New` (`server/server.go`):
 
-1. Refuses an empty `Auth.DefaultTenantID` (`controlplane.RequireDefaultTenant`), a
-   declared merchant's `Issuer` (a credential's merchant is its group) and a host
-   `Engine.UserInfo`.
+1. Fills unset settings (`Config.WithDefaults`), and refuses a declared merchant's
+   `Issuer` (a credential's merchant is its group) and a host `Engine.UserInfo`.
 2. Installs `customerDirectory` as the engine's `UserInfo`
    ([customer directory](customer-directory.md)) and calls `openrails.New`, which
    migrates unless `SkipMigrations`.
-3. Builds AuthKit: `controlplane.AuthKit` fixes merchant roles, the API-key prefix,
+3. Builds AuthKit, single-tenant unless `Auth.Tenancy` says otherwise (it creates or
+   adopts its one account directory): `controlplane.AuthKit` fixes merchant roles, the API-key prefix,
    the resource's scopes, the console's client (`ConsoleClientID`), AuthKit's River
    schema and mount, and `SkipMigrations`. AuthKit gets its own pool on the engine's
    database unless one is given.

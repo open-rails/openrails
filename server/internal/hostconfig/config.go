@@ -14,9 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -127,20 +125,13 @@ func defaultSSLMode(host string) string {
 	return "verify-full"
 }
 
-// localTenantID is the platform account directory of a server whose token
-// issuer is on this machine. A deployed server names its own.
-var localTenantID = iam.TenantID(uuid.MustParse("51336692-ef57-4cdb-a189-a8d388465c11"))
-
 // authDefaults are AuthKit's settings the binary defaults: the token issuer
-// is public_billing_base_url, and a loopback issuer's account directory is
-// localTenantID (elsewhere boot refuses an unnamed one). AuthKit's refresh
-// sessions last 30 days and its tables live in "profiles". Registration
-// stays the server's: closed, or invite_only with local_sign_in.
+// is public_billing_base_url. AuthKit's refresh sessions last 30 days and its
+// tables live in "profiles". Registration stays the server's: closed, or
+// invite_only with local_sign_in. AuthKit itself creates its one account
+// directory, and a loopback issuer's development keys.
 func authDefaults(a *authkit.Config, publicBillingBaseURL string) {
 	a.Token.Issuer = cmp.Or(strings.TrimSpace(a.Token.Issuer), publicBillingBaseURL)
-	if a.DefaultTenantID.IsZero() && loopbackURL(a.Token.Issuer) {
-		a.DefaultTenantID = localTenantID
-	}
 	a.Token.RefreshTokenDuration = cmp.Or(a.Token.RefreshTokenDuration, 30*24*time.Hour)
 	a.Database.Schema = cmp.Or(a.Database.Schema, "profiles")
 }
@@ -161,19 +152,6 @@ func cloudflare(s *server.Config, ranges []string) {
 	}
 	s.Auth.HTTP = &http
 	s.Engine.TrustedProxies = append(slices.Clone(s.Engine.TrustedProxies), ranges...)
-}
-
-// loopbackURL reports a URL whose host is this machine.
-func loopbackURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	if strings.EqualFold(u.Hostname(), "localhost") {
-		return true
-	}
-	ip := net.ParseIP(u.Hostname())
-	return ip != nil && ip.IsLoopback()
 }
 
 // DatabaseConnection is the database section's connection: URL, or the
