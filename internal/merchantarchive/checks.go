@@ -128,7 +128,7 @@ var excludedColumns = map[string]string{
 	"ledger_type_totals":      "merchant_id book currency account_type psp_id credits_posted debits_posted",
 	"ledger_daily":            "merchant_id book currency account_type bucket_at transfer_type psp_id product_id credits debits",
 	"ledger_rollup_pending":   "merchant_id transfer_id",
-	"provider_listed_rebills": "merchant_id psp_id transaction_key listed_at",
+	"provider_listed_rebills": "merchant_id psp_id transaction_key subscription_key amount listed_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment

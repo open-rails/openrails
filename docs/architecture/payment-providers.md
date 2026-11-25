@@ -86,18 +86,24 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
 - Because a CCBill callback is unsigned and applied as sent, the provider
   refresh checks it afterwards and only reports; it never changes access or
   money. Every CCBill DataLink read (the full read and each paced day) records
-  the `REBILL` transaction ids it lists, leading zeros removed, in
-  `provider_listed_rebills`. After its reads each refresh run lists the
-  rebills and upgrades recorded from CCBill callbacks (a payment whose
-  attempt is `observed_via` `webhook`, or whose bill is a `ccbill_upgrade`;
-  positive `rail` charges, no reversals) that the server received
-  (`payments.created_at`, never the callback's own timestamp) between 30 days
-  and 36 hours ago, and before the read reached 36 hours past them. One no
-  read has listed raises `pull.charge.unconfirmed` (critical,
+  the `REBILL` rows it lists in `provider_listed_rebills`: transaction id and
+  subscription id without leading zeros, and the amount. After its reads each
+  refresh run lists the rebills recorded from CCBill callbacks (a payment
+  whose attempt is `observed_via` `webhook`; positive `rail` charges, no
+  reversals) that the server received (`payments.created_at`, never the
+  callback's own timestamp) between 30 days and 36 hours ago, and before the
+  read reached 36 hours past them. One no read has listed with both its
+  transaction id and its subscription raises `pull.charge.unconfirmed` (high,
   `requires_review`, one per PSP and transaction, with the payment, customer,
-  subscription and its CCBill id, amount and currency as evidence); a read
-  that later lists it resolves it. The check makes no DataLink request of its
-  own. Initial sales are not checked: the fetcher reads no `NEW` export.
+  subscription and its CCBill id, amount, currency and any listing of the
+  transaction under another subscription as evidence); a read that later
+  lists it resolves it. The amount is evidence, never a condition. The check
+  makes no DataLink request of its own.
+- It is high, not critical, until DataLink's dating of rebills is confirmed
+  against a live account: reads do not overlap, so a genuine rebill DataLink
+  exports late into a window already read can raise it today. Initial sales
+  (the fetcher reads no `NEW` export) and upgrades are not checked, the
+  latter until DataLink's listing of them is confirmed.
 - When the ACTIVEMEMBERS roster lists a member OpenRails has as a CCBill lapse
   (`cancel_type` `expired`), `pull.subscription.mismatch` is critical if the
   lapse cut paid access short (ended before `current_period_ends_at`, as a

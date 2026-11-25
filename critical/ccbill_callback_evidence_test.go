@@ -22,12 +22,17 @@ import (
 type callbackEvidenceFeed struct {
 	*httptest.Server
 	mu      sync.Mutex
-	rebills map[string]time.Time
+	rebills map[string]listedRebill
+}
+
+type listedRebill struct {
+	sub string
+	at  time.Time
 }
 
 func newCallbackEvidenceFeed(t *testing.T, sub string, active bool, expires time.Time) *callbackEvidenceFeed {
 	t.Helper()
-	feed := &callbackEvidenceFeed{rebills: map[string]time.Time{}}
+	feed := &callbackEvidenceFeed{rebills: map[string]listedRebill{}}
 	mst := time.FixedZone("MST", -7*60*60)
 	feed.Server = httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
 		if r.ParseForm() != nil || r.URL.Path != "/data/main.cgi" {
@@ -49,9 +54,9 @@ func newCallbackEvidenceFeed(t *testing.T, sub string, active bool, expires time
 		}
 		feed.mu.Lock()
 		defer feed.mu.Unlock()
-		for txn, at := range feed.rebills {
-			if !at.Before(from) && !at.After(until) {
-				fmt.Fprintf(out, "REBILL,945280,0001,%s,%s,%s,10.00\n", sub, at.UTC().Format(time.DateTime), txn)
+		for txn, r := range feed.rebills {
+			if !r.at.Before(from) && !r.at.After(until) {
+				fmt.Fprintf(out, "REBILL,945280,0001,%s,%s,%s,10.00\n", r.sub, r.at.UTC().Format(time.DateTime), txn)
 			}
 		}
 	}))
@@ -59,11 +64,16 @@ func newCallbackEvidenceFeed(t *testing.T, sub string, active bool, expires time
 	return feed
 }
 
-// addRebill makes DataLink list txn, dated at.
+// addRebill makes DataLink list txn of the member, dated at.
 func (f *callbackEvidenceFeed) addRebill(txn string, at time.Time) {
+	f.addRebillOf(ccbillProvider, txn, at)
+}
+
+// addRebillOf makes DataLink list txn of subscription sub, dated at.
+func (f *callbackEvidenceFeed) addRebillOf(sub, txn string, at time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.rebills[txn] = at
+	f.rebills[txn] = listedRebill{sub: sub, at: at}
 }
 
 // callbackEvidence is alpha with a CCBill member imported paid through
@@ -152,7 +162,7 @@ func TestCCBillCallbackEvidence(t *testing.T) {
 		require.Len(t, found, 1, "the rebill no read lists is raised")
 		f := found[0]
 		require.Equal(t, forged, f.SubjectKey)
-		require.Equal(t, "critical", f.Severity)
+		require.Equal(t, "high", f.Severity)
 		require.Equal(t, billing.FindingStatus("requires_review"), f.Status)
 		local, _ := f.Evidence["local"].(map[string]any)
 		require.NotEmpty(t, local["payment_id"], "%v", f.Evidence)
@@ -277,6 +287,22 @@ func TestCCBillCallbackEvidence(t *testing.T) {
 		found := c.unconfirmed(t)
 		require.Len(t, found, 1)
 		require.Equal(t, forged, found[0].SubjectKey)
-		require.Equal(t, "critical", found[0].Severity)
+		require.Equal(t, "high", found[0].Severity)
+	})
+
+	t.Run("OR-J38-S94/a-rebill-callback-reusing-another-subscriptions-transaction-is-raised", func(t *testing.T) {
+		c := startCallbackEvidence(t, "945280", false, dueAgo)
+		at := c.clock.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+		// DataLink lists the transaction, but as another member's rebill.
+		c.feed.addRebillOf("0223344556677889900", genuine, at)
+		c.rebill(t, genuine, at)
+		c.refresh()
+		c.later(37 * time.Hour)
+		found := c.unconfirmed(t)
+		require.Len(t, found, 1, "a listing under another subscription confirms nothing")
+		require.Equal(t, genuine, found[0].SubjectKey)
+		remote, _ := found[0].Evidence["remote"].(map[string]any)
+		require.Equal(t, "223344556677889900", remote["listed_subscription_id"])
+		require.Equal(t, "10.00", remote["listed_amount"])
 	})
 }

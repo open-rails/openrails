@@ -33,9 +33,9 @@ const (
 	// when the charge's subscription period is current).
 	FindingChargeMissingLocal FindingType = "pull.charge.missing"
 	// FindingChargeUnconfirmed: a CCBill rebill recorded from an unsigned
-	// callback that no DataLink read listed within 36 hours of its receipt.
-	// CRITICAL; requires_review, nothing is changed. A read that lists the
-	// transaction resolves it.
+	// callback that no DataLink read listed under its subscription within 36
+	// hours of its receipt. High; requires_review, nothing is changed. A read
+	// that lists it resolves it.
 	FindingChargeUnconfirmed FindingType = "pull.charge.unconfirmed"
 	// FindingRefundUnrecorded (PS-5): a rail refund is not recorded
 	// locally. Enforce: record the refund; any entitlement-revocation

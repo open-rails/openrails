@@ -132,14 +132,15 @@ func (e *Engine) confirmCCBillCallbackRebills(ctx context.Context, pspID uuid.UU
 		return nil, err
 	}
 	q := e.Local.DB.Gen(ctx)
-	var keys []string
+	var keys, subs, amounts []string
 	for _, t := range snap.Transactions {
-		if key := ccbillTransactionKey(t.TransactionID); t.Type == TransactionTypeSale && key != "" {
-			keys = append(keys, key)
+		key, sub := ccbillTransactionKey(t.TransactionID), rails.SubscriptionKey(string(ProviderCCBill), strings.TrimSpace(t.SubscriptionID))
+		if t.Type == TransactionTypeSale && key != "" && sub != "" {
+			keys, subs, amounts = append(keys, key), append(subs, sub), append(amounts, strings.TrimSpace(t.Amount))
 		}
 	}
 	if len(keys) > 0 {
-		if err := q.RecordProviderListedRebills(ctx, gen.RecordProviderListedRebillsParams{MerchantID: mid.UUID(), PspID: pspID, TransactionKeys: keys, ListedAt: now}); err != nil {
+		if err := q.RecordProviderListedRebills(ctx, gen.RecordProviderListedRebillsParams{MerchantID: mid.UUID(), PspID: pspID, TransactionKeys: keys, SubscriptionKeys: subs, Amounts: amounts, ListedAt: now}); err != nil {
 			return nil, fmt.Errorf("record listed rebills: %w", err)
 		}
 	}
@@ -170,16 +171,20 @@ func (e *Engine) confirmCCBillCallbackRebills(ctx context.Context, pspID uuid.UU
 		if p.RailSubscriptionID != nil {
 			local["rail_subscription_id"] = *p.RailSubscriptionID
 		}
+		remote := map[string]any{"source": "ccbill_datalink_export", "read_through": readThrough.UTC()}
+		if p.ListedSubscriptionKey != nil {
+			remote["listed_subscription_id"], remote["listed_amount"] = *p.ListedSubscriptionKey, p.ListedAmount
+		}
 		out = append(out, Finding{
 			Provider:          ProviderCCBill,
 			Type:              FindingChargeUnconfirmed,
 			SubjectKey:        p.TransactionID,
-			Severity:          SeverityCritical,
+			Severity:          SeverityHigh,
 			Status:            FindingStatusRequiresReview,
 			RequiresAdmin:     true,
-			RecommendedAction: "no CCBill DataLink read lists this rebill, recorded from an unsigned callback; check the transaction, its subscription and amount in CCBill's admin before trusting the payment and the period it paid for",
+			RecommendedAction: "no CCBill DataLink read lists this rebill under its subscription, recorded from an unsigned callback; check the transaction, its subscription and amount in CCBill's admin before trusting the payment and the period it paid for",
 			LocalEvidence:     local,
-			RemoteEvidence:    map[string]any{"source": "ccbill_datalink_export", "read_through": readThrough.UTC()},
+			RemoteEvidence:    remote,
 		})
 	}
 	return out, nil

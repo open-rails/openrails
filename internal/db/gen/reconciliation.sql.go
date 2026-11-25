@@ -2414,10 +2414,13 @@ func (q *Queries) ReconcileExecutingOperations(ctx context.Context, arg Reconcil
 
 const reconcileListConfirmedUnconfirmedCharges = `-- name: ReconcileListConfirmedUnconfirmedCharges :many
 SELECT f.id FROM billing.reconciliation_findings f
+JOIN billing.payments p ON p.merchant_id = f.merchant_id AND p.psp_id = f.psp_id AND p.transaction_id = f.subject_key
+JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.id = p.subscription_id
 WHERE f.merchant_id = $1::uuid AND f.psp_id = $2::uuid
   AND f.finding_type = 'pull.charge.unconfirmed' AND f.status IN ('reconcile_required', 'requires_review')
   AND EXISTS (SELECT 1 FROM billing.provider_listed_rebills l
-              WHERE l.merchant_id = f.merchant_id AND l.psp_id = f.psp_id AND l.transaction_key = ltrim(f.subject_key, '0'))
+              WHERE l.merchant_id = f.merchant_id AND l.psp_id = f.psp_id AND l.transaction_key = ltrim(f.subject_key, '0')
+                AND l.subscription_key = s.rail_subscription_key)
 `
 
 type ReconcileListConfirmedUnconfirmedChargesParams struct {
@@ -2425,7 +2428,8 @@ type ReconcileListConfirmedUnconfirmedChargesParams struct {
 	PspID      uuid.UUID
 }
 
-// Open pull.charge.unconfirmed findings of the PSP whose transaction a read has since listed.
+// Open pull.charge.unconfirmed findings of the PSP whose payment a read has
+// since listed under its subscription.
 func (q *Queries) ReconcileListConfirmedUnconfirmedCharges(ctx context.Context, arg ReconcileListConfirmedUnconfirmedChargesParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, reconcileListConfirmedUnconfirmedCharges, arg.MerchantID, arg.PspID)
 	if err != nil {
@@ -2797,21 +2801,21 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 
 const reconcileListUnconfirmedCallbackRebills = `-- name: ReconcileListUnconfirmedCallbackRebills :many
 SELECT p.id, p.customer_id, p.subscription_id, p.transaction_id, p.amount, p.currency, p.purchased_at, p.created_at,
-       s.rail_subscription_id
+       s.rail_subscription_id, other.subscription_key AS listed_subscription_key, other.amount AS listed_amount
 FROM billing.payments p
 LEFT JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.id = p.subscription_id
+LEFT JOIN billing.provider_listed_rebills other ON other.merchant_id = p.merchant_id AND other.psp_id = p.psp_id
+  AND other.transaction_key = ltrim(p.transaction_id, '0')
 WHERE p.merchant_id = $1::uuid AND p.psp_id = $2::uuid AND p.rail = 'ccbill'
   AND p.created_at >= $3::timestamptz AND p.created_at < $4::timestamptz
   AND p.deleted_at IS NULL AND p.amount > 0 AND p.money_movement = 'rail'
   AND p.status IN ('succeeded', 'refunded') AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
-  AND (EXISTS (SELECT 1 FROM billing.payment_attempts a
-               WHERE a.merchant_id = p.merchant_id AND a.psp_id = p.psp_id AND a.transaction_id = p.transaction_id
-                 AND a.observed_via = 'webhook' AND a.kind IN ('rebill', 'dunning_retry', 'customer_retry'))
-       OR EXISTS (SELECT 1 FROM billing.provider_bills b
-               WHERE b.merchant_id = p.merchant_id AND b.psp_id = p.psp_id AND b.invoice_id = p.invoice_id
-                 AND b.source_kind = 'ccbill_upgrade'))
+  AND EXISTS (SELECT 1 FROM billing.payment_attempts a
+              WHERE a.merchant_id = p.merchant_id AND a.psp_id = p.psp_id AND a.transaction_id = p.transaction_id
+                AND a.observed_via = 'webhook' AND a.kind IN ('rebill', 'dunning_retry', 'customer_retry'))
   AND NOT EXISTS (SELECT 1 FROM billing.provider_listed_rebills l
-               WHERE l.merchant_id = p.merchant_id AND l.psp_id = p.psp_id AND l.transaction_key = ltrim(p.transaction_id, '0'))
+              WHERE l.merchant_id = p.merchant_id AND l.psp_id = p.psp_id AND l.transaction_key = ltrim(p.transaction_id, '0')
+                AND l.subscription_key = s.rail_subscription_key)
 ORDER BY p.created_at, p.id
 `
 
@@ -2823,20 +2827,23 @@ type ReconcileListUnconfirmedCallbackRebillsParams struct {
 }
 
 type ReconcileListUnconfirmedCallbackRebillsRow struct {
-	ID                 uuid.UUID
-	CustomerID         uuid.UUID
-	SubscriptionID     *uuid.UUID
-	TransactionID      string
-	Amount             int64
-	Currency           string
-	PurchasedAt        time.Time
-	CreatedAt          time.Time
-	RailSubscriptionID *string
+	ID                    uuid.UUID
+	CustomerID            uuid.UUID
+	SubscriptionID        *uuid.UUID
+	TransactionID         string
+	Amount                int64
+	Currency              string
+	PurchasedAt           time.Time
+	CreatedAt             time.Time
+	RailSubscriptionID    *string
+	ListedSubscriptionKey *string
+	ListedAmount          *string
 }
 
-// The PSP's CCBill rebills and upgrades recorded from its callbacks, received
-// (created_at, the server's clock) in [received_from, received_before), that
-// no read has listed: positive rail charges, no reversals.
+// The PSP's CCBill rebills recorded from its callbacks, received (created_at,
+// the server's clock) in [received_from, received_before), that no read has
+// listed under their subscription: positive rail charges, no reversals.
+// A listing of the transaction under another subscription is evidence only.
 func (q *Queries) ReconcileListUnconfirmedCallbackRebills(ctx context.Context, arg ReconcileListUnconfirmedCallbackRebillsParams) ([]ReconcileListUnconfirmedCallbackRebillsRow, error) {
 	rows, err := q.db.Query(ctx, reconcileListUnconfirmedCallbackRebills,
 		arg.MerchantID,
@@ -2861,6 +2868,8 @@ func (q *Queries) ReconcileListUnconfirmedCallbackRebills(ctx context.Context, a
 			&i.PurchasedAt,
 			&i.CreatedAt,
 			&i.RailSubscriptionID,
+			&i.ListedSubscriptionKey,
+			&i.ListedAmount,
 		); err != nil {
 			return nil, err
 		}
@@ -2995,26 +3004,30 @@ func (q *Queries) ReconcilePSPHasExecutingOperations(ctx context.Context, arg Re
 }
 
 const recordProviderListedRebills = `-- name: RecordProviderListedRebills :exec
-INSERT INTO billing.provider_listed_rebills (merchant_id, psp_id, transaction_key, listed_at)
-SELECT $1::uuid, $2::uuid, k, $3::timestamptz
-FROM unnest($4::text[]) AS k
+INSERT INTO billing.provider_listed_rebills (merchant_id, psp_id, transaction_key, subscription_key, amount, listed_at)
+SELECT $1::uuid, $2::uuid, l.transaction_key, l.subscription_key, NULLIF(l.amount, ''), $3::timestamptz
+FROM unnest($4::text[], $5::text[], $6::text[]) AS l (transaction_key, subscription_key, amount)
 ON CONFLICT (merchant_id, psp_id, transaction_key) DO NOTHING
 `
 
 type RecordProviderListedRebillsParams struct {
-	MerchantID      uuid.UUID
-	PspID           uuid.UUID
-	ListedAt        time.Time
-	TransactionKeys []string
+	MerchantID       uuid.UUID
+	PspID            uuid.UUID
+	ListedAt         time.Time
+	TransactionKeys  []string
+	SubscriptionKeys []string
+	Amounts          []string
 }
 
-// The rebill transaction keys a read of the PSP listed; the first listing stands.
+// The rebills a read of the PSP listed; the first listing stands.
 func (q *Queries) RecordProviderListedRebills(ctx context.Context, arg RecordProviderListedRebillsParams) error {
 	_, err := q.db.Exec(ctx, recordProviderListedRebills,
 		arg.MerchantID,
 		arg.PspID,
 		arg.ListedAt,
 		arg.TransactionKeys,
+		arg.SubscriptionKeys,
+		arg.Amounts,
 	)
 	return err
 }

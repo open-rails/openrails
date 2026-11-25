@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 790,
+  "scenario_count": 791,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3916,7 +3916,7 @@
     {
       "id": "OR-J38-S86",
       "journey": "J38",
-      "name": "A CCBill rebill callback stamped before the windows already read, which no DataLink read lists, raises one critical pull.charge.unconfirmed finding with its payment's evidence 36 hours after it was received; the payment is kept and later refreshes do not duplicate it"
+      "name": "A CCBill rebill callback stamped before the windows already read, which no DataLink read lists, raises one high pull.charge.unconfirmed finding with its payment's evidence 36 hours after it was received; the payment is kept and later refreshes do not duplicate it"
     },
     {
       "id": "OR-J38-S87",
@@ -3952,6 +3952,11 @@
       "id": "OR-J38-S93",
       "journey": "J38",
       "name": "A paced (live) CCBill refresh, a day of transactions an hour, raises pull.charge.unconfirmed only for the callback rebill no read lists"
+    },
+    {
+      "id": "OR-J38-S94",
+      "journey": "J38",
+      "name": "A CCBill rebill callback reusing a transaction id DataLink lists under another subscription is raised, with that listing as evidence"
     }
   ]
 }

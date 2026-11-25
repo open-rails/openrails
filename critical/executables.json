@@ -2553,6 +2553,9 @@
     ],
     "OR-J38-S93": [
       "TestCCBillCallbackEvidence/OR-J38-S93/a-paced-ccbill-refresh-raises-only-the-rebill-no-read-lists"
+    ],
+    "OR-J38-S94": [
+      "TestCCBillCallbackEvidence/OR-J38-S94/a-rebill-callback-reusing-another-subscriptions-transaction-is-raised"
     ]
   }
 }
