@@ -53,7 +53,8 @@ func (s *Server) capabilities() *billing.Capabilities {
 }
 
 // readyHandler serves /health/ready with the checks Engine.Ready
-// runs (#748), and 503 once the process drains. Which dependency failed, and
+// runs (#748) and the staff second factor (ControlPlane.SecondFactor), and
+// 503 once the process drains. Which dependency failed, and
 // why, goes to the log: the route is public.
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	if s != nil && s.draining.Load() {
@@ -70,6 +71,11 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	_, err := runtime.Ready(ctx)
 	if err == nil && (s == nil || s.auth == nil) {
 		err = errors.New("readiness: authentication is not available")
+	}
+	// Staff sign-ins need a second factor: one none can enroll fails
+	// readiness, not just a log line at boot.
+	if err == nil {
+		err = s.controlPlane.SecondFactor(ctx)
 	}
 	req := httprequest.New(s.Log, w, r, nil)
 	if err != nil {

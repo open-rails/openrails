@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/authkit"
+
 	"github.com/open-rails/openrails/internal/paymentpage"
 )
 
@@ -11,13 +13,13 @@ import (
 // of its own. The page runs the PSPs' scripts, so it never shares an origin
 // with the API, the admin console, AuthKit or the product's pages (Stripe
 // keeps checkout.stripe.com apart from its dashboard).
-func checkCheckoutOrigin(cfg Config) error {
+func checkCheckoutOrigin(cfg Config, auth authkit.Config) error {
 	if strings.TrimSpace(cfg.Engine.CheckoutOrigin) == "" {
 		return nil
 	}
-	forbidden := []string{cfg.Engine.PublicURL, cfg.Auth.Token.Issuer, cfg.Auth.Frontend.BaseURL}
-	if cfg.Auth.HTTP != nil {
-		forbidden = append(forbidden, cfg.Auth.HTTP.PublicURL)
+	forbidden := []string{cfg.Engine.PublicURL, auth.Token.Issuer, auth.Frontend.BaseURL}
+	if auth.HTTP != nil {
+		forbidden = append(forbidden, auth.HTTP.PublicURL)
 	}
 	_, err := paymentpage.Origin(cfg.Engine.CheckoutOrigin, forbidden...)
 	return err

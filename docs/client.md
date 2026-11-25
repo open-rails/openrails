@@ -75,8 +75,8 @@ Who presents which credential in each mode, and why, is [authentication](authent
 (`remote_application` in its manifest, [standalone.md](standalone.md)).
 Feed `golang.org/x/oauth2/clientcredentials` into `RemoteCredential.Token`; the
 token source caches each token until it expires. The token's `aud` is the
-server's `auth.resource.id`, and its permissions are what your issuer grants
-the client, within the merchant's owner role:
+server's resource, its `public_url`, and its permissions are what
+your issuer grants the client, within the merchant's owner role:
 
 ```go guide:standalone-client
 cc := backendCredentials(s)
@@ -100,7 +100,7 @@ return remote.Merchant(s.Merchant)
 ```
 
 A merchant API key (`RemoteCredential.APIKey`) works the same way and carries
-its role's permissions. Grant only what the backend needs:
+its role's permissions. On a standalone server, a person signed in to the console with the server's own account mints it under **Access → API keys**, holding at most their own role there. Grant only what the backend needs:
 
 | Purpose | Permissions |
 |---|---|

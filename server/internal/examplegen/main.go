@@ -201,9 +201,8 @@ func envExample(settings []hostconfig.Setting, d docs) ([]byte, error) {
 # upper-cased and joined by "_"; a list is comma-separated, a section or a
 # list of sections JSON. A variable inside a known section that names no key
 # refuses boot. Policy (rate_limits, user_action_rate_limit,
-# destructive_action_limits, auth.http.rate_limits) is set in config.yaml
-# only. A merchant's settings are no variables: its document is
-# merchant.example.yaml.
+# destructive_action_limits) is set in config.yaml only. A merchant's settings
+# are no variables: its document is merchant.example.yaml.
 `)
 	var order []string
 	sections := map[string][]string{}
@@ -225,9 +224,6 @@ func envExample(settings []hostconfig.Setting, d docs) ([]byte, error) {
 		}
 		if doc == "" {
 			doc = d.of(s.Owner, s.Field)
-		}
-		if doc == "" && strings.HasPrefix(s.Path, "auth.") {
-			doc = "AuthKit's " + s.Path + "."
 		}
 		if doc == "" {
 			missing = append(missing, s.Path)

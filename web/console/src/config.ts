@@ -12,8 +12,8 @@ export interface ConsoleIssuer {
 export interface BootstrapConfig {
   auth_base_url: string
   api_base_url: string
-  local_sign_in: boolean
   issuers: ConsoleIssuer[]
+  app_sign_in: boolean
   exchange?: {
     token_endpoint: string
     client_id: string

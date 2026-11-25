@@ -88,20 +88,18 @@ func serveCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	scopes := map[string][]string{billing.ScopeSelf: {"merchant:*"}}
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: spec.Schema, RiverSchema: spec.Schema}, ClickHouse: billing.ClickHouseConfig{Database: spec.CHDatabase},
 			PublicURL: url, RateLimits: billing.RateLimitsConfig{}},
-		Auth: authkit.Config{
-			DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: spec.Schema + "_auth", RiverSchema: spec.Schema},
-			Token: authkit.TokenConfig{Issuer: url, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: url, PublicURL: url, Scopes: scopes},
-			AuthorizationServer: authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: url, Scopes: []string{billing.ScopeSelf}}},
-				GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: billing.ScopeSelf, Resource: url, Description: "Use own billing"}}}},
-			Registration: authkit.RegistrationConfig{AllowMissingSenders: true}, TwoFactor: authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
-			HTTP: &authkit.HTTPConfig{DirectPeerIP: true},
+		AuthKit: func(c *authkit.Config) {
+			c.DefaultTenantID = iam.NewTenantID()
+			c.AuthorizationServer = authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: url, Scopes: []string{billing.ScopeSelf}}},
+				GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: billing.ScopeSelf, Resource: url, Description: "Use own billing"}}}}
+			c.Registration.AllowMissingSenders = true
+			c.TwoFactor.Mode = iam.TwoFactorDisabled
 		},
-		LocalSignIn: true, AdminConsole: server.AdminConsole{Disabled: true},
-		Port: port,
+		AdminConsole: server.AdminConsole{Disabled: true},
+		Port:         port,
 	}, server.Deps{
 		Engine: openrails.Deps{Postgres: pool, Redis: rdb, ClickHouse: ch, FXTransport: fxWire{}, Logger: quietLogger(os.Stderr)},
 		Auth:   authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}},

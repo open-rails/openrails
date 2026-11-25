@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/hostdeps"
@@ -54,11 +53,10 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if err != nil {
 		return nil, err
 	}
-	opts := controlplane.Options{LocalSignIn: h.Server.LocalSignIn, Naming: h.Server.Naming}
-	if h.Server.LocalSignIn && !h.Server.AdminConsole.Disabled {
-		opts.ConsoleClientID = server.ConsoleClientID
-	}
-	akCfg, err := controlplane.AuthKit(&h.Server.Engine, h.Server.Auth, opts)
+	// An operator command declares what it registers: its applications may
+	// read their keys on a private network.
+	opts := controlplane.Options{KeysPath: h.Server.Auth.Keys.Path, Naming: h.Server.Naming, Console: !h.Server.AdminConsole.Disabled, Configure: privateNetworkKeys}
+	akCfg, err := controlplane.AuthKit(&h.Server.Engine, opts)
 	if err != nil {
 		return nil, err
 	}

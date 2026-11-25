@@ -74,13 +74,16 @@ func TestOneDatabaseSection(t *testing.T) {
 	for yaml, want := range map[string]string{
 		"database:\n  urll: x\n":                       "unknown configuration keys refuse boot: database.urll",
 		"redis:\n  adr: x\n":                           "unknown configuration keys refuse boot: redis.adr",
-		"auth:\n  tokn: {}\n":                          "unknown configuration keys refuse boot: auth.tokn",
+		"auth:\n  tokn: {}\n":                          "removed auth settings refuse boot: auth.tokn (AUTH_TOKN)",
 		"database:\n  sqltrace: true\n":                "unknown configuration keys refuse boot: database.sqltrace",
 		"clickhouse:\n  url: http://events.internal\n": "clickhouse.url (CLICKHOUSE_URL) must be clickhouse://",
 		"host: 127.0.0.1\n":                            "host was removed",
 		"db:\n  url: x\n":                              "db was merged into database",
-		"auth:\n  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11\n": "auth.default_tenant_id was removed",
-		"auth:\n  keys:\n    allow_ephemeral_dev_keys: true\n":               "auth.keys.allow_ephemeral_dev_keys was removed",
+		"auth:\n  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11\n": "auth.default_tenant_id (AUTH_DEFAULT_TENANT_ID)",
+		"auth:\n  keys:\n    allow_ephemeral_dev_keys: true\n":               "auth.keys.allow_ephemeral_dev_keys (AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS)",
+		"auth:\n  token:\n    issuer: https://billing.example\n":             "auth.token.issuer (AUTH_TOKEN_ISSUER): set public_url",
+		"local_sign_in: true\n":           "local_sign_in / LOCAL_SIGN_IN was removed",
+		"admin_console:\n  issuers: {}\n": "admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed",
 	} {
 		if _, err := Load(write(t, yaml)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", yaml, err, want)
@@ -109,12 +112,41 @@ func TestPolicySectionsAreFileOnly(t *testing.T) {
 	}
 	for env, section := range map[string]string{
 		"RATE_LIMITS_PAYMENT_REQUESTS_PER_MINUTE": "rate_limits",
-		"AUTH_HTTP_RATE_LIMITS":                   "auth.http.rate_limits",
 	} {
 		t.Run(env, func(t *testing.T) {
 			configPath, _ := isolate(t)
 			t.Setenv(env, "1")
 			want := section + " is set in config.yaml, not the environment: unset " + env
+			if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("load: %v, want %q", err, want)
+			}
+		})
+	}
+}
+
+// The auth section holds auth.keys.path alone: any other key, from the
+// file, a secret file or the environment, refuses boot.
+func TestOnlyTheKeyPathIsAnAuthSetting(t *testing.T) {
+	configPath, _ := isolate(t)
+	t.Setenv("AUTH_KEYS_PATH", "/etc/openrails/auth")
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Auth.Keys.Path != "/etc/openrails/auth" {
+		t.Fatalf("AUTH_KEYS_PATH reads auth.keys.path: %+v", cfg.Server.Auth)
+	}
+	for env, want := range map[string]string{
+		"AUTH_PASSWORD_MIN_LENGTH":                "auth.password.min_length (AUTH_PASSWORD_MIN_LENGTH)",
+		"AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS":   "auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
+		"AUTH_HTTP_DIRECT_PEER_IP":                "auth.http.direct_peer_ip (AUTH_HTTP_DIRECT_PEER_IP): set trusted_proxies",
+		"AUTH_ISSUERS":                            "auth.issuers (AUTH_ISSUERS)",
+		"AUTH_CONTROL_PLANE_ISSUER":               "auth.control_plane_issuer (AUTH_CONTROL_PLANE_ISSUER)",
+		"AUTH_REGISTRATION_ALLOW_MISSING_SENDERS": "auth.registration.allow_missing_senders (AUTH_REGISTRATION_ALLOW_MISSING_SENDERS)",
+	} {
+		t.Run(env, func(t *testing.T) {
+			configPath, _ := isolate(t)
+			t.Setenv(env, "true")
 			if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("load: %v, want %q", err, want)
 			}

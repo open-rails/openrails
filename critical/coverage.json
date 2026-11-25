@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 775,
+  "scenario_count": 781,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1347,6 +1347,26 @@
       "id": "OR-J01-S26",
       "journey": "J01",
       "name": "A proposal rewritten before its lock is held to the change kinds its approval allowed"
+    },
+    {
+      "id": "OR-J01-S27",
+      "journey": "J01",
+      "name": "A trusted issuer's token without openrails:self, a staff member's openrails:merchant one, is refused at /v1/me and admits no customer; the same issuer's openrails:self token reads the customer's billing"
+    },
+    {
+      "id": "OR-J01-S28",
+      "journey": "J01",
+      "name": "Every account of the standalone server's own needs a second factor: a password alone gets no session until it enrolls an authenticator app, and every later sign-in asks for it"
+    },
+    {
+      "id": "OR-J01-S29",
+      "journey": "J01",
+      "name": "The console's public sign-in shows the server's own accounts and root's issuer, never a merchant's; naming a merchant finds its trusted issuers whose metadata names an authorization endpoint, at the client openrails-console; a merchant whose issuers only sign assertions and an unknown name answer alike"
+    },
+    {
+      "id": "OR-J01-S30",
+      "journey": "J01",
+      "name": "An application registered at run time names only https key URLs on public hosts: a loopback, private or cluster-internal jwks_uri, or such an issuer to discover keys from, is refused; the operator declares one on a private network"
     },
     {
       "id": "OR-J22-S05",
@@ -3672,6 +3692,16 @@
       "id": "OR-J06-S83",
       "journey": "J06",
       "name": "Customers' own cancellations past the merchant's cap wait with the time to wait; the finding names the wave and alerts staff once; staff cancellations spend none of the cap"
+    },
+    {
+      "id": "OR-J06-S84",
+      "journey": "J06",
+      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and say what OpenRails derives instead; the key path alone loads"
+    },
+    {
+      "id": "OR-J06-S85",
+      "journey": "J06",
+      "name": "A server whose staff cannot enroll a second factor, a public issuer with no totp.key, is not ready and logs the key to mount; with it mounted the server is ready"
     },
     {
       "id": "OR-J07-S10",

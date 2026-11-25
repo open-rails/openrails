@@ -48,10 +48,10 @@ var (
 var collapsed = []string{"rate_limits"}
 
 // freeForm are sections whose keys are someone else's or the operator's own
-// names, so a documented key beneath them is not checked: AuthKit's auth
-// section, rate-limit buckets, console issuers by merchant, and the chart's
-// config (config.yaml itself, checked as configuration keys) and files.
-var freeForm = []string{"auth", "rate_limits", "admin_console.issuers", "config", "files"}
+// names, so a documented key beneath them is not checked: rate-limit
+// buckets, and the chart's config (config.yaml itself, checked as
+// configuration keys) and files.
+var freeForm = []string{"rate_limits", "config", "files"}
 
 func underFreeForm(k string) bool {
 	for _, f := range freeForm {

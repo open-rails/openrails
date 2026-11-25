@@ -100,7 +100,7 @@ var envNames = map[string]string{
 // fileOnlySections are policy, set in config.yaml alone: the environment
 // holds secrets and per-environment facts. A variable naming one refuses
 // boot.
-var fileOnlySections = []string{"rate_limits", "auth.http.rate_limits"}
+var fileOnlySections = []string{"rate_limits"}
 
 // fileOnlySection is the file-only section key is in, "" for none.
 func fileOnlySection(key string) string {
@@ -173,7 +173,7 @@ func Load(configPath string) (*Config, error) {
 		if serviceLink(upperKey, strings.TrimSpace(value)) {
 			return "", nil
 		}
-		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
+		if upperKey == "MERCHANT" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
 			return "", nil
 		}
 		// VAULT_SECRETS_PATH names the mounted secret files directory, which
@@ -290,22 +290,14 @@ func Load(configPath string) (*Config, error) {
 		}
 	}
 
-	for _, old := range []string{"admin_console.enabled", "admin_console.path"} {
+	for _, old := range []string{"admin_console.enabled", "admin_console.path", "admin_console.issuer"} {
 		if k.Exists(old) {
-			return nil, fmt.Errorf("%s was removed: use admin_console.disabled to omit the console at /admin; configure admin_console.issuers and local_sign_in for sign-in", old)
+			return nil, fmt.Errorf("%s was removed: admin_console.disabled omits the console at /admin; its sign-in buttons are the merchants' trusted issuers", old)
 		}
 	}
-	if k.Exists("admin_console.issuer") {
-		return nil, fmt.Errorf("admin_console.issuer was renamed: declare admin_console.issuers keyed by merchant id or name (root for operators)")
-	}
-	// HARD CUT (#469): the AuthKit control plane is always on in standalone
-	// mode; the verifier-only deployment mode is gone. The former
-	// auth.control_plane.enabled knob is rejected — not silently ignored — so a
-	// deployment that believed it was toggling the control plane finds out at
-	// load time. Private posture is fixed in this repo, not a disabled control
-	// plane.
-	if k.Exists("auth.control_plane.enabled") {
-		return nil, fmt.Errorf("auth.control_plane.enabled was removed: the control plane is always on in standalone mode — delete the key; private/self-hosted registration is the default")
+	// One rule for the auth section: only server.AuthConfig's keys are set.
+	if err := retiredAuth(k.Keys()); err != nil {
+		return nil, err
 	}
 	if k.Exists("dashboard_base_url") {
 		return nil, fmt.Errorf("dashboard_base_url was removed: alert links point at the server's console")
@@ -362,35 +354,9 @@ func Load(configPath string) (*Config, error) {
 	retiredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
 	retiredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
 	retiredDBRequireRLS := k.Exists("db.require_rls") || os.Getenv("DB_REQUIRE_RLS") != ""
-	retiredAuthIssuers := k.Exists("auth.issuers") || k.Exists("auth.expected_audience") ||
-		os.Getenv("AUTH_ISSUERS") != "" || os.Getenv("AUTH_EXPECTED_AUDIENCE") != ""
 	retiredRails := k.Exists("rails") || hasEnvPrefix("RAILS_")
-	retiredControlPlaneLegacy := k.Exists("auth.control_plane.issuer") ||
-		k.Exists("auth.control_plane.issued_audiences") ||
-		k.Exists("auth.control_plane.expected_audiences") ||
-		k.Exists("auth.control_plane.public_user_registration") ||
-		k.Exists("auth.control_plane.public_tenant_registration") ||
-		k.Exists("auth.control_plane.public_hosted") ||
-		k.Exists("auth.control_plane.token_prefix") ||
-		k.Exists("auth.control_plane.platform_admin_user_id") ||
-		os.Getenv("AUTH_CONTROL_PLANE_ISSUER") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_ISSUED_AUDIENCES") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_EXPECTED_AUDIENCES") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_USER_REGISTRATION") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_TENANT_REGISTRATION") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PUBLIC_HOSTED") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_TOKEN_PREFIX") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_BOOTSTRAP_ADMIN_SERVICE_TOKEN_NAME") != "" ||
-		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ADMIN_USER_ID") != ""
-	// HARD CUT (#1185): auth is AuthKit's own configuration, by AuthKit's
-	// keys; the server's former auth keys name their replacements.
 	if _, present := os.LookupEnv("AUTHKIT_KEYS_PATH"); present {
 		return nil, fmt.Errorf("AUTHKIT_KEYS_PATH was renamed: set AUTH_KEYS_PATH (auth.keys.path)")
-	}
-	for old, now := range retiredAuthKeys {
-		if k.Exists(old) {
-			return nil, fmt.Errorf("%s was removed: auth is AuthKit's configuration; set %s", old, now)
-		}
 	}
 	if retiredStoreConfig {
 		return nil, fmt.Errorf("store config was removed: seed merchant profile fields with openrails push-merchant-config under merchants[].profile; delete the store yaml key and STORE_* env vars")
@@ -404,14 +370,8 @@ func Load(configPath string) (*Config, error) {
 	if retiredDBRequireRLS {
 		return nil, fmt.Errorf("db.require_rls config was removed: merchant isolation uses explicit scoped queries, not PostgreSQL RLS; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
 	}
-	if retiredAuthIssuers {
-		return nil, fmt.Errorf("auth.issuers / auth.expected_audience config was removed: declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars")
-	}
 	if retiredRails {
 		return nil, fmt.Errorf("rails config was removed: seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars")
-	}
-	if retiredControlPlaneLegacy {
-		return nil, fmt.Errorf("auth.control_plane config was removed: use auth.token.issuer (env AUTH_TOKEN_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
 	}
 
 	// The db section merged into database.
@@ -523,6 +483,9 @@ var retiredSettings = []retiredSetting{
 	{"webhook_secret_overlap", "WEBHOOK_SECRET_OVERLAP", "a rotated-out webhook signing secret keeps verifying for 24 hours; retire_webhook_overlap ends it early"},
 	{"return_origins", "RETURN_ORIGINS", "return URLs may name the billing origin, the merchant's issuer and its checkout.embed_origins"},
 	{"event_retention", "EVENT_RETENTION", "the event log keeps 90 days"},
+	{"local_sign_in", "LOCAL_SIGN_IN", "the server's own accounts always sign staff in to the console, by invitation"},
+	{"admin_console.issuers", "ADMIN_CONSOLE_ISSUERS", "staff sign in at root's trusted issuers (bootstrap.yaml) or at their merchant's, found by its name, as the client openrails-console"},
+	{"resource_server", "RESOURCE_SERVER", "the server's resource is public_url, and each merchant's trusted issuers are its applications in AuthKit"},
 	{"llm.provider", "LLM_PROVIDER", noCatalogAssistant},
 	{"llm.model", "LLM_MODEL", noCatalogAssistant},
 	{"llm.base_url", "LLM_BASE_URL", noCatalogAssistant},
@@ -606,25 +569,3 @@ const (
 	userActionsHint       = "customers' own card removals and cancellations are capped at the larger of 5 an hour or one per 400 paying customers, and of 10 a day or one per 100"
 	destructiveLimitsHint = "staff destructive-action limits are fixed; a person clears a hold with `openrails destructive-holds clear`"
 )
-
-// retiredAuthKeys are the server's former auth keys and their replacements.
-var retiredAuthKeys = map[string]string{
-	"auth.issuer":                        "auth.token.issuer (AUTH_TOKEN_ISSUER)",
-	"auth.schema":                        "auth.database.schema (AUTH_DATABASE_SCHEMA)",
-	"auth.keys_path":                     "auth.keys.path (AUTH_KEYS_PATH)",
-	"auth.mint_disabled":                 "auth.keys.verify_only (AUTH_KEYS_VERIFY_ONLY)",
-	"auth.allow_ephemeral_signing_key":   "auth.keys.allow_ephemeral_dev_keys (AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS)",
-	"auth.allow_private_network_jwks":    "auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
-	"auth.allow_missing_senders":         "auth.registration.allow_missing_senders (AUTH_REGISTRATION_ALLOW_MISSING_SENDERS)",
-	"auth.direct_peer_ip":                "auth.http.direct_peer_ip (AUTH_HTTP_DIRECT_PEER_IP)",
-	"auth.request_origin":                "auth.resource.public_url (AUTH_RESOURCE_PUBLIC_URL)",
-	"auth.naming":                        "naming (NAMING_*) for merchant names, auth.username for usernames",
-	"auth.allow_loopback_http":           "nothing: AuthKit admits http only on a loopback host",
-	"auth.allow_memory":                  "nothing: AuthKit keeps its limits and proofs in Redis or memory",
-	"auth.active_key_id":                 "signing_key.active_key_id (AUTHKIT_ACTIVE_KEY_ID)",
-	"auth.active_private_key_pem":        "signing_key.active_private_key_pem (AUTHKIT_ACTIVE_PRIVATE_KEY_PEM)",
-	"auth.public_keys":                   "signing_key.public_keys (AUTHKIT_PUBLIC_KEYS)",
-	"auth.default_tenant_id":             "nothing: AuthKit creates the server's one account directory, or adopts the one its database holds",
-	"auth.keys.allow_ephemeral_dev_keys": "nothing: a loopback issuer's development keys are generated, under auth.keys.path when set",
-	"resource_server":                    "auth.resource (id, public_url) and each merchant's trusted issuers in AuthKit",
-}

@@ -24,13 +24,7 @@ args: [run-server]
 # named like them (database.url is DATABASE_URL). port and metrics_port are the
 # chart's (ports.http, metrics.port).
 config:
-  # public_url: https://billing.example.com # required
-  # The server's AuthKit, in AuthKit's keys (AUTH_<PATH> env).
-  # auth:
-  #   token:
-  #     issuer: https://billing.example.com # https, required
-  #   resource:
-  #     id: https://billing.example.com # trusted issuers' tokens' aud
+  # public_url: https://billing.example.com # required: the server's AuthKit issuer and resource
   # Optional, no default; more than one replica needs it.
   # redis:
   #   url: redis://redis:6379 # or rediss://user:password@host/db, from a REDIS_URL secret; ca_cert

@@ -92,14 +92,10 @@ func TestTheReferenceStatesEveryDefault(t *testing.T) {
 	flatten("", reflect.ValueOf(d), want)
 	configPath, _ := isolate(t)
 	t.Setenv("PUBLIC_URL", "https://billing.example.com")
-	cfg, err := Load(configPath)
-	if err != nil {
+	if _, err := Load(configPath); err != nil {
 		t.Fatal(err)
 	}
 	want["database.url"] = defaultDatabaseURL
-	want["auth.token.issuer"] = "public_url"
-	want["auth.token.refresh_token_duration"] = cfg.Server.Auth.Token.RefreshTokenDuration.String()
-	want["auth.database.schema"] = cfg.Server.Auth.Database.Schema
 	documented := standaloneDefaults(t)
 	for key, value := range want {
 		values, ok := documented[key]
@@ -130,7 +126,6 @@ func TestAnEmptyConfigurationLoadsTheDefaults(t *testing.T) {
 	for got, want := range map[string]string{
 		cfg.Database.DSN(func(string) string { return "" }): defaultDatabaseURL,
 		cfg.Server.Engine.PublicURL:                         "http://localhost:3053",
-		cfg.Server.Auth.Token.Issuer:                        "http://localhost:3053",
 		cfg.Server.Engine.Database.Schema:                   "billing",
 		fmt.Sprint(cfg.Server.Port):                         "3053",
 	} {

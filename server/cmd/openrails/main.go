@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
+	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/hostdeps"
 )
@@ -149,7 +150,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// listening, which is what "not ready" means to a probe.
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	srv, graph, cp, closeDeps, err := openServer(ctx)
+	srv, graph, cp, closeDeps, err := openServer(ctx, manifestPath)
 	if err != nil {
 		if ctx.Err() != nil {
 			slog.Default().InfoContext(ctx, "Shutdown requested while booting; exiting", logx.Err(err))
@@ -199,7 +200,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	defer stop()
 	// The same server as run-server, without a listener: AuthKit's jobs run
 	// in the same fleet.
-	srv, graph, cp, closeDeps, err := openServer(ctx)
+	srv, graph, cp, closeDeps, err := openServer(ctx, manifestPath)
 	if err != nil {
 		if ctx.Err() != nil {
 			slog.Default().InfoContext(ctx, "Shutdown requested while booting; exiting", logx.Err(err))
@@ -255,7 +256,9 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 	}
 	// The control plane owns the AuthKit/River schema selection. Preserve its
 	// configuration without building its roles, HTTP handler or job workers.
-	authDatabase := host.Server.Auth.Database
-	authDatabase.RiverSchema = config.RiverSchemaName(&host.Server.Engine)
-	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{Tenancy: host.Server.Auth.Tenancy, Logger: slog.Default()})
+	auth, err := controlplane.AuthKit(&host.Server.Engine, controlplane.Options{KeysPath: host.Server.Auth.Keys.Path})
+	if err != nil {
+		return err
+	}
+	return authkit.Migrate(ctx, database.Pool(), auth.Database, authkit.MigrationOptions{Tenancy: auth.Tenancy, Logger: slog.Default()})
 }

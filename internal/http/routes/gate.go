@@ -558,11 +558,12 @@ type customerOf struct {
 // user of the issuer the merchant declares), an account of the
 // Authenticator's own authority bound to the merchant, and the customer the
 // merchant's own backend names in an assertion (auth.Asserted). Any other
-// bound credential's user is
-// its issuer's, pinned to it. A token of the Authenticator's own authority
-// that carries scopes but not ScopeSelf, such as a console's, was not issued
-// to act as a customer; one that says nothing of its scopes is the host's
-// own mint.
+// bound credential's user is its issuer's, pinned to it. A token of the
+// Authenticator's own authority that carries scopes but not ScopeSelf, such
+// as a console's, was not issued to act as a customer; one that says nothing
+// of its scopes is the host's own mint. A trusted issuer's token acts as the
+// customer only with ScopeSelf: one granted openrails:merchant is a staff
+// member's.
 func customerIssuer(ctx context.Context, a any, v billingauth.Verified, c billingauth.Identity) (customerOf, error) {
 	_, isRoot := a.(auth.Root)
 	bound := boundScope(v) != (billingauth.Scope{})
@@ -573,17 +574,18 @@ func customerIssuer(ctx context.Context, a any, v billingauth.Verified, c billin
 	if err != nil {
 		return customerOf{}, err
 	}
+	scoped, has := v.(interface{ Scopes() []string })
+	self := has && slices.Contains(scoped.Scopes(), billing.ScopeSelf)
 	switch {
 	case c.Issuer == root.Authority:
-		scoped, has := v.(interface{ Scopes() []string })
-		return customerOf{self: !bound || !has || slices.Contains(scoped.Scopes(), billing.ScopeSelf)}, nil
+		return customerOf{self: !bound || !has || self}, nil
 	case !bound:
 		return customerOf{self: true}, nil
 	}
 	if asserted, ok := v.(auth.Asserted); ok && asserted.Asserted() {
 		return customerOf{self: true}, nil
 	}
-	return customerOf{issuer: c.Issuer, self: true}, nil
+	return customerOf{issuer: c.Issuer, self: self}, nil
 }
 
 // bindCustomer binds the admitted customer and its scope: the only place a

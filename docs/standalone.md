@@ -13,7 +13,7 @@ process instead, see [the embedded guide](embedded.md).
 
 | Service | Needed | Holds | Losing it |
 |---|---|---|---|
-| PostgreSQL 18+ | yes | everything: the ledger, grants, subscriptions, access, catalog, provider intents and River's queue. OpenRails owns one schema (`billing`), its River schema (`billing_river`) and the server's AuthKit schema (`profiles`); the instance may be shared. | data loss. Provider-owned facts can be re-read with a PSP import; the ledger, credits, access and catalog exist nowhere else. |
+| PostgreSQL 18+ | yes | everything: the ledger, grants, subscriptions, access, catalog, provider intents and River's queue. OpenRails owns one schema (`billing`), its River schema (`billing_river`) and the server's AuthKit schema (`billing_auth`); the instance may be shared. | data loss. Provider-owned facts can be re-read with a PSP import; the ledger, credits, access and catalog exist nowhere else. |
 | ClickHouse 26.8 LTS | for usage | the event store usage needs: usage reporting, the gate, meters, limits and usage history ([event store](#event-store)) | a ClickHouse without the store's identity is refused at boot: restore its backup |
 | Redis 6.2+ or Garnet | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines, AuthKit's rate limits and spent DPoP proofs | each instance keeps them in memory: right for one instance only. No money path needs Redis, and nothing in it needs a backup. |
 | Vault | optional | with `vault.kv_mount`, every merchant's configuration, credentials included; a Transit mount signs for Solana crankers | without a KV mount the merchant manifest is the configuration, read-only |
@@ -56,23 +56,13 @@ database:
 redis: # optional for one server; replicas share rate limits and spent proofs through it
   url: redis://redis:6379
 
-# The server's own AuthKit, by AuthKit's keys: its signing key, and the
-# resource server it is. Its sign-in stays off: people sign in at the app,
-# which merchant.yaml declares the merchant's trusted issuer.
+# The server's own AuthKit: its issuer and resource are
+# public_url, and its keys (keys.json, totp.key) live here. It
+# accepts the tokens of the app merchant.yaml declares the merchant's trusted
+# issuer; on a loopback URL that app's keys may be on localhost.
 auth:
-  token:
-    issuer: http://localhost:3053
-    allow_private_network_jwks: true # local only: the app's keys at http://localhost:8080
   keys:
     path: /vault/auth
-  http:
-    direct_peer_ip: true             # clients connect directly; behind a proxy, set trusted_proxies
-  registration:
-    allow_missing_senders: true      # it sends no sign-in mail of its own
-  # OpenRails is an OAuth resource server: it accepts the tokens its
-  # merchants' trusted issuers mint for it.
-  resource:
-    id: http://localhost:3053        # the tokens' aud, and where DPoP proofs point
 
 # Receipts and payment notices, sent from the merchant's from_email.
 email_smtp:
@@ -121,8 +111,7 @@ starts the workers. It never applies a catalog: that is an operator step.
 openrails catalog apply catalog.yaml --config config.yaml --merchant onlydemo
 ```
 
-A private deployment's first run, as an init job (with people signing in at a
-trusted issuer, `push-auth-bootstrap` has nothing to do):
+A private deployment's first run, as an init job: the bootstrap manifest seeds the first operator (a user with `root_role: root:owner`) and root's trusted applications.
 
 ```sh
 openrails push-auth-bootstrap --file /etc/openrails/bootstrap.yaml
@@ -130,9 +119,7 @@ openrails push-merchant-config --file /etc/openrails/merchants.yaml --insert
 openrails catalog apply /etc/openrails/catalog.yaml --merchant your-merchant
 ```
 
-In production drop every `allow_*` key, use https for the issuer and resource,
-mount a real signing key ([secrets](#secrets)) and set `trusted_proxies` behind a
-proxy. Boot refuses an unknown key and a retired one (naming its replacement).
+In production set an https `public_url`, mount a real signing key and `totp.key` ([secrets](#secrets)) and set `trusted_proxies` behind a proxy. Boot refuses an unknown key and a retired one (naming its replacement).
 
 ## Configuration sources
 
@@ -149,11 +136,11 @@ Each key of `config.yaml` but a policy section ([below](#configuration-reference
    may be a JSON object. A `.env` in the working directory is loaded too, and
    the server logs that it did.
 
-Exceptions to the mechanical name: `VAULT_ADDR` is `vault.address`; `AUTH_<PATH>` is `auth.<path>` by AuthKit's keys (`AUTH_TOKEN_ISSUER`). A key is spelled exactly as here. With `database.url` unset, libpq's own variables (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` or `PGPASSFILE`, `PGSSLMODE`, `PGSSLROOTCERT`) name the database.
+Exceptions to the mechanical name: `VAULT_ADDR` is `vault.address`; `AUTH_KEYS_PATH` is `auth.keys.path`. A key is spelled exactly as here. With `database.url` unset, libpq's own variables (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` or `PGPASSFILE`, `PGSSLMODE`, `PGSSLROOTCERT`) name the database.
 
 The file is two Go types: `server.Config`, whose `Engine` is `openrails.Config` with its keys at the top level, and the keys only the binary reads (the connections it opens, `logger`). A key neither reads refuses boot. Embedded, decode the same keys into `openrails.Config` (its `yaml` tags).
 
-The environment holds secrets and per-environment facts (URLs, hosts, ports, credentials); `config.yaml` holds policy. `rate_limits` and `auth.http.rate_limits` are set in `config.yaml` alone: a variable or secret file naming one refuses boot.
+The environment holds secrets and per-environment facts (URLs, hosts, ports, credentials); `config.yaml` holds policy. `rate_limits` is set in `config.yaml` alone: a variable or secret file naming one refuses boot.
 
 Three inputs configure a deployment, each on its own lifecycle:
 
@@ -176,7 +163,7 @@ merchant's document, both generated from the configuration types (`go run
 them stale). Durations
 are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
-(`docker compose up -d postgres garnet`) with nothing configured but `public_url`; none relaxes a protection, and a deployment that leaves one unset fails to connect or refuses to boot. The top-level keys: `port`, `metrics_port`, `logger`, `public_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `local_sign_in`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits` and `captcha`.
+(`docker compose up -d postgres garnet`) with nothing configured but `public_url`; none relaxes a protection, and a deployment that leaves one unset fails to connect or refuses to boot. The top-level keys: `port`, `metrics_port`, `logger`, `public_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits` and `captcha`.
 
 **Listener and lifecycle**
 
@@ -211,7 +198,7 @@ Boot migrates, replicas taking turns on a lock; `openrails migrate up` runs the 
 
 SQL is authored in `billing`; another schema is reached by one token-aware
 rewrite of schema qualifiers, never other strings. The server's AuthKit keeps its
-own schema (`auth.database.schema`, default `profiles`).
+tables in `<database.schema>_auth` (`billing_auth`) and its jobs in `<database.schema>_river`.
 
 **Event store**
 
@@ -232,37 +219,19 @@ costs sharing, not service ([scaling](#scaling-and-redis)).
 
 **The server's AuthKit**
 
-`auth` is AuthKit's own configuration in AuthKit's keys; an unknown key refuses
-boot. The ones a deployment sets:
+OpenRails derives its AuthKit's configuration ([the server's AuthKit](#the-servers-authkit)); a deployment sets only where its keys live. Any other `auth` key or `AUTH_*` variable refuses boot, naming what replaced it.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `auth.token.issuer` | `public_url` | the server's own issuer, https (http only on a loopback host) |
-| `auth.token.refresh_token_duration` | `720h` | how long a session lasts from its sign-in; negative lasts until revoked |
-| `auth.token.allow_private_network_jwks` | `false` | fetch a trusted issuer's keys from a private address (local federation only) |
-| `auth.keys.path` | `/vault/auth`; for a loopback issuer without keys, a per-issuer directory where AuthKit generates development keys | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
-| `auth.keys.verify_only` | `false` | verify tokens, mint none |
-| `auth.resource.id` | `public_url` when https (http on a loopback host) | the resource trusted issuers mint tokens for: their `aud` (RFC 8707). Turns trusted-issuer tokens on |
-| `auth.resource.public_url` | none | the public origin DPoP proofs point at |
-| `auth.registration.native_user_mode` | `closed`; `invite_only` with `local_sign_in` | local enrollment; `open` is refused unless a hosted product supplies `server.Config.MerchantCreation` |
-| `auth.registration.allow_missing_senders` | `false` | run without an email or SMS sender |
-| `auth.sign_in.dpop` | `optional` | `optional` or `required` for the server's own users |
-| `auth.http.direct_peer_ip` | follows `trusted_proxies` | AuthKit's client IP follows `trusted_proxies` and Cloudflare's published ranges; `true` asserts there are no `trusted_proxies`, and beside them refuses boot |
-| `auth.http.rate_limits` | AuthKit's | AuthKit's own buckets |
-| `auth.database.schema` | `profiles` | AuthKit's tables |
-| `local_sign_in` | `false` | serve sign-in to the server's own accounts; off, people sign in at a trusted issuer |
+| `auth.keys.path` | `/vault/auth`; for a loopback `public_url` without keys, a per-issuer directory where AuthKit generates development keys | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
 
-A merchant renames at most every 72 hours, and a former name forwards and stays reserved for 90 days. The server fixes the rest: merchant roles, the API-key prefix, the scopes `openrails:merchant` and `openrails:self`, AuthKit's River schema and mount. The root owner needs a second factor: when none can be enrolled (no 16, 24 or 32-byte `totp.key` and no email or SMS sender), the server still starts, logs why, and refuses the sign-ins that need one.
+A merchant renames at most every 72 hours, and a former name forwards and stays reserved for 90 days.
 
 **The admin console**
 
 | Key | Meaning |
 |---|---|
 | `admin_console.disabled` | omit the console at `/admin` (an API-only server) |
-| `admin_console.issuers` | sign-in choices, empty by default |
-| `admin_console.issuers.<merchant>.url` | a trusted issuer staff sign in at, keyed by a merchant id or name, or `root` for operators |
-| `admin_console.issuers.<merchant>.client_id` | the console's public PKCE client there, with redirect URI `<origin>/admin/callback` |
-| `admin_console.issuers.<merchant>.name`, `.scope` | the button's label; the scope asked for (add `offline_access` where the issuer needs it for refresh tokens) |
 
 **Mail**
 
@@ -481,14 +450,25 @@ which deletes the merchant's usage there and retries until the store takes it.
 
 ## Auth and trust
 
-The server runs its own AuthKit (the `auth` section, `server.Config.Auth`). It
-decides who every request is: the server's own accounts and API keys, and the
-access tokens trusted issuers mint for `auth.resource.id`. OpenRails then binds
-the credential to one merchant and checks the route's permission; nothing in a
-request selects the merchant, and a valid credential bound to none is
-`403 merchant_unresolved` ([credentials](client.md#credentials)).
+The server runs its own AuthKit. It decides who every request is: the server's own accounts and API keys, and the access tokens trusted issuers mint for the server's resource. OpenRails then binds the credential to one merchant and checks the route's permission; nothing in a request selects the merchant, and a valid credential bound to none is `403 merchant_unresolved` ([credentials](client.md#credentials)).
 
 Who signs in, and how, in each mode, with the flows step by step: [authentication](authentication.md).
+
+### The server's AuthKit
+
+OpenRails builds AuthKit's configuration (`controlplane.AuthKit`) from settings it already has; `auth.keys.path` is the one a deployment sets:
+
+| AuthKit | From |
+|---|---|
+| issuer, resource identifier (RFC 8707) and its public URL | `public_url`: https, or http on a loopback host |
+| tables and jobs | `<database.schema>_auth`, and the engine's River schema `<database.schema>_river` |
+| client IP | `trusted_proxies` and Cloudflare's published ranges |
+| emailed links | the console's `/admin/invite`, `/admin/reset`, `/admin/verify` and `/admin/passwordless` |
+| keys on a private network | allowed for a loopback issuer and for the applications the operator declares (the merchant manifest's `remote_application`, the bootstrap manifest); an application registered at run time names only https key URLs on public hosts |
+
+The server's own accounts are staff. They join by invitation, need a second factor (a passkey or an authenticator app, whose secrets `totp.key` encrypts) and stay signed in for 30 days; passwords follow AuthKit's default policy (at least 8 characters, common ones refused). Readiness fails while staff cannot enroll one: with no `totp.key` the log names the file to mount. The server fixes the merchant roles, the API-key prefix, the issued audience `openrails`, the scopes `openrails:merchant` and `openrails:self`, the console's client `openrails-console`, its HTTP mount and the refresh cookie.
+
+A hosted product built on `server` sets its own account policy (open registration with `MerchantCreation`, agreements, usernames, group OAuth clients, SMS, DPoP) in code, with `server.Config.AuthKit`: it adjusts the derived configuration before the fixed parts apply. `AdminConsole.OwnAccountsOnly` keeps its console to its own accounts, with no trusted issuer's sign-in.
 
 ### The account directory
 
@@ -496,17 +476,12 @@ The server's AuthKit is single-tenant: `openrails migrate up`, or the first boot
 
 ### Trusted issuers
 
-With `auth.resource.id` set, the server accepts RFC 9068 access tokens
-(`typ: at+jwt`) minted for that resource by its trusted issuers: AuthKit remote
-applications in a merchant's group, from the manifest's `remote_application`
-(holding the merchant's owner role) or registered at run time. One issuer acts
-for one merchant. A token's permissions count within its application's role and
-its scopes:
+The server accepts RFC 9068 access tokens (`typ: at+jwt`) minted for its resource, `public_url`, by its trusted issuers: AuthKit remote applications in a merchant's group, from the manifest's `remote_application` (holding the merchant's owner role) or registered at run time, and root's, from the bootstrap manifest. One issuer acts for one merchant. A token's permissions count within its application's role and its scopes:
 
 | Scope | Grants |
 |---|---|
 | `openrails:merchant` | merchant permissions, within the application's role: your backend |
-| `openrails:self` | none: a customer's own billing at `/v1/me` |
+| `openrails:self` | none: a customer's own billing at `/v1/me`, which refuses any other token of a trusted issuer (`403 permission_required`) |
 
 When your app runs AuthKit, it is the authorization server: it registers the server as a resource, a public client for the browser's token exchange and a confidential client for the backend's client credentials; for staff to sign in to the console there too, also the console's public client ([authentication](authentication.md#standalone-at-your-apps-issuer)). In the example's app:
 
@@ -576,16 +551,16 @@ refused on `/v1/app` (`403 application_required`).
 
 ### The console
 
-`/admin` is the staff console. Staff sign in at an app's issuer (`admin_console.issuers`, one choice per merchant or `root`) or, with `local_sign_in`, with the server's own accounts, which people join by invitation; the console offers each that is on.
+`/admin` is the staff console. Staff sign in with the server's own accounts, always offered, or at a trusted issuer that signs people in: one whose OpenID Connect metadata names an authorization endpoint (one that only signs assertions does not). The sign-in page shows root's issuers, the deployment's own (from the bootstrap manifest), and a **Sign in with your app** field: staff type their merchant's name and get its issuers' buttons, labeled with the merchant's name. `/admin/m/<merchant>` shows them at once, for a bookmark. The page never lists merchants: an unknown name and a merchant with no such issuer get the same answer. The server reads the metadata (an operator-declared issuer's on any network, a run-time one's on public hosts only), so the buttons follow the issuers registered at run time.
 
-- **At an app's issuer** the console is an OAuth 2.0 public client there (authorization code with PKCE, redirect URI `<origin>/admin/callback`). The token it receives is already bound to OpenRails' resource and the issuer's merchant, so there is no exchange; people, roles and second factors are the app's.
-- **With `local_sign_in`** the console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once.
+- **With the server's own accounts** the console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
+- **At a trusted issuer** the console is the OAuth 2.0 public client `openrails-console` there (authorization code with PKCE, redirect URI `<origin>/admin/callback`). The token it receives is already bound to OpenRails' resource and the issuer's merchant, so there is no exchange; people, roles and second factors are the app's.
 
 Each flow, and what the app's issuer registers, is in [authentication](authentication.md#staff-and-operators). `admin_console.disabled` omits the console.
 
 ### Customer contacts
 
-The server mounts none of OpenRails' own SCIM routes (`/v1/app/scim/v2`, [client](client.md#customers)). A customer of the server's own accounts is read from them; a trusted issuer's customer from the merchant's directory in the server's AuthKit, which the issuer's AuthKit pushes to over SCIM at `/directory/scim/v2` with its client credentials, and from the verified contact claims of its tokens. Each customer is read from its own issuer's directory, newest write winning. A customer your backend names in an assertion (`CreateCustomerToken`) is the merchant's own, and its contact is what that application pushed or asserted for it. OpenRails emails a customer only at an address the issuer proved.
+The server mounts none of OpenRails' own SCIM routes (`/v1/app/scim/v2`, [client](client.md#customers)); AuthKit's directory at `/directory/scim/v2` is mounted instead. A customer of the server's own accounts is read from them; a trusted issuer's customer from the merchant's directory in the server's AuthKit, which the issuer's AuthKit pushes to over SCIM at `/directory/scim/v2` with its client credentials, and from the verified contact claims of its tokens. Each customer is read from its own issuer's directory, newest write winning. A customer your backend names in an assertion (`CreateCustomerToken`) is the merchant's own, and its contact is what that application pushed or asserted for it. OpenRails emails a customer only at an address the issuer proved.
 
 ## The payment page
 
@@ -610,10 +585,9 @@ Stripe PSP registers the origin as a payment-method domain on its account.
 
 TLS ends at your proxy or ingress. Every path goes to the server: the API, the
 console at `/admin`, `/v1/webhooks/{rail}/{account_id}` for provider webhooks and
-the checkout origin. Give one public origin to `public_url`,
-`auth.token.issuer` and `auth.resource.id`, and another to `checkout_origin`.
+the checkout origin. Give one public origin to `public_url`, which is also the server's issuer and resource, and another to `checkout_origin`.
 
-- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies; `auth.http` declares none of its own. Cloudflare's published ranges are built in and trusted like `trusted_proxies`, and their peers alone are believed for `CF-Connecting-IP` (AuthKit's client IP) and `CF-IPCountry` (the checkout's country); Cloudflare overwrites both, so this holds also where it does not front the origin.
+- **Client IP.** The client is the socket peer unless `trusted_proxies` lists the proxy's CIDRs; then `X-Forwarded-For` is walked right to left past trusted hops. Without it rate limits, abuse tracking, request logs and webhook source addresses all see the proxy. AuthKit takes the same proxies. Cloudflare's published ranges are built in and trusted like `trusted_proxies`, and their peers alone are believed for `CF-Connecting-IP` (AuthKit's client IP) and `CF-IPCountry` (the checkout's country); Cloudflare overwrites both, so this holds also where it does not front the origin.
 - **Body size.** Requests are capped at 1 MiB (`413 request_body_too_large`),
   but a billing archive import (`POST /v1/merchant/billing-archive`) streams up
   to 1 GiB: raise the proxy's limit if you import over HTTP.
@@ -738,7 +712,7 @@ with the command ([provider refresh](#provider-refresh)).
 | Signal | Meaning |
 |---|---|
 | `GET /health/live` | the process serves HTTP; only after PostgreSQL answers and migrations finish, so allow a long startup probe |
-| `GET /health/ready` | PostgreSQL, the merchants service, the River producer and a local River consumer. Redis, Vault, PSP posture and refused configuration are degraded, never failing. Public and detail-free: a failure is logged and answers 503 |
+| `GET /health/ready` | PostgreSQL, the merchants service, the River producer, a local River consumer, and a second factor staff can enroll (`totp.key`). Redis, Vault, PSP posture and refused configuration are degraded, never failing. Public and detail-free: a failure is logged and answers 503 |
 | `GET /metrics` on `metrics_port` | the operator's Prometheus telemetry, on its own listener so it is never public (unset serves none; the chart enables it on 9090 with its own ClusterIP Service): `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Not the merchant dashboard's business metrics, which are the `/v1/metrics` API on `port`. `Server.MetricsHandler` mounts it in your own binary |
 | probes | `openrails_psp_posture`, `openrails_configuration` (what is not served and why), `openrails_solana_crankers` and `openrails_job_progress` |
 | `openrails workers [--json]` | each job kind as River holds it: overrunning, retrying and discarded jobs, last completion and the newest error |
@@ -1132,9 +1106,6 @@ A minimal `values.yaml`:
 ```yaml
 config:
   public_url: https://billing.example.com
-  auth:
-    token: {issuer: https://billing.example.com}
-    resource: {id: https://billing.example.com}
   redis: {url: redis://redis:6379}
   email_smtp: {host: smtp.example.com, port: 587, username: openrails, from: "Billing <billing@example.com>"}
   trusted_proxies: [10.244.0.0/16]   # the pod CIDR the ingress controller runs in
@@ -1239,10 +1210,10 @@ kubectl -n openrails exec deploy/openrails -- \
 | Symptom | Look at |
 |---|---|
 | boot refuses a key | its log names the key and, for a retired one, its replacement |
-| `/health/ready` 503 | PostgreSQL, the merchants service or local workers: the log names it |
+| `/health/ready` 503 | PostgreSQL, the merchants service, local workers or a missing `totp.key`: the log names it |
 | a PSP never arms | the `openrails_psp_posture` probe: the provider's verdict for its environment, or credentials of another account (`consistency.duplicate_gateway_account`) |
 | configuration not served | the `openrails_configuration` probe and `consistency.merchant_config.not_served` |
-| 401 on a trusted issuer's token | its `iss` (a trusted issuer of that merchant), its `aud` (`auth.resource.id`), its signing keys' JWKS |
+| 401 on a trusted issuer's token | its `iss` (a trusted issuer of that merchant), its `aud` (`public_url`), its signing keys' JWKS |
 | `403 merchant_unresolved` | the credential is bound to no live merchant: fix the credential, nothing in the request changes it |
 | 403 with a permission code | the role behind the key or the issuer's application lacks the route's permission |
 | every client shares one rate limit | `trusted_proxies` is unset behind a proxy |
