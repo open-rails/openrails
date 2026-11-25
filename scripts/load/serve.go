@@ -72,7 +72,7 @@ func serveCmd(ctx context.Context, args []string) error {
 		defer rdb.Close()
 	}
 	url := "http://" + spec.Addr
-	host, portText, err := net.SplitHostPort(spec.Addr)
+	_, portText, err := net.SplitHostPort(spec.Addr)
 	if err != nil {
 		return fmt.Errorf("addr %q: %w", spec.Addr, err)
 	}
@@ -91,7 +91,7 @@ func serveCmd(ctx context.Context, args []string) error {
 	scopes := map[string][]string{billing.ScopeSelf: {"merchant:*"}}
 	srv, err := server.New(ctx, server.Config{
 		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: spec.Schema, RiverSchema: spec.Schema}, ClickHouse: billing.ClickHouseConfig{Database: spec.CHDatabase},
-			PublicBillingBaseURL: url, RateLimits: billing.RateLimitsConfig{}},
+			PublicURL: url, RateLimits: billing.RateLimitsConfig{}},
 		Auth: authkit.Config{
 			DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: spec.Schema + "_auth", RiverSchema: spec.Schema},
 			Token: authkit.TokenConfig{Issuer: url, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: url, PublicURL: url, Scopes: scopes},
@@ -101,8 +101,7 @@ func serveCmd(ctx context.Context, args []string) error {
 			HTTP: &authkit.HTTPConfig{DirectPeerIP: true},
 		},
 		LocalSignIn: true, AdminConsole: server.AdminConsole{Disabled: true},
-		RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
-		Host:        host, Port: port,
+		Port: port,
 	}, server.Deps{
 		Engine: openrails.Deps{Postgres: pool, Redis: rdb, ClickHouse: ch, FXTransport: fxWire{}, Logger: quietLogger(os.Stderr)},
 		Auth:   authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}},
