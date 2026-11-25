@@ -837,8 +837,12 @@ openrails intents resolve --merchant <name> --intent <id> [--step S] (--receipt 
 
 `intents` shows each row's `executes_under` mode and the drain forecast.
 `resolve` closes an `unknown_needs_verify` operation from an exact provider
-receipt or provider-confirmed non-execution (an empty NMI search is never
-enough); it never resends. Webhooks are at-least-once and handlers idempotent;
+receipt or provider-confirmed non-execution. For an NMI checkout sale, an empty
+order search also allows release with an actor and reason attesting release
+without proof of nonexecution. Such sales release automatically after 24 hours
+from submission when the order search is empty. Both raise a high finding for
+later reconciliation; the terminal intent cannot accept a later receipt. It never
+resends. Webhooks are at-least-once and handlers idempotent;
 there is no local inbound queue, so a long outage is backfilled with a provider
 refresh.
 

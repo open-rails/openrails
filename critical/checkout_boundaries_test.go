@@ -3,10 +3,14 @@
 package critical_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"github.com/jackc/pgx/v5"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -14,11 +18,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/db/gen"
+	embedded "github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCheckoutBoundaries(t *testing.T) {
+	testNMISaleBoundaries(t)
 	t.Run("OR-J09-S02/customer-challenge-settles-only-after-confirmation", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		input := saleInput(t, a, p)
@@ -381,5 +392,286 @@ func TestCheckoutBoundaries(t *testing.T) {
 		require.Equal(t, invoices.Items[0].Payment.PaymentID, replay.Payment.PaymentID)
 		require.Len(t, p.effects(t), 1)
 		require.EqualValues(t, 3000, p.effects(t)[0].Amount)
+	})
+}
+
+type nmiCheckoutWire func(*http.Request) (*http.Response, error)
+
+func (f nmiCheckoutWire) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func nmiSaleRequest(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/transact.php") }
+
+func nmiCheckoutInvoice(t *testing.T, a *authorityWorld, key string, recurring bool, ttl time.Duration) billing.Invoice {
+	t.Helper()
+	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Ownership: catalog.OwnershipUnique, Entitlements: []string{key + ":owned"}})
+	require.NoError(t, err)
+	params := billing.CreatePriceParams{ProductID: product.ID, Key: key, UnitAmount: 5_000_000, Currency: "USD"}
+	if recurring {
+		params.BillingIntervalMonths = ptr(1)
+	}
+	price, err := a.alpha.CreatePrice(t.Context(), params)
+	require.NoError(t, err)
+	expires := a.clock.Now().Add(ttl)
+	invoice, err := a.alpha.CreateInvoice(t.Context(), key, billing.CreateInvoiceParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}, ExpiresAt: &expires})
+	require.NoError(t, err)
+	return *invoice
+}
+
+func payNMICheckout(t *testing.T, a *authorityWorld, invoice billing.Invoice, token string, save bool) billing.Invoice {
+	t.Helper()
+	status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", a.aliceToken, billing.PayInvoiceParams{ExpectedTotal: invoice.Total, Payment: billing.InvoicePaymentParams{Token: token, BillingDetails: billedTo("US", "10001")}, Reusable: ptr(save)}, map[string]string{"Idempotency-Key": invoice.ID.String()})
+	require.Contains(t, []int{http.StatusOK, http.StatusPaymentRequired}, status, string(raw))
+	current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+	require.NoError(t, err)
+	return *current
+}
+
+func nmiCheckoutOperation(t *testing.T, a *authorityWorld, invoice billing.Invoice, verify bool) gen.BillingProviderIntent {
+	t.Helper()
+	rt := embedded.Graph(a.engine).Runtime
+	var row gen.BillingProviderIntent
+	ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+	require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var id uuid.UUID
+		err := a.pool.QueryRow(ctx, "SELECT id FROM "+pgx.Identifier{a.schema, "provider_intents"}.Sanitize()+" WHERE payload->>'order_id'=$1", invoice.ID.UUID().String()).Scan(&id)
+		if err != nil {
+			return err
+		}
+		if verify {
+			row, err = rt.IntentRunner().VerifyByID(ctx, id)
+		} else {
+			row, err = intents.NewStore(rt.DB).Get(ctx, id)
+		}
+		return err
+	}))
+	return row
+}
+
+func testNMISaleBoundaries(t *testing.T) {
+	t.Run("OR-J09-S71/gateway-refusal-reopens-the-invoice", func(t *testing.T) {
+		a, p := newNMIWorld(t)
+		invoice := nmiCheckoutInvoice(t, a, "refusal", false, 48*time.Hour)
+		invoice = payNMICheckout(t, a, invoice, "invalid-payment-token", true)
+		require.Equal(t, billing.InvoiceOpen, invoice.Status)
+		require.NotNil(t, invoice.Payment.LastPaymentError)
+		require.Equal(t, billing.DeclineProcessingError, invoice.Payment.LastPaymentError.Reason)
+		row := nmiCheckoutOperation(t, a, invoice, false)
+		require.Equal(t, intents.StatusFailedTerminal, row.Status)
+		var proof map[string]any
+		require.NoError(t, json.Unmarshal(row.ResultEvidence, &proof))
+		require.Equal(t, true, proof["declined"])
+		require.EqualValues(t, 300, proof["response_code"])
+		attempts, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		require.NoError(t, err)
+		require.Len(t, attempts.Items, 1)
+		require.Empty(t, p.core.Ledger(""))
+		p.money(t, 0, 0)
+	})
+	t.Run("OR-J09-S72/never-connected-sale-reopens-the-invoice", func(t *testing.T) {
+		closed := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("closed server received request") }))
+		target := closed.URL
+		closed.Close()
+		a, p := newNMIWorld(t, func(w *world) {
+			original := w.deps.NMITransport
+			w.deps.NMITransport = nmiCheckoutWire(func(r *http.Request) (*http.Response, error) {
+				if nmiSaleRequest(r) {
+					copy := r.Clone(r.Context())
+					copy.URL, _ = url.Parse(target)
+					return http.DefaultTransport.RoundTrip(copy)
+				}
+				return original.RoundTrip(r)
+			})
+		})
+		invoice := nmiCheckoutInvoice(t, a, "unsent", false, 48*time.Hour)
+		invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), false)
+		require.Equal(t, billing.InvoiceOpen, invoice.Status)
+		row := nmiCheckoutOperation(t, a, invoice, false)
+		require.Equal(t, intents.StatusFailedTerminal, row.Status)
+		require.Contains(t, string(row.ResultEvidence), `"request_refused": true`)
+		require.Empty(t, p.core.Attempts())
+		p.money(t, 0, 0)
+	})
+	t.Run("OR-J09-S73/disconnected-client-keeps-the-sale-running", func(t *testing.T) {
+		a, p := newNMIWorld(t)
+		invoice := nmiCheckoutInvoice(t, a, "disconnected", false, 48*time.Hour)
+		hold := p.core.Hold(nmiSaleRequest, nmimock.HoldResponse)
+		defer hold.Release()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, _, err := a.do(ctx, http.MethodPost, "/v1/me/invoices/"+invoice.ID.String()+"/pay", a.aliceToken, billing.PayInvoiceParams{ExpectedTotal: invoice.Total, Payment: billing.InvoicePaymentParams{Token: p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), BillingDetails: billedTo("US", "10001")}, Reusable: ptr(false)}, map[string]string{"Idempotency-Key": "disconnect"})
+			done <- err
+		}()
+		select {
+		case <-hold.Arrived():
+		case <-time.After(5 * time.Second):
+			t.Fatal("sale did not arrive")
+		}
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
+		time.Sleep(100 * time.Millisecond)
+		hold.Release()
+		require.Eventually(t, func() bool {
+			current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+			return err == nil && current.Status == billing.InvoiceComplete
+		}, 5*time.Second, 20*time.Millisecond)
+		require.Equal(t, intents.StatusSucceeded, nmiCheckoutOperation(t, a, invoice, false).Status)
+		payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		require.NoError(t, err)
+		require.Len(t, payments.Items, 1)
+		require.Len(t, p.core.Attempts(), 1)
+		p.money(t, 1, 500)
+	})
+	t.Run("OR-J09-S74/empty-order-releases-after-a-day-and-expires", func(t *testing.T) {
+		a, p := newNMIWorld(t)
+		first := nmiCheckoutInvoice(t, a, "released", false, 48*time.Hour)
+		expiring := nmiCheckoutInvoice(t, a, "released-expiring", false, time.Hour)
+		p.core.FailRequests(nmiSaleRequest, http.StatusBadGateway, 2)
+		first = payNMICheckout(t, a, first, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), false)
+		expiring = payNMICheckout(t, a, expiring, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), false)
+		a.clock.Advance(23 * time.Hour)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, nmiCheckoutOperation(t, a, first, true).Status)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, nmiCheckoutOperation(t, a, expiring, true).Status)
+		rt := embedded.Graph(a.engine).Runtime
+		ctx := merchant.WithID(t.Context(), a.alpha.MerchantID())
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { _, err := rt.Invoices.ExpireDue(ctx, 100); return err }))
+		current, err := a.alpha.GetInvoice(t.Context(), expiring.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.InvoiceProcessing, current.Status)
+		a.clock.Advance(time.Hour)
+		p.core.QueryUnavailable(true)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, nmiCheckoutOperation(t, a, first, true).Status)
+		p.core.QueryUnavailable(false)
+		for _, invoice := range []billing.Invoice{first, expiring} {
+			row := nmiCheckoutOperation(t, a, invoice, true)
+			require.Equal(t, intents.StatusFailedTerminal, row.Status)
+			var evidence map[string]any
+			require.NoError(t, json.Unmarshal(row.ResultEvidence, &evidence))
+			require.Equal(t, true, evidence["released_unconfirmed"])
+			require.NotEmpty(t, evidence["submitted_at"])
+			require.NotContains(t, evidence, "not_executed")
+		}
+		current, err = a.alpha.GetInvoice(t.Context(), first.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.InvoiceOpen, current.Status)
+		require.Equal(t, billing.DeclineProcessingError, current.Payment.LastPaymentError.Reason)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/"+first.ID.String()+"/cancel", a.aliceToken, nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: *first.Lines[0].PriceID}}})
+		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { _, err := rt.Invoices.ExpireDue(ctx, 100); return err }))
+		current, err = a.alpha.GetInvoice(t.Context(), expiring.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.InvoiceExpired, current.Status)
+		findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: payment.SaleReleasedFinding})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 2)
+		require.Equal(t, "high", findings.Items[0].Severity)
+		unresolved, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: payment.SaleUnresolvedFinding, Status: "fixed"})
+		require.NoError(t, err)
+		require.Len(t, unresolved.Items, 2)
+		p.money(t, 0, 0)
+	})
+	t.Run("OR-J09-S75/operator-attests-an-empty-order-release", func(t *testing.T) {
+		a, p := newNMIWorld(t)
+		invoice := nmiCheckoutInvoice(t, a, "attested", false, 48*time.Hour)
+		p.core.HideSales(1)
+		invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), false)
+		row := nmiCheckoutOperation(t, a, invoice, false)
+		rt := embedded.Graph(a.engine).Runtime
+		resolve := func(resolution intents.Resolution) error {
+			return rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context) error {
+				resolved, err := rt.IntentRunner().Resolve(ctx, row.ID, resolution)
+				if err == nil {
+					row = resolved
+				}
+				return err
+			})
+		}
+		resolution := intents.Resolution{NotExecuted: true, Actor: "operator", Reason: "Checked the empty order and accept the risk of late money"}
+		p.core.Reveal()
+		require.Error(t, resolve(resolution))
+		p.core.QueryUnavailable(true)
+		require.Error(t, resolve(resolution))
+		p.core.QueryUnavailable(false)
+		p.core.EditSale(p.core.LastSale().TransactionID, func(s *nmimock.Sale) { s.Hidden = true })
+		require.Error(t, resolve(intents.Resolution{NotExecuted: true, Reason: "missing actor"}))
+		require.NoError(t, resolve(resolution))
+		require.Equal(t, intents.StatusFailedTerminal, row.Status)
+		var evidence map[string]any
+		require.NoError(t, json.Unmarshal(row.ResultEvidence, &evidence))
+		require.Equal(t, true, evidence["released_unconfirmed"])
+		require.Equal(t, "operator", evidence["operator_resolution"].(map[string]any)["actor"])
+		current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.InvoiceOpen, current.Status)
+		require.True(t, errors.Is(resolve(intents.Resolution{ProviderReference: p.core.LastSale().TransactionID, Actor: "operator", Reason: "late receipt"}), intents.ErrResolutionNotUnknown))
+		p.money(t, 1, 500)
+	})
+	t.Run("OR-J09-S76/vault-read-failure-keeps-paid-access-and-retries-storage", func(t *testing.T) {
+		for _, recurring := range []bool{false, true} {
+			a, p := newNMIWorld(t)
+			invoice := nmiCheckoutInvoice(t, a, "card-storage", recurring, 48*time.Hour)
+			storageDown := true
+			p.core.Intercept(func(r *http.Request) bool {
+				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/customers/")
+			}, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+				if !storageDown {
+					return serve(), nil
+				}
+				response := httptest.NewRecorder()
+				response.WriteHeader(http.StatusServiceUnavailable)
+				return response.Result(), nil
+			})
+			invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}), true)
+			require.Equal(t, billing.InvoiceComplete, invoice.Status)
+			require.Nil(t, invoice.Payment.PaymentMethodID)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, nmiCheckoutOperation(t, a, invoice, false).Status)
+			customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+			access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"card-storage:owned"}})
+			require.NoError(t, err)
+			require.True(t, access.Entitlements["card-storage:owned"])
+			findings, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: payment.SaleCardNotSavedFinding})
+			require.NoError(t, err)
+			require.Len(t, findings.Items, 1)
+			finding := findings.Items[0]
+			require.Equal(t, customer.UUID().String(), finding.Evidence["customer_id"])
+			if recurring {
+				require.NotEmpty(t, finding.Evidence["subscription_id"])
+			}
+			a.clock.Advance(6 * time.Minute)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, nmiCheckoutOperation(t, a, invoice, true).Status)
+			again, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: payment.SaleCardNotSavedFinding})
+			require.NoError(t, err)
+			require.Len(t, again.Items, 1)
+			require.Equal(t, finding.ID, again.Items[0].ID)
+			storageDown = false
+			a.clock.Advance(6 * time.Minute)
+			require.Equal(t, intents.StatusSucceeded, nmiCheckoutOperation(t, a, invoice, true).Status)
+			require.Equal(t, intents.StatusSucceeded, nmiCheckoutOperation(t, a, invoice, true).Status)
+			payments, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: customer})
+			require.NoError(t, err)
+			require.Len(t, payments.Items, 1)
+			require.Len(t, p.core.Attempts(), 1)
+			methods, err := a.alpha.ListPaymentMethods(t.Context(), customer, billing.PaymentMethodListParams{})
+			require.NoError(t, err)
+			require.Len(t, methods.Items, 1)
+			current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
+			require.NoError(t, err)
+			require.Equal(t, &methods.Items[0].ID, current.Payment.PaymentMethodID)
+			fixed, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: payment.SaleCardNotSavedFinding, Status: "fixed"})
+			require.NoError(t, err)
+			require.Len(t, fixed.Items, 1)
+			require.Equal(t, finding.ID, fixed.Items[0].ID)
+			if recurring {
+				subID, err := billing.ParseSubscriptionID(finding.Evidence["subscription_id"].(string))
+				require.NoError(t, err)
+				sub, err := a.alpha.GetSubscription(t.Context(), subID)
+				require.NoError(t, err)
+				require.NotNil(t, sub.PaymentMethodID)
+			}
+			p.money(t, 1, 500)
+		}
 	})
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 785,
+  "scenario_count": 791,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3927,6 +3927,36 @@
       "id": "OR-J38-S87",
       "journey": "J38",
       "name": "Buying a consumable product again raises no duplicate-ownership finding; a second live purchase of a non-consumable still does"
+    },
+    {
+      "id": "OR-J09-S71",
+      "journey": "J09",
+      "name": "Definitive NMI gateway refusal reopens the invoice without a charge"
+    },
+    {
+      "id": "OR-J09-S72",
+      "journey": "J09",
+      "name": "A sale that never connects ends uncharged and reopens the invoice"
+    },
+    {
+      "id": "OR-J09-S73",
+      "journey": "J09",
+      "name": "Client disconnect leaves the provider sale running to one paid invoice"
+    },
+    {
+      "id": "OR-J09-S74",
+      "journey": "J09",
+      "name": "An empty NMI order releases after 24 hours and the reopened invoice can cancel or expire"
+    },
+    {
+      "id": "OR-J09-S75",
+      "journey": "J09",
+      "name": "Operator attestation releases an empty NMI order and refuses an order containing a transaction"
+    },
+    {
+      "id": "OR-J09-S76",
+      "journey": "J09",
+      "name": "An approved new-card sale grants paid access while card storage retries without another charge"
     }
   ]
 }

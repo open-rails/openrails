@@ -8,9 +8,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -206,7 +208,7 @@ func (c *NMIClient) checkConfiguration() error {
 	return nil
 }
 
-func newSaleError(rawResponse string, output url.Values) error {
+func newSaleError(rawResponse string, output url.Values, sale bool) error {
 	message := "sale failed"
 
 	responseCode := parseMobiusResponseCode(output)
@@ -228,6 +230,12 @@ func newSaleError(rawResponse string, output url.Values) error {
 		if duplicateRefusal(output, responseCode) {
 			return errors.Join(ErrDuplicateTransaction, unknown)
 		}
+		if sale && strings.TrimSpace(output.Get("response")) == "3" {
+			switch responseCode {
+			case 300, 410, 411, 440, 441, 460, 461:
+				return errors.Join(ErrSaleRefused, ambiguous(rejection))
+			}
+		}
 		return unknown
 	}
 	return rejection
@@ -238,6 +246,10 @@ func newSaleError(rawResponse string, output url.Values) error {
 // Only a caller holding a unique durable order may treat it as not executed;
 // it is also ambiguous, so others verify.
 var ErrDuplicateTransaction = errors.New("nmi: gateway refused a duplicate transaction without processing it")
+
+// ErrSaleRefused marks a gateway refusal that did not process the sale.
+// Checkout may release its unique order; other callers still verify.
+var ErrSaleRefused = errors.New("nmi: gateway refused the sale without processing it")
 
 func duplicateRefusal(output url.Values, responseCode int) bool {
 	return strings.TrimSpace(output.Get("response")) == "3" && responseCode == 300 &&
@@ -323,8 +335,7 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 	}
 
 	body = c.tagged(ctx, requestType, body)
-	// Local validation and arming still precede dispatch. Only failures after
-	// HTTP Do begins are transport-ambiguous.
+	// Local validation and arming still precede dispatch.
 	req, cancel, err := c.newRequest(ctx, http.MethodPost, c.DirectPostURL, bytes.NewReader(body), true)
 	if err != nil {
 		return "", errors.Join(ErrNotDispatched, fmt.Errorf("build direct request: %w", err))
@@ -338,8 +349,14 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 	if err := req.Context().Err(); err != nil {
 		return "", errors.Join(ErrNotDispatched, err)
 	}
+	var connected atomic.Bool
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }}
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	resp, err := c.client().Do(req)
 	if err != nil {
+		if !connected.Load() {
+			return "", errors.Join(ErrNotDispatched, fmt.Errorf("failed to connect: %w", err))
+		}
 		c.Log.WarnContext(ctx, "NMI direct request failed", logx.Err(err), "provider", c.providerName, "request_type", requestType)
 		return "", ambiguous(fmt.Errorf("failed to send request: %w", err))
 	}

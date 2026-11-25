@@ -12,7 +12,7 @@ provider and what the provider's answer proves.
 - **Rail**: a gateway kind, `billing.Rail`; `rails.Descriptor` (`internal/modules/payments/rails/registry.go`) declares what each does.
 - **PSP**: one merchant account on a rail, a `psps` row; its identity is `(rail, live, account_id)`.
 - **Operation** (intent): one `provider_intents` row: frozen terms, an idempotency key, a status and a lease.
-- **Unknown**: `unknown_needs_verify`, an operation that may have reached the provider; only provider evidence settles it.
+- **Unknown**: `unknown_needs_verify`, an operation that may have reached the provider; provider evidence settles it, with an attested or timed empty-order release for NMI checkout sales.
 - **Merchant controls**: `writes` (`full`, `limited`: no system-origin writes, or `readonly`), the rebill brake on system-origin charges, and destructive arming (`internal/controls`).
 - **Provider posture**: a PSP credential's proven environment; any other verdict disarms it.
 - **Wake job**: a debounced River job that reads one provider object after a callback.
@@ -42,10 +42,15 @@ Each write type is a `Handler` (`Execute`, `Verify`, `CheckRelevance`,
 
 Per rail ([provider uncertainty](../standalone.md#provider-intents) has the full rules):
 
-- **NMI** has no idempotency key. Local refusals return `nmi.ErrNotDispatched`;
-  any error after sending is ambiguous. A charge settles only from the exact
+- **NMI** has no idempotency key. Local refusals and dial failures before a
+  connection is obtained return `nmi.ErrNotDispatched`. Lost answers and
+  non-200 responses stay ambiguous. Checkout recognizes `response=3` refusal
+  codes 300, 410, 411, 440, 441, 460 and 461 through `nmi.ErrSaleRefused`;
+  other callers keep verifying them. A charge settles only from the exact
   receipt under its invoice id, which every attempt for one period shares; an
-  empty search proves nothing, and NMI is never resent
+  empty search proves nothing. Checkout sales release after 24 hours with an empty
+  order search, or earlier on operator attestation, raising a high finding for
+  reconciliation if money later appears. NMI is never resent
   (`Store.ArmLostSubmissionResend` refuses any rail but Stripe).
 - **Stripe** requests carry an `Idempotency-Key` rooted in the operation id
   (`stripeapi.SetIdempotencyKey`). A lost renewal may replay it after

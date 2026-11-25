@@ -99,7 +99,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 			return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
 		}
 		var pmErr *nmi.CustomerVaultError
-		if errors.As(err, &pmErr) && IsHardDecline(pmErr.ResponseCode) {
+		if !nmi.RequiresVerification(err) && errors.As(err, &pmErr) && IsHardDecline(pmErr.ResponseCode) {
 			code := FailureCode(pmErr)
 			message := pmErr.Error()
 			return charge.Result{

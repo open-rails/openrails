@@ -57,8 +57,8 @@ takes exactly one payment:
   invoice, rechecks `invoices.Payable` and `StillBuyable`, records the `nmi_sale`
   provider intent with frozen terms, and creates and starts the invoice attempt,
   whose id is `InvoiceAttemptID(merchant, invoice, key)`: one Idempotency-Key is one
-  attempt, forever. The intent runs inline (`EnqueueOwnedAndExecute`);
-  `NMISaleIntentHandler` executes NMI and Stripe sales alike, and charges and
+  attempt, forever. The intent runs inline (`EnqueueOwnedAndExecute`), bounded
+  by its lease independently of the caller's cancellation; `NMISaleIntentHandler` executes NMI and Stripe sales alike, and charges and
   saves a new card in one request.
 - *Hosted*: Stripe Checkout for one-time lines (`payInvoiceHosted`) or a CCBill
   FlexForm for one subscription (`payInvoiceCCBill`); the invoice waits with a
@@ -149,9 +149,17 @@ Checks:
 
 ### 2. Agreement with providers
 `ConfirmInvoice` reads the provider, never trusting the browser. A lost sale answer
-is settled by reads (`collect`, `absentSale`): only NMI's definitive decline under
-the sale's own order reference ends it unpaid; anything else stays `processing`
-with a high `life.sale.unresolved` finding and takes no other payment. A partial
+is settled by reads (`collect`, `absentSale`). NMI's definitive decline under
+its order ends it unpaid. An empty order search keeps it `processing` with a
+high `life.sale.unresolved` finding until 24 hours after `submitted_at`, then
+releases it unpaid. An operator may release an empty order earlier with
+`intents resolve --not-executed`, an actor and a reason. Both releases reopen
+the invoice with a processing failure, resolve the unresolved finding and raise
+`life.sale.released_unconfirmed`: search absence is not proof that no money moved.
+Failed searches and orders containing unqualified transactions stay processing.
+A released open invoice expires normally. A terminal released intent stops
+verification and cannot accept a receipt resolution; later money requires
+operator reconciliation and refund of an unhonored charge at NMI. A partial
 approval settles at NMI only in full (`nmi.SettleOnlyInFull`) and never pays the
 invoice. Stripe Checkout settles from `checkout.session.*` webhooks or confirm
 (`confirmInvoiceHosted`). `settle` treats a replayed payment as done and refuses a
@@ -162,6 +170,11 @@ Checks:
 - OR-J28-S04 and OR-J28-S08: duplicate, old and thin Stripe events settle once.
 - OR-J38-S43 (a second payment of a paid invoice) and OR-J37-S70 (a transfer after
   expiry): money the invoice no longer takes is held for refund or review.
+
+An approved new-card sale whose card cannot be read still pays the invoice and
+grants access. The intent retains its receipt and retries storage without charging
+again; `life.sale.card_not_saved` identifies the customer, invoice and any opened
+subscription until storage recovers. The subscription waits for its method.
 
 ### 3. Exact money
 Totals and line amounts are `int64` micros (`invoices.total`, `CHECK (total >= 0)`);

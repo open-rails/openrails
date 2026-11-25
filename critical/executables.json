@@ -2538,6 +2538,24 @@
     ],
     "OR-J38-S87": [
       "TestPublicEntitlements/OR-J38-S87/consumable-purchases-do-not-report-duplicate-ownership"
+    ],
+    "OR-J09-S71": [
+      "TestCheckoutBoundaries/OR-J09-S71/gateway-refusal-reopens-the-invoice"
+    ],
+    "OR-J09-S72": [
+      "TestCheckoutBoundaries/OR-J09-S72/never-connected-sale-reopens-the-invoice"
+    ],
+    "OR-J09-S73": [
+      "TestCheckoutBoundaries/OR-J09-S73/disconnected-client-keeps-the-sale-running"
+    ],
+    "OR-J09-S74": [
+      "TestCheckoutBoundaries/OR-J09-S74/empty-order-releases-after-a-day-and-expires"
+    ],
+    "OR-J09-S75": [
+      "TestCheckoutBoundaries/OR-J09-S75/operator-attests-an-empty-order-release"
+    ],
+    "OR-J09-S76": [
+      "TestCheckoutBoundaries/OR-J09-S76/vault-read-failure-keeps-paid-access-and-retries-storage"
     ]
   }
 }

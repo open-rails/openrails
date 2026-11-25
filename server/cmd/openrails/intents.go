@@ -98,7 +98,7 @@ func newIntentsResolveCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "resolve",
-		Short: "Resolve an unknown provider operation with an exact provider receipt or provider-confirmed non-execution (--not-executed also releases a never-submitted invoice collection)",
+		Short: "Resolve an unknown provider operation with an exact provider receipt or non-execution evidence or an attested empty NMI sale order",
 		Long: `Closes one unknown operation from provider evidence; it never resends.
 
 --receipt names the exact provider object (transaction, subscription,
@@ -110,8 +110,9 @@ sale) before the normal receipt path commits its local effects.
 
 --not-executed needs the operation type's own proof. For an NMI or custodian
 sale that is NMI showing a definitive decline as the one transaction under the
-sale's order; an empty search is never enough, and a submitted invoice
-collection, rebill or tier-change proration refuses it. An operation that never
+sale's order, or zero transactions with the operator attesting release without
+proof of nonexecution. A submitted invoice collection, rebill or tier-change
+proration refuses it. An operation that never
 crossed its submission fence is released on that alone.
 
 --step selects the step of a multi-step operation (nmi_upgrade: successor or
@@ -132,7 +133,7 @@ proration; stripe_tier_change: update, schedule or phases). --actor and
 	cmd.Flags().StringVar(&intentID, "intent", "", "Unknown operation id (required)")
 	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases)")
 	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription, schedule or refund id")
-	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record provider-confirmed non-execution")
+	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record non-execution or attest release of an empty NMI sale order")
 	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
 	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")
 	return cmd

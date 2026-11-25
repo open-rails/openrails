@@ -178,7 +178,7 @@ func (c *Charger) proxySale(ctx context.Context, req charge.Request, src Source,
 	sale, err := nmi.ParseSaleResponse(string(proxyRes.Body), req.AmountMinor, req.Currency)
 	if err != nil {
 		var vaultErr *nmi.CustomerVaultError
-		if errors.As(err, &vaultErr) && nmidirect.IsHardDecline(vaultErr.ResponseCode) {
+		if !nmi.RequiresVerification(err) && errors.As(err, &vaultErr) && nmidirect.IsHardDecline(vaultErr.ResponseCode) {
 			return charge.Result{TokenType: tokenType}, vaultErr, nil
 		}
 		// Transient gateway condition (420/421/430) or unreadable body

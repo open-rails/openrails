@@ -47,7 +47,7 @@ func (c *NMIClient) VerifyStoredCredential(ctx context.Context, vaultID, billing
 		return "", err
 	}
 	if !isDirectResponseApproved(output) {
-		return "", newSaleError(response, output)
+		return "", newSaleError(response, output, false)
 	}
 	id := strings.TrimSpace(output.Get("transactionid"))
 	if id == "" {

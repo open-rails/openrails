@@ -247,7 +247,7 @@ func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebill
 		return &ManualRebillResponse{Success: true, TransactionID: transactionID, AVSResponse: strings.TrimSpace(output.Get("avsresponse")), CVVResponse: strings.TrimSpace(output.Get("cvvresponse"))}, nil
 	}
 
-	rejection := newSaleError(response, output)
+	rejection := newSaleError(response, output, false)
 	result := &ManualRebillResponse{
 		Success:       false,
 		Declined:      !RequiresVerification(rejection),
