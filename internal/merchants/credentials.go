@@ -372,10 +372,13 @@ func (s *Service) LoadNMIWebhookSecrets(ctx context.Context, id billing.Merchant
 
 // CCBillWebhookTokens are the tokens a CCBill webhook URL may end in: the
 // current one and, only during its bounded overlap, the previous
-// one. Required false still admits the tokenless URL.
+// one. Required false still admits the tokenless URL. Declared false (no
+// document names the PSP) and Duplicate (its account is another PSP's, whose
+// secrets are not read) admit nothing.
 type CCBillWebhookTokens struct {
-	Current, Previous string
-	Required          bool
+	Current, Previous   string
+	Required            bool
+	Declared, Duplicate bool
 }
 
 // LoadCCBillWebhookTokens loads a CCBill PSP's webhook tokens; none when no
@@ -386,7 +389,7 @@ func (s *Service) LoadCCBillWebhookTokens(ctx context.Context, id billing.Mercha
 		return CCBillWebhookTokens{}, err
 	}
 	required, set := scope.Settings[config.RequireWebhookTokenKey].(bool)
-	out := CCBillWebhookTokens{Current: scope.Secret("webhook_token"), Required: required || !set}
+	out := CCBillWebhookTokens{Current: scope.Secret("webhook_token"), Required: required || !set, Declared: scope.Declared, Duplicate: scope.DuplicateAccount}
 	if s.overlapOpen(scope) {
 		out.Previous = scope.Secret("webhook_token_previous")
 	}

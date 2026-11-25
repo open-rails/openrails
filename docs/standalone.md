@@ -589,7 +589,7 @@ the checkout origin. Give one public origin to `public_url`, which is also the s
   request. NMI and Stripe sign; CCBill signs nothing and is accepted only from
   its published ranges, and, when its PSP declares a `webhook_token`, only at
   `/v1/webhooks/ccbill/{account_id}/{token}` ([CCBill](client.md#ccbill)).
-  Request logs show that path's token as `{token}`. Stripe endpoints are registered automatically once
+  Request logs show that path's token as `{token}`. Your proxy, ingress and CDN access logs record the full path: mask the token segment there too, since only OpenRails' own request log masks it. Without a token, or with `require_webhook_token: false`, the source-address check is all that stands, and anything that can set `X-Forwarded-For` through a trusted hop can forge it (Cloudflare's published ranges are trusted by default, so a request sent through Cloudflare may name a CCBill address): keep the transition short. Stripe endpoints are registered automatically once
   `public_url` is public https and provider writes are allowed.
   Per-rail setup: [PSPs](client.md#merchant-configuration-and-psps).
 

@@ -310,8 +310,9 @@ var livePSPProbe = func(r *httprequest.Request) webhookauth.LiveRailProbe {
 type signedWebhook[T any] struct {
 	verified T
 	// keyed: the PSP declares a secret to check with. mismatch: only the
-	// signature failed, made with another secret.
-	keyed, mismatch bool
+	// signature failed, made with another secret. veto: the delivery is
+	// refused for every candidate, never handed to a sibling.
+	keyed, mismatch, veto bool
 	// err is why the delivery did not verify; nil when it did.
 	err error
 }
@@ -345,6 +346,7 @@ func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
 	}
 	checks := make([]signedWebhook[T], len(candidates))
 	var won []int
+	vetoed := -1
 	for i, psp := range candidates {
 		c, err := check(merchant.WithID(ctx, psp.MerchantID), psp)
 		if err != nil {
@@ -357,9 +359,15 @@ func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
 			return merchants.PSPIdentity{}, none, noop, false
 		}
 		checks[i] = c
+		if c.veto && vetoed < 0 {
+			vetoed = i
+		}
 		if c.err == nil {
 			won = append(won, i)
 		}
+	}
+	if vetoed >= 0 {
+		won = nil
 	}
 	if len(won) > 1 && tieBreak != nil {
 		won = slices.DeleteFunc(won, func(i int) bool { return !tieBreak(candidates[i], checks[i].verified) })
@@ -379,6 +387,9 @@ func routeSignedWebhook[T any](r *httprequest.Request, rail, accountID string,
 			if c.keyed && (report < 0 || checks[report].mismatch && !c.mismatch) {
 				report = i
 			}
+		}
+		if vetoed >= 0 {
+			report = vetoed
 		}
 		if report < 0 {
 			warnUndeclaredWebhook(r.Log, rail, accountID)
@@ -460,11 +471,17 @@ func checkCCBillWebhook(r *httprequest.Request) func(context.Context, merchants.
 		if err != nil {
 			return signedWebhook[bool]{}, err
 		}
-		out := signedWebhook[bool]{keyed: true}
+		out := signedWebhook[bool]{keyed: tokens.Declared}
 		switch {
-		case presented == "" && (tokens.Current == "" || !tokens.Required):
+		case !tokens.Declared || tokens.Duplicate:
+			out.err = errCCBillWebhookToken
+		case presented == "" && tokens.Current != "" && tokens.Required:
+			// A sibling PSP of the account without a token must not take
+			// what this one refuses.
+			out.veto, out.err = true, errCCBillWebhookToken
+		case presented == "":
 			out.verified = tokens.Current != ""
-		case presented == "" || !tokenMatches(presented, tokens.Current) && !tokenMatches(presented, tokens.Previous):
+		case !tokenMatches(presented, tokens.Current) && !tokenMatches(presented, tokens.Previous):
 			out.mismatch, out.err = true, errCCBillWebhookToken
 		}
 		return out, nil

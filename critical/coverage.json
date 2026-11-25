@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 787,
+  "scenario_count": 789,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3022,6 +3022,16 @@
       "id": "OR-J28-S21",
       "journey": "J28",
       "name": "The webhook token URL exists only for CCBill: any other rail answers route_not_found"
+    },
+    {
+      "id": "OR-J28-S22",
+      "journey": "J28",
+      "name": "A tokenless CCBill delivery that one PSP of the account refuses for want of its token is refused for all of them, never accepted under a sibling PSP without a token; the right token reaches its own PSP"
+    },
+    {
+      "id": "OR-J28-S23",
+      "journey": "J28",
+      "name": "Rotating a CCBill webhook token over the API keeps the old one verifying for its overlap only, and a supplied previous token is refused"
     },
     {
       "id": "OR-J48-S01",

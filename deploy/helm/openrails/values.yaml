@@ -33,7 +33,9 @@ config:
   #   url: clickhouse://clickhouse:9000/openrails # with a password, from a CLICKHOUSE_URL secret
   # Only the ingress controller's own addresses: without it the client IP is the
   # proxy's. It also decides the sender address a CCBill webhook is checked
-  # against, so never list a pod or node CIDR other workloads share.
+  # against, so never list a pod or node CIDR other workloads share. A CCBill
+  # webhook URL ends in a secret token: mask that path segment in the
+  # ingress's and any CDN's access logs, which record the full path.
   # trusted_proxies: [10.244.250.0/28]
   # Vault holds merchant configuration and secrets when a KV mount is named.
   # vault:

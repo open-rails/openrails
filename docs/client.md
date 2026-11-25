@@ -309,7 +309,9 @@ token the PSP takes only `/v1/webhooks/ccbill/{account_id}`, as before, and
 refuses the token URL. To add one to a PSP CCBill already calls: declare the
 token with the setting `require_webhook_token: false` (deliveries to the old URL
 are then still admitted, each logged as a warning), change the URL in CCBill,
-then remove the setting. A rotated token keeps the old one for 24 hours, like a
+then remove the setting. Without a token, or with `require_webhook_token: false`, the source-address check is all that stands, and anything that can set `X-Forwarded-For` through a trusted hop can forge it (Cloudflare's published ranges are trusted by default, so a request sent through Cloudflare may name a CCBill address): keep the transition short. Your proxy, ingress and CDN access logs record the full path: mask the token segment there too, since only OpenRails' own request log masks it. A tokenless delivery is refused
+when any PSP of the account requires a token, so a live and a sandbox PSP
+sharing an account each declare their own. A rotated token keeps the old one for 24 hours, like a
 signing secret; in a file, declare the old one as `webhook_token_previous` with
 `webhook_overlap_expires_at`. Refunds go through CCBill's own admin (`refund_unsupported`).
 A card checkout can keep CCBill back as a fallback ([invoices](#invoices-and-checkout)).

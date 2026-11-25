@@ -82,7 +82,11 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   refuses a missing or wrong token (`401 authentication_required`, "Invalid
   webhook token"), unless its `require_webhook_token` is false, which still
   admits a tokenless delivery and logs a warning; a wrong token is always
-  refused. A PSP without one refuses the token URL. The source address is the
+  refused. A PSP without one refuses the token URL. A tokenless delivery that
+  one candidate PSP of the account refuses for want of its token is refused
+  for all of them (`signedWebhook.veto`), never handed to a sibling without a
+  token; an undeclared PSP, or one whose account another PSP holds, admits
+  nothing. The source address is the
   one `trusted_proxies` resolves, so a trusted proxy can name any sender; the
   token is what a process inside that network does not hold. The request log
   writes the token segment as `{token}` (`middleware.loggedPath`); it is never
@@ -285,7 +289,7 @@ Critical scenarios:
 - J10: OR-J10-S01, S03, S04 (`TestPaymentReplay`), S02 (`TestCheckoutBoundaries`), S05 (`TestInvoicePaymentReceipts`).
 - J11: OR-J11-S01, S02 (`TestProviderRecovery`), S04 (`TestUnresolvedRouting`).
 - J15: OR-J15-S01 to S04 (`TestNMIRecovery`), S06, S07 (`TestVerificationBinding`), S08 to S21 (`TestProviderTrailing`), S30 (`TestBackgroundJobs`), S70, S72 (`TestDueWork`), S71 (`TestNMIRoster`).
-- J28: OR-J28-S01 to S05, S08 (`TestCallbackContracts`), S06, S07 (`TestWebhookAccountClasses`), S17 to S21 (`TestCCBillWebhookToken`).
+- J28: OR-J28-S01 to S05, S08 (`TestCallbackContracts`), S06, S07 (`TestWebhookAccountClasses`), S17 to S23 (`TestCCBillWebhookToken`).
 - J29: OR-J29-S01, S04 (`TestProcessRecovery`), S02, S05, S06 (`TestUnresolvedMoneyContracts`), S07, S08, S40, S41 (`TestBackgroundJobs`), S37, S70 to S73 (`TestDueWork`).
 - J37: OR-J37-S01 to S05, S63 (`TestSolanaContracts`), S07, S09, S60 to S62 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestInvoiceExpiryClock`).
 - Elsewhere: OR-J09-S05, S06 (lost and partial NMI sales), OR-J16-S04, OR-J20-S03, S70, OR-J26-S55, OR-J31-S03, S04 (copied book, export with open work), OR-J34-S05, OR-J04-S43.
