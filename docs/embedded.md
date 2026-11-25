@@ -114,7 +114,7 @@ an optional section is on once set.
 | `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)); code only. |
 | `PublicURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
-| `TrustedProxies` | Your own load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Cloudflare's published ranges are built in and trusted too, and only their peers are believed for `CF-IPCountry`. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
+| `TrustedProxies` | Your own load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Cloudflare's published ranges are built in and trusted too, and only their peers are believed for `CF-IPCountry`. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. It also decides the sender address a CCBill webhook is checked against: list only your proxy itself, never a network other workloads share. |
 | `CheckoutOrigin` | Needed only to serve OpenRails' own hosted pay page: its separate origin ([checkout page](#checkout-page)). Leave it empty with the embedded checkout or your own card form; pay URLs then answer `pay_url_unavailable`. |
 | `RateLimits` | `billing.RateLimitsConfig`, one `*billing.RateLimit` per bucket: `Purchase` (10 a minute), `Payment` (40), `Subscribe` (20), `Webhook` (1200). Nil takes the default; `&billing.RateLimit{}` (`RequestsPerMinute` 0) leaves the bucket unlimited, so a host fronting billing with its own limiter sets every bucket to it. |
 | `Captcha` | `billing.CaptchaAccount`: `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`); both keys turn it on. It challenges a subject at 3× a bucket's limit. |
@@ -303,7 +303,7 @@ whose permissions `Auth` knows. The mount strips ambient cookies: browsers send
 credentials in `Authorization`. Customer and public routes answer any origin
 without credentials; staff routes send no CORS headers. In-process `Client`
 calls pass through none of this and count against no rate limit. Point each
-PSP's webhooks at `{Prefix}/v1/webhooks/{rail}/{account_id}`.
+PSP's webhooks at `{Prefix}/v1/webhooks/{rail}/{account_id}`, or a CCBill PSP's with a webhook token at `{Prefix}/v1/webhooks/ccbill/{account_id}/{token}` ([CCBill](client.md#ccbill)); keep that path out of your own request logs.
 
 ## Auth
 

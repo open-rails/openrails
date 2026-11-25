@@ -239,7 +239,7 @@ func RequestLogHTTP(logger *slog.Logger, resolver *iputil.TrustedProxies, skipPa
 			start := time.Now()
 			sw := &statusWriter{ResponseWriter: w}
 			next.ServeHTTP(sw, r)
-			logger.InfoContext(r.Context(), r.Method+" "+r.URL.Path, "status", sw.status(), "latency", time.Since(start).String(), "ip", resolver.ClientIP(r), "request_id", requestID)
+			logger.InfoContext(r.Context(), r.Method+" "+loggedPath(r), "status", sw.status(), "latency", time.Since(start).String(), "ip", resolver.ClientIP(r), "request_id", requestID)
 		})
 	}
 }

@@ -237,8 +237,8 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	if err != nil {
 		return billing.PSP{}, err
 	}
-	if _, supplied := credentials["webhook_signing_secret_previous"]; supplied {
-		return billing.PSP{}, apperr.Invalidf("webhook_signing_secret_previous is retained by rotation and cannot be supplied").WithParam("credentials")
+	if err := suppliedPrevious(credentials); err != nil {
+		return billing.PSP{}, err
 	}
 	doc := merchantdocs.PSP{Rail: rail, Environment: environment, AccountID: accountID, Custodian: req.Custodian, Settings: mergeSettings(nil, settings), Secrets: credentials}
 	set, err := s.config.Get(ctx, id)
@@ -448,8 +448,8 @@ func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID bi
 // signing secret keeps the outgoing one verifying for a bounded overlap
 // (SEC-29) unless retire ends it at once.
 func (s *Service) applyCredentials(p *merchantdocs.PSP, credentials map[string]string, retire bool) (bool, error) {
-	if _, supplied := credentials["webhook_signing_secret_previous"]; supplied {
-		return false, apperr.Invalidf("webhook_signing_secret_previous is retained by rotation and cannot be supplied").WithParam("credentials")
+	if err := suppliedPrevious(credentials); err != nil {
+		return false, err
 	}
 	if p.Secrets == nil {
 		p.Secrets = map[string]string{}
@@ -458,18 +458,19 @@ func (s *Service) applyCredentials(p *merchantdocs.PSP, credentials map[string]s
 		p.Settings = map[string]any{}
 	}
 	rotated := false
-	if next, ok := credentials["webhook_signing_secret"]; ok && hasWebhookOverlap(p.Rail) {
-		current := strings.TrimSpace(p.Secrets["webhook_signing_secret"])
+	key := webhookSecretKey(p.Rail)
+	if next, ok := credentials[key]; ok && key != "" {
+		current := strings.TrimSpace(p.Secrets[key])
 		if current != "" && current != next {
 			rotated = true
 			if !retire {
-				p.Secrets["webhook_signing_secret_previous"] = current
+				p.Secrets[key+"_previous"] = current
 				p.Settings[WebhookOverlapExpiresKey] = s.now().Add(webhookSecretOverlap).Format(time.RFC3339)
 			}
 		}
 	}
 	if retire {
-		delete(p.Secrets, "webhook_signing_secret_previous")
+		delete(p.Secrets, key+"_previous")
 		delete(p.Settings, WebhookOverlapExpiresKey)
 	}
 	maps.Copy(p.Secrets, credentials)
