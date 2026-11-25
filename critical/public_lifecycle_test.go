@@ -183,7 +183,7 @@ func TestPublicLifecycle(t *testing.T) {
 					{"/billing/v1/me", "", 401},
 					{"/billing/v1/me", "invalid-credential", 401},
 					{"/billing/v1/me/invoices/" + invoice.ID.String(), a.aliceToken, 200},
-					{"/billing/v1/me/invoices/" + strings.Replace(invoice.ID.String(), "in_", "%6Frd_", 1), a.aliceToken, 200},
+					{"/billing/v1/me/invoices/" + strings.Replace(invoice.ID.String(), "in_", "%69n_", 1), a.aliceToken, 200},
 					{"/billing/v1/me/invoices/" + invoice.ID.String() + "%2Fextra", a.aliceToken, 404},
 					{"/billing/v1/me/invoices/" + invoice.ID.String(), a.bobToken, 404},
 				} {

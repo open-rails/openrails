@@ -1026,7 +1026,7 @@
     {
       "id": "OR-J28-S04",
       "journey": "J28",
-      "name": "Duplicate and out-of-invoice callback settles once without regression"
+      "name": "Duplicate and out-of-order callback settles once without regression"
     },
     {
       "id": "OR-J28-S05",

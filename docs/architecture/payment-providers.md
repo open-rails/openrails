@@ -171,7 +171,7 @@ parks for a person.
 
 Checks:
 - `markSubscriptionDirty` (`internal/modules/webhooks/converge.go`) only enqueues; state changes go through `ApplyDecision`.
-- OR-J28-S04 (duplicate, out-of-invoice) and OR-J28-S05 (callback during a fetch).
+- OR-J28-S04 (duplicate, out-of-order) and OR-J28-S05 (callback during a fetch).
 - OR-J15-S01, S03, S04: a missing callback repaired from the Query API, a skipped cycle collected only after proven absence, a reversed charge never recollected.
 - OR-J15-S18, S19: any other 404 fails the converge, which retries with access intact.
 

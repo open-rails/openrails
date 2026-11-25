@@ -110,7 +110,7 @@ type LineKey struct {
 	Amount   *int64
 }
 
-// LinesDigest names a set of lines, in any invoice.
+// LinesDigest names a set of lines, in any order.
 func LinesDigest(lines []LineKey) []byte {
 	keys := make([]string, len(lines))
 	for i, l := range lines {

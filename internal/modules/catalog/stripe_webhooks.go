@@ -597,7 +597,7 @@ func (s *StripeCatalogService) RetireSupersededWebhookEndpoints(ctx context.Cont
 	return out, nil
 }
 
-// sameStringSet compares two string slices as sets (invoice-insensitive).
+// sameStringSet compares two string slices as sets (order-insensitive).
 func sameStringSet(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

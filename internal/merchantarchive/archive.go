@@ -419,19 +419,19 @@ func exportQuery(p contract.Profile) string {
 		cols[i] = "(" + expr + ")::text"
 	}
 	from := "billing." + p.Name + " t"
-	invoice := ""
+	order := ""
 	for _, c := range p.Columns {
 		if c.Name == "id" {
-			invoice = "t.id"
+			order = "t.id"
 			break
 		}
 	}
-	if invoice == "" {
+	if order == "" {
 		parts := make([]string, len(p.Columns))
 		for i, c := range p.Columns {
 			parts[i] = "t." + pgx.Identifier{c.Name}.Sanitize() + "::text COLLATE \"C\" NULLS FIRST"
 		}
-		invoice = strings.Join(parts, ",")
+		order = strings.Join(parts, ",")
 	}
 	prefix := ""
 	parent, childParent := "", ""
@@ -444,9 +444,9 @@ func exportQuery(p contract.Profile) string {
 	if parent != "" {
 		prefix = "WITH RECURSIVE lineage AS (SELECT id,0 depth FROM billing." + p.Name + " WHERE merchant_id=$1 AND " + parent + " IS NULL UNION ALL SELECT c.id,l.depth+1 FROM billing." + p.Name + " c JOIN lineage l ON " + childParent + "=l.id WHERE c.merchant_id=$1) "
 		from += " JOIN lineage l ON l.id=t.id"
-		invoice = "l.depth,t.id"
+		order = "l.depth,t.id"
 	}
-	return prefix + "SELECT " + strings.Join(cols, ",") + " FROM " + from + " WHERE " + exportWhere(p.Name) + " ORDER BY " + invoice
+	return prefix + "SELECT " + strings.Join(cols, ",") + " FROM " + from + " WHERE " + exportWhere(p.Name) + " ORDER BY " + order
 }
 
 func exportWhere(table string) string {

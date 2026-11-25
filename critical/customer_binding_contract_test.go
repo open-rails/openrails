@@ -107,7 +107,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 			sdk, err = filepath.Abs("../web/billing-ui/dist/client.js")
 			require.NoError(t, err)
 		}
-		sdkInput, err := json.Marshal(map[string]string{"sdk": sdk, "base": server.URL + "/account/links/" + link, "token": a.aliceToken, "order": invoice.ID.String(), "customer": customer.String()})
+		sdkInput, err := json.Marshal(map[string]string{"sdk": sdk, "base": server.URL + "/account/links/" + link, "token": a.aliceToken, "invoice": invoice.ID.String(), "customer": customer.String()})
 		require.NoError(t, err)
 		sdkCall := exec.CommandContext(t.Context(), "node", "customer_binding_sdk.mjs")
 		sdkCall.Stdin = bytes.NewReader(sdkInput)

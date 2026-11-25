@@ -333,7 +333,7 @@ func shouldTreatCCBillErrorAsNonRetryable(err error) bool {
 		}
 	}
 
-	// Subscription lookups can fail due to out-of-invoice webhook delivery.
+	// Subscription lookups can fail due to out-of-order webhook delivery.
 	// Keep these retryable.
 	if db.IsNotFound(err) {
 		return false

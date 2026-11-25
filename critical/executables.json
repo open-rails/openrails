@@ -2106,16 +2106,16 @@
       "TestBooks/OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit"
     ],
     "OR-J40-S08": [
-      "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-invoice-both-commit"
+      "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-order-both-commit"
     ],
     "OR-J40-S09": [
-      "TestBooks/OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-invoices-all-commit"
+      "TestBooks/OR-J40-S09/two-checkouts-and-a-usage-collection-in-opposite-lock-orders-all-commit"
     ],
     "OR-J40-S23": [
       "TestBooks/OR-J40-S23/an-event-queued-before-or-after-a-ledger-transfer-both-commit"
     ],
     "OR-J40-S24": [
-      "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-invoice-both-commit"
+      "TestBooks/OR-J40-S24/one-transaction-posting-for-two-merchants-in-either-order-both-commit"
     ],
     "OR-J40-S40": [
       "TestProcessorFees/OR-J40-S40/a-stripe-charge-fee-and-a-dispute-fee-post-once-exactly"

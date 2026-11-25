@@ -366,7 +366,7 @@ func (s *MoneyService) DepositBatch(ctx context.Context, items []DepositParams) 
 
 // countDepositUnits counts the merchant's units the deposits are in before
 // any customer is locked: a first use takes the units lock first, so two
-// batches never wait on each other's locks in opposite invoices.
+// batches never wait on each other's locks in opposite orders.
 func countDepositUnits(ctx context.Context, q *gen.Queries, items ...DepositParams) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
