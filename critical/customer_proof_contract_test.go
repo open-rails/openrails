@@ -36,14 +36,14 @@ func (a *proofAuthenticator) RootScope(ctx context.Context) (auth.Scope, error) 
 }
 
 // authenticateCustomerProof authenticates token as a browser presents it: with
-// sender's proof, else as ak's sessions are (authtest.Authorize).
+// sender's proof, else as ak's sessions are (present).
 func authenticateCustomerProof(t *testing.T, ak *authkit.Client, provider auth.Authenticator, token string, sender *authtest.DPoPKey) (auth.Verified, *http.Request) {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "https://critical.invalid/customer-proof", nil)
 	if sender != nil {
 		sender.Authorize(t, request, token, "")
 	} else {
-		authtest.Authorize(t, ak, request, token)
+		present(t, ak, request, token)
 	}
 	verified, err := provider.Authenticate(request)
 	var challenge *auth.Challenge
@@ -85,7 +85,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		provider := &proofAuthenticator{bindingAuthenticator{Authenticator: a.auth.Authenticator()}}
 		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://critical.invalid/customer-proof", nil)
 		require.NoError(t, err)
-		authtest.Authorize(t, a.auth, request, a.aliceToken)
+		present(t, a.auth, request, a.aliceToken)
 		verified, err := provider.Authenticate(request)
 		require.NoError(t, err)
 		for range 2 {
@@ -100,7 +100,7 @@ func TestCustomerProofResolution(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, before.LastSeenAt, after.LastSeenAt, "reading proof must not refresh or admit the customer")
 		other := billing.CustomerID(uuid.MustParse(a.bob.ID))
-		authtest.Authorize(t, a.auth, request, a.bobToken)
+		present(t, a.auth, request, a.bobToken)
 		missing, err := provider.Authenticate(request)
 		require.NoError(t, err)
 		_, err = a.engine.ResolveCustomer(t.Context(), provider, missing)
@@ -296,7 +296,7 @@ func TestCustomerProofResolution(t *testing.T) {
 				require.ErrorIs(t, <-done, want)
 			})
 		}
-		fresh := authtest.SignIn(t, a.auth, a.alice)
+		fresh := signIn(t, a.auth, a.alice)
 		verified, _ := authenticateCustomerProof(t, a.auth, provider, fresh.AccessToken, nil)
 		a.storage.cut()
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)

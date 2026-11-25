@@ -99,7 +99,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 	if cards != nil {
 		cardURL, err := url.Parse(cards.server.URL)
 		require.NoError(t, err)
-		cardProxy := httputil.NewSingleHostReverseProxy(cardURL)
+		cardProxy := browserSession(t, cards.auth, httputil.NewSingleHostReverseProxy(cardURL))
 		mux.HandleFunc("/__nmi/", func(w http.ResponseWriter, r *http.Request) {
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/__nmi")
 			r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, "/__nmi")

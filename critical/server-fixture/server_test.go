@@ -313,7 +313,12 @@ func TestServerFixture(t *testing.T) {
 				if len(scopes) == 0 {
 					scopes = []string{"openid", billing.ScopeSelf}
 				}
-				result.Result = as.Authorize(t, user, authtest.CodeFlow{ClientID: shop.OAuth.ClientID, ClientSecret: *shop.OAuth.ClientSecret, RedirectURI: "https://" + cmd.Merchant + ".critical.invalid/callback", Resource: httpServer.URL, Scopes: scopes, Nonce: cmd.Nonce, Consent: true})
+				tokens := as.Authorize(t, user, authtest.CodeFlow{ClientID: shop.OAuth.ClientID, ClientSecret: *shop.OAuth.ClientSecret, RedirectURI: "https://" + cmd.Merchant + ".critical.invalid/callback", Resource: httpServer.URL, Scopes: scopes, Nonce: cmd.Nonce, Consent: true})
+				// A user grant is DPoP-bound: "dpop" presents it with its key.
+				if tokens.DPoP != nil {
+					tokens.DPoP.Holds(tokens.AccessToken)
+				}
+				result.Result = tokens
 			case "stale-sign-in":
 				// A freshly issued/renewed token may carry an older sign-in.
 				// Preserve the real session and every authority claim, changing

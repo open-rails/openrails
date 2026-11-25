@@ -76,13 +76,14 @@ def main():
                 "database": {"url": owned_dsn}, "redis": {"url": "redis://" + redis},
                 "public_url": origin,
                 "checkout_origin": "http://" + checkout,
-                "auth": {"keys": {"path": str(temporary / "keys")}},
             }
             config_path = temporary / "config.json"
             config_path.write_text(json.dumps(config))
             config_path.chmod(0o600)
             # Do not inherit another application's DB/auth/provider configuration.
             env = {key: os.environ[key] for key in ("PATH", "HOME", "LANG", "TZ") if key in os.environ}
+            # AuthKit generates the loopback issuer's development keys here.
+            env["XDG_STATE_HOME"] = str(temporary / "state")
             with log_path.open("wb") as log:
                 child = subprocess.Popen([str(binary), "--config", str(config_path), "run-server"],
                                          cwd=temporary, env=env, stdout=log, stderr=subprocess.STDOUT)

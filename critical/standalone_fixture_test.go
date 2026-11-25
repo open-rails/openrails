@@ -5,7 +5,6 @@ package critical_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -176,7 +175,7 @@ func (w *standaloneWorld) authorize(t *testing.T, req *http.Request, token strin
 	if token == "" {
 		return
 	}
-	if !dpopBound(token) {
+	if confirmation(token) == "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 		return
 	}
@@ -187,24 +186,6 @@ func (w *standaloneWorld) authorize(t *testing.T, req *http.Request, token strin
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
-}
-
-// dpopBound reports a JWT whose cnf names a DPoP key (RFC 9449 §6.1).
-func dpopBound(token string) bool {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-	var claims struct {
-		Cnf struct {
-			JKT string `json:"jkt"`
-		} `json:"cnf"`
-	}
-	return json.Unmarshal(payload, &claims) == nil && claims.Cnf.JKT != ""
 }
 
 func (w *standaloneWorld) command(t *testing.T, in any, out any) {

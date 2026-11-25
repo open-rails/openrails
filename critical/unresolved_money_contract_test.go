@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -36,7 +35,7 @@ func TestUnresolvedMoneyContracts(t *testing.T) {
 		require.NoError(t, err)
 		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, child.url+"/v1/me/invoices", bytes.NewReader(body))
 		require.NoError(t, err)
-		authtest.Authorize(t, a.auth, request, a.aliceToken)
+		present(t, a.auth, request, a.aliceToken)
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Idempotency-Key", "checkout-process-death")
 		done := make(chan error, 1)

@@ -71,7 +71,7 @@ func consoleStaff(t *testing.T, a *authorityWorld, name string, perms ...billing
 	require.NoError(t, err)
 	_, err = a.auth.SetGroupRole(t.Context(), iam.SystemIdentity(), a.alphaGroup, iam.UserSubject(user.ID), role.Name)
 	require.NoError(t, err)
-	return authtest.SignIn(t, a.auth, user).AccessToken
+	return signIn(t, a.auth, user).AccessToken
 }
 
 // consoleOperator holds what a person reviewing an import needs: merchant

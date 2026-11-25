@@ -229,7 +229,7 @@ func TestCCBillIdentity(t *testing.T) {
 			a := ccbillWebhookWorld(t, func(w *world) { w.posture = "full" })
 			price := ccbillMemberPrice(t, a.alpha)
 			erin := authtest.NewUser(t, a.auth)
-			token := authtest.SignIn(t, a.auth, erin).AccessToken
+			token := signIn(t, a.auth, erin).AccessToken
 			// The page names the customer: the options say what it still needs,
 			// and paying without it is refused in the customer's words.
 			requires := func(token string) []string {
@@ -245,7 +245,7 @@ func TestCCBillIdentity(t *testing.T) {
 			require.Empty(t, requires(token), "a verified email and username name the customer")
 			unverified, err := a.auth.CreateUser(t.Context(), iam.NewUser{Email: "unverified-" + erin.Username + "@example.com", Username: "unverified" + erin.Username[4:], Password: authtest.Password})
 			require.NoError(t, err)
-			pending := authtest.SignIn(t, a.auth, authtest.User{User: unverified, Password: authtest.Password}).AccessToken
+			pending := signIn(t, a.auth, authtest.User{User: unverified, Password: authtest.Password}).AccessToken
 			require.Equal(t, []string{"verified_email"}, requires(pending))
 			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", pending, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
 				Payment: &billing.InvoicePaymentParams{ReturnURL: alphaSite + "/paid"}},
