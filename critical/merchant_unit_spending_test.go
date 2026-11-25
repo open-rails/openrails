@@ -521,8 +521,9 @@ func unitUsage(t *testing.T) {
 	completion.capture(t, billing.CaptureUsage{Dimensions: map[string]int64{"tokens": 2500}})
 
 	// A top-up posts the usage first: the lot expiring soonest pays. Usage
-	// at a movement's instant is not before its cut: a second passes.
-	a.clock.Advance(time.Second)
+	// at a movement's instant is not before its cut: a second passes, after
+	// the gates' own clock.
+	a.clock.Advance(time.Since(a.clock.Now()) + time.Second)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{
 		{CustomerID: customer, Currency: "GOLD", Amount: 1, Source: "critical", SourceID: "post-gold"},
 		{CustomerID: customer, Currency: "CREDITS", Amount: 1, Source: "critical", SourceID: "post-credits"},
@@ -544,7 +545,7 @@ func unitUsage(t *testing.T) {
 	over := admitImages(t, a, thin, "over", 2)
 	require.True(t, over.Allowed())
 	over.capture(t, imageUse(4))
-	a.clock.Advance(time.Second)
+	a.clock.Advance(time.Since(a.clock.Now()) + time.Second)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: thin, Currency: "GOLD", Amount: 5, Source: "critical", SourceID: "after"}})
 	require.NoError(t, err)
 	unitBalance(t, a.alpha, thin, "GOLD", 5, 0, 5)
@@ -587,7 +588,7 @@ func unitOverrun(t *testing.T) {
 	// deposit, takes the 20 and forgives 8: nothing is owed in a unit.
 	first.capture(t, imageUse(5))
 	phone.capture(t, imageUse(2))
-	a.clock.Advance(time.Second)
+	a.clock.Advance(time.Since(a.clock.Now()) + time.Second)
 	_, err = a.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: s.alice, Currency: "GOLD", Amount: 1, Source: "critical", SourceID: "post"}})
 	require.NoError(t, err)
 	unitBalance(t, a.alpha, s.alice, "GOLD", 1, 0, 1)

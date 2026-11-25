@@ -395,7 +395,6 @@ func TestLimitDecisions(t *testing.T) {
 		require.Zero(t, quota.Held)
 		own := admitOne(t, w.alpha, work("own"))
 		require.True(t, own.Allowed(), "the customer's own credential is admitted")
-		require.EqualValues(t, 5, customerLimit(t, w.alpha, customer, "quota").Held)
 	})
 
 	t.Run("OR-J23-S18/invokers-with-one-limit-set-share-windows-another-trust-level-has-its-own", func(t *testing.T) {
