@@ -27,8 +27,6 @@ config:
   # public_billing_base_url: https://billing.example.com
   # The server's AuthKit, in AuthKit's keys (AUTH_<PATH> env).
   # auth:
-  #   # Required: generate once and keep this deployment's account directory ID.
-  #   default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11
   #   token:
   #     issuer: https://billing.example.com # https, required
   #   resource:
@@ -74,8 +72,8 @@ secrets:
   # Environment variables win over files.
   files: []
   # A Secret holding AuthKit's keys.json and totp.key, mounted at /vault/auth
-  # and reloaded when it changes. Empty mounts a scratch directory, which
-  # only auth.keys.allow_ephemeral_dev_keys can use, and only with one replica.
+  # and reloaded when it changes. Empty mounts a scratch directory, which only
+  # a loopback issuer's generated development keys can use, with one replica.
   authKeys: ""
   # Merchant manifest overlays: a Secret key holding YAML in the manifest's
   # shape (PSP credentials kept outside Vault), added to

@@ -98,9 +98,10 @@ type Config struct {
 	// resource server (Auth.Resource; its ID defaults to
 	// Engine.PublicBillingBaseURL) and its trusted issuers. It decides who
 	// every request is; the server only maps merchants to AuthKit groups.
-	// Auth.Token.Issuer and Auth.DefaultTenantID are required. DefaultTenantID
-	// identifies the persisted platform/operator account directory, not a
-	// merchant's customer tenant. The server sets what is the product's:
+	// Auth.Token.Issuer is required. AuthKit is single-tenant unless
+	// Auth.Tenancy says otherwise: it creates its one account directory on a
+	// fresh database, or adopts the one there. The server sets what is the
+	// product's:
 	// the merchant roles, the API key prefix, the issued audience, the
 	// resource's scopes, the enabled console's OAuth client (openrails-console),
 	// a 15-minute access-token lifetime unless
@@ -216,9 +217,9 @@ type Deps struct {
 	Engine openrails.Deps
 	// Auth is what the server's AuthKit reaches: its email and SMS senders,
 	// its signing key source and the rest of authkit.Deps. Nil Postgres is a
-	// pool of its own on the engine's database, nil Redis the engine's, and
-	// nil Email renders AuthKit's email and sends it through the engine's
-	// sender.
+	// pool of its own on the engine's database, nil Redis the engine's, nil
+	// Logger the engine's, and nil Email renders AuthKit's email and sends it
+	// through the engine's sender.
 	Auth authkit.Deps
 	// CustomerAdmissionPolicy may refuse an otherwise verified ordinary customer
 	// request before automatic customer admission. The original identity and
@@ -266,9 +267,6 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		ctx = context.Background()
 	}
 	cfg = cfg.WithDefaults()
-	if err := controlplane.RequireDefaultTenant(cfg.Auth); err != nil {
-		return nil, err
-	}
 	for _, m := range cfg.Engine.Merchants {
 		if m.Issuer != "" {
 			return nil, fmt.Errorf("server: Engine.Merchants %q's Issuer binds an embedded host's own issuer to its merchant; a standalone server's credentials are bound to a merchant by its AuthKit group", m.Slug)
@@ -325,6 +323,9 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 			return fail(fmt.Errorf("server: AuthKit pool: %w", err))
 		}
 		akDeps.Postgres = s.pool
+	}
+	if akDeps.Logger == nil {
+		akDeps.Logger = logger
 	}
 	if akDeps.Redis == nil && s.graph.RedisClient != nil {
 		akDeps.Redis = s.graph.RedisClient

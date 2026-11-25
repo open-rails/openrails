@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
-	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	"github.com/open-rails/openrails/server/internal/hostdeps"
 )
@@ -235,9 +234,6 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 	if host == nil {
 		return errors.New("standalone config is required")
 	}
-	if err := controlplane.RequireDefaultTenant(host.Server.Auth); err != nil {
-		return err
-	}
 	database, err := openCLIDB(ctx)
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
@@ -260,5 +256,5 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 	// configuration without building its roles, HTTP handler or job workers.
 	authDatabase := host.Server.Auth.Database
 	authDatabase.RiverSchema = config.RiverSchemaName(&host.Server.Engine)
-	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{LegacyTenantID: host.Server.Auth.DefaultTenantID})
+	return authkit.Migrate(ctx, database.Pool(), authDatabase, authkit.MigrationOptions{Tenancy: host.Server.Auth.Tenancy, Logger: slog.Default()})
 }

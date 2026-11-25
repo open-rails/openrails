@@ -297,11 +297,11 @@ pkg openrails, type Route struct, Handler http.Handler
 pkg openrails, type Route struct, Method string
 pkg openrails, type Route struct, Path string
 pkg openrails, type RouteGroups struct
-pkg openrails, type RouteGroups struct, Admin bool
-pkg openrails, type RouteGroups struct, Catalog bool
-pkg openrails, type RouteGroups struct, MerchantConfig bool
-pkg openrails, type RouteGroups struct, Metrics bool
-pkg openrails, type RouteGroups struct, Programmatic bool
+pkg openrails, type RouteGroups struct, Admin bool `yaml:"admin"`
+pkg openrails, type RouteGroups struct, Catalog bool `yaml:"catalog"`
+pkg openrails, type RouteGroups struct, MerchantConfig bool `yaml:"merchant_config"`
+pkg openrails, type RouteGroups struct, Metrics bool `yaml:"metrics"`
+pkg openrails, type RouteGroups struct, Programmatic bool `yaml:"programmatic"`
 pkg openrails, type Routes struct
 pkg openrails, type Routes struct, Auth auth.Authenticator
 pkg openrails, type Routes struct, Prefix string

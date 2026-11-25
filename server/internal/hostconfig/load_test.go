@@ -56,9 +56,12 @@ func TestOneDatabaseSection(t *testing.T) {
 		}
 		return configPath
 	}
-	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\n  lease_conns: 2\nevent_retention: 48h\n"))
+	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\n  lease_conns: 2\nevent_retention: 48h\nroute_groups:\n  merchant_config: true\n"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !cfg.Server.RouteGroups.MerchantConfig {
+		t.Error("route_groups.merchant_config is read")
 	}
 	if e := cfg.Server.Engine; cfg.Database.URL != "postgres://u:p@db.internal:5432/x" || e.Database.Schema != "shop" || e.Database.RiverSchema != "shop_river" || e.Database.LeaseConns != 2 || e.EventRetention != 48*time.Hour {
 		t.Fatalf("connection %+v, engine %+v, retention %s", cfg.Database, e.Database, e.EventRetention)
@@ -69,6 +72,8 @@ func TestOneDatabaseSection(t *testing.T) {
 		"auth:\n  tokn: {}\n":           "unknown configuration keys refuse boot: auth.tokn",
 		"database:\n  sqltrace: true\n": "unknown configuration keys refuse boot: database.sqltrace",
 		"db:\n  url: x\n":               "db was merged into database",
+		"auth:\n  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11\n": "auth.default_tenant_id was removed",
+		"auth:\n  keys:\n    allow_ephemeral_dev_keys: true\n":               "auth.keys.allow_ephemeral_dev_keys was removed",
 	} {
 		if _, err := Load(write(t, yaml)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", yaml, err, want)
