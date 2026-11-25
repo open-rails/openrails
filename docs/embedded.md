@@ -115,7 +115,6 @@ an optional section is on once set.
 | Field | Meaning |
 |---|---|
 | `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
-| `UsageBillingEnabled` | Bills owed usage automatically ([usage](client.md#usage-and-running-charges)). Deploy every worker first. |
 | `Database` | `billing.DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
 | `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)); code only. |
@@ -220,7 +219,7 @@ The catalog has its own lifecycle: `New` never applies one ([catalog](client.md#
 one instance migrates, the rest wait. To migrate as a deploy step instead, run
 `openrails.Migrate(ctx, pool, cfg.Database)` (or `openrails migrate up`) and set
 `DatabaseConfig.SkipMigrations` on the servers, which then only check the ledger.
-With an event store, also run `openrails.MigrateClickHouse(ctx, conn, cfg.ClickHouse)`; `SkipMigrations` checks its migrations too.
+With an event store, also run `openrails.MigrateClickHouse(ctx, pool, conn, cfg.ClickHouse)`, which takes its own advisory lock on `pool`; `SkipMigrations` checks its migrations too.
 
 - An older build boots on a schema a newer one migrated (it leaves unknown
   migrations alone), so rolling upgrades work in both directions within v1.

@@ -458,7 +458,7 @@ func TestRevenueRecognition(t *testing.T) {
 	t.Run("OR-J41-S09/a-usage-orders-payment-books-its-cash-and-leaves-it-for-the-receivable", func(t *testing.T) {
 		for _, collection := range []string{"card", "remittance"} {
 			t.Run(collection, func(t *testing.T) {
-				a, _, customer := usageBillingWorld(t, true, collection == "remittance")
+				a, _, customer := usageBillingWorld(t, collection == "remittance")
 				oneUsage(t, a.alpha, usageInput(customer, "billed-work", 3))
 				// The pass posts usage taken in before its instant.
 				a.clock.Advance(time.Second)

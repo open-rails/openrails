@@ -298,7 +298,7 @@ func TestMRRRisk(t *testing.T) {
 	})
 
 	t.Run("OR-J42-S15/usage-delinquency-puts-the-customers-mrr-at-risk-and-clears-it", func(t *testing.T) {
-		a, p, customer := usageBillingWorld(t, true, true)
+		a, p, customer := usageBillingWorld(t, true)
 		sub := nmiMembershipOn(t, a, p, catalog.Field[int]{})
 		oneUsage(t, a.alpha, usageInput(customer, "overdue-work", 3))
 		fleet := startFleet(t, a.world)

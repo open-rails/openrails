@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding"
 	"flag"
 	"fmt"
@@ -112,51 +113,50 @@ func loadDocs(settings []hostconfig.Setting) (docs, error) {
 			}
 		}
 	})
-	out, err := exec.Command("go", append([]string{"list", "-f", "{{.ImportPath}}\t{{.Dir}}"}, list...)...).Output()
+	out, err := exec.CommandContext(context.Background(), "go", append([]string{"list", "-f", "{{.ImportPath}}\t{{.Dir}}\t{{join .GoFiles \" \"}}"}, list...)...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("go list: %w", err)
 	}
 	d := docs{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		pkg, dir, _ := strings.Cut(line, "\t")
+		pkg, rest, _ := strings.Cut(line, "\t")
+		dir, names, _ := strings.Cut(rest, "\t")
 		fset := token.NewFileSet()
-		parsed, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, parser.ParseComments)
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range parsed {
-			for _, f := range p.Files {
-				ast.Inspect(f, func(n ast.Node) bool {
-					ts, ok := n.(*ast.TypeSpec)
-					if !ok {
-						return true
-					}
-					st, ok := ts.Type.(*ast.StructType)
-					if !ok {
-						return true
-					}
-					previous := ""
-					for _, field := range st.Fields.List {
-						doc := field.Doc.Text()
-						if doc == "" {
-							doc = field.Comment.Text()
-						}
-						for _, name := range field.Names {
-							text := doc
-							if text == "" && strings.Contains(previous, name.Name) {
-								text = previous // "Host and Port are …"
-							}
-							if text != "" {
-								d[pkg+"."+ts.Name.Name+"."+name.Name] = sentence(text)
-							}
-						}
-						if doc != "" {
-							previous = doc
-						}
-					}
-					return false
-				})
+		for _, name := range strings.Fields(names) {
+			f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments)
+			if err != nil {
+				return nil, err
 			}
+			ast.Inspect(f, func(n ast.Node) bool {
+				ts, ok := n.(*ast.TypeSpec)
+				if !ok {
+					return true
+				}
+				st, ok := ts.Type.(*ast.StructType)
+				if !ok {
+					return true
+				}
+				previous := ""
+				for _, field := range st.Fields.List {
+					doc := field.Doc.Text()
+					if doc == "" {
+						doc = field.Comment.Text()
+					}
+					for _, name := range field.Names {
+						text := doc
+						if text == "" && strings.Contains(previous, name.Name) {
+							text = previous // "Host and Port are …"
+						}
+						if text != "" {
+							d[pkg+"."+ts.Name.Name+"."+name.Name] = sentence(text)
+						}
+					}
+					if doc != "" {
+						previous = doc
+					}
+				}
+				return false
+			})
 		}
 	}
 	return d, nil
