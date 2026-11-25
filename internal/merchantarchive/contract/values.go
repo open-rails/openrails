@@ -47,7 +47,17 @@ func ValidateValues(p Profile, values []*string) error {
 		base := value(p, values, "base_revision")
 		applied := value(p, values, "applied_revision")
 		digest := value(p, values, "request_sha256")
-		if raw == nil || id == nil || base == nil || applied == nil || digest == nil || json.Unmarshal([]byte(*raw), &receipt) != nil {
+		if raw == nil || id == nil || base == nil || applied == nil || digest == nil {
+			return fmt.Errorf("invalid catalog application receipt")
+		}
+		receipt.ApplicationID = *id
+		var err error
+		receipt.BaseRevision, err = strconv.ParseInt(*base, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid catalog application receipt")
+		}
+		receipt.AppliedRevision, err = strconv.ParseInt(*applied, 10, 64)
+		if err != nil || json.Unmarshal([]byte(*raw), &receipt) != nil {
 			return fmt.Errorf("invalid catalog application receipt")
 		}
 		if receipt.ApplicationID != *id || strconv.FormatInt(receipt.BaseRevision, 10) != *base || strconv.FormatInt(receipt.AppliedRevision, 10) != *applied || receipt.BaseRevision < 0 || receipt.AppliedRevision != receipt.BaseRevision+1 || receipt.Replayed || receipt.ProductsChanged < 0 || receipt.PricesChanged < 0 {

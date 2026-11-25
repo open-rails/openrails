@@ -136,17 +136,13 @@ func (s *Service) recordCatalogReceipt(ctx context.Context, receipt *billing.Cat
 
 // storedCatalogReceipt is the retained receipt shape.
 type storedCatalogReceipt struct {
-	ApplicationID   string `json:"application_id"`
-	BaseRevision    int64  `json:"base_revision"`
-	AppliedRevision int64  `json:"applied_revision"`
-	Replayed        bool   `json:"replayed"`
-	ProductsChanged int    `json:"products_changed"`
-	PricesChanged   int    `json:"prices_changed"`
+	Replayed        bool `json:"replayed"`
+	ProductsChanged int  `json:"products_changed"`
+	PricesChanged   int  `json:"prices_changed"`
 }
 
 func storedReceipt(r billing.CatalogApplicationReceipt) storedCatalogReceipt {
-	return storedCatalogReceipt{ApplicationID: r.ApplicationID, BaseRevision: r.BaseRevision, AppliedRevision: r.AppliedRevision,
-		Replayed: r.Replayed, ProductsChanged: r.ProductsChanged, PricesChanged: r.PricesChanged}
+	return storedCatalogReceipt{Replayed: r.Replayed, ProductsChanged: r.ProductsChanged, PricesChanged: r.PricesChanged}
 }
 
 // announceKeyChanges counts each changed product's holders into its change

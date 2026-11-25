@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -169,6 +170,12 @@ products:
 		replay, err := a.alphaRemote.ApplyCatalog(t.Context(), document(`{display_name: Plus, entitlements: [hd]}`, "sd"), billing.ApplyCatalogParams{})
 		require.NoError(t, err)
 		require.True(t, replay.Replayed)
+		require.Equal(t, first.ApplicationID, replay.ApplicationID)
+		require.Equal(t, first.BaseRevision, replay.BaseRevision)
+		require.Equal(t, first.AppliedRevision, replay.AppliedRevision)
+		var duplicated bool
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT result ?| ARRAY['application_id', 'base_revision', 'applied_revision'] FROM "+pgx.Identifier{a.schema, "catalog_applications"}.Sanitize()+" WHERE merchant_id = $1 AND application_id = $2", a.alpha.MerchantID().UUID(), first.ApplicationID).Scan(&duplicated))
+		require.False(t, duplicated)
 		require.Len(t, historyOf(t, a.alphaRemote, billing.LogListParams{}), len(entries), "a replay records nothing")
 
 		_, err = a.alphaRemote.ApplyCatalog(t.Context(), document(`{display_name: Plus HD, entitlements: [hd, uhd]}`, ""), billing.ApplyCatalogParams{})

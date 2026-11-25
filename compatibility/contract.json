@@ -2015,7 +2015,7 @@
       "type inspectionCursor struct {\n\tKind string    `json:\"kind\"`\n\tAt   time.Time `json:\"at\"`\n\tKey  string    `json:\"key\"`\n\tFrom time.Time `json:\"from\"`\n\tTo   time.Time `json:\"to\"`\n}",
       "type invoiceKeyResult struct {\n\tInvoiceID uuid.UUID         `json:\"invoice_id\"`\n\tDigest    []byte            `json:\"digest\"`\n\tStatus    int               `json:\"status,omitempty\"`\n\tCode      billing.ErrorCode `json:\"code,omitempty\"`\n\tInvoice   *billing.Invoice  `json:\"invoice,omitempty\"`\n}",
       "type limitPosition struct {\n\tKey string `json:\"k\"`\n}",
-      "type storedCatalogReceipt struct {\n\tApplicationID   string `json:\"application_id\"`\n\tBaseRevision    int64  `json:\"base_revision\"`\n\tAppliedRevision int64  `json:\"applied_revision\"`\n\tReplayed        bool   `json:\"replayed\"`\n\tProductsChanged int    `json:\"products_changed\"`\n\tPricesChanged   int    `json:\"prices_changed\"`\n}",
+      "type storedCatalogReceipt struct {\n\tReplayed        bool `json:\"replayed\"`\n\tProductsChanged int  `json:\"products_changed\"`\n\tPricesChanged   int  `json:\"prices_changed\"`\n}",
       "type usageCursor struct {\n\tAmount   int64                `json:\"a\"`\n\tKey      string               `json:\"k\"`\n\tCurrency string               `json:\"c\"`\n\tGroupBy  billing.UsageGroupBy `json:\"g\"`\n\tFrom     time.Time            `json:\"f\"`\n\tTo       time.Time            `json:\"t\"`\n}"
     ],
     "internal/usageerasure": [
