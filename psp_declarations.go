@@ -138,6 +138,19 @@ type CCBillPSP struct {
 	DatalinkUsername string `psp:"secrets.datalink_username"`
 	// DatalinkPassword is the DataLink user's password.
 	DatalinkPassword string `psp:"secrets.datalink_password"`
+	// WebhookToken is the secret last segment of the webhook URL registered in
+	// CCBill, /v1/webhooks/ccbill/{account_id}/{token}: 32 or more of
+	// A-Z, a-z, 0-9, _ and -. Declared, a delivery without it is refused.
+	WebhookToken string `psp:"secrets.webhook_token"`
+	// WebhookTokenPrevious is the rotated-out token. It verifies only until
+	// WebhookOverlapExpiresAt, which must be set with it.
+	WebhookTokenPrevious string `psp:"secrets.webhook_token_previous"`
+	// WebhookOverlapExpiresAt ends the previous token's verification, RFC 3339.
+	WebhookOverlapExpiresAt time.Time `psp:"webhook_overlap_expires_at"`
+	// RequireWebhookToken false still accepts a delivery to the tokenless URL
+	// while the URL in CCBill is changed; a wrong token is always refused.
+	// Unset is true.
+	RequireWebhookToken *bool `psp:"require_webhook_token"`
 	// DisputeRatioLimit is the acquirer's limit on chargebacks over settled
 	// sales in a month, as a percentage ("0.9%"): monitored like a card
 	// network's program. "" declares none.
@@ -150,11 +163,17 @@ func (p CCBillPSP) PSPConfig() billing.PSPConfig {
 		Rail: billing.RailCCBill, Environment: p.Environment, Archived: p.Archived,
 		AccountID: rails.Account(models.RailCCBill, map[string]string{"client_accnum": p.ClientAccnum, "client_subacc": p.ClientSubacc}),
 		Secrets: secretSlots(map[string]string{
-			"salt":              p.Salt,
-			"datalink_username": p.DatalinkUsername,
-			"datalink_password": p.DatalinkPassword,
+			"salt":                   p.Salt,
+			"datalink_username":      p.DatalinkUsername,
+			"datalink_password":      p.DatalinkPassword,
+			"webhook_token":          p.WebhookToken,
+			"webhook_token_previous": p.WebhookTokenPrevious,
 		}),
-		Settings: settingSlots(map[string]any{"dispute_ratio_limit": p.DisputeRatioLimit}),
+		Settings: settingSlots(map[string]any{
+			"webhook_overlap_expires_at": instant(p.WebhookOverlapExpiresAt),
+			"require_webhook_token":      optional(p.RequireWebhookToken),
+			"dispute_ratio_limit":        p.DisputeRatioLimit,
+		}),
 	}
 }
 
@@ -189,6 +208,14 @@ func instant(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// optional is an unset flag as an omitted key.
+func optional(v *bool) any {
+	if v == nil {
+		return ""
+	}
+	return *v
 }
 
 func secretSlots(slots map[string]string) map[string]string {

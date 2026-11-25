@@ -65,16 +65,33 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
 
 ### Callbacks
 
-- One route, `POST /v1/webhooks/{rail}/{account_id}` (`handlers.Webhook`); the
-  path's account must equal the payload's. `routeSignedWebhook` accepts a
+- One handler, `handlers.Webhook`, on `POST /v1/webhooks/{rail}/{account_id}`
+  and, for CCBill only, `POST /v1/webhooks/{rail}/{account_id}/{token}` (any
+  other rail answers `404 route_not_found`); the path's account must equal the
+  payload's. `routeSignedWebhook` accepts a
   delivery only when exactly one PSP on that account verifies it (Stripe's
   `livemode` breaks a live/test tie).
 - NMI and Stripe are HMAC-signed. Stripe's signed `t` is a time, checked within
   5 minutes (a literal in the Stripe path of `handlers/webhook.go`); NMI's is a
   nonce, so an NMI replay is answered by the event's `event_id` alone. A thin
   Stripe event is read back first. CCBill signs nothing: its source address
-  (`webhookauth.CCBillIPAllowed`) and the payload's account authenticate it.
-- A rotated secret verifies for 24 hours;
+  (`webhookauth.CCBillIPAllowed`), the PSP's webhook token in the URL
+  (`checkCCBillWebhook`, compared in constant time with the current token, then
+  the previous one inside its overlap) and the payload's account authenticate
+  it; a delivery must pass both checks. A PSP that declares `webhook_token`
+  refuses a missing or wrong token (`401 authentication_required`, "Invalid
+  webhook token"), unless its `require_webhook_token` is false, which still
+  admits a tokenless delivery and logs a warning; a wrong token is always
+  refused. A PSP without one refuses the token URL. A tokenless delivery that
+  one candidate PSP of the account refuses for want of its token is refused
+  for all of them (`signedWebhook.veto`), never handed to a sibling without a
+  token; an undeclared PSP, or one whose account another PSP holds, admits
+  nothing. The source address is the
+  one `trusted_proxies` resolves, so a trusted proxy can name any sender; the
+  token is what a process inside that network does not hold. The request log
+  writes the token segment as `{token}` (`middleware.loggedPath`); it is never
+  stored with the event.
+- A rotated secret or CCBill webhook token verifies for 24 hours;
   `retire_webhook_overlap` ends it at once. A delivery is claimed in
   `idempotency_keys` and recorded in `webhook_events`, in the handler's
   transaction where possible (`MarkWebhookProcessedInTx`).
@@ -272,7 +289,7 @@ Critical scenarios:
 - J10: OR-J10-S01, S03, S04 (`TestPaymentReplay`), S02 (`TestCheckoutBoundaries`), S05 (`TestInvoicePaymentReceipts`).
 - J11: OR-J11-S01, S02 (`TestProviderRecovery`), S04 (`TestUnresolvedRouting`).
 - J15: OR-J15-S01 to S04 (`TestNMIRecovery`), S06, S07 (`TestVerificationBinding`), S08 to S21 (`TestProviderTrailing`), S30 (`TestBackgroundJobs`), S70, S72 (`TestDueWork`), S71 (`TestNMIRoster`).
-- J28: OR-J28-S01 to S05, S08 (`TestCallbackContracts`), S06, S07 (`TestWebhookAccountClasses`).
+- J28: OR-J28-S01 to S05, S08 (`TestCallbackContracts`), S06, S07 (`TestWebhookAccountClasses`), S17 to S23 (`TestCCBillWebhookToken`).
 - J29: OR-J29-S01, S04 (`TestProcessRecovery`), S02, S05, S06 (`TestUnresolvedMoneyContracts`), S07, S08, S40, S41 (`TestBackgroundJobs`), S37, S70 to S73 (`TestDueWork`).
 - J37: OR-J37-S01 to S05, S63 (`TestSolanaContracts`), S07, S09, S60 to S62 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestInvoiceExpiryClock`).
 - Elsewhere: OR-J09-S05, S06 (lost and partial NMI sales), OR-J16-S04, OR-J20-S03, S70, OR-J26-S55, OR-J31-S03, S04 (copied book, export with open work), OR-J34-S05, OR-J04-S43.
@@ -284,6 +301,5 @@ Gaps:
 - CI runs against deterministic fakes, not providers; a wire change is
   unverified until exercised against the provider ([evidence](../../.claude/CLAUDE.md#rails-and-psps)).
 - `reconcile.Decide` is pure but has no table test of its own.
-- No scenario refuses a CCBill delivery from an unlisted address; the CCBill
-  tests allowlist loopback. J28 covers Stripe and NMI; CCBill callbacks only
-  appear in `TestCCBillIdentity` and `TestCCBillRefunds`.
+- CCBill's own source ranges are never exercised: the CCBill tests allowlist
+  loopback. OR-J28-S17 refuses a forwarded non-CCBill address.

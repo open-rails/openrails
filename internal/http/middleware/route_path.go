@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/logx"
@@ -28,6 +29,19 @@ func WithRoutePath(canonicalPath string) HTTPMiddleware {
 func policyRequestPath(r *http.Request) string {
 	if path, ok := r.Context().Value(routePathKey{}).(string); ok && path != "" {
 		return path
+	}
+	return r.URL.Path
+}
+
+// loggedPath is r's path as a log may hold it: a webhook URL's token segment,
+// a CCBill PSP's secret, is replaced.
+func loggedPath(r *http.Request) string {
+	before, rest, found := strings.Cut(r.URL.Path, "/v1/webhooks/")
+	if !found {
+		return r.URL.Path
+	}
+	if segments := strings.SplitN(rest, "/", 3); len(segments) == 3 {
+		return before + "/v1/webhooks/" + segments[0] + "/" + segments[1] + "/{token}"
 	}
 	return r.URL.Path
 }

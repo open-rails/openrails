@@ -77,6 +77,10 @@ psps:
     environment: ""
     # Archived drains the PSP: its subscriptions stay, it takes no new work.
     archived: false
+    # WebhookOverlapExpiresAt ends the previous token's verification, RFC 3339.
+    webhook_overlap_expires_at: ""
+    # RequireWebhookToken false still accepts a delivery to the tokenless URL while the URL in CCBill is changed; a wrong token is always refused.
+    require_webhook_token: ""
     # DisputeRatioLimit is the acquirer's limit on chargebacks over settled sales in a month, as a percentage ("0.9%"): monitored like a card network's program.
     dispute_ratio_limit: ""
     # Its credentials.
@@ -87,6 +91,10 @@ psps:
       datalink_username: ""
       # DatalinkPassword is the DataLink user's password.
       datalink_password: ""
+      # WebhookToken is the secret last segment of the webhook URL registered in CCBill, /v1/webhooks/ccbill/{account_id}/{token}: 32 or more of A-Z, a-z, 0-9, _ and -.
+      webhook_token: ""
+      # WebhookTokenPrevious is the rotated-out token.
+      webhook_token_previous: ""
   solana:
     # The rail this PSP is on.
     rail: solana

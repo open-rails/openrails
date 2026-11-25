@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,6 +93,19 @@ func ValidatePSPKeys(psp string, p billing.PSPConfig) error {
 			return fmt.Errorf("psps.%s: %w", psp, err)
 		}
 	}
+	if raw, ok := p.Settings[RequireWebhookTokenKey]; ok && raw != "" {
+		if _, isBool := raw.(bool); !isBool {
+			return fmt.Errorf("psps.%s.settings.%s must be true or false", psp, RequireWebhookTokenKey)
+		}
+	}
+	for name, value := range p.Secrets {
+		value = strings.TrimSpace(value)
+		if key := strings.ToLower(strings.TrimSpace(name)); d.Rail == models.RailCCBill && value != "" && (key == "webhook_token" || key == "webhook_token_previous") {
+			if err := ValidateCCBillWebhookToken(value); err != nil {
+				return fmt.Errorf("psps.%s.secrets.%s %w", psp, key, err)
+			}
+		}
+	}
 	secrets := make([]string, 0, len(d.CredentialKeys))
 	for _, k := range d.CredentialKeys {
 		secrets = append(secrets, k.Name)
@@ -113,6 +127,21 @@ func ValidatePSPKeys(psp string, p billing.PSPConfig) error {
 		takes = strings.Join(slices.Sorted(slices.Values(secrets)), ", ")
 	}
 	return fmt.Errorf("psps.%s.secrets: unknown %s %s (%s takes %s)", psp, field, strings.Join(unknown, ", "), d.Rail, takes)
+}
+
+// RequireWebhookTokenKey is the CCBill PSP setting that, false, still admits
+// a delivery to the tokenless webhook URL; unset or "" is true.
+const RequireWebhookTokenKey = "require_webhook_token"
+
+var ccbillWebhookTokenShape = regexp.MustCompile(`^[A-Za-z0-9_-]{32,}$`)
+
+// ValidateCCBillWebhookToken refuses a webhook token shorter than 32
+// characters or with any but A-Z, a-z, 0-9, _ and -.
+func ValidateCCBillWebhookToken(token string) error {
+	if !ccbillWebhookTokenShape.MatchString(token) {
+		return errors.New("must be at least 32 characters of A-Z, a-z, 0-9, _ and -")
+	}
+	return nil
 }
 
 // ParseMerchantDocument parses one merchant YAML document, which names its

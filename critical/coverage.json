@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 786,
+  "scenario_count": 793,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3017,6 +3017,41 @@
       "id": "OR-J28-S16",
       "journey": "J28",
       "name": "A replayed NMI chargeback batch, its reversal already booked, reverses and revokes nothing again: access the merchant restored after the dispute survives it"
+    },
+    {
+      "id": "OR-J28-S17",
+      "journey": "J28",
+      "name": "A CCBill PSP that declares a webhook token refuses a delivery without it or with a wrong one, and the right token from outside CCBill's addresses: a forged renewal extends nothing"
+    },
+    {
+      "id": "OR-J28-S18",
+      "journey": "J28",
+      "name": "A rotated-out CCBill webhook token verifies only inside its overlap"
+    },
+    {
+      "id": "OR-J28-S19",
+      "journey": "J28",
+      "name": "A CCBill PSP without a webhook token takes the tokenless URL as before and refuses the token URL"
+    },
+    {
+      "id": "OR-J28-S20",
+      "journey": "J28",
+      "name": "require_webhook_token false admits a tokenless CCBill delivery but never a wrong token"
+    },
+    {
+      "id": "OR-J28-S21",
+      "journey": "J28",
+      "name": "The webhook token URL exists only for CCBill: any other rail answers route_not_found"
+    },
+    {
+      "id": "OR-J28-S22",
+      "journey": "J28",
+      "name": "A tokenless CCBill delivery that one PSP of the account refuses for want of its token is refused for all of them, never accepted under a sibling PSP without a token; the right token reaches its own PSP"
+    },
+    {
+      "id": "OR-J28-S23",
+      "journey": "J28",
+      "name": "Rotating a CCBill webhook token over the API keeps the old one verifying for its overlap only, and a supplied previous token is refused"
     },
     {
       "id": "OR-J48-S01",

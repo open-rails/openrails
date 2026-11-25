@@ -195,7 +195,11 @@ pkg openrails, type CCBillPSP struct, DatalinkPassword string `psp:"secrets.data
 pkg openrails, type CCBillPSP struct, DatalinkUsername string `psp:"secrets.datalink_username"`
 pkg openrails, type CCBillPSP struct, DisputeRatioLimit string `psp:"dispute_ratio_limit"`
 pkg openrails, type CCBillPSP struct, Environment billing.Environment `psp:"environment"`
+pkg openrails, type CCBillPSP struct, RequireWebhookToken *bool `psp:"require_webhook_token"`
 pkg openrails, type CCBillPSP struct, Salt string `psp:"secrets.salt,required"`
+pkg openrails, type CCBillPSP struct, WebhookOverlapExpiresAt time.Time `psp:"webhook_overlap_expires_at"`
+pkg openrails, type CCBillPSP struct, WebhookToken string `psp:"secrets.webhook_token"`
+pkg openrails, type CCBillPSP struct, WebhookTokenPrevious string `psp:"secrets.webhook_token_previous"`
 pkg openrails, type Client struct
 pkg openrails, type Config = billing.Config
 pkg openrails, type CustomerBinding struct
