@@ -4175,7 +4175,6 @@
           "cancel_unsupported_on_rail",
           "invalid_param",
           "payment_in_progress",
-          "provider_cancel_held",
           "service_unavailable",
           "solana_rpc_unavailable",
           "solana_transaction_refused",
@@ -9497,7 +9496,6 @@
           "cancel_unsupported_on_rail",
           "invalid_param",
           "payment_in_progress",
-          "provider_cancel_held",
           "resource_not_found",
           "service_unavailable",
           "subscription_not_active"
