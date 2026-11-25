@@ -1,6 +1,6 @@
 # OpenRails
 
-OpenRails is a billing engine you add to an existing application. It keeps a merchant's catalog, invoices, subscriptions, prepaid balances and metered usage in your PostgreSQL, collects through NMI, Stripe, CCBill or Solana, emails customers their receipts and billing notices, and answers what each customer may access. Your app keeps its users and sign-in.
+OpenRails is a billing engine you add to an existing application. It keeps a merchant's catalog, invoices, subscriptions, prepaid balances and metered usage in your PostgreSQL, collects through NMI, Stripe, CCBill or Solana, emails customers their receipts and billing notices, and answers what content each customer may access. Your app keeps its users and sign-in.
 
 | Path | Billing runs | Start here |
 |---|---|---|
@@ -13,9 +13,23 @@ OpenRails is a billing engine you add to an existing application. It keeps a mer
 
 [The architecture docs](docs/architecture/README.md) describe each system and how it keeps OpenRails' guarantees, for people changing or reviewing it.
 
+---
+
+### Running Locally
+
+Start a standalone server for development:
+
+```sh
+docker compose up -d
+task dev
+```
+
+The merchant-dashboard (frontend) is now on localhost:5174, hosted by Vite for fast reloads. The API server is now on localhost:3054, with an Air server for fast reloads.
+
+Login to the dashboard with the provided username and password.
+
 ## License
 
-OpenRails is under the Elastic License 2.0 ([LICENSE](LICENSE)): use, change
-and self-host it for any purpose, except offering it to others as a hosted or
-managed service. The browser SDK [`@openrails/billing-ui`](web/billing-ui) is MIT
-([web/billing-ui/LICENSE](web/billing-ui/LICENSE)).
+OpenRails is under the Elastic License 2.0 ([LICENSE](LICENSE)): use, change and self-host it for any purpose, except offering it to others as a hosted or managed service.
+
+The browser SDK [`@openrails/billing-ui`](web/billing-ui) is MIT ([web/billing-ui/LICENSE](web/billing-ui/LICENSE)).
