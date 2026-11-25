@@ -24,7 +24,7 @@ func hostFleet(t *testing.T, w *world, concurrency ...int) *river.Client[pgx.Tx]
 	if len(concurrency) > 0 {
 		workers = concurrency[0]
 	}
-	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: workers}}}, w.engine.RiverJobs())
+	fleet, err := riverhelpers.New(t.Context(), w.pool, &river.Config{Schema: w.schema + "_river", Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: workers}}}, w.engine.RiverJobs())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

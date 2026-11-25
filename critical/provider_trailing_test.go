@@ -669,7 +669,7 @@ func TestProviderTrailing(t *testing.T) {
 		require.NoError(t, openrailshttp.Mount(mux, replica, openrails.Routes{Auth: tw.auth.Authenticator(), RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}))
 		second := httptest.NewServer(mux)
 		t.Cleanup(second.Close)
-		fleet, err := riverhelpers.New(t.Context(), tw.pool, &river.Config{Schema: tw.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}}}, replica.RiverJobs())
+		fleet, err := riverhelpers.New(t.Context(), tw.pool, &river.Config{Schema: tw.schema + "_river", Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}}}, replica.RiverJobs())
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
