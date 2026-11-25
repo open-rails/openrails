@@ -9,14 +9,13 @@
 # at boot and read-only. To change it in the console instead, name a Vault KV
 # mount (vault.kv_mount) and keep only the merchant's name in merchant.yaml.
 
-host: 0.0.0.0
 port: 3053
-public_billing_base_url: http://localhost:3053 # where browsers and PSPs reach this server
+public_url: http://localhost:3053 # where browsers and PSPs reach this server
 
 database:
   url: postgres://openrails:openrails@postgres:5432/openrails?sslmode=disable
 redis: # optional for one server; replicas share rate limits and spent proofs through it
-  addr: redis:6379
+  url: redis://redis:6379
 
 # The server's own AuthKit, by AuthKit's keys: its signing key, and the
 # resource server it is. Its sign-in stays off: people sign in at the app,
@@ -35,12 +34,6 @@ auth:
   # merchants' trusted issuers mint for it.
   resource:
     id: http://localhost:3053        # the tokens' aud, and where DPoP proofs point
-
-# Route groups beyond the public, customer (/v1/me) and webhook routes.
-route_groups:
-  admin: true        # customer support; the app's backend reads customers with merchant:customer:read
-  catalog: true      # product and price reads (merchant:catalog:read)
-  programmatic: true # /v1/app: the backend's entitlement checks (merchant:entitlements:read)
 
 # Receipts and payment notices, sent from the merchant's from_email.
 email_smtp:

@@ -96,7 +96,7 @@ type Config struct {
 	// Auth is the server's AuthKit, as AuthKit documents its configuration:
 	// accounts, sign-in and the tokens it issues (Auth.SignIn.DPoP), the
 	// resource server (Auth.Resource; its ID defaults to
-	// Engine.PublicBillingBaseURL) and its trusted issuers. It decides who
+	// Engine.PublicURL) and its trusted issuers. It decides who
 	// every request is; the server only maps merchants to AuthKit groups.
 	// Auth.Token.Issuer is required. AuthKit is single-tenant unless
 	// Auth.Tenancy says otherwise: it creates its one account directory on a
@@ -113,9 +113,10 @@ type Config struct {
 	// passwordless, registration). Off, the default, people sign in at a
 	// trusted issuer and AuthKit serves only its JWKS.
 	LocalSignIn bool `yaml:"local_sign_in"`
-	// Naming is the rename policy for merchant names; AuthKit's own
-	// (Auth.Username) governs usernames.
-	Naming billing.NamingConfig `yaml:"naming"`
+	// Naming is the rename policy for merchant names: renames allowed every
+	// 72 hours, a former name forwarding and reserved 90 days. AuthKit's own
+	// (Auth.Username) governs usernames. Set in code.
+	Naming billing.NamingConfig `yaml:"-"`
 	// MerchantCreation is the policy for the merchants users create and
 	// rename through a hosted product (ProvisionMerchant with an owner,
 	// RenameUserMerchant); nil for operator-provisioned
@@ -124,22 +125,16 @@ type Config struct {
 	// Set in code.
 	MerchantCreation *MerchantCreationConfig `yaml:"-"`
 
-	// RouteGroups turns the merchant route groups on, each off by default:
-	// Admin, Catalog, MerchantConfig and Metrics, and Programmatic, each
-	// route behind the server's own merchant permission (the Merchant*
-	// permissions).
-	RouteGroups openrails.RouteGroups `yaml:"route_groups"`
 	// AdminConsole controls the console at /admin and declares app sign-in
 	// methods; the zero value keeps it on. LocalSignIn is independent. Alert
 	// links point at it.
 	AdminConsole AdminConsole `yaml:"admin_console"`
 
-	// Host and Port are where Run and Serve listen.
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	// Port is where Run and Serve listen, on every interface.
+	Port int `yaml:"port"`
 	// MetricsPort is where Run and Serve also serve MetricsHandler, the
-	// operator's Prometheus /metrics, on Host, apart from the public surface.
-	// Zero serves none.
+	// operator's Prometheus /metrics, apart from the public surface. Zero
+	// serves none.
 	MetricsPort int `yaml:"metrics_port"`
 }
 
@@ -153,7 +148,6 @@ func DefaultConfig() Config {
 			Enabled: new(true), RenameInterval: new(72 * time.Hour),
 			FormerNames: billing.FormerNamesConfig{Mode: billing.FormerNamesFinite},
 		},
-		Host: "0.0.0.0",
 		Port: 3053,
 	}
 }
@@ -163,7 +157,6 @@ func DefaultConfig() Config {
 func (c Config) WithDefaults() Config {
 	d := DefaultConfig()
 	c.Engine = c.Engine.WithDefaults()
-	c.Host = cmp.Or(c.Host, d.Host)
 	c.Port = cmp.Or(c.Port, d.Port)
 	c.Naming.Enabled = cmp.Or(c.Naming.Enabled, d.Naming.Enabled)
 	c.Naming.RenameInterval = cmp.Or(c.Naming.RenameInterval, d.Naming.RenameInterval)
@@ -195,8 +188,8 @@ func resolveConsoleIssuers(declared map[string]ConsoleIssuer, resource string) (
 	return out, nil
 }
 
-// Addr is c's public listener, host:port.
-func (c Config) Addr() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
+// Addr is c's public listener, :port on every interface.
+func (c Config) Addr() string { return ":" + strconv.Itoa(c.Port) }
 
 const (
 	// drainDelay is how long Run and Serve keep serving once ctx ends, with
@@ -261,7 +254,6 @@ func init() {
 // engine, then its own AuthKit (which creates or upgrades its tables), then
 // the control plane over both and the HTTP surface. ctx bounds the wait for
 // the database.
-// Engine.Database.SkipMigrations applies to the internal AuthKit as well.
 func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -369,14 +361,14 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		}
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		RouteGroups: config.RouteGroups(cfg.RouteGroups), ConsoleDisabled: !consoleEnabled, ConsoleIssuers: consoleIssuers, Resource: akCfg.Resource.ID,
+		RouteGroups: config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}, ConsoleDisabled: !consoleEnabled, ConsoleIssuers: consoleIssuers, Resource: akCfg.Resource.ID,
 		CustomerAdmissionPolicy: admission,
 		CheckoutOrigin:          checkout, CheckoutHandler: page, ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
 	}
 	if consoleEnabled {
-		s.graph.Runtime.AlertService.SetConsoleURL(strings.TrimRight(cfg.Engine.PublicBillingBaseURL, "/") + adminconsole.Path)
+		s.graph.Runtime.AlertService.SetConsoleURL(strings.TrimRight(cfg.Engine.PublicURL, "/") + adminconsole.Path)
 	}
 	return s, nil
 }
@@ -462,7 +454,7 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	s.log.InfoContext(ctx, "OpenRails serving", "addr", ln.Addr().String())
 	var metrics *http.Server
 	if s.cfg.MetricsPort != 0 {
-		mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.MetricsPort)))
+		mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", ":"+strconv.Itoa(s.cfg.MetricsPort))
 		if err != nil {
 			_ = hs.Close()
 			return err

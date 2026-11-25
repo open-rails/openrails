@@ -9,7 +9,7 @@ import (
 )
 
 // ReturnOrigins are the exact origins one merchant's return URLs may name
-// (SEC-33), in this order: the billing origin (PublicBillingBaseURL's), the
+// (SEC-33), in this order: the billing origin (PublicURL's), the
 // origin of the merchant's declared Issuer, and its checkout.embed_origins.
 // Nothing else, so one merchant's checkout never returns to another's site.
 func ReturnOrigins(cfg *billing.Config, issuer string, embedOrigins []string) []string {
@@ -20,7 +20,7 @@ func ReturnOrigins(cfg *billing.Config, issuer string, embedOrigins []string) []
 		}
 	}
 	if cfg != nil {
-		add(cfg.PublicBillingBaseURL)
+		add(cfg.PublicURL)
 	}
 	add(issuer)
 	for _, raw := range embedOrigins {
@@ -47,7 +47,7 @@ func cfgBillingBase(cfg *billing.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.PublicBillingBaseURL
+	return cfg.PublicURL
 }
 
 // ReturnURLAllowed reports whether raw is an absolute URL whose origin is

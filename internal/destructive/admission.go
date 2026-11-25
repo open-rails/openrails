@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,7 +14,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -23,28 +23,30 @@ import (
 // Admissions owns the durable admission boundary. The root pool is retained
 // independently of domain transaction rebindings; no provider call runs here.
 type Admissions struct {
-	db        *db.DB
-	clock     clockwork.Clock
-	project   HoldProjector
-	policy    billing.DestructiveActionLimitsConfig
-	policyErr error
+	db      *db.DB
+	clock   clockwork.Clock
+	project HoldProjector
+	// policy is DefaultLimits unless a test set others (SetLimits).
+	policy atomic.Pointer[Limits]
 }
 
-// NewAdmissions admits under the deployment's limits; zero fields keep the
-// defaults.
-func NewAdmissions(database *db.DB, clock clockwork.Clock, project HoldProjector, limits billing.DestructiveActionLimitsConfig) *Admissions {
+// NewAdmissions admits under DefaultLimits.
+func NewAdmissions(database *db.DB, clock clockwork.Clock, project HoldProjector) *Admissions {
 	if clock == nil {
 		clock = clockwork.NewRealClock()
 	}
-	policy, err := config.NormalizeDestructiveActionLimits(limits)
-	return &Admissions{db: database, clock: clock, project: project, policy: policy, policyErr: err}
+	return &Admissions{db: database, clock: clock, project: project}
+}
+
+func (a *Admissions) limitsNow() Limits {
+	if l := a.policy.Load(); l != nil {
+		return *l
+	}
+	return DefaultLimits
 }
 func (a *Admissions) transaction(ctx context.Context, merchantID uuid.UUID, f func(context.Context, *gen.Queries, pgx.Tx) error) error {
 	if a == nil || a.db == nil || a.project == nil {
 		return errors.New("destructive admission and incident projector must be configured")
-	}
-	if a.policyErr != nil {
-		return a.policyErr
 	}
 	return a.db.DataPool().CommittedMerchantTx(ctx, billing.MerchantID(merchantID), func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -578,7 +580,7 @@ func (a *Admissions) GetAction(ctx context.Context, mid, id uuid.UUID) (Action, 
 // merchant's and the deployment's rise by one per 400 (hour) and 100 (day)
 // customers active in it.
 func (a *Admissions) limits(scope Scope, active int64) (int64, int64) {
-	p := a.policy
+	p := a.limitsNow()
 	switch scope {
 	case ScopeActor:
 		return p.ActorPerHour, p.ActorPerDay

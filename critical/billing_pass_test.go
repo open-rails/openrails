@@ -132,7 +132,7 @@ func awaitAnyJob(t *testing.T, events <-chan *river.Event, ids map[int64]bool) *
 func reported(t *testing.T, w *world, job int64) bool {
 	t.Helper()
 	var ok bool
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT metadata ? 'output' FROM "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+" WHERE id = $1", job).Scan(&ok))
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT metadata ? 'output' FROM "+pgx.Identifier{w.schema + "_river", "river_job"}.Sanitize()+" WHERE id = $1", job).Scan(&ok))
 	return ok
 }
 

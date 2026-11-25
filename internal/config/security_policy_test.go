@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/open-rails/openrails/billing"
@@ -11,7 +12,7 @@ import (
 // returns to the browser's origin when it is one of them, else the issuer's,
 // else the billing origin.
 func TestReturnOriginsAreTheMerchantsOwn(t *testing.T) {
-	cfg := &billing.Config{PublicBillingBaseURL: "https://billing.example.com/billing"}
+	cfg := &billing.Config{PublicURL: "https://billing.example.com/billing"}
 	alpha := ReturnOrigins(cfg, "https://alpha.example", []string{"https://shop.alpha.example"})
 	for raw, want := range map[string]bool{
 		"https://billing.example.com/account":  true,
@@ -36,5 +37,21 @@ func TestReturnOriginsAreTheMerchantsOwn(t *testing.T) {
 		if got := PortalReturnOrigin(cfg, c.issuer, []string{"https://shop.alpha.example"}, c.browser); got != c.want {
 			t.Errorf("%s: %q, want %q", name, got, c.want)
 		}
+	}
+}
+
+// A schema whose derived River schema River cannot hold refuses boot, naming
+// the key and the limit; one at the limit is accepted.
+func TestTheDerivedRiverSchemaFitsRiver(t *testing.T) {
+	fits := strings.Repeat("s", MaxRiverSchema-len("_river"))
+	if err := ValidateDatabase(billing.DatabaseConfig{Schema: fits}); err != nil {
+		t.Fatalf("%d characters: %v", len(fits), err)
+	}
+	err := ValidateDatabase(billing.DatabaseConfig{Schema: fits + "s"})
+	if err == nil || !strings.Contains(err.Error(), "database.schema") || !strings.Contains(err.Error(), "at most 46") {
+		t.Fatalf("one character more: %v", err)
+	}
+	if err := ValidateDatabase(billing.DatabaseConfig{Schema: fits + "s", RiverSchema: "river"}); err != nil {
+		t.Fatalf("a named River schema is its own: %v", err)
 	}
 }

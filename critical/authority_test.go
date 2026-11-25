@@ -164,6 +164,7 @@ func (a *authorityWorld) restart(t *testing.T) {
 	var err error
 	a.engine, err = openrails.New(t.Context(), a.cfg, a.deps)
 	require.NoError(t, err)
+	a.applyLimits()
 	a.alpha, err = declaredMerchant(a.engine, "alpha")
 	require.NoError(t, err)
 	a.beta, err = declaredMerchant(a.engine, "beta")

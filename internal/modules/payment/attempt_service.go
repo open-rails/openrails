@@ -273,17 +273,17 @@ func (s *OrderAttemptService) solanaSignerAvailable(ctx context.Context) error {
 }
 
 // getAPIBaseURL returns the API base URL for building Solana Pay URLs.
-// Uses config.PublicBillingBaseURL which should be set to the full base URL where billing routes are mounted.
+// Uses config.PublicURL which should be set to the full base URL where billing routes are mounted.
 //
 // Standalone: "https://api.mysite.com" → routes at /v1/*
 // Embedded:   "https://api.mysite.com/billing" → routes at /billing/v1/*
 //
-// Generated URLs follow the pattern: PublicBillingBaseURL + "/v1/order-attempts/:id/solana-pay"
+// Generated URLs follow the pattern: PublicURL + "/v1/order-attempts/:id/solana-pay"
 func (s *OrderAttemptService) getAPIBaseURL() string {
 	if s.config == nil {
 		return ""
 	}
-	apiURL := strings.TrimSpace(s.config.PublicBillingBaseURL)
+	apiURL := strings.TrimSpace(s.config.PublicURL)
 	if apiURL == "" {
 		return ""
 	}

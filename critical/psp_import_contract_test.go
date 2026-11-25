@@ -177,6 +177,7 @@ func (iw *importWorld) restart(t *testing.T, change func(billing.PSPs)) {
 	var err error
 	iw.engine, err = openrails.New(t.Context(), iw.cfg, iw.deps)
 	require.NoError(t, err)
+	iw.applyLimits()
 	iw.alpha, err = declaredMerchant(iw.engine, "alpha")
 	require.NoError(t, err)
 	iw.api = iw.alpha

@@ -120,11 +120,8 @@ func AuthKit(cfg *billing.Config, auth authkit.Config, opts Options) (authkit.Co
 		auth.Token.IssuedAudiences = []string{billingauth.TokenAudience}
 	}
 	auth.Database.RiverSchema = config.RiverSchemaName(cfg)
-	// A standalone server's internal AuthKit must obey the engine's startup
-	// migration policy rather than silently upgrading a second schema.
-	auth.Database.SkipMigrations = auth.Database.SkipMigrations || cfg.Database.SkipMigrations
 	if auth.Resource.ID == "" {
-		auth.Resource.ID = defaultResource(cfg.PublicBillingBaseURL)
+		auth.Resource.ID = defaultResource(cfg.PublicURL)
 	}
 	if auth.Resource.ID != "" {
 		// Preserve explicit host scopes, while the billing scopes keep their
@@ -160,7 +157,7 @@ func AuthKit(cfg *billing.Config, auth authkit.Config, opts Options) (authkit.Co
 		reg.Verification = iam.RegistrationVerificationRequired
 	}
 	if opts.LocalSignIn && opts.ConsoleClientID != "" {
-		consoleFrontend(&auth.Frontend, cfg.PublicBillingBaseURL, auth.Token.Issuer)
+		consoleFrontend(&auth.Frontend, cfg.PublicURL, auth.Token.Issuer)
 	}
 	var http authkit.HTTPConfig
 	if auth.HTTP != nil {

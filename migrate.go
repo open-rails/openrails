@@ -15,15 +15,14 @@ import (
 )
 
 // Migrate prepares OpenRails' schema and River's tables in database's
-// schemas, without constructing an engine. It runs
-// regardless of database.SkipMigrations, which controls New only.
+// schemas, without constructing an engine: ahead of a deploy, after which
+// New's own migration is a no-op under the same lock.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, database billing.DatabaseConfig) error {
 	return engine.Migrate(ctx, pool, billing.Config{Database: database}.WithDefaults())
 }
 
 // MigrateClickHouse creates or upgrades the event store's database on conn,
-// as New does with Deps.ClickHouse: run it beside Migrate when
-// billing.DatabaseConfig.SkipMigrations is set. It holds a PostgreSQL
+// as New does with Deps.ClickHouse: run it beside Migrate. It holds a PostgreSQL
 // advisory lock on pool while it migrates, so instances migrating together
 // take turns.
 func MigrateClickHouse(ctx context.Context, pool *pgxpool.Pool, conn driver.Conn, clickhouse billing.ClickHouseConfig) error {

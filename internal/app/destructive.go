@@ -17,7 +17,7 @@ import (
 // NewDestructiveAdmissions is the shared admission owner, projecting its
 // incidents through this runtime.
 func (r *Runtime) NewDestructiveAdmissions(clock clockwork.Clock) *destructive.Admissions {
-	return destructive.NewAdmissions(r.DB, clock, r.projectDestructiveHold, r.Config.DestructiveActionLimits)
+	return destructive.NewAdmissions(r.DB, clock, r.projectDestructiveHold)
 }
 
 // WireOneOffDestructiveAdmissions arms a one-off operator runtime (CLI tools

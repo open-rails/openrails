@@ -5,6 +5,7 @@ package critical_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"net/http"
 	"testing"
 
@@ -101,7 +102,7 @@ func TestDestructiveControls(t *testing.T) {
 
 		// A deployment's configured lower actor limit holds the third revoke.
 		low := newAuthorityWorld(t, func(w *world) {
-			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 2}
+			w.limits = func(l *destructive.Limits) { l.ActorPerHour = 2 }
 		})
 		var few []billing.CreateCreditGrantParams
 		for i := range 3 {

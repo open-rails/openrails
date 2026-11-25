@@ -151,8 +151,6 @@ github.com/knadh/koanf/providers/env v1.1.0 h1:U2VXPY0f+CsNDkvdsG8GcsnK4ah85WwWy
 github.com/knadh/koanf/providers/env v1.1.0/go.mod h1:QhHHHZ87h9JxJAn2czdEl6pdkNnDh/JS1Vtsyt65hTY=
 github.com/knadh/koanf/providers/file v1.2.0 h1:hrUJ6Y9YOA49aNu/RSYzOTFlqzXSCpmYIDXI7OJU6+U=
 github.com/knadh/koanf/providers/file v1.2.0/go.mod h1:bp1PM5f83Q+TOUu10J/0ApLBd9uIzg+n9UgthfY+nRA=
-github.com/knadh/koanf/providers/rawbytes v1.0.0 h1:MrKDh/HksJlKJmaZjgs4r8aVBb/zsJyc/8qaSnzcdNI=
-github.com/knadh/koanf/providers/rawbytes v1.0.0/go.mod h1:KxwYJf1uezTKy6PBtfE+m725NGp4GPVA7XoNTJ/PtLo=
 github.com/knadh/koanf/v2 v2.2.2 h1:ghbduIkpFui3L587wavneC9e3WIliCgiCgdxYO/wd7A=
 github.com/knadh/koanf/v2 v2.2.2/go.mod h1:abWQc0cBXLSF/PSOMCB/SK+T13NXDsPvOksbpi5e/9Q=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
@@ -201,12 +199,8 @@ github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 h1:yf
 github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729/go.mod h1:hVoHR2EVESiICEMbg137etN/Lx+lSrHPTD39Z/uE+2s=
 github.com/onsi/gomega v1.10.1 h1:o0+MgICZLuZ7xjH7Vx6zS/zcu93/BEp1VwkIW1mEXCE=
 github.com/onsi/gomega v1.10.1/go.mod h1:iN09h71vgCQne3DLsj+A5owkum+a2tYe+TOCB1ybHNo=
-github.com/open-rails/authkit v1.53.0 h1:hx3YvN707rYLm4FkVi9odO7QBau5KDAT1elue4l4Urs=
-github.com/open-rails/authkit v1.53.0/go.mod h1:wbxTHMKwbozLyvxA7NL07h9X60GGh2RHjWHC9xtLftw=
 github.com/open-rails/authkit v1.54.0 h1:2N4nwC7yN+S6IJRRPNrLZKsB9JfioUsJOB+0sZjfhHM=
 github.com/open-rails/authkit v1.54.0/go.mod h1:JqPFk8OZDYhRtKq5iyfaZU1TZV2I55lhDWcbonad1lA=
-github.com/open-rails/helpers v1.21.0 h1:cts3SsLwbGDlv3v7zwmz6KeGQCBbgZV0pRMXib60M6w=
-github.com/open-rails/helpers v1.21.0/go.mod h1:zYjaT7bwVqSiLYgXw+qvqw2hgLxnIFNzsEjEvscK4xw=
 github.com/open-rails/helpers v1.22.0 h1:82aru2uFI2LQpmDlCAAmhNG3RLyvWJN+muos2ZCGMVE=
 github.com/open-rails/helpers v1.22.0/go.mod h1:zYjaT7bwVqSiLYgXw+qvqw2hgLxnIFNzsEjEvscK4xw=
 github.com/open-rails/migratekit v1.11.4 h1:68sOEfsOg1954+qGKjXI7XvrVIA44x1G7uJeAzeixnM=

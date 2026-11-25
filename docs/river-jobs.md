@@ -84,9 +84,7 @@ openrails --config /path/to/config.yaml workers
 openrails --config /path/to/config.yaml workers --json
 ```
 
-For individual rows, query `river_job` in the configured
-`database.river_schema` (`Config.Database.RiverSchema` in Go). It defaults to the
-billing schema plus `_river`, so the default table is `billing_river.river_job`.
+For individual rows, query `river_job` in River's schema: the billing schema plus `_river` (`Config.Database.RiverSchema` in Go sets another), so the default table is `billing_river.river_job`.
 Replace `billing_river` with your configured schema if it differs. The query
 shows recent retained rows across all components in the selected schema.
 [Schema configuration](../internal/config/config.go) · [River table usage](../internal/river/health.go)

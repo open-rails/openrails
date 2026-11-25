@@ -471,37 +471,6 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	return nil
 }
 
-// NormalizeUserActionRateLimit fills c's zero fields from the defaults and
-// refuses a limit that is not positive.
-func NormalizeUserActionRateLimit(c billing.UserActionRateLimitConfig) (billing.UserActionRateLimitConfig, error) {
-	c = billing.Config{UserActionRateLimit: c}.WithDefaults().UserActionRateLimit
-	if c.MinimumCustomersPerHour < 1 || c.PaidCustomersPerHourlyCustomer < 1 || c.MinimumCustomersPerDay < 1 || c.PaidCustomersPerDailyCustomer < 1 {
-		return c, fmt.Errorf("user_action_rate_limit fields must be positive")
-	}
-	return c, nil
-}
-
-// NormalizeDestructiveActionLimits fills c's zero fields from the defaults and
-// refuses limits that could never apply: a negative one, an hour above its
-// day, an actor above its merchant, or a merchant above the deployment.
-func NormalizeDestructiveActionLimits(c billing.DestructiveActionLimitsConfig) (billing.DestructiveActionLimitsConfig, error) {
-	c = billing.Config{DestructiveActionLimits: c}.WithDefaults().DestructiveActionLimits
-	for _, v := range []int64{c.ActorPerHour, c.ActorPerDay, c.MerchantPerHour, c.MerchantPerDay, c.DeploymentPerHour, c.DeploymentPerDay, c.ErasurePerHour, c.ErasurePerDay} {
-		if v < 0 {
-			return c, fmt.Errorf("destructive_action_limits fields must be positive")
-		}
-	}
-	switch {
-	case c.ActorPerHour > c.ActorPerDay || c.MerchantPerHour > c.MerchantPerDay || c.DeploymentPerHour > c.DeploymentPerDay || c.ErasurePerHour > c.ErasurePerDay:
-		return c, fmt.Errorf("destructive_action_limits: an hourly limit cannot exceed its daily limit")
-	case c.ActorPerHour > c.MerchantPerHour || c.ActorPerDay > c.MerchantPerDay:
-		return c, fmt.Errorf("destructive_action_limits: an actor limit cannot exceed the merchant limit")
-	case c.MerchantPerHour > c.DeploymentPerHour || c.MerchantPerDay > c.DeploymentPerDay:
-		return c, fmt.Errorf("destructive_action_limits: a merchant limit cannot exceed the deployment limit")
-	}
-	return c, nil
-}
-
 // RateLimitBuckets are c's buckets by key: a pointer to each bucket's limit.
 func RateLimitBuckets(c *billing.RateLimitsConfig) map[string]**billing.RateLimit {
 	return map[string]**billing.RateLimit{"purchase": &c.Purchase, "payment": &c.Payment, "subscribe": &c.Subscribe, "webhook": &c.Webhook}
@@ -568,13 +537,6 @@ func CaptchaChallengeBuckets() []string {
 // optional setting is Degrade's: it is turned off with a reason, never
 // refused.
 func Validate(cfg *billing.Config) error {
-	if _, err := NormalizeUserActionRateLimit(cfg.UserActionRateLimit); err != nil {
-		return err
-	}
-	if _, err := NormalizeDestructiveActionLimits(cfg.DestructiveActionLimits); err != nil {
-		return err
-	}
-
 	if err := ValidateDatabase(cfg.Database); err != nil {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
@@ -724,14 +686,25 @@ func ValidatePublicURL(raw string, allowLoopback, originOnly bool) error {
 	return nil
 }
 
-// ValidateDatabase refuses a schema that is not a safe identifier and a
-// negative lease pool.
+// MaxRiverSchema is the longest River schema: a Postgres name is at most 63
+// bytes (NAMEDATALEN 64) and River's names in it, such as the
+// <schema>.river_leadership channel, add 17.
+const MaxRiverSchema = 63 - len(".river_leadership")
+
+// ValidateDatabase refuses a schema that is not a safe identifier, and one
+// whose derived River schema, the schema plus _river, is too long for River.
 func ValidateDatabase(d billing.DatabaseConfig) error {
-	if d.LeaseConns < 0 {
-		return fmt.Errorf("database.lease_conns %d is negative", d.LeaseConns)
-	}
 	// The schema is interpolated into SQL and must be a safe identifier (#165).
-	return validateSchema(d.Schema)
+	if err := validateSchema(d.Schema); err != nil {
+		return err
+	}
+	if strings.TrimSpace(d.RiverSchema) == "" {
+		river := RiverSchemaName(&billing.Config{Database: d})
+		if len(river) > MaxRiverSchema {
+			return fmt.Errorf("database.schema %q is too long: its River schema %q is %d characters, and River's is at most %d (Postgres names are 63 bytes, less River's .river_leadership); use at most %d", d.Schema, river, len(river), MaxRiverSchema, MaxRiverSchema-len("_river"))
+		}
+	}
+	return nil
 }
 
 // defaults are the engine's defaults, for settings read without New.

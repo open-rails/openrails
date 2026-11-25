@@ -64,10 +64,6 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	}
 	// AuthKit requires its HTTP configuration while the merchant persona can
 	// register OAuth clients. Retain that policy, but never mount its handler.
-	key, err := h.SigningKey.Source()
-	if err != nil {
-		return nil, err
-	}
 	// Keep AuthKit's pool independent: its authority reads may run inside a
 	// merchant transaction even when the configured billing pool has one slot.
 	pool, err := pgxpool.NewWithConfig(ctx, c.db.Pool().Config())
@@ -75,7 +71,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 		return nil, err
 	}
 	c.cleanups = append(c.cleanups, pool.Close)
-	deps := authkit.Deps{Postgres: pool, KeySource: key, Logger: slog.Default()}
+	deps := authkit.Deps{Postgres: pool, Logger: slog.Default()}
 	if h.SMTP != nil {
 		sender, err := hostdeps.NewEmailSender(*h.SMTP)
 		if err != nil {

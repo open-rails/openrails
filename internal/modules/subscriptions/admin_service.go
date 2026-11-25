@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/destructive"
-	"github.com/open-rails/openrails/internal/requestauth"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
@@ -39,7 +37,6 @@ var (
 
 // AdminSubscriptionService handles administrative subscription operations
 type AdminSubscriptionService struct {
-	requestedCancelLimit  func(context.Context, *models.Subscription) error
 	destructiveAdmissions *destructive.Admissions
 	SubscriptionService   *SubscriptionService
 	ProductService        *catalog.ProductService
@@ -205,23 +202,6 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	if subscription.Status == models.StatusCanceled && !revokeAccess {
 		return ErrSubscriptionNotActive
-	}
-	// HTTP staff and named host invokers share the same customer-impact budget.
-	// Unattended lifecycle work has no external actor and uses its own policy.
-	_, identity := billingauth.IdentityFromContext(ctx)
-	_, staff := billingauth.StaffFromContext(ctx)
-	host, fromHost := requestauth.HostPrincipalFromContext(ctx)
-	requested := identity || staff
-	if fromHost {
-		requested = host.Invoker != nil
-	}
-	if requested {
-		if s.requestedCancelLimit == nil {
-			return errors.New("requested cancellation limiter is not configured")
-		}
-		if err := s.requestedCancelLimit(ctx, subscription); err != nil {
-			return err
-		}
 	}
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine || subscription.Rail == models.RailSolana || subscription.Status == models.StatusCanceled && revokeAccess {
 		command, err := CancellationCommand(ctx, subscription, reason, revokeAccess, accountDeletion)
@@ -395,10 +375,4 @@ func NewAdminSubscriptionService(
 // SetDestructiveAdmissions wires the shared staff-command admission boundary.
 func (s *AdminSubscriptionService) SetDestructiveAdmissions(a *destructive.Admissions) {
 	s.destructiveAdmissions = a
-}
-
-// SetRequestedCancellationLimiter wires the merchant-global customer-impact
-// budget for externally requested staff cancellations.
-func (s *AdminSubscriptionService) SetRequestedCancellationLimiter(limit func(context.Context, *models.Subscription) error) {
-	s.requestedCancelLimit = limit
 }

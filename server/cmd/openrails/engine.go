@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
@@ -21,15 +20,11 @@ func openServer(ctx context.Context) (_ *server.Server, _ *app.App, _ *controlpl
 	if h == nil {
 		return nil, nil, nil, nil, fmt.Errorf("config not loaded")
 	}
-	key, err := h.SigningKey.Source()
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
 	opened, err := hostdeps.Open(ctx, slog.Default(), h)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	srv, err := server.New(ctx, h.Server, server.Deps{Engine: opened.Deps, Auth: authkit.Deps{KeySource: key}})
+	srv, err := server.New(ctx, h.Server, server.Deps{Engine: opened.Deps})
 	if err != nil {
 		opened.Close()
 		return nil, nil, nil, nil, fmt.Errorf("bootstrap server: %w", err)

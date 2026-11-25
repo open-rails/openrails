@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/authkit/authtest"
 	"net/http"
 	"net/textproto"
 	"sync"
@@ -156,6 +158,55 @@ func TestFindingAlerts(t *testing.T) {
 		}
 		require.Equal(t, 1, alerts, "two messages past the cap alert once")
 		require.Zero(t, mail.count("life.customer.messages_rate_limited"), "a medium finding goes to alert webhooks, not email")
+	})
+
+	t.Run("OR-J06-S83/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none", func(t *testing.T) {
+		a, p, first := purchasedMembershipWith(t, 24, alertEmail)
+		tokens := []string{a.aliceToken, a.bobToken}
+		for range 4 {
+			tokens = append(tokens, authtest.SignIn(t, a.auth, authtest.NewUser(t, a.auth)).AccessToken)
+		}
+		subs := []*billing.Subscription{first}
+		for i, token := range tokens[1:] {
+			subs = append(subs, membershipAtPrice(t, a, p, first.PriceID, token, fmt.Sprintf("wave-%d", i)))
+		}
+		cancel := func(i int) (int, []byte) {
+			return a.request(t, http.MethodPost, "/v1/me/subscriptions/"+subs[i].ID.String()+"/cancel", tokens[i], map[string]any{"reason": "Stop renewing"})
+		}
+		// Five customers an hour may cancel on a small merchant; the sixth waits.
+		for i := range 5 {
+			status, raw := cancel(i)
+			require.Equal(t, http.StatusOK, status, string(raw))
+		}
+		status, raw := cancel(5)
+		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
+		require.Contains(t, string(raw), `"code":"rate_limit_exceeded"`)
+		require.Contains(t, string(raw), "try again in")
+		kept, err := a.alpha.GetSubscription(t.Context(), subs[5].ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionActive, kept.Status, "a refused cancellation changes nothing")
+
+		page, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: "life.customer_action_rate.exceeded"})
+		require.NoError(t, err)
+		require.Len(t, page.Items, 1)
+		wave := page.Items[0]
+		require.EqualValues(t, 5, wave.Evidence["cancellations"], "the finding names the wave: %v", wave.Evidence)
+		require.EqualValues(t, 0, wave.Evidence["card_removals"])
+		require.NotEmpty(t, wave.Evidence["wave_started_at"])
+		var alerts int
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
+			" WHERE kind = 'openrails.operator_alert' AND args->'finding'->>'id' = $1", wave.ID.UUID().String()).Scan(&alerts))
+		require.Equal(t, 1, alerts, "staff hear of the wave once")
+		status, raw = cancel(5)
+		require.Equal(t, http.StatusTooManyRequests, status, string(raw))
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
+			" WHERE kind = 'openrails.operator_alert' AND args->'finding'->>'id' = $1", wave.ID.UUID().String()).Scan(&alerts))
+		require.Equal(t, 1, alerts, "a second refusal of the same wave alerts no one again")
+
+		// Staff cancel under their own destructive limits, not the customers' cap.
+		canceled, err := a.alphaRemote.CancelSubscription(t.Context(), subs[5].ID, billing.CancelSubscriptionParams{Reason: "support request"})
+		require.NoError(t, err)
+		require.Equal(t, billing.SubscriptionCanceled, canceled.Status)
 	})
 
 	t.Run("OR-J06-S70/a-held-terminal-outcome-alerts-the-operator-once", func(t *testing.T) {

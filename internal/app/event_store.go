@@ -23,12 +23,12 @@ import (
 	"github.com/open-rails/openrails/internal/migrate"
 )
 
-// attachEventStore migrates (or validates) the event store's database and
+// attachEventStore migrates the event store's database and
 // matches its identity with the one this database recorded, recording it on
 // first attach. Another identity is an empty or different ClickHouse under a
 // database that has used one: refused.
 func attachEventStore(ctx context.Context, cfg *billing.Config, database *db.DB, conn driver.Conn, logger *slog.Logger) (*eventstore.Store, error) {
-	store, err := eventstore.Open(ctx, conn, config.ClickHouseDatabase(cfg), eventstore.Options{Validate: cfg.Database.SkipMigrations, Logger: logger,
+	store, err := eventstore.Open(ctx, conn, config.ClickHouseDatabase(cfg), eventstore.Options{Logger: logger,
 		Serialize: migrate.ClickHouseLock(database.Pool(), config.ClickHouseDatabase(cfg))})
 	if err != nil {
 		return nil, err
