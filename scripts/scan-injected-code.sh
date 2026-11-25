@@ -21,13 +21,12 @@
 #   scan-injected-code.sh [--all]              scan every tracked file (default)
 #   scan-injected-code.sh --all --include-untracked
 #                                              ...plus untracked, non-ignored files
-#   scan-injected-code.sh --staged             scan staged blobs (pre-commit hook)
+#   scan-injected-code.sh --staged             scan staged blobs
 #   scan-injected-code.sh --range <rev-range>  scan blobs changed in a range (CI)
 #   scan-injected-code.sh --files <path>...    scan the named paths verbatim
 #   scan-injected-code.sh --self-test          run the detector against its fixtures
-# scripts/install-git-hooks.sh installs the pre-commit scan once per clone. CI
-# runs the tree scan and the self-test. --staged and --range read blobs, not
-# the working tree.
+# CI runs the tree scan and the self-test. --staged and --range read blobs,
+# not the working tree.
 #
 # Rules: R1 100+ spaces or 20+ tabs in a row, outside Markdown; R2 eval( on a
 # line with a base64 decode; R3 detached: true in a file using child_process;
@@ -119,7 +118,7 @@ findings=0
 # --- argument parsing --------------------------------------------------------
 
 usage() {
-	sed -n '3,52p' "$self" | sed -e 's/^#\{0,1\} \{0,1\}//'
+	sed -n '3,51p' "$self" | sed -e 's/^#\{0,1\} \{0,1\}//'
 	exit 2
 }
 
