@@ -2061,10 +2061,12 @@
     },
     "adapters/fiber/fiber.go": {
       "adaptor": "github.com/gofiber/fiber/v3/middleware/adaptor",
+      "context": "context",
       "fmt": "fmt",
       "http": "net/http",
       "openrails": "github.com/open-rails/openrails",
       "strings": "strings",
+      "url": "net/url",
       "v3": "github.com/gofiber/fiber/v3"
     },
     "adapters/gin/gin.go": {
