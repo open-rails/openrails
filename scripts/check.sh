@@ -17,7 +17,6 @@ guards() {
   bash scripts/check-borrowed-connections.sh
   bash scripts/check-logging.sh
   bash scripts/check-image-digests.sh
-  bash scripts/scan-injected-code.sh --all
   go run ./scripts/contracts -lint
   go run ./scripts/docscheck
   (cd server && go run ./internal/examplegen)

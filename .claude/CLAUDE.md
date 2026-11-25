@@ -278,6 +278,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - A test that needs PostgreSQL, Redis, Vault or a fixture process is tagged `integration`, like
   `critical/`; every other test needs nothing outside its process. Every PR with a Go change runs
   `scripts/check.sh vet` (each module, every build tag) and `unit` (each module's untagged tests).
+- CI also runs the shared injected-code scan, `open-rails/helpers`' `injection-scan.yml` pinned by commit; it has no local copy.
 - Static checks: `scripts/check.sh guards`, `scripts/check-embedded-auth-boundary.sh`,
   `sqlc vet` and `go run ./scripts/contracts`. `go run ./scripts/contracts -lint` (in guards)
   checks the Go API's conventions; it has no baseline left, so any new finding fails.

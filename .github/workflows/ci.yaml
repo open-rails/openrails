@@ -140,6 +140,13 @@ jobs:
           "${plan[@]}" | tee "$RUNNER_TEMP/plan.json"
           cat "$RUNNER_TEMP/plan.json" >> "$GITHUB_STEP_SUMMARY"
 
+  # The shared scanner (open-rails/helpers): hidden or obfuscated code in the
+  # tree. It runs in CI only, on every tier but a focused dispatch.
+  injection-scan:
+    name: Injected code scan
+    if: ${{ (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) && (github.event_name != 'workflow_dispatch' || inputs.critical == '') }}
+    uses: open-rails/helpers/.github/workflows/injection-scan.yml@529605218bc46aa7b5b7de796859c09187b5960c # master 2026-11-25
+
   guards:
     name: Source guards
     needs: scope
@@ -162,7 +169,6 @@ jobs:
           family: plain
       - run: python3 scripts/check-ci-policy.py
       - run: bash scripts/check.sh guards
-      - run: bash scripts/scan-injected-code.sh --self-test
       - name: Workflow lint
         run: |
           curl --fail --silent --show-error --location \
@@ -650,7 +656,7 @@ jobs:
   # the full tier on a release head.
   gate:
     name: ${{ github.event_name == 'push' && 'Push check' || (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
-    needs: [source, scope, guards, go, lint, chart, sql, browser, critical, critical-coverage, critical-cache, security, artifact-release, artifact-image]
+    needs: [source, scope, injection-scan, guards, go, lint, chart, sql, browser, critical, critical-coverage, critical-cache, security, artifact-release, artifact-image]
     if: ${{ always() && needs.scope.outputs.tier != 'focused' && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -700,7 +706,7 @@ jobs:
               raise SystemExit('A push never calls the publishing workflows')
           expected = {
               'source': event == 'pull_request' and target == 'master',
-              'guards': True, 'go': on['core'], 'lint': on['core'], 'chart': on['chart'],
+              'injection-scan': True, 'guards': True, 'go': on['core'], 'lint': on['core'], 'chart': on['chart'],
               'sql': on['runtime'], 'browser': on['browser'], 'security': on['security'],
               'artifact-release': on['artifacts'], 'artifact-image': on['artifacts'],
               'critical': critical == 'all', 'critical-coverage': critical == 'all',
