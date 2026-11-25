@@ -101,7 +101,13 @@ export { BuyButton, type BuyButtonProps } from "./buy-button"
 export { ProductList, type ProductListProps } from "./product-list"
 export { CardBrandPlate } from "./components/card-brands"
 export { resolveCardBrand, type CardBrand } from "./lib/card-brands"
-export { browserCountry, initialCountry } from "./lib/billing"
+export {
+  browserCountry,
+  DEFAULT_BILLING_FIELDS,
+  initialCountry,
+  type BillingFieldMode,
+  type BillingFields,
+} from "./lib/billing"
 export {
   addAmounts,
   amountToDecimal,

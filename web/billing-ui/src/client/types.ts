@@ -766,6 +766,21 @@ export const paymentConfigSchema = z.object({
     .array(pspConfigSchema)
     .nullish()
     .transform((v) => v ?? []),
+  /**
+   * The billing details a new card's form asks for: `auto` asks for the
+   * postal code, and requires it, only in the US.
+   */
+  billing_fields: z
+    .object({
+      country: z.enum(["required", "optional", "hidden"]).catch("required"),
+      postal_code: z
+        .enum(["auto", "required", "optional", "hidden"])
+        .catch("auto"),
+    })
+    .nullish()
+    .transform(
+      (v) => v ?? { country: "required" as const, postal_code: "auto" as const }
+    ),
   solana: z
     .object({
       /** `mainnet | devnet | testnet` */
