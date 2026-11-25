@@ -78,7 +78,7 @@ type Service struct {
 	// nmiWire points credential probes at the runtime's NMI gateway and
 	// transport, as every NMI client it builds.
 	nmiWire func(*nmi.NMIClient)
-	// dataLinkURL is the loopback fake DataLink a sandbox stack declares,
+	// dataLinkURL is the loopback fake DataLink (Deps.ProviderEndpoints),
 	// which CCBill credential probes read as every DataLink client does.
 	dataLinkURL string
 	// dataLinkPacing keeps CCBill accounts' probe slots, shared by every
@@ -130,7 +130,6 @@ func NewService(logger *slog.Logger, pool *db.Pool, configuration *merchantdocs.
 	}
 	service.config = configuration
 	service.fakeProviders = config.FakeProviders(cfg)
-	service.dataLinkURL = config.SandboxCCBillDataLinkURL(cfg)
 	if v := cfg.CardVault; v != (billing.CardVaultConfig{}) {
 		service.platformVault = &v
 	}
@@ -284,6 +283,15 @@ func (s *Service) WithDataLinkPacing(p ccbill.Pacing) *Service {
 func (s *Service) WithNMIWire(wire func(*nmi.NMIClient)) *Service {
 	if s != nil {
 		s.nmiWire = wire
+	}
+	return s
+}
+
+// WithDataLinkURL points CCBill credential probes at a loopback fake DataLink
+// (Deps.ProviderEndpoints); "" is CCBill's.
+func (s *Service) WithDataLinkURL(url string) *Service {
+	if s != nil {
+		s.dataLinkURL = url
 	}
 	return s
 }

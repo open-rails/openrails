@@ -61,6 +61,9 @@ COPY . /app
 COPY --from=console /src/web/console/dist /app/web/console/dist
 COPY --from=payment-page /src/web/pay/dist /app/web/pay/dist
 
+# MAIN is the command built as /usr/local/bin/openrails: the server, or a
+# test fixture under server/ci (examples/standalone/compose.e2e.yaml).
+ARG MAIN=./cmd/openrails
 # Release identity (internal/buildinfo); unset falls back to "dev".
 ARG VERSION=
 ARG COMMIT=
@@ -75,7 +78,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     mkdir -p ../bin && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X github.com/open-rails/openrails/internal/buildinfo.version=${VERSION} -X github.com/open-rails/openrails/internal/buildinfo.commit=${COMMIT} -X github.com/open-rails/openrails/internal/buildinfo.date=${DATE}" \
-      -o ../bin/openrails ./cmd/openrails
+      -o ../bin/openrails ${MAIN}
 
 
 # Stage 3: production

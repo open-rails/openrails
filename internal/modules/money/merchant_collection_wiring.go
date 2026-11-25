@@ -67,7 +67,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiFactory() *railresolve.NMIFactory 
 	if b.NMIClients != nil {
 		return b.NMIClients
 	}
-	return &railresolve.NMIFactory{Config: b.Config, Postures: writeposture.View{DB: b.DB}, Log: b.Log}
+	return &railresolve.NMIFactory{Postures: writeposture.View{DB: b.DB}, Log: b.Log}
 }
 
 // nmiProxyPosture is the posture identity of scope's gateway credential

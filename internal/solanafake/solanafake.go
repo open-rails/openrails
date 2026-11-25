@@ -1,5 +1,5 @@
-// Package solanafake is a loopback Solana JSON-RPC node for sandbox tests
-// (provider_sandbox.solana_rpc_url). It serves declared mints, token accounts,
+// Package solanafake is a loopback Solana JSON-RPC node for tests
+// (Deps.ProviderEndpoints.SolanaRPCURL). It serves declared mints, token accounts,
 // plans, subscription authorities and subscriptions, and lands signed
 // transactions, plan creation, subscribe, cancel and resume among them, as the
 // chain would: signatures must verify, token moves apply all-or-nothing, v0

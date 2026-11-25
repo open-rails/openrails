@@ -63,8 +63,11 @@ func (c PSPCoverage) Complete() bool { return c.Declared > 0 && c.Pulled >= c.De
 type MerchantFetcherBuilder struct {
 	StripeClients *stripeapi.Factory
 	Config        *billing.Config
-	Merchants     *merchants.Service
-	DB            *db.DB
+	// Endpoints are the loopback fakes the pull clients reach
+	// (Deps.ProviderEndpoints); zero, the providers.
+	Endpoints config.ProviderEndpoints
+	Merchants *merchants.Service
+	DB        *db.DB
 
 	// AccountIDs optionally pins a rail to one declared account_id (operator
 	// pulls; may target archived accounts for drain).
@@ -253,7 +256,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Config: b.Config, Postures: writeposture.View{DB: b.DB}, Log: b.Log}
+	factory := &railresolve.NMIFactory{Gateway: b.Endpoints.NMIGatewayURL, Postures: writeposture.View{DB: b.DB}, Log: b.Log}
 	if b.NMIClients != nil {
 		factory.Transport = b.NMIClients.Transport
 	}
@@ -293,8 +296,8 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.Mer
 	})
 	dl.ReadOnly = b.readOnly(ctx, mid)
 	dl.Pacing = b.DataLinkPacing
-	if sandbox := config.SandboxCCBillDataLinkURL(b.Config); sandbox != "" {
-		dl.BaseURL = sandbox
+	if fake := b.Endpoints.CCBillDataLinkURL; fake != "" {
+		dl.BaseURL = fake
 		dl.LoopbackFixture = true
 	}
 	if b.WireDataLink != nil {
@@ -330,12 +333,12 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.Mer
 		b.warnScopeError(ctx, mid, ProviderSolana, err)
 		return
 	}
-	// A sandbox run's loopback RPC replaces the public one here as it does
-	// for the runtime's own Solana clients (hermetic CI never reaches devnet).
+	// A loopback fake RPC replaces the public one here as it does for the
+	// runtime's own Solana clients (hermetic CI never reaches devnet).
 	rpc := solanaint.NewRPCClientWithConfig(b.Log, solanaint.RPCClientConfig{
 		Network:   scope.Environment,
 		URL:       rpcURL,
-		PublicURL: config.SandboxSolanaRPCURL(b.Config),
+		PublicURL: b.Endpoints.SolanaRPCURL,
 		ReadOnly:  true,
 	})
 	fetcher := NewSolanaFetcher(b.Log, rpc, SolanaSubscriptionSourceFromDB(b.DB))

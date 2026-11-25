@@ -53,7 +53,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 	if r.Verifier == nil {
 		r.Verifier = &reconcile.Verifier{
 			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
-			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, DataLinkPacing: r.DataLinkPacing(), Log: r.Log},
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Endpoints: r.ProviderEndpoints, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients, DataLinkPacing: r.DataLinkPacing(), Log: r.Log},
 			Log:     r.Log,
 		}
 		r.Verifier.Start()
@@ -297,7 +297,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// Every provider intent arms per merchant at drain time: NMI through
 	// CollectionResolver, CCBill and Stripe through RailConfigs.
 	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.RailConfigs, clock) // an unarmed rail parks
-	ccbillCancel.DataLinkBaseURL = config.SandboxCCBillDataLinkURL(r.Config)
+	ccbillCancel.DataLinkBaseURL = r.ProviderEndpoints.CCBillDataLinkURL
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
 	rebill.DeferDelete = newProviderCancelScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
 	registry := intents.NewRegistry(
@@ -489,6 +489,7 @@ func (r *Runtime) refreshWorkers(clock clockwork.Clock) (*riverjobs.ProviderRefr
 		Contacts:       r.Contacts,
 		Alerts:         r.AlertService, // requires_review findings -> operator notifications
 		NMIClients:     r.NMIClients,
+		Endpoints:      r.ProviderEndpoints,
 		DataLinkPacing: r.DataLinkPacing(),
 		Verifier:       r.Verifier,
 		Disputes:       r.Disputes,

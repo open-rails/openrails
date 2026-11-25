@@ -696,7 +696,7 @@ func TestProviderTime(t *testing.T) {
 		t.Cleanup(dataLink.Close)
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		a, _ := newPSPWorld(t, func(w *world) {
-			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink.URL()}
 		})
 		dataLink.SetClock(a.clock.Now)
 		create := func(client *openrails.Client, subacc string) error {
@@ -722,7 +722,7 @@ func TestProviderTime(t *testing.T) {
 		dataLink.RequireCredentials("critical-datalink", "critical-datalink-password", false)
 		account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 		a, _ := newPSPWorld(t, func(w *world) {
-			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink.URL()}
 		})
 		create := func(client *openrails.Client, subacc, username, password string) error {
 			_, err := client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "ccbill", Rail: billing.RailCCBill, Environment: billing.EnvironmentSandbox,
@@ -753,7 +753,7 @@ func TestProviderTime(t *testing.T) {
 		t.Cleanup(dataLink.Close)
 		dataLink.RequireCredentials("critical-datalink", "critical-datalink-password", false)
 		a, _ := newPSPWorld(t, func(w *world) {
-			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink.URL()}
 		})
 		create := func(password string) error {
 			_, err := a.alphaRemote.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "ccbill", Rail: billing.RailCCBill, Environment: billing.EnvironmentSandbox,
@@ -806,7 +806,7 @@ func TestProviderTime(t *testing.T) {
 				t.Cleanup(dataLink.Close)
 				account := fmt.Sprintf("%06d", 100000+rand.IntN(900000))
 				a, _ := newPSPWorld(t, func(w *world) {
-					w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{CCBillDataLinkURL: dataLink.URL()}
+					w.deps.ProviderEndpoints = openrails.ProviderEndpoints{CCBillDataLinkURL: dataLink.URL()}
 				})
 				dataLink.SetClock(a.clock.Now)
 				create := func(client *openrails.Client, subacc string) (*billing.PSP, error) {

@@ -22,15 +22,20 @@ func isolate(t *testing.T) (configPath, secrets string) {
 func TestRetiredSettingsRefuseTheLoad(t *testing.T) {
 	for _, retired := range retiredSettings {
 		want := retired.key + " / " + retired.env + " was removed: " + retired.now
+		variable := strings.Replace(retired.env, "*", "NMI_GATEWAY_URL", 1)
+		yaml := retired.key + ": x\n"
+		if variable != retired.env {
+			yaml = retired.key + ":\n  nmi_gateway_url: x\n"
+		}
 		for source, set := range map[string]func(t *testing.T, configPath, secrets string){
 			"key": func(t *testing.T, configPath, _ string) {
-				if err := os.WriteFile(configPath, []byte(retired.key+": x\n"), 0o600); err != nil {
+				if err := os.WriteFile(configPath, []byte(yaml), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			},
-			"env": func(t *testing.T, _, _ string) { t.Setenv(retired.env, "x") },
+			"env": func(t *testing.T, _, _ string) { t.Setenv(variable, "x") },
 			"secret": func(t *testing.T, _, secrets string) {
-				if err := os.WriteFile(filepath.Join(secrets, retired.env), []byte("x"), 0o600); err != nil {
+				if err := os.WriteFile(filepath.Join(secrets, variable), []byte("x"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			},

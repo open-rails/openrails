@@ -412,7 +412,7 @@ func TestBillingArchive(t *testing.T) {
 		archive := archiveBytes(t, s.alpha)
 		target, client := archiveTarget(t, s.world, func(w *world) {
 			w.clock.Advance(s.clock.Now().Sub(w.clock.Now()))
-			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{SolanaRPCURL: s.wire.server.URL}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{SolanaRPCURL: s.wire.server.URL}
 			w.cfg.Solana = billing.SolanaConfig{Crankers: []billing.SolanaCrankerConfig{{Mode: "local_keypair", PrivateKey: s.cranker.PrivateKey.String()}}}
 		})
 		s.node.SetClock(target.clock.Now)

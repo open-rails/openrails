@@ -2266,6 +2266,9 @@
     "OR-J04-S81": [
       "TestBillingPass/OR-J04-S81/a-dead-passs-lease-lapses-and-the-next-pass-runs"
     ],
+    "OR-J04-S82": [
+      "TestHostDeps/OR-J04-S82/provider-endpoints-are-loopback-fakes-never-beside-a-live-psp"
+    ],
     "OR-J38-S83": [
       "TestMerchantPullLease/OR-J38-S83/one-pull-of-a-merchant-runs-the-others-skip-and-none-holds-a-session"
     ],
@@ -2319,6 +2322,9 @@
     ],
     "OR-J06-S72": [
       "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
+    ],
+    "OR-J06-S73": [
+      "TestRetiredRuntimeSettings/OR-J06-S73/a-provider-sandbox-setting-refuses-boot"
     ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"
