@@ -2395,6 +2395,9 @@
     "OR-J06-S85": [
       "TestStandaloneAuthSurface/OR-J06-S85/a-server-whose-staff-cannot-enroll-a-second-factor-is-not-ready"
     ],
+    "OR-J06-S86": [
+      "TestStandaloneAuthSurface/OR-J06-S86/the-servers-root-summarizes-it"
+    ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"
     ],

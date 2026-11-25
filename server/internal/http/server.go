@@ -270,7 +270,7 @@ func New(logger *slog.Logger, deps Dependencies) (*Server, error) {
 	s.nativeRoutes = &router.Table{Log: logger}
 	for _, entry := range mux.Entries {
 		switch entry.Path {
-		case "/health/live", "/health/ready":
+		case "/{$}", "/health/live", "/health/ready":
 			continue
 		}
 		entry.Browser = s.nativeBrowser[entry.Method+" "+entry.Path]
@@ -352,7 +352,8 @@ func (s *Server) billingCredentialsHTTP(next http.Handler) http.Handler {
 	})
 }
 
-// HTTPRoutes returns the native hosted surface without process health routes.
+// HTTPRoutes returns the native hosted surface without the process routes:
+// the summary and health.
 func (s *Server) HTTPRoutes() *router.Table {
 	return &router.Table{Entries: append([]router.Entry(nil), s.nativeRoutes.Entries...), Log: s.Log}
 }

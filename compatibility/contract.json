@@ -1630,7 +1630,9 @@
       "type subscriptionHistoryCursor struct {\n\tVersion      int       `json:\"v\"`\n\tMerchant     uuid.UUID `json:\"m\"`\n\tSubscription uuid.UUID `json:\"s\"`\n\tAt           time.Time `json:\"t\"`\n\tSource       int32     `json:\"k\"`\n\tID           uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/http/routes": [
-      "type Health struct {\n\tStatus HealthStatus `json:\"status\"`\n}"
+      "type Health struct {\n\tStatus HealthStatus `json:\"status\"`\n}",
+      "type ServiceLinks struct {\n\tAPI     string  `json:\"api\"`\n\tConfig  string  `json:\"config\"`\n\tConsole *string `json:\"console\"`\n\tLive    string  `json:\"live\"`\n\tReady   string  `json:\"ready\"`\n}",
+      "type ServiceSummary struct {\n\tService string        `json:\"service\"`\n\tVersion string        `json:\"version\"`\n\tStatus  ServiceStatus `json:\"status\"`\n\tLinks   ServiceLinks  `json:\"links\"`\n}"
     ],
     "internal/integrations/basistheory": [
       "type CardData struct {\n\tNumber          string `json:\"number\"`\n\tExpirationMonth int    `json:\"expiration_month\"`\n\tExpirationYear  int    `json:\"expiration_year\"`\n\tCVC             string `json:\"cvc,omitempty\"`\n}",

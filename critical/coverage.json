@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 786,
+  "scenario_count": 787,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3707,6 +3707,11 @@
       "id": "OR-J06-S85",
       "journey": "J06",
       "name": "A server whose staff cannot enroll a second factor, a public issuer with no totp.key, is not ready and logs the key to mount; with it mounted the server is ready"
+    },
+    {
+      "id": "OR-J06-S86",
+      "journey": "J06",
+      "name": "GET / answers the service, the binary's version, whether /health/ready says ready (not_ready while draining, still 200) and the paths of the API, its configuration, the console and health, naming no host; HEAD / answers too, and every other unknown path is still not found"
     },
     {
       "id": "OR-J07-S10",

@@ -695,6 +695,7 @@ with the command ([provider refresh](#provider-refresh)).
 
 | Signal | Meaning |
 |---|---|
+| `GET /` | a summary, always 200: `service`, `version`, `status` (`ready` or `not_ready`, as `/health/ready` would answer) and `links` to `/v1`, `/v1/config`, the console (`/admin/`, null when disabled) and the health routes. Public, and says no more than `/health/ready` |
 | `GET /health/live` | the process serves HTTP; only after PostgreSQL answers and migrations finish, so allow a long startup probe |
 | `GET /health/ready` | PostgreSQL, the merchants service, the River producer, a local River consumer, and a second factor staff can enroll (`totp.key`). Redis, Vault, PSP posture and refused configuration are degraded, never failing. Public and detail-free: a failure is logged and answers 503 |
 | `GET /metrics` on `metrics_port` | the operator's Prometheus telemetry, on its own listener so it is never public (unset serves none; the chart enables it on 9090 with its own ClusterIP Service): `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Not the merchant dashboard's business metrics, which are the `/v1/metrics` API on `port`. `Server.MetricsHandler` mounts it in your own binary |

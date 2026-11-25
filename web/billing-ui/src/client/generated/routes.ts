@@ -25,6 +25,7 @@ export type OpenRailsRoute = {
 }
 
 export const OPENRAILS_ROUTES = [
+  { method: "GET", path: "/", group: "meta", auth: "public", permission: null, sensitive: false, mountedWhen: null, request: null, responses: { 200: "ServiceSummary" }, errors: [], errorSets: ["tier:public"] },
   { method: "GET", path: "/health/live", group: "meta", auth: "public", permission: null, sensitive: false, mountedWhen: null, request: null, responses: { 200: "Health" }, errors: [], errorSets: ["tier:public"] },
   { method: "GET", path: "/health/ready", group: "meta", auth: "public", permission: null, sensitive: false, mountedWhen: null, request: null, responses: { 200: "Health" }, errors: ["service_unavailable"], errorSets: ["tier:public"] },
   { method: "GET", path: "/v1/config", group: "meta", auth: "public", permission: null, sensitive: false, mountedWhen: null, request: null, responses: { 200: "PublicConfig" }, errors: [], errorSets: ["tier:public"] },
