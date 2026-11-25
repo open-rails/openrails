@@ -1114,6 +1114,11 @@
       "name": "Stored limit rate cards migrate to counts: a per-unit card becomes one count and a matrix one per priced cell with its filter, the limit's field owner renames, and a card counts cannot express refuses the migration with nothing changed"
     },
     {
+      "id": "OR-J31-S17",
+      "journey": "J31",
+      "name": "A database written before the reporting rollups, holding a cancel of every kind a subscription records (user, merchant, expired, chargeback, upgrade, provider, abandoned), upgrades through them and adopts one cancel decision of each kind"
+    },
+    {
       "id": "OR-J31-S09",
       "journey": "J31",
       "name": "A paid Stripe hosted-page order exports and restores with its attempt's Checkout Session state"
