@@ -998,10 +998,10 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 			f.Type = FindingOrphanedSchedule
 			f.RecommendedAction = "subscription ended locally but its OpenRails-owned schedule still bills at the rail; approving queues the provider cancel"
 			f.Change = opts.changes.cancelSchedule(&f, s)
-		case ccbillAccessEndedWhileListed(provider, s, now):
+		case ccbillLapseInDoubt(provider, s, now):
 			// Possibly a forged CCBill callback; alert only.
 			f.Severity = SeverityCritical
-			f.RecommendedAction = "CCBill's roster lists this member active, but a CCBill cancel or expiry ended its access; check the member in CCBill's admin before restoring access by hand"
+			f.RecommendedAction = "CCBill's roster lists this member active, but a CCBill cancel or expiry cut its access short or ended it two days ago; check the member in CCBill's admin before restoring access by hand"
 		}
 		return []Finding{f}
 

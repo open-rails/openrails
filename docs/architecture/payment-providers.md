@@ -85,19 +85,24 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   the lifecycle machine, one event at a time on the locked row.
 - Because a CCBill callback is unsigned and applied as sent, the provider
   refresh checks it afterwards and only reports; it never changes access or
-  money. Each DataLink read of a window `[since, until)` (the full read and a
-  paced account's day) lists the rebills OpenRails recorded from CCBill
-  callbacks in that window (the payment's attempt is `observed_via` `webhook`,
-  `kind` `rebill`; positive `rail` charges, no reversals). One whose
-  transaction id, leading zeros ignored, is not among the window's `REBILL`
-  rows raises `pull.charge.unconfirmed` (critical, `requires_review`, one per
-  PSP and transaction, with the payment, subscription, customer, amount and
-  window as evidence); a later read that lists the transaction resolves it.
-  The check makes no DataLink request of its own. Initial sales are not
-  checked: the fetcher reads no `NEW` export.
-- A CCBill cancel or expire callback that ended access (`cancel_type`
-  `expired`) of a member the ACTIVEMEMBERS roster still lists as active raises
-  `pull.subscription.mismatch` at critical. Nothing is restored.
+  money. Every CCBill DataLink read (the full read and each paced day) records
+  the `REBILL` transaction ids it lists, leading zeros removed, in
+  `provider_listed_rebills`. After its reads each refresh run lists the
+  rebills and upgrades recorded from CCBill callbacks (a payment whose
+  attempt is `observed_via` `webhook`, or whose bill is a `ccbill_upgrade`;
+  positive `rail` charges, no reversals) that the server received
+  (`payments.created_at`, never the callback's own timestamp) between 30 days
+  and 36 hours ago, and before the read reached 36 hours past them. One no
+  read has listed raises `pull.charge.unconfirmed` (critical,
+  `requires_review`, one per PSP and transaction, with the payment, customer,
+  subscription and its CCBill id, amount and currency as evidence); a read
+  that later lists it resolves it. The check makes no DataLink request of its
+  own. Initial sales are not checked: the fetcher reads no `NEW` export.
+- When the ACTIVEMEMBERS roster lists a member OpenRails has as a CCBill lapse
+  (`cancel_type` `expired`), `pull.subscription.mismatch` is critical if the
+  lapse cut paid access short (ended before `current_period_ends_at`, as a
+  `failedRB` cancel does) or the roster still lists the member 48 hours after
+  access ended; an ordinary lapse keeps its severity. Nothing is restored.
 
 ### Staying in sync
 
@@ -139,7 +144,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   disarmed (`consistency.duplicate_gateway_account`). Objects OpenRails creates
   at NMI and Stripe carry the book id (`internal/booktag`).
 
-Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`,
+Other tables: `provider_bills`, `provider_charge_attributions`, `provider_listed_rebills`, `webhook_health`,
 `webhook_health_daily`, `nmi_history_months`, `nmi_bulk_checkpoints`,
 `solana_subscriptions`, `solana_pay_references`, `solana_pay_receipts`.
 
@@ -236,7 +241,7 @@ Checks:
 
 ### 6. Data lifecycle
 
-In `internal/retention` (`tables.go`; `OutboxIntentTypes` in `retention.go`), instruction-only operations and `operation_log` entries go after 25 months; `webhook_events` and released parks after 90 days; resolved findings after 12 months; money-moving operations and provider bills, schedules and receipts are permanent. None is partitioned.
+In `internal/retention` (`tables.go`; `OutboxIntentTypes` in `retention.go`), instruction-only operations and `operation_log` entries go after 25 months; `webhook_events`, released parks and `provider_listed_rebills` after 90 days; resolved findings after 12 months; money-moving operations and provider bills, schedules and receipts are permanent. None is partitioned.
 
 Checks:
 - Each table comment's `Retention:` sentence matches its `tables.go` rule (`State` tables carry none).
@@ -289,6 +294,7 @@ Critical scenarios:
 - J15: OR-J15-S01 to S04 (`TestNMIRecovery`), S06, S07 (`TestVerificationBinding`), S08 to S21 (`TestProviderTrailing`), S30 (`TestBackgroundJobs`), S70, S72 (`TestDueWork`), S71 (`TestNMIRoster`).
 - J28: OR-J28-S01 to S05, S08 (`TestCallbackContracts`), S06, S07 (`TestWebhookAccountClasses`).
 - J29: OR-J29-S01, S04 (`TestProcessRecovery`), S02, S05, S06 (`TestUnresolvedMoneyContracts`), S07, S08, S40, S41 (`TestBackgroundJobs`), S37, S70 to S73 (`TestDueWork`).
+- J38: OR-J38-S86 to S93 (`TestCCBillCallbackEvidence`): unconfirmed CCBill callback rebills and doubtful lapses.
 - J37: OR-J37-S01 to S05, S63 (`TestSolanaContracts`), S07, S09, S60 to S62 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestInvoiceExpiryClock`).
 - Elsewhere: OR-J09-S05, S06 (lost and partial NMI sales), OR-J16-S04, OR-J20-S03, S70, OR-J26-S55, OR-J31-S03, S04 (copied book, export with open work), OR-J34-S05, OR-J04-S43.
 

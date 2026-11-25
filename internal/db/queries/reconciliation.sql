@@ -440,18 +440,42 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (s
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;
 
--- name: ReconcileListCallbackRebills :many
--- The PSP's rebills recorded from its own callbacks (the attempt observed via
--- webhook) received in [since, until): positive rail charges, no reversals.
-SELECT p.id, p.customer_id, p.subscription_id, p.transaction_id, p.amount, p.currency, p.purchased_at
+-- name: RecordProviderListedRebills :exec
+-- The rebill transaction keys a read of the PSP listed; the first listing stands.
+INSERT INTO billing.provider_listed_rebills (merchant_id, psp_id, transaction_key, listed_at)
+SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, k, sqlc.arg(listed_at)::timestamptz
+FROM unnest(sqlc.arg(transaction_keys)::text[]) AS k
+ON CONFLICT (merchant_id, psp_id, transaction_key) DO NOTHING;
+
+-- name: ReconcileListUnconfirmedCallbackRebills :many
+-- The PSP's CCBill rebills and upgrades recorded from its callbacks, received
+-- (created_at, the server's clock) in [received_from, received_before), that
+-- no read has listed: positive rail charges, no reversals.
+SELECT p.id, p.customer_id, p.subscription_id, p.transaction_id, p.amount, p.currency, p.purchased_at, p.created_at,
+       s.rail_subscription_id
 FROM billing.payments p
-JOIN billing.payment_attempts a ON a.merchant_id = p.merchant_id AND a.psp_id = p.psp_id AND a.transaction_id = p.transaction_id
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id)::uuid
-  AND p.purchased_at >= sqlc.arg(since)::timestamptz AND p.purchased_at < sqlc.arg(until)::timestamptz
+LEFT JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.id = p.subscription_id
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id)::uuid AND p.rail = 'ccbill'
+  AND p.created_at >= sqlc.arg(received_from)::timestamptz AND p.created_at < sqlc.arg(received_before)::timestamptz
   AND p.deleted_at IS NULL AND p.amount > 0 AND p.money_movement = 'rail'
   AND p.status IN ('succeeded', 'refunded') AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
-  AND a.observed_via = 'webhook' AND a.kind = 'rebill' AND a.outcome = 'approved'
-ORDER BY p.purchased_at, p.id;
+  AND (EXISTS (SELECT 1 FROM billing.payment_attempts a
+               WHERE a.merchant_id = p.merchant_id AND a.psp_id = p.psp_id AND a.transaction_id = p.transaction_id
+                 AND a.observed_via = 'webhook' AND a.kind IN ('rebill', 'dunning_retry', 'customer_retry'))
+       OR EXISTS (SELECT 1 FROM billing.provider_bills b
+               WHERE b.merchant_id = p.merchant_id AND b.psp_id = p.psp_id AND b.invoice_id = p.invoice_id
+                 AND b.source_kind = 'ccbill_upgrade'))
+  AND NOT EXISTS (SELECT 1 FROM billing.provider_listed_rebills l
+               WHERE l.merchant_id = p.merchant_id AND l.psp_id = p.psp_id AND l.transaction_key = ltrim(p.transaction_id, '0'))
+ORDER BY p.created_at, p.id;
+
+-- name: ReconcileListConfirmedUnconfirmedCharges :many
+-- Open pull.charge.unconfirmed findings of the PSP whose transaction a read has since listed.
+SELECT f.id FROM billing.reconciliation_findings f
+WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.psp_id = sqlc.arg(psp_id)::uuid
+  AND f.finding_type = 'pull.charge.unconfirmed' AND f.status IN ('reconcile_required', 'requires_review')
+  AND EXISTS (SELECT 1 FROM billing.provider_listed_rebills l
+              WHERE l.merchant_id = f.merchant_id AND l.psp_id = f.psp_id AND l.transaction_key = ltrim(f.subject_key, '0'));
 
 -- name: ReconcilePSPHasExecutingOperations :one
 -- Whether one of the PSP's provider operations is executing: claimed, its

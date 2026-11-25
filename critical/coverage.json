@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 782,
+  "scenario_count": 790,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3916,27 +3916,42 @@
     {
       "id": "OR-J38-S86",
       "journey": "J38",
-      "name": "A CCBill rebill callback whose transaction the DataLink read of its window does not list raises one critical pull.charge.unconfirmed finding with its payment's evidence; access and money are not changed, and later reads do not duplicate it"
+      "name": "A CCBill rebill callback stamped before the windows already read, which no DataLink read lists, raises one critical pull.charge.unconfirmed finding with its payment's evidence 36 hours after it was received; the payment is kept and later refreshes do not duplicate it"
     },
     {
       "id": "OR-J38-S87",
       "journey": "J38",
-      "name": "A CCBill rebill callback whose transaction DataLink lists in the read window raises no finding"
+      "name": "A CCBill rebill callback whose transaction a DataLink read lists raises no finding"
     },
     {
       "id": "OR-J38-S88",
       "journey": "J38",
-      "name": "An unconfirmed CCBill rebill is resolved by a later read that lists its transaction, also spelled without the leading zero"
+      "name": "A genuine CCBill rebill DataLink lists late, in a later window and without its leading zero, raises no finding; an unconfirmed one is resolved by the read that later lists it"
     },
     {
       "id": "OR-J38-S89",
       "journey": "J38",
-      "name": "A CCBill rebill callback outside the read window (inside the refresh's safety lag) is not checked"
+      "name": "An unlisted CCBill rebill callback raises nothing for 36 hours after it was received, and is raised after"
     },
     {
       "id": "OR-J38-S90",
       "journey": "J38",
-      "name": "A CCBill cancel callback that ended access while the DataLink roster lists the member active raises pull.subscription.mismatch at critical and restores nothing"
+      "name": "A CCBill failed-rebill cancel callback that cut paid access short, for a member the DataLink roster lists active, raises pull.subscription.mismatch at critical and restores nothing"
+    },
+    {
+      "id": "OR-J38-S91",
+      "journey": "J38",
+      "name": "A CCBill rebill DataLink dates hours before its callback's stamp, in an earlier window, raises no finding"
+    },
+    {
+      "id": "OR-J38-S92",
+      "journey": "J38",
+      "name": "An ordinary CCBill cancellation the roster still lists keeps the mismatch below critical until the roster still lists it 48 hours after access ended"
+    },
+    {
+      "id": "OR-J38-S93",
+      "journey": "J38",
+      "name": "A paced (live) CCBill refresh, a day of transactions an hour, raises pull.charge.unconfirmed only for the callback rebill no read lists"
     }
   ]
 }

@@ -47,6 +47,7 @@ sql:
       - "internal/migrate/postgres/0050_nmi_history_due.up.sql"
       - "internal/migrate/postgres/0051_dispute_findings_name_psp.up.sql"
       - "internal/migrate/postgres/0052_invoices.up.sql"
+      - "internal/migrate/postgres/0053_provider_listed_rebills.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

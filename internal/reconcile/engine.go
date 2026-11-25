@@ -592,21 +592,13 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	bindApplyActions(findings, binding.ID, runID)
 	findings = e.classifyProvenance(ctx, binding.ID, snap, findings)
 
-	// CCBill callbacks are unsigned: their rebills in this window must be in DataLink's.
-	var ccbillListed map[string]bool
-	if provider == ProviderCCBill && !params.Reversals && snap.Capabilities.Transactions {
-		ccbillListed = listedCCBillRebills(snap)
-		if !params.Since.IsZero() && params.Since.Before(params.Until) {
-			mid, err := merchant.Require(ctx)
-			if err != nil {
-				return rep, nil, nil, nil, err
-			}
-			unconfirmed, err := unconfirmedCCBillRebills(ctx, e.Local.DB.Gen(ctx), mid.UUID(), binding.ID, params.Since, params.Until, ccbillListed)
-			if err != nil {
-				return rep, nil, nil, nil, fmt.Errorf("check callback rebills: %w", err)
-			}
-			findings = append(findings, unconfirmed...)
+	// CCBill callbacks are unsigned: each read confirms the rebills it lists.
+	if provider == ProviderCCBill && !params.Reversals {
+		unconfirmed, err := e.confirmCCBillCallbackRebills(ctx, binding.ID, snap, params.Until, now)
+		if err != nil {
+			return rep, nil, nil, nil, fmt.Errorf("confirm callback rebills: %w", err)
 		}
+		findings = append(findings, unconfirmed...)
 	}
 
 	if snap.Capabilities.Transactions && !params.Reversals {
@@ -788,16 +780,6 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 	for _, rec := range actionable {
 		if rec.LastSeenRun != nil && *rec.LastSeenRun == runID {
-			continue
-		}
-		if rec.Type == FindingChargeUnconfirmed {
-			if !ccbillListed[ccbillTransactionKey(rec.SubjectKey)] {
-				continue
-			}
-			if err := e.Store.MarkFindingVanished(ctx, rec.ID); err != nil {
-				return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve unconfirmed charge %s: %w", rec.ID, err)
-			}
-			rep.AutoResolved++
 			continue
 		}
 		switch rec.Type {

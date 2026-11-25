@@ -101,6 +101,7 @@ var Tables = map[string]Table{
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
 	"webhook_health_daily":            {Rows, "rows are deleted 13 months (397 days) after day_at."},
 	"customer_messages":               {Rows, "rows are deleted two years (731 days) after created_at."},
+	"provider_listed_rebills":         {Rows, "rows are deleted 90 days after listed_at."},
 
 	"merchants":                  {Class: State},
 	"merchant_slug_aliases":      {Class: State},

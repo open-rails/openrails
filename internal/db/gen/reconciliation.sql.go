@@ -2412,63 +2412,33 @@ func (q *Queries) ReconcileExecutingOperations(ctx context.Context, arg Reconcil
 	return items, nil
 }
 
-const reconcileListCallbackRebills = `-- name: ReconcileListCallbackRebills :many
-SELECT p.id, p.customer_id, p.subscription_id, p.transaction_id, p.amount, p.currency, p.purchased_at
-FROM billing.payments p
-JOIN billing.payment_attempts a ON a.merchant_id = p.merchant_id AND a.psp_id = p.psp_id AND a.transaction_id = p.transaction_id
-WHERE p.merchant_id = $1::uuid AND p.psp_id = $2::uuid
-  AND p.purchased_at >= $3::timestamptz AND p.purchased_at < $4::timestamptz
-  AND p.deleted_at IS NULL AND p.amount > 0 AND p.money_movement = 'rail'
-  AND p.status IN ('succeeded', 'refunded') AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
-  AND a.observed_via = 'webhook' AND a.kind = 'rebill' AND a.outcome = 'approved'
-ORDER BY p.purchased_at, p.id
+const reconcileListConfirmedUnconfirmedCharges = `-- name: ReconcileListConfirmedUnconfirmedCharges :many
+SELECT f.id FROM billing.reconciliation_findings f
+WHERE f.merchant_id = $1::uuid AND f.psp_id = $2::uuid
+  AND f.finding_type = 'pull.charge.unconfirmed' AND f.status IN ('reconcile_required', 'requires_review')
+  AND EXISTS (SELECT 1 FROM billing.provider_listed_rebills l
+              WHERE l.merchant_id = f.merchant_id AND l.psp_id = f.psp_id AND l.transaction_key = ltrim(f.subject_key, '0'))
 `
 
-type ReconcileListCallbackRebillsParams struct {
+type ReconcileListConfirmedUnconfirmedChargesParams struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
-	Since      time.Time
-	Until      time.Time
 }
 
-type ReconcileListCallbackRebillsRow struct {
-	ID             uuid.UUID
-	CustomerID     uuid.UUID
-	SubscriptionID *uuid.UUID
-	TransactionID  string
-	Amount         int64
-	Currency       string
-	PurchasedAt    time.Time
-}
-
-// The PSP's rebills recorded from its own callbacks (the attempt observed via
-// webhook) received in [since, until): positive rail charges, no reversals.
-func (q *Queries) ReconcileListCallbackRebills(ctx context.Context, arg ReconcileListCallbackRebillsParams) ([]ReconcileListCallbackRebillsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListCallbackRebills,
-		arg.MerchantID,
-		arg.PspID,
-		arg.Since,
-		arg.Until,
-	)
+// Open pull.charge.unconfirmed findings of the PSP whose transaction a read has since listed.
+func (q *Queries) ReconcileListConfirmedUnconfirmedCharges(ctx context.Context, arg ReconcileListConfirmedUnconfirmedChargesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, reconcileListConfirmedUnconfirmedCharges, arg.MerchantID, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ReconcileListCallbackRebillsRow
+	var items []uuid.UUID
 	for rows.Next() {
-		var i ReconcileListCallbackRebillsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.CustomerID,
-			&i.SubscriptionID,
-			&i.TransactionID,
-			&i.Amount,
-			&i.Currency,
-			&i.PurchasedAt,
-		); err != nil {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -2825,6 +2795,83 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 	return items, nil
 }
 
+const reconcileListUnconfirmedCallbackRebills = `-- name: ReconcileListUnconfirmedCallbackRebills :many
+SELECT p.id, p.customer_id, p.subscription_id, p.transaction_id, p.amount, p.currency, p.purchased_at, p.created_at,
+       s.rail_subscription_id
+FROM billing.payments p
+LEFT JOIN billing.subscriptions s ON s.merchant_id = p.merchant_id AND s.id = p.subscription_id
+WHERE p.merchant_id = $1::uuid AND p.psp_id = $2::uuid AND p.rail = 'ccbill'
+  AND p.created_at >= $3::timestamptz AND p.created_at < $4::timestamptz
+  AND p.deleted_at IS NULL AND p.amount > 0 AND p.money_movement = 'rail'
+  AND p.status IN ('succeeded', 'refunded') AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
+  AND (EXISTS (SELECT 1 FROM billing.payment_attempts a
+               WHERE a.merchant_id = p.merchant_id AND a.psp_id = p.psp_id AND a.transaction_id = p.transaction_id
+                 AND a.observed_via = 'webhook' AND a.kind IN ('rebill', 'dunning_retry', 'customer_retry'))
+       OR EXISTS (SELECT 1 FROM billing.provider_bills b
+               WHERE b.merchant_id = p.merchant_id AND b.psp_id = p.psp_id AND b.invoice_id = p.invoice_id
+                 AND b.source_kind = 'ccbill_upgrade'))
+  AND NOT EXISTS (SELECT 1 FROM billing.provider_listed_rebills l
+               WHERE l.merchant_id = p.merchant_id AND l.psp_id = p.psp_id AND l.transaction_key = ltrim(p.transaction_id, '0'))
+ORDER BY p.created_at, p.id
+`
+
+type ReconcileListUnconfirmedCallbackRebillsParams struct {
+	MerchantID     uuid.UUID
+	PspID          uuid.UUID
+	ReceivedFrom   time.Time
+	ReceivedBefore time.Time
+}
+
+type ReconcileListUnconfirmedCallbackRebillsRow struct {
+	ID                 uuid.UUID
+	CustomerID         uuid.UUID
+	SubscriptionID     *uuid.UUID
+	TransactionID      string
+	Amount             int64
+	Currency           string
+	PurchasedAt        time.Time
+	CreatedAt          time.Time
+	RailSubscriptionID *string
+}
+
+// The PSP's CCBill rebills and upgrades recorded from its callbacks, received
+// (created_at, the server's clock) in [received_from, received_before), that
+// no read has listed: positive rail charges, no reversals.
+func (q *Queries) ReconcileListUnconfirmedCallbackRebills(ctx context.Context, arg ReconcileListUnconfirmedCallbackRebillsParams) ([]ReconcileListUnconfirmedCallbackRebillsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListUnconfirmedCallbackRebills,
+		arg.MerchantID,
+		arg.PspID,
+		arg.ReceivedFrom,
+		arg.ReceivedBefore,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReconcileListUnconfirmedCallbackRebillsRow
+	for rows.Next() {
+		var i ReconcileListUnconfirmedCallbackRebillsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.SubscriptionID,
+			&i.TransactionID,
+			&i.Amount,
+			&i.Currency,
+			&i.PurchasedAt,
+			&i.CreatedAt,
+			&i.RailSubscriptionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscription :many
 
 INSERT INTO billing.subscriptions (
@@ -2945,6 +2992,31 @@ func (q *Queries) ReconcilePSPHasExecutingOperations(ctx context.Context, arg Re
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const recordProviderListedRebills = `-- name: RecordProviderListedRebills :exec
+INSERT INTO billing.provider_listed_rebills (merchant_id, psp_id, transaction_key, listed_at)
+SELECT $1::uuid, $2::uuid, k, $3::timestamptz
+FROM unnest($4::text[]) AS k
+ON CONFLICT (merchant_id, psp_id, transaction_key) DO NOTHING
+`
+
+type RecordProviderListedRebillsParams struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	ListedAt        time.Time
+	TransactionKeys []string
+}
+
+// The rebill transaction keys a read of the PSP listed; the first listing stands.
+func (q *Queries) RecordProviderListedRebills(ctx context.Context, arg RecordProviderListedRebillsParams) error {
+	_, err := q.db.Exec(ctx, recordProviderListedRebills,
+		arg.MerchantID,
+		arg.PspID,
+		arg.ListedAt,
+		arg.TransactionKeys,
+	)
+	return err
 }
 
 const recordSubscriptionVerificationReads = `-- name: RecordSubscriptionVerificationReads :exec
