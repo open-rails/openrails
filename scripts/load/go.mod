@@ -9,8 +9,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jonboulle/clockwork v0.5.0
-	github.com/open-rails/authkit v1.53.0
-	github.com/open-rails/helpers v1.21.0
+	github.com/open-rails/authkit v1.54.0
+	github.com/open-rails/helpers v1.22.0
 	github.com/open-rails/openrails v0.282.0
 	github.com/open-rails/openrails/server v0.282.0
 	github.com/redis/go-redis/v9 v9.23.0
@@ -29,7 +29,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/fatih/color v1.18.0 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.6 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gagliardetto/binary v0.8.0 // indirect
@@ -64,13 +63,9 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/knadh/koanf/maps v0.1.2 // indirect
 	github.com/knadh/koanf/parsers/yaml v1.1.0 // indirect
-	github.com/knadh/koanf/providers/confmap v1.0.0 // indirect
-	github.com/knadh/koanf/providers/env v1.1.0 // indirect
-	github.com/knadh/koanf/providers/file v1.2.0 // indirect
 	github.com/knadh/koanf/providers/rawbytes v1.0.0 // indirect
 	github.com/knadh/koanf/v2 v2.2.2 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect

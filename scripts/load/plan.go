@@ -98,7 +98,7 @@ func defaultPlan() Plan {
 
 		WarmSeconds:     15,
 		SteadySeconds:   75,
-		Ramp:            []int{400, 1000, 2000, 4000},
+		Ramp:            []int{400, 1000, 2000, 4000, 8000, 16000},
 		StepSeconds:     40,
 		CooldownSeconds: 20,
 
@@ -110,7 +110,7 @@ func defaultPlan() Plan {
 		RecoverySeconds: 30,
 
 		EmbeddedSteadySeconds: 45,
-		EmbeddedRamp:          []int{400, 1000, 2000},
+		EmbeddedRamp:          []int{400, 1000, 2000, 4000, 8000},
 
 		PostingCustomers: 2000,
 		PostingEvents:    10,

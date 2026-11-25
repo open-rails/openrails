@@ -80,10 +80,18 @@ type live struct {
 	Shed        int64            `json:"shed"`
 	Lagged      int64            `json:"lagged"`
 	Captured    map[string]int64 `json:"captured"`
-	HotP50      int64            `json:"hot_p50_us"`
-	HotP99      int64            `json:"hot_p99_us"`
-	SyncP99     int64            `json:"sync_p99_us"`
-	Syncs       int64            `json:"syncs"`
+	// HotP50 and HotP99 are the hot merchant's warm decisions, made on a
+	// view without waiting; MissP50 and MissP99 those that waited for a sync
+	// (a customer's first, or one held behind a stale view's probe), Hot and
+	// Missed their counts.
+	HotP50  int64 `json:"hot_p50_us"`
+	HotP99  int64 `json:"hot_p99_us"`
+	MissP50 int64 `json:"miss_p50_us"`
+	MissP99 int64 `json:"miss_p99_us"`
+	Hot     int64 `json:"hot"`
+	Missed  int64 `json:"missed"`
+	SyncP99 int64 `json:"sync_p99_us"`
+	Syncs   int64 `json:"syncs"`
 }
 
 // admission is one allowed decision of a draining customer.
@@ -145,6 +153,9 @@ type worker struct {
 
 	wmu        sync.Mutex
 	window     *Hist
+	missWindow *Hist
+	hot        atomic.Int64
+	missed     atomic.Int64
 	syncWindow *Hist
 
 	inflight, shed, lagged, total, unavailable, failed, syncCount atomic.Int64
@@ -244,7 +255,7 @@ func gatesCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	w := &worker{spec: spec, ctx: context.WithoutCancel(ctx), decisions: newHists(), syncs: newHists(), counters: map[string]int64{},
-		window: newHist(), syncWindow: newHist(), captured: map[string]map[string]int64{}, amounts: map[string]map[string]int64{}}
+		window: newHist(), missWindow: newHist(), syncWindow: newHist(), captured: map[string]map[string]int64{}, amounts: map[string]map[string]int64{}}
 	phase := "start"
 	w.phase.Store(&phase)
 	if spec.CaptureLog != "" {
@@ -403,8 +414,8 @@ func gateClients(ctx context.Context, w *worker) ([]*openrails.Client, func(), e
 // embeddedConfig is the engine every embedded process and the coordinator
 // open on a world's schema, declaring the same merchants.
 func embeddedConfig(schema, chdb string, slugs []string) openrails.Config {
-	cfg := openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, ClickHouse: openrails.ClickHouseConfig{Database: chdb},
-		ProviderWriteMode: openrails.ProviderWritesReadOnly, RateLimits: openrails.RateLimitsConfig{}}
+	cfg := openrails.Config{Database: billing.DatabaseConfig{Schema: schema, RiverSchema: schema}, ClickHouse: billing.ClickHouseConfig{Database: chdb},
+		RateLimits: billing.RateLimitsConfig{}}
 	for _, s := range slugs {
 		cfg.Merchants = append(cfg.Merchants, billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{Slug: s, DisplayName: strings.ToUpper(s)}})
 	}
@@ -538,13 +549,21 @@ func (w *worker) request(m *mrun, customer billing.CustomerID, drain bool) {
 	if drain {
 		class = "drain"
 	}
-	w.decisions.add(phase+"|"+class+"|"+path+"|"+outcome, lat)
+	// A known customer's decision that waited across a sync answer was held:
+	// behind a stale view's probe, or for a view it lacked.
 	if path == "local" && lat >= time.Millisecond && (w.spec.Mode == "embedded" || m.syncs.Load() != syncsBefore) {
-		w.count("waited|"+phase+"|"+class, 1)
+		path = "held"
 	}
+	w.decisions.add(phase+"|"+class+"|"+path+"|"+outcome, lat)
 	if class == "hot" {
+		w.hot.Add(1)
 		w.wmu.Lock()
-		w.window.Add(lat)
+		if path == "cold" || path == "held" {
+			w.missed.Add(1)
+			w.missWindow.Add(lat)
+		} else {
+			w.window.Add(lat)
+		}
 		w.wmu.Unlock()
 	}
 	w.total.Add(1)
@@ -591,12 +610,12 @@ func (w *worker) report(done <-chan struct{}) {
 		case <-tick.C:
 		}
 		w.wmu.Lock()
-		win, sw := w.window, w.syncWindow
-		w.window, w.syncWindow = newHist(), newHist()
+		win, miss, sw := w.window, w.missWindow, w.syncWindow
+		w.window, w.missWindow, w.syncWindow = newHist(), newHist(), newHist()
 		w.wmu.Unlock()
 		l := live{Proc: w.spec.Proc, At: time.Now(), Decisions: w.total.Load(), Unavailable: w.unavailable.Load(), Errors: w.failed.Load(),
 			Inflight: w.inflight.Load(), Shed: w.shed.Load(), Lagged: w.lagged.Load(), Captured: map[string]int64{},
-			HotP50: win.Q(0.5), HotP99: win.Q(0.99), SyncP99: sw.Q(0.99), Syncs: w.syncCount.Load()}
+			HotP50: win.Q(0.5), HotP99: win.Q(0.99), MissP50: miss.Q(0.5), MissP99: miss.Q(0.99), Hot: w.hot.Load(), Missed: w.missed.Load(), SyncP99: sw.Q(0.99), Syncs: w.syncCount.Load()}
 		for _, m := range w.ms {
 			l.Captured[m.Slug] = m.captured.Load()
 		}
