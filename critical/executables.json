@@ -2532,6 +2532,15 @@
     ],
     "OR-J47-S12": [
       "TestCheckoutFunnel/OR-J47-S12/an-erasure-clears-a-checkouts-attribution"
+    ],
+    "OR-J37-S72": [
+      "TestSolanaPulls/OR-J37-S72/a-pull-confirmed-and-not-finalized-books-nothing-and-is-not-signed-again"
+    ],
+    "OR-J37-S73": [
+      "TestSolanaContracts/OR-J37-S73/a-first-subscription-payment-confirmed-and-not-finalized-enrolls-nothing-until-it-finalizes"
+    ],
+    "OR-J37-S74": [
+      "TestSolanaPulls/OR-J37-S74/a-confirmed-pull-its-fork-drops-books-nothing-and-is-signed-again-only-after-its-blockhash-expires"
     ]
   }
 }

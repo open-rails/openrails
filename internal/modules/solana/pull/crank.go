@@ -285,7 +285,7 @@ func (h *Handler) crankOne(ctx context.Context, repo *solanasubs.SolanaSubscript
 	return crankOutcome{kind: crankSucceeded, signature: sig}, nil
 }
 
-// finalizePull is the renewal repair for a confirmed on-chain pull: renew the
+// finalizePull is the renewal repair for a finalized on-chain pull: renew the
 // membership window (payment row, period advance, notifications; idempotent
 // on the tx signature) and advance the row past the pulled period. Shared by
 // the inline success path and the recorded-signature verify leg.

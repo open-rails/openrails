@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 783,
+  "scenario_count": 786,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3917,6 +3917,21 @@
       "id": "OR-J47-S12",
       "journey": "J47",
       "name": "A customer's erasure clears every attribution field of its checkouts; the checkouts stand"
+    },
+    {
+      "id": "OR-J37-S72",
+      "journey": "J37",
+      "name": "A Solana renewal pull that is confirmed and not finalized books nothing, extends nothing and is not signed again; it is booked once when it finalizes"
+    },
+    {
+      "id": "OR-J37-S73",
+      "journey": "J37",
+      "name": "A first Solana subscription payment that is confirmed and not finalized enrolls nothing and stays pending; it enrolls once when it finalizes"
+    },
+    {
+      "id": "OR-J37-S74",
+      "journey": "J37",
+      "name": "A confirmed Solana pull whose fork is dropped books nothing and is signed again only after its blockhash provably expired"
     }
   ]
 }

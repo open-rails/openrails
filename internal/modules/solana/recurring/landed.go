@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	// ErrPaymentNotLanded: the signature is not (yet) a confirmed transaction.
-	// Retryable: the wallet may have just sent it.
-	ErrPaymentNotLanded = errors.New("recurring: transaction not confirmed on-chain")
+	// ErrPaymentNotLanded: the signature is not (yet) a finalized transaction.
+	// Retryable: the wallet may have just sent it, or it awaits finality.
+	ErrPaymentNotLanded = errors.New("recurring: transaction not finalized on-chain")
 	// ErrPaymentUnverified: the landed transaction does not prove the payment.
 	ErrPaymentUnverified = errors.New("recurring: transaction does not prove the payment")
 	// ErrPaymentLate: the payment landed after its quote's validity.
@@ -35,7 +35,7 @@ func (e *LatePaymentError) Error() string {
 
 func (e *LatePaymentError) Unwrap() error { return ErrPaymentLate }
 
-// landedTx is a confirmed, successful transaction whose every required
+// landedTx is a finalized, successful transaction whose every required
 // signature verifies against its message.
 type landedTx struct {
 	signature string
@@ -43,15 +43,17 @@ type landedTx struct {
 	tx        *solanago.Transaction
 }
 
-// fetchLanded reads the signature's transaction from the chain. The signature
-// names the transaction; nothing else the caller supplies is trusted.
+// fetchLanded reads the signature's finalized transaction from the chain. The
+// signature names the transaction; nothing else the caller supplies is trusted.
 func fetchLanded(ctx context.Context, chain solanaint.ChainReader, signature string) (*landedTx, error) {
 	sig, err := solanago.SignatureFromBase58(strings.TrimSpace(signature))
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid signature", ErrPaymentUnverified)
 	}
 	result, err := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{},
-		func(ctx context.Context) (*rpc.GetTransactionResult, error) { return chain.GetTransaction(ctx, sig) },
+		func(ctx context.Context) (*rpc.GetTransactionResult, error) {
+			return chain.GetFinalizedTransaction(ctx, sig)
+		},
 		func(r *rpc.GetTransactionResult) bool { return r != nil },
 	)
 	if err != nil || result == nil {

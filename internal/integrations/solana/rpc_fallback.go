@@ -571,6 +571,12 @@ func (c *RPCClient) GetTransaction(ctx context.Context, signature solanago.Signa
 	return c.getTransactionAt(ctx, signature, rpc.CommitmentConfirmed)
 }
 
+// GetFinalizedTransaction retrieves transaction details at finalized
+// commitment with automatic failover; nil while it is only confirmed.
+func (c *RPCClient) GetFinalizedTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error) {
+	return c.getTransactionAt(ctx, signature, rpc.CommitmentFinalized)
+}
+
 // getTransactionAt retrieves a transaction at commitment. Versioned (v0)
 // transactions are requested explicitly; without it the node refuses them.
 func (c *RPCClient) getTransactionAt(ctx context.Context, signature solanago.Signature, commitment rpc.CommitmentType) (*rpc.GetTransactionResult, error) {

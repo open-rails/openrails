@@ -222,7 +222,7 @@ func (c *RPCClient) ReferenceHistory(ctx context.Context, reference string, term
 	return out, closed, nil
 }
 
-// SubmitAndConfirm submits a signed transaction and watches it to Confirmed.
+// SubmitAndConfirm submits a signed transaction and watches it to Finalized.
 // The error covers submission/watch failures only (RPC down, expired
 // blockhash, ctx ended); a landed revert is in Outcome.Err. terminal comes from
 // RecentBlockhash.Terminal(); zero watches until ctx ends.
@@ -235,5 +235,5 @@ func (c *RPCClient) SubmitAndConfirm(ctx context.Context, tx *solanago.Transacti
 	if err != nil {
 		return nil, err
 	}
-	return c.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, terminal)
+	return c.WatchTransaction(ctx, sig, rpc.CommitmentFinalized, terminal)
 }

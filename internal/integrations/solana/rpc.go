@@ -23,8 +23,9 @@ type ChainReader interface {
 	// GetTokenBalanceForMint is the owner's ATA balance of mint in base units;
 	// 0 when the ATA does not exist.
 	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)
-	// GetTransaction reads a transaction at confirmed commitment.
-	GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
+	// GetFinalizedTransaction reads a transaction at finalized commitment;
+	// nil while it is only confirmed.
+	GetFinalizedTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
 	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal ChainTerminal) (*TransactionOutcome, error)
 	// NeverLanded reports whether the signature provably never landed and
 	// never will.
