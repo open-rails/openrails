@@ -628,7 +628,7 @@ type BillingGrant struct {
 	ImportRootID *uuid.UUID
 }
 
-// Internal typed financial emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers.
+// Internal typed financial emission and deduplication journal; the public feed is eventlog_events, read through GET /v1/app/events. Retention: rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -1159,7 +1159,7 @@ type BillingMrrFlow struct {
 	Logos      int64
 }
 
-// One change of a customer's MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer's or merchant's cancel), opening (an import or backfill adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.
+// One change of a customer's MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer's or merchant's cancel), opening (an import adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.
 type BillingMrrMovement struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID
@@ -1381,7 +1381,7 @@ type BillingNotificationChannelState struct {
 	RestoreRequired bool
 }
 
-// Internal notification emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.
+// Internal notification emission and deduplication journal; the public feed is eventlog_events, read through GET /v1/app/events. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.
 type BillingNotificationEvent struct {
 	MerchantID uuid.UUID
 	ID         uuid.UUID

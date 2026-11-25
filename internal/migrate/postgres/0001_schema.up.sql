@@ -4343,19 +4343,19 @@ COMMENT ON COLUMN billing.carts.lines IS 'JSON array of {price_id, quantity, amo
 CREATE INDEX carts_last_changed_at_idx ON billing.carts (last_changed_at);
 
 CREATE TABLE billing.owed_items (
-    id uuid CONSTRAINT invoice_items_id_not_null NOT NULL DEFAULT uuidv7(),
-    merchant_id uuid CONSTRAINT invoice_items_merchant_id_not_null NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
-    customer_id uuid CONSTRAINT invoice_items_customer_id_not_null NOT NULL,
-    currency text CONSTRAINT invoice_items_currency_not_null NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
+    id uuid NOT NULL DEFAULT uuidv7(),
+    merchant_id uuid NOT NULL REFERENCES billing.merchants (id) ON DELETE RESTRICT,
+    customer_id uuid NOT NULL,
+    currency text NOT NULL CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     invoice_id uuid,
-    source_type text CONSTRAINT invoice_items_source_type_not_null NOT NULL,
-    source_id text CONSTRAINT invoice_items_source_id_not_null NOT NULL,
-    accrued_at timestamptz CONSTRAINT invoice_items_invoice_at_not_null NOT NULL,
-    amount bigint CONSTRAINT invoice_items_amount_not_null NOT NULL CHECK (amount >= 0),
-    status text CONSTRAINT invoice_items_status_not_null NOT NULL DEFAULT 'pending',
-    metadata jsonb CONSTRAINT invoice_items_metadata_not_null NOT NULL,
-    created_at timestamptz CONSTRAINT invoice_items_created_at_not_null NOT NULL DEFAULT now(),
-    updated_at timestamptz CONSTRAINT invoice_items_updated_at_not_null NOT NULL DEFAULT now(),
+    source_type text NOT NULL,
+    source_id text NOT NULL,
+    accrued_at timestamptz NOT NULL,
+    amount bigint NOT NULL CHECK (amount >= 0),
+    status text NOT NULL DEFAULT 'pending',
+    metadata jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT owed_items_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
     CONSTRAINT owed_items_invoice_id_fkey FOREIGN KEY (merchant_id, customer_id, invoice_id) REFERENCES billing.invoices (merchant_id, customer_id, id) ON DELETE RESTRICT,
@@ -5747,7 +5747,7 @@ CREATE TABLE billing.notification_events (
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT notification_events_merchant_id_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id) ON DELETE CASCADE
 );
-COMMENT ON TABLE billing.notification_events IS 'Internal notification emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.';
+COMMENT ON TABLE billing.notification_events IS 'Internal notification emission and deduplication journal; the public feed is eventlog_events, read through GET /v1/app/events. Retention: rows are deleted after at least 90 days from inserted_at and never earlier than the configured event retention, independently of readers.';
 
 CREATE INDEX notification_events_customer_idx ON billing.notification_events (merchant_id, customer_id, created_at, id);
 CREATE INDEX notification_events_delivery_idx ON billing.notification_events (inserted_at, merchant_id, id);
@@ -5892,7 +5892,7 @@ CREATE TABLE billing.host_outbox (
         OR (event_type IN ('destructive.hold_opened', 'destructive.hold_cleared') AND subject_type = 'destructive_hold' AND payment_id IS NULL AND amount IS NULL AND currency IS NULL AND jsonb_typeof(data) = 'object')
     )
 );
-COMMENT ON TABLE billing.host_outbox IS 'Internal typed financial emission and deduplication journal; the public feed is event_log. Retention: rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers.';
+COMMENT ON TABLE billing.host_outbox IS 'Internal typed financial emission and deduplication journal; the public feed is eventlog_events, read through GET /v1/app/events. Retention: rows are deleted after at least 90 days from recorded_at and never earlier than the configured event retention, independently of readers.';
 COMMENT ON COLUMN billing.host_outbox.currency IS 'The transition''s currency; NULL only for a product''s key change, which has none.';
 COMMENT ON COLUMN billing.host_outbox.dedupe_key IS 'Deterministic per transition (delinquency:<customer>:<currency>:<transition_seq>) so a re-run collapses instead of instructing a second shutoff.';
 
@@ -6249,7 +6249,7 @@ CREATE TABLE billing.subscription_mrr (
     ends_at timestamptz,
     next_change_at timestamptz,
     changed_at timestamptz NOT NULL,
-    cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo', 'backfill')),
+    cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo')),
     recorded_currency text NOT NULL CHECK (recorded_currency ~ '^[A-Z0-9]{3,12}$'),
     recorded_product_id uuid NOT NULL,
     recorded_price_id uuid NOT NULL,
@@ -6316,7 +6316,7 @@ CREATE TABLE billing.mrr_movements (
     mrr_after bigint NOT NULL CHECK (mrr_after >= 0),
     logo_delta integer NOT NULL CHECK (abs(logo_delta) <= 1),
     cohort_at timestamptz NOT NULL,
-    cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo', 'backfill')),
+    cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo')),
     voluntary boolean,
     backfilled boolean NOT NULL,
     occurred_at timestamptz NOT NULL,
@@ -6326,7 +6326,7 @@ CREATE TABLE billing.mrr_movements (
     CONSTRAINT mrr_movements_amount_check CHECK (mrr_after = mrr_before + delta),
     CONSTRAINT mrr_movements_voluntary_check CHECK ((voluntary IS NOT NULL) = (kind = 'churn'))
 );
-COMMENT ON TABLE billing.mrr_movements IS 'One change of a customer''s MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer''s or merchant''s cancel), opening (an import or backfill adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.';
+COMMENT ON TABLE billing.mrr_movements IS 'One change of a customer''s MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer''s or merchant''s cancel), opening (an import adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.mrr_movements.logo_delta IS '1 when the customer gains MRR from none, -1 when it loses all, 0 otherwise.';
 COMMENT ON COLUMN billing.mrr_movements.cohort_at IS 'The customer''s first_active_at in the currency: its cohort.';
 COMMENT ON COLUMN billing.mrr_movements.backfilled IS 'Written by a backfill from current state, not when the change happened.';
@@ -6351,7 +6351,7 @@ CREATE TABLE billing.mrr_movement_lines (
     mrr_before bigint NOT NULL CHECK (mrr_before >= 0),
     mrr_after bigint NOT NULL CHECK (mrr_after >= 0),
     subscriber_delta integer NOT NULL CHECK (abs(subscriber_delta) <= 1),
-    cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo', 'backfill')),
+    cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo')),
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT mrr_movement_lines_movement_id_fkey FOREIGN KEY (merchant_id, movement_id) REFERENCES billing.mrr_movements (merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT mrr_movement_lines_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions (merchant_id, id) ON DELETE RESTRICT,
@@ -6378,7 +6378,7 @@ CREATE TABLE billing.mrr_scheduled (
     kind text NOT NULL CHECK (kind IN ('churn', 'contraction', 'expansion')),
     mrr_delta bigint NOT NULL CHECK (mrr_delta <> 0),
     effective_at timestamptz NOT NULL,
-    cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo', 'backfill')),
+    cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo')),
     scheduled_change_id uuid,
     status text NOT NULL CHECK (status IN ('scheduled', 'reversed', 'effected', 'superseded')),
     scheduled_at timestamptz NOT NULL,
@@ -6731,7 +6731,7 @@ COMMENT ON FUNCTION billing.subscription_risk(s billing.subscriptions, p_level b
 -- The MRR writers read by key: a subscription's row, a customer's rows, the
 -- dirty rows. A session caches their plans, and one made while
 -- subscription_mrr was small scans it whole, or reads every entry of the
--- merchant from an index, so each row of a bulk import or backfill read every
+-- merchant from an index, so each row of a bulk import read every
 -- row written before it. These functions plan each read for the table as it
 -- is, without sequential scans, and a subscription's row is looked up by its
 -- customer too, so whichever index a plan takes is keyed: a write's work
@@ -6880,7 +6880,6 @@ DECLARE
     v_outcome text;
     v_closed uuid[] := '{}';
     v_moved boolean;
-    v_backfill boolean := COALESCE(current_setting('openrails.mrr_cause', true) = 'backfill', false);
     v_buckets timestamptz[];
     v_logos bigint[];
 BEGIN
@@ -6913,7 +6912,7 @@ BEGIN
              WHERE l.mrr_after <> l.mrr_before ORDER BY (l.cause = 'upgrade') DESC, abs(l.mrr_after - l.mrr_before) DESC, l.subscription_id LIMIT 1;
             v_kind := CASE
                 WHEN v_cause IN ('prune', 'undo') THEN 'correction'
-                WHEN v_cause IN ('import', 'backfill') THEN CASE WHEN v_total > 0 THEN 'opening' ELSE 'correction' END
+                WHEN v_cause = 'import' THEN CASE WHEN v_total > 0 THEN 'opening' ELSE 'correction' END
                 WHEN v_customer.mrr = 0 THEN CASE WHEN v_customer.first_active_at IS NULL THEN 'new' ELSE 'reactivation' END
                 WHEN v_after = 0 THEN 'churn'
                 WHEN v_total > 0 THEN 'expansion'
@@ -6933,7 +6932,7 @@ BEGIN
                 cohort_at, cause, voluntary, backfilled, occurred_at)
             VALUES (p_merchant, v_pair.customer_id, v_pair.currency, v_kind, v_total, v_customer.mrr, v_after, v_logo,
                 v_first, v_cause, CASE WHEN v_kind = 'churn' THEN v_cause IN ('canceled', 'merchant_canceled') END,
-                v_cause = 'backfill', v_at)
+                false, v_at)
             RETURNING id INTO v_movement;
             v_movements := array_append(v_movements, v_movement);
             INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
@@ -7104,20 +7103,14 @@ BEGIN
             END IF;
         END IF;
         IF v_row.risk <> '{}' THEN
-            -- A backfilled reason enters when the book says it began.
+            -- A case opens with the subscription's first reason.
             IF v_case.id IS NULL THEN
                 INSERT INTO billing.mrr_risk_cases (merchant_id, subscription_id, customer_id, currency, entry_reason, opened_at, mrr_at_entry, backfilled)
-                SELECT p_merchant, v_row.subscription_id, v_row.customer_id, v_row.currency, e.reason, e.at, v_row.mrr, v_backfill
-                  FROM (SELECT r.reason, r.n, CASE WHEN v_backfill THEN billing.mrr_risk_began(p_merchant, v_row.customer_id, v_row.subscription_id,
-                               v_row.currency, r.reason, v_at) ELSE v_at END AS at
-                          FROM unnest(v_row.risk) WITH ORDINALITY AS r(reason, n)) e
-                 ORDER BY e.at, e.n LIMIT 1
+                SELECT p_merchant, v_row.subscription_id, v_row.customer_id, v_row.currency, v_row.risk[1], v_at, v_row.mrr, false
                 RETURNING * INTO v_case;
             END IF;
             INSERT INTO billing.mrr_risk_episodes (merchant_id, case_id, subscription_id, currency, reason, entered_at, mrr_at_entry, overdue_amount)
-            SELECT p_merchant, v_case.id, v_row.subscription_id, v_row.currency, r.reason,
-                   CASE WHEN v_backfill THEN billing.mrr_risk_began(p_merchant, v_row.customer_id, v_row.subscription_id,
-                        v_row.currency, r.reason, v_at) ELSE v_at END, v_row.mrr,
+            SELECT p_merchant, v_case.id, v_row.subscription_id, v_row.currency, r.reason, v_at, v_row.mrr,
                    CASE WHEN r.reason = 'delinquent' THEN (SELECT d.overdue_amount FROM billing.customer_delinquency d
                        WHERE d.merchant_id = p_merchant AND d.customer_id = v_row.customer_id AND d.currency = v_row.currency) END
               FROM unnest(v_row.risk) AS r(reason)
@@ -7259,18 +7252,6 @@ COMMENT ON FUNCTION billing.subscriptions_track_cancellations() IS 'Records a su
 
 CREATE TRIGGER trg_subscriptions_track_cancellations AFTER UPDATE OF status ON billing.subscriptions
     FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status) EXECUTE FUNCTION billing.subscriptions_track_cancellations();
-
--- When a backfilled reason began, where the book records it: the customer's
--- delinquency or the subscription's unverified state; else p_at.
-CREATE FUNCTION billing.mrr_risk_began(p_merchant uuid, p_customer uuid, p_subscription uuid, p_currency text, p_reason text, p_at timestamptz) RETURNS timestamptz
-LANGUAGE sql STABLE SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-SELECT least(p_at, COALESCE(CASE p_reason
-    WHEN 'delinquent' THEN (SELECT d.entered_at FROM billing.customer_delinquency d
-                             WHERE d.merchant_id = p_merchant AND d.customer_id = p_customer AND d.currency = p_currency AND d.state = 'delinquent')
-    WHEN 'unverified' THEN (SELECT v.unverified_at FROM billing.subscription_verifications v
-                             WHERE v.merchant_id = p_merchant AND v.subscription_id = p_subscription) END, p_at))
-$$;
-COMMENT ON FUNCTION billing.mrr_risk_began(p_merchant uuid, p_customer uuid, p_subscription uuid, p_currency text, p_reason text, p_at timestamptz) IS 'When a backfilled risk reason began: customer_delinquency.entered_at for delinquent, subscription_verifications.unverified_at for unverified, else p_at, never after p_at.';
 
 -- A change outside the subscription row appends its customer for the MRR
 -- risk worker instead of touching subscription_mrr: the worker locks each
