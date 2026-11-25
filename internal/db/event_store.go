@@ -91,12 +91,26 @@ func UsageLedgerOf(q *gen.Queries) UsageLedger {
 // InTx is d bound to the transaction q runs in, so work queued through it
 // commits with that transaction; d itself outside one.
 func (d *DB) InTx(q *gen.Queries) *DB {
-	if d == nil || q == nil {
+	if d == nil {
 		return d
+	}
+	t := TxOf(q)
+	if t == nil {
+		return d
+	}
+	t.Log = d.Log
+	return t
+}
+
+// TxOf is the handle of the transaction q runs in, with its bindings; nil
+// outside one.
+func TxOf(q *gen.Queries) *DB {
+	if q == nil {
+		return nil
 	}
 	tx, ok := q.DBTX().(schemaTx)
 	if !ok {
-		return d
+		return nil
 	}
-	return &DB{pgtx: tx, rw: tx.rw, river: tx.river, Log: d.Log}
+	return &DB{pgtx: tx, rw: tx.rw, river: tx.river}
 }

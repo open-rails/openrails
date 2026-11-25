@@ -168,6 +168,9 @@ func (s *MoneyService) StartRunningChargeInTx(ctx context.Context, txDB *db.DB, 
 	if err := txSvc.watchBalance(ctx, q, merchantID.UUID(), customer.UUID(), string(in.Currency)); err != nil {
 		return nil, false, err
 	}
+	if err := txSvc.enrollUsageBilling(ctx, q, customer.UUID(), string(in.Currency)); err != nil {
+		return nil, false, err
+	}
 	charge, err = runningChargeFromRow(row, now)
 	return charge, true, err
 }
