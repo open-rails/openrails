@@ -15568,6 +15568,9 @@
           },
           "pay_url": {
             "$ref": "#/components/schemas/MyOrderPayURLParams"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/OrderAttribution"
           }
         }
       },
@@ -15589,6 +15592,9 @@
           },
           "pay_url": {
             "$ref": "#/components/schemas/OrderPayURLParams"
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/OrderAttribution"
           }
         }
       },
@@ -16953,13 +16959,17 @@
           },
           "credits": {
             "type": "boolean"
+          },
+          "checkouts": {
+            "type": "boolean"
           }
         },
         "required": [
           "subscriptions",
           "card_payments",
           "usage",
-          "credits"
+          "credits",
+          "checkouts"
         ]
       },
       "DashboardWidget": {
@@ -20775,6 +20785,16 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "checkout": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderCheckout"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -20805,7 +20825,211 @@
           "expired_at",
           "voided_at",
           "uncollectible_at",
-          "created_at"
+          "created_at",
+          "checkout"
+        ]
+      },
+      "OrderAttribution": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "medium": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "campaign": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "term": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "referrer": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "affiliate": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "medium",
+          "campaign",
+          "term",
+          "content",
+          "referrer",
+          "affiliate"
+        ]
+      },
+      "OrderCheckout": {
+        "type": "object",
+        "properties": {
+          "customer_type": {
+            "type": "string",
+            "enum": [
+              "new",
+              "reactivated",
+              "returning"
+            ]
+          },
+          "purchase_number": {
+            "type": "integer"
+          },
+          "opened_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "submitted_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "country": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "country_source": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "billing_address",
+                  "card",
+                  "ip"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "billing_country": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card_country": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ip_country": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "language": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/OrderAttribution"
+          }
+        },
+        "required": [
+          "customer_type",
+          "purchase_number",
+          "opened_at",
+          "submitted_at",
+          "country",
+          "country_source",
+          "billing_country",
+          "card_country",
+          "ip_country",
+          "language",
+          "attribution"
         ]
       },
       "OrderLine": {
@@ -21384,13 +21608,24 @@
           "due_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "checkout_order_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "subscription_id",
           "period_starts_at",
           "period_ends_at",
-          "due_at"
+          "due_at",
+          "checkout_order_id"
         ]
       },
       "OrderUsage": {

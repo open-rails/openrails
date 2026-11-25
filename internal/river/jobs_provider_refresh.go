@@ -15,6 +15,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -104,6 +105,8 @@ type ProviderRefreshWorker struct {
 	Alerts *alerting.Service
 
 	NMIClients *railresolve.NMIFactory
+	// Endpoints are the loopback fakes the pulls reach (Deps.ProviderEndpoints).
+	Endpoints config.ProviderEndpoints
 	// DataLinkPacing paces live CCBill accounts' DataLink requests;
 	// WireDataLink adjusts each DataLink client a pass arms (test seam).
 	DataLinkPacing ccbill.Pacing
@@ -208,6 +211,7 @@ func (w *ProviderRefreshWorker) work(ctx context.Context, mid, psp uuid.UUID) er
 	builder := reconcile.MerchantFetcherBuilder{
 		StripeClients:  w.StripeClients,
 		Config:         w.Config,
+		Endpoints:      w.Endpoints,
 		Merchants:      w.Merchants,
 		DB:             w.DB,
 		NMIClients:     w.NMIClients,

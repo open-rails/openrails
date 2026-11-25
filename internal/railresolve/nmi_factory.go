@@ -20,7 +20,9 @@ import (
 // security key and its declared environment, so its posture key is the one
 // startup verified. There is no bare-key path.
 type NMIFactory struct {
-	Config *billing.Config
+	// Gateway is the loopback NMI gateway (Deps.ProviderEndpoints), or empty
+	// for NMI's own endpoints.
+	Gateway string
 	// Postures is each merchant's write posture: a readonly merchant's
 	// client writes nothing, and so does every client without Postures.
 	Postures controls.Reader
@@ -30,12 +32,11 @@ type NMIFactory struct {
 	Log       *slog.Logger
 }
 
-// gateway is config.ProviderSandbox's loopback NMI gateway, or empty for NMI.
 func (f *NMIFactory) gateway() string {
 	if f == nil {
 		return ""
 	}
-	return config.SandboxNMIGatewayURL(f.Config)
+	return f.Gateway
 }
 
 // Settings reads the PSP's credential set: its versioned security key, the

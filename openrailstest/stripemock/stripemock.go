@@ -2,19 +2,18 @@
 // the Stripe APIs OpenRails calls, sells through hosted Checkout and delivers
 // signed webhooks, so a test drives a real OpenRails through a Stripe purchase.
 //
-// Point a sandbox engine at it, mount OpenRails, and tell the mock where its
-// webhooks go:
+// Point an engine at it (Deps.ProviderEndpoints), mount OpenRails, and tell
+// the mock where its webhooks go:
 //
 //	stripe := stripemock.New(stripemock.Options{Clock: clock.Now})
 //	defer stripe.Close()
 //	engine, err := openrails.New(ctx, openrails.Config{
-//		ProviderSandbox: billing.ProviderSandboxConfig{StripeAPIURL: stripe.URL()},
 //		Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{
 //			Slug: "shop", DisplayName: "Shop", PSPs: billing.PSPs{
 //				"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
 //			},
 //		}}},
-//	}, openrails.Deps{Postgres: pool, Clock: clock})
+//	}, openrails.Deps{Postgres: pool, Clock: clock, ProviderEndpoints: openrails.ProviderEndpoints{StripeAPIURL: stripe.URL()}})
 //	id, err := engine.DeclaredMerchant("shop")
 //	shop, err := engine.Merchant(id)
 //	// … openrailshttp.Mount(mux, engine, routes); srv := httptest.NewServer(mux)
@@ -76,7 +75,7 @@ func New(opts Options) *Mock {
 	return &Mock{stripemock.New(stripemock.Options{Clock: opts.Clock})}
 }
 
-// URL is the API root: Config.ProviderSandbox.StripeAPIURL.
+// URL is the API root: Deps.ProviderEndpoints.StripeAPIURL.
 func (s *Mock) URL() string { return s.m.URL() }
 
 // Transport serves Stripe in process: Deps.StripeTransport.

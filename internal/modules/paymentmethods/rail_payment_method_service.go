@@ -570,7 +570,7 @@ func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context,
 	}
 	factory := s.NMIClients
 	if factory == nil {
-		factory = &railresolve.NMIFactory{Config: s.Config, Postures: controls.View{DB: s.DB}, Log: s.Log}
+		factory = &railresolve.NMIFactory{Postures: controls.View{DB: s.DB}, Log: s.Log}
 	}
 	return factory.Client(ctx, s.MerchantSecrets, mid, scope)
 }

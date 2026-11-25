@@ -158,14 +158,16 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "catalog_rate_cards" {
 			ClearMeteredPaymentTerm(p, r.Values)
 		}
-		// Orders before usage orders had none of their columns; before
-		// embedded pay URLs hosted ones only; before renewals none of their
-		// columns; before pay URLs none of theirs; before the payment axis one
-		// status. Before migration 89, embedded was a ui_mode.
+		// Orders before checkout facts had none of their columns; before
+		// usage orders none of theirs; before embedded pay URLs hosted ones
+		// only; before renewals none of their columns; before pay URLs none
+		// of theirs; before the payment axis one status. Before migration 89,
+		// embedded was a ui_mode.
 		if p.Name == "orders" && len(r.Values) < len(p.Columns) {
-			missing := len(p.Columns) - 2 - len(r.Values)
+			base := Profile{Name: p.Name, Columns: p.Columns[:len(p.Columns)-orderCheckoutColumns]}
+			missing := len(base.Columns) - 2 - len(r.Values)
 			if missing == orderUsageColumns+1+orderRenewalColumns+orderPayURLColumns+1 {
-				r.Values = splitOrderStatus(p, r.Values)
+				r.Values = splitOrderStatus(base, r.Values)
 				missing--
 			}
 			switch missing {
@@ -173,15 +175,22 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
 			case orderUsageColumns + 1, orderUsageColumns + 1 + orderRenewalColumns, orderUsageColumns + 1 + orderRenewalColumns + orderPayURLColumns:
 				r.Values = append(r.Values, make([]*string, missing-orderUsageColumns-1)...)
-				r.Values = append(r.Values, hostedIfPayURL(p, r.Values))
+				r.Values = append(r.Values, hostedIfPayURL(base, r.Values))
 				r.Values = append(r.Values, make([]*string, orderUsageColumns)...)
 			}
-			if len(r.Values) == len(p.Columns)-2 {
+			if len(r.Values) == len(base.Columns)-2 {
 				r.Values = append(r.Values, new("engine"), nil)
+			}
+			if len(r.Values) == len(base.Columns) {
+				r.Values = append(r.Values, make([]*string, orderCheckoutColumns)...)
 			}
 		}
 		if p.Name == "orders" {
 			embeddedFromUIMode(p, r.Values)
+		}
+		// Subscriptions before checkout facts named no checkout.
+		if p.Name == "subscriptions" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, nil)
 		}
 		// Order lines before usage orders named no accrual source.
 		if p.Name == "order_lines" {
@@ -244,11 +253,12 @@ var retiredTables = map[string]bool{"usage_daily": true, "usage_accruals": true,
 var errArchivedUnpostedUsage = fmt.Errorf("an archive with usage accruals the ledger had not taken: restore it on the release that wrote it, post them, and export it again")
 
 // The column groups later migrations appended to orders, in order: the pay
-// URL's, renewals', embedded, usage orders'.
+// URL's, renewals', embedded, usage orders', checkout facts.
 const (
-	orderPayURLColumns  = 5
-	orderRenewalColumns = 5
-	orderUsageColumns   = 10
+	orderPayURLColumns   = 5
+	orderRenewalColumns  = 5
+	orderUsageColumns    = 10
+	orderCheckoutColumns = 16
 )
 
 // hostedIfPayURL is embedded for an order archived before it had one: false

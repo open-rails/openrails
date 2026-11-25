@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 758,
+  "scenario_count": 772,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3589,6 +3589,11 @@
       "name": "A billing pass whose holder died leaves a lease that lapses on its own; a pass started meanwhile exits, and the next takes what is due"
     },
     {
+      "id": "OR-J04-S82",
+      "journey": "J04",
+      "name": "Deps.ProviderEndpoints sends provider clients only to loopback fakes: a hostname, a non-loopback address, userinfo or a source matching every address refuses New, and so does any endpoint beside a live PSP"
+    },
+    {
       "id": "OR-J38-S83",
       "journey": "J38",
       "name": "Of concurrent pulls of one merchant one runs and the others skip, another merchant's pull runs beside it, and a provider refresh waits for the running pull; the pull holds a lease row, not a database session"
@@ -3606,45 +3611,50 @@
     {
       "id": "OR-J06-S73",
       "journey": "J06",
-      "name": "A signup under a rebill hold charges and creates its subscription; its first renewal waits with access kept and charges once after the release"
+      "name": "A provider_sandbox section or PROVIDER_SANDBOX_* variable refuses boot and names its replacement: no setting redirects a provider"
     },
     {
       "id": "OR-J06-S74",
       "journey": "J06",
-      "name": "A failed renewal's dunning retry waits under a rebill hold and retries after the release"
+      "name": "A signup under a rebill hold charges and creates its subscription; its first renewal waits with access kept and charges once after the release"
     },
     {
       "id": "OR-J06-S75",
       "journey": "J06",
-      "name": "Scheduled usage collection waits under a rebill hold and collects after the release"
+      "name": "A failed renewal's dunning retry waits under a rebill hold and retries after the release"
     },
     {
       "id": "OR-J06-S76",
       "journey": "J06",
-      "name": "A rebill hold never holds what a person asks for: a customer's immediate upgrade and a staff refund run"
+      "name": "Scheduled usage collection waits under a rebill hold and collects after the release"
     },
     {
       "id": "OR-J06-S77",
       "journey": "J06",
-      "name": "--all-merchants sets every merchant's control; each change is one configuration-history entry with its reason, and an unchanged control records none"
+      "name": "A rebill hold never holds what a person asks for: a customer's immediate upgrade and a staff refund run"
     },
     {
       "id": "OR-J06-S78",
       "journey": "J06",
-      "name": "Destructive arming is each merchant's own: arming or disarming one leaves the other, and one control arms destructive actions and enforcing pulls"
+      "name": "--all-merchants sets every merchant's control; each change is one configuration-history entry with its reason, and an unchanged control records none"
     },
     {
       "id": "OR-J06-S79",
       "journey": "J06",
-      "name": "Export leaves the source's writes readonly, restore lands the destination readonly and disarmed, an armed destination is refused, and writes full restores the copy"
+      "name": "Destructive arming is each merchant's own: arming or disarming one leaves the other, and one control arms destructive actions and enforcing pulls"
     },
     {
       "id": "OR-J06-S80",
       "journey": "J06",
-      "name": "Unreadable controls deny provider writes, rebills and destructive actions"
+      "name": "Export leaves the source's writes readonly, restore lands the destination readonly and disarmed, an armed destination is refused, and writes full restores the copy"
     },
     {
       "id": "OR-J06-S81",
+      "journey": "J06",
+      "name": "Unreadable controls deny provider writes, rebills and destructive actions"
+    },
+    {
+      "id": "OR-J06-S82",
       "journey": "J06",
       "name": "The migration carries write postures, the destructive switch and merchant policies into merchant controls"
     },
@@ -3792,6 +3802,66 @@
       "id": "OR-J40-S29",
       "journey": "J40",
       "name": "A merchant's refund of a usage order's payment, made through OpenRails or observed from the provider, records and leaves its owed settled; a chargeback after a refund owes again only what the refund left, keeps it if the refund settles later, and its won dispute settles it and gives the loss back"
+    },
+    {
+      "id": "OR-J47-S01",
+      "journey": "J47",
+      "name": "Checkout steps are recorded where the customer takes them: created, opened on the first read in person, submitted on the first pay request, paid"
+    },
+    {
+      "id": "OR-J47-S02",
+      "journey": "J47",
+      "name": "A merchant's pay URL is opened only when its page reads it; an expired checkout is abandoned at the step it reached"
+    },
+    {
+      "id": "OR-J47-S04",
+      "journey": "J47",
+      "name": "A checkout's purchase number counts the customer's paid purchases; an abandoned checkout is not one"
+    },
+    {
+      "id": "OR-J47-S05",
+      "journey": "J47",
+      "name": "A checkout's country is its billing address, then the trusted proxy's IP country, never the address; an untrusted header is ignored"
+    },
+    {
+      "id": "OR-J47-S06",
+      "journey": "J47",
+      "name": "A checkout's language is the first in-person request's Accept-Language, canonicalized"
+    },
+    {
+      "id": "OR-J47-S07",
+      "journey": "J47",
+      "name": "Checkout attribution is normalized and bounded, a bad field dropped without refusing the sale, kept first, and the referrer keeps only its host"
+    },
+    {
+      "id": "OR-J47-S09",
+      "journey": "J47",
+      "name": "An unpaid checkout that never started an attempt keeps its facts for 397 days, then is deleted"
+    },
+    {
+      "id": "OR-J47-S08",
+      "journey": "J47",
+      "name": "A subscription's renewals, and an upgrade's, name the checkout that bought it, whose country and attribution they carry"
+    },
+    {
+      "id": "OR-J47-S03",
+      "journey": "J47",
+      "name": "Checkout measures read the funnel as it happened: checkouts by step and outcome, conversion, submission and customer conversion rates, sales by purchase number, repeat purchase rate, and cash by country and source; the overview's checkout section answers and saves"
+    },
+    {
+      "id": "OR-J47-S10",
+      "journey": "J47",
+      "name": "A checkout's customer type is new on a first purchase, returning after one or while subscribed, reactivated once a subscription ended; sales and cash split by it, and subscriber_type is refused with it"
+    },
+    {
+      "id": "OR-J47-S11",
+      "journey": "J47",
+      "name": "Spending a merchant's units is not a checkout: unit orders carry no checkout facts and leave the funnel, conversion, purchase numbers and repeat purchases to purchases in money"
+    },
+    {
+      "id": "OR-J47-S12",
+      "journey": "J47",
+      "name": "A customer's erasure clears every attribution field of its checkouts; the checkouts stand"
     }
   ]
 }

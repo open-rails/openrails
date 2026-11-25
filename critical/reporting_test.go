@@ -249,14 +249,14 @@ func healthOverview(t *testing.T) {
 	board, err := a.alpha.GetDashboard(t.Context())
 	require.NoError(t, err)
 	require.True(t, board.IsDefault)
-	require.Equal(t, &billing.DashboardProfile{Subscriptions: true, CardPayments: true}, board.Profile)
+	require.Equal(t, &billing.DashboardProfile{Subscriptions: true, CardPayments: true, Checkouts: true}, board.Profile)
 	sections := map[string]bool{}
 	for _, w := range board.Widgets {
 		if w.Viz == dashboard.Heading {
 			sections[w.Title] = true
 		}
 	}
-	require.Equal(t, map[string]bool{"Revenue and cash": true, "Recurring": true, "Retention": true, "Payment health": true}, sections,
+	require.Equal(t, map[string]bool{"Revenue and cash": true, "Recurring": true, "Retention": true, "Payment health": true, "Checkout and customers": true}, sections,
 		"no credits or usage section without credits or usage")
 	require.Equal(t, "kpi", board.Widgets[0].Viz)
 	require.Equal(t, []string{"mrr"}, board.Widgets[0].Query.Measures, "a subscription business leads with MRR")
@@ -293,9 +293,9 @@ func healthOverview(t *testing.T) {
 	overviewAnswers(t, a.beta, empty.Widgets, "")
 
 	// Every profile's overview is a layout the merchant may save.
-	all := billing.DashboardProfile{Subscriptions: true, CardPayments: true, Usage: true, Credits: true}
-	for bits := range 16 {
-		profile := billing.DashboardProfile{Subscriptions: bits&1 != 0, CardPayments: bits&2 != 0, Usage: bits&4 != 0, Credits: bits&8 != 0}
+	all := billing.DashboardProfile{Subscriptions: true, CardPayments: true, Usage: true, Credits: true, Checkouts: true}
+	for bits := range 32 {
+		profile := billing.DashboardProfile{Subscriptions: bits&1 != 0, CardPayments: bits&2 != 0, Usage: bits&4 != 0, Credits: bits&8 != 0, Checkouts: bits&16 != 0}
 		saved, err := a.beta.SetDashboard(t.Context(), billing.SetDashboardParams{Widgets: dashboard.DefaultWidgets(profile)})
 		require.NoError(t, err, "%+v", profile)
 		require.False(t, saved.IsDefault)

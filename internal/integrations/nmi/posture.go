@@ -212,7 +212,7 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 // ProxyPostureClient is the posture identity of a PSP credential that a
 // custodian proxy forwards. The declared environment selects the destination
 // (DirectPostURL) and the official signal; it is never inferred from a URL.
-// fixtureDestination (code seams and the loopback provider_sandbox only)
+// fixtureDestination (Deps.ProviderEndpoints' loopback gateway only)
 // replaces the destination and skips verification: OpenRails never dials it
 // itself, only the custodian does.
 func ProxyPostureClient(logger *slog.Logger, merchantID, pspID uuid.UUID, accountID string, cfg *config.NMIProviderSettings, fixtureDestination string) (*NMIClient, error) {

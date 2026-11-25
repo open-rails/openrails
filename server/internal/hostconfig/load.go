@@ -279,9 +279,11 @@ func Load(configPath string) (*Config, error) {
 	// Settings that left the file: an environment variable or a mounted
 	// secret file names one as surely as a key does.
 	for _, retired := range retiredSettings {
-		_, inEnv := os.LookupEnv(retired.env)
-		_, inSecrets := secretFiles[retired.env]
-		if k.Exists(retired.key) || inEnv || inSecrets {
+		inSecrets := false
+		for name := range secretFiles {
+			inSecrets = inSecrets || retired.names(name)
+		}
+		if k.Exists(retired.key) || retired.inEnv() || inSecrets {
 			return nil, fmt.Errorf("%s / %s was removed: %s", retired.key, retired.env, retired.now)
 		}
 	}
@@ -314,7 +316,7 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("dashboard_base_url was removed: alert links point at the server's console")
 	}
 	if k.Exists("ccbill_webhook_ip_allowlist") {
-		return nil, fmt.Errorf("ccbill_webhook_ip_allowlist was renamed: set provider_sandbox.ccbill_webhook_sources")
+		return nil, fmt.Errorf("ccbill_webhook_ip_allowlist was removed: CCBill webhooks are accepted from CCBill's published ranges")
 	}
 	if k.Exists("merchant_cors") {
 		return nil, fmt.Errorf("merchant_cors was removed: browser CORS belongs to the host app, not OpenRails merchant config")
@@ -508,8 +510,8 @@ const WritePostureHint = "each merchant's controls decide its provider writes: `
 // retiredDBEnv are the db section's environment variables.
 var retiredDBEnv = []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "DB_SSLROOTCERT", "DB_SQL_TRACE", "DB_LEASE_CONNS"}
 
-// retiredSettings are former settings: a key, its environment variable and
-// what replaced it.
+// retiredSettings are former settings: a key, its environment variable (a
+// section's ends in "_*") and what replaced it.
 type retiredSetting struct{ key, env, now string }
 
 var retiredSettings = []retiredSetting{
@@ -531,6 +533,24 @@ var retiredSettings = []retiredSetting{
 	{"llm.api_key", "LLM_API_KEY", noCatalogAssistant},
 	{"llm.catalog_copilot_enabled", "LLM_CATALOG_COPILOT_ENABLED", noCatalogAssistant},
 	{"llm.catalog_drafting_enabled", "LLM_CATALOG_DRAFTING_ENABLED", noCatalogAssistant},
+	{"provider_sandbox", "PROVIDER_SANDBOX_*", "no setting redirects a provider: a PSP's environment (test or sandbox) and its test credentials reach the provider's own test system; tests wire fakes in Go (Deps.ProviderEndpoints)"},
+}
+
+// names reports whether an environment variable or secret file is the
+// setting's.
+func (r retiredSetting) names(name string) bool {
+	if prefix, section := strings.CutSuffix(r.env, "*"); section {
+		return strings.HasPrefix(name, prefix)
+	}
+	return name == r.env
+}
+
+func (r retiredSetting) inEnv() bool {
+	if prefix, section := strings.CutSuffix(r.env, "*"); section {
+		return hasEnvPrefix(prefix)
+	}
+	_, present := os.LookupEnv(r.env)
+	return present
 }
 
 const noCatalogAssistant = "the catalog assistant was removed; OpenRails calls no language model"

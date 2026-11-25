@@ -90,6 +90,7 @@ type runtimeOverrides struct {
 	BasisTheoryTransport http.RoundTripper
 	NMITransport         http.RoundTripper
 	FXTransport          http.RoundTripper
+	ProviderEndpoints    config.ProviderEndpoints
 	DB                   *db.DB
 	Redis                redis.UniversalClient
 	Clock                clockwork.Clock
@@ -220,8 +221,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		return runtimeRef.Merchants
 	}
 	railConfigs := railresolve.NewMerchantsSource(cfg, merchantsFn)
+	var endpoints config.ProviderEndpoints
+	if overrides != nil {
+		endpoints = overrides.ProviderEndpoints
+	}
 	var stripeTransport http.RoundTripper
-	if api := config.SandboxStripeAPIURL(cfg); api != "" {
+	if api := endpoints.StripeAPIURL; api != "" {
 		stripeTransport = stripeapi.HostRewriteTransport(api)
 	}
 	if overrides != nil && overrides.StripeTransport != nil {
@@ -231,7 +236,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	postures := controls.View{DB: database}
 	stripeClients := stripeapi.NewFactory(stripeTransport, postures)
 	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
-	nmiClients := &railresolve.NMIFactory{Config: cfg, Postures: postures, Log: logger}
+	nmiClients := &railresolve.NMIFactory{Gateway: endpoints.NMIGatewayURL, Postures: postures, Log: logger}
 	if overrides != nil {
 		nmiClients.Transport = overrides.NMITransport
 	}
@@ -252,7 +257,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	// request-plane transaction builds).
 	solanaRPCResolver := &solanamodule.MerchantRPCBuilder{
 		MerchantsFn: merchantsFn,
-		Endpoint:    config.SandboxSolanaRPCURL(cfg),
+		Endpoint:    endpoints.SolanaRPCURL,
 		Postures:    postures,
 		Log:         logger,
 	}
@@ -332,6 +337,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		RedisClient:   redisClient,
 		Config:        cfg,
 		Clock:         clock,
+
+		ProviderEndpoints: endpoints,
 		// #746: one proxy-aware client-IP resolver, built once from config
 		// and Cloudflare's ranges.
 		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies),
@@ -407,8 +414,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	runtime.CollectionResolver = collectionResolver
 	runtime.MoneyService.SetUsageRecoveryResolver(collectionResolver)
 	moneyCharger.SetAdapterResolver(collectionResolver)
-	// A declared loopback NMI gateway (config.ProviderSandbox) reaches every
-	// NMI client through the shared factory.
+	// A loopback NMI gateway (Deps.ProviderEndpoints) reaches every NMI
+	// client through the shared factory.
 	runtime.NMIClients = nmiClients
 	if serviceInstances.PurchaseService != nil {
 		serviceInstances.PurchaseService.NMIClients = nmiClients

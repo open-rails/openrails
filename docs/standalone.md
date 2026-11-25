@@ -190,7 +190,7 @@ are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
 (`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
 signing keys; none relaxes a protection, and a deployment that leaves one unset
-fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit`, `destructive_action_limits` and `provider_sandbox`.
+fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit` and `destructive_action_limits`.
 
 **Listener and lifecycle**
 
@@ -359,15 +359,6 @@ user_action_rate_limit:
   minimum_customers_per_day: 10
   paid_customers_per_daily_customer: 100
 ```
-
-**Provider sandbox (tests only)**
-
-| Key | Meaning |
-|---|---|
-| `provider_sandbox.nmi_gateway_url`, `.stripe_api_url`, `.solana_rpc_url`, `.ccbill_datalink_url` | loopback fakes the rails talk to instead of the providers. The host must be a loopback IP literal and every PSP non-live; anything else refuses boot |
-| `provider_sandbox.ccbill_webhook_sources` | extra CCBill webhook source CIDRs, honored only for a webhook naming a sandbox CCBill account; `/0` is refused |
-
-`openrails sandbox nmi-gateway` serves such an NMI fake.
 
 ## The merchant manifest
 
@@ -683,8 +674,7 @@ the checkout origin. Give one public origin to `public_billing_base_url`,
   (`nmi`, `stripe`, `ccbill`, `basistheory`), never a PSP key, and the PSP's
   account id. The account resolves the merchant and its own secret verifies the
   request. NMI and Stripe sign; CCBill signs nothing and is accepted only from
-  its published ranges (plus `provider_sandbox.ccbill_webhook_sources` for
-  sandbox accounts). Stripe endpoints are registered automatically once
+  its published ranges. Stripe endpoints are registered automatically once
   `public_billing_base_url` is public https and provider writes are allowed.
   Per-rail setup: [PSPs](client.md#merchant-configuration-and-psps).
 
@@ -845,7 +835,7 @@ Each merchant has three operator controls, one row of `billing.merchant_controls
 
 `limited` stops what the system initiates; `readonly` stops the wire, enforced in each rail's transport. Verified receipt recovery runs under every setting. Every subscription has one collector, fixed when it is created or imported: `engine` (OpenRails charges a saved card or pulls on chain, and retries declines), `nmi_schedule` (NMI charges, OpenRails retries) or `provider` (Stripe or CCBill charge and retry). Configuration never moves a subscription to another collector.
 
-Each PSP's environment decides whether money is real, and the provider must agree before it arms; test seams (`provider_sandbox`) are refused beside a live PSP, and a non-live PSP relaxes no other protection.
+Each PSP's environment decides whether money is real, and the provider must agree before it arms; no setting redirects a provider, and a non-live PSP relaxes no other protection.
 
 **Rebills.** Held, the charges OpenRails initiates for the merchant wait: engine renewals (with any scheduled plan change they apply), dunning retries, NMI recurring recovery, scheduled usage collection and Solana renewal pulls. The due pass does not select them and an accepted one parks unsent; access is kept as for any renewal that has not been attempted. Released, they run at the next billing pass. What the customer starts never waits: a purchase and its first charge, an immediate plan or seat change, paying a renewal or usage order now. Refunds, card refreshes and deletes follow writes, not rebills. A hold longer than a whole period leaves that period to the operator, as any missed period is.
 
@@ -1074,7 +1064,7 @@ Periods are constants, the same for every merchant. Each table's comment states 
 | `subscription_status_transitions`, `subscription_billing_changes`, `operation_log`, `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `provider_intents` | instruction-only intents 25 months after they last changed; the rest are permanent |
 | `reconciliation_findings` | resolved ones, 12 months after resolved and last seen |
-| `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 90 days |
+| `order_attempts`; `orders`, `order_lines` | attempts that never reached a provider 90 days after `expires_at`; unpaid closed orders with no attempt, 397 days |
 | `parked_provider_subscriptions` | 90 days after release |
 | `carts` | 30 days after `last_changed_at` |
 | `notification_events`, `host_outbox`, the event log | 90 days |
@@ -1185,7 +1175,6 @@ the merchant the token is bound to.
 | `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters, credit lot counters, rollups and sign rules, and warn of a general-ledger total opposite its normal side; non-zero on a finding, not a warning. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
-| `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |
 
 ## Kubernetes and Helm
 

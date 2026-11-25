@@ -76,7 +76,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 			vault = nmimock.New(nmimock.Options{Clock: w.clock.Now})
 			t.Cleanup(vault.Close)
 			w.posture = "full"
-			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{NMIGatewayURL: vault.URL()}
+			w.deps.ProviderEndpoints = openrails.ProviderEndpoints{NMIGatewayURL: vault.URL()}
 			merchant := cfgMerchant(w.cfg, "alpha")
 			merchant.PSPs = billing.PSPs{"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "sdk-vault", SecurityKey: "critical-sdk-vault", TokenizationKey: "critical-sdk-tokenization"}.PSPConfig()}
 			merchant.CardVault = "nmi"

@@ -56,7 +56,7 @@ func OpenMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, cl
 		return nil, err
 	}
 	svc.WithPlatformVaultStore(conn.PlatformKV)
-	svc.StripeClients = stripeapi.ConfiguredFactory(cfg, controls.View{DB: database})
+	svc.StripeClients = stripeapi.NewFactory(nil, controls.View{DB: database})
 	if vault, ok := source.(*merchantdocs.VaultSource); ok {
 		key, err := vault.FingerprintKey(ctx)
 		if err == nil {

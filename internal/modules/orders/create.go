@@ -87,6 +87,9 @@ type CreateInput struct {
 	// LinesDigest names a customer order's lines (LinesDigest): FindOrCreate
 	// answers the customer's open order of the same lines instead.
 	LinesDigest []byte
+	// Checkout is what the creating request tells of the customer; an open
+	// order found instead keeps its own.
+	Checkout CheckoutFacts
 	// BalanceKey is a customer request's scoped Idempotency-Key and
 	// BalanceDigest its digest: an order in a merchant's unit, paid as it is
 	// created, keeps them, so a retry answers it.
@@ -308,9 +311,16 @@ func (s *Service) create(ctx context.Context, in CreateInput) (*Order, bool, err
 		if keyed != "" {
 			key = &keyed
 		}
-		if err := q.CreateOrder(ctx, gen.CreateOrderParams{MerchantID: mid.UUID(), ID: id, CustomerID: in.CustomerID, Origin: string(in.Origin),
+		params := gen.CreateOrderParams{MerchantID: mid.UUID(), ID: id, CustomerID: in.CustomerID, Origin: string(in.Origin),
 			Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: digest, LinesDigest: in.LinesDigest,
-			ExpiresAt: now.Add(in.TTL), Now: now}); err != nil {
+			ExpiresAt: now.Add(in.TTL), Now: now}
+		// Spending a merchant's units is not a checkout: no facts.
+		if !unit {
+			if err := checkoutFacts(ctx, q, &params, in.Checkout); err != nil {
+				return err
+			}
+		}
+		if err := q.CreateOrder(ctx, params); err != nil {
 			return err
 		}
 		for i, l := range quote.Lines {

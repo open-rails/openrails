@@ -61,7 +61,7 @@ func changedField(t *testing.T, entry billing.LogEntry, field string) (before, a
 }
 
 func TestMerchantControls(t *testing.T) {
-	t.Run("OR-J06-S73/a-signup-under-a-rebill-hold-charges-and-its-first-renewal-waits-for-the-release", func(t *testing.T) {
+	t.Run("OR-J06-S74/a-signup-under-a-rebill-hold-charges-and-its-first-renewal-waits-for-the-release", func(t *testing.T) {
 		a, p := newPaymentWorld(t, func(w *world) { w.clock.Advance(-30 * 24 * time.Hour) })
 		operator(t, a.world, "rebills", "hold", "alpha", "incident: duplicate charges suspected")
 		sub := buyMembership(t, a, a.alpha, p, 24)
@@ -83,7 +83,7 @@ func TestMerchantControls(t *testing.T) {
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
 	})
-	t.Run("OR-J06-S74/a-dunning-retry-waits-under-a-rebill-hold-and-retries-after-the-release", func(t *testing.T) {
+	t.Run("OR-J06-S75/a-dunning-retry-waits-under-a-rebill-hold-and-retries-after-the-release", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t, 7*24)
 		due := *sub.CurrentPeriodEndsAt
 		p.core.SetDecline("4242", "insufficient_funds")
@@ -107,7 +107,7 @@ func TestMerchantControls(t *testing.T) {
 		runRegistered(t, fleet, "openrails.billing_pass", 2)
 		renewalSettled(t, a, p, sub, due)
 	})
-	t.Run("OR-J06-S75/scheduled-usage-collection-waits-under-a-rebill-hold-and-collects-after-the-release", func(t *testing.T) {
+	t.Run("OR-J06-S76/scheduled-usage-collection-waits-under-a-rebill-hold-and-collects-after-the-release", func(t *testing.T) {
 		a, p, customer := usageBillingWorld(t, false)
 		operator(t, a.world, "rebills", "hold", "alpha", "incident")
 		oneUsage(t, a.alpha, usageInput(customer, "held-usage", 3))
@@ -127,7 +127,7 @@ func TestMerchantControls(t *testing.T) {
 		}, 15*time.Second, 20*time.Millisecond)
 		p.money(t, 1, 3000)
 	})
-	t.Run("OR-J06-S76/a-rebill-hold-never-holds-what-a-person-asks-for", func(t *testing.T) {
+	t.Run("OR-J06-S77/a-rebill-hold-never-holds-what-a-person-asks-for", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t)
 		operator(t, a.world, "rebills", "hold", "alpha", "incident")
 		price := upgradePrice(t, a, sub)
@@ -154,7 +154,7 @@ func TestMerchantControls(t *testing.T) {
 			return false
 		}, 15*time.Second, 20*time.Millisecond, "the refund reaches the provider")
 	})
-	t.Run("OR-J06-S77/all-merchants-sets-every-merchant-and-each-change-is-history", func(t *testing.T) {
+	t.Run("OR-J06-S78/all-merchants-sets-every-merchant-and-each-change-is-history", func(t *testing.T) {
 		w := newWorld(t, fullWrites)
 		out := operator(t, w, "rebills", "hold", "", "platform incident")
 		for _, slug := range []string{"alpha", "beta"} {
@@ -192,7 +192,7 @@ func TestMerchantControls(t *testing.T) {
 		_, err := hostCLIResult(t, w, "merchant", "rebills", "hold", "--all-merchants", "--by", "critical operator")
 		require.Error(t, err, "a change needs its reason")
 	})
-	t.Run("OR-J06-S78/destructive-arming-is-each-merchants-own", func(t *testing.T) {
+	t.Run("OR-J06-S79/destructive-arming-is-each-merchants-own", func(t *testing.T) {
 		a, p, sub := purchasedMembership(t, 7*24)
 		database := worldDB(t, a.world)
 		gate := destructive.New(database)
@@ -227,7 +227,7 @@ func TestMerchantControls(t *testing.T) {
 		runRegistered(t, fleet, "openrails.billing_pass", 1)
 		subscriptionState(t, a, sub.ID, "canceled")
 	})
-	t.Run("OR-J06-S79/export-and-restore-set-writes-readonly-and-an-armed-destination-is-refused", func(t *testing.T) {
+	t.Run("OR-J06-S80/export-and-restore-set-writes-readonly-and-an-armed-destination-is-refused", func(t *testing.T) {
 		source := newWorld(t, fullWrites)
 		customer := billing.CustomerID(uuid.New())
 		_, err := source.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "controls-archive"}})
@@ -253,7 +253,7 @@ func TestMerchantControls(t *testing.T) {
 		_, after := changedField(t, entries[len(entries)-1], "writes")
 		require.Equal(t, "full", after)
 	})
-	t.Run("OR-J06-S80/unreadable-controls-deny-writes-rebills-and-destructive-actions", func(t *testing.T) {
+	t.Run("OR-J06-S81/unreadable-controls-deny-writes-rebills-and-destructive-actions", func(t *testing.T) {
 		a, p := newPaymentWorld(t)
 		setControl(t, a.world, "destructive_armed", true, a.alpha.MerchantID())
 		database := worldDB(t, a.world)
@@ -272,7 +272,7 @@ func TestMerchantControls(t *testing.T) {
 		require.NotEqual(t, http.StatusCreated, status, string(raw))
 		require.Empty(t, p.effects(t), "nothing reaches the provider")
 	})
-	t.Run("OR-J06-S81/the-migration-carries-postures-the-switch-and-policies-into-controls", func(t *testing.T) {
+	t.Run("OR-J06-S82/the-migration-carries-postures-the-switch-and-policies-into-controls", func(t *testing.T) {
 		s := newLegacySchemaBefore(t, "_merchant_controls.up.sql")
 		d := s.seed(t)
 		merchant := func(slug string) uuid.UUID {

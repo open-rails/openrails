@@ -70,7 +70,7 @@ func newProviderRuntime(ctx context.Context, logger *slog.Logger, opts providerR
 	}
 	cleanup = func() { opened.Close(); _ = database.Close() }
 	// The factory the configuration's load registered Stripe posture with.
-	stripeClients := stripeapi.ConfiguredFactory(cfg, controls.View{DB: database})
+	stripeClients := stripeapi.NewFactory(nil, controls.View{DB: database})
 	if opened.Service != nil {
 		stripeClients = opened.Service.StripeClients
 	}
