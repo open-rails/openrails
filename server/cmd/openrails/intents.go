@@ -49,12 +49,12 @@ func newIntentsCmd() *cobra.Command {
 executed by its own River job. This command lists them for one merchant and
 writes nothing.
 
-EXECUTES UNDER is the lowest merchant write posture that runs a row: limited
+EXECUTES UNDER is the lowest merchant writes control that runs a row: limited
 for user- and admin-origin rows, full for system-origin ones; nothing runs
 under readonly. Under limited or readonly the pending rows, and the drain
-forecast printed after them, are exactly what "openrails merchant arm" will
-send. Read it before arming the merchant, and resolve anything you did not
-expect first.
+forecast printed after them, are exactly what "openrails merchant writes full"
+will send. Read it before restoring the merchant's writes, and resolve
+anything you did not expect first.
 
 Statuses: pending (waiting; LAST FAILURE names a blocker such as the posture, an
 unarmed PSP or a provider outage, and the row drains when it lifts),

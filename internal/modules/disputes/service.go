@@ -16,6 +16,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -26,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Service records disputes, responds to them and evaluates the monitoring
@@ -43,7 +43,7 @@ type Service struct {
 	// them a response waits.
 	Admissions *destructive.Admissions
 	Postures   interface {
-		Read(context.Context, uuid.UUID) (writeposture.Posture, error)
+		Read(context.Context, uuid.UUID) (controls.Posture, error)
 	}
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	Log       *slog.Logger

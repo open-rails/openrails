@@ -92,11 +92,13 @@ ORDER BY 1 ASC;
 
 -- name: ListDueUsageCollections :many
 -- CROSS-MERCHANT: open usage orders collected automatically whose next
--- charge is due, in due order. An idle pass reads no row.
+-- charge is due, in due order; none of a merchant whose rebills are held.
+-- An idle pass reads no row.
 SELECT merchant_id, id, customer_id, next_collection_attempt_at::timestamptz AS next_collection_attempt_at
 FROM billing.orders
 WHERE origin = 'usage' AND status = 'open' AND collection_method = 'charge_automatically'
   AND next_collection_attempt_at <= sqlc.arg(now)::timestamptz
+  AND NOT EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = orders.merchant_id AND c.rebills_held)
   AND (sqlc.narg(after_at)::timestamptz IS NULL
        OR (next_collection_attempt_at, merchant_id, id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_id)::uuid))
 ORDER BY next_collection_attempt_at, merchant_id, id

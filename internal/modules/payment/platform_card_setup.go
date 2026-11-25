@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -19,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // SaveBasisTheoryCard verifies a collected card without taking money and saves it
@@ -54,7 +54,7 @@ func (s *PurchaseService) SaveBasisTheoryCard(ctx context.Context, req billing.C
 	if !db.IsNotFound(err) {
 		return SavedCard{}, err
 	}
-	if (writeposture.View{DB: d}).Posture(ctx, mid.UUID()).ReadOnly() {
+	if (controls.View{DB: d}).Posture(ctx, mid.UUID()).ReadOnly() {
 		return SavedCard{}, ProviderWritesDisabled("card setup is unavailable while provider writes are disabled")
 	}
 	cfg, proxy, bt, err := s.CustodianSaleService.basisTheory(ctx, req.PSPID.UUID())

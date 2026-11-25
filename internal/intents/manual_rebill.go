@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -22,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const rebillSubmittedAt = "submitted_at"
@@ -83,7 +83,10 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.BillingProvide
 	if h.Config == nil {
 		return Parked("rebill execution mode is not configured")
 	}
-	if blocked, reason := GateExecution(ctx, writeposture.View{DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
+	if blocked, reason := GateExecution(ctx, controls.View{DB: h.DB}, in.MerchantID, Origin(in.Origin)); blocked {
+		return Parked(reason)
+	}
+	if reason := RebillHold(ctx, controls.View{DB: h.DB}, in); reason != "" {
 		return Parked(reason)
 	}
 	client, err := h.railClient(ctx, in)

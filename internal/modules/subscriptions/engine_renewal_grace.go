@@ -17,7 +17,7 @@ import (
 // supersedes it; a decline, cancellation or terminal outcome revokes it.
 //
 // A renewal with no outcome past its allowance is held (collection stopped:
-// fleet halted, admission hold, breaker, readonly). By default the member keeps
+// fleet halted, rebills held, breaker, readonly). By default the member keeps
 // access until the renewal is attempted, and life.renewal.held reports the
 // backlog; access_while_renewal_held=suspend ends access at the allowance.
 //

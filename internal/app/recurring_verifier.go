@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -17,14 +18,13 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // RecurringVerifier runs the NMI verification a card move needs when the
 // card has no recurring lineage: a decline is the card's refusal.
 func (rt *Runtime) RecurringVerifier(merchantID uuid.UUID, origin intents.Origin) subscriptions.RecurringVerifier {
 	return func(ctx context.Context, psp uuid.UUID, method gen.BillingPaymentMethod, order string) (string, error) {
-		if blocked, reason := intents.GateExecution(ctx, writeposture.View{DB: rt.DB}, merchantID, origin); blocked {
+		if blocked, reason := intents.GateExecution(ctx, controls.View{DB: rt.DB}, merchantID, origin); blocked {
 			return "", apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the recurring verification cannot be sent: "+reason)
 		}
 		var ref string

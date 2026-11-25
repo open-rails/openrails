@@ -83,29 +83,44 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	w.local, err = w.engine.LocalMerchant(w.alpha.MerchantID())
 	require.NoError(t, err)
 	if w.posture != "full" {
-		var declared []billing.MerchantID
-		for _, m := range w.cfg.Merchants {
-			// A declaration refused (a slug declared twice) has no merchant.
-			if id, err := w.engine.DeclaredMerchant(m.Slug); err == nil {
-				declared = append(declared, id)
-			}
-		}
-		setWritePosture(t, w, w.posture, declared...)
+		setWritePosture(t, w, w.posture, declaredMerchants(w)...)
 	}
 	return w
+}
+
+// declaredMerchants is the world's declared merchants. A declaration refused
+// (a slug declared twice) has no merchant.
+func declaredMerchants(w *world) []billing.MerchantID {
+	var declared []billing.MerchantID
+	for _, m := range w.cfg.Merchants {
+		if id, err := w.engine.DeclaredMerchant(m.Slug); err == nil {
+			declared = append(declared, id)
+		}
+	}
+	return declared
 }
 
 // fullWrites leaves the declared merchants' write posture full.
 func fullWrites(w *world) { w.posture = "full" }
 
-// setWritePosture stores the merchants' write posture as an operator's
-// `openrails merchant hold` would.
+// setWritePosture stores the merchants' writes as an operator's
+// `openrails merchant writes` would.
 func setWritePosture(t *testing.T, w *world, mode string, merchants ...billing.MerchantID) {
 	t.Helper()
+	setControl(t, w, "writes", mode, merchants...)
+}
+
+// setControl stores one of the merchants' controls (writes, rebills_held or
+// destructive_armed) as fixture setup, outside the history an operator's
+// change records.
+func setControl(t *testing.T, w *world, column string, value any, merchants ...billing.MerchantID) {
+	t.Helper()
+	require.Contains(t, []string{"writes", "rebills_held", "destructive_armed"}, column)
+	table := pgx.Identifier{w.schema, "merchant_controls"}.Sanitize()
 	for _, id := range merchants {
-		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{w.schema, "merchant_write_posture"}.Sanitize()+
-			" (merchant_id, mode, reason, set_by) VALUES ($1, $2, 'operator', 'critical fixture operator')"+
-			" ON CONFLICT (merchant_id) DO UPDATE SET mode = EXCLUDED.mode, set_at = now()", id.UUID(), mode)
+		_, err := w.pool.Exec(t.Context(), "INSERT INTO "+table+" (merchant_id, writes, rebills_held, destructive_armed) VALUES ($1, 'full', false, false) ON CONFLICT (merchant_id) DO NOTHING", id.UUID())
+		require.NoError(t, err)
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+table+" SET "+column+" = $2 WHERE merchant_id = $1", id.UUID(), value)
 		require.NoError(t, err)
 	}
 }

@@ -642,6 +642,7 @@ SELECT merchant_id, id, customer_id, next_collection_attempt_at::timestamptz AS 
 FROM billing.orders
 WHERE origin = 'usage' AND status = 'open' AND collection_method = 'charge_automatically'
   AND next_collection_attempt_at <= $1::timestamptz
+  AND NOT EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = orders.merchant_id AND c.rebills_held)
   AND ($2::timestamptz IS NULL
        OR (next_collection_attempt_at, merchant_id, id) > ($2::timestamptz, $3::uuid, $4::uuid))
 ORDER BY next_collection_attempt_at, merchant_id, id
@@ -664,7 +665,8 @@ type ListDueUsageCollectionsRow struct {
 }
 
 // CROSS-MERCHANT: open usage orders collected automatically whose next
-// charge is due, in due order. An idle pass reads no row.
+// charge is due, in due order; none of a merchant whose rebills are held.
+// An idle pass reads no row.
 func (q *Queries) ListDueUsageCollections(ctx context.Context, arg ListDueUsageCollectionsParams) ([]ListDueUsageCollectionsRow, error) {
 	rows, err := q.db.Query(ctx, listDueUsageCollections,
 		arg.Now,

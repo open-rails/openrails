@@ -21,6 +21,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -28,7 +29,6 @@ import (
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Executor approves, dismisses and lists proposals for the merchant on the
@@ -481,7 +481,7 @@ func (e *Executor) holdFor(ctx context.Context, d *db.DB, mid uuid.UUID, c *reco
 		}
 	}
 	if c.Effects.MovesMoney || c.Effects.ProviderWrite {
-		if p := (writeposture.View{DB: d}).Posture(ctx, mid); p.ReadOnly() {
+		if p := (controls.View{DB: d}).Posture(ctx, mid); p.ReadOnly() {
 			return &billing.ProposalError{Code: billing.CodeProviderWritesHeld, Message: p.Reason}
 		}
 	}

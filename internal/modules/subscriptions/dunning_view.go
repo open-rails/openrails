@@ -8,19 +8,19 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/collection"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // DunningViews reads the dunning of each subscription past_due or
 // awaiting_method, by subscription id. prices holds the subscriptions'
 // current prices by price id.
-func DunningViews(ctx context.Context, d *db.DB, postures writeposture.View, subs []*models.Subscription, prices map[uuid.UUID]*models.Price) (map[uuid.UUID]*billing.SubscriptionDunning, error) {
+func DunningViews(ctx context.Context, d *db.DB, postures controls.View, subs []*models.Subscription, prices map[uuid.UUID]*models.Price) (map[uuid.UUID]*billing.SubscriptionDunning, error) {
 	out := map[uuid.UUID]*billing.SubscriptionDunning{}
 	var ids []uuid.UUID
 	var dues []time.Time

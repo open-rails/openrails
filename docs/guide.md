@@ -222,8 +222,7 @@ its paid access, and the keys follow the product's current entitlements.
   and a refund or cancel behaves as you expect.
 - Declare the live PSP (`environment` omitted means real money) and register its
   webhook URL and signing secret; OpenRails checks the credentials before arming it.
-- A merchant writes to its providers unless its write posture holds it
-  (`openrails merchant hold`, [write safety](standalone.md#write-safety-and-the-kill-switch)).
+- A merchant writes to its providers unless its controls hold it (`openrails merchant writes`, [merchant controls](standalone.md#merchant-controls)).
 - Register `Ready` and `Probes()` with your supervisor ([embedded](embedded.md#health)).
 
 ## Customer messages

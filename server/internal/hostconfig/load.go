@@ -479,7 +479,7 @@ func hasEnvPrefix(prefix string) bool {
 }
 
 // WritePostureHint is where provider writes are held now.
-const WritePostureHint = "each merchant's write posture decides its provider writes: hold them with `openrails merchant hold --merchant NAME --mode readonly|limited --by NAME`, restore them with `openrails merchant arm`"
+const WritePostureHint = "each merchant's controls decide its provider writes: `openrails merchant writes readonly|limited|full --merchant NAME --by NAME --reason TEXT`"
 
 // retiredDBEnv are the db section's environment variables.
 var retiredDBEnv = []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "DB_SSLROOTCERT", "DB_SQL_TRACE", "DB_LEASE_CONNS"}
@@ -488,6 +488,7 @@ var retiredDBEnv = []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_U
 // what replaced it.
 var retiredSettings = []struct{ key, env, now string }{
 	{"provider_write_mode", "PROVIDER_WRITE_MODE", WritePostureHint},
+	{"engine_admission_hold", "ENGINE_ADMISSION_HOLD", "hold a merchant's rebills with `openrails merchant rebills hold --merchant NAME | --all-merchants --by NAME --reason TEXT`"},
 	{"drain_delay", "DRAIN_DELAY", "on SIGTERM the server drains for 5s, then stops within 20s"},
 	{"shutdown_timeout", "SHUTDOWN_TIMEOUT", "on SIGTERM the server drains for 5s, then stops within 20s"},
 }

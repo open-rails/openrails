@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -30,7 +31,6 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -171,7 +171,7 @@ func (s *OrderAttemptService) requireProviderWrites(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if posture := (writeposture.View{DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
+	if posture := (controls.View{DB: s.db}).Posture(ctx, mid.UUID()); posture.ReadOnly() {
 		return ProviderWritesDisabled(posture.Reason)
 	}
 	return nil

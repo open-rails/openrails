@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/mandates"
@@ -149,12 +150,18 @@ func (h *OrderCollectionHandler) Execute(ctx context.Context, intent gen.Billing
 		// Resumed after a possible submission. Stripe replays its idempotent
 		// sequence; NMI-family rails may only read.
 		if p.Rail == string(models.RailStripe) {
+			if reason := intents.RebillHold(ctx, controls.View{DB: h.DB}, intent); reason != "" {
+				return intents.Parked(reason)
+			}
 			return h.replayStripe(ctx, intent, p)
 		}
 		return h.Verify(ctx, intent)
 	}
 	if outcome, done := h.recoverBeforeDispatch(ctx, intent, p); done {
 		return outcome
+	}
+	if reason := intents.RebillHold(ctx, controls.View{DB: h.DB}, intent); reason != "" {
+		return intents.Parked(reason)
 	}
 	if h.Charger == nil {
 		return intents.Parked("order collection charger not wired")
@@ -305,6 +312,9 @@ func (h *OrderCollectionHandler) Verify(ctx context.Context, intent gen.BillingP
 			return intents.Ambiguous("stripe idempotency window elapsed; resolve with the exact stripe invoice or provider-confirmed non-execution")
 		}
 		if blocked, reason := intents.GateExecution(ctx, h.Config, intent.MerchantID, intents.Origin(intent.Origin)); blocked {
+			return intents.Ambiguous("stripe replay deferred: " + reason)
+		}
+		if reason := intents.RebillHold(ctx, controls.View{DB: h.DB}, intent); reason != "" {
 			return intents.Ambiguous("stripe replay deferred: " + reason)
 		}
 		// The executor replays through the provider-enforced idempotency key.

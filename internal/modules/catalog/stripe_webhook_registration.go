@@ -11,12 +11,12 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/httpx"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 type ManagedStripeWebhookParams struct {
@@ -32,7 +32,7 @@ type ManagedStripeWebhookParams struct {
 	EnabledEvents       []string
 	// Posture is the merchant's write posture: below full the pass writes
 	// nothing.
-	Posture writeposture.Posture
+	Posture controls.Posture
 	// Now overrides the rollover clock (tests). Zero = time.Now().
 	Now time.Time
 	// AllowRetire lets this pass DELETE endpoints that a successor replaced

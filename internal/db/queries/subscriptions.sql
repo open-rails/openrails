@@ -553,8 +553,8 @@ FOR UPDATE OF s;
 -- past_due rows whose grace ended with no retry scheduled (provider-billed,
 -- any rail: the provider never said renewed or canceled; or a case network
 -- advice deferred to its next renewal), and engine
--- collections due (admit_engine false while admissions are held). A row the
--- pass left unchanged waits for its due_recheck_at. Ids only, in id order
+-- collections due. A merchant whose rebills are held has no retry or engine
+-- collection due. A row the pass left unchanged waits for its due_recheck_at. Ids only, in id order
 -- after a cursor, so a pass reaches every merchant; due rows run per merchant.
 -- name: ListDueDunningMerchants :many
 SELECT d.merchant_id
@@ -572,6 +572,7 @@ FROM (
               WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
                 AND i.intent_type = 'manual_rebill'
                 AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
+       AND NOT EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.rebills_held)
     UNION ALL
     SELECT s.merchant_id
       FROM billing.subscriptions s
@@ -595,7 +596,7 @@ FROM (
     UNION ALL
     SELECT s.merchant_id
       FROM billing.subscriptions s
-     WHERE sqlc.arg(admit_engine)::boolean
+     WHERE sqlc.arg(include_engine)::boolean
        AND s.collection_policy = 'engine' AND s.status IN ('active', 'past_due') AND s.deleted_at IS NULL
        AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz
        AND (s.status = 'active' OR s.next_retry_at <= sqlc.arg(now)::timestamptz)
@@ -606,6 +607,7 @@ FROM (
               WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
                 AND i.intent_type = 'subscription_collection'
                 AND i.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))
+       AND NOT EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = s.merchant_id AND c.rebills_held)
 ) d
 WHERE d.merchant_id > sqlc.arg(after_merchant_id)::uuid
 GROUP BY d.merchant_id
@@ -629,10 +631,14 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
        OR (sub.status='awaiting_method' AND sub.grace_ends_at <= sqlc.arg(now)::timestamptz AND sub.rail = ANY(sqlc.arg(rails)::text[])
            AND ((sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine') OR (sub.collection_policy='nmi_schedule' AND sub.rail='nmi')))
        OR ((sub.collection_policy <> 'engine' OR (sqlc.arg(include_engine)::boolean AND sub.retry_advised_at IS NOT NULL)) AND sub.status='past_due' AND sub.next_retry_at IS NULL AND sub.grace_ends_at <= sqlc.arg(now)::timestamptz)
-       OR (sqlc.arg(admit_engine)::boolean AND sub.collection_policy='engine' AND sub.rail = ANY(sqlc.arg(rails)::text[]) AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
+       OR (sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine' AND sub.rail = ANY(sqlc.arg(rails)::text[]) AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
            AND NOT EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
+  -- A merchant's held rebills wait: neither its retries nor its engine
+  -- renewals are due.
+  AND NOT (((sub.status='past_due' AND sub.next_retry_at IS NOT NULL) OR (sub.collection_policy='engine' AND sub.status='active'))
+           AND EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id = sub.merchant_id AND c.rebills_held))
   AND (sqlc.narg(after_due_at)::timestamptz IS NULL
        OR (CASE WHEN sub.status='awaiting_method' OR (sub.status='past_due' AND sub.next_retry_at IS NULL) THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id)
           > (sqlc.narg(after_due_at)::timestamptz, sqlc.arg(after_id)::uuid))

@@ -8,12 +8,12 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // CustomerConvergeWorker converges one customer after a mutation that changed
@@ -37,7 +37,7 @@ func (w CustomerConvergeWorker) Work(ctx context.Context, job *river.Job[converg
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts
 	}
-	postures := writeposture.View{DB: w.DB}
+	postures := controls.View{DB: w.DB}
 	return w.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
 		// A readonly merchant is observed, never written.
 		if postures.Posture(ctx, mid.UUID()).ReadOnly() {

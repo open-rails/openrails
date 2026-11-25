@@ -114,7 +114,6 @@ an optional section is on once set.
 
 | Field | Meaning |
 |---|---|
-| `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
 | `UsageBillingEnabled` | Bills owed usage automatically ([usage](client.md#usage-and-running-charges)). Deploy every worker first. |
 | `Database` | `billing.DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
 | `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
@@ -136,10 +135,7 @@ an optional section is on once set.
 | `EventRetention` | A `time.Duration`: how long the event log keeps facts (default 90 days). |
 | `WebhookSecretOverlap` | A `time.Duration`: how long a rotated webhook secret still verifies (default 24 h, at most 168 h). |
 
-How much OpenRails writes to a merchant's providers is the merchant's write
-posture, kept in the database: `openrails merchant hold` and
-`openrails merchant arm`, run with the engine's database and schema, change it
-([write safety](standalone.md#write-safety-and-the-kill-switch)).
+How much OpenRails writes to a merchant's providers, whether the charges it initiates wait and whether its destructive actions run are the merchant's controls, kept in the database: `openrails merchant writes`, `merchant rebills` and `merchant destructive`, run with the engine's database and schema, change them ([merchant controls](standalone.md#merchant-controls)).
 
 Several instances must agree on the schemas, `Merchants`,
 `RateLimits`, `Captcha`, `TrustedProxies`, `ReturnOrigins` and the mounted

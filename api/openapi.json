@@ -10282,7 +10282,7 @@
           "merchant_config"
         ],
         "operationId": "ListChanges",
-        "description": "ListChanges lists the merchant's configuration history, newest first: each change to a product, price, meter or limit and to the merchant, messages, PSP and custodian documents, with who made it and how. A credential reads \"changed\", never its value. ObjectType and ObjectID narrow it to one object, Since and Until to a time range.",
+        "description": "ListChanges lists the merchant's configuration history, newest first: each change to a product, price, meter or limit, to the merchant, messages, PSP and custodian documents and to its operator controls, with who made it and how. A credential reads \"changed\", never its value. ObjectType and ObjectID narrow it to one object, Since and Until to a time range.",
         "parameters": [
           {
             "name": "cursor",
@@ -10311,6 +10311,7 @@
             "schema": {
               "type": "string",
               "enum": [
+                "controls",
                 "custodian",
                 "limit",
                 "merchant",
@@ -19615,6 +19616,7 @@
           "object_type": {
             "type": "string",
             "enum": [
+              "controls",
               "custodian",
               "limit",
               "merchant",

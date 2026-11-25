@@ -6,9 +6,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // OverwriteHeld is the merchant's gate on a pull's overwrite class, for the
@@ -22,7 +22,7 @@ func OverwriteHeld(ctx context.Context, database *db.DB, cfg *billing.Config, me
 	if !verdict.Allowed {
 		return verdict.Reason, false
 	}
-	if posture := (writeposture.View{DB: database}).Posture(ctx, merchantID); posture.ReadOnly() {
+	if posture := (controls.View{DB: database}).Posture(ctx, merchantID); posture.ReadOnly() {
 		return posture.Reason, verdict.EnforceArmed
 	}
 	return "", verdict.EnforceArmed

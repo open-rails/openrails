@@ -12,8 +12,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/booktag"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // ErrProviderReadOnly is returned for every mutating Stripe request of a
@@ -41,7 +41,7 @@ const APIVersion = "2026-06-24.dahlia"
 type guardTransport struct {
 	base     http.RoundTripper
 	readOnly bool
-	postures writeposture.Reader
+	postures controls.Reader
 	// fixture marks an injected fake transport.
 	fixture bool
 }
@@ -115,18 +115,18 @@ type Factory struct {
 	wired bool
 	// postures gates each write on its merchant's write posture; without
 	// one every write is refused.
-	postures writeposture.Reader
+	postures controls.Reader
 }
 
 // NewFactory sends Stripe's requests to base when it is set: a fake provider,
 // where a test key's writes need no posture and a live key's are refused.
-func NewFactory(base http.RoundTripper, postures writeposture.Reader) *Factory {
+func NewFactory(base http.RoundTripper, postures controls.Reader) *Factory {
 	return &Factory{base: base, postures: postures}
 }
 
 // ConfiguredFactory is the factory cfg's deployment uses: Stripe itself, or
 // the loopback Stripe its provider_sandbox.stripe_api_url names.
-func ConfiguredFactory(cfg *billing.Config, postures writeposture.Reader) *Factory {
+func ConfiguredFactory(cfg *billing.Config, postures controls.Reader) *Factory {
 	if api := config.SandboxStripeAPIURL(cfg); api != "" {
 		return NewFactory(HostRewriteTransport(api), postures)
 	}
@@ -136,7 +136,7 @@ func ConfiguredFactory(cfg *billing.Config, postures writeposture.Reader) *Facto
 // NewWiredFactory sends every request to wire and exempts nothing: posture is
 // checked through wire and every write is gated as against Stripe (a test
 // seam, as nmi.NMIClient.UseTransport is).
-func NewWiredFactory(wire http.RoundTripper, postures writeposture.Reader) *Factory {
+func NewWiredFactory(wire http.RoundTripper, postures controls.Reader) *Factory {
 	return &Factory{base: wire, wired: true, postures: postures}
 }
 
@@ -171,7 +171,7 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
 	var base http.RoundTripper
-	var postures writeposture.Reader
+	var postures controls.Reader
 	fixture := false
 	if f != nil {
 		base, fixture, postures = f.base, f.base != nil && !f.wired, f.postures

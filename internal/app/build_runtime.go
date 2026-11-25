@@ -15,11 +15,11 @@ import (
 
 	"github.com/open-rails/authkit/userinfo"
 
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/migrate"
-	"github.com/open-rails/openrails/internal/writeposture"
 
 	"context"
 	"fmt"
@@ -231,7 +231,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		stripeTransport = overrides.StripeTransport
 	}
 	// Every provider write waits on its merchant's write posture.
-	postures := writeposture.View{DB: database}
+	postures := controls.View{DB: database}
 	stripeClients := stripeapi.NewFactory(stripeTransport, postures)
 	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
 	nmiClients := &railresolve.NMIFactory{Config: cfg, Postures: postures, Log: logger}
@@ -614,7 +614,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
-	moneyService.EngineAdmissionHold = cfg.EngineAdmissionHold
 	moneyService.UsageBillingEnabled = cfg.UsageBillingEnabled
 	var hyperSwitchErr error
 	if cfg.HyperSwitch != (billing.HyperSwitchConfig{}) {
@@ -695,7 +694,7 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 		return nil, err
 	}
 
-	postures := writeposture.View{DB: database}
+	postures := controls.View{DB: database}
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(database.Log,
 		subscriptionService,
 		productService,

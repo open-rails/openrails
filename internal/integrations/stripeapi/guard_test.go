@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/stripemock"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 type wireFunc func(*http.Request) (*http.Response, error)
@@ -39,7 +39,7 @@ func send(t *testing.T, client *http.Client, method, key string) error {
 // never held.
 func TestAWriteIsSentOnlyOnItsPSPsVerdict(t *testing.T) {
 	stripe := stripemock.NewUnstarted(stripemock.Options{})
-	factory := stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))
+	factory := stripeapi.NewWiredFactory(stripe, controls.Fixed(controls.Full))
 	client := factory.Client(0)
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
 	key := "sk_test_acct_" + name
@@ -62,7 +62,7 @@ func TestAWriteIsSentOnlyOnItsPSPsVerdict(t *testing.T) {
 // re-check or a new key arms it.
 func TestARevokedKeyStopsItsWrites(t *testing.T) {
 	stripe := stripemock.NewUnstarted(stripemock.Options{})
-	factory := stripeapi.NewWiredFactory(stripe, writeposture.Fixed(writeposture.Full))
+	factory := stripeapi.NewWiredFactory(stripe, controls.Fixed(controls.Full))
 	client := factory.Client(0)
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
 	key := "sk_test_acct_" + name
@@ -111,13 +111,13 @@ func TestARefusedPostureReadDisarmsNamingThePermission(t *testing.T) {
 }
 
 // held is the write posture of each merchant it names; any other is full.
-type held map[uuid.UUID]writeposture.Mode
+type held map[uuid.UUID]controls.Mode
 
-func (h held) Posture(_ context.Context, id uuid.UUID) writeposture.Posture {
+func (h held) Posture(_ context.Context, id uuid.UUID) controls.Posture {
 	if mode, ok := h[id]; ok {
-		return writeposture.Posture{Mode: mode, Reason: "held for the test"}
+		return controls.Posture{Mode: mode, Reason: "held for the test"}
 	}
-	return writeposture.Posture{Mode: writeposture.Full}
+	return controls.Posture{Mode: controls.Full}
 }
 
 // A merchant's readonly write posture stops its Stripe writes at the
@@ -126,7 +126,7 @@ func (h held) Posture(_ context.Context, id uuid.UUID) writeposture.Posture {
 func TestAReadonlyMerchantsStripeWritesStopAtTheTransport(t *testing.T) {
 	stripe := stripemock.NewUnstarted(stripemock.Options{})
 	readonly, full := uuid.New(), uuid.New()
-	factory := stripeapi.NewWiredFactory(stripe, held{readonly: writeposture.ReadOnly})
+	factory := stripeapi.NewWiredFactory(stripe, held{readonly: controls.ReadOnly})
 	client := factory.Client(0)
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
 	key := "sk_test_acct_" + name

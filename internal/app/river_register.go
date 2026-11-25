@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/logx"
@@ -23,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/pull"
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
@@ -384,8 +384,8 @@ func (r *Runtime) StripeEngines() intents.StripeEngineServiceResolver {
 }
 
 // Posture reads merchants' provider write postures.
-func (r *Runtime) Posture() writeposture.View {
-	return writeposture.View{DB: r.DB}
+func (r *Runtime) Posture() controls.View {
+	return controls.View{DB: r.DB}
 }
 
 // IntentRunner returns a Runner for synchronous enqueue+execute from request

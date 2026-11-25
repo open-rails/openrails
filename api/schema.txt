@@ -261,7 +261,7 @@ table billing.change_log
   constraint change_log_changes_check CHECK (((jsonb_typeof(changes) = 'object'::text) AND (jsonb_typeof((changes -> 'version'::text)) = 'number'::text) AND (octet_length((changes)::text) <= 262144)))
   constraint change_log_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint change_log_object_id_check CHECK (((octet_length(object_id) >= 1) AND (octet_length(object_id) <= 512)))
-  constraint change_log_object_type_check CHECK ((object_type = ANY (ARRAY['product'::text, 'price'::text, 'meter'::text, 'limit'::text, 'merchant'::text, 'messages'::text, 'psp'::text, 'custodian'::text])))
+  constraint change_log_object_type_check CHECK ((object_type = ANY (ARRAY['product'::text, 'price'::text, 'meter'::text, 'limit'::text, 'merchant'::text, 'messages'::text, 'psp'::text, 'custodian'::text, 'controls'::text])))
   constraint change_log_pkey PRIMARY KEY (merchant_id, id)
   constraint change_log_reason_check CHECK (((octet_length(reason) >= 1) AND (octet_length(reason) <= 1024)))
   constraint change_log_request_id_check CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 128)))
@@ -569,17 +569,6 @@ table billing.dashboard_configs
   constraint dashboard_configs_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint dashboard_configs_pkey PRIMARY KEY (merchant_id)
   index CREATE UNIQUE INDEX dashboard_configs_pkey ON billing.dashboard_configs USING btree (merchant_id)
-
-table billing.destructive_action_switch
-  column singleton boolean NOT NULL DEFAULT true
-  column enabled boolean NOT NULL
-  column updated_by text
-  column reason text
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint destructive_action_switch_pkey PRIMARY KEY (singleton)
-  constraint destructive_action_switch_singleton_check CHECK ((singleton = true))
-  index CREATE UNIQUE INDEX destructive_action_switch_pkey ON billing.destructive_action_switch USING btree (singleton)
-  trigger CREATE TRIGGER destructive_action_switch_wake_dispute_responses AFTER UPDATE OF enabled ON billing.destructive_action_switch FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.destructive_actions
   column merchant_id uuid NOT NULL
@@ -1280,18 +1269,23 @@ table billing.mandates
   index CREATE UNIQUE INDEX mandates_unscheduled_live_key ON billing.mandates USING btree (merchant_id, customer_id, currency) WHERE ((kind = 'unscheduled'::text) AND (status = ANY (ARRAY['active'::text, 'requires_reconsent'::text])))
   trigger CREATE TRIGGER guard_mandate_update BEFORE UPDATE ON billing.mandates FOR EACH ROW EXECUTE FUNCTION billing.guard_mandate_update()
 
-table billing.merchant_destructive_policy
+table billing.merchant_controls
   column merchant_id uuid NOT NULL
-  column destructive_actions_enabled boolean NOT NULL DEFAULT true
-  column enforce_armed_at timestamp with time zone
+  column writes text NOT NULL
+  column rebills_held boolean NOT NULL
+  column destructive_armed boolean NOT NULL
   column first_pull_completed_at timestamp with time zone
-  column updated_by text
+  column changed_by text
   column reason text
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_destructive_policy_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint merchant_destructive_policy_pkey PRIMARY KEY (merchant_id)
-  index CREATE UNIQUE INDEX merchant_destructive_policy_pkey ON billing.merchant_destructive_policy USING btree (merchant_id)
-  trigger CREATE TRIGGER merchant_destructive_policy_wake_dispute_responses AFTER INSERT OR UPDATE OF destructive_actions_enabled, enforce_armed_at ON billing.merchant_destructive_policy FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
+  column changed_at timestamp with time zone
+  constraint merchant_controls_change_check CHECK ((((changed_by IS NULL) = (reason IS NULL)) AND ((reason IS NULL) = (changed_at IS NULL))))
+  constraint merchant_controls_changed_by_check CHECK ((changed_by <> ''::text))
+  constraint merchant_controls_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint merchant_controls_pkey PRIMARY KEY (merchant_id)
+  constraint merchant_controls_reason_check CHECK ((reason <> ''::text))
+  constraint merchant_controls_writes_check CHECK ((writes = ANY (ARRAY['full'::text, 'limited'::text, 'readonly'::text])))
+  index CREATE UNIQUE INDEX merchant_controls_pkey ON billing.merchant_controls USING btree (merchant_id)
+  trigger CREATE TRIGGER merchant_controls_wake_dispute_responses AFTER INSERT OR UPDATE OF writes, destructive_armed ON billing.merchant_controls FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.merchant_leases
   column merchant_id uuid NOT NULL
@@ -1313,20 +1307,6 @@ table billing.merchant_slug_aliases
   constraint merchant_slug_aliases_pkey PRIMARY KEY (slug)
   index CREATE INDEX merchant_slug_aliases_merchant_id_idx ON billing.merchant_slug_aliases USING btree (merchant_id)
   index CREATE UNIQUE INDEX merchant_slug_aliases_pkey ON billing.merchant_slug_aliases USING btree (slug)
-
-table billing.merchant_write_posture
-  column merchant_id uuid NOT NULL
-  column mode text NOT NULL
-  column reason text NOT NULL
-  column set_by text NOT NULL
-  column set_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_write_posture_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
-  constraint merchant_write_posture_mode_check CHECK ((mode = ANY (ARRAY['full'::text, 'limited'::text, 'readonly'::text])))
-  constraint merchant_write_posture_pkey PRIMARY KEY (merchant_id)
-  constraint merchant_write_posture_reason_check CHECK ((reason = ANY (ARRAY['exported'::text, 'restored'::text, 'operator'::text])))
-  constraint merchant_write_posture_set_by_check CHECK ((set_by <> ''::text))
-  index CREATE UNIQUE INDEX merchant_write_posture_pkey ON billing.merchant_write_posture USING btree (merchant_id)
-  trigger CREATE TRIGGER merchant_write_posture_wake_dispute_responses AFTER INSERT OR UPDATE OF mode ON billing.merchant_write_posture FOR EACH STATEMENT EXECUTE FUNCTION billing.wake_dispute_responses()
 
 table billing.merchants
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -4703,7 +4683,6 @@ function billing.guard_billing_restore_receipt()
                     'limit_windows',
                     'maintenance_runs',
                     'mandates',
-                    'merchant_destructive_policy',
                     'merchant_leases',
                     'money_settings',
                     'mrr_cohort_flows',
@@ -4779,6 +4758,10 @@ function billing.guard_billing_restore_receipt()
                   INTO occupied USING NEW.merchant_id;
               IF occupied THEN RAISE EXCEPTION 'billing restore destination is not empty: %',item.relname USING ERRCODE='55000'; END IF;
           END LOOP;
+          IF EXISTS (SELECT 1 FROM billing.merchant_controls c WHERE c.merchant_id=NEW.merchant_id
+              AND (c.destructive_armed OR c.first_pull_completed_at IS NOT NULL)) THEN
+              RAISE EXCEPTION 'billing restore destination is not empty: merchant_controls' USING ERRCODE='55000';
+          END IF;
       ELSE
           IF OLD.kind<>'billing_restore' OR NEW.kind<>'billing_restore'
              OR OLD.status<>'running' OR NEW.status<>'completed'

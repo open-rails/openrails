@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -23,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -248,7 +248,7 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 	if err != nil {
 		return err
 	}
-	collect := reason == MissProviderSkipped && !(writeposture.View{DB: w.DB}).Posture(ctx, sub.MerchantID).ReadOnly()
+	collect := reason == MissProviderSkipped && !(controls.View{DB: w.DB}).Posture(ctx, sub.MerchantID).ReadOnly()
 	return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := w.DB.NewWithPgxTx(tx)
 		q := txdb.Gen(ctx)

@@ -169,16 +169,3 @@ UPDATE billing.reconciliation_state
 SET fully_reconciled = false, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND fully_reconciled = true;
-
--- name: DisarmMerchantEnforcement :exec
--- Clears first-enforce arming, so post-rollback pulls run advisory until an
--- operator re-arms, and trips the merchant's destructive stop, which the intent
--- runner's gate reads: no new provider write starts during the reversal.
-INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
-VALUES (sqlc.arg(merchant_id)::uuid, false, NULL, sqlc.narg(updated_by)::text, sqlc.narg(reason)::text, now())
-ON CONFLICT (merchant_id) DO UPDATE SET
-    destructive_actions_enabled = false,
-    enforce_armed_at = NULL,
-    updated_by = EXCLUDED.updated_by,
-    reason = EXCLUDED.reason,
-    updated_at = now();

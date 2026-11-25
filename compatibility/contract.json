@@ -299,7 +299,7 @@
       "const (\n\tInvokerTypeCustomer InvokerType = \"customer\"\n\n\tInvokerTypeDelegated InvokerType = \"delegated\"\n)",
       "const (\n\tLogActionCreate    LogAction = \"create\"\n\tLogActionUpdate    LogAction = \"update\"\n\tLogActionArchive   LogAction = \"archive\"\n\tLogActionUnarchive LogAction = \"unarchive\"\n\tLogActionDelete    LogAction = \"delete\"\n\n\tLogActionKeyAdd    LogAction = \"key_add\"\n\tLogActionKeyRemove LogAction = \"key_remove\"\n\tLogActionKeyRename LogAction = \"key_rename\"\n\n\tLogActionMove LogAction = \"move\"\n)",
       "const (\n\tLogActorSystem LogActor = \"system\"\n\n\tLogActorFile LogActor = \"file\"\n\n\tLogActorVault LogActor = \"vault\"\n)",
-      "const (\n\tLogObjectProduct LogObjectType = \"product\"\n\n\tLogObjectPrice LogObjectType = \"price\"\n\tLogObjectMeter LogObjectType = \"meter\"\n\tLogObjectLimit LogObjectType = \"limit\"\n\n\tLogObjectMerchant LogObjectType = \"merchant\"\n\n\tLogObjectMessages  LogObjectType = \"messages\"\n\tLogObjectPSP       LogObjectType = \"psp\"\n\tLogObjectCustodian LogObjectType = \"custodian\"\n)",
+      "const (\n\tLogObjectProduct LogObjectType = \"product\"\n\n\tLogObjectPrice LogObjectType = \"price\"\n\tLogObjectMeter LogObjectType = \"meter\"\n\tLogObjectLimit LogObjectType = \"limit\"\n\n\tLogObjectMerchant LogObjectType = \"merchant\"\n\n\tLogObjectMessages  LogObjectType = \"messages\"\n\tLogObjectPSP       LogObjectType = \"psp\"\n\tLogObjectCustodian LogObjectType = \"custodian\"\n\n\tLogObjectControls LogObjectType = \"controls\"\n)",
       "const (\n\tLogSourceAPI          LogSource = \"api\"\n\tLogSourceCustomer     LogSource = \"customer\"\n\tLogSourceConsole      LogSource = \"console\"\n\tLogSourceCatalogApply LogSource = \"catalog_apply\"\n\tLogSourceCLI          LogSource = \"cli\"\n\n\tLogSourceReload       LogSource = \"reload\"\n\tLogSourceJob          LogSource = \"job\"\n\tLogSourceIntent       LogSource = \"intent\"\n\tLogSourceWebhook      LogSource = \"webhook\"\n\tLogSourceProviderRead LogSource = \"provider_read\"\n)",
       "const (\n\tLowBalanceLineCustomer LowBalanceLineSource = \"customer\"\n\n\tLowBalanceLineMerchant LowBalanceLineSource = \"merchant\"\n\n\tLowBalanceLineDefault LowBalanceLineSource = \"default\"\n)",
       "const (\n\tMRRRiskPastDue MRRRiskReason = \"past_due\"\n\n\tMRRRiskNeedsPaymentMethod MRRRiskReason = \"needs_payment_method\"\n\n\tMRRRiskUnverified MRRRiskReason = \"unverified\"\n\n\tMRRRiskCardExpiring MRRRiskReason = \"card_expiring\"\n\n\tMRRRiskDelinquent MRRRiskReason = \"delinquent\"\n)",
@@ -705,7 +705,7 @@
       "type CheckEntitlementsParams struct {\n\tCustomerID   CustomerID `json:\"customer_id\"`\n\tEntitlements []string   `json:\"entitlements\"`\n\tPrefixes     []string   `json:\"prefixes,omitempty\"`\n\tPrefixLimit  int        `json:\"prefix_limit,omitempty\"`\n\tAt           time.Time  `json:\"at,omitzero\"`\n\n\tIncludeValidity bool `json:\"include_validity,omitempty\"`\n}",
       "type ClearDestructiveHoldParams struct {\n\tReason string `json:\"reason\"`\n}",
       "type ClickHouseConfig struct {\n\tDatabase string `yaml:\"database\"`\n}",
-      "type Config struct {\n\tEngineAdmissionHold bool `yaml:\"engine_admission_hold\"`\n\n\tUsageBillingEnabled bool `yaml:\"usage_billing_enabled\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\"`\n\n\tClickHouse ClickHouseConfig `yaml:\"clickhouse\"`\n\n\tMerchants []MerchantDeclaration `yaml:\"-\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\"`\n\n\tCheckoutOrigin string `yaml:\"checkout_origin\"`\n\n\tRateLimits RateLimitsConfig `yaml:\"rate_limits\"`\n\n\tCaptcha CaptchaAccount `yaml:\"captcha\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\"`\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig `yaml:\"destructive_action_limits\"`\n\n\tVault VaultConfig `yaml:\"vault\"`\n\n\tCardVault CardVaultConfig `yaml:\"card_vault\"`\n\n\tHyperSwitch HyperSwitchConfig `yaml:\"hyperswitch\"`\n\n\tSolana SolanaConfig `yaml:\"solana\"`\n\n\tLLM LLMConfig `yaml:\"llm\"`\n\n\tReadCache ReadCache `yaml:\"-\"`\n\n\tProviderSandbox ProviderSandboxConfig `yaml:\"provider_sandbox\"`\n\n\tEventRetention time.Duration `yaml:\"event_retention\"`\n\n\tWebhookSecretOverlap time.Duration `yaml:\"webhook_secret_overlap\"`\n}",
+      "type Config struct {\n\tUsageBillingEnabled bool `yaml:\"usage_billing_enabled\"`\n\n\tDatabase DatabaseConfig `yaml:\"database\"`\n\n\tClickHouse ClickHouseConfig `yaml:\"clickhouse\"`\n\n\tMerchants []MerchantDeclaration `yaml:\"-\"`\n\n\tPublicBillingBaseURL string `yaml:\"public_billing_base_url\"`\n\n\tReturnOrigins []string `yaml:\"return_origins\"`\n\n\tTrustedProxies []string `yaml:\"trusted_proxies\"`\n\n\tCheckoutOrigin string `yaml:\"checkout_origin\"`\n\n\tRateLimits RateLimitsConfig `yaml:\"rate_limits\"`\n\n\tCaptcha CaptchaAccount `yaml:\"captcha\"`\n\n\tUserActionRateLimit UserActionRateLimitConfig `yaml:\"user_action_rate_limit\"`\n\n\tDestructiveActionLimits DestructiveActionLimitsConfig `yaml:\"destructive_action_limits\"`\n\n\tVault VaultConfig `yaml:\"vault\"`\n\n\tCardVault CardVaultConfig `yaml:\"card_vault\"`\n\n\tHyperSwitch HyperSwitchConfig `yaml:\"hyperswitch\"`\n\n\tSolana SolanaConfig `yaml:\"solana\"`\n\n\tLLM LLMConfig `yaml:\"llm\"`\n\n\tReadCache ReadCache `yaml:\"-\"`\n\n\tProviderSandbox ProviderSandboxConfig `yaml:\"provider_sandbox\"`\n\n\tEventRetention time.Duration `yaml:\"event_retention\"`\n\n\tWebhookSecretOverlap time.Duration `yaml:\"webhook_secret_overlap\"`\n}",
       "type ConfirmOrderParams struct {\n\tSignature *string `json:\"signature,omitempty\"`\n}",
       "type ConfirmPaymentMethodParams struct {\n\tCapture *CustodianCaptureReference `json:\"capture,omitempty\"`\n}",
       "type CreateAlertWebhookParams struct {\n\tName    string             `json:\"name\"`\n\tURL     string             `json:\"url\"`\n\tFormat  AlertWebhookFormat `json:\"format\"`\n\tEnabled *bool              `json:\"enabled\"`\n}",
@@ -3011,6 +3011,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "billingservice": "github.com/open-rails/openrails/internal/service",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
@@ -3028,8 +3029,7 @@
       "time": "time",
       "utf8": "unicode/utf8",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5",
-      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/http/handlers/webhook.go": {
       "api": "github.com/open-rails/openrails/internal/api",
@@ -3197,6 +3197,7 @@
       "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
@@ -3209,8 +3210,7 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
-      "uuid": "github.com/google/uuid",
-      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
+      "uuid": "github.com/google/uuid"
     },
     "internal/intents/collection_payload.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
@@ -3277,6 +3277,7 @@
       "clockwork": "github.com/jonboulle/clockwork",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "db": "github.com/open-rails/openrails/internal/db",
       "destructive": "github.com/open-rails/openrails/internal/destructive",
@@ -3292,8 +3293,7 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5",
-      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/intents/initial_membership_refusal.go": {
       "bytes": "bytes",
@@ -3454,6 +3454,7 @@
       "clockwork": "github.com/jonboulle/clockwork",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "db": "github.com/open-rails/openrails/internal/db",
       "destructive": "github.com/open-rails/openrails/internal/destructive",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -3466,8 +3467,7 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5",
-      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/intents/price_migration_push.go": {
       "context": "context",
@@ -4277,6 +4277,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "failpoint": "github.com/open-rails/openrails/internal/failpoint",
@@ -4328,6 +4329,7 @@
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "db": "github.com/open-rails/openrails/internal/db",
       "destructive": "github.com/open-rails/openrails/internal/destructive",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
@@ -4345,8 +4347,7 @@
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
-      "v5": "github.com/jackc/pgx/v5",
-      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/subscriptions/engine_collection_terms.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
@@ -4709,6 +4710,7 @@
       "billing": "github.com/open-rails/openrails/billing",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "db": "github.com/open-rails/openrails/internal/db",
       "destructive": "github.com/open-rails/openrails/internal/destructive",
       "errors": "errors",
@@ -4724,8 +4726,7 @@
       "time": "time",
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5",
-      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/pspimport/importer.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
@@ -4840,7 +4841,9 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/destructive_run_converge.go": {
+      "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
@@ -5112,6 +5115,7 @@
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
+      "controls": "github.com/open-rails/openrails/internal/controls",
       "db": "github.com/open-rails/openrails/internal/db",
       "destructive": "github.com/open-rails/openrails/internal/destructive",
       "errors": "errors",
@@ -5134,8 +5138,7 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5",
-      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks",
-      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
+      "webhooks": "github.com/open-rails/openrails/internal/modules/webhooks"
     },
     "internal/scim/bulk.go": {
       "billing": "github.com/open-rails/openrails/billing",

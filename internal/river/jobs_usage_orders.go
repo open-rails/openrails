@@ -13,11 +13,11 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // usagePage bounds one job's due accounts, and its due collections; a full
@@ -142,7 +142,7 @@ func (w UsageOrderWorker) collect(ctx context.Context, logger *slog.Logger, now 
 	}
 	var failed error
 	held := map[uuid.UUID]bool{}
-	postures := writeposture.View{DB: w.DB}
+	postures := controls.View{DB: w.DB}
 	for _, row := range due {
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "usage collection", func(ctx context.Context) error {
 			limited, seen := held[row.MerchantID]

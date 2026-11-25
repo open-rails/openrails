@@ -241,7 +241,7 @@ type TerminalHold struct {
 }
 
 // SwitchRemedy lets an outcome the destructive switch holds apply.
-const SwitchRemedy = "Turn the destructive-action switch on for the deployment and the merchant (billing.destructive_action_switch, billing.merchant_destructive_policy) to let it end, or end it by hand."
+const SwitchRemedy = "Arm the merchant's destructive actions (`openrails merchant destructive arm`) to let it end, or end it by hand."
 
 func NormalizeCancelType(cancelType *models.CancelType) string {
 	if cancelType == nil {

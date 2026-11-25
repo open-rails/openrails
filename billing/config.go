@@ -11,11 +11,10 @@ import (
 // and as the standalone server's file spells them (the yaml keys).
 // Everything that reaches outside the process is in openrails.Deps. Whether
 // money is real is each PSP's declared environment, never the deployment's;
-// how much OpenRails may write to providers is each merchant's write posture.
+// how much OpenRails may write to providers, and whether the charges it
+// initiates wait, are each merchant's controls.
 // A field left zero takes DefaultConfig's value (WithDefaults).
 type Config struct {
-	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
-	EngineAdmissionHold bool `yaml:"engine_admission_hold"`
 	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
 	UsageBillingEnabled bool `yaml:"usage_billing_enabled"`
 

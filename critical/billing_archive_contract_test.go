@@ -276,7 +276,7 @@ func TestBillingArchive(t *testing.T) {
 		require.Len(t, provider.effects(t), 1)
 		// Final source writers really stop before the operator authorizes the copy.
 		require.NoError(t, source.engine.Close(context.Background()))
-		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		hostCLI(t, target, "merchant", "writes", "full", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator", "--reason", "the source is stopped")
 		order, err := client.CreateOrder(t.Context(), "destination-after-arm", request)
 		require.NoError(t, err)
 		address, err := url.Parse(*order.PayURL)
@@ -447,7 +447,7 @@ func TestBillingArchive(t *testing.T) {
 		}, 20*time.Second, 20*time.Millisecond, "the due pull is parked while the restored merchant is read-only")
 		require.NoError(t, fleet.Stop(t.Context()))
 		require.Equal(t, sends, s.wire.sends(), "a restored pull sends nothing before the operator arms")
-		hostCLI(t, target, "merchant", "arm", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator")
+		hostCLI(t, target, "merchant", "writes", "full", "--merchant", "id:"+client.MerchantID().String(), "--by", "critical verified operator", "--reason", "the source is stopped")
 		advanceTo(target, retryAt)
 		wakeOperations(t, fleet)
 		require.NoError(t, fleet.Start(t.Context()))
