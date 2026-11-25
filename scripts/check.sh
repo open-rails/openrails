@@ -94,11 +94,10 @@ case "${1:-all}" in
   browser) browser ;;
   browser-build) browser_build ;;
   chart) chart ;;
-  critical) bash scripts/critical-tests.sh ;;
   all)
     : "${OPENRAILS_CRITICAL_DSN:?Set an owned disposable PostgreSQL URL}"
     guards; build; vet; unit; browser; chart
     bash scripts/critical-tests.sh
     ;;
-  *) echo 'usage: scripts/check.sh [guards|build|vet|unit|browser|browser-build|chart|critical|all]' >&2; exit 2 ;;
+  *) echo 'usage: scripts/check.sh [guards|build|vet|unit|browser|browser-build|chart|all]' >&2; exit 2 ;;
 esac
