@@ -797,7 +797,11 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 		return err
 	}
 	if pay.card != nil {
-		_, err := payment.NewCardOption(options, pay.card.PSPID)
+		option, err := payment.NewCardOption(options, pay.card.PSPID)
+		if err != nil {
+			return err
+		}
+		_, err = s.rt.OrderAttemptService.NewCardBilling(ctx, *option, pay.card.Billing)
 		return err
 	}
 	if pay.solana != nil {

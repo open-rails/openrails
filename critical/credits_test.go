@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestCredits(t *testing.T) {
-	t.Run("OR-J22-S01/reservation-capture-conserves-native-units", func(t *testing.T) {
+	t.Run("OR-J22-S01/usage-in-flight-then-settled-conserves-native-units", func(t *testing.T) {
 		w := newWorld(t)
 		customer := billing.CustomerID(uuid.New())
 		grants, err := w.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "funding"}})
@@ -30,30 +29,19 @@ func TestCredits(t *testing.T) {
 			RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelDynamic, Currency: "USD"}}),
 		})
 		require.NoError(t, err)
-		admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{{
-			RequestID: "reserved-work", CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
-			ExpiresAt: ptr(w.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(int64(600))},
-		}})
-		require.NoError(t, err)
-		require.Len(t, admitted, 1)
-		require.True(t, admitted[0].Allowed(), "%+v", admitted[0])
+		// A gate has the request in flight, then settles it at 450; a resend
+		// of the item answers its receipt and settles nothing more.
+		lease := newLease()
+		syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 600}}})
 		balance(t, w.alpha, customer, 400, 600, 1000)
-		request := []billing.CaptureAdmissionParams{{RequestID: "reserved-work", Amount: ptr(int64(450)), Usage: billing.CaptureUsage{EventType: "compute", Dimensions: map[string]int64{"units": 1}}}}
-		captured, err := w.alpha.CaptureAdmissions(t.Context(), request)
-		require.NoError(t, err)
-		require.Len(t, captured, 1)
-		require.NoError(t, captured[0].Err())
-		require.NotNil(t, captured[0].Receipt)
-		require.EqualValues(t, 450, captured[0].Receipt.Amount)
-		// Capturing releases the unused 150-unit reservation atomically; the
-		// 450 is held in the customer's day until it posts.
+		item := numbered(1, billing.LeaseUsage{CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
+			EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(int64(450)), Source: "critical", SourceID: "reserved-work"})
+		out := settleUsage(t, w.alpha, lease, item...)
+		require.EqualValues(t, 1, out.Usage.ThroughN)
+		// The 450 is held in the customer's day until it posts.
 		balance(t, w.alpha, customer, 550, 450, 1000)
-		require.Nil(t, captured[0].Receipt.BalanceTransactionID)
-		replayed, err := w.alpha.CaptureAdmissions(t.Context(), request)
-		require.NoError(t, err)
-		require.NoError(t, replayed[0].Err())
-		require.True(t, replayed[0].Receipt.Replayed)
-		require.Equal(t, captured[0].Receipt.Amount, replayed[0].Receipt.Amount)
+		out = settleUsage(t, w.alpha, lease, item...)
+		require.EqualValues(t, 1, out.Usage.ThroughN)
 		balance(t, w.alpha, customer, 550, 450, 1000)
 		fleet := startFleet(t, w)
 		nextMonth(w)

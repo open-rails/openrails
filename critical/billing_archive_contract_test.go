@@ -295,25 +295,18 @@ func TestBillingArchive(t *testing.T) {
 		customer := billing.CustomerID(uuid.MustParse(source.alice.ID))
 		_, err := source.alpha.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: customer, Currency: "USD", Amount: 1000, Source: "critical", SourceID: "held-work"}})
 		require.NoError(t, err)
-		admitted, err := source.alpha.Admit(t.Context(), []billing.AdmitParams{{RequestID: "unfinished", CustomerID: customer, Currency: "USD", Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, EstimatedAmount: 600, ExpiresAt: ptr(source.clock.Now().Add(time.Hour))}})
-		require.NoError(t, err)
-		require.Len(t, admitted, 1)
-		require.True(t, admitted[0].Allowed())
+		// A live gate has a request in flight.
+		lease := newLease()
+		syncLease(t, source.alpha, billing.SyncLeasesParams{LeaseID: lease, InFlight: []billing.InFlight{{CustomerID: customer, Limit: "balance", Unit: "USD", Amount: 600}}})
 		var partial bytes.Buffer
 		err = source.alpha.ExportBillingArchive(t.Context(), &partial)
 		require.Error(t, err)
 		require.Empty(t, partial.Bytes())
 		balance(t, source.alpha, customer, 400, 600, 1000)
-		hold, err := source.alpha.GetAdmission(t.Context(), "unfinished")
-		require.NoError(t, err)
-		require.Equal(t, ptr(billing.AdmissionOpen), hold.State)
 		status, raw := source.request(t, "POST", "/v1/me/orders", source.aliceToken, saleInput(t, source, provider), map[string]string{"Idempotency-Key": "after-failed-export"})
 		require.Equal(t, 201, status, string(raw))
 		require.Len(t, provider.effects(t), 1)
-		released, err := source.alpha.ReleaseAdmissions(t.Context(), []string{"unfinished"})
-		require.NoError(t, err)
-		require.Len(t, released, 1)
-		require.NoError(t, released[0].Err())
+		syncLease(t, source.alpha, billing.SyncLeasesParams{LeaseID: lease, Close: true})
 		balance(t, source.alpha, customer, 1000, 0, 1000)
 		require.NotEmpty(t, archiveBytes(t, source.alpha))
 	})
@@ -325,7 +318,7 @@ func TestBillingArchive(t *testing.T) {
 		price, err := source.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "archived-download", UnitAmount: 9_990_000, Currency: "USD"})
 		require.NoError(t, err)
 		sale := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
-			Payment: &billing.OrderPaymentParams{Token: provider.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"})}}
+			Payment: &billing.OrderPaymentParams{Token: provider.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
 		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, sale, map[string]string{"Idempotency-Key": "archived-nmi-sale"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var paid billing.Order

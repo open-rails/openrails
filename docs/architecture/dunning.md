@@ -2,7 +2,7 @@
 
 Collection decides what happens when a customer's card refuses money OpenRails asked for. The decline table maps every rail code to one reason and action; the retry schedule collects money owed (renewals OpenRails collects, usage orders); arrears delinquency tracks how long a usage debt goes unpaid. Merchants set the retry schedule, for renewals and usage orders alike, and the arrears grace periods. Renewal admission and the state machine are in
 [subscriptions](subscriptions.md), usage rating in [usage billing](usage-billing.md).
-Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limits-admissions-and-the-gate).
+Guides: [dunning](../client.md#subscriptions), [spend limits](../client.md#limits-and-the-gate).
 
 ## Concepts
 

@@ -2,18 +2,13 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -63,14 +58,6 @@ func New(logger *slog.Logger, rt *app.Runtime) (*Service, error) {
 	return &Service{rt: rt, Log: logger}, nil
 }
 
-// spendGate is the admission gate on the engine's clock: an admission is
-// looked up within the retained range as that clock counts it.
-func (s *Service) spendGate() *spendgate.Gate {
-	gate := spendgate.New(s.rt.DB)
-	gate.SetClock(s.now)
-	return gate
-}
-
 func (s *Service) now() time.Time {
 	if s != nil && s.rt != nil && s.rt.Clock != nil {
 		return s.rt.Clock.Now()
@@ -91,119 +78,3 @@ var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
 // ErrUsageOutsideIngestWindow refuses usage whose occurred_at is older than
 // the ingest window or ahead of the clock.
 var ErrUsageOutsideIngestWindow = money.ErrUsageOutsideIngestWindow
-
-// CaptureAdmission settles an admitted request. The first capture fixes its
-// terms; an exact retry returns the original receipt.
-func (s *Service) CaptureAdmission(ctx context.Context, params billing.CaptureAdmissionParams) (*billing.CaptureReceipt, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return s.moneyService().CaptureAdmission(ctx, params)
-}
-
-// CaptureAdmissionTx is CaptureAdmission inside tx, a transaction from the
-// host's pool: the capture commits with the host's record of the work.
-func (s *Service) CaptureAdmissionTx(ctx context.Context, tx pgx.Tx, params billing.CaptureAdmissionParams) (receipt *billing.CaptureReceipt, err error) {
-	err = s.inRunningChargeTx(ctx, tx, func(ctx context.Context, txDB *db.DB) error {
-		receipt, err = s.moneyService().WithDatabase(txDB).CaptureAdmission(ctx, params)
-		return err
-	})
-	return receipt, err
-}
-
-// ReleaseAdmissionTx is ReleaseAdmission inside tx, a transaction from the
-// host's pool.
-func (s *Service) ReleaseAdmissionTx(ctx context.Context, tx pgx.Tx, requestID string) (admission *billing.Admission, err error) {
-	err = s.inRunningChargeTx(ctx, tx, func(ctx context.Context, txDB *db.DB) error {
-		gate := spendgate.New(txDB)
-		gate.SetClock(s.now)
-		admission, err = s.releaseAdmission(ctx, gate, requestID)
-		return err
-	})
-	return admission, err
-}
-
-// GetAdmission reads an allowed admission and its hold.
-func (s *Service) GetAdmission(ctx context.Context, requestID string) (*billing.Admission, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	row, err := s.spendGate().Get(ctx, strings.TrimSpace(requestID))
-	if err != nil {
-		return nil, err
-	}
-	return admissionFromHold(row, s.now()), nil
-}
-
-// AdmissionCustomer resolves ownership from the durable operation before route authorization.
-func (s *Service) AdmissionCustomer(ctx context.Context, requestID string) (identity.CustomerID, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return identity.CustomerID{}, err
-	}
-	defer release()
-	row, err := s.spendGate().Get(ctx, requestID)
-	return identity.CustomerID(row.CustomerID), err
-}
-
-// ReleaseAdmission frees an open hold. Releasing a released admission
-// returns it unchanged.
-func (s *Service) ReleaseAdmission(ctx context.Context, requestID string) (*billing.Admission, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return s.releaseAdmission(ctx, s.spendGate(), requestID)
-}
-
-func (s *Service) releaseAdmission(ctx context.Context, gate *spendgate.Gate, requestID string) (*billing.Admission, error) {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return nil, fmt.Errorf("request_id required")
-	}
-	if err := gate.Release(ctx, requestID); err != nil {
-		return nil, err
-	}
-	row, err := gate.Get(ctx, requestID)
-	if err != nil {
-		return nil, err
-	}
-	return admissionFromHold(row, s.now()), nil
-}
-
-// ExtendAdmission moves an open hold's deadline to expiresAt.
-func (s *Service) ExtendAdmission(ctx context.Context, requestID string, expiresAt time.Time) (*billing.Admission, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return nil, fmt.Errorf("request_id required")
-	}
-	if expiresAt.IsZero() {
-		return nil, ErrHoldDeadlineRequired
-	}
-	gate := s.spendGate()
-	err = gate.Extend(ctx, requestID, expiresAt)
-	if errors.Is(err, spendgate.ErrExpired) {
-		return nil, ErrHoldDeadlinePassed
-	}
-	if errors.Is(err, spendgate.ErrNotFound) {
-		return nil, ErrHoldNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	row, err := gate.Get(ctx, requestID)
-	if err != nil {
-		return nil, err
-	}
-	return admissionFromHold(row, s.now()), nil
-}

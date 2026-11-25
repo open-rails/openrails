@@ -215,10 +215,16 @@ dunning_policy:
   access_during_dunning: ""
   # AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no outcome because collection is stopped keeps access until it is attempted) or DunningAccessSuspend (access ends at the renewal allowance, min(24h, max(2h, period/10)) past the paid period).
   access_while_renewal_held: ""
-# Checkout is the embedded checkout's settings; a patch replaces it whole.
+# Checkout is the checkout's settings (embed origins, billing fields); a patch replaces it whole.
 checkout:
   # EmbedOrigins are the origins that may frame the merchant's embedded pay URLs: exact https origins (http on loopback), at most 10, no wildcards.
   embed_origins: []
+  # BillingFields are the billing details a new card's form asks for and OpenRails requires; absent, country always and the postal code in the US.
+  billing_fields:
+    # Country is required (default), optional or hidden.
+    country: ""
+    # PostalCode is auto (default: asked for, and required, in the US only), required, optional or hidden.
+    postal_code: ""
 # BalanceNotices are the default low-balance lines of the merchant's customers; a patch replaces it whole.
 balance_notices:
   # RunwayHours is the line in hours of spend at the customer's burn rate: 24 when unset, 0 off.

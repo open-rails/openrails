@@ -88,7 +88,7 @@ func TestCheckout(t *testing.T) {
 		nmiPrice, err := nmi.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: nmiProduct.ID, Key: "nmi-download", UnitAmount: 9_990_000, Currency: "USD"})
 		require.NoError(t, err)
 		input = billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: nmiPrice.ID}}, ExpectedTotal: ptr(int64(9_990_000)), Reusable: ptr(false),
-			Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"})}}
+			Payment: &billing.OrderPaymentParams{Token: journal.core.Tokenize(nmimock.Card{Brand: "mastercard", Last4: "5454", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}}
 		status, raw = nmi.request(t, http.MethodPost, "/v1/me/orders", nmi.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-unkept-card"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var nmiOrder billing.Order

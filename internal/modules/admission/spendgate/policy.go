@@ -1,4 +1,4 @@
-// Package spendgate evaluates request holds and spend windows.
+// Package spendgate resolves a billing policy's spend windows.
 package spendgate
 
 import (

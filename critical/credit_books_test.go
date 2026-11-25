@@ -96,21 +96,12 @@ func (s *creditShop) spend(t *testing.T, amount int64, key string) {
 	}))
 }
 
-// usage captures usage the customer's credit line admits; the next movement
+// usage settles usage on the customer's credit line; the next movement
 // posts it. Time passes, so a movement at the next instant posts it.
 func (s *creditShop) usage(t *testing.T, amount int64, request string) {
 	t.Helper()
-	a := s.a
-	verdicts, err := a.alpha.Admit(t.Context(), []billing.AdmitParams{{
-		RequestID: request, CustomerID: s.customer, Invoker: s.customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD",
-		ExpiresAt: ptr(a.clock.Now().Add(time.Hour)), Usage: &billing.UsageEstimate{EventType: "compute", Dimensions: map[string]int64{"units": 1}, Amount: ptr(amount)},
-	}})
-	require.NoError(t, err)
-	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-	captured, err := a.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture(request, amount)})
-	require.NoError(t, err)
-	require.NoError(t, captured[0].Err())
-	a.clock.Advance(time.Second)
+	spend(t, s.a.alpha, s.customer, request, amount)
+	s.a.clock.Advance(time.Second)
 }
 
 // lotMoney is a lot's money deferred and released.

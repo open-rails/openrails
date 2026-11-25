@@ -39,7 +39,8 @@ sql:
       - "internal/migrate/postgres/0039_lease_in_flight_off_customers.up.sql"
       - "internal/migrate/postgres/0040_migration_cohort_order.up.sql"
       - "internal/migrate/postgres/0041_mrr_totals_settle.up.sql"
-      - "internal/migrate/postgres/0042_mrr_keyed_reads.up.sql"
+      - "internal/migrate/postgres/0044_drop_request_holds.up.sql"
+      - "internal/migrate/postgres/0046_mrr_keyed_reads.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

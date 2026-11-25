@@ -78,7 +78,7 @@ func availableUnits(ctx context.Context, q *gen.Queries, order *Order, now time.
 		return 0, err
 	}
 	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: order.MerchantID, CustomerID: order.CustomerID, Currency: order.Currency,
-		AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now)})
+		AsOf: now, LeaseLiveSince: limits.LeaseLiveSince(now)})
 	if err != nil {
 		return 0, err
 	}

@@ -210,19 +210,19 @@ func TestRunningChargeContracts(t *testing.T) {
 		})
 		customer := billing.CustomerID(uuid.New())
 		fund(t, w.alpha, customer, "funded", 100_000_000)
-		admit := func(id string, delta int64) billing.AdmissionVerdict {
+		admit := func(id string) decided {
 			t.Helper()
-			p := reservation(w, customer, id, 1000)
-			p.AccrualRateDeltaPerHour = delta
-			return admitOne(t, w.alpha, p)
+			return admitOne(t, w.alpha, reservation(customer, id, 1000))
 		}
-		require.True(t, admit("before", 4_000_000).Allowed(), "nothing accrues yet")
+		require.True(t, admit("before").Allowed(), "nothing accrues yet")
 		_, err := w.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "gpu/1", CustomerID: customer, Currency: "USD", RatePerHour: 8_000_000})
 		require.NoError(t, err)
-		requireDenied(t, admit("past-the-cap", 4_000_000), billing.DenyAccrualRateCapReached)
-		require.True(t, admit("to-the-cap", 2_000_000).Allowed(), "$8 an hour running and $2 more is the cap")
+		require.True(t, admit("under-the-cap").Allowed(), "$8 an hour is under the $10 cap")
+		_, err = w.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "gpu/2", CustomerID: customer, Currency: "USD", RatePerHour: 3_000_000})
+		require.NoError(t, err)
+		requireDenied(t, admit("past-the-cap"), billing.DenyAccrualRateCapReached)
 		_, err = w.alpha.StopRunningCharge(t.Context(), "gpu/1", billing.StopRunningChargeParams{})
 		require.NoError(t, err)
-		require.True(t, admit("after-the-stop", 4_000_000).Allowed(), "a stopped charge accrues nothing")
+		require.True(t, admit("after-the-stop").Allowed(), "a stopped charge accrues nothing")
 	})
 }

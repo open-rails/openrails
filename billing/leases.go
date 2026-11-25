@@ -34,32 +34,28 @@ func (id *LeaseID) UnmarshalText(text []byte) error {
 const (
 	MaxSyncUsageItems = 1000
 	MaxSyncViews      = 1000
-	MaxSyncReleases   = 1000
 	MaxSyncInFlight   = 10_000
 )
 
 // SyncLeasesParams is one sync of a lease: the usage it settles, what its
-// gate has had in flight across a sync, the views it asks for and the request
-// holds of the lease it gives back. The first sync under a new LeaseID
-// creates the lease (its id must be a UUIDv7 no older than the replay
-// horizon); every later one renews it, until one with Close: that sync
-// settles its usage, releases the lease's request holds, clears its in-flight
-// report and ends it. Usage against a closed lease still settles. A process
-// resending an earlier lease's usage sends Close.
+// gate has in flight beyond it, and the views it asks for. The first sync
+// under a new LeaseID creates the lease (its id must be a UUIDv7 no older
+// than the replay horizon); every later one renews it, until one with Close:
+// that sync settles its usage, clears its in-flight report and ends it.
+// Usage against a closed lease still settles. A process resending an earlier
+// lease's usage sends Close.
 type SyncLeasesParams struct {
 	LeaseID LeaseID      `json:"lease_id"`
 	Usage   []LeaseUsage `json:"usage"`
 	// InFlight replaces the lease's last report; null or empty clears it.
 	InFlight []InFlight   `json:"in_flight"`
 	Views    []ViewParams `json:"views"`
-	// Releases are request ids of the lease's own request holds to release.
-	Releases []string `json:"releases"`
-	Close    bool     `json:"close,omitempty"`
+	Close    bool         `json:"close,omitempty"`
 }
 
 // InFlight is what a gate has had in flight for one customer's limit across
 // at least one sync: tickets open since before its previous sync, and usage
-// a previous sync left unsettled. Views and admissions of other leases count
+// a previous sync left unsettled. Other leases' views count
 // it as held while the lease is live.
 type InFlight struct {
 	CustomerID CustomerID `json:"customer_id"`
@@ -77,8 +73,7 @@ type InFlight struct {
 // stated amount a dynamic card charges. TrustLevel, Roles and Resource are
 // the invoker attributes billing policy resolves its spend windows from.
 // AdmittedAt places the usage in the limit windows current when its request
-// was admitted; null, in those current when it settles. RequestID captures
-// the lease's request hold of that id, by its pinned cards and windows.
+// was admitted; null, in those current when it settles.
 type LeaseUsage struct {
 	N           int64            `json:"n"`
 	CustomerID  CustomerID       `json:"customer_id"`
@@ -97,7 +92,6 @@ type LeaseUsage struct {
 	Amount      *int64           `json:"amount,string"`
 	OccurredAt  time.Time        `json:"occurred_at"`
 	AdmittedAt  *time.Time       `json:"admitted_at"`
-	RequestID   *string          `json:"request_id"`
 }
 
 // LeaseUsageRef names one usage item of a lease.
@@ -186,12 +180,10 @@ type View struct {
 	Limits     []ViewLimit      `json:"limits"`
 }
 
-// ViewLimit is one limit of a view in its current window. Held is what
-// request holds and other live leases' in-flight reports set aside;
-// Remaining is Capacity − Used − Held (for balance, what the customer may
-// spend before any credit line). A session not yet open has no window.
-// Settled is what this sync's own usage settled into the limit; Recent, for
-// a money limit, what the customer's usage charged in the last minute.
+// ViewLimit is one limit of a view in its current window. Held is what other
+// live leases' in-flight reports set aside; Remaining is Capacity − Used −
+// Held (for balance, what the customer may spend before any credit line). A
+// session not yet open has no window.
 type ViewLimit struct {
 	Limit          string              `json:"limit"`
 	Unit           string              `json:"unit"`
@@ -209,8 +201,6 @@ type ViewLimit struct {
 	Next *ViewWindow `json:"next"`
 	// DrainPerHour is what running charges take from balance each hour.
 	DrainPerHour int64 `json:"drain_per_hour,string"`
-	Settled      int64 `json:"settled,string"`
-	Recent       int64 `json:"recent,string"`
 }
 
 // ViewWindow is a limit's next window and what it will hold.

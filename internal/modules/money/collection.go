@@ -113,7 +113,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if req.Initiator == charge.InitiatorMerchant {
 		// The card lost its agreement after enqueue: nothing is sent, and the
 		// next attempt stops for the customer.
-		if err := requireCollectionAgreement(ctx, c.db.Gen(ctx), charge.CustodyOf(c.db), method, req.Currency); err != nil {
+		if err := requireCollectionAgreement(ctx, c.db.Gen(ctx), charge.CustodyOf(c.db), method, req.Currency, false); err != nil {
 			if errors.Is(err, charge.ErrAgreementRequired) {
 				return nil, fmt.Errorf("%w: %w", charge.ErrInstrumentChanged, err)
 			}

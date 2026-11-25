@@ -98,11 +98,6 @@ func noStoreRefusals(t *testing.T) {
 	requireNoStore(t, err)
 	_, err = a.alphaRemote.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: billing.LeaseID(uuid.Must(uuid.NewV7()))})
 	requireNoStore(t, err)
-	admit := billing.AdmitParams{RequestID: "no-store", CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: 100, ExpiresAt: ptr(a.clock.Now().Add(time.Hour))}
-	_, err = a.alpha.Admit(ctx, []billing.AdmitParams{admit})
-	requireNoStore(t, err)
-	_, err = a.alphaRemote.CaptureAdmissions(ctx, []billing.CaptureAdmissionParams{{RequestID: "no-store", Amount: ptr(int64(100))}})
-	requireNoStore(t, err)
 	_, err = a.alpha.ListCustomerLimits(ctx, billing.CustomerLimitListParams{CustomerID: customer})
 	requireNoStore(t, err)
 	_, err = a.alphaRemote.AdjustCustomerLimit(ctx, customer, billing.AdjustCustomerLimitParams{Limit: "daily", Amount: 1, SourceID: "no-store"})
@@ -114,14 +109,6 @@ func noStoreRefusals(t *testing.T) {
 		require.Equal(t, http.StatusConflict, status, string(raw))
 		require.Contains(t, string(raw), `"code":"event_store_required"`)
 	}
-
-	// A host transaction's admissions are refused alike.
-	tx, err := a.pool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(context.Background()) }()
-	_, err = a.local.AdmitTx(ctx, tx, []billing.AdmitParams{admit})
-	require.ErrorIs(t, err, billing.ErrEventStoreRequired)
-	require.NoError(t, tx.Rollback(ctx))
 
 	// A metrics query naming usage is refused; one that does not answers.
 	week := &billing.MetricsRange{From: a.clock.Now().Add(-7 * 24 * time.Hour).Format(time.RFC3339), To: a.clock.Now().Add(time.Second).Format(time.RFC3339)}

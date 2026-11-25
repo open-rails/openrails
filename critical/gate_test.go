@@ -440,11 +440,8 @@ func TestGate(t *testing.T) {
 		require.Equal(t, billing.DenyLimitReached, r.DenyCode)
 		require.Equal(t, "daily", *r.Limit)
 		require.NotNil(t, r.ResetsAt, "an exhausted limit says when it resets")
-		// Near the limit the server decides what still fits.
+		// What still fits is decided on the gate's view.
 		gateAdmit(t, g, gateWork(customer, "last", 5))
-		admission, err := a.alpha.GetAdmission(t.Context(), "last")
-		require.NoError(t, err)
-		require.Nil(t, admission.ExpiresAt, "a gate's request hold lives with its lease")
 
 		// With OpenRails down a cold customer is ErrUnavailable.
 		client, wire := gateRemote(t, a)
@@ -467,7 +464,7 @@ func TestGate(t *testing.T) {
 		gateAdmit(t, g, gateWork(customer, "near", 50))
 		// The open ticket is reported once a sync has passed it.
 		time.Sleep(2500 * time.Millisecond)
-		require.EqualValues(t, 53, customerLimit(t, a.alpha, customer, "daily").Held, "the gate's hold and its reported ticket")
+		require.EqualValues(t, 53, customerLimit(t, a.alpha, customer, "daily").Held, "the gate reports its open tickets in flight")
 		require.NoError(t, g.Close(t.Context()))
 		daily := customerLimit(t, a.alpha, customer, "daily")
 		require.EqualValues(t, 2, daily.Used)
@@ -484,8 +481,9 @@ func TestGate(t *testing.T) {
 			gates[i] = newGate(t, a.alpha, openrails.GateDeps{})
 		}
 		// Steady traffic, ten requests a second on each gate, until the
-		// balance runs out: what others add is learned from the views, and
-		// the last of the balance is decided on the server.
+		// balance runs out. Every request is decided on a gate's view: what
+		// the others add it learns from the views, so near zero they may
+		// take the balance past it by what they admit before the next views.
 		var admitted atomic.Int64
 		var wg sync.WaitGroup
 		for i, g := range gates {
@@ -513,7 +511,10 @@ func TestGate(t *testing.T) {
 		b, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
 		require.NoError(t, err)
 		require.Equal(t, admitted.Load(), 40_000-b.AvailableAmount, "every admitted request settled once")
-		require.GreaterOrEqual(t, b.AvailableAmount, int64(-4*100), "steady traffic overshoots at most one request a gate")
+		// The bound: what the other gates admit in four sync intervals, plus
+		// one request a gate.
+		bound := int64(len(gates)-1)*10*4*100 + int64(len(gates))*100
+		require.GreaterOrEqual(t, b.AvailableAmount, -bound, "steady traffic overshoots at most the bound")
 	})
 
 	t.Run("OR-J23-S38/two-gates-and-an-unreachable-openrails-spend-at-most-the-remaining", func(t *testing.T) {
@@ -562,54 +563,16 @@ func TestGate(t *testing.T) {
 			}
 		}
 		require.Positive(t, offline, "a view keeps deciding while OpenRails is unreachable")
+		// A flush resends what the outage held back: what a sync settles it
+		// never also reports in flight, so the balance reads right as each
+		// flush returns.
 		for _, p := range processes {
 			p.wire.down.Store(false)
 			gateFlush(t, p.gate)
-		}
-		// A flush resends what the outage held back and reports it in flight
-		// once more; each gate's next sync replaces that report.
-		require.Eventually(t, func() bool {
 			b, err := a.alpha.GetBalance(t.Context(), customer, billing.GetBalanceParams{Currency: "USD"})
-			return err == nil && b.AvailableAmount >= 0
-		}, 10*time.Second, 100*time.Millisecond, "the two gates together spent at most what was left, each its share: %v units", spent)
-	})
-
-	t.Run("OR-J23-S39/near-zero-is-decided-on-the-server-exactly", func(t *testing.T) {
-		a := newAuthorityWorld(t)
-		applyLimits(t, a.alpha, unitPlan)
-		customer := billing.CustomerID(uuid.New())
-		grantLimitProduct(t, a.alpha, customer, "plan", 24)
-		_, err := a.alpha.UpdateCustomer(t.Context(), customer, billing.UpdateCustomerParams{Limits: []billing.LimitOverride{{Limit: "quota", Capacity: 10}}})
-		require.NoError(t, err)
-		settleUsage(t, a.alpha, newLease(), numbered(1, workReport(customer, "most", 9))...)
-		gates := []*openrails.Gate{newGate(t, a.alpha, openrails.GateDeps{}), newGate(t, a.alpha, openrails.GateDeps{})}
-		for i, g := range gates {
-			gateAdmit(t, g, gateWork(customer, fmt.Sprintf("view-%d", i), 0)).Release(t.Context())
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, b.AvailableAmount, int64(0), "the two gates together spent at most what was left, each its share: %v units", spent)
 		}
-		// One unit is left and both gates see it: every request is near zero
-		// and decided on the server, one at a time.
-		var allowed atomic.Int64
-		var wg sync.WaitGroup
-		for i, g := range gates {
-			for n := range 3 {
-				wg.Go(func() {
-					ticket, err := g.Consume(t.Context(), gateWork(customer, fmt.Sprintf("last-%d-%d", i, n), 1))
-					if err != nil {
-						t.Errorf("consume: %v", err)
-						return
-					}
-					if ticket.Allowed() {
-						allowed.Add(1)
-					}
-				})
-			}
-		}
-		wg.Wait()
-		for _, g := range gates {
-			gateFlush(t, g)
-		}
-		require.EqualValues(t, 1, allowed.Load(), "exactly the one unit left")
-		require.EqualValues(t, 10, customerLimit(t, a.alpha, customer, "quota").Used)
 	})
 
 	t.Run("OR-J23-S40/an-idle-gate-stops-syncing-and-decides-one-request-on-its-stale-view", func(t *testing.T) {

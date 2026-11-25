@@ -27,11 +27,7 @@ The host collects only:
 - the country: a native ISO-3166 country select with `autocomplete="billing country"`;
 - the postal code: a country-aware input with `autocomplete="billing postal-code"`.
 
-Postal code is optional for the 53 ISO-3166 alpha-2 countries and territories
-in the Universal Postal Union's September 2025
-[list of countries which do not require postal codes](https://www.upu.int/UPU/media/upu/documents/PostCode/General-Addressing-Issues.pdf).
-The UI keeps a postal code when the customer supplies one. It does not collect
-street, city, or state for NMI.
+Which of the country and postal code it asks for follows the merchant's billing fields (`GET /v1/me/config`'s `payment.billing_fields`; `useBillingFields`, or a form's `billingFields` prop). By default, as Stripe does, the country is always asked for, preselected from the browser locale, and the postal code only when the country is the US, where it is required. A hidden field is not shown and not sent. The UI does not collect street, city, or state for NMI.
 
 Card number, expiration, and CVC remain inside NMI Collect.js cross-origin
 iframes. NMI owns those inner inputs, including their browser-autofill behavior;
@@ -47,7 +43,7 @@ is saved first (`SavePaymentMethod`).
 
 A new-card payment sends the one-time `token` and its `psp_id` plus
 `billing_details`: `name`, and `address` with the uppercase ISO `country` and
-`postal_code`. Paying with an existing saved card sends only
+`postal_code` when the form asked for them. Paying with an existing saved card sends only
 `payment_method_id`; it does not overwrite the stored billing identity with
 empty form values.
 
@@ -74,7 +70,7 @@ Each payment sends one Idempotency-Key, minted when the button renders and kept 
 ## Separate NMI card setup
 
 `TokenizedCardForm` reuses the same hosted fields and emits `payment_token`,
-`name_on_card`, `country` and `zip` to its async `onTokenized` callback. The host
+`name_on_card`, and the `country` and `zip` it asked for to its async `onTokenized` callback. The host
 provides explicit save-card consent and uses the callback to invoke its native
 authenticated save-card endpoint. Set `disabled` until consent is given. The
 form never creates a zero-dollar purchase or announces a completed payment.

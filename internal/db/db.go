@@ -29,9 +29,7 @@ type DB struct {
 	// the default schema. Inherited by tx-scoped wrappers.
 	rw schemaRewriter
 
-	// partitions is shared by every pool-backed handle of one database.
-	partitions *partitionState
-	Log        *slog.Logger
+	Log *slog.Logger
 }
 
 // NewWithPGXPool wraps a host-supplied pgx pool (the embedded-host path). The
@@ -66,7 +64,7 @@ func NewWithPGXPoolAndSessions(logger *slog.Logger, pool *pgxpool.Pool, schema s
 		}
 		direct = direct.Copy()
 	}
-	return &DB{river: &runtimeBinding{}, pool: pool, rw: newSchemaRewriter(schema), partitions: &partitionState{}, direct: direct, Log: logger}, nil
+	return &DB{river: &runtimeBinding{}, pool: pool, rw: newSchemaRewriter(schema), direct: direct, Log: logger}, nil
 }
 
 // DataPool returns a schema-aware wrapper over the base pool for the rare
