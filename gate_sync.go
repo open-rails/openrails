@@ -40,9 +40,11 @@ type gateState struct {
 	wanted  map[string]billing.ViewParams
 	waiters map[string]*viewWait
 	// active is anything done since the last sync; reported is a last sync
-	// that reported something in flight.
+	// that reported something in flight; deferred a last sync that left its
+	// usage to the next to answer waiting requests sooner.
 	active   bool
 	reported bool
+	deferred bool
 	tickets  map[*Ticket]struct{}
 	queues   map[billing.LeaseID]*usageQueue
 	refused  []error
@@ -649,7 +651,16 @@ func (g *gateState) syncOnce() {
 	closing := g.closing
 	g.builds++
 	build := g.builds
-	head := headLocked(g.queues[g.lease], billing.MaxSyncUsageItems)
+	// A sync carrying usage waits for its insert, which a request waiting
+	// for its first view need not: such a sync leaves the usage to the next,
+	// which carries it, so every other sync at worst does. What it leaves is
+	// neither sent nor settled, never lost or counted twice.
+	coldOnly := len(g.waiters) > 0 && !closing && !g.deferred
+	g.deferred = coldOnly
+	var head []*queued
+	if !coldOnly {
+		head = headLocked(g.queues[g.lease], billing.MaxSyncUsageItems)
+	}
 	carried := map[*queued]bool{}
 	usage := make([]billing.LeaseUsage, len(head))
 	for i, e := range head {
@@ -696,7 +707,7 @@ func (g *gateState) syncOnce() {
 			break
 		}
 	}
-	more := fresh && err == nil || len(headLocked(g.queues[g.lease], 1)) > 0 && (len(usage) == billing.MaxSyncUsageItems || partial(usage, res, err))
+	more := fresh && err == nil || len(headLocked(g.queues[g.lease], 1)) > 0 && (coldOnly || len(usage) == billing.MaxSyncUsageItems || partial(usage, res, err))
 	g.mu.Unlock()
 	if more {
 		g.poke()
