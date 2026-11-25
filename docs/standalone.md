@@ -15,7 +15,7 @@ process instead, see [the embedded guide](embedded.md).
 |---|---|---|---|
 | PostgreSQL 18+ | yes | everything: the ledger, grants, subscriptions, access, catalog, provider intents and River's queue. OpenRails owns one schema (`billing`), its River schema (`billing_river`) and the server's AuthKit schema (`billing_auth`); the instance may be shared. | data loss. Provider-owned facts can be re-read with a PSP import; the ledger, credits, access and catalog exist nowhere else. |
 | ClickHouse 26.8 LTS | for usage | the event store usage needs: usage reporting, the gate, meters, limits and usage history ([event store](#event-store)) | a ClickHouse without the store's identity is refused at boot: restore its backup |
-| Redis 6.2+ or Garnet | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines, AuthKit's rate limits and spent DPoP proofs | each instance keeps them in memory: right for one instance only. No money path needs Redis, and nothing in it needs a backup. |
+| Redis 6.2+, Valkey or Garnet | for more than one instance | rate limits, admin lockouts, captcha challenges, card-testing declines, AuthKit's rate limits and spent DPoP proofs | each instance keeps them in memory: right for one instance only. No money path needs Redis, and nothing in it needs a backup. |
 | Vault | optional | with `vault.kv_mount`, every merchant's configuration, credentials included; a Transit mount signs for Solana crankers | without a KV mount the merchant manifest is the configuration, read-only |
 | SMTP | optional | billing and operator mail, the server's own sign-in codes | no email; operator alerts still reach webhooks |
 

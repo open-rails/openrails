@@ -27,9 +27,9 @@ services:
       retries: 30
 
   redis:
-    image: redis:7-alpine
+    image: valkey/valkey@sha256:9971099af41c36e887aabdfe22b80c0fe45df949163dfc9cb434febc57cfc3fc # 8-alpine (8.1.12)
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 2s
       retries: 30
 
