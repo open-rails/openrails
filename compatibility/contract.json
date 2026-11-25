@@ -685,7 +685,7 @@
       "type CardVaultKind string",
       "type Cart struct {\n\tCurrency       catalog.Currency     `json:\"currency\"`\n\tTotal          int64                `json:\"total,string\"`\n\tLines          []OrderPreviewLine   `json:\"lines\"`\n\tPaymentOptions []OrderPaymentOption `json:\"payment_options\"`\n\n\tLastChangedAt *time.Time `json:\"last_changed_at\"`\n\tExpiresAt     *time.Time `json:\"expires_at\"`\n}",
       "type CatalogApplicationReceipt struct {\n\tApplicationID      string              `json:\"application_id\"`\n\tBaseRevision       int64               `json:\"base_revision\"`\n\tAppliedRevision    int64               `json:\"applied_revision\"`\n\tReplayed           bool                `json:\"replayed\"`\n\tProductsChanged    int                 `json:\"products_changed\"`\n\tPricesChanged      int                 `json:\"prices_changed\"`\n\tEntitlementChanges []EntitlementChange `json:\"entitlement_changes\"`\n\tChanges            []CatalogChange     `json:\"changes\"`\n\tConflicts          []CatalogConflict   `json:\"conflicts\"`\n\tWarnings           []CatalogWarning    `json:\"warnings\"`\n}",
-      "type CatalogChange struct {\n\tObject     CatalogObjectKind `json:\"object\"`\n\tKey        string            `json:\"key\"`\n\tProductKey *string           `json:\"product_key\"`\n\tFields     []string          `json:\"fields\"`\n\tRevision   int64             `json:\"revision\"`\n}",
+      "type CatalogChange struct {\n\tObject     CatalogObjectKind `json:\"object\"`\n\tKey        string            `json:\"key\"`\n\tProductKey *string           `json:\"product_key\"`\n\tFields     []string          `json:\"fields\"`\n\tRevision   int64             `json:\"revision\"`\n\tDeleted    bool              `json:\"deleted\"`\n}",
       "type CatalogConflict struct {\n\tObject     CatalogObjectKind `json:\"object\"`\n\tKey        string            `json:\"key\"`\n\tProductKey *string           `json:\"product_key\"`\n\n\tCurrency *catalog.Currency      `json:\"currency\"`\n\tFields   []CatalogFieldConflict `json:\"fields\"`\n}",
       "type CatalogFieldConflict struct {\n\tField     string          `json:\"field\"`\n\tFileValue json.RawMessage `json:\"file_value\"`\n\tLiveValue json.RawMessage `json:\"live_value\"`\n\tSetBy     string          `json:\"set_by\"`\n\tSetAt     time.Time       `json:\"set_at\"`\n}",
       "type CatalogObjectKind string",
@@ -3886,6 +3886,7 @@
       "maps": "maps",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "syntax": "github.com/open-rails/openrails/internal/catalogrules/syntax",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"

@@ -94,6 +94,15 @@
     "OR-J05-S09": [
       "TestMerchantCurrencies/OR-J05-S09/another-merchant-does-not-see-a-merchants-units"
     ],
+    "OR-J05-S13": [
+      "TestPublicCatalog/OR-J05-S13/prune-keeps-a-refused-price-and-its-ownership"
+    ],
+    "OR-J05-S14": [
+      "TestPublicCatalog/OR-J05-S14/meter-edits-preserve-document-keys-and-aggregations"
+    ],
+    "OR-J05-S15": [
+      "TestPublicCatalog/OR-J05-S15/product-creates-retry-by-content-including-concurrently"
+    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],

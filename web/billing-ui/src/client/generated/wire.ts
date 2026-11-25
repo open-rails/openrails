@@ -320,6 +320,7 @@ export type CatalogChange = {
   product_key: string | null
   fields: string[]
   revision: number
+  deleted: boolean
 }
 
 export type CatalogConflict = {
