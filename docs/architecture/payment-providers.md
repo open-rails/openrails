@@ -78,7 +78,7 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   nonce, so an NMI replay is answered by the event's `event_id` alone. A thin
   Stripe event is read back first. CCBill signs nothing: its source address
   (`webhookauth.CCBillIPAllowed`) and the payload's account authenticate it.
-- A rotated secret verifies for `webhook_secret_overlap` (default 24 h);
+- A rotated secret verifies for 24 hours;
   `retire_webhook_overlap` ends it at once. A delivery is claimed in
   `idempotency_keys` and recorded in `webhook_events`, in the handler's
   transaction where possible (`MarkWebhookProcessedInTx`).
@@ -142,8 +142,7 @@ Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`
 - **CLI**: `openrails intents resolve`, `openrails provider-refresh`,
   `openrails book arm`, `openrails merchant controls|writes|rebills|destructive`, `openrails undo-run`,
   `openrails solana-pay resolve`.
-- **Configuration**: `webhook_secret_overlap`,
-  `ccbill_webhook_ip_allowlist`, `solana.crankers`, each PSP's `environment`;
+- **Configuration**: `ccbill_webhook_ip_allowlist`, `solana.crankers`, each PSP's `environment`;
   probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs:
   [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
 

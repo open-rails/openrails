@@ -4,7 +4,8 @@
 # its default, which its description names; values here are empty. A file
 # document names its slug; a merchant manifest keys each document by it under
 # merchants.<slug>, and with vault.kv_mount Vault holds them. Secrets belong
-# in a manifest overlay or Vault. A list shows one element, a map one <key>.
+# in Vault, or in a manifest mounted from a secret. A list shows one element,
+# a map one <key>.
 # Slug is the merchant's name.
 slug: ""
 # DisplayName is the merchant's name as its customers see it.

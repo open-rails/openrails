@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -89,9 +88,8 @@ type Service struct {
 	// jobs queues a purge's secret cleanup and event store deletion with the
 	// purge.
 	jobs *db.DB
-	// clock and webhookSecretOverlap bound rotated webhook secrets (SEC-29).
-	clock                clockwork.Clock
-	webhookSecretOverlap time.Duration
+	// clock bounds rotated webhook secrets (SEC-29).
+	clock clockwork.Clock
 	// fingerprints keys the stored fingerprint of each PSP's account
 	// credential; nil compares declared credentials in memory instead.
 	fingerprints *CredentialFingerprinter

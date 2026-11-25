@@ -46,6 +46,9 @@
     "OR-J03-S05": [
       "TestHostedCheckout/OR-J03-S05/real-assets-and-config-redact-private-state"
     ],
+    "OR-J03-S06": [
+      "TestHostedCheckout/OR-J03-S06/return-urls-name-only-the-merchants-own-sites"
+    ],
     "OR-J04-S01": [
       "TestPublicSDK/OR-J04-S01/built-client-and-real-HTTP-preserve-domain-outcomes"
     ],
@@ -1572,6 +1575,9 @@
     ],
     "OR-J42-S32": [
       "TestReportingMRR/OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles"
+    ],
+    "OR-J42-S33": [
+      "TestReportingMRR/OR-J42-S33/a-refund-that-revokes-access-finalizes-and-takes-the-customer-out-once"
     ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"

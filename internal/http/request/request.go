@@ -346,7 +346,7 @@ func (r *Request) Staff() (billingauth.Staff, bool) {
 	return billingauth.StaffFromContext(r.Request.Context())
 }
 
-// ClientCountry is the client's country as a trusted proxy reports it, or "".
+// ClientCountry is the client's country as Cloudflare reports it, or "".
 func (r *Request) ClientCountry() string {
 	if r.Request == nil || r.State == nil {
 		return ""

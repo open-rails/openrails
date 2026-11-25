@@ -63,7 +63,7 @@ func newProviderRuntime(ctx context.Context, logger *slog.Logger, opts providerR
 	}
 	// Rails arm as the server's pulls do: a declared account with a missing
 	// credential is a rail not armed, loudly.
-	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.Vault, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath, nil)
+	opened, err := boot.OneOffMerchants(ctx, cfg, database, opts.Vault, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("merchant configuration unavailable, so no rail can be armed: %w", err)

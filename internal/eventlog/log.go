@@ -23,7 +23,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-const DefaultRetention = retention.EventLog
+// eventRetention keeps committed facts 90 days for readers to catch up; an
+// older cursor gets event_cursor_expired.
+const eventRetention = retention.EventLog
 
 type cursor struct {
 	Version  int       `json:"v"`
@@ -76,14 +78,14 @@ func (legacyCodec) Decode(raw string) (shared.Cursor, error) {
 
 // List uses shared cursor, retention and paging mechanics over the existing
 // committed SQL journal. Domain capture/deferred flush remain unchanged.
-func List(ctx context.Context, database *db.DB, merchantID billing.MerchantID, query billing.EventListParams, retention time.Duration, now time.Time) (billing.EventPage, error) {
+func List(ctx context.Context, database *db.DB, merchantID billing.MerchantID, query billing.EventListParams, now time.Time) (billing.EventPage, error) {
 	if merchantID.IsZero() {
 		return billing.EventPage{}, apperr.Invalidf("merchant is required")
 	}
 	if scoped, ok := merchant.FromContext(ctx); ok && scoped != merchantID {
 		return billing.EventPage{}, apperr.Invalidf("event merchant differs from the authorized scope")
 	}
-	log := shared.Log{Source: "openrails", Scope: merchantID.String(), Retention: retention, Now: func() time.Time { return now }, Codec: legacyCodec{}, ReadSnapshot: func(ctx context.Context, fn func(shared.Snapshot) error) error {
+	log := shared.Log{Source: "openrails", Scope: merchantID.String(), Retention: eventRetention, Now: func() time.Time { return now }, Codec: legacyCodec{}, ReadSnapshot: func(ctx context.Context, fn func(shared.Snapshot) error) error {
 		return database.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error { return fn(snapshot{q: gen.New(tx), mid: merchantID}) })
 	}}
 	p, err := log.ListEvents(ctx, shared.Query{After: query.After, Types: query.Types, Limit: query.Limit})

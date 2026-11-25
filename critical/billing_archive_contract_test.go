@@ -259,7 +259,8 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
 		cfg.Merchants = slices.Clone(target.cfg.Merchants)
-		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: billing.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}})
+		// The restored merchant keeps its issuer: its return URLs' origin.
+		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{Issuer: alphaSite, MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"stripe": openrails.StripePSP{AccountID: "acct_e2e", Environment: billing.EnvironmentTest, SecretKey: "sk_test_critical", WebhookSigningSecret: "whsec_critical_fixture", PublishableKey: "pk_test_critical"}.PSPConfig()}, MerchantSettings: billing.MerchantSettings{CardVault: "stripe"}}})
 		deps := target.deps
 		page := declareCheckoutPage(t, &cfg, &deps)
 		target.engine, err = openrails.New(t.Context(), cfg, deps)
@@ -268,7 +269,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, err)
 		serveCheckoutPage(t, page, target.engine)
 		customer := billing.CustomerID(uuid.MustParse(source.alice.ID))
-		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done"}}
+		request := billing.CreateOrderParams{CustomerID: customer, Lines: input.Lines, PayURL: &billing.OrderPayURLParams{SuccessURL: alphaSite + "/done"}}
 		_, err = client.CreateOrder(t.Context(), "destination-order", request)
 		var held *billing.StatusError
 		require.ErrorAs(t, err, &held)
@@ -371,7 +372,7 @@ func TestBillingArchive(t *testing.T) {
 		source, provider := newPaymentWorld(t)
 		provider.core.SendWebhooksTo(source.server.URL+"/v1/webhooks/stripe/acct_e2e", "whsec_critical_fixture")
 		sale := saleInput(t, source, provider)
-		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}}
+		hosted := billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal, Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}}
 		status, raw := source.request(t, http.MethodPost, "/v1/me/orders", source.aliceToken, hosted, map[string]string{"Idempotency-Key": "archived-hosted"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var order billing.Order
@@ -422,7 +423,8 @@ func TestBillingArchive(t *testing.T) {
 		require.NoError(t, target.engine.Close(t.Context()))
 		cfg := target.cfg
 		cfg.Merchants = slices.Clone(target.cfg.Merchants)
-		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"solana": openrails.SolanaPSP{Environment: billing.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}})
+		// The restored merchant keeps its issuer: its return URLs' origin.
+		setCfgMerchant(&cfg, "restored-source", billing.MerchantDeclaration{Issuer: alphaSite, MerchantDocument: billing.MerchantDocument{DisplayName: "Restored", PSPs: billing.PSPs{"solana": openrails.SolanaPSP{Environment: billing.EnvironmentDevnet, Treasury: s.treasury.PublicKey().String(), RPCURL: s.wire.server.URL}.PSPConfig()}}})
 		target.engine, err = openrails.New(t.Context(), cfg, target.deps)
 		require.NoError(t, err)
 		client, err = target.engine.Merchant(s.alpha.MerchantID())

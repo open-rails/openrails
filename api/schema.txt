@@ -38,7 +38,8 @@ migration 0039_lease_in_flight_off_customers.up.sql sha256:c0290a0816eb44a2edef2
 migration 0040_migration_cohort_order.up.sql sha256:72f4a45e6f1533ec1dca16b01d24db219b14490cd071402e8fe61d02964e702a
 migration 0041_mrr_totals_settle.up.sql sha256:88d0cea1c62392fc13958c7e9b917d6b4c7c7f109ba392dbd60ea90c24c55c6e
 migration 0044_drop_request_holds.up.sql sha256:f7ab167c764da9a5b518fe6984c20e48a413311864bbfefea75f1ae8da8ed31d
-migration 0045_merchant_controls.up.sql sha256:05e5d9df346d3db1f9c796c5b1bda6896847821f50342bead3d5b6d0836213d1
+migration 0046_mrr_keyed_reads.up.sql sha256:3d48a85fc96faea77697c4e71260216ae3d08728881ff8982d2b0c5ace2c8c80
+migration 0047_merchant_controls.up.sql sha256:05e5d9df346d3db1f9c796c5b1bda6896847821f50342bead3d5b6d0836213d1
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -5445,6 +5446,8 @@ function billing.pending_mrr_lines(uuid,uuid,text)
    RETURNS TABLE(subscription_id uuid, product_id uuid, price_id uuid, mrr_before bigint, mrr_after bigint, cause text, changed_at timestamp with time zone)
    LANGUAGE sql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   SELECT m.subscription_id,
          CASE WHEN m.currency = p_currency THEN m.product_id ELSE m.recorded_product_id END,
@@ -5718,6 +5721,8 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   DECLARE
       v_price billing.prices;
@@ -5735,7 +5740,7 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
       IF NOT FOUND THEN
           RETURN;
       END IF;
-      SELECT * INTO v_prev FROM billing.subscription_mrr WHERE merchant_id = s.merchant_id AND subscription_id = s.id;
+      SELECT * INTO v_prev FROM billing.subscription_mrr WHERE merchant_id = s.merchant_id AND customer_id = s.customer_id AND subscription_id = s.id;
       IF s.deleted_at IS NULL THEN
           IF s.status = 'canceled' THEN
               -- A cancellation at period end contributes until it ends (an older
@@ -5781,7 +5786,7 @@ function billing.refresh_subscription_mrr(billing.subscriptions,timestamp with t
                      THEN v_at ELSE v_prev.changed_at END,
                  cause = CASE WHEN ROW(v_prev.currency, v_prev.product_id, v_prev.price_id, v_prev.mrr) IS DISTINCT FROM ROW(v_price.currency, s.product_id, s.price_id, v_level)
                      THEN p_cause ELSE v_prev.cause END
-           WHERE merchant_id = s.merchant_id AND subscription_id = s.id;
+           WHERE merchant_id = s.merchant_id AND customer_id = s.customer_id AND subscription_id = s.id;
       END IF;
       SELECT * INTO v_open FROM billing.mrr_scheduled
        WHERE merchant_id = s.merchant_id AND subscription_id = s.id AND status = 'scheduled' FOR UPDATE;
@@ -5928,6 +5933,8 @@ function billing.schedule_mrr_change(uuid,uuid,timestamp with time zone)
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   DECLARE
       v_change billing.scheduled_changes;
@@ -6057,12 +6064,14 @@ function billing.settle_at_commit()
    RETURNS trigger
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   BEGIN
       IF TG_TABLE_NAME = 'ledger_rollup_pending' THEN
           PERFORM 1 FROM billing.ledger_rollup_pending WHERE merchant_id = NEW.merchant_id AND transfer_id = NEW.transfer_id;
       ELSIF TG_TABLE_NAME = 'subscription_mrr' THEN
-          PERFORM 1 FROM billing.subscription_mrr WHERE merchant_id = NEW.merchant_id AND subscription_id = NEW.subscription_id AND dirty;
+          PERFORM 1 FROM billing.subscription_mrr WHERE merchant_id = NEW.merchant_id AND customer_id = NEW.customer_id AND subscription_id = NEW.subscription_id AND dirty;
       ELSE
           PERFORM 1 FROM billing.eventlog_pending WHERE ordinal = NEW.ordinal;
       END IF;
@@ -6156,6 +6165,8 @@ function billing.settle_mrr(uuid)
    RETURNS void
    LANGUAGE plpgsql
    SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+   SET enable_seqscan TO 'off'
+   SET plan_cache_mode TO 'force_custom_plan'
   AS $function$
   DECLARE
       v_pair record;

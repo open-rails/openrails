@@ -92,14 +92,14 @@ func oneOffSync(svc *merchants.Service) merchantdocs.SyncFunc {
 // through: Vault when a KV mount is named; else the merchant's entry in the
 // manifest on disk fills a file source. No manifest and none at the
 // conventional path leaves the merchant without configuration: nothing arms.
-func OneOffMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, client *vaultapi.Client, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlays []string) (*Merchants, error) {
+func OneOffMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, client *vaultapi.Client, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string) (*Merchants, error) {
 	opened, err := OpenMerchants(ctx, cfg, database, client)
 	if err != nil {
 		return nil, err
 	}
 	svc := opened.Service
 	if _, ok := svc.Config().Source().(*merchantdocs.FileSource); ok {
-		declaration, err := manifestEntry(ctx, database.Log, svc, merchantID, manifest, manifestPath, overlays)
+		declaration, err := manifestEntry(ctx, database.Log, svc, merchantID, manifest, manifestPath)
 		if err != nil {
 			opened.Close()
 			return nil, err
@@ -121,7 +121,7 @@ func OneOffMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, 
 
 // manifestEntry is the merchant's declaration in the manifest: the one given,
 // else the file at manifestPath, else the conventional path when it exists.
-func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string, overlayPaths []string) (*billing.MerchantDocument, error) {
+func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchants.Service, merchantID billing.MerchantID, manifest *BillingConfig, manifestPath string) (*billing.MerchantDocument, error) {
 	if manifest == nil {
 		path := strings.TrimSpace(manifestPath)
 		explicit := path != ""
@@ -136,11 +136,7 @@ func manifestEntry(ctx context.Context, logger *slog.Logger, directory *merchant
 		if err != nil {
 			return nil, fmt.Errorf("read merchant manifest %s: %w", path, err)
 		}
-		overlays, err := ReadMerchantManifestOverlays(overlayPaths)
-		if err != nil {
-			return nil, err
-		}
-		if manifest, err = LoadManifest(raw, overlays, CheckManifestDeclaration); err != nil {
+		if manifest, err = LoadManifest(raw, CheckManifestDeclaration); err != nil {
 			return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 		}
 	}
