@@ -6,6 +6,34 @@
     "description": "OpenRails' HTTP API, from the API root: a standalone server serves it at /, an embedded host beneath its mount (usually /billing). Generated from the route catalog (internal/http/routes) by `go run ./scripts/contracts -write`; do not edit."
   },
   "paths": {
+    "/": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceSummary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [],
+        "x-openrails-auth": "public",
+        "x-openrails-errors": null,
+        "x-openrails-error-sets": [
+          "tier:public"
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -4176,7 +4204,6 @@
           "cancel_unsupported_on_rail",
           "invalid_param",
           "payment_in_progress",
-          "provider_cancel_held",
           "service_unavailable",
           "solana_rpc_unavailable",
           "solana_transaction_refused",
@@ -9498,7 +9525,6 @@
           "cancel_unsupported_on_rail",
           "invalid_param",
           "payment_in_progress",
-          "provider_cancel_held",
           "resource_not_found",
           "service_unavailable",
           "subscription_not_active"
@@ -25767,6 +25793,67 @@
           "kind",
           "amount",
           "effective_at"
+        ]
+      },
+      "ServiceLinks": {
+        "type": "object",
+        "properties": {
+          "api": {
+            "type": "string"
+          },
+          "config": {
+            "type": "string"
+          },
+          "console": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "live": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "api",
+          "config",
+          "console",
+          "live",
+          "ready"
+        ]
+      },
+      "ServiceSummary": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_ready",
+              "ready"
+            ]
+          },
+          "links": {
+            "$ref": "#/components/schemas/ServiceLinks"
+          }
+        },
+        "required": [
+          "service",
+          "version",
+          "status",
+          "links"
         ]
       },
       "SetCartLineParams": {

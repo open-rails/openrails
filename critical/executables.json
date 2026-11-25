@@ -368,6 +368,19 @@
     "OR-J17-S12": [
       "TestCancellationRecoveryContracts/OR-J17-S12/a-resume-whose-transaction-began-first-still-follows-the-cancel-it-resumes"
     ],
+    "OR-J17-S13": [
+      "TestUnarmedCancels/OR-J17-S13/a-customers-own-cancel-stops-the-provider-on-an-unarmed-merchant",
+      "TestUnarmedCancels/OR-J17-S13/a-customers-own-cancel-stops-the-provider-on-an-unarmed-merchant/nmi",
+      "TestUnarmedCancels/OR-J17-S13/a-customers-own-cancel-stops-the-provider-on-an-unarmed-merchant/ccbill"
+    ],
+    "OR-J17-S14": [
+      "TestUnarmedCancels/OR-J17-S14/a-staff-cancel-on-an-unarmed-merchant-is-still-held"
+    ],
+    "OR-J17-S15": [
+      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider",
+      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider/nmi",
+      "TestUnarmedCancels/OR-J17-S15/over-the-customer-budget-a-customers-own-cancel-reaches-no-provider/ccbill"
+    ],
     "OR-J18-S01": [
       "TestSubscriptionChangeContracts/OR-J18-S01/staff-preview-and-scheduled-change-agree-at-renewal"
     ],
@@ -2387,6 +2400,9 @@
     ],
     "OR-J06-S85": [
       "TestStandaloneAuthSurface/OR-J06-S85/a-server-whose-staff-cannot-enroll-a-second-factor-is-not-ready"
+    ],
+    "OR-J06-S86": [
+      "TestStandaloneAuthSurface/OR-J06-S86/the-servers-root-summarizes-it"
     ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"

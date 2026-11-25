@@ -695,6 +695,7 @@ with the command ([provider refresh](#provider-refresh)).
 
 | Signal | Meaning |
 |---|---|
+| `GET /` | a summary, always 200: `service`, `version`, `status` (`ready` or `not_ready`, as `/health/ready` would answer) and `links` to `/v1`, `/v1/config`, the console (`/admin/`, null when disabled) and the health routes. Public, and says no more than `/health/ready` |
 | `GET /health/live` | the process serves HTTP; only after PostgreSQL answers and migrations finish, so allow a long startup probe |
 | `GET /health/ready` | PostgreSQL, the merchants service, the River producer, a local River consumer, and a second factor staff can enroll (`totp.key`). Redis, Vault, PSP posture and refused configuration are degraded, never failing. Public and detail-free: a failure is logged and answers 503 |
 | `GET /metrics` on `metrics_port` | the operator's Prometheus telemetry, on its own listener so it is never public (unset serves none; the chart enables it on 9090 with its own ClusterIP Service): `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Not the merchant dashboard's business metrics, which are the `/v1/metrics` API on `port`. `Server.MetricsHandler` mounts it in your own binary |
@@ -753,7 +754,7 @@ Each PSP's environment decides whether money is real, and the provider must agre
 4. Review `GET /v1/merchant/findings` and `openrails proposals list`.
 5. `openrails merchant writes full`. Missed whole periods are never back-billed.
 
-**Destructive actions.** Disarmed (the default for every new merchant), the merchant's provider pulls run advisory: findings are stored, nothing changes, and the first completed pull stamps `first_pull_completed_at`. No cancellation, revocation, provider delete or pull overwrite runs; detection, findings, additive repairs and notices run either way. A held retraction stays `reconcile_required` with `held_by: kill_switch`; a provider-confirmed cancel it holds parks the subscription `unverified` with access kept, until a targeted verification or an operator refresh applies it once armed. A rollback of a destructive run disarms its merchant. Review the first pull, then arm:
+**Destructive actions.** Disarmed (the default for every new merchant), the merchant's provider pulls run advisory: findings are stored, nothing changes, and the first completed pull stamps `first_pull_completed_at`. No cancellation, revocation, provider delete or pull overwrite runs except a customer's own cancel; detection, findings, additive repairs and notices run either way. A held retraction stays `reconcile_required` with `held_by: kill_switch`; a provider-confirmed cancel it holds parks the subscription `unverified` with access kept, until a targeted verification or an operator refresh applies it once armed. A rollback of a destructive run disarms its merchant. Review the first pull, then arm:
 
 ```sh
 openrails merchant controls --merchant shop
@@ -762,7 +763,7 @@ openrails merchant destructive arm --merchant shop --by you --reason "reviewed f
 openrails merchant destructive disarm --all-merchants --by you --reason "incident: mass cancellation observed"
 ```
 
-A held cancel logs `convergence cancel held; the subscription keeps its access`. Every destructive act reads the control first, so a change reaches every instance at its next check. Until the merchant is armed a cancel of an NMI- or CCBill-owned membership is `409 provider_cancel_held`: OpenRails will not cancel locally while the provider would keep charging.
+A held cancel logs `convergence cancel held; the subscription keeps its access`. Every destructive act reads the control first, so a change reaches every instance at its next check. Until the merchant is armed a staff cancel of an NMI- or CCBill-owned membership is `409 provider_cancel_held`: OpenRails will not cancel locally while the provider would keep charging. A customer's own cancel is never held: the provider stops billing and the subscription ends at period end, refused only by the [customer budget](#abuse-limits).
 
 **Cancellation caps.** A provider read, or a billing import's cancels of subscriptions it did not create, may cancel at most `min(25, max(3, 5% of the PSP's live linked book))` subscriptions per PSP, or the whole book when it has at most 5. Over that it cancels none, halts the merchant's pass and raises `pull.cancellation.capped`; a held import cancel keeps the subscription `unverified` with access. The usual causes are a misdeclared `account_id`, a credential rotated onto a sibling sub-account, or a provider returning a short page.
 
@@ -1143,6 +1144,6 @@ kubectl -n openrails exec deploy/openrails -- \
 | webhooks refused | the URL's rail and account id, the PSP's signing secret, CCBill's source address |
 | `400 pay_url_unavailable` | `checkout_origin` is unset |
 | renewals not charging | `openrails merchant controls` (writes, rebills), `openrails book status`, `openrails intents` |
-| cancels refused with `provider_cancel_held` | the merchant's destructive arming (`openrails merchant controls`) |
+| staff cancels refused with `provider_cancel_held` | the merchant's destructive arming (`openrails merchant controls`) |
 | jobs stuck | `openrails workers`, `openrails_job_progress`, the River schema of every fleet |
 | missed provider events | `openrails provider-refresh --merchant NAME` |

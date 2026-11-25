@@ -20,7 +20,7 @@ func TestStandaloneMetaRoutesLogThroughTheServer(t *testing.T) {
 	s := &Server{Log: logger, runtime: &app.Runtime{Log: logger, Config: &billing.Config{}}}
 	mux := http.NewServeMux()
 	s.registerStandaloneMetaRoutes(mux)
-	for path, status := range map[string]int{"/health/live": http.StatusOK, "/health/nope": http.StatusNotFound} {
+	for path, status := range map[string]int{"/": http.StatusOK, "/nope": http.StatusNotFound, "/health/live": http.StatusOK, "/health/nope": http.StatusNotFound} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != status {
