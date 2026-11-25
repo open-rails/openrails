@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules/syntax"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/stretchr/testify/require"
 )
@@ -211,7 +212,10 @@ func TestPublicCatalog(t *testing.T) {
 		require.Equal(t, concurrent[0], concurrent[1])
 	})
 	t.Run("OR-J05-S14/meter-edits-preserve-document-keys-and-aggregations", func(t *testing.T) {
-		a := newAuthorityWorld(t)
+		a := newAuthorityWorld(t, func(w *world) {
+			// The meter edits share one actor and exceed its default hourly budget.
+			w.limits = func(l *destructive.Limits) { l.ActorPerHour = l.ActorPerDay }
+		})
 		document, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"meters":{"Mixed Case":{"event_type":"x","aggregation":"count"},"maximum":{"event_type":"x","value_property":"units","aggregation":"max"}}}`))
 		require.NoError(t, err)
 		receipt, err := a.alphaRemote.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
@@ -253,6 +257,58 @@ func TestPublicCatalog(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, read.RateCard)
 
+		references, err := catalog.ParseApplicationJSON([]byte(`{
+			"schema_version":1,
+			"meters":{"jobs":{"event_type":"jobs","aggregation":"count"},"Jobs":{"event_type":"Jobs","aggregation":"count"}},
+			"limits":{
+				"mixed":{"unit":"usage_units","reset":{"kind":"lifetime"},"counts":[{"meter":"Mixed Case"}]},
+				"jobs":{"unit":"usage_units","reset":{"kind":"lifetime"},"counts":[{"meter":"Jobs"}]}
+			},
+			"products":{"document-meter-card":{"display_name":"Document meter card","rate_cards":[{"meter":"Mixed Case","price":{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"1","divide_by":1}}}]}}
+		}`))
+		require.NoError(t, err)
+		receipt, err = a.alphaRemote.ApplyCatalog(t.Context(), references, billing.ApplyCatalogParams{})
+		require.NoError(t, err)
+		require.Empty(t, receipt.Conflicts)
+		for key, meterKey := range map[string]string{"mixed": "Mixed Case", "jobs": "Jobs"} {
+			limit, err := a.alphaRemote.GetLimit(t.Context(), key)
+			require.NoError(t, err)
+			require.Equal(t, []catalog.LimitCount{{Meter: meterKey, Weight: 1, Per: 1}}, limit.Counts)
+		}
+		read, err = a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.NotNil(t, read.RateCard)
+		products, err := a.alphaRemote.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{"document-meter-card"}})
+		require.NoError(t, err)
+		require.Len(t, products.Items, 1)
+		require.Equal(t, products.Items[0].ID, read.RateCard.ProductID)
+		for _, key := range []string{"jobs", "Jobs"} {
+			read, err := a.alphaRemote.GetMeter(t.Context(), key)
+			require.NoError(t, err)
+			require.Equal(t, key, read.Key)
+		}
+
+		// Remove the card so only the limit prevents the aggregation change.
+		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		require.NoError(t, err)
+		require.Nil(t, read.RateCard)
+		before := *read
+		status, raw = a.request(t, http.MethodPut, path, a.alphaKey.Secret, billing.SetMeterParams{EventType: "refused", ValueProperty: "units", Aggregation: catalog.AggregationMax})
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		require.Contains(t, string(raw), `"code":"meter_in_use"`)
+		read, err = a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.Equal(t, before, *read)
+
+		changed, err := catalog.ParseApplicationJSON([]byte(`{"schema_version":1,"meters":{"Mixed Case":{"value_property":"units","aggregation":"max"}}}`))
+		require.NoError(t, err)
+		_, err = a.alphaRemote.ApplyCatalog(t.Context(), changed, billing.ApplyCatalogParams{Force: true})
+		failure := requireCode(t, err, billing.CodeMeterInUse)
+		require.Equal(t, http.StatusConflict, failure.Status)
+		read, err = a.alphaRemote.GetMeter(t.Context(), "Mixed Case")
+		require.NoError(t, err)
+		require.Equal(t, before, *read)
+
 		for _, key := range []string{strings.Repeat("m", 300), strings.Repeat("é", 128), " padded "} {
 			_, err := catalog.ParseApplicationJSON([]byte(fmt.Sprintf(`{"schema_version":1,"meters":{%q:{"event_type":"x","aggregation":"count"}}}`, key)))
 			require.Error(t, err)
@@ -270,6 +326,10 @@ func TestPublicCatalog(t *testing.T) {
 		read, err = a.alphaRemote.SetMeter(t.Context(), "has space", billing.SetMeterParams{EventType: "x", Aggregation: catalog.AggregationCount})
 		require.NoError(t, err)
 		require.Equal(t, "has space", read.Key)
+		read, err = a.alphaRemote.SetMeter(t.Context(), "has space", billing.SetMeterParams{EventType: "x", ValueProperty: "units", Aggregation: catalog.AggregationMax})
+		require.NoError(t, err)
+		require.Equal(t, catalog.AggregationMax, read.Aggregation)
+		require.False(t, read.BillingSupported)
 
 		read, err = a.alphaRemote.GetMeter(t.Context(), "maximum")
 		require.NoError(t, err)
@@ -284,7 +344,7 @@ func TestPublicCatalog(t *testing.T) {
 		require.False(t, read.BillingSupported)
 		meters, err := a.alphaRemote.ListMeters(t.Context(), billing.PageRequest{})
 		require.NoError(t, err)
-		require.Len(t, meters.Items, 3, "invalid keys and aliases must leave no extra meters")
+		require.Len(t, meters.Items, 5, "invalid keys and aliases must leave no extra meters")
 	})
 	t.Run("OR-J05-S01/exact-price-quantity-and-provider-settlement", func(t *testing.T) {
 		a, provider := newPaymentWorld(t)

@@ -31,7 +31,7 @@ var catalogRoutes = []Route{
 			"document that applied whole is remembered by its canonical content hash: applying it again returns " +
 			"the original receipt even after later catalog edits. It is an operator action, never a side effect " +
 			"of starting: run it from a command (openrails catalog apply, or the host's own) or the console.",
-		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "currency_unsupported", "event_store_required", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
+		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "currency_unsupported", "event_store_required", "meter_in_use", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 
 	{Method: GET, Path: "/v1/catalog/meters", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListMeters", Level: LevelRead,
 		Cache: billing.ReadMeters,
