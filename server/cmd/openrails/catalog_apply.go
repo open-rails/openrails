@@ -20,6 +20,12 @@ type catalogApplyOptions struct {
 	forceConflicts   bool
 }
 
+func newCatalogCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "catalog", Short: "Apply catalog documents"}
+	cmd.AddCommand(newCatalogApplyCmd())
+	return cmd
+}
+
 // newCatalogApplyCmd executes the same atomic batch as the merchant Client
 // through trusted local operator authority, without starting an HTTP server.
 func newCatalogApplyCmd() *cobra.Command {
@@ -31,7 +37,7 @@ func newCatalogApplyCmd() *cobra.Command {
 			"and prints what changed and what it skipped. An object with a field an edit set differently is skipped " +
 			"whole and the command exits non-zero; --force-conflicts overwrites those fields instead. A price none of " +
 			"whose methods can sell it is refused, printed with why, and the command exits non-zero. " +
-			"A document that applied whole is remembered by its content hash: applying it again changes nothing, " +
+			"A document that applied whole and changed the catalog or its ownership is remembered by its content hash: applying it again changes nothing, " +
 			"even after later edits. A prior document is not a rollback. " +
 			"Omitted items are kept unless the document sets prune: true: an omitted item only documents set is " +
 			"deleted when nothing refers to it and archived otherwise, and the receipt lists each one. " +

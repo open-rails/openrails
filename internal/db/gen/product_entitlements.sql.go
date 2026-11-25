@@ -142,17 +142,16 @@ func (q *Queries) ListRecurringBenefitOverlaps(ctx context.Context, merchantID u
 
 const removeProductEntitlements = `-- name: RemoveProductEntitlements :many
 UPDATE billing.product_entitlements pe
-SET removed_at = GREATEST($1::timestamptz, pe.added_at), removed_by = $2::text
-WHERE pe.merchant_id = $3::uuid
-  AND pe.product_id = $4::uuid
+SET removed_at = GREATEST($1::timestamptz, pe.added_at)
+WHERE pe.merchant_id = $2::uuid
+  AND pe.product_id = $3::uuid
   AND pe.removed_at IS NULL
-  AND pe.entitlement = ANY($5::text[])
+  AND pe.entitlement = ANY($4::text[])
 RETURNING pe.entitlement::text AS entitlement
 `
 
 type RemoveProductEntitlementsParams struct {
 	At           time.Time
-	Actor        string
 	MerchantID   uuid.UUID
 	ProductID    uuid.UUID
 	Entitlements []string
@@ -162,7 +161,6 @@ type RemoveProductEntitlementsParams struct {
 func (q *Queries) RemoveProductEntitlements(ctx context.Context, arg RemoveProductEntitlementsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, removeProductEntitlements,
 		arg.At,
-		arg.Actor,
 		arg.MerchantID,
 		arg.ProductID,
 		arg.Entitlements,
@@ -188,16 +186,16 @@ func (q *Queries) RemoveProductEntitlements(ctx context.Context, arg RemoveProdu
 const replaceEntitlement = `-- name: ReplaceEntitlement :many
 WITH closed AS (
   UPDATE billing.product_entitlements pe
-  SET removed_at = GREATEST($2::timestamptz, pe.added_at), removed_by = $3::text
+  SET removed_at = GREATEST($2::timestamptz, pe.added_at)
   WHERE pe.merchant_id = $1::uuid
-    AND pe.entitlement = $4::text
+    AND pe.entitlement = $3::text
     AND pe.removed_at IS NULL
   RETURNING pe.product_id
 ), opened AS (
   INSERT INTO billing.product_entitlements (merchant_id, product_id, entitlement, added_at, added_by)
-  SELECT $1::uuid, closed.product_id, $5::text, $2::timestamptz, $3::text
+  SELECT $1::uuid, closed.product_id, $4::text, $2::timestamptz, $5::text
   FROM closed
-  WHERE $5::text IS NOT NULL
+  WHERE $4::text IS NOT NULL
   ON CONFLICT (merchant_id, product_id, entitlement) WHERE removed_at IS NULL DO NOTHING
   RETURNING product_id
 )
@@ -210,9 +208,9 @@ ORDER BY p.key
 type ReplaceEntitlementParams struct {
 	MerchantID uuid.UUID
 	At         time.Time
-	Actor      string
 	FromKey    string
 	ToKey      *string
+	Actor      string
 }
 
 type ReplaceEntitlementRow struct {
@@ -227,9 +225,9 @@ func (q *Queries) ReplaceEntitlement(ctx context.Context, arg ReplaceEntitlement
 	rows, err := q.db.Query(ctx, replaceEntitlement,
 		arg.MerchantID,
 		arg.At,
-		arg.Actor,
 		arg.FromKey,
 		arg.ToKey,
+		arg.Actor,
 	)
 	if err != nil {
 		return nil, err

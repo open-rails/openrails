@@ -72,7 +72,6 @@ func NMIPlan(p nmi.V5Plan) Object {
 	case months > 0:
 		obj.IntervalMonths = months
 	}
-	obj.Evidence, _ = json.Marshal(p)
 	return obj
 }
 
@@ -149,7 +148,7 @@ func stripeObject(raw json.RawMessage) (Object, bool, error) {
 	if err := json.Unmarshal(raw, &s); err != nil || s.ID == "" {
 		return Object{}, false, fmt.Errorf("stripe catalog object is unreadable")
 	}
-	obj := Object{Ref: s.ID, Active: s.Active, Evidence: raw}
+	obj := Object{Ref: s.ID, Active: s.Active}
 	switch s.Object {
 	case "product":
 		if s.Deleted {
@@ -222,7 +221,7 @@ func majorUnits(minor int64, currency string) (string, error) {
 // in native units): what a read finding its object gone records, when the
 // object was never observed. namesCurrency is false for NMI.
 func Stated(ref string, amount int64, currency string, namesCurrency bool, hours, months *int) *Object {
-	obj := &Object{Kind: Price, Ref: ref, Active: true, Evidence: json.RawMessage(`{"source":"openrails_provider_price"}`)}
+	obj := &Object{Kind: Price, Ref: ref, Active: true}
 	if minor, err := moneyutil.NativeToRailMinorExact(currency, amount); err == nil {
 		if major, err := majorUnits(int64(minor), currency); err == nil {
 			obj.Amount = major

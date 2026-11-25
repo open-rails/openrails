@@ -68,6 +68,15 @@ UPDATE billing.products SET
     revision = CASE WHEN sqlc.arg(keys_changed)::boolean THEN revision + 1 ELSE revision END,
     updated_at = now()
 WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND deleted_at IS NULL
+  AND (sqlc.arg(keys_changed)::boolean
+    OR display_name IS DISTINCT FROM COALESCE(sqlc.narg(display_name)::text, display_name)
+    OR (sqlc.arg(set_description)::boolean AND description IS DISTINCT FROM NULLIF(sqlc.narg(description)::text, ''))
+    OR (sqlc.arg(set_credit_grant)::boolean AND credit_grant IS DISTINCT FROM sqlc.narg(credit_grant)::jsonb)
+    OR (sqlc.arg(set_tier_group)::boolean AND tier_group IS DISTINCT FROM NULLIF(sqlc.narg(tier_group)::text, ''))
+    OR tier_rank IS DISTINCT FROM COALESCE(sqlc.narg(tier_rank)::int, tier_rank)
+    OR (sqlc.arg(set_ownership)::boolean AND ownership IS DISTINCT FROM sqlc.narg(ownership)::text)
+    OR (sqlc.arg(set_required_entitlements)::boolean AND required_entitlements IS DISTINCT FROM sqlc.arg(required_entitlements)::text[])
+    OR archived IS DISTINCT FROM COALESCE(sqlc.narg(archived)::boolean, archived))
 RETURNING *;
 
 -- name: ReviveProduct :execrows

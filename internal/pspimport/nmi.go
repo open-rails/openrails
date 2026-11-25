@@ -141,7 +141,6 @@ func (s *nmiSource) subscription(sub nmi.V5Subscription, row nmi.RecurringReport
 	var stated *providerobjects.Object
 	if sub.Plan != nil {
 		if plan := providerobjects.NMIPlan(*sub.Plan); plan.Ref != "" {
-			plan.Evidence, _ = json.Marshal(map[string]any{"source": "nmi_subscription_plan", "subscription": ref, "plan": sub.Plan})
 			stated = &plan
 		}
 		data.Plan = strings.TrimSpace(sub.Plan.ID)

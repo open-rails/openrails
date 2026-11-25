@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 790,
+  "scenario_count": 792,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -181,12 +181,22 @@
     {
       "id": "OR-J05-S14",
       "journey": "J05",
-      "name": "Meter edits preserve exact document keys, refuse invalid keys with 400, and accept nonbilling aggregations with the same billing support reporting"
+      "name": "Meter edits, document rate cards and limit counts preserve exact case-sensitive meter keys; invalid keys return 400, limit-counted meters refuse nonbilling aggregations through PUT and document apply, and unattached analytics meters accept them"
     },
     {
       "id": "OR-J05-S15",
       "journey": "J05",
       "name": "Identical product creates return 201 with the same product, including concurrent creates and normalized definitions; a different definition under the same key returns 409 resource_conflict"
+    },
+    {
+      "id": "OR-J05-S16",
+      "journey": "J05",
+      "name": "Quantity-only price changes create a new version and archive the old one through POST and catalog apply; the document receipt lists the price change and an unrelated product rename applies with it"
+    },
+    {
+      "id": "OR-J05-S17",
+      "journey": "J05",
+      "name": "Catalog reapply preserves unchanged field owners; equal-state documents store no receipt or revision, no-op edits write no rows, product edits advance once per merchant and transaction, and unchanged conflicts only refresh the finding"
     },
     {
       "id": "OR-J06-S01",

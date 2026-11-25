@@ -60,12 +60,15 @@ func (f *FieldChange) UnmarshalJSON(raw []byte) error {
 // Fields is the payload of a create, update, archive, unarchive or delete:
 // each changed field and the object's revision after (a product's, a price
 // key's, a configuration document's Vault version or 0 from a file; none
-// after a delete). A catalog document's application carries its id.
+// after a delete). A catalog document's application carries its id. Move
+// carries a price key's movement made by the same change, without its own
+// version or revision.
 type Fields struct {
 	Version       int                    `json:"version"`
 	Revision      *int64                 `json:"revision,omitempty"`
 	ApplicationID string                 `json:"application_id,omitempty"`
 	Fields        map[string]FieldChange `json:"fields"`
+	Move          *Move                  `json:"move,omitempty"`
 }
 
 // Keys is the payload of a key_add or key_remove, with the product's
@@ -104,10 +107,11 @@ func KeyRenamed(product string, revision *int64, from, to string) Entry {
 func PriceObjectID(product, price string) string { return product + ":" + price }
 
 // Move is the payload of a price key's move: from the entry's time the key
-// named PriceID or, archived, nothing; with the key's revision after. A move
-// recorded before configuration history carries no revision.
+// named PriceID or, archived, nothing. A standalone move carries Version and
+// the key's revision after; a move within Fields uses its version and revision.
+// A move recorded before configuration history carries no revision.
 type Move struct {
-	Version  int             `json:"version"`
+	Version  int             `json:"version,omitempty"`
 	Revision *int64          `json:"revision,omitempty"`
 	PriceID  billing.PriceID `json:"price_id"`
 	Archived bool            `json:"archived"`

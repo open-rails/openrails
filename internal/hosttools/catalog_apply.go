@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 )
@@ -24,7 +23,6 @@ type CatalogApplyOptions struct {
 	Config  *billing.Config
 	PGXPool *pgxpool.Pool
 	Vault   *vaultapi.Client
-	App     *app.App
 	// MerchantManifest is the manifest the host boots from; nil reads
 	// MerchantManifestPath (or the conventional path). Managed Vault
 	// deployments always use their configured backend instead.
