@@ -304,10 +304,7 @@ boot. The ones a deployment sets:
 | `naming.enabled`, `naming.rename_interval` | `true`, `72h` | merchant renames on, and how often one merchant may rename (`0s` at once) |
 | `naming.former_names.mode`, `naming.former_names.duration` | `finite`, `2160h` | how long a former name forwards: `finite` for the duration, `forever`, or `immediate` |
 
-The server fixes the rest: merchant roles, the API-key prefix, the scopes
-`openrails:merchant` and `openrails:self`, AuthKit's River schema and mount. The
-root owner needs a second factor, so boot refuses without a 16, 24 or 32-byte
-`totp.key` or an email or SMS sender.
+The server fixes the rest: merchant roles, the API-key prefix, the scopes `openrails:merchant` and `openrails:self`, AuthKit's River schema and mount. The root owner needs a second factor: when none can be enrolled (no 16, 24 or 32-byte `totp.key` and no email or SMS sender), the server still starts, logs why, and refuses the sign-ins that need one.
 
 **The admin console**
 
@@ -591,6 +588,8 @@ the credential to one merchant and checks the route's permission; nothing in a
 request selects the merchant, and a valid credential bound to none is
 `403 merchant_unresolved` ([credentials](client.md#credentials)).
 
+Who signs in, and how, in each mode, with the flows step by step: [authentication](authentication.md).
+
 ### The account directory
 
 The server's AuthKit is single-tenant: `openrails migrate up`, or the first boot, creates its one operator account directory on a fresh database and adopts the one an existing database holds; a database with several refuses to start. Nothing names it in configuration.
@@ -609,9 +608,7 @@ its scopes:
 | `openrails:merchant` | merchant permissions, within the application's role: your backend |
 | `openrails:self` | none: a customer's own billing at `/v1/me` |
 
-When your app runs AuthKit, it is the authorization server: it registers the
-server as a resource, a public client for the browser's token exchange and a
-confidential client for the backend's client credentials. In the example's app:
+When your app runs AuthKit, it is the authorization server: it registers the server as a resource, a public client for the browser's token exchange and a confidential client for the backend's client credentials; for staff to sign in to the console there too, also the console's public client ([authentication](authentication.md#standalone-at-your-apps-issuer)). In the example's app:
 
 ```go guide:standalone-issuer
 // OpenRails is a resource server this AuthKit mints tokens for.
@@ -679,22 +676,16 @@ refused on `/v1/app` (`403 application_required`).
 
 ### The console
 
-`/admin` is the staff console. Staff sign in at an app's issuer
-(`admin_console.issuers`, one choice per merchant or `root`) or, with
-`local_sign_in`, with the server's own accounts. The console exchanges the
-person's token for one bound to the chosen merchant (RFC 8693 through the
-server's `openrails-console` client), refused where they hold no role. Its
-session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once. `admin_console.disabled` omits it.
+`/admin` is the staff console. Staff sign in at an app's issuer (`admin_console.issuers`, one choice per merchant or `root`) or, with `local_sign_in`, with the server's own accounts, which people join by invitation; the console offers each that is on.
+
+- **At an app's issuer** the console is an OAuth 2.0 public client there (authorization code with PKCE, redirect URI `<origin>/admin/callback`). The token it receives is already bound to OpenRails' resource and the issuer's merchant, so there is no exchange; people, roles and second factors are the app's.
+- **With `local_sign_in`** the console exchanges the session's token for one bound to the chosen merchant (RFC 8693 through the server's `openrails-console` client), refused where the person holds no role there and no root role. The session keeps the access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in (`auth.token.refresh_token_duration`); a revoked session answers `401 credential_revoked` at once.
+
+Each flow, and what the app's issuer registers, is in [authentication](authentication.md#staff-and-operators). `admin_console.disabled` omits the console.
 
 ### Customer contacts
 
-The server mounts no SCIM routes. A customer of the server's own accounts is
-read from them; a trusted issuer's customer from the merchant's directory in the
-server's AuthKit, which the issuer's AuthKit pushes to over SCIM at
-`/directory/scim/v2` with its client credentials, and from the verified contact
-claims of its tokens. Each customer is read from its own issuer's directory,
-newest write winning. A customer your backend names in an assertion (`CreateCustomerToken`) is the merchant's own, and its contact is what that application pushed or asserted for it.
-OpenRails emails a customer only at an address the issuer proved.
+The server mounts none of OpenRails' own SCIM routes (`/v1/app/scim/v2`, [client](client.md#customers)). A customer of the server's own accounts is read from them; a trusted issuer's customer from the merchant's directory in the server's AuthKit, which the issuer's AuthKit pushes to over SCIM at `/directory/scim/v2` with its client credentials, and from the verified contact claims of its tokens. Each customer is read from its own issuer's directory, newest write winning. A customer your backend names in an assertion (`CreateCustomerToken`) is the merchant's own, and its contact is what that application pushed or asserted for it. OpenRails emails a customer only at an address the issuer proved.
 
 ## The payment page
 

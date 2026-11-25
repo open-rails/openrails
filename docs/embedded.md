@@ -340,6 +340,8 @@ PSP's webhooks at `{Prefix}/v1/webhooks/{rail}/{account_id}`.
 
 ## Auth
 
+Embedded, your app's own sign-in is the only one: customers, staff and operators present your app's credential to your mount, and there is no second token and no OpenRails login ([authentication](authentication.md)).
+
 `Routes.Auth` is an `authkit/auth` `Authenticator`: it says who a request is and
 whether they hold a permission in a scope; OpenRails decides what to admit and
 answers every refusal itself (401 with `WWW-Authenticate`, 403
