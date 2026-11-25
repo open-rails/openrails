@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
@@ -248,7 +249,8 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 			return err
 		}
 		defer conn.Close()
-		if err := eventstore.Migrate(ctx, conn, config.ClickHouseDatabase(&host.Server.Engine), slog.Default()); err != nil {
+		chdb := config.ClickHouseDatabase(&host.Server.Engine)
+		if err := eventstore.Migrate(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)}); err != nil {
 			return err
 		}
 	}

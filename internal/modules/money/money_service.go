@@ -66,7 +66,6 @@ var ErrInsufficientCredits = billing.ErrInsufficientCredits
 
 type MoneyService struct {
 	destructiveAdmissions *destructive.Admissions
-	UsageBillingEnabled   bool
 	hyperSwitchDeployment string
 	usageRecoveryResolver railresolve.NMIClientResolver
 	db                    *db.DB

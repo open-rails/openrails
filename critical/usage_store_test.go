@@ -376,18 +376,38 @@ products:
 		require.Zero(t, customerLimit(t, w.alpha, customer, "rolling").Used, "the rolling window passed")
 	})
 
-	t.Run("OR-J24-S52/new-refuses-a-database-with-unposted-usage-without-its-store", func(t *testing.T) {
+	t.Run("OR-J24-S52/a-database-with-unposted-usage-starts-without-its-store-and-opens-a-finding", func(t *testing.T) {
 		w := newWorld(t)
 		usageMeter(t, w.alpha, 100)
 		customer, _ := fundedCustomer(t, w)
 		settleUsage(t, w.alpha, newLease(), numbered(1, usageInput(customer, "unposted", 2))...)
+		other := billing.CustomerID(uuid.New())
+		fund(t, w.alpha, other, "funded", 500)
 		ctx := t.Context()
 		require.NoError(t, w.engine.Close(context.Background()))
+		w.engine = nil
+
+		// Without its store the deployment starts: the merchant's usage is
+		// refused and named in a finding, the customer whose usage waits for
+		// the store cannot read or move its balance, and every other customer
+		// bills as before.
 		without := w.deps
 		without.ClickHouse = nil
-		err := openrailsNewErr(ctx, w.cfg, without)
-		require.ErrorIs(t, err, billing.ErrEventStoreRequired)
-		require.ErrorContains(t, err, w.alpha.MerchantID().String())
+		degraded, err := openrails.New(ctx, w.cfg, without)
+		require.NoError(t, err)
+		client, err := declaredMerchant(degraded, "alpha")
+		require.NoError(t, err)
+		findings, err := client.ListFindings(ctx, billing.FindingListParams{Type: "consistency.unposted_usage"})
+		require.NoError(t, err)
+		require.Len(t, findings.Items, 1, "the merchant's unposted usage is a finding")
+		_, err = client.SyncLeases(ctx, billing.SyncLeasesParams{LeaseID: newLease(), Usage: numbered(1, usageInput(other, "metered", 1))})
+		requireNoStore(t, err)
+		_, err = client.GetBalance(ctx, customer, billing.GetBalanceParams{Currency: "USD"})
+		requireNoStore(t, err)
+		balance(t, client, other, 500, 0, 500)
+		_, err = client.StartRunningCharge(ctx, billing.StartRunningChargeParams{Reference: "without-the-store", CustomerID: other, Currency: "USD", RatePerHour: 3600})
+		require.NoError(t, err, "running charges need only PostgreSQL")
+		require.NoError(t, degraded.Close(context.Background()))
 
 		// A lost store: an empty one is refused, and attaching it discards the
 		// unposted usage only when told to, on the record.
@@ -407,7 +427,7 @@ products:
 		engine, err := openrails.New(ctx, emptied, w.deps)
 		require.NoError(t, err)
 		w.engine = engine
-		client, err := declaredMerchant(engine, "alpha")
+		client, err = declaredMerchant(engine, "alpha")
 		require.NoError(t, err)
 		balance(t, client, customer, 1000, 0, 1000)
 	})

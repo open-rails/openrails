@@ -198,8 +198,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 			return nil, err
 		}
 		database.SetEventStore(events)
-	} else if err := refuseUnpostedUsage(ctx, database); err != nil {
-		return nil, err
 	}
 	if overrides != nil && overrides.Notifications != nil {
 		if overrides.Notifications.Sink == nil || overrides.Notifications.Recipient == nil {
@@ -614,7 +612,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
-	moneyService.UsageBillingEnabled = cfg.UsageBillingEnabled
 	var hyperSwitchErr error
 	if cfg.HyperSwitch != (billing.HyperSwitchConfig{}) {
 		if err := moneyService.SetHyperSwitchDeployment(cfg.HyperSwitch.APIBaseURL); err != nil {

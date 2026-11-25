@@ -311,7 +311,7 @@ func TestBillingArchive(t *testing.T) {
 		require.NotEmpty(t, archiveBytes(t, source.alpha))
 	})
 	t.Run("OR-J31-S06/nmi-receipts-naming-their-card-move-with-the-book", func(t *testing.T) {
-		source, provider, customer := usageBillingWorld(t, true, false)
+		source, provider, customer := usageBillingWorld(t, false)
 		// A sale and a usage collection, each holding the receipt that names the card NMI reported.
 		product, err := source.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "archived-download", DisplayName: "Download", Ownership: catalog.OwnershipConsumable, Entitlements: []string{"download:owned"}})
 		require.NoError(t, err)

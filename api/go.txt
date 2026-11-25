@@ -3,7 +3,7 @@ pkg openrails, const QueueBilling untyped string = "billing"
 pkg openrails, const QueuePSPImport untyped string = "psp_import"
 pkg openrails, func DefaultConfig() Config
 pkg openrails, func Migrate(context.Context, *pgxpool.Pool, billing.DatabaseConfig) error
-pkg openrails, func MigrateClickHouse(context.Context, driver.Conn, billing.ClickHouseConfig) error
+pkg openrails, func MigrateClickHouse(context.Context, *pgxpool.Pool, driver.Conn, billing.ClickHouseConfig) error
 pkg openrails, func New(context.Context, Config, Deps) (*Engine, error)
 pkg openrails, func NewGate(*Client, GateDeps) (*Gate, error)
 pkg openrails, func NewRemote(string, RemoteOptions) (*Remote, error)
@@ -1602,7 +1602,6 @@ pkg openrails/billing, type Config struct, ReadCache ReadCache `yaml:"-"`
 pkg openrails/billing, type Config struct, ReturnOrigins []string `yaml:"return_origins"`
 pkg openrails/billing, type Config struct, Solana SolanaConfig `yaml:"solana"`
 pkg openrails/billing, type Config struct, TrustedProxies []string `yaml:"trusted_proxies"`
-pkg openrails/billing, type Config struct, UsageBillingEnabled bool `yaml:"usage_billing_enabled"`
 pkg openrails/billing, type Config struct, UserActionRateLimit UserActionRateLimitConfig `yaml:"user_action_rate_limit"`
 pkg openrails/billing, type Config struct, Vault VaultConfig `yaml:"vault"`
 pkg openrails/billing, type Config struct, WebhookSecretOverlap time.Duration `yaml:"webhook_secret_overlap"`

@@ -195,7 +195,7 @@ run a server on this machine against the repository's Compose dependencies
 signing keys; none relaxes a protection, and a deployment that leaves one unset
 fails to connect or refuses to boot. The top-level
 keys: `host`, `port`, `private_port`, `logger`,
-`usage_billing_enabled`, `event_retention`, `webhook_secret_overlap`,
+`event_retention`, `webhook_secret_overlap`,
 `merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
 `checkout_origin`, `return_origins`, `trusted_proxies`,
 `cloudflare_proxies`, `database`, `clickhouse`, `redis`,
@@ -217,7 +217,6 @@ keys: `host`, `port`, `private_port`, `logger`,
 
 | Key | Default | Meaning |
 |---|---|---|
-| `usage_billing_enabled` | `false` | turn on automatic usage orders on credit ([usage billing](client.md)) |
 | `event_retention` | `2160h` | how long the event log keeps facts, whatever readers have read |
 | `webhook_secret_overlap` | `24h` | how long a rotated-out webhook signing secret keeps verifying, at most `168h` |
 | `merchant_manifest_overlays` | none | secret overlays merged over the merchant manifest ([the merchant manifest](#the-merchant-manifest)) |
@@ -762,7 +761,7 @@ JWKS, `llm.base_url`):
 
 Usage needs an event store on ClickHouse; money stays in PostgreSQL. Every usage item is a raw event there (kept 100 days), with the rollups limits, balances and history read (limit windows, pricing periods, minutes, and 15-minute UTC history buckets kept 25 months, which readers fold into the merchant's `accounting.timezone` days). PostgreSQL keeps what the ledger took (`usage_postings`), who has usage it has not taken yet (`usage_unposted`) and the rate cards usage was priced under (`usage_card_prints`). Usage posts at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass (`openrails.usage_close`), and before any other movement of a customer's balance, so up to a month of usage is only in ClickHouse: back it up nightly ([backup and restore](#backup-and-restore)).
 
-Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken does not start without ClickHouse (`event_store_required`, naming the merchants): only the store can post it.
+Without a `clickhouse` section the server runs subscriptions, purchases, checkout, entitlements, credit packs and balances, running charges, usage orders, customer messages and the books; the usage routes stay mounted and answer 409 `event_store_required`, catalog documents and edits declaring meters, limits, a product's `limits` or `rate_cards` are refused, and so are the settings only usage reads (spend windows, failed-usage grace and cutoffs, the accrual-rate cap). Meters and limits already stored stay dormant: they are named in one log line at boot and in a `consistency.dormant_usage` finding, and the next catalog document applied removes them. A database with usage the ledger has not taken starts without ClickHouse: only the store can post that usage, so each merchant with some gets a `consistency.unposted_usage` finding, and the customers it belongs to can neither read nor move their balances (`event_store_required`) until the store is attached; every other customer bills as before. Replicas starting together take turns migrating ClickHouse under a PostgreSQL advisory lock.
 
 The first boot with ClickHouse records the store's identity in PostgreSQL. A later boot against a ClickHouse with another identity, an empty or different one, is refused: restore the event store's backup instead. Where none exists, `openrails usage attach --actor NAME --reason TEXT` records the configured ClickHouse as the store; with usage unposted it also needs `--discard-unposted`, which deletes it and records each merchant's discard as a `usage_discard` maintenance run. While ClickHouse is out of reach, syncs answer 503 `service_unavailable` (gates spend their offline share), and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 

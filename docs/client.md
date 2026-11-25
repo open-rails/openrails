@@ -889,9 +889,12 @@ Each item is one event in the event store, written before the sync answers: once
 
 Usage posts to the ledger at each month's end in the merchant's `accounting.timezone` and before any other movement of the customer's balance in its currency: a top-up or grant, a credit lot's expiry, revocation or refund, a usage order. A posting takes, per pricing period, the price of the period's whole usage before it, less what earlier postings took: one deduction per credit lot drawn, then owed for the rest. So a tiered price is the price of the period's total however its usage arrived, and late usage posts with the next posting. A volume price that falls as the period grows credits the difference back once the period's 35-day late window closes. Until it posts the balance already holds the usage (`GetBalance`'s `HeldAmount`), so gates refuse as if it had posted. Read what was used with `GET /v1/me/usage` (by event type, invoker or meter, over the days of the merchant's `accounting.timezone`: each day's share of its period's price, so days sum to what posts), the posting on `ListBalanceTransactions` (its period, `through`, and what it added per meter), or `QueryMetrics`.
 
-**Automatic usage billing** (`Config.UsageBillingEnabled`, off by default) turns
-owed usage into a usage order on the customer's monthly date, or when debt
-reaches the credit limit, and charges the default card for the currency. A
+**Usage billing** follows the merchant's `usage_billing` terms: a merchant with
+them turns owed usage and running charges into a usage order on the customer's
+monthly date, or when debt reaches the credit limit, and charges the default card
+for the currency; one without has none. No host setting turns it on or off, and
+it needs only PostgreSQL: metered prices need the event store, running charges
+do not. A
 customer spends on credit only with a valid default card and its agreement.
 Declined collection follows the renewal retry schedule; `send_invoice` orders
 are never charged.

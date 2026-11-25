@@ -50,7 +50,7 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 	if err != nil {
 		return nil, err
 	}
-	if s.rt.Config.UsageBillingEnabled && (len(change.creditLimits) > 0 || len(change.usageBilling) > 0 || len(change.trustLevels) > 0 || change.setPolicy) {
+	if len(change.creditLimits) > 0 || len(change.usageBilling) > 0 || len(change.trustLevels) > 0 || change.setPolicy {
 		unlock, err := s.rt.DB.LockUsagePolicy(ctx, mid)
 		if err != nil {
 			return nil, err

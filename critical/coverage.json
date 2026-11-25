@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 747,
+  "scenario_count": 749,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -781,7 +781,7 @@
     {
       "id": "OR-J24-S39",
       "journey": "J24",
-      "name": "Without ClickHouse usage, admissions, limits, usage catalog declarations, usage settings and usage metrics answer event_store_required in process and over HTTP, a gate refuses for good, and subscriptions, credit packs, running charges and usage orders work"
+      "name": "Without ClickHouse usage, limits, usage catalog declarations, usage settings and usage metrics answer event_store_required in process and over HTTP, a gate refuses for good, and subscriptions, credit packs, running charges and usage orders work"
     },
     {
       "id": "OR-J24-S40",
@@ -836,7 +836,7 @@
     {
       "id": "OR-J24-S52",
       "journey": "J24",
-      "name": "New refuses a database with unposted usage without its store and an empty store; usage attach discards the unposted usage only with --discard-unposted, on the record"
+      "name": "A database with unposted usage starts without its store: the merchant's usage is refused and named in a finding, that customer's balance waits for the store, and other customers and running charges bill; an empty store is refused, and usage attach discards the unposted usage only with --discard-unposted, on the record"
     },
     {
       "id": "OR-J24-S53",
@@ -931,7 +931,7 @@
     {
       "id": "OR-J26-S02",
       "journey": "J26",
-      "name": "Subscription-only host starts no usage billing sweep"
+      "name": "A merchant without usage_billing terms bills no usage: its debt is owed and no usage order is made"
     },
     {
       "id": "OR-J26-S03",
@@ -2076,7 +2076,7 @@
     {
       "id": "OR-J26-S51",
       "journey": "J26",
-      "name": "An overdue usage order is told once without automatic usage billing"
+      "name": "An overdue usage order is told once by the billing pass"
     },
     {
       "id": "OR-J26-S52",
@@ -3737,6 +3737,16 @@
       "id": "OR-J19-S19",
       "journey": "J19",
       "name": "An identical price migration created while the first records is refused at once with price_migration_in_progress, another destructive command of the merchant is admitted meanwhile, and once recorded the identical request answers it"
+    },
+    {
+      "id": "OR-J26-S64",
+      "journey": "J26",
+      "name": "Running charges bill on the merchant's usage_billing terms with no host setting and no event store: PostgreSQL alone bills them"
+    },
+    {
+      "id": "OR-J24-S66",
+      "journey": "J24",
+      "name": "Two engines starting together on a fresh schema and a fresh ClickHouse database take turns migrating it: each migration is recorded once, one store identity, and both serve usage"
     }
   ]
 }

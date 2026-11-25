@@ -491,6 +491,7 @@ var retiredSettings = []struct{ key, env, now string }{
 	{"engine_admission_hold", "ENGINE_ADMISSION_HOLD", "hold a merchant's rebills with `openrails merchant rebills hold --merchant NAME | --all-merchants --by NAME --reason TEXT`"},
 	{"drain_delay", "DRAIN_DELAY", "on SIGTERM the server drains for 5s, then stops within 20s"},
 	{"shutdown_timeout", "SHUTDOWN_TIMEOUT", "on SIGTERM the server drains for 5s, then stops within 20s"},
+	{"usage_billing_enabled", "USAGE_BILLING_ENABLED", "a merchant with usage_billing terms bills its usage; one without has none"},
 }
 
 // retiredAuthKeys are the server's former auth keys and their replacements.

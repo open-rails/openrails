@@ -15,9 +15,6 @@ import (
 // initiates wait, are each merchant's controls.
 // A field left zero takes DefaultConfig's value (WithDefaults).
 type Config struct {
-	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
-	UsageBillingEnabled bool `yaml:"usage_billing_enabled"`
-
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig `yaml:"database"`
 	// ClickHouse names the database of the event store, Deps.ClickHouse.

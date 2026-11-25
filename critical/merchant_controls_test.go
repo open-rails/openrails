@@ -108,7 +108,7 @@ func TestMerchantControls(t *testing.T) {
 		renewalSettled(t, a, p, sub, due)
 	})
 	t.Run("OR-J06-S75/scheduled-usage-collection-waits-under-a-rebill-hold-and-collects-after-the-release", func(t *testing.T) {
-		a, p, customer := usageBillingWorld(t, true, false)
+		a, p, customer := usageBillingWorld(t, false)
 		operator(t, a.world, "rebills", "hold", "alpha", "incident")
 		oneUsage(t, a.alpha, usageInput(customer, "held-usage", 3))
 		a.clock.Advance(time.Second)

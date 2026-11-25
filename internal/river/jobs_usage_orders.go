@@ -69,7 +69,7 @@ func (w UsageOrderWorker) Work(ctx context.Context, job *river.Job[money.UsageOr
 }
 
 func (w UsageOrderWorker) run(ctx context.Context, page money.UsageOrderArgs) error {
-	if w.DB == nil || w.Money == nil || w.Config == nil || !w.Config.UsageBillingEnabled {
+	if w.DB == nil || w.Money == nil {
 		return nil
 	}
 	logger := w.Log.With("worker", money.KindUsageOrders)
