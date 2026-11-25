@@ -156,7 +156,9 @@ func (e *env) checkWorld(ctx context.Context, w *WorldResult, schema string, see
 	e.checkDrains(ctx, w, seeds, admin)
 	e.checkLedger(ctx, w, schema, seeds)
 	w.Rows = e.rowStats(ctx, w, schema)
-	w.Storage = e.storage(ctx, w, schema)
+	if w.Storage, err = e.storage(ctx, schema); err != nil {
+		w.fail("storage: %v", err)
+	}
 	w.Queries = e.queryStats(ctx, w, schema)
 }
 
@@ -313,24 +315,22 @@ type TableStorage struct {
 	Uncompressed uint64 `json:"uncompressed"`
 }
 
-func (e *env) storage(ctx context.Context, w *WorldResult, database string) []TableStorage {
+func (e *env) storage(ctx context.Context, database string) ([]TableStorage, error) {
 	rows, err := e.ch.Query(ctx, `SELECT table, sum(rows), count(), sum(bytes_on_disk), sum(data_compressed_bytes), sum(data_uncompressed_bytes)
 FROM system.parts WHERE database = ? AND active GROUP BY table ORDER BY table`, database)
 	if err != nil {
-		w.fail("storage: %v", err)
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 	var out []TableStorage
 	for rows.Next() {
 		var t TableStorage
 		if err := rows.Scan(&t.Table, &t.Rows, &t.Parts, &t.Bytes, &t.Compressed, &t.Uncompressed); err != nil {
-			w.fail("storage: %v", err)
-			return out
+			return out, err
 		}
 		out = append(out, t)
 	}
-	return out
+	return out, rows.Err()
 }
 
 // QueryStats is ClickHouse's own timing of one kind of query, from

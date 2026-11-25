@@ -42,6 +42,7 @@ migration 0046_mrr_keyed_reads.up.sql sha256:3d48a85fc96faea77697c4e71260216ae3d
 migration 0047_usage_receivable.up.sql sha256:e03ef2a943130a26447ce0f63a55724a77e2f2d282441be4664a12aa628a9ee2
 migration 0048_checkout_analytics.up.sql sha256:dcacd14f32148717d7be07654f4ce8d7f989a7a113b39ec4508cfdd86f76f38b
 migration 0049_merchant_controls.up.sql sha256:05e5d9df346d3db1f9c796c5b1bda6896847821f50342bead3d5b6d0836213d1
+migration 0050_nmi_history_due.up.sql sha256:65cc5e10e5243b68bdbab9a8a0b525baab182978afcab2934d991664651a38b1
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1727,9 +1728,11 @@ table billing.nmi_history_months
 table billing.nmi_history_reads
   column merchant_id uuid NOT NULL
   column psp_id uuid NOT NULL
-  column read_at timestamp with time zone NOT NULL
+  column read_at timestamp with time zone
+  column due_at timestamp with time zone NOT NULL
   constraint nmi_history_reads_pkey PRIMARY KEY (merchant_id, psp_id)
   constraint nmi_history_reads_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
+  index CREATE INDEX nmi_history_reads_due_at_idx ON billing.nmi_history_reads USING btree (due_at, merchant_id, psp_id)
   index CREATE UNIQUE INDEX nmi_history_reads_pkey ON billing.nmi_history_reads USING btree (merchant_id, psp_id)
 
 table billing.notification_channel_state

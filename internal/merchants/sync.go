@@ -123,6 +123,12 @@ func (s *Service) SyncConfig(ctx context.Context, id billing.MerchantID, previou
 			if err := s.fingerprint(ctx, tx, id, row, p, previous); err != nil {
 				return err
 			}
+			// A declared NMI account's history is due work for the hourly job.
+			if row.Rail == string(models.RailNMI) && !p.Archived {
+				if err := q.QueueNMIHistoryRead(ctx, gen.QueueNMIHistoryReadParams{MerchantID: id.UUID(), PspID: row.ID, DueAt: s.now()}); err != nil {
+					return err
+				}
+			}
 			if s.fingerprints == nil && !p.Archived {
 				declared = append(declared, DeclaredCredential{PSPID: row.ID, Rail: p.Rail, Credential: strings.TrimSpace(p.Secrets[AccountCredentialKey(p.Rail)])})
 			}

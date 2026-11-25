@@ -33,7 +33,8 @@ const DefaultTimeout = 10 * time.Minute
 const RescueAfter = 10 * time.Minute
 
 // kinds are OpenRails' job kinds and their timeouts. Provider refresh gets an
-// hour, PSP import gets two hours, and the billing pass uses its scan budgets.
+// hour, as does NMI history, PSP import gets two hours, and the billing pass
+// uses its scan budgets.
 var kinds = map[string]time.Duration{
 	balancelook.Kind:                     DefaultTimeout,
 	usageerasure.Kind:                    DefaultTimeout,
@@ -56,6 +57,7 @@ var kinds = map[string]time.Duration{
 	KindProviderRefreshRequested:         time.Hour,
 	KindPacedProviderRefresh:             time.Hour,
 	KindMerchantHealth:                   time.Hour,
+	KindNMIHistory:                       time.Hour,
 	reconcile.KindChargeAttributions:     time.Hour,
 	KindStripeWebhookReconcile:           DefaultTimeout,
 	KindMRRRisk:                          DefaultTimeout,

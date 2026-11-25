@@ -3,8 +3,9 @@ name: Load qualification
 # The usage gate and usage path under load (scripts/load): the SDK gate over
 # HTTP against the standalone server and against the embedded engine, on
 # PostgreSQL 18, Redis and ClickHouse 26.8, ramped until something saturates,
-# with the faults it must survive. Manual only; one run costs about 45 runner
-# minutes. GitHub-hosted runners are shared hardware: their latency is noisy.
+# with the faults it must survive; the storage world measures ClickHouse's
+# bytes per usage event. Manual only; one run costs about 45 runner minutes.
+# GitHub-hosted runners are shared hardware: their latency is noisy.
 on:
   workflow_dispatch:
     inputs:
@@ -18,7 +19,7 @@ on:
         description: Usage events of the heavy customer in the month-end close
         default: "26000000"
       worlds:
-        description: Worlds to run (http, embedded, posting)
+        description: Worlds to run (http, embedded, posting, storage)
         default: http,embedded,posting
 
 permissions:

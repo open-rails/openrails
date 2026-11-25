@@ -67,6 +67,17 @@ type Plan struct {
 	PostingEvents    int   `json:"posting_events"`
 	HeavyRows        int64 `json:"heavy_rows"`
 
+	// The storage world's customers each report StoragePerDay events a day
+	// for StorageDays, from StorageInvokers invokers, through
+	// StorageReporters concurrent reporters; each of its two databases stops
+	// taking days in after StorageMinutes.
+	StorageCustomers int `json:"storage_customers"`
+	StoragePerDay    int `json:"storage_per_day"`
+	StorageDays      int `json:"storage_days"`
+	StorageInvokers  int `json:"storage_invokers"`
+	StorageReporters int `json:"storage_reporters"`
+	StorageMinutes   int `json:"storage_minutes"`
+
 	Worlds []string `json:"worlds"`
 }
 
@@ -115,6 +126,13 @@ func defaultPlan() Plan {
 		PostingCustomers: 2000,
 		PostingEvents:    10,
 		HeavyRows:        26_000_000,
+
+		StorageCustomers: 2000,
+		StoragePerDay:    31,
+		StorageDays:      24,
+		StorageInvokers:  3,
+		StorageReporters: 4,
+		StorageMinutes:   16,
 
 		Worlds: []string{"http", "embedded", "posting"},
 	}
