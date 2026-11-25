@@ -22,7 +22,7 @@ const ClientID = "openrails-console"
 
 // Source is a trusted issuer a console sign-in may lead to.
 type Source struct {
-	// Key is the merchant id whose group trusts it, or "root".
+	// Key is the id of the merchant whose group trusts it, or "root".
 	Key string
 	// Name is the merchant's display name; "" for root.
 	Name   string
@@ -36,10 +36,12 @@ type Source struct {
 // Directory derives the console's sign-in buttons from the trusted issuers:
 // one per issuer whose OpenID Connect metadata, the document the console
 // itself reads, names an authorization endpoint. Issuers that only sign
-// assertions get none. The list is recomputed at most every listTTL and each
-// issuer's metadata read at most every metadataTTL.
+// assertions get none. Root's, the deployment's own, are listed to anyone
+// (at most every listTTL); a merchant's only to someone who names the
+// merchant. Each issuer's metadata is read at most every metadataTTL.
 type Directory struct {
-	sources  func(context.Context) ([]Source, error)
+	root     func(context.Context) ([]Source, error)
+	merchant func(context.Context, string) ([]Source, error)
 	resource string
 	public   *http.Client
 	private  *http.Client
@@ -62,28 +64,46 @@ const (
 	failedTTL   = time.Minute
 )
 
-// NewDirectory lists sources' sign-in buttons for tokens to resource.
-func NewDirectory(sources func(context.Context) ([]Source, error), resource string) *Directory {
+// NewDirectory lists root's and a named merchant's sign-in buttons for
+// tokens to resource.
+func NewDirectory(root func(context.Context) ([]Source, error), merchant func(context.Context, string) ([]Source, error), resource string) *Directory {
 	declared := httpx.Policy{Allow: func(net.IP) bool { return true }}
 	return &Directory{
-		sources: sources, resource: resource,
+		root: root, merchant: merchant, resource: resource,
 		public: httpx.Policy{}.Client(5 * time.Second), private: declared.Client(5 * time.Second),
 		now: time.Now, signsIn: map[string]checked{},
 	}
 }
 
-// Issuers are the console's sign-in buttons, sorted by name.
-func (d *Directory) Issuers(ctx context.Context) ([]Issuer, error) {
+// Root are root's sign-in buttons, sorted by name.
+func (d *Directory) Root(ctx context.Context) ([]Issuer, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := d.now()
 	if d.list != nil && now.Sub(d.listAt) < listTTL {
 		return d.list, nil
 	}
-	sources, err := d.sources(ctx)
+	sources, err := d.root(ctx)
 	if err != nil {
 		return nil, err
 	}
+	d.list, d.listAt = d.buttons(ctx, sources, now), now
+	return d.list, nil
+}
+
+// Merchant are the sign-in buttons of the merchant named name; none for an
+// unknown name, or a merchant whose issuers sign nobody in.
+func (d *Directory) Merchant(ctx context.Context, name string) ([]Issuer, error) {
+	sources, err := d.merchant(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.buttons(ctx, sources, d.now()), nil
+}
+
+func (d *Directory) buttons(ctx context.Context, sources []Source, now time.Time) []Issuer {
 	byIssuer := map[string][]Source{}
 	var order []string
 	for _, s := range sources {
@@ -105,8 +125,7 @@ func (d *Directory) Issuers(ctx context.Context) ([]Issuer, error) {
 		out = append(out, Issuer{Key: issuer, URL: issuer, ClientID: ClientID, Name: buttonName(issuer, group), Resource: d.resource, Scope: DefaultScope})
 	}
 	slices.SortFunc(out, func(a, b Issuer) int { return strings.Compare(a.Name, b.Name) })
-	d.list, d.listAt = out, now
-	return out, nil
+	return out
 }
 
 // buttonName is the merchant's name for an issuer one merchant trusts, else

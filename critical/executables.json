@@ -1931,7 +1931,7 @@
       "TestStandaloneAuthSurface/OR-J01-S28/own-accounts-need-a-second-factor"
     ],
     "OR-J01-S29": [
-      "TestStandaloneAuthSurface/OR-J01-S29/console-sign-in-is-the-trusted-issuers-that-sign-people-in"
+      "TestStandaloneAuthSurface/OR-J01-S29/console-app-sign-in-is-found-by-merchant-name"
     ],
     "OR-J01-S30": [
       "TestStandaloneAuthSurface/OR-J01-S30/run-time-applications-name-only-public-key-urls"

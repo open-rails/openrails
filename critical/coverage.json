@@ -1346,7 +1346,7 @@
     {
       "id": "OR-J01-S29",
       "journey": "J01",
-      "name": "The console offers a sign-in button for each trusted issuer whose metadata names an authorization endpoint, at the client openrails-console, named by its merchant; issuers that only sign assertions get none, and the server's own accounts always sign in"
+      "name": "The console's public sign-in shows the server's own accounts and root's issuer, never a merchant's; naming a merchant finds its trusted issuers whose metadata names an authorization endpoint, at the client openrails-console; a merchant whose issuers only sign assertions and an unknown name answer alike"
     },
     {
       "id": "OR-J01-S30",

@@ -123,9 +123,10 @@ type Config struct {
 	// permissions).
 	RouteGroups openrails.RouteGroups `yaml:"route_groups"`
 	// AdminConsole controls the console at /admin; the zero value keeps it
-	// on. Staff sign in with the server's own accounts or, a button each, at
-	// the merchants' trusted issuers (and root's) whose metadata names an
-	// authorization endpoint. Alert links point at it.
+	// on. Staff sign in with the server's own accounts, at root's trusted
+	// issuers, or at their merchant's, found by its name; only issuers whose
+	// metadata names an authorization endpoint sign people in. Alert links
+	// point at it.
 	AdminConsole AdminConsole `yaml:"admin_console"`
 
 	// Host and Port are where Run and Serve listen.

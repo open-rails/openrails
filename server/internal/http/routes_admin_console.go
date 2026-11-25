@@ -29,7 +29,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	}
 	var issuers *adminconsole.Directory
 	if !s.consoleOwnOnly {
-		issuers = adminconsole.NewDirectory(s.controlPlane.ConsoleSources, s.resource)
+		issuers = adminconsole.NewDirectory(s.controlPlane.RootConsoleSources, s.controlPlane.MerchantConsoleSources, s.resource)
 	}
 	console, err := adminconsole.Handler(s.Log, path, cfg, issuers, s.consoleAssets)
 	if err != nil {

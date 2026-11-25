@@ -107,11 +107,13 @@ adds `RiverJobs` to its fleet.
 
 `registerAdminConsoleRoutes` serves the SPA and its `config.json` (AuthKit base,
 the token exchange for `ConsoleClientID`, and the sign-in issuers) under
-`adminconsole.Path`. `adminconsole.Directory` derives the issuers per request from
-`ControlPlane.ConsoleSources` (root's and each live merchant's enabled trusted
-applications), keeping those whose OpenID Connect metadata names an authorization
-endpoint; lists are cached 30 s, metadata 10 minutes. Readiness also runs
-`ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's
+`adminconsole.Path`. `adminconsole.Directory` keeps the trusted issuers whose OpenID
+Connect metadata names an authorization endpoint (cached 10 minutes): root's
+(`ControlPlane.RootConsoleSources`, cached 30 s) in `config.json`, and one named
+merchant's (`ControlPlane.MerchantConsoleSources`) at `adminconsole.SignInPath`, which
+answers an unknown name and a merchant without one with the same 404. The SPA's
+`/m/<merchant>` route reads it at once. `AdminConsole.OwnAccountsOnly` turns both
+off. Readiness also runs `ControlPlane.SecondFactor`. `GET /admin/merchants` (`consoleMerchants`) is the selector's
 directory: it needs an explicit `Authorization` header and lists only merchants the
 credential's permissions reach. The SPA calls `/v1` with the staff token.
 `AdminConsole.Disabled` removes the subtree.

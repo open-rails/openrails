@@ -21,9 +21,12 @@ type Config struct {
 	AuthBaseURL string `json:"auth_base_url"`
 	// APIBaseURL is the admin API base, default "/v1".
 	APIBaseURL string `json:"api_base_url"`
-	// Issuers are the sign-in buttons beside the server's own accounts: the
-	// trusted issuers that sign people in (Directory), read per request.
+	// Issuers are root's sign-in buttons beside the server's own accounts:
+	// its trusted issuers that sign people in (Directory), read per request.
 	Issuers []Issuer `json:"issuers"`
+	// AppSignIn offers sign-in at a merchant's own app: the console asks for
+	// the merchant's name and reads its buttons from SignInPath.
+	AppSignIn bool `json:"app_sign_in"`
 	// Exchange is where the console trades an own account's token for one
 	// bound to the merchant staff choose (RFC 8693, the merchant's id as
 	// group_id). An issuer's token is bound already.
@@ -61,6 +64,11 @@ type Issuer struct {
 
 // Path is where the standalone server serves the console, apart from /v1.
 const Path = "/admin"
+
+// SignInPath, beneath Path, answers ?merchant=<name> with that merchant's
+// sign-in buttons, {"issuers": [...]}; an unknown name and a merchant whose
+// issuers sign nobody in are the same 404.
+const SignInPath = "/sign-in"
 
 // DefaultScope is what the console asks a trusted issuer for. With openid it
 // checks the ID token, which it uses only to name the person and to end the
@@ -128,18 +136,37 @@ func Handler(logger *slog.Logger, path string, cfg Config, issuers *Directory, a
 
 		if rel == "config.json" {
 			out := cfg
-			out.Issuers = []Issuer{}
+			out.Issuers, out.AppSignIn = []Issuer{}, issuers != nil
 			if issuers != nil {
-				list, err := issuers.Issuers(r.Context())
+				list, err := issuers.Root(r.Context())
 				if err != nil {
 					// The server's own accounts still sign in.
-					logger.WarnContext(r.Context(), "admin console: listing trusted issuers failed", "error", err)
+					logger.WarnContext(r.Context(), "admin console: listing root's trusted issuers failed", "error", err)
 				}
 				out.Issuers = append(out.Issuers, list...)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
 			_ = json.NewEncoder(w).Encode(out)
+			return
+		}
+		if "/"+rel == SignInPath {
+			w.Header().Set("Cache-Control", "no-store")
+			var list []Issuer
+			var err error
+			if name := strings.TrimSpace(r.URL.Query().Get("merchant")); issuers != nil && name != "" {
+				list, err = issuers.Merchant(r.Context(), name)
+			}
+			switch {
+			case err != nil:
+				logger.ErrorContext(r.Context(), "admin console: reading a merchant's trusted issuers failed", "error", err)
+				writeError(w, http.StatusServiceUnavailable, "app sign-in is unavailable; try again")
+			case len(list) == 0:
+				writeError(w, http.StatusNotFound, "no app sign-in for that merchant name")
+			default:
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string][]Issuer{"issuers": list})
+			}
 			return
 		}
 

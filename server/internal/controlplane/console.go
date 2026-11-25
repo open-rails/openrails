@@ -4,56 +4,43 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"slices"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/server/internal/adminconsole"
 )
 
-// ConsoleSources are the trusted issuers staff may sign in to the console
-// at: root's applications (declared in the bootstrap manifest) and each live
-// merchant's, enabled ones only. Which of them sign people in, the console's
-// directory decides from their metadata.
-func (c *ControlPlane) ConsoleSources(ctx context.Context) ([]adminconsole.Source, error) {
-	if c == nil || c.client == nil || c.pool == nil {
+// RootConsoleSources are root's enabled trusted applications, declared in
+// the bootstrap manifest: the deployment's own, which the console's sign-in
+// page may show to anyone.
+func (c *ControlPlane) RootConsoleSources(ctx context.Context) ([]adminconsole.Source, error) {
+	if c == nil || c.client == nil {
 		return nil, ErrNoControlPlane
 	}
-	out, err := c.groupSources(ctx, iam.RootGroup(), "root", "")
+	return c.groupSources(ctx, iam.RootGroup(), "root", "")
+}
+
+// MerchantConsoleSources are the enabled trusted applications of the live
+// merchant named name (its current or a former name); none for an unknown
+// or inactive one, alike.
+func (c *ControlPlane) MerchantConsoleSources(ctx context.Context, name string) ([]adminconsole.Source, error) {
+	dir, err := c.directory()
 	if err != nil {
 		return nil, err
 	}
-	status := "active"
-	var afterAt *time.Time
-	var afterID *uuid.UUID
-	for {
-		rows, err := gen.New(c.pool).ListPlatformMerchants(ctx, gen.ListPlatformMerchantsParams{Status: &status, AfterAt: afterAt, AfterID: afterID, RowLimit: 200})
-		if err != nil {
-			return nil, fmt.Errorf("controlplane: console sign-in sources: %w", err)
-		}
-		for _, row := range rows {
-			mid := billing.MerchantID(row.ID)
-			name := row.Slug
-			if c.merchants != nil {
-				name = cmp.Or(c.merchants.DisplayName(ctx, mid), row.Slug)
-			}
-			sources, err := c.groupSources(ctx, iam.GroupByID(mid.String()), mid.String(), name)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, sources...)
-		}
-		if len(rows) < 200 {
-			return out, nil
-		}
-		last := rows[len(rows)-1]
-		afterAt, afterID = &last.CreatedAt, &last.ID
+	m, err := dir.GetBySlug(ctx, name)
+	switch {
+	case errors.Is(err, billing.ErrMerchantNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case m.Status != merchants.StatusActive:
+		return nil, nil
 	}
+	return c.groupSources(ctx, iam.GroupByID(m.ID.String()), m.ID.String(), cmp.Or(dir.DisplayName(ctx, m.ID), m.Slug))
 }
 
 func (c *ControlPlane) groupSources(ctx context.Context, group iam.GroupRef, key, name string) ([]adminconsole.Source, error) {

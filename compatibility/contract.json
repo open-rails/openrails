@@ -2057,7 +2057,7 @@
       "type providerRefreshReceipt struct {\n\tJobID         int64              `json:\"job_id\"`\n\tMerchantID    billing.MerchantID `json:\"merchant_id\"`\n\tRiverSchema   string             `json:\"river_schema\"`\n\tQueue         string             `json:\"queue\"`\n\tAlreadyQueued bool               `json:\"already_queued\"`\n}"
     ],
     "server/internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tIssuers []Issuer `json:\"issuers\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tIssuers []Issuer `json:\"issuers\"`\n\n\tAppSignIn bool `json:\"app_sign_in\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
       "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
       "type Issuer struct {\n\tKey      string `json:\"key\"`\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
       "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n\tRole        string `json:\"role,omitempty\"`\n}"

@@ -81,50 +81,75 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.Nil(t, second["token_set"])
 	})
 
-	t.Run("OR-J01-S29/console-sign-in-is-the-trusted-issuers-that-sign-people-in", func(t *testing.T) {
+	t.Run("OR-J01-S29/console-app-sign-in-is-found-by-merchant-name", func(t *testing.T) {
 		w := newStandaloneWorld(t, func(c map[string]any) { c["Console"] = true })
-		var issuer string
-		metadata := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/.well-known/openid-configuration" {
-				http.NotFound(rw, r)
-				return
-			}
-			rw.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(rw).Encode(map[string]string{"issuer": issuer, "authorization_endpoint": issuer + "/oauth2/authorize", "token_endpoint": issuer + "/oauth2/token"})
-		}))
-		t.Cleanup(metadata.Close)
-		issuer = metadata.URL
-		_, signer, err := ed25519.GenerateKey(rand.Reader)
-		require.NoError(t, err)
-		der, err := x509.MarshalPKIXPublicKey(signer.Public())
-		require.NoError(t, err)
-		app := iam.RemoteApplication{Issuer: issuer, Mode: iam.RemoteApplicationModeStatic, PublicKeys: []iam.RemoteApplicationKey{{KID: "app", PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}}
-		body, err := json.Marshal(app)
-		require.NoError(t, err)
-		var stored iam.RemoteApplication
-		w.command(t, map[string]any{"Op": "trust-application", "Merchant": w.Merchants["beta"].ID.String(), "Body": json.RawMessage(body)}, &stored)
+		trust := func(merchant string) string {
+			var issuer string
+			metadata := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/.well-known/openid-configuration" {
+					http.NotFound(rw, r)
+					return
+				}
+				rw.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(rw).Encode(map[string]string{"issuer": issuer, "authorization_endpoint": issuer + "/oauth2/authorize", "token_endpoint": issuer + "/oauth2/token"})
+			}))
+			t.Cleanup(metadata.Close)
+			issuer = metadata.URL
+			_, signer, err := ed25519.GenerateKey(rand.Reader)
+			require.NoError(t, err)
+			der, err := x509.MarshalPKIXPublicKey(signer.Public())
+			require.NoError(t, err)
+			body, err := json.Marshal(iam.RemoteApplication{Issuer: issuer, Mode: iam.RemoteApplicationModeStatic, PublicKeys: []iam.RemoteApplicationKey{{KID: "app", PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}})
+			require.NoError(t, err)
+			var stored iam.RemoteApplication
+			w.command(t, map[string]any{"Op": "trust-application", "Merchant": merchant, "Body": json.RawMessage(body)}, &stored)
+			return issuer
+		}
+		beta, operators := trust(w.Merchants["beta"].ID.String()), trust("root")
+		type button struct {
+			Key, URL, Name, Resource, Scope string
+			ClientID                        string `json:"client_id"`
+		}
 		status, raw := w.request(t, http.MethodGet, "/admin/config.json", "", nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var cfg struct {
-			Issuers  []struct{ Key, URL, ClientID, Name, Resource, Scope string } `json:"issuers"`
-			Exchange *struct {
+			Issuers   []button `json:"issuers"`
+			AppSignIn bool     `json:"app_sign_in"`
+			Exchange  *struct {
 				ClientID string `json:"client_id"`
 			} `json:"exchange"`
 			LocalSignIn *bool `json:"local_sign_in"`
 		}
 		require.NoError(t, json.Unmarshal(raw, &cfg))
-		// beta's application signs people in; alpha's and beta's assertion
-		// signers do not.
+		// The public page shows the deployment's own issuer, never a
+		// merchant's.
 		require.Len(t, cfg.Issuers, 1, string(raw))
-		got := cfg.Issuers[0]
-		require.Equal(t, issuer, got.URL)
-		require.Equal(t, "beta", got.Name)
-		require.Equal(t, w.URL, got.Resource)
-		require.Equal(t, "openid profile email openrails:merchant", got.Scope)
-		require.Contains(t, string(raw), `"client_id":"openrails-console"`)
+		require.Equal(t, operators, cfg.Issuers[0].URL)
+		require.NotContains(t, string(raw), beta)
+		require.NotContains(t, string(raw), "beta")
+		require.True(t, cfg.AppSignIn)
 		require.NotNil(t, cfg.Exchange, "the server's own accounts always sign staff in")
 		require.Equal(t, "openrails-console", cfg.Exchange.ClientID)
 		require.Nil(t, cfg.LocalSignIn)
+		// Naming the merchant finds its app's issuer.
+		status, raw = w.request(t, http.MethodGet, "/admin/sign-in?merchant=beta", "", nil)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var found struct{ Issuers []button }
+		require.NoError(t, json.Unmarshal(raw, &found))
+		require.Len(t, found.Issuers, 1, string(raw))
+		got := found.Issuers[0]
+		require.Equal(t, beta, got.URL)
+		require.Equal(t, "beta", got.Name)
+		require.Equal(t, "openrails-console", got.ClientID)
+		require.Equal(t, w.URL, got.Resource)
+		require.Equal(t, "openid profile email openrails:merchant", got.Scope)
+		// A merchant whose issuers only sign assertions and an unknown name
+		// answer alike.
+		status, none := w.request(t, http.MethodGet, "/admin/sign-in?merchant=alpha", "", nil)
+		require.Equal(t, http.StatusNotFound, status, string(none))
+		status, unknown := w.request(t, http.MethodGet, "/admin/sign-in?merchant=no-such-merchant", "", nil)
+		require.Equal(t, http.StatusNotFound, status, string(unknown))
+		require.JSONEq(t, string(none), string(unknown))
 	})
 
 	t.Run("OR-J01-S30/run-time-applications-name-only-public-key-urls", func(t *testing.T) {
