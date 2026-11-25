@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -46,11 +47,11 @@ func (g *Gate) Check(ctx context.Context, merchantID uuid.UUID) Verdict {
 	if g == nil || g.DB == nil {
 		return Verdict{Reason: "destructive gate not wired; refusing destructive actions (fail closed)"}
 	}
-	row, err := g.DB.Gen(ctx).GetMerchantControls(ctx, merchantID)
+	c, err := controls.Load(ctx, g.DB.Gen(ctx), merchantID)
 	if err != nil {
 		return Verdict{Reason: fmt.Sprintf("merchant controls unreadable (%v); refusing destructive actions (fail closed)", err)}
 	}
-	return verdict(merchantID, row.DestructiveArmed, row.FirstPullCompletedAt)
+	return verdict(merchantID, c.DestructiveArmed, c.FirstPullCompletedAt)
 }
 
 // verdict is the gate's answer for one merchant's arming: one control gates
@@ -102,11 +103,11 @@ func (g *Gate) EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Tim
 	if g == nil || g.DB == nil {
 		return time.Time{}
 	}
-	row, err := g.DB.Gen(ctx).GetMerchantControls(ctx, merchantID)
-	if err != nil || row.FirstPullCompletedAt == nil {
+	c, err := controls.Load(ctx, g.DB.Gen(ctx), merchantID)
+	if err != nil || c.FirstPullCompletedAt == nil {
 		return time.Time{}
 	}
-	return row.FirstPullCompletedAt.UTC()
+	return c.FirstPullCompletedAt.UTC()
 }
 
 // AllowDestructive implements the intents runner's gate: it opens its own
