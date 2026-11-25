@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -27,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Additional sentinel errors for admin operations
@@ -49,7 +49,7 @@ type AdminSubscriptionService struct {
 	PaymentService        *payments.PaymentService
 	StripeService         *StripeService
 	clock                 clockwork.Clock
-	postures              writeposture.View
+	postures              controls.View
 
 	// providerCancel queues the durable, admin-origin provider cancel of a
 	// merchant-initiated cancel.
@@ -377,7 +377,7 @@ func NewAdminSubscriptionService(
 	entitlementService *entitlements.EntitlementService,
 	notificationService *NotificationService,
 	paymentService *payments.PaymentService,
-	postures writeposture.View,
+	postures controls.View,
 	clocks ...clockwork.Clock,
 ) *AdminSubscriptionService {
 	return &AdminSubscriptionService{

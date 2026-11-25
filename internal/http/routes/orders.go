@@ -32,7 +32,7 @@ var ordersRoutes = []Route{
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetMyOrder)},
 	{Method: GET, Path: "/v1/me/orders/{id}/payment-attempt", Group: Customer, Auth: AuthCustomer, IdempotencyKey: true,
 		Responses: []Reply{{200, billing.OrderPaymentAttempt{}}}, Errors: codes("idempotency_key_required", "invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetMyOrderPaymentAttempt)},
-	{Method: POST, Path: "/v1/me/orders/{id}/pay", Group: Customer, Auth: AuthCustomer, PayURL: PayURLOrder, IdempotencyKey: true,
+	{Method: POST, Path: "/v1/me/orders/{id}/pay", Group: Customer, Auth: AuthCustomer, PayURL: PayURLOrder, IdempotencyKey: true, SubmitsCheckout: true,
 		Request: billing.PayOrderParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: orderPayErrors, Handler: h(handlers.PayMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/confirm", Group: Customer, Auth: AuthCustomer, PayURL: PayURLOrder,
 		Request: billing.ConfirmOrderParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: codes("card_declined", "customer_action_required", "customer_session_required", "invalid_param", "payment_failed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmMyOrder)},

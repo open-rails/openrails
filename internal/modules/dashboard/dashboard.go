@@ -17,14 +17,18 @@ import (
 
 // VizTypes are the supported widget visualizations. A kpi is a tile's value,
 // its change and a sparkline of the same query by time; a cohort is a heatmap
-// of cohort_retention by cohort and months_since_start; a heading is a
-// section title and programs each card PSP's dispute program standing in the
-// range's last month, both with an empty query.
-var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "cohort", "heading", "programs"}
+// of cohort_retention by cohort and months_since_start; a funnel is a count by
+// one dimension whose values are ordered steps, each drawn with the rows that
+// reached it or went further; a heading is a section title and programs each
+// card PSP's dispute program standing in the range's last month, both with an
+// empty query.
+var VizTypes = []string{"kpi", "stat", "line", "area", "bar", "donut", "table", "cohort", "funnel", "heading", "programs"}
 
 const (
 	// Heading is the viz of a section title.
 	Heading = "heading"
+	// Funnel is the viz of a funnel.
+	Funnel = "funnel"
 	// Programs is the viz of the dispute program standings
 	// (GET /v1/metrics/dispute-programs).
 	Programs = "programs"
@@ -131,11 +135,17 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 			}
 			continue
 		}
-		if _, verr := metrics.ValidateAt(&w.Query, now); verr != nil {
+		plan, verr := metrics.ValidateAt(&w.Query, now)
+		if verr != nil {
 			for _, fe := range verr.Errors {
 				fe.Param = at("query." + fe.Param)
 				errs = append(errs, fe)
 			}
+			continue
+		}
+		if w.Viz == Funnel && !funnelShaped(plan) {
+			errs = append(errs, metrics.FieldError{Code: "funnel_shape", Param: at("query"),
+				Message: "a funnel draws one count measure by one dimension of ordered values (checkouts by step), with no time grouping"})
 		}
 		if w.Viz == Cohort && !(slices.Contains(w.Query.By, "cohort") && slices.Contains(w.Query.By, "months_since_start")) {
 			errs = append(errs, metrics.FieldError{Code: "invalid_widget_query", Param: at("query.by"),
@@ -146,6 +156,13 @@ func validateWidgetsAt(widgets []Widget, now time.Time) *metrics.ValidationError
 		return &metrics.ValidationError{Errors: errs}
 	}
 	return nil
+}
+
+// funnelShaped is a query a funnel draws: one measure that is not money, by
+// one dimension with a closed vocabulary, its order the funnel's.
+func funnelShaped(plan *metrics.Plan) bool {
+	return !plan.HasTime && len(plan.Measures) == 1 && !plan.Measures[0].Money &&
+		len(plan.Dims) == 1 && len(plan.Measures[0].Values(plan.Dims[0])) > 1
 }
 
 func emptyQuery(q billing.QueryMetricsParams) bool {

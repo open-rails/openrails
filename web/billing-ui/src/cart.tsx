@@ -10,7 +10,11 @@ import {
   type BillingAppearance,
 } from "./appearance"
 import type { BillingClient } from "./client/client"
-import type { Cart as CartData, Order } from "./client/types"
+import type {
+  Cart as CartData,
+  Order,
+  OrderAttribution,
+} from "./client/types"
 import { PayButton } from "./components/pay-button"
 import type { PaymentFallbacks } from "./fallbacks"
 import { LoadingSkeleton } from "./components/states"
@@ -32,6 +36,8 @@ export interface CartProps {
   onSettled?: (order: Order) => void
   /** Passed to OrderPayment: PSPs kept back until others fail on the order. */
   fallbacks?: PaymentFallbacks
+  /** Where the host's page says the customer came from (utm_*, referrer). */
+  attribution?: OrderAttribution
   appearance?: BillingAppearance
   className?: string
 }
@@ -42,6 +48,7 @@ export function Cart({
   onOrder,
   onSettled,
   fallbacks,
+  attribution,
   appearance,
   className,
 }: CartProps) {
@@ -114,6 +121,7 @@ export function Cart({
       const result = await client.createOrder({
         cart: true,
         expectedTotal: cart.total,
+        ...(attribution ? { attribution } : {}),
         idempotencyKey: key,
       })
       if (result.error) throw result.error

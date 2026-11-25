@@ -36,7 +36,7 @@ func (s *Service) Get(ctx context.Context) (*Dashboard, error) {
 		if err != nil {
 			return nil, fmt.Errorf("dashboard: profile probe: %w", err)
 		}
-		profile := Profile{Subscriptions: found.HasSubscriptions, CardPayments: found.HasCardPayments, Usage: found.HasUsage, Credits: found.HasCredits}
+		profile := Profile{Subscriptions: found.HasSubscriptions, CardPayments: found.HasCardPayments, Usage: found.HasUsage, Credits: found.HasCredits, Checkouts: found.HasCheckouts}
 		return &Dashboard{Widgets: DefaultWidgets(profile), IsDefault: true, Profile: &profile}, nil
 	}
 	if err != nil {

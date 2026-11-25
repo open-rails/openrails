@@ -204,7 +204,7 @@ signed-in customer's (`validatePaymentMethodDeleteAuthority`).
 Checks:
 - OR-J12-S07: in `readonly` provider-write mode a removal sends nothing.
 - OR-J12-S06: removal is refused while a subscription uses the card.
-- `requestedPaymentMethodDelete` (`internal/intents/payment_method_delete_authority.go`) is the only path past the maintenance kill switch.
+- `requestedPaymentMethodDelete` (`internal/intents/payment_method_delete_authority.go`) is the only path past the merchant's destructive arming.
 
 ## Tests
 

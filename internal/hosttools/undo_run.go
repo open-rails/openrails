@@ -198,7 +198,7 @@ func printUndoResult(w io.Writer, res reconcile.UndoResult) {
 		fmt.Fprintf(w, "  proven source domains reset to unproven: %d (nothing may retract against a book this incomplete)\n", res.ProvenDomainsReset)
 	}
 	if res.EnforcementDisarmed {
-		fmt.Fprintln(w, "  enforcement disarmed: the next pull for this merchant runs ADVISORY until an operator re-arms it")
+		fmt.Fprintln(w, "  destructive actions disarmed: the next pull for this merchant runs ADVISORY until an operator re-arms it (`openrails merchant destructive arm`)")
 	}
 	if res.Plan.Kind == reconcile.DestructiveRunKindApproval {
 		if res.Recomputed {

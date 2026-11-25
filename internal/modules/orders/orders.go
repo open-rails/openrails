@@ -208,6 +208,10 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 	}
 	if o.SubscriptionID != nil && o.PeriodStartsAt != nil && o.PeriodEndsAt != nil && o.DueAt != nil {
 		out.Renewal = &billing.OrderRenewal{SubscriptionID: billing.SubscriptionID(*o.SubscriptionID), PeriodStartsAt: *o.PeriodStartsAt, PeriodEndsAt: *o.PeriodEndsAt, DueAt: *o.DueAt}
+		if o.CheckoutOrderID != nil {
+			checkout := billing.OrderID(*o.CheckoutOrderID)
+			out.Renewal.CheckoutOrderID = &checkout
+		}
 	}
 	if o.Origin == string(billing.OrderOriginUsage) {
 		out.Usage = usageView(o.BillingOrder)

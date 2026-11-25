@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func (h *SubscriptionCollectionHandler) stripeEngineService(ctx context.Context, in gen.BillingProviderIntent) (*subscriptions.StripeService, error) {
@@ -170,7 +170,7 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 	if h.Config == nil {
 		return intents.Parked("Stripe execution mode unavailable")
 	}
-	if blocked, reason := intents.GateExecution(ctx, writeposture.View{DB: h.DB}, current.MerchantID, intents.Origin(current.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(ctx, controls.View{DB: h.DB}, current.MerchantID, intents.Origin(current.Origin)); blocked {
 		return intents.Parked(reason)
 	}
 	service, err := h.stripeEngineService(ctx, current)
@@ -243,8 +243,8 @@ func (h *SubscriptionCollectionHandler) resendLostStripeSubmission(ctx context.C
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	if h.Config.EngineAdmissionHold {
-		return intents.Parked("new engine payment submission is held")
+	if reason := intents.RebillHold(ctx, controls.View{DB: h.DB}, in); reason != "" {
+		return intents.Parked(reason)
 	}
 	_, proof, first, err := h.validateAndFence(ctx, in, p, h.resendSubmission(in, attempt))
 	if err != nil {

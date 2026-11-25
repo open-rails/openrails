@@ -170,7 +170,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err != nil {
 			return nil, err
 		}
-		plan, err := planCatalogApplication(withoutRefused(params, prepared.refused), scoped.catalogBefore, owners, prepared.providers, force)
+		plan, err := planCatalogApplication(withoutRefused(params, prepared.refused), scoped.catalogBefore, owners, prepared.providers, prepared.refused, force)
 		if err != nil {
 			return nil, err
 		}

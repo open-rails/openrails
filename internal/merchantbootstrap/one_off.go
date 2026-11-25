@@ -11,13 +11,13 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/vaultconn"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Merchants is a one-off process's merchant configuration: the merchants
@@ -56,7 +56,7 @@ func OpenMerchants(ctx context.Context, cfg *billing.Config, database *db.DB, cl
 		return nil, err
 	}
 	svc.WithPlatformVaultStore(conn.PlatformKV)
-	svc.StripeClients = stripeapi.NewFactory(nil, writeposture.View{DB: database})
+	svc.StripeClients = stripeapi.NewFactory(nil, controls.View{DB: database})
 	if vault, ok := source.(*merchantdocs.VaultSource); ok {
 		key, err := vault.FingerprintKey(ctx)
 		if err == nil {

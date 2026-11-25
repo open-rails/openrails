@@ -1,6 +1,7 @@
 // Package destructive is the brake on destructive convergence (mass local
-// cancellation, entitlement revocation, the provider deletes they queue): a
-// DB-backed switch read before each destructive act, default safe.
+// cancellation, entitlement revocation, the provider deletes they queue): each
+// merchant's destructive_armed control, read before each destructive act,
+// default disarmed.
 package destructive
 
 import (
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -22,8 +24,7 @@ type Verdict struct {
 	// intents) may execute for this merchant.
 	Allowed bool
 	// EnforceArmed: this merchant's provider pull may run in enforce mode.
-	// False means advisory (findings only, no mutations) until an operator
-	// reviews the first pull and arms the merchant.
+	// False means advisory (findings only, no mutations).
 	EnforceArmed bool
 	// Reason explains a false Allowed / EnforceArmed, for the operator log.
 	Reason string
@@ -31,8 +32,8 @@ type Verdict struct {
 	FirstPullCompletedAt *time.Time
 }
 
-// Gate reads the destructive-action policy. Fail-closed by construction: a
-// read error, a missing switch row, or a nil Gate all deny.
+// Gate reads the merchant's destructive arming. Fail-closed by construction:
+// a read error or a nil Gate denies.
 type Gate struct {
 	DB *db.DB
 }
@@ -40,34 +41,30 @@ type Gate struct {
 // New builds a gate over a database handle.
 func New(database *db.DB) *Gate { return &Gate{DB: database} }
 
-// Check evaluates the policy for a merchant. ctx MUST already be
-// merchant-scoped (inside RunInMerchantConn / MerchantTx): the per-merchant
-// half is merchant-owned tenant data. Use CheckMerchant when you are not.
+// Check evaluates the merchant's arming. ctx MUST already be merchant-scoped
+// (inside RunInMerchantConn / MerchantTx). Use CheckMerchant when you are not.
 func (g *Gate) Check(ctx context.Context, merchantID uuid.UUID) Verdict {
 	if g == nil || g.DB == nil {
 		return Verdict{Reason: "destructive gate not wired; refusing destructive actions (fail closed)"}
 	}
-	row, err := g.DB.Gen(ctx).GetDestructivePolicy(ctx, merchantID)
+	c, err := controls.Load(ctx, g.DB.Gen(ctx), merchantID)
 	if err != nil {
-		return Verdict{Reason: fmt.Sprintf("destructive policy unreadable (%v); refusing destructive actions (fail closed)", err)}
+		return Verdict{Reason: fmt.Sprintf("merchant controls unreadable (%v); refusing destructive actions (fail closed)", err)}
 	}
-	switch {
-	case !row.SwitchEnabled:
+	return verdict(merchantID, c.DestructiveArmed, c.FirstPullCompletedAt)
+}
+
+// verdict is the gate's answer for one merchant's arming: one control gates
+// destructive convergence and enforcing pulls alike.
+func verdict(merchantID uuid.UUID, armed bool, firstPull *time.Time) Verdict {
+	if !armed {
 		return Verdict{
-			Reason:               "instance kill switch is OFF (billing.destructive_action_switch.enabled = false): no maintenance cancellation, entitlement revocation or operator/system provider delete will execute on any node",
-			FirstPullCompletedAt: row.FirstPullCompletedAt,
-		}
-	case !row.MerchantEnabled:
-		return Verdict{
-			Reason:               fmt.Sprintf("destructive actions are disabled for merchant %s (billing.merchant_destructive_policy.destructive_actions_enabled = false)", merchantID),
-			FirstPullCompletedAt: row.FirstPullCompletedAt,
+			Reason: fmt.Sprintf("destructive actions are not armed for merchant %s: its pulls run ADVISORY (findings are persisted, nothing is mutated) and no cancellation, revocation or provider delete executes. "+
+				"Review its findings, then `openrails merchant destructive arm`", merchantID),
+			FirstPullCompletedAt: firstPull,
 		}
 	}
-	v := Verdict{Allowed: true, EnforceArmed: row.EnforceArmedAt != nil, FirstPullCompletedAt: row.FirstPullCompletedAt}
-	if !v.EnforceArmed {
-		v.Reason = fmt.Sprintf("merchant %s has never been armed for enforcing pulls: this pass runs ADVISORY — findings are persisted, nothing is mutated. Review them, then ArmMerchantEnforcement", merchantID)
-	}
-	return v
+	return Verdict{Allowed: true, EnforceArmed: true, FirstPullCompletedAt: firstPull}
 }
 
 // CheckMerchant is Check for callers that are NOT already on a merchant-scoped
@@ -82,7 +79,7 @@ func (g *Gate) CheckMerchant(ctx context.Context, merchantID uuid.UUID) Verdict 
 		v = g.Check(sctx, merchantID)
 		return nil
 	}); err != nil {
-		return Verdict{Reason: fmt.Sprintf("destructive policy unreadable (%v); refusing destructive actions (fail closed)", err)}
+		return Verdict{Reason: fmt.Sprintf("merchant controls unreadable (%v); refusing destructive actions (fail closed)", err)}
 	}
 	return v
 }
@@ -100,45 +97,17 @@ func (g *Gate) RecordFirstPull(ctx context.Context, merchantID uuid.UUID, now ti
 
 // EvidenceFloor is the instant this deployment first completed a pull for a
 // merchant: a destructive decision may not rest on evidence older than this.
-// Zero (nil gate, unreadable policy, never pulled) is not permissive: the
+// Zero (nil gate, unreadable controls, never pulled) is not permissive: the
 // decider then trusts only this pass's evidence. ctx must be merchant-scoped.
 func (g *Gate) EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Time {
 	if g == nil || g.DB == nil {
 		return time.Time{}
 	}
-	row, err := g.DB.Gen(ctx).GetDestructivePolicy(ctx, merchantID)
-	if err != nil || row.FirstPullCompletedAt == nil {
+	c, err := controls.Load(ctx, g.DB.Gen(ctx), merchantID)
+	if err != nil || c.FirstPullCompletedAt == nil {
 		return time.Time{}
 	}
-	return row.FirstPullCompletedAt.UTC()
-}
-
-// Arm blesses a merchant for enforcing pulls. ctx must be merchant-scoped.
-func (g *Gate) Arm(ctx context.Context, merchantID uuid.UUID, now time.Time, by, reason string) error {
-	if g == nil || g.DB == nil {
-		return fmt.Errorf("destructive gate not wired")
-	}
-	return g.DB.Gen(ctx).ArmMerchantEnforcement(ctx, gen.ArmMerchantEnforcementParams{
-		MerchantID: merchantID, ArmedAt: now.UTC(),
-		UpdatedBy: strPtr(by), Reason: strPtr(reason),
-	})
-}
-
-// SetSwitch flips the instance kill switch. Runs on any connection.
-func (g *Gate) SetSwitch(ctx context.Context, enabled bool, by, reason string) error {
-	if g == nil || g.DB == nil {
-		return fmt.Errorf("destructive gate not wired")
-	}
-	return g.DB.Gen(ctx).SetDestructiveActionSwitch(ctx, gen.SetDestructiveActionSwitchParams{
-		Enabled: enabled, UpdatedBy: strPtr(by), Reason: strPtr(reason),
-	})
-}
-
-func strPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
+	return c.FirstPullCompletedAt.UTC()
 }
 
 // AllowDestructive implements the intents runner's gate: it opens its own

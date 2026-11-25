@@ -320,6 +320,7 @@ export type CatalogChange = {
   product_key: string | null
   fields: string[]
   revision: number
+  deleted: boolean
 }
 
 export type CatalogConflict = {
@@ -428,6 +429,7 @@ export type CreateMyOrderParams = {
   payment?: OrderPaymentParams
   reusable?: boolean
   pay_url?: MyOrderPayURLParams
+  attribution?: OrderAttribution
 }
 
 export type CreateOrderParams = {
@@ -435,6 +437,7 @@ export type CreateOrderParams = {
   lines?: OrderLineParams[]
   expires_at?: string
   pay_url?: OrderPayURLParams
+  attribution?: OrderAttribution
 }
 
 export type CreatePSPImportParams = {
@@ -746,6 +749,7 @@ export type DashboardProfile = {
   card_payments: boolean
   usage: boolean
   credits: boolean
+  checkouts: boolean
 }
 
 export type DashboardWidget = {
@@ -1265,7 +1269,7 @@ export type LogEntry = {
   occurred_at: string
   actor: "file" | "system" | "vault"
   source: "api" | "catalog_apply" | "cli" | "console" | "customer" | "intent" | "job" | "provider_read" | "reload" | "webhook"
-  object_type: "custodian" | "limit" | "merchant" | "messages" | "meter" | "price" | "product" | "psp"
+  object_type: "controls" | "custodian" | "limit" | "merchant" | "messages" | "meter" | "price" | "product" | "psp"
   object_id: string
   action: "archive" | "create" | "delete" | "key_add" | "key_remove" | "key_rename" | "move" | "unarchive" | "update"
   changes: unknown | null
@@ -1537,6 +1541,31 @@ export type Order = {
   voided_at: string | null
   uncollectible_at: string | null
   created_at: string
+  checkout: OrderCheckout | null
+}
+
+export type OrderAttribution = {
+  source: string | null
+  medium: string | null
+  campaign: string | null
+  term: string | null
+  content: string | null
+  referrer: string | null
+  affiliate: string | null
+}
+
+export type OrderCheckout = {
+  customer_type: "new" | "reactivated" | "returning"
+  purchase_number: number
+  opened_at: string | null
+  submitted_at: string | null
+  country: string | null
+  country_source: "billing_address" | "card" | "ip" | null
+  billing_country: string | null
+  card_country: string | null
+  ip_country: string | null
+  language: string | null
+  attribution: OrderAttribution
 }
 
 export type OrderLine = {
@@ -1651,6 +1680,7 @@ export type OrderRenewal = {
   period_starts_at: string
   period_ends_at: string
   due_at: string
+  checkout_order_id: string | null
 }
 
 export type OrderUsage = {

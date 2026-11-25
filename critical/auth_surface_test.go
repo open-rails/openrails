@@ -178,7 +178,7 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.Equal(t, "http://127.0.0.1:9/jwks.json", stored.JWKSURI)
 	})
 
-	t.Run("OR-J06-S74/auth-settings-beyond-the-key-path-refuse-boot", func(t *testing.T) {
+	t.Run("OR-J06-S83/auth-settings-beyond-the-key-path-refuse-boot", func(t *testing.T) {
 		w := newWorld(t)
 		const derived = "OpenRails derives the server's AuthKit configuration; only auth.keys.path (AUTH_KEYS_PATH) is set"
 		for _, c := range []struct {
@@ -208,7 +208,7 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		require.NoError(t, err, "the key path alone loads: %s", out)
 	})
 
-	t.Run("OR-J06-S75/a-server-whose-staff-cannot-enroll-a-second-factor-is-not-ready", func(t *testing.T) {
+	t.Run("OR-J06-S84/a-server-whose-staff-cannot-enroll-a-second-factor-is-not-ready", func(t *testing.T) {
 		w := newWorld(t)
 		t.Cleanup(func() {
 			_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema + "_auth"}.Sanitize()+" CASCADE")

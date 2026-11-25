@@ -1041,7 +1041,7 @@ func (*conPass) Standing() []string {
 }
 
 // heldRenewalsFinding reports engine renewals with no outcome past their
-// allowance: collection is stopped (fleet halted, admission hold, breaker,
+// allowance: collection is stopped (fleet halted, rebills held, breaker,
 // readonly). Members keep access by default, so the backlog is the operator's
 // signal. It resolves once collection resumes and the renewals are attempted.
 func (p *healthPass) heldRenewalsFinding(ctx context.Context, scope Scope, now time.Time) (*ConvergeFinding, error) {
@@ -1057,7 +1057,7 @@ func (p *healthPass) heldRenewalsFinding(ctx context.Context, scope Scope, now t
 		Type: findingRenewalHeld, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityHigh,
 		SubjectKey: "engine", Provider: "self",
 		Evidence: map[string]any{"count": h.Held, "oldest_paid_through": h.OldestDueAt.UTC(), "oldest_held_seconds": int64(age.Seconds())},
-		RecommendedAction: fmt.Sprintf("%d engine renewals have had no outcome past their allowance (oldest due %s): collection is stopped. Members keep access until they are attempted. Resume collection (fleet, admission hold, breaker, provider write mode).",
+		RecommendedAction: fmt.Sprintf("%d engine renewals have had no outcome past their allowance (oldest due %s): collection is stopped. Members keep access until they are attempted. Resume collection (fleet, the merchant's rebills, breaker, its writes).",
 			h.Held, h.OldestDueAt.UTC().Format(time.RFC3339)),
 	}, nil
 }

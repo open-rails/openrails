@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
@@ -22,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Custodian-held cards: the custodian (Basis Theory) holds the card and the
@@ -87,7 +87,7 @@ func (s *CustodianSaleService) nmiFactory() *railresolve.NMIFactory {
 	if s.NMIClients != nil {
 		return s.NMIClients
 	}
-	return &railresolve.NMIFactory{Postures: writeposture.View{DB: s.DB}, Log: s.Log}
+	return &railresolve.NMIFactory{Postures: controls.View{DB: s.DB}, Log: s.Log}
 }
 
 func (s *CustodianSaleService) btClient(ctx context.Context, cfg *custodialPSP) (*basistheory.Client, error) {
@@ -101,7 +101,7 @@ func (s *CustodianSaleService) btClient(ctx context.Context, cfg *custodialPSP) 
 		APIKey:        cfg.Custody.APIKey,
 		BaseURL:       cfg.Custody.APIBaseURL,
 		WebhookKeyURL: cfg.Custody.WebhookKeyURL,
-		ReadOnly:      writeposture.View{DB: s.DB}.Posture(ctx, cfg.MerchantID.UUID()).ReadOnly(),
+		ReadOnly:      controls.View{DB: s.DB}.Posture(ctx, cfg.MerchantID.UUID()).ReadOnly(),
 		Transport:     s.BasisTheoryTransport,
 	})
 }

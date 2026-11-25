@@ -239,7 +239,7 @@ Checks:
   (OR-J01-S28).
 - **CLI.** The built binary (`OPENRAILS_CRITICAL_CLI_BINARY`, `hostCLI`) runs
   OR-J04-S41, OR-J22-S04, OR-J31-S03, OR-J31-S10, OR-J32-S05, OR-J38-S21 and
-  OR-J38-S72, OR-J06-S74, OR-J06-S75, and the archive tests' `billing prepare-target`.
+  OR-J38-S72, OR-J06-S83, OR-J06-S84, and the archive tests' `billing prepare-target`.
 - **Image smoke** (`smoke-image` in `.github/workflows/docker-publish.yaml`): CVE scan,
   arm64 build, `version`, `migrate pg`, then `run-server` from environment only until
   `/health/ready` passes and `/admin/` serves the console.

@@ -220,7 +220,11 @@ function Explorer({ range }: { range: DashboardRange }) {
   )
   const result = useQuery(adminQueries.widgetMetrics(query))
   const drawn: WidgetViz =
-    draft.time || viz === "table" ? viz : viz === "donut" ? viz : "table"
+    draft.time || viz === "table"
+      ? viz
+      : viz === "donut" || viz === "funnel"
+        ? viz
+        : "table"
   return (
     <ReportCard
       title={adminText("Explore")}

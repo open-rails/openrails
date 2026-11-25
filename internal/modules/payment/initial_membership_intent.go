@@ -136,9 +136,6 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 		// its accepted payload and history remain intact and no schedule starts.
 		return h.complete(ctx, in, intents.TerminalWithEvidence("new provider schedules are no longer started", map[string]any{"not_executed": true}))
 	}
-	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Purchases.Config != nil && h.Purchases.Config.EngineAdmissionHold {
-		return intents.Parked("engine payment admission is held")
-	}
 	if in.Rail == "stripe" {
 		return h.executeStripeInitial(ctx, in, p)
 	}
@@ -720,9 +717,6 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 
 func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Context, in gen.BillingProviderIntent, p InitialMembershipPayload) (intents.InitialMembershipNonexecutionProof, bool, error) {
 	var proof intents.InitialMembershipNonexecutionProof
-	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Purchases.Config != nil && h.Purchases.Config.EngineAdmissionHold {
-		return proof, false, errors.New("engine payment admission is held")
-	}
 	submitted := false
 	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.database().NewWithPgxTx(tx)
