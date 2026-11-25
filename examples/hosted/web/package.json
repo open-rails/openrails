@@ -12,7 +12,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@openrails/auth-ui": "1.56.0",
+    "@openrails/auth-ui": "1.57.0",
     "@openrails/billing-ui": "file:../../../web/billing-ui",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
