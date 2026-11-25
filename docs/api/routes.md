@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (185), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (184), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or an application holding the route's permission, as `application`). Every route of a tier that checks a permission names one; the route catalog refuses one that does not.
 
@@ -135,7 +135,6 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 | GET | `/v1/catalog/meters` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Meter>` |  |
 | GET | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Meter` |  |
 | PUT | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | catalog update; event store |
-| POST | `/v1/console/catalog/ask` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | `AskCatalogParams` | 200 `CatalogAnswer` | console only; when `catalog_copilot` |
 | POST | `/v1/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | catalog update |
 | GET | `/v1/catalog/products` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
 | GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `Product` |  |

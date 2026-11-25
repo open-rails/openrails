@@ -110,59 +110,6 @@ func ValidateMountPath(name, p string) error {
 	return nil
 }
 
-// LLM provider names (#741/#761). The provider selects the API dialect;
-// unknown values refuse to boot.
-const (
-	LLMProviderAnthropic = "anthropic"
-	LLMProviderOpenAI    = "openai"
-)
-
-// Per-provider default models when llm.model is unset.
-// Catalog tool definitions and corrective validation keep requests constrained.
-const (
-	LLMDefaultModelAnthropic = "claude-haiku-4-5-20251001"
-	// gpt-5.4-nano is the cheapest current-generation tool-capable OpenAI
-	// model ($0.20/M in, $1.25/M out as of 2026-07). gpt-4.1-nano is nominally
-	// cheaper but the 4.1 family is mid-retirement — a default must not 404.
-	LLMDefaultModelOpenAI = "gpt-5.4-nano"
-)
-
-// LLMConfigured reports whether a model backend is configured (fail-closed on a
-// missing key).
-func LLMConfigured(c billing.LLMConfig) bool { return strings.TrimSpace(c.APIKey) != "" }
-
-// LLMCatalogCopilotConfigured reports whether catalog Q&A (#779 Phase 1) can
-// run: a key AND the explicit catalog_copilot_enabled consent.
-func LLMCatalogCopilotConfigured(c billing.LLMConfig) bool {
-	return LLMConfigured(c) && c.CatalogCopilotEnabled
-}
-
-// LLMCatalogDraftingConfigured reports whether the #779 Phase 2 draft_* tools
-// are armed: catalog Q&A configured and explicit catalog_drafting_enabled
-// consent.
-func LLMCatalogDraftingConfigured(c billing.LLMConfig) bool {
-	return LLMCatalogCopilotConfigured(c) && c.CatalogDraftingEnabled
-}
-
-// LLMProvider returns the effective provider name.
-func LLMProvider(c billing.LLMConfig) string {
-	if strings.TrimSpace(c.Provider) == "" {
-		return LLMProviderAnthropic
-	}
-	return strings.ToLower(strings.TrimSpace(c.Provider))
-}
-
-// LLMModel returns the effective model id (per-provider default).
-func LLMModel(c billing.LLMConfig) string {
-	if strings.TrimSpace(c.Model) != "" {
-		return strings.TrimSpace(c.Model)
-	}
-	if LLMProvider(c) == LLMProviderOpenAI {
-		return LLMDefaultModelOpenAI
-	}
-	return LLMDefaultModelAnthropic
-}
-
 // ClickHouseDatabase is the event store's database: ClickHouse.Database, or
 // the default.
 func ClickHouseDatabase(c *billing.Config) string {
@@ -629,26 +576,6 @@ func Validate(cfg *billing.Config) error {
 func ValidateClickHouse(c billing.ClickHouseConfig) error {
 	if d := ClickHouseDatabase(&billing.Config{ClickHouse: c}); !schemaIdentRe.MatchString(d) {
 		return fmt.Errorf("clickhouse database %q is not a valid identifier (letters, digits, underscore only; must start with a letter or underscore)", d)
-	}
-	return nil
-}
-
-// validateLLM refuses an unknown provider (#741/#761: one vendor's dialect
-// pointed at another's key) and a model endpoint over plaintext HTTP.
-func validateLLM(llm billing.LLMConfig) error {
-	switch LLMProvider(llm) {
-	case LLMProviderAnthropic, LLMProviderOpenAI:
-	default:
-		return fmt.Errorf("invalid llm.provider %q: must be %q or %q", llm.Provider, LLMProviderAnthropic, LLMProviderOpenAI)
-	}
-	if base := strings.TrimSpace(llm.BaseURL); base != "" {
-		u, err := url.Parse(base)
-		if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("invalid llm.base_url %q: must be an absolute http(s) URL", base)
-		}
-		if u.Scheme != "https" {
-			return fmt.Errorf("llm.base_url %q must use https", base)
-		}
 	}
 	return nil
 }

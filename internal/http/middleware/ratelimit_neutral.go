@@ -475,8 +475,6 @@ func unlimited(limits billing.RateLimitsConfig) bool {
 func ClassifyBucket(path, method string) string {
 	method = strings.ToUpper(method)
 	switch {
-	case method == http.MethodPost && path == "/v1/console/catalog/ask":
-		return "catalog-ask"
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"
 	case strings.HasPrefix(path, "/v1/me/payment-methods"):

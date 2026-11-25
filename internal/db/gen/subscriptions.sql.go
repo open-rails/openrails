@@ -83,66 +83,6 @@ func (q *Queries) ClearSubscriptionDeletionMarker(ctx context.Context, arg Clear
 	return result.RowsAffected(), nil
 }
 
-const countAtRiskSubscriptions = `-- name: CountAtRiskSubscriptions :one
-SELECT count(*) FROM billing.subscription_mrr r
-JOIN billing.subscriptions sub ON sub.merchant_id = r.merchant_id AND sub.id = r.subscription_id
-WHERE r.merchant_id = $1::uuid AND r.risk <> '{}'
-  AND ($2::text IS NULL OR $2::text = ANY(r.risk))
-  AND ($3::timestamptz IS NULL OR EXISTS (SELECT 1 FROM billing.mrr_scheduled e
-      WHERE e.merchant_id = r.merchant_id AND e.subscription_id = r.subscription_id AND e.status = 'scheduled'
-        AND e.effective_at <= $3::timestamptz))
-  AND sub.merchant_id = $1::uuid AND ($4::uuid IS NULL OR sub.customer_id = $4::uuid)
-  AND ($5::text IS NULL OR sub.status::text = $5::text)
-  AND ($6::uuid IS NULL OR sub.price_id = $6::uuid)
-  AND ($7::text IS NULL OR sub.rail = $7::text)
-  AND ($8::timestamptz IS NULL OR sub.created_at >= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.created_at <= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.canceled_at >= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR sub.canceled_at <= $11::timestamptz)
-  AND ($12::timestamptz IS NULL OR sub.current_period_ends_at <= $12::timestamptz)
-  AND (NOT $13::boolean OR sub.status IN ('past_due', 'awaiting_method'))
-  AND sub.deleted_at IS NULL
-`
-
-type CountAtRiskSubscriptionsParams struct {
-	MerchantID            uuid.UUID
-	RiskReason            *string
-	ScheduledChangeBefore *time.Time
-	CustomerID            *uuid.UUID
-	Status                *string
-	PriceID               *uuid.UUID
-	Rail                  *string
-	CreatedAfter          *time.Time
-	CreatedBefore         *time.Time
-	CanceledAfter         *time.Time
-	CanceledBefore        *time.Time
-	ExpiresBefore         *time.Time
-	Dunning               bool
-}
-
-// The subscriptions whose MRR is at risk (for risk_reason, when set), read
-// from subscription_mrr's index of at-risk rows: the same filters and orders.
-func (q *Queries) CountAtRiskSubscriptions(ctx context.Context, arg CountAtRiskSubscriptionsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAtRiskSubscriptions,
-		arg.MerchantID,
-		arg.RiskReason,
-		arg.ScheduledChangeBefore,
-		arg.CustomerID,
-		arg.Status,
-		arg.PriceID,
-		arg.Rail,
-		arg.CreatedAfter,
-		arg.CreatedBefore,
-		arg.CanceledAfter,
-		arg.CanceledBefore,
-		arg.ExpiresBefore,
-		arg.Dunning,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMigrationCohort = `-- name: CountMigrationCohort :one
 SELECT count(*) FROM billing.subscriptions sub
 WHERE sub.merchant_id = $1::uuid AND sub.price_id = ANY($2::uuid[])
@@ -167,60 +107,6 @@ func (q *Queries) CountMigrationCohort(ctx context.Context, arg CountMigrationCo
 	return count, err
 }
 
-const countScheduledSubscriptions = `-- name: CountScheduledSubscriptions :one
-SELECT count(*) FROM billing.mrr_scheduled e
-JOIN billing.subscriptions sub ON sub.merchant_id = e.merchant_id AND sub.id = e.subscription_id
-WHERE e.merchant_id = $1::uuid AND e.status = 'scheduled' AND e.effective_at <= $2::timestamptz
-  AND sub.merchant_id = $1::uuid AND ($3::uuid IS NULL OR sub.customer_id = $3::uuid)
-  AND ($4::text IS NULL OR sub.status::text = $4::text)
-  AND ($5::uuid IS NULL OR sub.price_id = $5::uuid)
-  AND ($6::text IS NULL OR sub.rail = $6::text)
-  AND ($7::timestamptz IS NULL OR sub.created_at >= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR sub.created_at <= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.canceled_at >= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.canceled_at <= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR sub.current_period_ends_at <= $11::timestamptz)
-  AND (NOT $12::boolean OR sub.status IN ('past_due', 'awaiting_method'))
-  AND sub.deleted_at IS NULL
-`
-
-type CountScheduledSubscriptionsParams struct {
-	MerchantID            uuid.UUID
-	ScheduledChangeBefore time.Time
-	CustomerID            *uuid.UUID
-	Status                *string
-	PriceID               *uuid.UUID
-	Rail                  *string
-	CreatedAfter          *time.Time
-	CreatedBefore         *time.Time
-	CanceledAfter         *time.Time
-	CanceledBefore        *time.Time
-	ExpiresBefore         *time.Time
-	Dunning               bool
-}
-
-// The subscriptions whose MRR is scheduled to change by scheduled_change_before,
-// read from mrr_scheduled's index: the same filters and orders as above.
-func (q *Queries) CountScheduledSubscriptions(ctx context.Context, arg CountScheduledSubscriptionsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countScheduledSubscriptions,
-		arg.MerchantID,
-		arg.ScheduledChangeBefore,
-		arg.CustomerID,
-		arg.Status,
-		arg.PriceID,
-		arg.Rail,
-		arg.CreatedAfter,
-		arg.CreatedBefore,
-		arg.CanceledAfter,
-		arg.CanceledBefore,
-		arg.ExpiresBefore,
-		arg.Dunning,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countSubscriptionsByCustomer = `-- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM billing.subscriptions sub
 WHERE sub.merchant_id = $2::uuid AND sub.customer_id = $1
@@ -234,54 +120,6 @@ type CountSubscriptionsByCustomerParams struct {
 
 func (q *Queries) CountSubscriptionsByCustomer(ctx context.Context, arg CountSubscriptionsByCustomerParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countSubscriptionsByCustomer, arg.CustomerID, arg.MerchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countSubscriptionsFiltered = `-- name: CountSubscriptionsFiltered :one
-SELECT count(*) FROM billing.subscriptions sub
-WHERE sub.merchant_id = $1::uuid AND ($2::uuid IS NULL OR sub.customer_id = $2::uuid)
-  AND ($3::text IS NULL OR sub.status::text = $3::text)
-  AND ($4::uuid IS NULL OR sub.price_id = $4::uuid)
-  AND ($5::text IS NULL OR sub.rail = $5::text)
-  AND ($6::timestamptz IS NULL OR sub.created_at >= $6::timestamptz)
-  AND ($7::timestamptz IS NULL OR sub.created_at <= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR sub.canceled_at >= $8::timestamptz)
-  AND ($9::timestamptz IS NULL OR sub.canceled_at <= $9::timestamptz)
-  AND ($10::timestamptz IS NULL OR sub.current_period_ends_at <= $10::timestamptz)
-  AND (NOT $11::boolean OR sub.status IN ('past_due', 'awaiting_method'))
-  AND sub.deleted_at IS NULL
-`
-
-type CountSubscriptionsFilteredParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     *uuid.UUID
-	Status         *string
-	PriceID        *uuid.UUID
-	Rail           *string
-	CreatedAfter   *time.Time
-	CreatedBefore  *time.Time
-	CanceledAfter  *time.Time
-	CanceledBefore *time.Time
-	ExpiresBefore  *time.Time
-	Dunning        bool
-}
-
-func (q *Queries) CountSubscriptionsFiltered(ctx context.Context, arg CountSubscriptionsFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSubscriptionsFiltered,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Status,
-		arg.PriceID,
-		arg.Rail,
-		arg.CreatedAfter,
-		arg.CreatedBefore,
-		arg.CanceledAfter,
-		arg.CanceledBefore,
-		arg.ExpiresBefore,
-		arg.Dunning,
-	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -1345,6 +1183,8 @@ type ListAtRiskSubscriptionsPageParams struct {
 	RowLimit              int32
 }
 
+// The subscriptions whose MRR is at risk (for risk_reason, when set), read
+// from subscription_mrr's index of at-risk rows: the same filters and orders.
 func (q *Queries) ListAtRiskSubscriptionsPage(ctx context.Context, arg ListAtRiskSubscriptionsPageParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listAtRiskSubscriptionsPage,
 		arg.MerchantID,
@@ -2095,6 +1935,8 @@ type ListScheduledSubscriptionsPageParams struct {
 	RowLimit              int32
 }
 
+// The subscriptions whose MRR is scheduled to change by scheduled_change_before,
+// read from mrr_scheduled's index: the same filters and orders as above.
 func (q *Queries) ListScheduledSubscriptionsPage(ctx context.Context, arg ListScheduledSubscriptionsPageParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listScheduledSubscriptionsPage,
 		arg.MerchantID,
