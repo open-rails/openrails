@@ -163,8 +163,8 @@ func TestServerFixture(t *testing.T) {
 	srv, err := server.New(t.Context(), server.Config{
 		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicBillingBaseURL: httpServer.URL, RateLimits: billing.RateLimitsConfig{}, CheckoutOrigin: cfg.CheckoutOrigin},
 		Auth: authkit.Config{
-			DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: cfg.Schema + "_auth", RiverSchema: cfg.Schema},
-			Token: authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL, Scopes: resourceScopes},
+			Database: authkit.DatabaseConfig{Schema: cfg.Schema + "_auth", RiverSchema: cfg.Schema},
+			Token:    authkit.TokenConfig{Issuer: httpServer.URL, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: httpServer.URL, PublicURL: httpServer.URL, Scopes: resourceScopes},
 			AuthorizationServer: authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: httpServer.URL, Scopes: []string{billing.ScopeSelf, "fixture:host"}}}, GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: billing.ScopeSelf, Resource: httpServer.URL, Description: "Use own billing"}, {Name: "fixture:host", Resource: httpServer.URL, Description: "Host-owned consent"}}}},
 			Registration:        authkit.RegistrationConfig{AllowMissingSenders: true}, TwoFactor: authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 			Agreements: []authkit.AgreementConfig{{Key: "network-terms", Version: "critical-v1", URL: "https://critical.invalid/network-terms"}},

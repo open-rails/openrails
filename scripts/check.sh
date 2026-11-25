@@ -20,6 +20,7 @@ guards() {
   bash scripts/scan-injected-code.sh --all
   go run ./scripts/contracts -lint
   go run ./scripts/docscheck
+  (cd server && go run ./internal/examplegen)
   gofmt_clean
 }
 gofmt_clean() {

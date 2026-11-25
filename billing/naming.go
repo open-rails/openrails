@@ -7,16 +7,21 @@ import "time"
 // forwarding. Unset fields take the defaults: renames on, every 72 hours,
 // former names kept 90 days.
 type NamingConfig struct {
-	Enabled        *bool             `yaml:"enabled"`
-	RenameInterval *time.Duration    `yaml:"rename_interval"`
-	FormerNames    FormerNamesConfig `yaml:"former_names"`
+	// Enabled lets a merchant rename itself.
+	Enabled *bool `yaml:"enabled"`
+	// RenameInterval is how long a merchant waits between renames; 0s is at once.
+	RenameInterval *time.Duration `yaml:"rename_interval"`
+	// FormerNames is how long a former name keeps forwarding.
+	FormerNames FormerNamesConfig `yaml:"former_names"`
 }
 
 // FormerNamesConfig is how long a former name keeps forwarding. Duration
 // applies to FormerNamesFinite only.
 type FormerNamesConfig struct {
-	Mode     FormerNamesMode `yaml:"mode"`
-	Duration *time.Duration  `yaml:"duration"`
+	// Mode is finite, forever or immediate.
+	Mode FormerNamesMode `yaml:"mode"`
+	// Duration is how long a finite former name forwards.
+	Duration *time.Duration `yaml:"duration"`
 }
 
 // FormerNamesMode is FormerNamesConfig.Mode.

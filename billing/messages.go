@@ -150,16 +150,21 @@ type MessageEventSettings struct {
 // Text are Go text/template, HTML is html/template. Subject and a body are
 // required; a body left empty is not sent.
 type MessageTemplate struct {
+	// Subject is the subject line's template.
 	Subject string `json:"subject"`
-	HTML    string `json:"html,omitempty"`
-	Text    string `json:"text,omitempty"`
+	// HTML is the HTML body's template.
+	HTML string `json:"html,omitempty"`
+	// Text is the plain-text body's template.
+	Text string `json:"text,omitempty"`
 }
 
 // MessageLayout wraps every message's body: each part runs
 // {{template "body" .}} where the body goes, over the same MessageData. A
 // part left empty is the built-in one.
 type MessageLayout struct {
+	// HTML is the HTML layout template.
 	HTML string `json:"html,omitempty"`
+	// Text is the plain-text layout template.
 	Text string `json:"text,omitempty"`
 }
 

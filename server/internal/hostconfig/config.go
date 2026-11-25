@@ -14,9 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -128,20 +126,13 @@ func defaultSSLMode(host string) string {
 	return "verify-full"
 }
 
-// localTenantID is the platform account directory of a server whose token
-// issuer is on this machine. A deployed server names its own.
-var localTenantID = iam.TenantID(uuid.MustParse("51336692-ef57-4cdb-a189-a8d388465c11"))
-
 // authDefaults are AuthKit's settings the binary defaults: the token issuer
-// is public_billing_base_url, and a loopback issuer's account directory is
-// localTenantID (elsewhere boot refuses an unnamed one). AuthKit's refresh
-// sessions last 30 days and its tables live in "profiles". Registration
-// stays the server's: closed, or invite_only with local_sign_in.
+// is public_billing_base_url. AuthKit's refresh sessions last 30 days and its
+// tables live in "profiles". Registration stays the server's: closed, or
+// invite_only with local_sign_in. AuthKit itself creates its one account
+// directory, and a loopback issuer's development keys.
 func authDefaults(a *authkit.Config, publicBillingBaseURL string) {
 	a.Token.Issuer = cmp.Or(strings.TrimSpace(a.Token.Issuer), publicBillingBaseURL)
-	if a.DefaultTenantID.IsZero() && loopbackURL(a.Token.Issuer) {
-		a.DefaultTenantID = localTenantID
-	}
 	a.Token.RefreshTokenDuration = cmp.Or(a.Token.RefreshTokenDuration, 30*24*time.Hour)
 	a.Database.Schema = cmp.Or(a.Database.Schema, "profiles")
 }
@@ -166,27 +157,20 @@ func cloudflare(s *server.Config, ranges []string) {
 	s.Engine.CloudflareProxies = slices.Clone(ranges)
 }
 
-// loopbackURL reports a URL whose host is this machine.
-func loopbackURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	if strings.EqualFold(u.Hostname(), "localhost") {
-		return true
-	}
-	ip := net.ParseIP(u.Hostname())
-	return ip != nil && ip.IsLoopback()
-}
-
 // DatabaseConnection is the database section's connection: URL, or the
 // connection string its parts assemble.
 type DatabaseConnection struct {
-	URL      string `yaml:"url"`
-	Host     string `yaml:"host"`
-	Port     string `yaml:"port"`
-	Name     string `yaml:"name"`
+	// URL is the connection string; it overrides the parts below.
+	URL string `yaml:"url"`
+	// Host is the database server, when URL is unset.
+	Host string `yaml:"host"`
+	// Port is the database server's port.
+	Port string `yaml:"port"`
+	// Name is the database.
+	Name string `yaml:"name"`
+	// Username is the role the server connects, migrates and runs as.
 	Username string `yaml:"username"`
+	// Password is the role's password.
 	Password string `yaml:"password"`
 	// SSLMode is libpq's sslmode for the parts: verify-full by default,
 	// require for a loopback host or a Unix socket.
@@ -257,8 +241,10 @@ type RedisConfig struct {
 	URL string `yaml:"url"`
 	// Username is the ACL user; empty is the default user.
 	Username string `yaml:"username"`
+	// Password is the user's password.
 	Password string `yaml:"password"`
-	DB       int    `yaml:"db"`
+	// DB is the database number.
+	DB int `yaml:"db"`
 	// TLS connects over TLS, verifying the server against the system roots,
 	// or against CACert, which implies TLS.
 	TLS bool `yaml:"tls"`
@@ -271,8 +257,10 @@ type RedisConfig struct {
 // environment or a mounted secret file.
 type ClickHouseLogin struct {
 	// Addr is host:port of the native protocol, 9000 by default.
-	Addr     string `yaml:"addr"`
+	Addr string `yaml:"addr"`
+	// Username is the ClickHouse user.
 	Username string `yaml:"username"`
+	// Password is the user's password.
 	Password string `yaml:"password"`
 }
 
@@ -280,18 +268,24 @@ type ClickHouseLogin struct {
 // every app uses; an empty host sends no email. From is one RFC 5322
 // mailbox: "Shop <noreply@shop.example>".
 type SMTPConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
+	// Host is the SMTP server; empty sends no email.
+	Host string `yaml:"host"`
+	// Port is the server's port: 465 is implicit TLS, others STARTTLS.
+	Port int `yaml:"port"`
+	// Username is the SMTP login.
 	Username string `yaml:"username"`
+	// Password is the login's password.
 	Password string `yaml:"password"`
-	From     string `yaml:"from"`
+	// From is the deployment's own mailbox.
+	From string `yaml:"from"`
 }
 
 // VaultLogin is how the binary logs in to Vault (helpers/vault).
 type VaultLogin struct {
 	// Address is the server URL (VAULT_ADDR); empty is Vault's default,
 	// https://127.0.0.1:8200.
-	Address   string `yaml:"address"`
+	Address string `yaml:"address"`
+	// Namespace is a Vault Enterprise namespace.
 	Namespace string `yaml:"namespace"`
 	// CACert is the path of the PEM bundle of the CA that signed Vault's
 	// certificate (VAULT_CACERT). Set, it is the only trust: the system
@@ -301,14 +295,17 @@ type VaultLogin struct {
 	// token.
 	AuthMethod string `yaml:"auth_method"`
 	// Token is a pre-issued Vault token.
-	Token    string `yaml:"token"`
-	RoleID   string `yaml:"role_id"`
+	Token string `yaml:"token"`
+	// RoleID is the AppRole role id.
+	RoleID string `yaml:"role_id"`
+	// SecretID is the AppRole secret id, when SecretsPath holds none.
 	SecretID string `yaml:"secret_id"`
 	// SecretsPath is a directory of operator-mounted secret files named after
 	// environment variables. Every approle login reads VAULT_SECRET_ID there,
 	// so a rotated secret is used; without one, SecretID.
 	SecretsPath string `yaml:"secrets_path"`
-	K8sRole     string `yaml:"k8s_role"`
+	// K8sRole is the kubernetes auth method's role.
+	K8sRole string `yaml:"k8s_role"`
 	// AuthMount is where the approle or kubernetes auth method is mounted:
 	// the -path of `vault auth enable`, without auth/. Empty is the method's
 	// name.
