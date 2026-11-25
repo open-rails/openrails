@@ -133,8 +133,6 @@ export type OpenRailsRoute = {
   sensitive: boolean
   // The configuration the route needs; null when always mounted.
   mountedWhen: string | null
-  // Optional console assistance, outside the merchant Go client.
-  consoleOnly?: true
   // Only a person signed in, or the in-process host, may call it.
   person?: true
   // wire.ts type names: the JSON body, and each success by status.
@@ -169,15 +167,12 @@ export const OPENRAILS_ROUTES = [
 			seen[reply.Status] = true
 			replies = append(replies, fmt.Sprintf("%d: %s", reply.Status, m.bodyTS(reply.Body)))
 		}
-		console := ""
-		if r.ConsoleOnly {
-			console = "consoleOnly: true, "
-		}
+		person := ""
 		if r.Person {
-			console += "person: true, "
+			person = "person: true, "
 		}
 		fmt.Fprintf(&b, "  { method: %q, path: %q, group: %q, auth: %q, permission: %s, sensitive: %t, mountedWhen: %s, %srequest: %s, responses: { %s }, errors: [%s], errorSets: [%s] },\n",
-			r.Method, r.Path, r.Group, r.Auth, perm, r.Sensitive, when, console, m.bodyTS(r.Request), strings.Join(replies, ", "), quoted(r.Errors), quoted(r.ErrorSets()))
+			r.Method, r.Path, r.Group, r.Auth, perm, r.Sensitive, when, person, m.bodyTS(r.Request), strings.Join(replies, ", "), quoted(r.Errors), quoted(r.ErrorSets()))
 		for _, name := range r.ErrorSets() {
 			sets[name] = routes.ErrorSet(name)
 		}

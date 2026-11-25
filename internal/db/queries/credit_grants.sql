@@ -264,13 +264,16 @@ LIMIT 1;
 
 -- name: GetPaymentCashApplication :one
 -- What a payment's receipt brought and what the general ledger applied of
--- it: to its bill's lines at (application, payment, id) and to the credit lot
--- it bought at (credit_issue, payment, id).
-SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received'), 0)::bigint AS received,
-       COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_applied'), 0)::bigint AS applied
+-- it: to its bill's lines at (application, payment, id), to the credit lot
+-- it bought at (credit_issue, payment, id) and to the owed a usage order's
+-- payment settles at (usage_collection*, payment, id). A won dispute's
+-- recovery receives what it returns to unapplied cash (dispute_won at
+-- (dispute_won, payment, id)).
+SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received' OR transfer_type = 'dispute_won' AND operation = 'dispute_won' AND revenue_schedule_id IS NULL), 0)::bigint AS received,
+       COALESCE(sum(amount) FILTER (WHERE transfer_type IN ('cash_applied', 'usage_collected')), 0)::bigint AS applied
 FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment'
-  AND source_id = sqlc.arg(payment_id)::text AND transfer_type IN ('cash_received', 'cash_applied');
+  AND source_id = sqlc.arg(payment_id)::text AND transfer_type IN ('cash_received', 'cash_applied', 'usage_collected', 'dispute_won');
 
 -- name: ListLapsedRemaining :many
 -- What many customers' lots that lapsed and were not yet expired still hold

@@ -455,7 +455,7 @@ func TestRevenueRecognition(t *testing.T) {
 		require.Nil(t, done.Next)
 	})
 
-	t.Run("OR-J41-S09/a-usage-orders-payment-books-its-cash-and-leaves-it-for-the-receivable", func(t *testing.T) {
+	t.Run("OR-J41-S09/a-usage-orders-payment-books-its-cash-and-applies-it-to-the-receivable", func(t *testing.T) {
 		for _, collection := range []string{"card", "remittance"} {
 			t.Run(collection, func(t *testing.T) {
 				a, _, customer := usageBillingWorld(t, collection == "remittance")
@@ -484,10 +484,12 @@ func TestRevenueRecognition(t *testing.T) {
 				if collection == "remittance" {
 					debit = "external_receipts"
 				}
-				require.Equal(t, []glRow{{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.String(), Debit: debit, DebitPSP: psp, Credit: "unapplied_cash", Amount: 30_000_000, At: paidAt.UTC()}},
-					glFor(t, a.world, "payment", payment.String()), "the money is booked once and applied to no line")
+				require.Equal(t, []glRow{
+					{Type: "cash_received", Operation: "cash", Source: "payment", SourceID: payment.String(), Debit: debit, DebitPSP: psp, Credit: "unapplied_cash", Amount: 30_000_000, At: paidAt.UTC()},
+					{Type: "usage_collected", Operation: "usage_collection", Source: "payment", SourceID: payment.String(), Debit: "unapplied_cash", Credit: "usage_receivable", Amount: 30_000_000, At: paidAt.UTC()},
+				}, glFor(t, a.world, "payment", payment.String()), "the money is booked once and applied to the receivable, to no line")
 				require.Empty(t, orderSchedules(t, a.world, order.ID.UUID()))
-				require.EqualValues(t, 30_000_000, unappliedCash(t, a.world, "USD"), "it waits for the usage receivable")
+				require.Zero(t, unappliedCash(t, a.world, "USD"), "it settles the usage receivable")
 				require.Contains(t, hostCLI(t, a.world, "ledger-audit", "--merchant", "id:"+a.alpha.MerchantID().String()), "Ledger integrity OK")
 			})
 		}

@@ -91,7 +91,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `meter_rate_card_conflict` | 409 | `invalid_request_error` | The meter and its rate card disagree. |
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |
 | `metrics_query_invalid` | 400 | `invalid_request_error` | The metrics query is invalid; metadata.errors lists why. |
-| `model_unavailable` | 502 | `api_error` | The language model did not answer; retry, or ask a narrower question. |
 | `order_action_not_allowed` | 409 | `invalid_request_error` | The order's origin or status does not allow this action. |
 | `order_attempt_closed` | 409 | `invalid_request_error` | The order attempt already completed or was canceled. |
 | `order_attempt_expired` | 410 | `invalid_request_error` | The order attempt expired before it was paid. |

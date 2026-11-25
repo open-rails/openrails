@@ -22,7 +22,6 @@ func CapabilitiesFor(rt *app.Runtime, on config.RouteGroups, providerRoutes rout
 		"solana_subscription_management": providerRoutes.SolanaSigning,
 		"customer_provisioning":          on.Programmatic && rt != nil && !rt.HostUserInfo,
 		"merchant_config_edits":          config && rt.MerchantConfigManageable(),
-		"catalog_copilot":                catalog && rt != nil && rt.CopilotService.Configured(),
 	}}
 	for name, on := range extra {
 		caps.Features[name] = on

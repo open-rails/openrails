@@ -89,7 +89,6 @@ export function createMutations(
 ) {
   const { selectedMerchant } = client
   const {
-    askCatalog,
     cancelPriceMigration,
     cancelSubscription,
     changeSubscriptionPaymentMethod,
@@ -100,7 +99,6 @@ export function createMutations(
     createPSP,
     deleteWebhook,
     getCustomer,
-    getProductByKey,
     grantProductAccess,
     listCustomers,
     listPayments,
@@ -398,43 +396,6 @@ export function createMutations(
           reason: string
         }) => revokeProductAccess(grantId, reason),
         onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
-      })
-    },
-    askCatalogCopilot: () => {
-      const keys = merchantQueryKeys()
-      return mutationOptions({
-        mutationKey: [...keys.catalog(), "copilot", "ask"],
-        mutationFn: (question: string) => askCatalog(question),
-      })
-    },
-    loadCatalogPriceDraft: () => {
-      const keys = merchantQueryKeys()
-      return mutationOptions({
-        mutationKey: [...keys.catalog(), "copilot", "load-price-draft"],
-        mutationFn: async ({
-          productKey,
-          priceKey,
-        }: {
-          productKey: string
-          priceKey: string
-        }) => {
-          const product = await getProductByKey(productKey)
-          const price = product.prices.find((p) => p.key === priceKey)
-          if (!price) throw new Error(`No live price ${productKey}/${priceKey}`)
-          return {
-            price,
-            productName: product.display_name,
-            productKey: product.key,
-          }
-        },
-      })
-    },
-    createCatalogDraftPrice: (queryClient: QueryClient) => {
-      const keys = merchantQueryKeys()
-      return mutationOptions({
-        mutationKey: [...keys.catalog(), "copilot", "create-price"],
-        mutationFn: (price: CreatePriceParams) => createPrice(price),
-        onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
       })
     },
     applyCatalog: (queryClient: QueryClient) => {

@@ -784,38 +784,6 @@ func (r *SubscriptionRepo) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]*m
 	return r.manyWithDetails(ctx, rows)
 }
 
-// Count is how many of the merchant's subscriptions match f.
-func (r *SubscriptionRepo) Count(ctx context.Context, f SubscriptionFilters) (int64, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	customer, status, rail, price, err := r.filterArgs(f)
-	if err != nil {
-		return 0, err
-	}
-	if f.AtRisk {
-		return r.db.Gen(ctx).CountAtRiskSubscriptions(ctx, gen.CountAtRiskSubscriptionsParams{
-			MerchantID: mid.UUID(), RiskReason: optional(f.RiskReason), ScheduledChangeBefore: f.ScheduledChangeBefore,
-			CustomerID: customer, Status: status, PriceID: price, Rail: rail,
-			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
-		})
-	}
-	if f.ScheduledChangeBefore != nil {
-		return r.db.Gen(ctx).CountScheduledSubscriptions(ctx, gen.CountScheduledSubscriptionsParams{
-			MerchantID: mid.UUID(), ScheduledChangeBefore: *f.ScheduledChangeBefore, CustomerID: customer, Status: status, PriceID: price, Rail: rail,
-			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
-		})
-	}
-	return r.db.Gen(ctx).CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
-		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
-		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
-	})
-}
-
 // GetActiveOrPendingByUserIDAndTierGroup finds a lifecycle-owning subscription for a user
 // where the product belongs to the specified tier group.
 // Returns the subscription with its Price and Product loaded.
