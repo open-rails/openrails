@@ -518,7 +518,10 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			orderID := p.OrderID
-			transfer, err = ml.PayOwed(ctx, p.CustomerID, currency, p.Amount, coord, &orderID)
+			if transfer, err = ml.PayOwed(ctx, p.CustomerID, currency, p.Amount, coord, &orderID); err == nil {
+				err = books.New(q, intent.MerchantID).CollectUsage(ctx, books.UsageCollection{Payment: p.PaymentID, Customer: p.CustomerID, Order: &orderID,
+					Currency: currency, Amount: p.Amount, At: now})
+			}
 		}
 		if err != nil {
 			return err

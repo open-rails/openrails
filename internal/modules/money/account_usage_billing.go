@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -32,6 +33,9 @@ const UsageOrdersInterval = 5 * time.Minute
 var usageOutstanding = []rivertype.JobState{
 	rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled,
 }
+
+// reopenedOwedSource is the line source of owed a chargeback reopened.
+const reopenedOwedSource = owed.ReopenedSource
 
 // UsageOrderArgs is one usage pass over every merchant: it bills the due
 // accounts, then queues the due collections. Bill or Collect continues a pass
@@ -252,6 +256,18 @@ func (s *MoneyService) BillDueUsageAccount(ctx context.Context, customer uuid.UU
 		if cur == nil {
 			// A currency without usage billing is not checked again until its
 			// terms are; previously accepted payment operations still recover.
+			// Owed a chargeback reopened needs no terms: it is billed.
+			if reopened, err := q.HasPendingReopenedOwed(ctx, gen.HasPendingReopenedOwedParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency}); err != nil {
+				return err
+			} else if reopened {
+				owed, err := s.moneyLedger(q, mid.UUID()).OutstandingOwed(ctx, customer, currency)
+				if err != nil {
+					return err
+				}
+				if billed, err = s.billPendingUsage(ctx, s.db.NewWithPgxTx(tx), customer, currency, owed, usageTerms{}, now); err != nil {
+					return err
+				}
+			}
 			return q.CompleteUsageBillingCheck(ctx, gen.CompleteUsageBillingCheckParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency, Now: now})
 		}
 		row, err := s.ensureUsageBillingAccount(ctx, q, customer, currency, cfg)
@@ -318,15 +334,18 @@ func (s *MoneyService) billPendingUsage(ctx context.Context, d *db.DB, customer 
 		return false, err
 	}
 	var pending int64
+	reopened := false
 	for _, source := range sources {
 		pending += source.Amount
+		// Owed a chargeback reopened is billed at once, whatever the minimum.
+		reopened = reopened || source.Source == reopenedOwedSource && source.Amount > 0
 	}
 	claimed, err := q.SumOwedOrderClaims(ctx, gen.SumOwedOrderClaimsParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: currency})
 	if err != nil {
 		return false, err
 	}
 	amount := min(pending, max(owed-claimed, 0))
-	if amount <= 0 || amount < terms.minimum {
+	if amount <= 0 || amount < terms.minimum && !reopened {
 		return false, nil
 	}
 	order, err := s.finalizeUsageTx(ctx, d, identity.CustomerID(customer), currency, from, cutoff, now)
