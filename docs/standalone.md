@@ -190,7 +190,7 @@ are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
 (`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
 signing keys; none relaxes a protection, and a deployment that leaves one unset
-fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit`, `destructive_action_limits`, `llm` and `provider_sandbox`.
+fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit`, `destructive_action_limits` and `provider_sandbox`.
 
 **Listener and lifecycle**
 
@@ -361,18 +361,6 @@ user_action_rate_limit:
   paid_customers_per_daily_customer: 100
 ```
 
-**LLM**
-
-| Key | Meaning |
-|---|---|
-| `llm.provider`, `llm.model` | `anthropic` (default) or `openai`, and a model; each provider has a default |
-| `llm.api_key` | a secret (`LLM_API_KEY`); without it the catalog copilot is not mounted |
-| `llm.base_url` | an endpoint override; with `openai`, any compatible backend, including `/v1` |
-| `llm.catalog_copilot_enabled` | consent to send aggregate catalog and subscriber counts to the provider for `POST /v1/console/catalog/ask` |
-| `llm.catalog_drafting_enabled` | separate consent for the copilot's draft tools |
-
-Metrics and dashboards use no LLM.
-
 **Provider sandbox (tests only)**
 
 | Key | Meaning |
@@ -428,7 +416,6 @@ mounted file or the environment, named like its key's variable.
 | ClickHouse | `CLICKHOUSE_PASSWORD` |
 | SMTP | `EMAIL_SMTP_PASSWORD` |
 | Vault | `VAULT_TOKEN`, or `VAULT_SECRET_ID` re-read from `vault.secrets_path` |
-| LLM | `LLM_API_KEY` |
 | Solana local keypairs | `SOLANA_CRANKERS` |
 | AuthKit's signing key and TOTP key | `keys.json` and `totp.key` under `auth.keys.path`, or the `AUTHKIT_*` variables |
 | PSP and custodian credentials | Vault, or the merchant manifest mounted from a secret |
@@ -707,8 +694,7 @@ hosted product should not let merchants claim.
 
 ### Network egress
 
-Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers'
-JWKS, `llm.base_url`):
+Besides the hosts you configure (database, Redis, Vault, SMTP, trusted issuers' JWKS):
 
 | Destination | For |
 |---|---|
@@ -718,7 +704,6 @@ JWKS, `llm.base_url`):
 | `api.basistheory.com`, `cdn.basistheory.com` | Basis Theory custodians |
 | `api.mainnet-beta.solana.com`, `api.devnet.solana.com`, a PSP's `rpc_url` | Solana RPC |
 | `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | captcha, when set |
-| `api.anthropic.com`, `api.openai.com` | the catalog copilot, with `llm.api_key` and no `llm.base_url` |
 
 ## Event store
 

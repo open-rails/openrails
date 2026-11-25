@@ -13,7 +13,7 @@ import (
 // default, because it cannot be served as written. The engine serves without
 // it and reports it (see Runtime.Refusals); it never fails boot.
 type Degradation struct {
-	// Field names the setting: "captcha", "trusted_proxies", "llm", ...
+	// Field names the setting: "captcha", "trusted_proxies", "hyperswitch", ...
 	Field string
 	Err   error
 }
@@ -43,10 +43,6 @@ func Degrade(cfg *billing.Config) []Degradation {
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		cfg.Captcha = defaults.Captcha
 		off("captcha", fmt.Errorf("%w; captcha is off", err))
-	}
-	if err := validateLLM(cfg.LLM); err != nil {
-		cfg.LLM = billing.LLMConfig{}
-		off("llm", fmt.Errorf("%w; the catalog copilot is off", err))
 	}
 	if err := validateHyperSwitch(cfg); err != nil {
 		cfg.HyperSwitch = billing.HyperSwitchConfig{}

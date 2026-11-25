@@ -54,16 +54,12 @@ import {
 import { parseHours, parseBillingInterval } from "#orck/admin/lib/duration"
 
 import { CatalogApplicationDialog } from "#orck/admin/pages/catalog/application-dialog"
-import { CatalogCopilotPanel } from "#orck/admin/pages/catalog/copilot-panel"
 import {
   priceAmountLabel,
   priceIntervalLabel,
 } from "#orck/admin/pages/catalog/price-format"
 import { PriceChangeWizard } from "#orck/admin/pages/catalog/price-wizard"
-import {
-  useAccess,
-  useCatalogWrites,
-} from "#orck/admin/lib/capabilities"
+import { useCatalogWrites } from "#orck/admin/lib/capabilities"
 
 // Each part of the catalog is its own page, reached from the sub-items the
 // sidebar reveals under Catalog. The shell around them is identical, so it
@@ -77,18 +73,11 @@ function CatalogSection({
   title: string
   children: React.ReactNode
 }) {
-  const assistants = useAccess()?.assistants
   const writesAllowed = useCatalogWrites()
   return (
     <CatalogWritesContext.Provider value={writesAllowed}>
       <div className="flex flex-col gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        <CatalogCopilotPanel
-          enabled={assistants?.catalog_copilot ?? false}
-          draftingEnabled={
-            writesAllowed && (assistants?.catalog_drafting ?? false)
-          }
-        />
         {!writesAllowed && (
           <p className="text-sm text-muted-foreground">
             <AdminMessage

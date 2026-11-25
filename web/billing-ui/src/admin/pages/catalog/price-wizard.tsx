@@ -19,7 +19,6 @@ import {
 } from "#orck/admin/components/ui/dialog"
 import { Input } from "#orck/admin/components/ui/input"
 import { Label } from "#orck/admin/components/ui/label"
-import type { PriceChangeDraft } from "#orck/admin/lib/api/copilot"
 import { DIALOG_FORM } from "#orck/admin/lib/dialog-width"
 import type { Price } from "#orck/client/generated/wire"
 import {
@@ -45,15 +44,10 @@ import {
 const toDateInputValue = (d: Date) => d.toISOString().slice(0, 10)
 const fromDateInputValue = (value: string) => new Date(`${value}T00:00:00Z`)
 
-const priceChangeFormValues = (price: Price, draft?: PriceChangeDraft) => ({
-  amountInput: nativeAmountToInput(
-    draft?.new_amount ?? price.unit_amount,
-    price.currency
-  ),
-  mode: (draft?.migration ? "migrate" : "grandfather") as MigrationMode,
-  effectiveAt: draft?.migration?.effective_at
-    ? toDateInputValue(new Date(draft.migration.effective_at))
-    : "",
+const priceChangeFormValues = (price: Price) => ({
+  amountInput: nativeAmountToInput(price.unit_amount, price.currency),
+  mode: "grandfather" as MigrationMode,
+  effectiveAt: "",
 })
 
 // PriceChangeWizard is the #777 console price-change wizard — the ONLY
@@ -62,11 +56,6 @@ const priceChangeFormValues = (price: Price, draft?: PriceChangeDraft) => ({
 // gate on increase+migrate) -> review in words, then confirm applies the
 // catalog price update followed (if migrating) by the price migration.
 //
-// draft (#779): when the catalog copilot proposed this change, the dialog
-// opens PRE-FILLED straight at Step 3 (review) — the affected count already
-// rode in the draft. Confirm behaves EXACTLY as a hand-typed change (the
-// same server-clock check, create-price and price-migration calls).
-//
 // The notice window is measured on the server's clock, read from a preview
 // at Step 2 and again at confirm: neither a device clock that is off nor a
 // wizard left open can schedule a date the server's check would skip.
@@ -74,13 +63,11 @@ export function PriceChangeWizard({
   price,
   productName,
   productKey,
-  draft,
   onDone,
 }: {
   price: Price
   productName: string
   productKey: string | undefined
-  draft?: PriceChangeDraft
   onDone?: () => void
 }) {
   const { toast, toastApiError, adminMutations, adminQueries } =
@@ -89,12 +76,11 @@ export function PriceChangeWizard({
   const { id: adminId } = useAdminUI()
 
   const queryClient = useQueryClient()
-  const [open, setOpen] = React.useState(() => !!draft)
-  const [step, setStep] = React.useState<1 | 2 | 3>(() => (draft ? 3 : 1))
+  const [open, setOpen] = React.useState(false)
+  const [step, setStep] = React.useState<1 | 2 | 3>(1)
   const previewPriceChange = useMutation(adminMutations.previewPriceChange())
   const changePrice = useMutation(adminMutations.changePrice(queryClient))
-  const affectedCount =
-    previewPriceChange.data?.matched ?? draft?.affected_count ?? null
+  const affectedCount = previewPriceChange.data?.matched ?? null
   const { data: configuration } = useQuery({
     ...adminQueries.merchantConfiguration(),
     enabled: open,
@@ -122,7 +108,7 @@ export function PriceChangeWizard({
   }
 
   const form = useForm({
-    defaultValues: priceChangeFormValues(price, draft),
+    defaultValues: priceChangeFormValues(price),
     onSubmit: async ({ value }) => {
       if (!productKey || price.customer_amount) return
       const newAmount = nativeAmountFromInput(value.amountInput, price.currency)
@@ -251,15 +237,13 @@ export function PriceChangeWizard({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      {!draft && (
-        <DialogTrigger
-          render={
-            <Button variant="outline" size="sm">
-              <AdminMessage id={"Change price"} />
-            </Button>
-          }
-        />
-      )}
+      <DialogTrigger
+        render={
+          <Button variant="outline" size="sm">
+            <AdminMessage id={"Change price"} />
+          </Button>
+        }
+      />
       <DialogContent className={DIALOG_FORM}>
         <form
           className="grid gap-4"
@@ -295,11 +279,6 @@ export function PriceChangeWizard({
                     <DialogTitle className="flex items-center gap-2">
                       <AdminMessage id={"Change price for "} />
                       {productName}
-                      {draft && (
-                        <Badge variant="secondary">
-                          <AdminMessage id={"drafted by copilot"} />
-                        </Badge>
-                      )}
                     </DialogTitle>
                     <DialogDescription>
                       <AdminMessage id={"Step "} />
