@@ -57,8 +57,8 @@ func newProposalsCmd() *cobra.Command {
 		Short: "List, approve and dismiss the changes provider reads propose",
 		Long: "A provider read never applies a change on its own: each difference it finds is a proposal (a pull.* finding)\n" +
 			"that a person approves or dismisses. Approving applies the change through the lifecycle decider when its basis\n" +
-			"still holds; the kill switch holds changes that end access or write to a provider, a readonly posture changes that\n" +
-			"move money or write to a provider.",
+			"still holds; disarmed destructive actions (merchant destructive) hold changes that end access or write to a\n" +
+			"provider, readonly writes (merchant writes) changes that move money or write to a provider.",
 	}
 	persistent := cmd.PersistentFlags()
 	persistent.StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")

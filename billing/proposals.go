@@ -32,9 +32,10 @@ const (
 	// CodeFindingRequiresMerchantConfig: ResolveFinding refuses a pull.*
 	// finding; it is a proposal.
 	CodeFindingRequiresMerchantConfig ErrorCode = "finding_requires_merchant_config"
-	// CodeDestructiveActionsHeld: the kill switch holds the proposal.
+	// CodeDestructiveActionsHeld: the merchant's destructive actions are
+	// disarmed or under a destructive hold.
 	CodeDestructiveActionsHeld ErrorCode = "destructive_actions_held"
-	// CodeProviderWritesHeld: a readonly write posture holds the proposal.
+	// CodeProviderWritesHeld: the merchant's writes are readonly.
 	CodeProviderWritesHeld ErrorCode = "provider_writes_held"
 	// CodePersonRequired: only a person acting in person, or the in-process
 	// host, approves; an API key or service token does not.
@@ -119,8 +120,8 @@ type ChangeSubject struct {
 	ID   string `json:"id"`
 }
 
-// ChangeEffects are what holds a change: the kill switch holds EndsAccess and
-// ProviderWrite, a readonly write posture MovesMoney and ProviderWrite.
+// ChangeEffects are what holds a change: disarmed destructive actions hold
+// EndsAccess and ProviderWrite, readonly writes MovesMoney and ProviderWrite.
 type ChangeEffects struct {
 	EndsAccess    bool `json:"ends_access"`
 	MovesMoney    bool `json:"moves_money"`
@@ -187,8 +188,8 @@ const (
 	// ProposalSuperseded: the basis moved or the evidence went stale; the
 	// finding is resolved so and nothing applied.
 	ProposalSuperseded ProposalOutcome = "superseded"
-	// ProposalHeld: the kill switch or a readonly posture holds it; it stays
-	// open.
+	// ProposalHeld: disarmed or held destructive actions, or readonly writes,
+	// hold it; it stays open.
 	ProposalHeld ProposalOutcome = "held"
 	// ProposalFailed: applying failed; it stays open with the error in its
 	// notes.
