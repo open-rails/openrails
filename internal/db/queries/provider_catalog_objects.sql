@@ -2,16 +2,16 @@
 -- What the provider says now; an older observation never replaces a newer one.
 -- Empty strings, zero intervals and the zero time stand for NULL.
 INSERT INTO billing.provider_catalog_objects (merchant_id, psp_id, kind, ref, product_ref, name, active, deleted_at, amount, currency,
-    billing_interval_hours, billing_interval_months, evidence, observed_at, observed_via)
+    billing_interval_hours, billing_interval_months, observed_at, observed_via)
 SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, o.kind, o.ref, NULLIF(o.product_ref, ''), NULLIF(o.name, ''), o.active,
     NULLIF(o.deleted_at, '0001-01-01 00:00:00+00'::timestamptz), NULLIF(o.amount, ''), NULLIF(o.currency, ''),
-    NULLIF(o.hours, 0), NULLIF(o.months, 0), o.evidence, sqlc.arg(observed_at)::timestamptz, sqlc.arg(observed_via)::text
+    NULLIF(o.hours, 0), NULLIF(o.months, 0), sqlc.arg(observed_at)::timestamptz, sqlc.arg(observed_via)::text
 FROM unnest(sqlc.arg(kinds)::text[], sqlc.arg(refs)::text[], sqlc.arg(product_refs)::text[], sqlc.arg(names)::text[], sqlc.arg(actives)::boolean[],
-    sqlc.arg(deleted_ats)::timestamptz[], sqlc.arg(amounts)::text[], sqlc.arg(currencies)::text[], sqlc.arg(hours)::int[], sqlc.arg(months)::int[],
-    sqlc.arg(evidence)::jsonb[]) AS o(kind, ref, product_ref, name, active, deleted_at, amount, currency, hours, months, evidence)
+    sqlc.arg(deleted_ats)::timestamptz[], sqlc.arg(amounts)::text[], sqlc.arg(currencies)::text[], sqlc.arg(hours)::int[], sqlc.arg(months)::int[])
+    AS o(kind, ref, product_ref, name, active, deleted_at, amount, currency, hours, months)
 ON CONFLICT (merchant_id, psp_id, kind, ref) DO UPDATE SET product_ref = EXCLUDED.product_ref, name = EXCLUDED.name, active = EXCLUDED.active,
     deleted_at = EXCLUDED.deleted_at, amount = EXCLUDED.amount, currency = EXCLUDED.currency, billing_interval_hours = EXCLUDED.billing_interval_hours,
-    billing_interval_months = EXCLUDED.billing_interval_months, evidence = EXCLUDED.evidence, observed_at = EXCLUDED.observed_at,
+    billing_interval_months = EXCLUDED.billing_interval_months, observed_at = EXCLUDED.observed_at,
     observed_via = EXCLUDED.observed_via, updated_at = now()
 WHERE billing.provider_catalog_objects.observed_at <= EXCLUDED.observed_at;
 

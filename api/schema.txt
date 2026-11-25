@@ -47,6 +47,7 @@ migration 0051_dispute_findings_name_psp.up.sql sha256:dc6003d7c325f95975103f40b
 migration 0052_invoices.up.sql sha256:159aa7a2042a4aad8677057e7c0f5f38c18f547b43ea879dbd43c81379de6e8f
 migration 0053_price_quantity_identity.up.sql sha256:12cd85f601f043351b66f219a45f266826a6ce46fb42c7fc8e2003c1948bc65c
 migration 0054_drop_catalog_restore_receipts.up.sql sha256:3cc444004e0c5b6ca9f721d535fd68c15523687ee8eb50d84463d7630c130a38
+migration 0055_drop_unread_catalog_columns.up.sql sha256:aae9d3f1bc88b08487f259ddff75fa2349fd1d7952d6dd90d73694919380374c
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -2601,14 +2602,11 @@ table billing.product_entitlements
   column added_at timestamp with time zone NOT NULL
   column removed_at timestamp with time zone
   column added_by text NOT NULL
-  column removed_by text
   constraint product_entitlements_added_by_check CHECK (((octet_length(added_by) >= 1) AND (octet_length(added_by) <= 255)))
   constraint product_entitlements_entitlement_check CHECK ((((octet_length(entitlement) >= 1) AND (octet_length(entitlement) <= 256)) AND (btrim(entitlement) <> ''::text)))
   constraint product_entitlements_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint product_entitlements_pkey PRIMARY KEY (merchant_id, id)
   constraint product_entitlements_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
-  constraint product_entitlements_removed_by_check CHECK (((removed_by IS NULL) OR ((octet_length(removed_by) >= 1) AND (octet_length(removed_by) <= 255))))
-  constraint product_entitlements_removed_check CHECK (((removed_at IS NULL) = (removed_by IS NULL)))
   constraint product_entitlements_window_check CHECK (((removed_at IS NULL) OR (removed_at >= added_at)))
   index CREATE INDEX product_entitlements_entitlement_idx ON billing.product_entitlements USING btree (merchant_id, entitlement) INCLUDE (product_id, added_at, removed_at)
   index CREATE UNIQUE INDEX product_entitlements_live_key ON billing.product_entitlements USING btree (merchant_id, product_id, entitlement) WHERE (removed_at IS NULL)
@@ -2693,14 +2691,12 @@ table billing.provider_catalog_objects
   column currency text
   column billing_interval_hours integer
   column billing_interval_months integer
-  column evidence jsonb NOT NULL
   column observed_at timestamp with time zone NOT NULL
   column observed_via text NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint provider_catalog_objects_amount_check CHECK (((amount IS NULL) OR (amount ~ '^[0-9]+(\.[0-9]+)?$'::text)))
   constraint provider_catalog_objects_currency_check CHECK (((currency IS NULL) OR (currency ~ '^[A-Z][A-Z0-9]{2,9}$'::text)))
-  constraint provider_catalog_objects_evidence_check CHECK ((jsonb_typeof(evidence) = 'object'::text))
   constraint provider_catalog_objects_interval_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_months IS NULL)))
   constraint provider_catalog_objects_interval_positive_check CHECK ((((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)) AND ((billing_interval_months IS NULL) OR (billing_interval_months > 0))))
   constraint provider_catalog_objects_kind_check CHECK ((kind = ANY (ARRAY['product'::text, 'price'::text])))
@@ -5125,7 +5121,7 @@ function billing.guard_product_entitlement_history()
           RAISE EXCEPTION 'product entitlement history is immutable' USING ERRCODE='23514';
       END IF;
       IF OLD.removed_at IS NOT NULL OR NEW.removed_at IS NULL
-         OR (to_jsonb(NEW)-ARRAY['removed_at','removed_by']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['removed_at','removed_by']) THEN
+         OR (to_jsonb(NEW)-ARRAY['removed_at']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['removed_at']) THEN
           RAISE EXCEPTION 'a product entitlement row only closes, once' USING ERRCODE='23514';
       END IF;
       RETURN NEW;

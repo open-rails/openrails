@@ -20,7 +20,7 @@ RETURNING entitlement::text AS entitlement;
 -- name: RemoveProductEntitlements :many
 -- Closes the product's live rows of the given keys.
 UPDATE billing.product_entitlements pe
-SET removed_at = GREATEST(sqlc.arg(at)::timestamptz, pe.added_at), removed_by = sqlc.arg(actor)::text
+SET removed_at = GREATEST(sqlc.arg(at)::timestamptz, pe.added_at)
 WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pe.product_id = sqlc.arg(product_id)::uuid
   AND pe.removed_at IS NULL
@@ -32,7 +32,7 @@ RETURNING pe.entitlement::text AS entitlement;
 -- on the same products. Returns the products that granted from_key.
 WITH closed AS (
   UPDATE billing.product_entitlements pe
-  SET removed_at = GREATEST(sqlc.arg(at)::timestamptz, pe.added_at), removed_by = sqlc.arg(actor)::text
+  SET removed_at = GREATEST(sqlc.arg(at)::timestamptz, pe.added_at)
   WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid
     AND pe.entitlement = sqlc.arg(from_key)::text
     AND pe.removed_at IS NULL

@@ -400,7 +400,7 @@ func (s *ProductService) setEntitlements(ctx context.Context, merchantID, produc
 	}
 	if len(change.Removed) > 0 {
 		if _, err := q.RemoveProductEntitlements(ctx, gen.RemoveProductEntitlementsParams{
-			MerchantID: merchantID, ProductID: productID, Entitlements: change.Removed, At: edit.At, Actor: edit.Actor,
+			MerchantID: merchantID, ProductID: productID, Entitlements: change.Removed, At: edit.At,
 		}); err != nil {
 			return change, err
 		}

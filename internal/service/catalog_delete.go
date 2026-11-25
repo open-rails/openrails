@@ -92,7 +92,7 @@ func (s *Service) deleteProduct(ctx context.Context, productID uuid.UUID) error 
 			names[i] = k.Entitlement
 		}
 		edit := s.keyEdit(ctx)
-		if _, err := q.RemoveProductEntitlements(ctx, gen.RemoveProductEntitlementsParams{MerchantID: mid.UUID(), ProductID: productID, Entitlements: names, At: edit.At, Actor: edit.Actor}); err != nil {
+		if _, err := q.RemoveProductEntitlements(ctx, gen.RemoveProductEntitlementsParams{MerchantID: mid.UUID(), ProductID: productID, Entitlements: names, At: edit.At}); err != nil {
 			return err
 		}
 	}

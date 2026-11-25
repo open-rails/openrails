@@ -1862,8 +1862,7 @@ type BillingProductEntitlement struct {
 	// When the key stopped being granted; equal to added_at for a key added and removed at the same instant.
 	RemovedAt *time.Time
 	// Who added the key: a catalog application id (sha256:...), an operator, or migration.
-	AddedBy   string
-	RemovedBy *string
+	AddedBy string
 }
 
 // Scoped immutable provider bill identity and accepted invoice snapshot. Multiple verified aliases can name one invoice. Settlement proof never executes collection. Retention: permanent with the financial invoice.
@@ -1896,7 +1895,6 @@ type BillingProviderCatalogObject struct {
 	Currency              *string
 	BillingIntervalHours  *int32
 	BillingIntervalMonths *int32
-	Evidence              []byte
 	ObservedAt            time.Time
 	ObservedVia           string
 	CreatedAt             time.Time

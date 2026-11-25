@@ -7,7 +7,6 @@ package providerobjects
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -63,10 +62,8 @@ type Object struct {
 	// At most one interval is set.
 	IntervalHours  int
 	IntervalMonths int
-	// Evidence is the provider's object as read.
-	Evidence    json.RawMessage
-	ObservedAt  time.Time
-	ObservedVia Via
+	ObservedAt     time.Time
+	ObservedVia    Via
 	// Retired is set on stored objects: not active, deleted, or its product
 	// is. The provider no longer sells it; it keeps resolving and billing.
 	Retired bool
@@ -155,17 +152,13 @@ func (o *Observer) Record(ctx context.Context, psp merchants.PSPScope, at time.T
 	for start := 0; start < len(objects); start += recordBatch {
 		p := gen.UpsertProviderCatalogObjectsParams{MerchantID: mid.UUID(), PspID: psp.ID, ObservedAt: at.UTC(), ObservedVia: string(via)}
 		for _, obj := range objects[start:min(start+recordBatch, len(objects))] {
-			evidence := obj.Evidence
-			if len(evidence) == 0 {
-				evidence = json.RawMessage(`{}`)
-			}
 			var deleted time.Time
 			if obj.DeletedAt != nil {
 				deleted = obj.DeletedAt.UTC()
 			}
 			p.Kinds, p.Refs, p.ProductRefs, p.Names = append(p.Kinds, string(obj.Kind)), append(p.Refs, obj.Ref), append(p.ProductRefs, obj.ProductRef), append(p.Names, obj.Name)
 			p.Actives, p.DeletedAts, p.Amounts, p.Currencies = append(p.Actives, obj.Active), append(p.DeletedAts, deleted), append(p.Amounts, obj.Amount), append(p.Currencies, obj.Currency)
-			p.Hours, p.Months, p.Evidence = append(p.Hours, int32(obj.IntervalHours)), append(p.Months, int32(obj.IntervalMonths)), append(p.Evidence, []byte(evidence)) // #nosec G115 -- provider intervals are small
+			p.Hours, p.Months = append(p.Hours, int32(obj.IntervalHours)), append(p.Months, int32(obj.IntervalMonths)) // #nosec G115 -- provider intervals are small
 		}
 		if len(p.Refs) == 0 {
 			continue
@@ -324,7 +317,7 @@ func (o *Observer) Get(ctx context.Context, psp merchants.PSPScope, kind Kind, r
 	if err != nil {
 		return nil, err
 	}
-	out := &Object{Kind: Kind(row.Kind), Ref: row.Ref, Active: row.Active, DeletedAt: row.DeletedAt, Evidence: row.Evidence,
+	out := &Object{Kind: Kind(row.Kind), Ref: row.Ref, Active: row.Active, DeletedAt: row.DeletedAt,
 		ObservedAt: row.ObservedAt, ObservedVia: Via(row.ObservedVia), Retired: row.Retired}
 	out.ProductRef, out.Name, out.Amount, out.Currency = deref(row.ProductRef), deref(row.Name), deref(row.Amount), deref(row.Currency)
 	if row.BillingIntervalHours != nil {
