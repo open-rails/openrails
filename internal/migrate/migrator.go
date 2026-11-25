@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -57,10 +58,8 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if chain == nil {
 		chain = postgresmigrations.FS
 	}
-	render := func(schema string) ([]migratekit.Migration, error) { return loadChain(chain, schema) }
-
 	logger.InfoContext(ctx, "running OpenRails migrations", "schema", schema)
-	migrations, err := render(schema)
+	migrations, err := loadChain(chain, schema)
 	if err != nil {
 		return err
 	}
@@ -70,12 +69,15 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 		return fmt.Errorf("create OpenRails migrator: %w", err)
 	}
 	defer m.Close()
-	// Strict integrity: an applied migration whose content changed is refused
-	// unless the live schema still equals a fresh build of it.
-	m.WithSchema(schema).WithStrictIntegrity().WithRender(render).WithWarnFunc(func(d migratekit.Discrepancy) {
+	// Strict integrity: released migrations never change, so an applied
+	// migration whose content differs from this build's is refused.
+	m.WithSchema(schema).WithStrictIntegrity().WithWarnFunc(func(d migratekit.Discrepancy) {
 		logger.WarnContext(ctx, "migratekit: "+d.OneLine(), "kind", string(d.Kind), "migration", d.File, "key", d.Key)
 	})
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
+		if errors.Is(err, migratekit.ErrSchemaMismatch) {
+			return fmt.Errorf("openrails: this database applied a migration whose content differs from this build's; released migrations never change, so rebuild the database or run the release that built it: %w", err)
+		}
 		return fmt.Errorf("openrails: apply migrations: %w", err)
 	}
 	status, err := m.Status(ctx, migrations)

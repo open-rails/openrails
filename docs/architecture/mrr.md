@@ -55,7 +55,7 @@ Checks:
 - `go run ./scripts/contracts` shows no removed or changed line here.
 
 ### 6. Data lifecycle
-State: `subscription_mrr`, `customer_mrr`, `mrr_risk_due` and the rollups. Permanent: `mrr_movements`, `mrr_movement_lines`, `mrr_scheduled`, `mrr_risk_cases`, `mrr_risk_episodes`. None is partitioned; reads group the 15-minute rollups. A merchant archive carries the MRR tables; a restore skips their triggers, so `billing.check_billing_restore_mrr` proves at commit that subscriptions, customers, movements, totals and open risk episodes agree, and an archive from before MRR opens it (`billing.seed_mrr`), dating a backfilled case when its delinquency or unverified state began. A backfilled case's at-risk amounts enter `mrr_risk_flows` at the backfill (the migration or the restore), as MRR's opening does, so at-risk MRR before then reads zero even where the case began earlier. The source's queued risk changes stay at the source: the restore queues every customer with MRR for re-evaluation.
+State: `subscription_mrr`, `customer_mrr`, `mrr_risk_due` and the rollups. Permanent: `mrr_movements`, `mrr_movement_lines`, `mrr_scheduled`, `mrr_risk_cases`, `mrr_risk_episodes`. None is partitioned; reads group the 15-minute rollups. A merchant archive carries the MRR tables; a restore skips their triggers, so `billing.check_billing_restore_mrr` proves at commit that subscriptions, customers, movements, totals and open risk episodes agree. The source's queued risk changes stay at the source: the restore queues every customer with MRR for re-evaluation.
 
 Checks:
 - Table comments carry the `Retention:` rule in `internal/retention/tables.go`.
@@ -66,7 +66,7 @@ MRR is recorded by triggers as subscriptions change and settled at commit; `open
 
 Checks:
 - `ListDueSubscriptionMRR` reads `subscription_mrr.next_change_at` by index.
-- OR-J42-S06: a past day's MRR, and an index for each report read and the due read; OR-J42-S09 and S10: a bulk import and the backfill read `subscription_mrr` in proportion to the book.
+- OR-J42-S06: a past day's MRR, and an index for each report read and the due read; OR-J42-S09: a bulk import reads `subscription_mrr` in proportion to the book.
 
 ### 8. Abuse protection
 Does not apply: MRR has no entry point of its own.
@@ -83,7 +83,7 @@ Checks:
 
 ## Tests
 
-- OR-J42-S01–S10: MRR movements once per change and normalised per currency; scheduled churn, resume and end; scheduled contraction applied or reversed; a Stripe portal cancel and resume; a CCBill upgrade and an import; MRR at a past day; an engine upgrade; a prune and its undo; a bulk import; the backfill.
+- OR-J42-S01–S09: MRR movements once per change and normalised per currency; scheduled churn, resume and end; scheduled contraction applied or reversed; a Stripe portal cancel and resume; a CCBill upgrade and an import; MRR at a past day; an engine upgrade; a prune and its undo; a bulk import.
 - OR-J42-S11–S15: at-risk MRR as past due (recovered, then churned), needing a payment method then past due, a card expiring before its renewal, unverified, and usage delinquency.
 - OR-J42-S16–S19, S21: the risk drain and a decline for one customer both commit, the decline queued after the claim re-evaluated; a cancel at period end keeps the case open, a resume continues it, the end churns it once; a new default card puts a subscription following it at risk, never an NMI schedule; an upgrade supersedes the case; a restore carries the open case and re-evaluates every customer with MRR.
 - OR-J42-S22, S23: a customer whose evaluation fails alone is set aside with a finding while the rest drain, and a later evaluation takes its changes and closes the finding; canceled at period end, a card update clears `card_expiring` and recovers the case.

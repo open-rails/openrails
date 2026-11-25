@@ -506,30 +506,6 @@ type BillingDispute struct {
 	UpdatedAt   time.Time
 }
 
-type BillingEventLog struct {
-	MerchantID  *uuid.UUID
-	Position    int64
-	ID          string
-	Source      string
-	EventType   string
-	Version     int32
-	OccurredAt  time.Time
-	RecordedAt  time.Time
-	SubjectType string
-	SubjectID   string
-	Data        []byte
-}
-
-type BillingEventLogStream struct {
-	MerchantID    *uuid.UUID
-	Epoch         uuid.UUID
-	Position      int64
-	HeadID        string
-	PrunedThrough int64
-	PrunedID      string
-	RecordedAt    time.Time
-}
-
 // Global by design, one row: the identity of the ClickHouse event store this database's usage lives in, recorded when one first attaches. New refuses a store with another identity: an empty or different ClickHouse.
 type BillingEventStore struct {
 	Singleton  bool

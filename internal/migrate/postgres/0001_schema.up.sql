@@ -81,16 +81,6 @@ END
 $$;
 COMMENT ON FUNCTION billing.billing_cycle_label(p_hours integer) IS 'Analytics cadence bucket for a price access window.';
 
-CREATE FUNCTION billing.monthly_normalized_amount(p_amount bigint, p_hours integer) RETURNS bigint
-LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-SELECT CASE
-    WHEN p_hours IS NULL OR p_hours <= 0 THEN 0
-    WHEN p_hours >= 648 THEN round(p_amount::numeric / greatest(round(p_hours / 730.0), 1))::bigint
-    ELSE round(p_amount::numeric * 730.0 / p_hours)::bigint
-END
-$$;
-COMMENT ON FUNCTION billing.monthly_normalized_amount(p_amount bigint, p_hours integer) IS 'The one MRR normalisation: windows of at least 27 days divide by their whole-month count; shorter windows scale by 730 hours per month.';
-
 -- Trigger helpers shared by tables in several sections.
 CREATE FUNCTION billing.subscription_history_attribution(mid uuid, entity uuid, action text, version bigint) RETURNS jsonb
 LANGUAGE plpgsql AS $$
@@ -4193,45 +4183,6 @@ LANGUAGE sql STABLE SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
           AND pending.amount > 0), 0)
 $$;
 
--- Records the share of each of a merchant's settled reversals of a paid lot
--- that has none, as it was decided, from its legs in either book: a refund's
--- or chargeback's own; a recovery's per chargeback its labels name; nothing
--- when it has none, unless it was set aside (one of a unit pack the books
--- never booked, which the next pass decides). Units are every units-book leg
--- of the lot's face (not the cash, nor the difference of face and cash a lot
--- from before the credit books posted to promotion or revenue). A restore
--- of an archive from before the shares calls it.
-CREATE FUNCTION billing.seed_credit_reversal_shares(p_merchant uuid) RETURNS void
-LANGUAGE sql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-    WITH legs AS (
-        SELECT r.merchant_id, r.id AS reversal_id, g.id AS credit_grant_id,
-               CASE WHEN r.amount > 0 THEN substring(lt.source FROM 'restore:([0-9a-f-]{36})$')::uuid ELSE r.id END AS origin_id,
-               CASE WHEN lt.book = 'units' AND lt.transfer_type IN ('credit_refund_cash', 'credit_refund_cash_restore')
-                      OR lt.book = 'general' AND (c.account_type IN ('cash_clearing', 'external_receipts') OR d.account_type IN ('cash_clearing', 'external_receipts'))
-                    THEN lt.amount ELSE 0 END AS cash,
-               CASE WHEN lt.book = 'units' AND lt.transfer_type IN ('credit_refund', 'credit_refund_restore', 'credit_refund_funding') AND lt.source NOT IN ('promotion', 'revenue')
-                    THEN lt.amount ELSE 0 END AS units
-        FROM billing.payments r
-        JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id AND g.paid_amount IS NOT NULL
-        JOIN billing.ledger_transfers lt ON lt.merchant_id = r.merchant_id AND lt.credit_grant_id = g.id AND lt.operation = 'purchased_credit_refund' AND lt.source_id = r.id::text
-        JOIN billing.ledger_accounts d ON d.merchant_id = lt.merchant_id AND d.id = lt.debit_account_id
-        JOIN billing.ledger_accounts c ON c.merchant_id = lt.merchant_id AND c.id = lt.credit_account_id
-        WHERE r.merchant_id = p_merchant AND r.refunded_payment_id IS NOT NULL AND r.status = 'succeeded' AND r.amount <> 0 AND r.deleted_at IS NULL
-          AND NOT EXISTS (SELECT 1 FROM billing.credit_reversal_shares s WHERE s.merchant_id = r.merchant_id AND s.reversal_id = r.id AND s.credit_grant_id = g.id)
-    )
-    INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
-    SELECT merchant_id, reversal_id, credit_grant_id, origin_id, sum(cash)::bigint, sum(units)::bigint
-    FROM legs WHERE origin_id IS NOT NULL
-    GROUP BY merchant_id, reversal_id, credit_grant_id, origin_id;
-    INSERT INTO billing.credit_reversal_shares (merchant_id, reversal_id, credit_grant_id, origin_id, cash, units)
-    SELECT r.merchant_id, r.id, g.id, r.id, 0, 0
-    FROM billing.payments r
-    JOIN billing.credit_grants g ON g.merchant_id = r.merchant_id AND g.payment_id = r.refunded_payment_id AND g.paid_amount IS NOT NULL
-    WHERE r.merchant_id = p_merchant AND r.refunded_payment_id IS NOT NULL AND r.status = 'succeeded' AND r.amount <> 0 AND r.deleted_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM billing.credit_reversal_shares s WHERE s.merchant_id = r.merchant_id AND s.reversal_id = r.id AND s.credit_grant_id = g.id)
-      AND (g.deferred_credited > 0 OR g.paid_currency = g.unit);
-$$;
-
 -- A restore skips the triggers: its lots must agree with their legs, money
 -- included, and events.
 CREATE FUNCTION billing.check_billing_restore_credit_grants(p_merchant uuid) RETURNS void
@@ -6049,47 +6000,6 @@ END $$;
 CREATE TRIGGER eventlog_immutable BEFORE UPDATE ON billing.eventlog_events
     FOR EACH ROW EXECUTE FUNCTION billing.eventlog_immutable();
 
-CREATE VIEW billing.event_log AS
- SELECT merchant_id,
-    "position",
-    id,
-    event_source AS source,
-    event_type,
-    version,
-    occurred_at,
-    recorded_at,
-    subject_type,
-    subject_id,
-    data
-   FROM billing.eventlog_events
-  WHERE (source = 'openrails'::text);
-
-CREATE VIEW billing.event_log_streams AS
- SELECT merchant_id,
-    (epoch)::uuid AS epoch,
-    "position",
-    head_id,
-    pruned_through,
-    pruned_id,
-    recorded_at
-   FROM billing.eventlog_streams
-  WHERE (source = 'openrails'::text);
-
-CREATE FUNCTION billing.update_legacy_eventlog_stream() RETURNS trigger
-LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-BEGIN
- IF NEW.merchant_id IS DISTINCT FROM OLD.merchant_id THEN
-  RAISE EXCEPTION 'event scope identity is immutable' USING ERRCODE='23514';
- END IF;
- UPDATE billing.eventlog_streams SET epoch=NEW.epoch::text,position=NEW.position,
- head_id=NEW.head_id,pruned_through=NEW.pruned_through,pruned_id=NEW.pruned_id,
- recorded_at=NEW.recorded_at WHERE source='openrails' AND scope=OLD.merchant_id::text;
- RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER update_legacy_eventlog_stream INSTEAD OF UPDATE ON billing.event_log_streams FOR EACH ROW EXECUTE FUNCTION billing.update_legacy_eventlog_stream();
-
 CREATE TABLE billing.eventlog_pending (
     ordinal bigint NOT NULL GENERATED ALWAYS AS IDENTITY,
     transaction_id xid8 NOT NULL DEFAULT pg_current_xact_id(),
@@ -7503,90 +7413,6 @@ BEGIN
 END;
 $$;
 COMMENT ON FUNCTION billing.effect_due_mrr_risk(p_merchant uuid, p_batch integer, p_customer uuid) IS 'Claims up to p_batch of the merchant''s mrr_risk_due rows (p_customer''s alone when named) that no other transaction holds and none set aside (FOR UPDATE SKIP LOCKED), deletes them and re-evaluates each claimed customer''s subscriptions'' risk, locking them in id order; a customer evaluated also takes its rows set aside and closes its mrr.risk.evaluation_failed finding. Returns the rows claimed.';
-
--- A subscription with no subscription_mrr row (one written before MRR, or a
--- restore from an archive without it) is adopted as an opening movement, and
--- its risk as a backfilled case.
-CREATE FUNCTION billing.seed_mrr(p_merchant uuid, p_at timestamptz) RETURNS void
-LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-DECLARE
-    v_sub billing.subscriptions;
-BEGIN
-    PERFORM set_config('openrails.mrr_cause', 'backfill', true);
-    FOR v_sub IN
-        SELECT s.* FROM billing.subscriptions s
-         WHERE s.merchant_id = p_merchant AND s.price_id IS NOT NULL
-           AND NOT EXISTS (SELECT 1 FROM billing.subscription_mrr m WHERE m.merchant_id = s.merchant_id AND m.subscription_id = s.id)
-         ORDER BY s.id
-    LOOP
-        PERFORM billing.refresh_subscription_mrr(v_sub, p_at, 'backfill');
-        PERFORM billing.schedule_mrr_change(p_merchant, v_sub.id, p_at);
-    END LOOP;
-    PERFORM billing.settle_mrr(p_merchant);
-    PERFORM set_config('openrails.mrr_cause', '', true);
-END;
-$$;
-
--- A merchant's reporting rollups rebuilt from what they derive from (its
--- movements, product flows, customer_mrr and status transitions) where it
--- has none: a restore of an archive written before them.
-CREATE FUNCTION billing.rebuild_mrr_rollups(p_merchant uuid) RETURNS void
-LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM billing.mrr_flows WHERE merchant_id = p_merchant AND measure = 'churn_chargeback') THEN
-        INSERT INTO billing.mrr_flows (merchant_id, currency, bucket_at, measure, amount, entries, logos)
-        SELECT merchant_id, currency, billing.mrr_bucket(occurred_at), 'churn_chargeback', sum(delta), count(*), sum(logo_delta)
-          FROM billing.mrr_movements
-         WHERE merchant_id = p_merchant AND kind = 'churn' AND cause = 'chargeback'
-         GROUP BY merchant_id, currency, billing.mrr_bucket(occurred_at);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM billing.mrr_streak_flows WHERE merchant_id = p_merchant) THEN
-        INSERT INTO billing.mrr_streak_flows (merchant_id, currency, bucket_at, streak_at, measure, amount, logos)
-        SELECT v.merchant_id, v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(v.began_at), x.measure, sum(v.delta), sum(v.logo_delta)
-          FROM (SELECT v.*, max(v.occurred_at) FILTER (WHERE v.logo_delta = 1)
-                                OVER (PARTITION BY v.customer_id, v.currency ORDER BY v.occurred_at, v.id) AS began_at
-                  FROM billing.mrr_movements v WHERE v.merchant_id = p_merchant) v
-          CROSS JOIN LATERAL (SELECT v.kind UNION ALL SELECT 'churn_voluntary' WHERE v.voluntary
-                             UNION ALL SELECT 'churn_chargeback' WHERE v.kind = 'churn' AND v.cause = 'chargeback') x(measure)
-         WHERE v.kind IN ('expansion', 'contraction', 'churn', 'correction') AND v.began_at IS NOT NULL
-         GROUP BY v.merchant_id, v.currency, billing.mrr_bucket(v.occurred_at), billing.mrr_bucket(v.began_at), x.measure;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM billing.mrr_product_totals WHERE merchant_id = p_merchant) THEN
-        INSERT INTO billing.mrr_product_totals (merchant_id, currency, product_id, mrr, subscribers)
-        SELECT merchant_id, currency, product_id, sum(amount), sum(subscribers)
-          FROM billing.mrr_product_flows
-         WHERE merchant_id = p_merchant
-         GROUP BY merchant_id, currency, product_id
-        HAVING sum(amount) <> 0 OR sum(subscribers) <> 0;
-    END IF;
-    -- A customer's currencies with MRR after each movement are the running
-    -- sum of its logo changes.
-    IF NOT EXISTS (SELECT 1 FROM billing.mrr_customer_totals WHERE merchant_id = p_merchant)
-       AND NOT EXISTS (SELECT 1 FROM billing.mrr_customer_flows WHERE merchant_id = p_merchant) THEN
-        INSERT INTO billing.mrr_customer_flows (merchant_id, bucket_at, logos)
-        SELECT p_merchant, billing.mrr_bucket(v.occurred_at), sum((v.n > 0)::integer - (v.n - v.logo_delta > 0)::integer)
-          FROM (SELECT v.occurred_at, v.logo_delta,
-                       sum(v.logo_delta) OVER (PARTITION BY v.customer_id ORDER BY v.occurred_at, v.id) AS n
-                  FROM billing.mrr_movements v WHERE v.merchant_id = p_merchant) v
-         GROUP BY billing.mrr_bucket(v.occurred_at)
-        HAVING sum((v.n > 0)::integer - (v.n - v.logo_delta > 0)::integer) <> 0;
-        INSERT INTO billing.mrr_customer_totals (merchant_id, customers)
-        SELECT p_merchant, count(DISTINCT customer_id) FROM billing.customer_mrr WHERE merchant_id = p_merchant AND mrr > 0
-        HAVING count(DISTINCT customer_id) > 0;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM billing.subscription_cancellations WHERE merchant_id = p_merchant) THEN
-        INSERT INTO billing.subscription_cancellations (merchant_id, subscription_id, cancel_type, decided_at, reversed_at)
-        SELECT st.merchant_id, st.subscription_id, st.cancel_type, st.occurred_at,
-               (SELECT min(r.occurred_at) FROM billing.subscription_status_transitions r
-                 WHERE r.merchant_id = st.merchant_id AND r.subscription_id = st.subscription_id AND r.from_status = 'canceled'
-                   AND r.to_status <> 'canceled' AND (r.occurred_at, r.id) > (st.occurred_at, st.id))
-          FROM billing.subscription_status_transitions st
-         WHERE st.merchant_id = p_merchant AND st.to_status = 'canceled' AND st.from_status IS NOT NULL AND st.from_status <> 'canceled';
-    END IF;
-END;
-$$;
-COMMENT ON FUNCTION billing.rebuild_mrr_rollups(p_merchant uuid) IS 'Rebuilds the merchant''s chargeback churn flows, streak flows, product totals, distinct customers and cancel decisions from what they derive from, each where the merchant has none.';
-REVOKE ALL ON FUNCTION billing.rebuild_mrr_rollups(p_merchant uuid) FROM PUBLIC;
 
 -- A restore's reporting rollups agree with what they derive from.
 CREATE FUNCTION billing.check_billing_restore_mrr(p_merchant uuid) RETURNS void

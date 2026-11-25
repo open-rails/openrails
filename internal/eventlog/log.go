@@ -2,17 +2,12 @@
 package eventlog
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/ccoveille/go-safecast/v2"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	shared "github.com/open-rails/helpers/eventlog"
 	"github.com/open-rails/openrails/billing"
@@ -27,53 +22,11 @@ import (
 // older cursor gets event_cursor_expired.
 const eventRetention = retention.EventLog
 
-type cursor struct {
-	Version  int       `json:"v"`
-	Epoch    uuid.UUID `json:"epoch"`
-	Merchant string    `json:"merchant"`
-	Types    []string  `json:"types,omitempty"`
-	Position int64     `json:"position"`
-	Boundary string    `json:"boundary,omitempty"`
-}
-
 func invalid(message string) error {
 	return apperr.New(http.StatusBadRequest, billing.CodeInvalidCursor, message).WithParam("after")
 }
 func expired() error {
 	return apperr.New(http.StatusGone, billing.CodeEventCursorExpired, "event cursor is no longer retained; resynchronize current state").WithParam("after")
-}
-
-func decode(raw string) (cursor, error) {
-	var c cursor
-	if len(raw) > 32768 {
-		return c, invalid("invalid event cursor")
-	}
-	data, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return c, invalid("invalid event cursor")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&c) != nil || decoder.Decode(new(any)) != io.EOF || c.Version != 1 || c.Epoch == uuid.Nil || c.Position < 0 {
-		return c, invalid("invalid event cursor")
-	}
-	return c, nil
-}
-func encode(c cursor) string {
-	data, _ := json.Marshal(c)
-	return base64.RawURLEncoding.EncodeToString(data)
-}
-
-// legacyCodec keeps already-issued OpenRails cursors valid during adoption.
-type legacyCodec struct{}
-
-func (legacyCodec) Encode(c shared.Cursor) string {
-	epoch, _ := uuid.Parse(c.Epoch)
-	return encode(cursor{Version: c.Version, Epoch: epoch, Merchant: c.Scope, Types: c.Types, Position: c.Position, Boundary: c.Boundary})
-}
-func (legacyCodec) Decode(raw string) (shared.Cursor, error) {
-	c, err := decode(raw)
-	return shared.Cursor{Version: c.Version, Source: "openrails", Scope: c.Merchant, Epoch: c.Epoch.String(), Types: c.Types, Position: c.Position, Boundary: c.Boundary}, err
 }
 
 // List uses shared cursor, retention and paging mechanics over the existing
@@ -85,12 +38,12 @@ func List(ctx context.Context, database *db.DB, merchantID billing.MerchantID, q
 	if scoped, ok := merchant.FromContext(ctx); ok && scoped != merchantID {
 		return billing.EventPage{}, apperr.Invalidf("event merchant differs from the authorized scope")
 	}
-	log := shared.Log{Source: "openrails", Scope: merchantID.String(), Retention: eventRetention, Now: func() time.Time { return now }, Codec: legacyCodec{}, ReadSnapshot: func(ctx context.Context, fn func(shared.Snapshot) error) error {
+	log := shared.Log{Source: "openrails", Scope: merchantID.String(), Retention: eventRetention, Now: func() time.Time { return now }, ReadSnapshot: func(ctx context.Context, fn func(shared.Snapshot) error) error {
 		return database.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error { return fn(snapshot{q: gen.New(tx), mid: merchantID}) })
 	}}
 	p, err := log.ListEvents(ctx, shared.Query{After: query.After, Types: query.Types, Limit: query.Limit})
 	if errors.Is(err, shared.ErrInvalidCursor) {
-		err = invalid("event cursor belongs to another merchant or filter")
+		err = invalid("invalid event cursor")
 	}
 	if errors.Is(err, shared.ErrExpiredCursor) {
 		err = expired()

@@ -20,8 +20,8 @@ type EventSubject struct {
 	ID   string `json:"id"`
 }
 
-// Event contains committed facts, not delivery instructions. IDs retain their
-// existing hev_ or ntf_ identity so readers can deduplicate during migration.
+// Event contains committed facts, not delivery instructions. An ID (hev_ or
+// ntf_) names one fact, so readers deduplicate by it.
 type Event struct {
 	ID         string          `json:"id"`
 	MerchantID MerchantID      `json:"merchant_id"`

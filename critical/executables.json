@@ -740,9 +740,6 @@
     "OR-J31-S40": [
       "TestNotificationAdoptionExport/OR-J31-S40/export-holds-back-no-other-merchant-and-invoices-its-own-producers"
     ],
-    "OR-J31-S12": [
-      "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
-    ],
     "OR-J31-S14": [
       "TestLimitArchive/OR-J31-S14/open-limit-windows-and-staff-adjustments-move-with-the-book"
     ],
@@ -1531,9 +1528,6 @@
     ],
     "OR-J42-S09": [
       "TestMRR/OR-J42-S09/a-bulk-import-settles-once-its-reads-growing-with-the-book"
-    ],
-    "OR-J42-S10": [
-      "TestMRR/OR-J42-S10/the-backfill-adopts-a-book-written-before-mrr-settling-once"
     ],
     "OR-J42-S11": [
       "TestMRRRisk/OR-J42-S11/a-decline-puts-mrr-at-risk-as-past-due-payment-recovers-it-exhaustion-churns-it"

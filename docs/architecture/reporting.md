@@ -108,7 +108,7 @@ There is no revision check: the last save wins. Validation uses the wall clock
 
 **Draw.** The console's dashboard page (`web/billing-ui/src/admin/pages/dashboard`) reads `GET /v1/metrics/schema` once (`registry.ts`) for directions, thresholds and dimensions, runs each widget's query through `POST /v1/metrics/query` under the page's range, currency and comparison (`widgetQuery`), and adds and edits widgets (`widget-editor.tsx`) before a save. The editor and the Reports page's explorer build queries from the schema (`query-builder.tsx`), so every measure can be charted by its dimensions without console changes.
 
-**Restore.** A merchant archive carries the MRR rollups. One written before the reporting rollups lacks the streak flows, product totals, distinct customers, cancel decisions and chargeback churn flows: the restore rebuilds each from what it derives from (`billing.rebuild_mrr_rollups`, the migration's backfill), and the restore check (`billing.check_billing_restore_mrr`) proves every rollup agrees with its source.
+**Restore.** A merchant archive carries the MRR rollups, and the restore check (`billing.check_billing_restore_mrr`) proves every rollup agrees with its source.
 
 **Storage.** One table, `dashboard_configs`: `merchant_id` (primary key),
 `layout jsonb`, `updated_at`, `updated_by`.
