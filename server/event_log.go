@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/eventlog"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -24,18 +23,14 @@ func (s *Server) ListEvents(ctx context.Context, id billing.MerchantID, query bi
 		return nil, err
 	}
 	rt := s.graph.Runtime
-	retained, err := config.EventRetentionDuration(rt.Config)
-	if err != nil {
-		return nil, err
-	}
 	now := time.Now()
 	if rt.Clock != nil {
 		now = rt.Clock.Now()
 	}
 	var page billing.EventPage
-	err = rt.DB.RunInMerchantScope(ctx, id, "retained event log", func(ctx context.Context) error {
+	err := rt.DB.RunInMerchantScope(ctx, id, "retained event log", func(ctx context.Context) error {
 		var err error
-		page, err = eventlog.List(ctx, rt.DB, id, query, retained, now)
+		page, err = eventlog.List(ctx, rt.DB, id, query, now)
 		return err
 	})
 	if err != nil {

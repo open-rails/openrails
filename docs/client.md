@@ -69,11 +69,7 @@ touched billing holds nothing; that is never an error.
 
 ## Credentials
 
-| Path | Backend credential | Browser credential (`/v1/me`) |
-|---|---|---|
-| Embedded | none: the handle is in process | your app's own sign-in, sent as a header to your mount ([embedded.md](embedded.md)) |
-| Standalone | an access token from your issuer (`client_credentials`, scope `openrails:merchant`) or a merchant API key | an `openrails:self` token: token exchange at your issuer, or a customer token |
-| SaaS | the console's API key | a customer token, or a token from your own registered issuer |
+Who presents which credential in each mode, and why, is [authentication](authentication.md). Embedded, the handle is in process and needs none; over HTTP, each merchant's `RemoteCredential` carries one of the following.
 
 **Standalone.** The server trusts your issuer for one merchant
 (`remote_application` in its manifest, [standalone.md](standalone.md)).
@@ -124,19 +120,9 @@ from the `billing.Permission` constants. The standalone server's declared roles
 are `viewer`, `support` and `owner`; custom roles hold any `merchant:`
 permissions ([standalone.md](standalone.md)).
 
-**SaaS.** On the hosted platform, create the merchant, its PSPs and an API key
-in the console; the console documents its own pages and routes. Copy **API URL**
-from **Integration** and the key from **Settings → API keys** (shown once).
-`GetAdminAccess` (`GET /v1/admin/access`) returns the key's `ScopeID`: the
-merchant UUID `NewRemote` files the key under. The PSP webhook URLs to give each
-provider are shown under **Integration**. Keep the key on your server.
+**SaaS.** On the hosted platform, create the merchant, its PSPs and an API key in the console; the console documents its own pages and routes. Copy **API URL** from **Integration** and the key from **API keys** (shown once). `GetAdminAccess` (`GET /v1/admin/access`) returns the key's `ScopeID`: the merchant UUID `NewRemote` files the key under. The PSP webhook URLs to give each provider are shown under **Integration**. Keep the key on your server.
 
-**Customer tokens.** A backend whose signing key is registered as the merchant's
-application (standalone: the manifest's `remote_application`; SaaS:
-**Integration → Customer tokens**) sets `RemoteCredential.Assertion`.
-`CreateCustomerToken` redeems an RFC 7523 assertion for a short `openrails:self` token
-(about 15 minutes); `CreateCustomerAssertion` only signs one, for the browser to redeem
-with its own DPoP key. An API key alone cannot mint customer tokens.
+**Customer tokens.** A backend whose signing key is registered as the merchant's application (standalone: the manifest's `remote_application` or the console's **Access → Signing keys**; SaaS: **Integration → Customer tokens**) sets `RemoteCredential.Assertion`. `CreateCustomerToken` redeems an RFC 7523 assertion for a short `openrails:self` token (about 15 minutes); `CreateCustomerAssertion` only signs one, for the browser to redeem with its own DPoP key. An API key alone cannot mint customer tokens.
 
 The [hosted example](../examples/hosted) files its key as
 `AssertionKey{Issuer, KeyID, Signer, TokenURL}` beside the API key and mints a
@@ -261,7 +247,7 @@ psps:
 `openrails.ParseMerchantDocument` reads one. Unknown or duplicate fields,
 several documents, anchors and tags are refused, and so are the retired keys
 `rail_merchant_accounts` and `provider_accounts`. Keep secrets out of the
-committed file: an overlay or Vault supplies them
+committed file: Vault, or a file mounted from a secret, supplies them
 ([standalone.md](standalone.md#configuration-reference)).
 
 **Environments.** Each PSP declares whether it moves real money; omitted, it is the rail's real-money one, so production declares none. NMI: `live`, `test` (an account in test mode), `sandbox` (sandbox.nmi.com). Stripe: `live`, `test` (key prefixes must agree). CCBill: `live`, `sandbox`. Solana: `mainnet`, `devnet`, `testnet`. A merchant may mix them. OpenRails asks the provider before arming a PSP: NMI's `test_mode_status` and Solana's genesis hash on every RPC endpoint, again once that proof is an hour old; Stripe's `api.stripe.com/v1/account` against `account_id`, plus `api.stripe.com/v1/balance` for a test key, once per key and account. A PSP whose answer disagrees stays disarmed: reads work, writes fail before any byte is sent, and the `openrails_psp_posture` probe reports it. CCBill's sandbox has no signal, so its writes are always refused.
@@ -271,7 +257,7 @@ committed file: an overlay or Vault supplies them
 `basistheory`, never a PSP key, and `{account_id}` is the PSP's account fields
 joined with `-`. The account resolves the merchant, its own secret verifies the
 delivery, and the payload's account must agree. Rotating a signing secret keeps
-the old one for `webhook_secret_overlap` (24 h); `retire_webhook_overlap` on
+the old one for 24 hours; `retire_webhook_overlap` on
 `UpdatePSP` refuses it at once.
 
 A card PSP (NMI, Stripe, CCBill) may declare `dispute_ratio_limit`, its
@@ -974,8 +960,8 @@ for {
 
 Process each page idempotently by event id and save the cursor in the same
 transaction as your effects, empty pages included; a reader never skips an
-earlier uncommitted fact. Retention is `event_retention` (default 90 days);
-reading does not extend it. `410 event_cursor_expired` means the cursor predates
+earlier uncommitted fact. The event log keeps 90 days; reading does not extend
+it. `410 event_cursor_expired` means the cursor predates
 retention: rebuild your state, then start a new cursor. `400 invalid_cursor` is
 malformed or another merchant's or filter's cursor; filters are fixed for a
 cursor. `EventReader()` adapts the client to the helpers module's

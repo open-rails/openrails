@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -47,16 +46,6 @@ type Config struct {
 	// AUTHKIT_ACTIVE_PRIVATE_KEY_PEM, AUTHKIT_PUBLIC_KEYS); without one
 	// AuthKit reads auth.keys.path.
 	SigningKey SigningKey `yaml:"signing_key"`
-	// CloudflareProxies are Cloudflare's egress CIDRs, set only where
-	// Cloudflare fronts this origin: trusted like trusted_proxies, and the
-	// only peers whose CF-Connecting-IP AuthKit takes.
-	CloudflareProxies []string `yaml:"cloudflare_proxies"`
-	// RateLimitsDisabled limits nothing: an empty rate_limits.
-	RateLimitsDisabled bool `yaml:"rate_limits_disabled"`
-	// MerchantManifestOverlays are YAML files in the merchant manifest's own
-	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
-	// merged over the boot manifest in order; later wins.
-	MerchantManifestOverlays []string `yaml:"merchant_manifest_overlays"`
 	// Logger is the binary's logger.
 	Logger LoggerConfig `yaml:"logger"`
 	// EnvFile is the .env file the load consumed; empty when none.
@@ -134,24 +123,6 @@ func authDefaults(a *authkit.Config, publicBillingBaseURL string) {
 	a.Token.Issuer = cmp.Or(strings.TrimSpace(a.Token.Issuer), publicBillingBaseURL)
 	a.Token.RefreshTokenDuration = cmp.Or(a.Token.RefreshTokenDuration, 30*24*time.Hour)
 	a.Database.Schema = cmp.Or(a.Database.Schema, "profiles")
-}
-
-// cloudflare makes Cloudflare's egress a trusted proxy like any other to the
-// engine, and the only peers AuthKit takes CF-Connecting-IP from, unless
-// auth.http sets its own client-IP posture.
-func cloudflare(s *server.Config, ranges []string) {
-	if len(ranges) == 0 {
-		return
-	}
-	http := authkit.HTTPConfig{}
-	if s.Auth.HTTP != nil {
-		http = *s.Auth.HTTP
-	}
-	if !http.DirectPeerIP && len(http.TrustedProxies) == 0 && len(http.CloudflareProxies) == 0 {
-		http.TrustedProxies, http.CloudflareProxies = slices.Clone(s.Engine.TrustedProxies), ranges
-	}
-	s.Auth.HTTP = &http
-	s.Engine.TrustedProxies = append(slices.Clone(s.Engine.TrustedProxies), ranges...)
 }
 
 // DatabaseConnection is the database section's connection: URL, or the
@@ -316,10 +287,6 @@ func (c *Config) finish(secretsDir string) error {
 	s.Engine.PublicBillingBaseURL = cmp.Or(strings.TrimSpace(s.Engine.PublicBillingBaseURL), defaultPublicBillingBaseURL(cmp.Or(s.Port, server.DefaultConfig().Port)))
 	s.Engine.CheckoutOrigin = strings.TrimSpace(s.Engine.CheckoutOrigin)
 	authDefaults(&s.Auth, s.Engine.PublicBillingBaseURL)
-	cloudflare(s, c.CloudflareProxies)
-	if c.RateLimitsDisabled {
-		s.Engine.RateLimits, s.Engine.Captcha = billing.RateLimitsConfig{}, billing.CaptchaAccount{}
-	}
 	*s = s.WithDefaults()
 	if _, err := c.Logger.Handler(io.Discard); err != nil {
 		return err
@@ -353,8 +320,8 @@ func Validate(cfg *Config) error {
 	if s.Port < 1 || s.Port > 65535 {
 		return fmt.Errorf("invalid port %d: must be 1-65535", s.Port)
 	}
-	if s.PrivatePort < 0 || s.PrivatePort > 65535 || (s.PrivatePort != 0 && s.PrivatePort == s.Port) {
-		return fmt.Errorf("invalid private_port %d: must be 1-65535 and not port", s.PrivatePort)
+	if s.MetricsPort < 0 || s.MetricsPort > 65535 || (s.MetricsPort != 0 && s.MetricsPort == s.Port) {
+		return fmt.Errorf("invalid metrics_port %d: must be 1-65535 and not port", s.MetricsPort)
 	}
 	return config.Validate(&s.Engine)
 }

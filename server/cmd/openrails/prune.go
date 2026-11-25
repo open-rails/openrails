@@ -47,7 +47,7 @@ func newPruneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			manifest, err := cliMerchantManifest(c.Context(), manifestPath)
+			manifest, err := cliMerchantManifest(manifestPath)
 			if err != nil {
 				return err
 			}

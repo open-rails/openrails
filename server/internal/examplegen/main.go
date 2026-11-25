@@ -200,7 +200,9 @@ func envExample(settings []hostconfig.Setting, d docs) ([]byte, error) {
 # (empty: none) and each secret is empty. A variable is its config.yaml key,
 # upper-cased and joined by "_"; a list is comma-separated, a section or a
 # list of sections JSON. A variable inside a known section that names no key
-# refuses boot. A merchant's settings are no variables: its document is
+# refuses boot. Policy (rate_limits, user_action_rate_limit,
+# destructive_action_limits, auth.http.rate_limits) is set in config.yaml
+# only. A merchant's settings are no variables: its document is
 # merchant.example.yaml.
 `)
 	var order []string
@@ -258,7 +260,8 @@ func merchantExample(d docs) ([]byte, error) {
 # its default, which its description names; values here are empty. A file
 # document names its slug; a merchant manifest keys each document by it under
 # merchants.<slug>, and with vault.kv_mount Vault holds them. Secrets belong
-# in a manifest overlay or Vault. A list shows one element, a map one <key>.
+# in Vault, or in a manifest mounted from a secret. A list shows one element,
+# a map one <key>.
 `)
 	w.fields(reflect.TypeFor[billing.MerchantDocument](), 0, map[reflect.Type]bool{})
 	if len(w.missing) > 0 {

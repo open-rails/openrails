@@ -590,7 +590,7 @@ func TestRevenueRecognition(t *testing.T) {
 		// Alice opens the CCBill page and leaves; the order expires and she
 		// buys the membership by card in another.
 		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
-			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: "https://critical.invalid/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
+			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var abandoned billing.Order
 		require.NoError(t, json.Unmarshal(raw, &abandoned))

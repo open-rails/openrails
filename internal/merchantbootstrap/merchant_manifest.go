@@ -12,9 +12,6 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
-	koanfyaml "github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/rawbytes"
-	"github.com/knadh/koanf/v2"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -31,155 +28,39 @@ const DefaultMerchantConfigManifestPath = "/etc/openrails/merchants.yaml"
 // Manifest is a merchant config manifest. M is its entry: the engine's
 // declaration, or one embedding it with keys only its reader takes.
 type Manifest[M any] struct {
-	Version   int          `yaml:"version" koanf:"version"`
-	Merchants map[string]M `yaml:"merchants" koanf:"merchants"`
+	Version   int          `yaml:"version"`
+	Merchants map[string]M `yaml:"merchants"`
 }
 
 // BillingConfig is the manifest as the engine reads it.
 type BillingConfig = Manifest[billing.MerchantDocument]
 
-// LoadManifestFiles loads a merchant config YAML file plus optional
-// structured YAML overlays (LoadManifest).
-func LoadManifestFiles[M any](path string, overlays []string, check func(slug string, entry M) error) (*Manifest[M], error) {
-	docs := make([][]byte, 0, 1+len(overlays))
-	for _, p := range append([]string{path}, overlays...) {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		raw, err := os.ReadFile(p) // #nosec G304 -- operator-supplied manifest path
-		if err != nil {
-			return nil, fmt.Errorf("read merchant config manifest %s: %w", p, err)
-		}
-		docs = append(docs, raw)
-	}
-	if len(docs) == 0 {
+// LoadManifestFile loads the merchant config manifest at path (LoadManifest).
+func LoadManifestFile[M any](path string, check func(slug string, entry M) error) (*Manifest[M], error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
 		return nil, fmt.Errorf("read merchant config manifest: no path given")
 	}
-	return LoadManifest(docs[0], docs[1:], check)
-}
-
-// ReadMerchantManifestOverlays reads operator-mounted overlay files for
-// LoadManifest. Every listed path must exist.
-func ReadMerchantManifestOverlays(paths []string) ([][]byte, error) {
-	out := make([][]byte, 0, len(paths))
-	for _, p := range paths {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		raw, err := os.ReadFile(p) // #nosec G304 -- operator-configured overlay path
-		if err != nil {
-			return nil, fmt.Errorf("read merchant manifest overlay %s: %w", p, err)
-		}
-		out = append(out, raw)
+	raw, err := os.ReadFile(path) // #nosec G304 -- operator-supplied manifest path
+	if err != nil {
+		return nil, fmt.Errorf("read merchant config manifest %s: %w", path, err)
 	}
-	return out, nil
+	return LoadManifest(raw, check)
 }
 
-// LoadManifest merges the manifest with structured YAML overlays (later wins)
-// and strict-parses the result; check vets each entry under its normalized
-// slug. Overlays are the caller's concern (a host's mounted secret files);
-// the engine reads no env or files.
-func LoadManifest[M any](raw []byte, overlays [][]byte, check func(slug string, entry M) error) (*Manifest[M], error) {
-	k := koanf.New(".")
-	for i, doc := range append([][]byte{raw}, overlays...) {
-		if len(strings.TrimSpace(string(doc))) == 0 {
-			continue
-		}
-		if i > 0 {
-			if err := ValidateMerchantSecretOverlay(doc); err != nil {
-				return nil, fmt.Errorf("load merchant config overlay %d: %w", i, err)
-			}
-		}
-		if err := k.Load(rawbytes.Provider(doc), koanfyaml.Parser()); err != nil {
-			if i == 0 {
-				return nil, fmt.Errorf("load merchant config manifest: %w", err)
-			}
-			return nil, fmt.Errorf("load merchant config overlay %d: %w", i, err)
-		}
+// LoadManifest strict-parses a merchant config manifest; check vets each
+// entry under its normalized slug. The engine reads no env or files.
+func LoadManifest[M any](raw []byte, check func(slug string, entry M) error) (*Manifest[M], error) {
+	var root map[string]any
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return nil, fmt.Errorf("load merchant config manifest: %w", err)
 	}
 	for _, key := range []string{"auth", "users", "groups", "roles", "permissions", "catalogs", "products"} {
-		if k.Exists(key) {
+		if _, ok := root[key]; ok {
 			return nil, fmt.Errorf("merchant config manifest does not accept %q; use the matching push command", key)
 		}
 	}
-	// Strict-parse the merged tree: koanf's Unmarshal silently ignores unknown
-	// fields, so route the file/overlay path through the same DisallowUnknownField
-	// parser as the embedded bytes path — a typo'd field is rejected, not dropped.
-	merged, err := k.Marshal(koanfyaml.Parser())
-	if err != nil {
-		return nil, fmt.Errorf("merge merchant config manifest: %w", err)
-	}
-	return parseManifest(merged, check)
-}
-
-// ValidateMerchantSecretOverlay limits operator-mounted overlays to secret
-// secret values. The checked-in manifest remains the authority for merchant
-// identity, account IDs, settings, custodians, and billing policy. Without
-// this shape check, koanf's deep merge would let a bad Vault document silently
-// replace those structural fields before the strict final parse.
-func ValidateMerchantSecretOverlay(raw []byte) error {
-	var root map[string]any
-	if err := yaml.Unmarshal(raw, &root); err != nil {
-		return fmt.Errorf("parse merchant secret overlay: %w", err)
-	}
-	if len(root) == 0 {
-		return nil
-	}
-	for key := range root {
-		if key != "merchants" {
-			return fmt.Errorf("merchant secret overlay only accepts merchants.<slug>.psps.<psp>.secrets and merchants.<slug>.secrets.scim_token (found %q)", key)
-		}
-	}
-	merchants, ok := root["merchants"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("merchant secret overlay merchants must be a mapping")
-	}
-	for slug, rawMerchant := range merchants {
-		merchant, ok := rawMerchant.(map[string]any)
-		if !ok {
-			return fmt.Errorf("merchant secret overlay merchants.%s must be a mapping", slug)
-		}
-		for key := range merchant {
-			if key != "psps" && key != "secrets" {
-				return fmt.Errorf("merchant secret overlay cannot set merchants.%s.%s; structural manifest fields stay in the base manifest", slug, key)
-			}
-		}
-		if raw, ok := merchant["secrets"]; ok {
-			secrets, ok := raw.(map[string]any)
-			if !ok {
-				return fmt.Errorf("merchant secret overlay merchants.%s.secrets must be a mapping", slug)
-			}
-			for key := range secrets {
-				if key != "scim_token" {
-					return fmt.Errorf("merchant secret overlay cannot set merchants.%s.secrets.%s", slug, key)
-				}
-			}
-		}
-		if _, ok := merchant["psps"]; !ok {
-			continue
-		}
-		psps, ok := merchant["psps"].(map[string]any)
-		if !ok {
-			return fmt.Errorf("merchant secret overlay merchants.%s.psps must be a mapping", slug)
-		}
-		for psp, rawPSP := range psps {
-			declared, ok := rawPSP.(map[string]any)
-			if !ok {
-				return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s must be a mapping", slug, psp)
-			}
-			for key := range declared {
-				if key != "secrets" {
-					return fmt.Errorf("merchant secret overlay cannot set merchants.%s.psps.%s.%s; only secrets are overlayed", slug, psp, key)
-				}
-			}
-			if _, ok := declared["secrets"].(map[string]any); !ok {
-				return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.secrets must be a mapping", slug, psp)
-			}
-		}
-	}
-	return nil
+	return parseManifest(raw, check)
 }
 
 // parseManifest parses a merchant config manifest. Bootstrap authority and

@@ -172,8 +172,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Provision the manifest's merchants; without Vault the manifest is their
 	// configuration. The conventional file is optional; an explicit manifest
 	// path must exist.
-	listener := hostconfig.FromContext(cmd.Context())
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath); err != nil {
 		return closeOnError(err)
 	}
 	// HTTP never serves webhook and async billing APIs when the workers
@@ -216,7 +215,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 			slog.Default().ErrorContext(ctx, "Application shutdown encountered issues", logx.Err(err))
 		}
 	}()
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath); err != nil {
 		return err
 	}
 	// Background workers only (no HTTP server); fail fast if River cannot start.
