@@ -85,7 +85,7 @@ func TestCustomerBindingContracts(t *testing.T) {
 			mux.Handle(route.Method+" "+route.Path, route.Handler)
 		}
 		request := httptest.NewRequest(http.MethodGet, "/account/links/"+link+"/me/invoices/"+invoice.ID.String(), nil)
-		request.Header.Set("Authorization", "Bearer "+a.aliceToken)
+		authtest.Authorize(t, a.auth, request, a.aliceToken)
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, request)
 		require.EqualValues(t, 1, credential.calls.Load(), "the actual credential is authenticated once")

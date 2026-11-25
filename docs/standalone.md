@@ -56,13 +56,9 @@ database:
 redis: # optional for one server; replicas share rate limits and spent proofs through it
   url: redis://redis:6379
 
-# The server's own AuthKit: its issuer and resource are
-# public_url, and its keys (keys.json, totp.key) live here. It
-# accepts the tokens of the app merchant.yaml declares the merchant's trusted
-# issuer; on a loopback URL that app's keys may be on localhost.
-auth:
-  keys:
-    path: /vault/auth
+# The server's own AuthKit takes its issuer and resource from public_url. On
+# a loopback URL it generates development keys; in production its keys are
+# keys.json and totp.key in /vault/auth (auth.keys.path).
 
 # Receipts and payment notices, sent from the merchant's from_email.
 email_smtp:
@@ -221,7 +217,7 @@ OpenRails derives its AuthKit's configuration ([the server's AuthKit](#the-serve
 
 | Key | Default | Meaning |
 |---|---|---|
-| `auth.keys.path` | `/vault/auth`; for a loopback `public_url` without keys, a per-issuer directory where AuthKit generates development keys | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
+| `auth.keys.path` | unset: AuthKit reads `/vault/auth`, or for a loopback `public_url` generates development keys beneath `XDG_STATE_HOME` (the image sets it to `/vault/auth`) | the directory holding `keys.json` and `totp.key` (`AUTH_KEYS_PATH`), neither group- nor world-writable; file-watched |
 
 A merchant renames at most every 72 hours, and a former name forwards and stays reserved for 90 days.
 
@@ -444,12 +440,13 @@ OpenRails builds AuthKit's configuration (`controlplane.AuthKit`) from settings 
 | issuer, resource identifier (RFC 8707) and its public URL | `public_url`: https, or http on a loopback host |
 | tables and jobs | `<database.schema>_auth`, and the engine's River schema `<database.schema>_river` |
 | client IP | `trusted_proxies` and Cloudflare's published ranges |
+| JSON API | `/auth/v1` beneath the issuer's origin, or `/v1` beneath an issuer with a path |
 | emailed links | the console's `/admin/invite`, `/admin/reset`, `/admin/verify` and `/admin/passwordless` |
 | keys on a private network | allowed for a loopback issuer and for the applications the operator declares (the merchant manifest's `remote_application`, the bootstrap manifest); an application registered at run time names only https key URLs on public hosts |
 
-The server's own accounts are staff. They join by invitation, need a second factor (a passkey or an authenticator app, whose secrets `totp.key` encrypts) and stay signed in for 30 days; passwords follow AuthKit's default policy (at least 8 characters, common ones refused). Readiness fails while staff cannot enroll one: with no `totp.key` the log names the file to mount. The server fixes the merchant roles, the API-key prefix, the issued audience `openrails`, the scopes `openrails:merchant` and `openrails:self`, the console's client `openrails-console`, its HTTP mount and the refresh cookie.
+The server's own accounts are staff. They join by invitation, need a second factor (a passkey or an authenticator app, whose secrets `totp.key` encrypts) and stay signed in for 30 days; passwords follow AuthKit's policy (8 to 128 characters, common ones refused). Every sign-in binds its session to the browser's DPoP key (RFC 9449): its access tokens go with a proof of that key and are refused as bearer tokens. Readiness fails while staff cannot enroll a second factor: with no `totp.key` the log names the file to mount. The server fixes the merchant roles, the API-key prefix, the scopes `openrails:merchant` and `openrails:self` and the console's client `openrails-console`; a token's `aud` is its issuer, and lifetimes and rate limits are AuthKit's.
 
-A hosted product built on `server` sets its own account policy (open registration with `MerchantCreation`, agreements, usernames, group OAuth clients, SMS, DPoP) in code, with `server.Config.AuthKit`: it adjusts the derived configuration before the fixed parts apply. `AdminConsole.OwnAccountsOnly` keeps its console to its own accounts, with no trusted issuer's sign-in.
+A hosted product built on `server` sets its own account policy (open registration with `MerchantCreation`, agreements, usernames, group OAuth clients, SMS countries, AuthKit's opt-in route groups) in code, with `server.Config.AuthKit`: it adjusts the derived configuration before the fixed parts apply. `AdminConsole.OwnAccountsOnly` keeps its console to its own accounts, with no trusted issuer's sign-in.
 
 ### The account directory
 
@@ -475,8 +472,6 @@ AuthorizationServer: authkit.AuthorizationServerConfig{
 		Scopes: []string{"openrails:self", "openrails:merchant"},
 		// The most a token may carry.
 		Permissions: backendPermissions,
-		// The user's email in every token: a receipt reaches a brand-new buyer.
-		ContactClaims: true,
 	}},
 	Clients: []authkit.OAuthClientConfig{{
 		ID:         webClient, // public: the browser proves a DPoP key instead of a secret
@@ -484,7 +479,7 @@ AuthorizationServer: authkit.AuthorizationServerConfig{
 		Resources:  []string{s.OpenRailsURL},
 		GrantTypes: []authkit.OAuthGrantType{authkit.GrantTokenExchange},
 	}, {
-		ID:           backendClient, // confidential: this server and the SCIM pushes
+		ID:           backendClient, // confidential: this server
 		SecretSHA256: hex.EncodeToString(secret[:]),
 		Resources:    []string{s.OpenRailsURL},
 		Permissions:  backendPermissions,
@@ -553,7 +548,7 @@ There is no exchange at the server: the token is bound to its issuer's merchant 
 
 ### Customer contacts
 
-The server mounts none of OpenRails' own SCIM routes (`/v1/app/scim/v2`, [client](client.md#customers)); AuthKit's directory at `/directory/scim/v2` is mounted instead. A customer of the server's own accounts is read from them; a trusted issuer's customer from the merchant's directory in the server's AuthKit, which the issuer's AuthKit pushes to over SCIM at `/directory/scim/v2` with its client credentials, and from the verified contact claims of its tokens. Each customer is read from its own issuer's directory, newest write winning. A customer your backend names in an assertion (`CreateCustomerToken`) is the merchant's own, and its contact is what that application pushed or asserted for it. OpenRails emails a customer only at an address the issuer proved.
+The server mounts none of OpenRails' own SCIM routes (`/v1/app/scim/v2`, [client](client.md#customers)); AuthKit's directory at `/directory/scim/v2` is mounted instead. A customer of the server's own accounts is read from them; a trusted issuer's customer from the merchant's directory in the server's AuthKit, which the issuer pushes to over SCIM at `/directory/scim/v2` with a directory key (an API key of the merchant's group bound to its application, `provisions_for` on `POST /auth/v1/groups/{merchant_id}/api-keys`) or its own client-credentials token, and from the verified contact claims of its tokens (an AuthKit issuer adds `email` to a token asked for with the `email` scope). Each customer is read from its own issuer's directory, newest write winning. A customer your backend names in an assertion (`CreateCustomerToken`) is the merchant's own, and its contact is what that application pushed or asserted for it. OpenRails emails a customer only at an address the issuer proved.
 
 ## The payment page
 

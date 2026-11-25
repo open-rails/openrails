@@ -95,7 +95,7 @@ func consoleBrowser(t *testing.T, a *authorityWorld, config map[string]any, acti
 	require.NoError(t, err, "critical:build must build the console browser bundle")
 	target, err := url.Parse(a.server.URL)
 	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy := browserSession(t, a.auth, httputil.NewSingleHostReverseProxy(target))
 	var mu sync.Mutex
 	counts := map[string]int{}
 	mux := http.NewServeMux()

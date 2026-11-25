@@ -1,10 +1,10 @@
 // Command standalone is the embedded example's course site with OpenRails run
 // as its own server (openrails/ holds the server's files). The app keeps its
 // AuthKit, which is now also the OAuth issuer the server trusts: it mints the
-// browser's tokens for /v1/me, the backend's client-credentials
-// tokens, and pushes its users to the server's AuthKit over SCIM. newBilling builds the
-// client with NewRemote; content.go and web/src/pages.tsx are the embedded
-// example's, unchanged.
+// browser's tokens for /v1/me, carrying the user's proven email, and the
+// backend's client-credentials tokens. newBilling builds the client with
+// NewRemote; content.go and web/src/pages.tsx are the embedded example's,
+// unchanged.
 //
 // Run it from this directory with DATABASE_URL, after building the app
 // (cd web && pnpm install && pnpm build) and starting the server (README.md).
@@ -63,16 +63,15 @@ const (
 
 // backendPermissions are what the backend's tokens carry on the server:
 // customer support's reads, the content gate and catalog, by OpenRails' names
-// for the merchant's own staff, and AuthKit's own for the SCIM pushes.
+// for the merchant's own staff.
 var backendPermissions = []string{
 	string(billing.MerchantCustomerRead), string(billing.MerchantEntitlementsRead), string(billing.MerchantCatalogRead),
-	"merchant:directory:manage",
 }
 
 // newAuth is a development AuthKit, now also the authorization server
-// OpenRails trusts: it mints access tokens for the OpenRails server and
-// pushes this app's users to it over SCIM. Users prove their email: OpenRails
-// is told only a proven address, and sends receipts to it.
+// OpenRails trusts: it mints access tokens for the OpenRails server. Users
+// prove their email, and a token asked for with the email scope carries it:
+// OpenRails is told only a proven address, and sends receipts to it.
 func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client, error) {
 	email, err := smtp.New(smtp.Config{Server: s.SMTP, AppName: "OnlyDemo"})
 	if err != nil {
@@ -80,11 +79,10 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 	}
 	secret := sha256.Sum256([]byte(s.ClientSecret))
 	return authkit.New(ctx, authkit.Config{
-		Database:     authkit.DatabaseConfig{Schema: "profiles"},
-		Token:        authkit.TokenConfig{Issuer: s.PublicURL, IssuedAudiences: []string{"onlydemo"}},
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true},
-		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
-		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		Database:  authkit.DatabaseConfig{Schema: "profiles"},
+		Issuer:    s.PublicURL,
+		HTTP:      &authkit.HTTPConfig{DirectPeerIP: true},
+		TwoFactor: iam.TwoFactorDisabled,
 
 		// guide:standalone-issuer
 		// OpenRails is a resource server this AuthKit mints tokens for.
@@ -95,8 +93,6 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 				Scopes: []string{"openrails:self", "openrails:merchant"},
 				// The most a token may carry.
 				Permissions: backendPermissions,
-				// The user's email in every token: a receipt reaches a brand-new buyer.
-				ContactClaims: true,
 			}},
 			Clients: []authkit.OAuthClientConfig{{
 				ID:         webClient, // public: the browser proves a DPoP key instead of a secret
@@ -104,7 +100,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 				Resources:  []string{s.OpenRailsURL},
 				GrantTypes: []authkit.OAuthGrantType{authkit.GrantTokenExchange},
 			}, {
-				ID:           backendClient, // confidential: this server and the SCIM pushes
+				ID:           backendClient, // confidential: this server
 				SecretSHA256: hex.EncodeToString(secret[:]),
 				Resources:    []string{s.OpenRailsURL},
 				Permissions:  backendPermissions,
@@ -112,30 +108,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 			}},
 		},
 		// guide:end
-
-		// Customer contacts: every user, pushed to the merchant's directory in
-		// the server's AuthKit with the backend client's tokens, so receipts
-		// and the admin customer read have each email.
-		Provisioning: authkit.ProvisioningConfig{
-			Targets: []authkit.ProvisioningTarget{{
-				Name:              "openrails",
-				URL:               s.OpenRailsURL + "/directory/scim/v2",
-				ClientCredentials: backendCredentials(s),
-			}},
-		},
 	}, authkit.Deps{Postgres: db, Email: email})
-}
-
-// backendCredentials are the backend client's: client credentials at this
-// app's own token endpoint, for the OpenRails resource.
-func backendCredentials(s settings) *authkit.ProvisioningClientCredentials {
-	return &authkit.ProvisioningClientCredentials{
-		TokenURL:     s.PublicURL + "/oauth2/token",
-		ClientID:     backendClient,
-		ClientSecret: s.ClientSecret,
-		Scopes:       []string{"openrails:merchant"},
-		Resource:     s.OpenRailsURL,
-	}
 }
 
 // newBilling is the remote handle: the same *openrails.Client as embedded,
@@ -143,10 +116,9 @@ func backendCredentials(s settings) *authkit.ProvisioningClientCredentials {
 // server trusts that issuer for one merchant, the one every call acts on.
 func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
 	// guide:standalone-client
-	cc := backendCredentials(s)
 	tokens := (&clientcredentials.Config{
-		ClientID: cc.ClientID, ClientSecret: cc.ClientSecret, TokenURL: cc.TokenURL, Scopes: cc.Scopes,
-		EndpointParams: url.Values{"resource": {cc.Resource}},
+		ClientID: backendClient, ClientSecret: s.ClientSecret, TokenURL: s.PublicURL + "/oauth2/token",
+		Scopes: []string{"openrails:merchant"}, EndpointParams: url.Values{"resource": {s.OpenRailsURL}},
 	}).TokenSource(context.WithoutCancel(ctx)) // caches each token until it expires
 	remote, err := openrails.NewRemote(s.OpenRailsURL, openrails.RemoteOptions{Credentials: map[billing.MerchantID]openrails.RemoteCredential{
 		s.Merchant: {Token: func(context.Context) (string, error) {
@@ -164,8 +136,8 @@ func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
 	// guide:end
 }
 
-// newApp builds the app: its AuthKit (started: its River workers push the
-// SCIM changes), the billing client and the router.
+// newApp builds the app: its AuthKit (started: its River workers run its
+// jobs), the billing client and the router.
 func newApp(ctx context.Context, db *pgxpool.Pool, s settings, media mediaKey) (*authkit.Client, *openrails.Client, *gin.Engine, error) {
 	ak, err := newAuth(ctx, db, s) // see AuthKit's README
 	if err != nil {
@@ -181,7 +153,7 @@ func newApp(ctx context.Context, db *pgxpool.Pool, s settings, media mediaKey) (
 	}
 
 	r := gin.Default()
-	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /api/v1, the token endpoint at /oauth2/token
+	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /auth/v1, the token endpoint at /oauth2/token
 		return nil, nil, nil, err
 	}
 	r.GET("/api/billing", func(c *gin.Context) { // where the browser's billing client calls

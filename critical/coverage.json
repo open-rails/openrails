@@ -1346,7 +1346,7 @@
     {
       "id": "OR-J01-S28",
       "journey": "J01",
-      "name": "Every account of the standalone server's own needs a second factor: a password alone gets no session until it enrolls an authenticator app, and every later sign-in asks for it"
+      "name": "Every account of the standalone server's own needs a second factor: a password alone gets no session until it enrolls an authenticator app, and every later sign-in asks for it; every sign-in proves a DPoP key, and its tokens are refused as bearer tokens"
     },
     {
       "id": "OR-J01-S30",
@@ -3686,7 +3686,7 @@
     {
       "id": "OR-J06-S84",
       "journey": "J06",
-      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and say what OpenRails derives instead; the key path alone loads"
+      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and name what is refused; the key path alone loads"
     },
     {
       "id": "OR-J06-S85",

@@ -163,22 +163,26 @@ func TestServerFixture(t *testing.T) {
 		}
 	}
 	renameInterval := 72 * time.Hour
+	// Authenticator apps need a TOTP key.
+	totpKey := make([]byte, 32)
+	_, err = rand.Read(totpKey)
+	require.NoError(t, err)
 	srv, err := server.New(t.Context(), server.Config{
 		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: cfg.Schema, RiverSchema: cfg.Schema}, PublicURL: httpServer.URL, RateLimits: billing.RateLimitsConfig{Purchase: &billing.RateLimit{}, Payment: &billing.RateLimit{}, Subscribe: &billing.RateLimit{}, Webhook: &billing.RateLimit{}}, CheckoutOrigin: cfg.CheckoutOrigin},
-		// A hosted product's account policy: a host-owned consent scope,
-		// network terms and codes handed back instead of sent.
+		// A hosted product's account policy: a host-owned consent scope and
+		// network terms; a test rig's lifted limits.
 		AuthKit: func(c *authkit.Config) {
+			authtest.LiftLimits(c)
 			c.Resource.Scopes = map[string][]string{"fixture:host": {}}
 			c.AuthorizationServer = authkit.AuthorizationServerConfig{Resources: []authkit.ResourceServerConfig{{ID: httpServer.URL, Scopes: []string{billing.ScopeSelf, "fixture:host"}}}, GroupClients: authkit.GroupClientsConfig{Scopes: []authkit.GroupClientScope{{Name: billing.ScopeSelf, Resource: httpServer.URL, Description: "Use own billing"}, {Name: "fixture:host", Resource: httpServer.URL, Description: "Host-owned consent"}}}}
-			c.Registration.AllowMissingSenders = true
 			c.Agreements = []authkit.AgreementConfig{{Key: "network-terms", Version: "critical-v1", URL: "https://critical.invalid/network-terms"}}
 			if !cfg.StaffMFA {
-				c.TwoFactor.Mode = iam.TwoFactorDisabled
+				c.TwoFactor = iam.TwoFactorDisabled
 			}
 		},
 		Naming:       billing.NamingConfig{RenameInterval: &renameInterval},
 		AdminConsole: server.AdminConsole{Disabled: !cfg.Console},
-	}, server.Deps{CustomerAdmissionPolicy: customerPolicy, Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}, CheckoutAssets: hostPaymentAssets(cfg.PaymentAssets)}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}}})
+	}, server.Deps{CustomerAdmissionPolicy: customerPolicy, Engine: openrails.Deps{Postgres: pool, Redis: shared, Clock: clock, FXTransport: wire{fx, transport}, CheckoutAssets: hostPaymentAssets(cfg.PaymentAssets)}, Auth: authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}, TOTP: totpKey}}})
 	require.NoError(t, err)
 	defer srv.Close(context.Background())
 	handler := srv.Handler()
@@ -268,6 +272,15 @@ func TestServerFixture(t *testing.T) {
 				// nothing runs.
 				require.NoError(t, srv.Close(context.Background()))
 				result.Result = logx.Unset(srv)
+			case "dpop":
+				// The parent presents a session SignIn bound here: this
+				// process holds its key, as a browser keeps its own.
+				var in struct{ Method, URL, Token string }
+				require.NoError(t, json.Unmarshal(cmd.Body, &in))
+				r, err := http.NewRequest(in.Method, in.URL, nil)
+				require.NoError(t, err)
+				authtest.Authorize(t, ak, r, in.Token)
+				result.Result = map[string]string{"Authorization": r.Header.Get("Authorization"), "DPoP": r.Header.Get("DPoP")}
 			case "customer-policy":
 				denyNative.Store(cmd.ID != "allow")
 				result.Result = map[string]bool{"denied": denyNative.Load()}

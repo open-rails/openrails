@@ -117,14 +117,11 @@ services:
       DATABASE_URL: "postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app_password}@postgres:5432/openrails_db?sslmode=disable"
       REDIS_URL: "redis://valkey:6379"
       CLICKHOUSE_URL: "clickhouse://clickhouse:9000/openrails"
-      # AuthKit writes development keys (keys.json, totp.key) to the volume,
-      # so restarts keep sessions and authenticator enrollments.
-      AUTH_KEYS_PATH: /vault/auth
     command: ["run-server"]
     volumes:
-      # A writable volume by default; AUTHKIT_KEYS_HOST_DIR binds a host
-      # directory holding keys.json and totp.key instead.
-      - ${AUTHKIT_KEYS_HOST_DIR:-openrails_auth_keys}:/vault/auth
+      # AuthKit writes development keys (keys.json, totp.key) to the volume,
+      # so restarts keep sessions and authenticator enrollments.
+      - openrails_auth_keys:/vault/auth
     networks:
       - local-openrails
 

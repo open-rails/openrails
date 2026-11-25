@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 // AuthKit's configuration is derived from the engine's: a hook adjusts
@@ -19,52 +18,50 @@ func TestAuthKitIsDerivedFromTheEngine(t *testing.T) {
 	engine.PublicURL = "https://billing.example.com/"
 	engine.Database.Schema = "shop"
 	engine.TrustedProxies = []string{"10.0.0.0/8"}
-	a, err := AuthKit(&engine, Options{KeysPath: "/etc/keys", Console: true, Configure: func(c *authkit.Config) {
-		c.Token.IssuedAudiences = []string{"elsewhere"}
+	a, err := AuthKit(&engine, Options{Console: true, Configure: func(c *authkit.Config) {
+		c.APIKeyPrefix = "elsewhere"
 		c.Resource.Scopes = map[string][]string{billing.ScopeSelf: {"merchant:*"}, "host:own": {}}
-		c.Username.MinLength = 6
+		c.Usernames = []string{"shopper"}
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	base := "https://billing.example.com"
 	for got, want := range map[string]string{
-		a.Token.Issuer: base, a.Resource.ID: base, a.Resource.PublicURL: base, a.Frontend.BaseURL: base,
-		a.Keys.Path: "/etc/keys", a.Database.Schema: "shop_auth", a.Frontend.InvitePath: "/admin/invite",
+		a.Issuer: base, a.Resource.ID: base, a.FrontendURL: base + "/admin", a.Database.Schema: "shop_auth",
 	} {
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	}
-	if a.Token.AllowPrivateNetworkJWKS {
-		t.Error("a public issuer reads no keys on a private network unless the operator declares one")
+	if a.Registration != iam.RegistrationModeInviteOnly || a.TwoFactor != iam.TwoFactorRequired {
+		t.Errorf("staff join by invitation and need a second factor: %q %q", a.Registration, a.TwoFactor)
 	}
-	if a.Registration.NativeUserMode != iam.RegistrationModeInviteOnly || a.TwoFactor.Mode != iam.TwoFactorRequired || a.Token.RefreshTokenDuration != StaffSessionLifetime {
-		t.Errorf("staff join by invitation, need a second factor and stay 30 days: %+v %+v", a.Registration, a.TwoFactor)
-	}
-	if a.Username.MinLength != 6 {
+	if !slices.Equal(a.Usernames, []string{"shopper"}) {
 		t.Error("the hook's policy stays")
 	}
-	if !slices.Equal(a.Token.IssuedAudiences, []string{billingauth.TokenAudience}) || len(a.Resource.Scopes[billing.ScopeSelf]) != 0 || a.Resource.Scopes["host:own"] == nil {
-		t.Errorf("invariants win over the hook: %v %v", a.Token.IssuedAudiences, a.Resource.Scopes)
+	if a.APIKeyPrefix != APIKeyPrefix || len(a.Resource.Scopes[billing.ScopeSelf]) != 0 || a.Resource.Scopes["host:own"] == nil {
+		t.Errorf("invariants win over the hook: %q %v", a.APIKeyPrefix, a.Resource.Scopes)
 	}
 	if !slices.Equal(a.HTTP.TrustedProxies, engine.TrustedProxies) || a.HTTP.DirectPeerIP {
 		t.Errorf("AuthKit's client IP follows trusted_proxies: %+v", a.HTTP)
+	}
+	if !slices.Contains(a.HTTP.Groups, iam.RouteInvitations) {
+		t.Errorf("staff join by invitation: %v", a.HTTP.Groups)
 	}
 	if !slices.ContainsFunc(a.AuthorizationServer.Clients, func(c authkit.OAuthClientConfig) bool { return c.ID == ConsoleClientID }) {
 		t.Error("the console's client is declared")
 	}
 
-	engine.PublicURL = "http://localhost:3053"
-	if a, err := AuthKit(&engine, Options{}); err != nil || !a.Token.AllowPrivateNetworkJWKS {
-		t.Errorf("a loopback issuer is local: %v", err)
+	if a, err := AuthKit(&engine, Options{}); err != nil || a.FrontendURL != "" {
+		t.Errorf("without the console AuthKit's links land at the issuer's origin: %q %v", a.FrontendURL, err)
 	}
 	for name, c := range map[string]struct {
 		base string
 		hook func(*authkit.Config)
 	}{
 		"http on a public host": {"http://billing.example.com", nil},
-		"open registration":     {base, func(c *authkit.Config) { c.Registration.NativeUserMode = iam.RegistrationModeOpen }},
+		"open registration":     {base, func(c *authkit.Config) { c.Registration = iam.RegistrationModeOpen }},
 	} {
 		engine.PublicURL = c.base
 		if _, err := AuthKit(&engine, Options{Configure: c.hook}); err == nil {

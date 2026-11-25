@@ -133,16 +133,13 @@ func TestOnlyTheKeyPathIsAnAuthSetting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Server.Auth.Keys.Path != "/etc/openrails/auth" {
-		t.Fatalf("AUTH_KEYS_PATH reads auth.keys.path: %+v", cfg.Server.Auth)
+	if cfg.Auth.Keys.Path != "/etc/openrails/auth" {
+		t.Fatalf("AUTH_KEYS_PATH reads auth.keys.path: %+v", cfg.Auth)
 	}
 	for env, want := range map[string]string{
-		"AUTH_PASSWORD_MIN_LENGTH":                "auth.password.min_length (AUTH_PASSWORD_MIN_LENGTH)",
-		"AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS":   "auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
-		"AUTH_HTTP_DIRECT_PEER_IP":                "auth.http.direct_peer_ip (AUTH_HTTP_DIRECT_PEER_IP): set trusted_proxies",
-		"AUTH_ISSUERS":                            "auth.issuers (AUTH_ISSUERS)",
-		"AUTH_CONTROL_PLANE_ISSUER":               "auth.control_plane_issuer (AUTH_CONTROL_PLANE_ISSUER)",
-		"AUTH_REGISTRATION_ALLOW_MISSING_SENDERS": "auth.registration.allow_missing_senders (AUTH_REGISTRATION_ALLOW_MISSING_SENDERS)",
+		"AUTH_PASSWORD_MIN_LENGTH":              "auth.password_min_length (AUTH_PASSWORD_MIN_LENGTH)",
+		"AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS": "auth.token_allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
+		"AUTH_ISSUERS":                          "auth.issuers (AUTH_ISSUERS)",
 	} {
 		t.Run(env, func(t *testing.T) {
 			configPath, _ := isolate(t)

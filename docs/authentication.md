@@ -202,12 +202,12 @@ People sign in at `/admin` with the server's own AuthKit accounts, always offere
 2. A person who manages a merchant's people (or root's) invites someone by email with a role, in the console's **Access → People**.
 3. The invitee follows the emailed link to `/admin/invite` and creates an account, or accepts with the one they hold.
 
-The console then exchanges the session's token for one bound to the merchant the person picks: RFC 8693 at the server's token endpoint, as its `openrails-console` client, naming the merchant's id as `group_id` and binding the result to a DPoP key. The exchange is refused (`invalid_target`) where the person holds no role in that merchant and no root role. The session keeps its access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
+The console then exchanges the session's token for one bound to the merchant the person picks: RFC 8693 at the server's token endpoint, as its `openrails-console` client, naming the merchant's id as `group_id` and binding the result to a DPoP key. The exchange is refused (`invalid_target`) where the person holds no role in that merchant and no root role. Every sign-in proves the browser's DPoP key (RFC 9449), and the session is bound to it: its tokens go with a proof of that key, never as bearer tokens. The session keeps its access token in memory and a rotating HttpOnly refresh cookie (`__Host-authkit_rt` on HTTPS) that ends 30 days after sign-in; a revoked session answers `401 credential_revoked` at once.
 
 ```text
 staff browser (/admin)                server's AuthKit                     OpenRails API
-  | sign in, second factor --------------->|                                     |
-  |<------------- session token, refresh cookie                                  |
+  | sign in (DPoP proof), second factor -->|                                     |
+  |<------------- DPoP-bound session token, refresh cookie                       |
   | pick merchant M                        |                                     |
   | POST /oauth2/token                     |                                     |
   |   grant_type=token-exchange            |                                     |
@@ -235,6 +235,6 @@ The server always runs its own AuthKit, configured from the server's own setting
 - mints the tokens bound to OpenRails: customer tokens from assertions (RFC 7523) at its token endpoint, and the console's exchanged tokens;
 - holds each merchant's customer directory, which trusted issuers push to over SCIM at `/directory/scim/v2` ([customer contacts](standalone.md#customer-contacts));
 - serves its JWKS at its issuer plus `/.well-known/jwks.json`;
-- serves its staff accounts: sign-in, account security, invitations, and people, roles, API keys and signing keys under the console's **Access**.
+- serves its staff accounts at `/auth/v1`: sign-in, account security, invitations, and people, roles, API keys and signing keys under the console's **Access**.
 
 The hosted platform runs the same server with its own account policy.

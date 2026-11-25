@@ -34,6 +34,8 @@ import (
 
 type authorityWorld struct {
 	*world
+	// tb presents its sessions' DPoP proofs (authtest.Authorize).
+	tb                      testing.TB
 	storage                 *storageLink
 	auth                    *authkit.Client
 	authPool                *pgxpool.Pool
@@ -61,7 +63,7 @@ func newAuthorityWorld(t *testing.T, configure ...func(*world)) *authorityWorld 
 
 func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config), configure ...func(*world)) *authorityWorld {
 	t.Helper()
-	a := &authorityWorld{tenant: iam.NewTenantID()}
+	a := &authorityWorld{tenant: iam.NewTenantID(), tb: t}
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	a.signer, err = keys.SignerFromKey("critical-issuer", private)
@@ -97,7 +99,7 @@ func newAuthorityWorldWithAuth(t *testing.T, configureAuth func(*authkit.Config)
 			c.Tenancy, c.DefaultTenantID = authkit.TenancyMulti, a.tenant
 			c.Database.Schema, c.Database.RiverSchema = authSchema, authSchema
 			c.Roles = roles
-			c.TwoFactor.Mode = iam.TwoFactorDisabled
+			c.TwoFactor = iam.TwoFactorDisabled
 			if configureAuth != nil {
 				configureAuth(c)
 			}
@@ -172,6 +174,18 @@ func (a *authorityWorld) restart(t *testing.T) {
 	a.serve(t)
 }
 
+// browserSession is next with each request's bearer presented as the browser
+// holding its session's DPoP key would (authtest.Authorize): a fixture page
+// cannot sign with the key authtest keeps, so its proxy does.
+func browserSession(t testing.TB, ak *authkit.Client, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+			authtest.Authorize(t, ak, r, token)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func mustPermission(t *testing.T, text string) iam.Perm {
 	t.Helper()
 	var p iam.Perm
@@ -179,9 +193,12 @@ func mustPermission(t *testing.T, text string) iam.Perm {
 	return p
 }
 
+// remote is merchant's handle over HTTP with credential: a session
+// authtest bound goes as DPoP with a fresh proof, any other as Bearer.
 func (a *authorityWorld) remote(t *testing.T, merchant billing.MerchantID, credential string) *openrails.Client {
 	t.Helper()
-	r, err := openrails.NewRemote(a.server.URL, openrails.RemoteOptions{Credentials: map[billing.MerchantID]openrails.RemoteCredential{merchant: {APIKey: credential}}})
+	r, err := openrails.NewRemote(a.server.URL, openrails.RemoteOptions{Credentials: map[billing.MerchantID]openrails.RemoteCredential{merchant: {APIKey: credential}},
+		HTTPClient: &http.Client{Transport: authtest.Transport(t, a.auth, credential, nil)}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, r.Close(context.Background())) })
 	c, err := r.Merchant(merchant)
@@ -218,7 +235,9 @@ func (a *authorityWorld) doWith(ctx context.Context, client *http.Client, method
 		return 0, nil, err
 	}
 	if credential != "" {
-		request.Header.Set("Authorization", "Bearer "+credential)
+		// A browser's session goes as DPoP with a fresh proof; an API key or
+		// another issuer's token as Bearer.
+		authtest.Authorize(a.tb, a.auth, request, credential)
 	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
@@ -271,6 +290,8 @@ func (a *authorityWorld) signedToken(t *testing.T, change func(map[string]any, m
 		require.NoError(t, err)
 		require.NoError(t, json.Unmarshal(raw, into))
 	}
+	// Re-signed, it binds no key: a bearer token, as a host's own mint is.
+	delete(claims, "cnf")
 	change(header, claims)
 	h, err := json.Marshal(header)
 	require.NoError(t, err)

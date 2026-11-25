@@ -92,7 +92,7 @@ func publicBrowser(t *testing.T, a *authorityWorld, p *providerLedger, cases ...
 
 	target, err := url.Parse(a.server.URL)
 	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy := browserSession(t, a.auth, httputil.NewSingleHostReverseProxy(target))
 	var mu sync.Mutex
 	counts := map[string]int{}
 	mux := http.NewServeMux()

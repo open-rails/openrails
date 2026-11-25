@@ -4,8 +4,8 @@ The course store calling the `openrails` server it runs. Compose starts the
 app, PostgreSQL, Redis, Mailpit and the server, built from this checkout; the
 app's AuthKit is the server's trusted issuer ([standalone guide](../../docs/standalone.md)).
 
-- `main.go`: the app's AuthKit (it mints the browser's and the backend's tokens
-  and pushes users over SCIM) and the remote billing client.
+- `main.go`: the app's AuthKit (it mints the browser's and the backend's
+  tokens) and the remote billing client.
 - `openrails/config.yaml`, `openrails/merchant.example.yaml`: the server's
   configuration and its merchant manifest. The server makes the merchant at
   first boot; Compose's `merchant-id` step hands its id to the app

@@ -78,10 +78,9 @@ server's resource, its `public_url`, and its permissions are what
 your issuer grants the client, within the merchant's owner role:
 
 ```go guide:standalone-client
-cc := backendCredentials(s)
 tokens := (&clientcredentials.Config{
-	ClientID: cc.ClientID, ClientSecret: cc.ClientSecret, TokenURL: cc.TokenURL, Scopes: cc.Scopes,
-	EndpointParams: url.Values{"resource": {cc.Resource}},
+	ClientID: backendClient, ClientSecret: s.ClientSecret, TokenURL: s.PublicURL + "/oauth2/token",
+	Scopes: []string{"openrails:merchant"}, EndpointParams: url.Values{"resource": {s.OpenRailsURL}},
 }).TokenSource(context.WithoutCancel(ctx)) // caches each token until it expires
 remote, err := openrails.NewRemote(s.OpenRailsURL, openrails.RemoteOptions{Credentials: map[billing.MerchantID]openrails.RemoteCredential{
 	s.Merchant: {Token: func(context.Context) (string, error) {

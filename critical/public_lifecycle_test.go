@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/openrails"
 	openrailsfiber "github.com/open-rails/openrails/adapters/fiber"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
@@ -190,7 +191,7 @@ func TestPublicLifecycle(t *testing.T) {
 					r, err := http.NewRequestWithContext(t.Context(), "GET", "http://critical.invalid"+sample.path, nil)
 					require.NoError(t, err)
 					if sample.token != "" {
-						r.Header.Set("Authorization", "Bearer "+sample.token)
+						authtest.Authorize(t, a.auth, r, sample.token)
 					}
 					response, err := request(r)
 					require.NoError(t, err)

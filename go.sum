@@ -198,10 +198,10 @@ github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 h1:yf
 github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729/go.mod h1:hVoHR2EVESiICEMbg137etN/Lx+lSrHPTD39Z/uE+2s=
 github.com/onsi/gomega v1.10.1 h1:o0+MgICZLuZ7xjH7Vx6zS/zcu93/BEp1VwkIW1mEXCE=
 github.com/onsi/gomega v1.10.1/go.mod h1:iN09h71vgCQne3DLsj+A5owkum+a2tYe+TOCB1ybHNo=
-github.com/open-rails/authkit v1.54.0 h1:2N4nwC7yN+S6IJRRPNrLZKsB9JfioUsJOB+0sZjfhHM=
-github.com/open-rails/authkit v1.54.0/go.mod h1:JqPFk8OZDYhRtKq5iyfaZU1TZV2I55lhDWcbonad1lA=
-github.com/open-rails/helpers v1.22.0 h1:82aru2uFI2LQpmDlCAAmhNG3RLyvWJN+muos2ZCGMVE=
-github.com/open-rails/helpers v1.22.0/go.mod h1:zYjaT7bwVqSiLYgXw+qvqw2hgLxnIFNzsEjEvscK4xw=
+github.com/open-rails/authkit v1.56.0 h1:6fOFQi2Q7rvdQ0MdLls12T0Gjh/Mcqx02LY+V116eXQ=
+github.com/open-rails/authkit v1.56.0/go.mod h1:G4gfpS95panM0Il2eZd3IxtMDvmjRlTjE5ut92vF7NI=
+github.com/open-rails/helpers v1.22.1 h1:TGSebGApvAiWwiSkmjv1RFP4ToX/hsJBeT4u/cuOklI=
+github.com/open-rails/helpers v1.22.1/go.mod h1:zYjaT7bwVqSiLYgXw+qvqw2hgLxnIFNzsEjEvscK4xw=
 github.com/open-rails/migratekit v1.11.4 h1:68sOEfsOg1954+qGKjXI7XvrVIA44x1G7uJeAzeixnM=
 github.com/open-rails/migratekit v1.11.4/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
 github.com/paulmach/orb v0.14.0 h1:GE96348pAD+JkRTp8z5YMiPd1lqUEcFIFGi20C2n5uM=

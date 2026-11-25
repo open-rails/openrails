@@ -12,6 +12,9 @@ package main
 
 import (
 	"context"
+	"crypto"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -30,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/keys"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -90,11 +94,19 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 		return err
 	}
 	defer pool.Close()
-	keys, err := os.MkdirTemp("", "paymentpage-keys-")
+	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(keys)
+	signer, err := keys.SignerFromKey("paymentpage", private)
+	if err != nil {
+		return err
+	}
+	// Staff need a second factor: authenticator apps need a TOTP key.
+	totp := make([]byte, 32)
+	if _, err := rand.Read(totp); err != nil {
+		return err
+	}
 
 	h := &harness{clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second)), api: api, payment: payment, domain: "127.0.0.1"}
 	h.nmi = nmimock.New(nmimock.Options{Clock: h.clock.Now})
@@ -114,10 +126,9 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 					"stripe": openrails.StripePSP{Environment: billing.EnvironmentTest, AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
 				}}}},
 		},
-		Auth:    server.AuthConfig{Keys: server.AuthKeys{Path: keys}}, // a loopback issuer's development keys
-		AuthKit: func(c *authkit.Config) { c.Registration.AllowMissingSenders = true },
 	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets),
-		ProviderEndpoints: openrails.ProviderEndpoints{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()}}})
+		ProviderEndpoints: openrails.ProviderEndpoints{NMIGatewayURL: h.nmi.URL(), StripeAPIURL: h.stripe.URL()}},
+		Auth: authkit.Deps{KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}, TOTP: totp}}})
 	if err != nil {
 		return err
 	}

@@ -25,7 +25,7 @@ import type { BillingAdminMerchant, BillingAdminProps } from "./types"
 import { useAdminTheme } from "./theme"
 
 export interface AdminConsoleProps {
-  /** AuthKit's JSON API mount, e.g. `/api/v1`. */
+  /** AuthKit's JSON API mount, e.g. `/auth/v1`. */
   authBaseUrl: string
   /** The engine's API prefix, including /v1. */
   billingBaseUrl: string

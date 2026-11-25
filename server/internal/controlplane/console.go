@@ -37,7 +37,7 @@ func (c *ControlPlane) RootConsoleSources(ctx context.Context) ([]adminconsole.S
 
 // SecondFactor fails while the server's accounts need a second factor staff
 // cannot enroll: AuthKit's authkit_two_factor probe, or authenticator apps
-// (TOTP) offered without their key.
+// (TOTP) unavailable for want of their key.
 func (c *ControlPlane) SecondFactor(ctx context.Context) error {
 	if c == nil || c.client == nil || !c.secondFactor {
 		return nil
@@ -49,8 +49,8 @@ func (c *ControlPlane) SecondFactor(ctx context.Context) error {
 			}
 		}
 	}
-	if c.totp && !slices.Contains(c.client.TwoFactorMethods(), iam.TwoFactorTOTP) {
-		return errors.New("controlplane: staff need a second factor, but authenticator apps are unavailable: put a 16, 24 or 32-byte key in totp.key beside keys.json (AUTH_KEYS_PATH)")
+	if !slices.Contains(c.client.TwoFactorMethods(), iam.TwoFactorTOTP) {
+		return errors.New("controlplane: staff need a second factor, but authenticator apps are unavailable: put a 16, 24 or 32-byte key in totp.key beside keys.json")
 	}
 	return nil
 }

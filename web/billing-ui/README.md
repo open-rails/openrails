@@ -22,7 +22,7 @@ provenance; pin the exact version: `pnpm add @openrails/billing-ui@X.Y.Z`.
 import { BillingProvider, createBillingClient } from "@openrails/billing-ui"
 
 // Embedded: your app's own mount, with your auth's fetch (auth-ui's authFetch
-// attaches the bearer and retries once after a refresh).
+// attaches the DPoP-bound token and its proof, and retries once after a refresh).
 const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
 
 <BillingProvider client={billing} appearance={{ theme: "auto" }}>
@@ -126,7 +126,7 @@ Needs `@tanstack/react-query`. `AdminConsole` is the whole staff console, AuthKi
 account administration and billing together (needs `@openrails/auth-ui`):
 
 ```tsx
-<AdminConsole authBaseUrl="/api/v1" billingBaseUrl="/billing/v1" merchant={merchant} basePath="/admin" />
+<AdminConsole authBaseUrl="/auth/v1" billingBaseUrl="/billing/v1" merchant={merchant} basePath="/admin" />
 ```
 
 `BillingAdmin` is the billing pages alone, inside your own admin app:

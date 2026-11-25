@@ -53,8 +53,34 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		w := newStandaloneWorld(t, func(c map[string]any) { c["StaffMFA"] = true })
 		var user struct{ ID, Email, Password string }
 		w.command(t, map[string]any{"Op": "new-user"}, &user)
+		// The browser's key: a sign-in proves it, and the session's tokens
+		// go with its proofs.
+		key := authtest.NewDPoPKey(t)
+		call := func(path, token string, body any, prove bool) (int, []byte) {
+			data, err := json.Marshal(body)
+			require.NoError(t, err)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.URL+path, bytes.NewReader(data))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			switch {
+			case token != "":
+				key.Authorize(t, req, token, "")
+			case prove:
+				req.Header.Set("DPoP", key.Proof(t, http.MethodPost, w.URL+path, "", ""))
+			}
+			response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+			require.NoError(t, err)
+			defer response.Body.Close()
+			raw, err := io.ReadAll(response.Body)
+			require.NoError(t, err)
+			return response.StatusCode, raw
+		}
+		credentials := map[string]string{"identifier": user.Email, "password": user.Password}
+		status, raw := call("/auth/v1/password/login", "", credentials, false)
+		require.Equal(t, http.StatusUnauthorized, status, "a sign-in proves a DPoP key: %s", raw)
+		require.Contains(t, string(raw), "sender_proof_required")
 		login := func() map[string]any {
-			status, raw := w.request(t, http.MethodPost, "/auth/v1/password/login", "", map[string]string{"identifier": user.Email, "password": user.Password})
+			status, raw := call("/auth/v1/password/login", "", credentials, true)
 			require.Equal(t, http.StatusOK, status, string(raw))
 			var out map[string]any
 			require.NoError(t, json.Unmarshal(raw, &out))
@@ -66,14 +92,16 @@ func TestStandaloneAuthSurface(t *testing.T) {
 		step := first["enrollment"].(map[string]any)
 		require.Contains(t, step["allowed_methods"], "totp")
 		enrollment := step["token_set"].(map[string]any)["access_token"].(string)
-		status, raw := w.request(t, http.MethodGet, "/auth/v1/capabilities", "", nil)
+		status, raw = w.request(t, http.MethodGet, "/auth/v1/capabilities", "", nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Contains(t, string(raw), `"totp"`, "authenticator apps are offered")
 		status, raw = w.request(t, http.MethodPost, "/auth/v1/me/2fa/setup", enrollment, map[string]string{"method": "totp"})
+		require.Equal(t, http.StatusUnauthorized, status, "a bound token is no bearer: %s", raw)
+		status, raw = call("/auth/v1/me/2fa/setup", enrollment, map[string]string{"method": "totp"}, false)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var setup struct{ Secret string }
 		require.NoError(t, json.Unmarshal(raw, &setup))
-		status, raw = w.request(t, http.MethodPost, "/auth/v1/me/2fa/factors", enrollment, map[string]string{"method": "totp", "code": authtest.TOTPCode(t, setup.Secret, time.Now())})
+		status, raw = call("/auth/v1/me/2fa/factors", enrollment, map[string]string{"method": "totp", "code": authtest.TOTPCode(t, setup.Secret, time.Now())}, false)
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.Contains(t, string(raw), `"access_token"`, "enrolling finishes the sign-in")
 		second := login()
@@ -249,8 +277,8 @@ func TestStandaloneAuthSurface(t *testing.T) {
 			says  []string
 		}{
 			{"key", map[string]any{"auth": map[string]any{"password": map[string]any{"min_length": 12}}}, "", []string{"auth.password.min_length (AUTH_PASSWORD_MIN_LENGTH)", derived}},
-			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", []string{"auth.token.issuer (AUTH_TOKEN_ISSUER): set public_url", derived}},
-			{"private", nil, "AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS=true", []string{"auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)", derived}},
+			{"env", nil, "AUTH_TOKEN_ISSUER=https://billing.critical.invalid", []string{"auth.token_issuer (AUTH_TOKEN_ISSUER)", derived}},
+			{"private", nil, "AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS=true", []string{"auth.token_allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)", derived}},
 			{"local", map[string]any{"local_sign_in": true}, "", []string{"local_sign_in / LOCAL_SIGN_IN was removed"}},
 			{"console", map[string]any{"admin_console": map[string]any{"issuers": map[string]any{}}}, "", []string{"admin_console.issuers / ADMIN_CONSOLE_ISSUERS was removed", "openrails-console"}},
 		} {

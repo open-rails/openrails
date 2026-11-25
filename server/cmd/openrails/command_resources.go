@@ -53,9 +53,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if err != nil {
 		return nil, err
 	}
-	// An operator command declares what it registers: its applications may
-	// read their keys on a private network.
-	opts := controlplane.Options{KeysPath: h.Server.Auth.Keys.Path, Naming: h.Server.Naming, Console: !h.Server.AdminConsole.Disabled, Configure: privateNetworkKeys}
+	opts := controlplane.Options{Naming: h.Server.Naming, Console: !h.Server.AdminConsole.Disabled}
 	akCfg, err := controlplane.AuthKit(&h.Server.Engine, opts)
 	if err != nil {
 		return nil, err
@@ -69,7 +67,12 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 		return nil, err
 	}
 	c.cleanups = append(c.cleanups, pool.Close)
-	deps := authkit.Deps{Postgres: pool, Logger: slog.Default()}
+	source, closeKeys, err := hostdeps.AuthKeys(slog.Default(), h)
+	if err != nil {
+		return nil, err
+	}
+	c.cleanups = append(c.cleanups, closeKeys)
+	deps := authkit.Deps{Postgres: pool, Logger: slog.Default(), KeySource: source}
 	if h.SMTP != nil {
 		sender, err := hostdeps.NewEmailSender(*h.SMTP)
 		if err != nil {

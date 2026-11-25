@@ -64,24 +64,6 @@ type AdminConsole struct {
 	OwnAccountsOnly bool `yaml:"-"`
 }
 
-// AuthConfig is Config.Auth: what a deployment states about the server's
-// AuthKit. OpenRails derives the rest from the engine's settings: the issuer
-// and resource (Engine.PublicURL), its schema
-// (<database.schema>_auth), the client-IP posture, and the rules of the
-// server's own accounts.
-type AuthConfig struct {
-	// Keys is where AuthKit's keys live.
-	Keys AuthKeys `yaml:"keys"`
-}
-
-// AuthKeys is AuthConfig.Keys.
-type AuthKeys struct {
-	// Path is the directory holding AuthKit's signing keys (keys.json) and its
-	// authenticator-app key (totp.key). Empty is /vault/auth, or for a
-	// loopback public_url development keys AuthKit generates.
-	Path string `yaml:"path"`
-}
-
 // Config is a standalone deployment: plain data, as the openrails binary's
 // configuration file spells it (the yaml keys). New fills a setting left zero
 // from DefaultConfig.
@@ -94,19 +76,14 @@ type Config struct {
 	// Host, and must also be apart from AuthKit's issuer and public URLs.
 	Engine openrails.Config `yaml:",inline"`
 
-	// Auth is what the deployment states about the server's AuthKit, which
-	// decides who every request is; the server maps merchants to AuthKit
-	// groups. Its own accounts are staff: they join by invitation, need a
-	// second factor (a passkey or an authenticator app) and stay signed in
-	// for 30 days.
-	Auth AuthConfig `yaml:"auth"`
 	// AuthKit adjusts the AuthKit configuration the server derives, before
 	// the product's invariants are applied: the merchant roles, the API key
-	// prefix, the issued audience, the resource's billing scopes, the
-	// console's OAuth client, the client-IP posture and the HTTP mount. A
-	// hosted product sets its account policy here (open registration with
-	// MerchantCreation, agreements, usernames, group OAuth clients, SMS). Set
-	// in code.
+	// prefix, the resource's billing scopes, the console's OAuth client and
+	// the client-IP posture. The server's own accounts are staff: they join
+	// by invitation and need a second factor. A hosted product sets its
+	// account policy here (open registration with MerchantCreation,
+	// agreements, usernames, group OAuth clients, SMS countries). Set in
+	// code.
 	AuthKit func(*authkit.Config) `yaml:"-"`
 	// Naming is the rename policy for merchant names: renames allowed every
 	// 72 hours, a former name forwarding and reserved 90 days. AuthKit's
@@ -204,7 +181,9 @@ type Deps struct {
 	// its signing key source and the rest of authkit.Deps. Nil Postgres is a
 	// pool of its own on the engine's database, nil Redis the engine's, nil
 	// Logger the engine's, and nil Email renders AuthKit's email and sends it
-	// through the engine's sender.
+	// through the engine's sender. Nil KeySource reads keys.json and totp.key
+	// in /vault/auth, or for a loopback public_url development keys AuthKit
+	// generates.
 	Auth authkit.Deps
 	// CustomerAdmissionPolicy may refuse an otherwise verified ordinary customer
 	// request before automatic customer admission. The original identity and
@@ -257,7 +236,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		}
 	}
 	consoleEnabled := !cfg.AdminConsole.Disabled
-	opts := controlplane.Options{KeysPath: cfg.Auth.Keys.Path, Naming: cfg.Naming, Console: consoleEnabled, Configure: cfg.AuthKit}
+	opts := controlplane.Options{Naming: cfg.Naming, Console: consoleEnabled, Configure: cfg.AuthKit}
 	if c := cfg.MerchantCreation; c != nil {
 		opts.MerchantCreation = &controlplane.MerchantCreationConfig{ReservedSlugs: c.ReservedSlugs, ReservedEscalationRole: c.ReservedEscalationRole, SlugPattern: c.SlugPattern}
 	}

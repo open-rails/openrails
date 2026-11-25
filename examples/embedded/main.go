@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	authkitgin "github.com/open-rails/authkit/adapters/gin"
+	"github.com/open-rails/authkit/adapters/logsender"
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails"
@@ -42,16 +43,16 @@ const issuer = "http://localhost:8080"
 
 // newAuth is a development AuthKit with the README's roles: open
 // registration, development signing keys AuthKit generates for a loopback
-// issuer, and its own River client (ak.Start runs it).
+// issuer, sign-up codes in the log, and its own River client (ak.Start runs
+// it).
 func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authkit.Client, error) {
 	return authkit.New(ctx, authkit.Config{
-		Database:     authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
-		Token:        authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{"onlydemo"}},
-		Roles:        rbac,
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true}, // the React app keeps its session in an HttpOnly cookie
-		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
-		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
-	}, authkit.Deps{Postgres: db}) // the same pool OpenRails uses
+		Database:  authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
+		Issuer:    issuer,
+		Roles:     rbac,
+		HTTP:      &authkit.HTTPConfig{DirectPeerIP: true}, // the API at /auth/v1
+		TwoFactor: iam.TwoFactorDisabled,
+	}, authkit.Deps{Postgres: db, Email: logsender.Email{}}) // the same pool OpenRails uses
 }
 
 // newBilling builds the billing engine and the handle of your merchant: the
@@ -155,7 +156,7 @@ func run(ctx context.Context) error {
 	// guide:end
 
 	r := gin.Default()
-	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /api/v1
+	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /auth/v1
 		return err
 	}
 	// guide:embedded-mount

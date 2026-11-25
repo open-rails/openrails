@@ -17,11 +17,7 @@ func checkCheckoutOrigin(cfg Config, auth authkit.Config) error {
 	if strings.TrimSpace(cfg.Engine.CheckoutOrigin) == "" {
 		return nil
 	}
-	forbidden := []string{cfg.Engine.PublicURL, auth.Token.Issuer, auth.Frontend.BaseURL}
-	if auth.HTTP != nil {
-		forbidden = append(forbidden, auth.HTTP.PublicURL)
-	}
-	_, err := paymentpage.Origin(cfg.Engine.CheckoutOrigin, forbidden...)
+	_, err := paymentpage.Origin(cfg.Engine.CheckoutOrigin, cfg.Engine.PublicURL, auth.Issuer, auth.FrontendURL)
 	return err
 }
 

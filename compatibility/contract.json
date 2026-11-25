@@ -1428,9 +1428,7 @@
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
       "type AdminConsole struct {\n\tDisabled bool `yaml:\"disabled\"`\n\n\tOwnAccountsOnly bool `yaml:\"-\"`\n}",
-      "type AuthConfig struct {\n\tKeys AuthKeys `yaml:\"keys\"`\n}",
-      "type AuthKeys struct {\n\tPath string `yaml:\"path\"`\n}",
-      "type Config struct {\n\tEngine openrails.Config `yaml:\",inline\"`\n\n\tAuth AuthConfig `yaml:\"auth\"`\n\n\tAuthKit func(*authkit.Config) `yaml:\"-\"`\n\n\tNaming billing.NamingConfig `yaml:\"-\"`\n\n\tMerchantCreation *MerchantCreationConfig `yaml:\"-\"`\n\n\tAdminConsole AdminConsole `yaml:\"admin_console\"`\n\n\tPort int `yaml:\"port\"`\n\n\tMetricsPort int `yaml:\"metrics_port\"`\n}",
+      "type Config struct {\n\tEngine openrails.Config `yaml:\",inline\"`\n\n\tAuthKit func(*authkit.Config) `yaml:\"-\"`\n\n\tNaming billing.NamingConfig `yaml:\"-\"`\n\n\tMerchantCreation *MerchantCreationConfig `yaml:\"-\"`\n\n\tAdminConsole AdminConsole `yaml:\"admin_console\"`\n\n\tPort int `yaml:\"port\"`\n\n\tMetricsPort int `yaml:\"metrics_port\"`\n}",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tAuth authkit.Deps\n\n\tCustomerAdmissionPolicy func(context.Context, auth.Verified, openrails.CustomerBinding) error\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tConsoleAssets fs.FS\n}",
       "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}",
       "type Server struct {\n}"

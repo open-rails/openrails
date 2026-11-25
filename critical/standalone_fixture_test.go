@@ -5,6 +5,7 @@ package critical_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -141,9 +142,7 @@ func (w *standaloneWorld) request(t *testing.T, method, path, token string, body
 	req, err := http.NewRequestWithContext(t.Context(), method, w.URL+path, bytes.NewReader(raw))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	w.authorize(t, req, token)
 	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	require.NoError(t, err)
 	defer response.Body.Close()
@@ -160,9 +159,7 @@ func (w *standaloneWorld) send(t *testing.T, method, path, token string, headers
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	w.authorize(t, req, token)
 	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	require.NoError(t, err)
 	defer response.Body.Close()
@@ -170,6 +167,46 @@ func (w *standaloneWorld) send(t *testing.T, method, path, token string, headers
 	require.NoError(t, err)
 	return response.StatusCode, response.Header, data
 }
+
+// authorize presents token on req as a browser does: a session the server's
+// AuthKit bound to a DPoP key goes with a fresh proof the fixture makes, as it
+// holds the key; any other token as Bearer.
+func (w *standaloneWorld) authorize(t *testing.T, req *http.Request, token string) {
+	t.Helper()
+	if token == "" {
+		return
+	}
+	if !dpopBound(token) {
+		req.Header.Set("Authorization", "Bearer "+token)
+		return
+	}
+	target := *req.URL
+	target.RawQuery = ""
+	var headers map[string]string
+	w.command(t, map[string]any{"Op": "dpop", "Body": map[string]string{"Method": req.Method, "URL": target.String(), "Token": token}}, &headers)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+}
+
+// dpopBound reports a JWT whose cnf names a DPoP key (RFC 9449 §6.1).
+func dpopBound(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	var claims struct {
+		Cnf struct {
+			JKT string `json:"jkt"`
+		} `json:"cnf"`
+	}
+	return json.Unmarshal(payload, &claims) == nil && claims.Cnf.JKT != ""
+}
+
 func (w *standaloneWorld) command(t *testing.T, in any, out any) {
 	t.Helper()
 	data, err := json.Marshal(in)
