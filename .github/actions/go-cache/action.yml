@@ -1,9 +1,11 @@
 name: Go caches
 description: >-
-  Restores a family of Go build/module caches. Only a push to rc/** or master
-  saves one, in that branch's scope, and then deletes the family's older
-  entries there: one current entry per family and base. Pull requests restore
-  their base's; dispatches on the RC its own; everything else master's.
+  After go-remote-cache: restores a family of Go build/module caches. With the
+  remote build cache on (GOCACHEPROG), Go never reads GOCACHE, so only the
+  module cache is kept, one entry per go.sum for every family. Only a push to
+  rc/** or master saves, in that branch's scope, and then deletes the family's
+  older entries there. Pull requests restore their base's; dispatches on the
+  RC its own; everything else master's.
 
 inputs:
   family:
@@ -23,11 +25,17 @@ runs:
         FAMILY: ${{ inputs.family }}
       run: |
         modules="$(go env GOMODCACHE)"
+        sum="$(cat go.sum server/go.sum examples/go.sum | sha256sum | cut -c1-16)"
         # setup-go installs go.mod's go line; its own go env then downloads the
         # toolchain line's release into the module cache. Restoring that over
         # itself fails, so the toolchain stays out of the cache.
+        if [[ -n "${GOCACHEPROG:-}" ]]; then
+          printf 'paths<<EOF\n%s\n!%s/golang.org/toolchain@*\nEOF\n' "$modules" "$modules" >> "$GITHUB_OUTPUT"
+          family="go-v4-${RUNNER_OS}-modules-"
+          printf 'family=%s\nprefix=%s\nsum=%s\nkey=%s\n' "$family" "$family" "$family" "$family$sum" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
         printf 'paths<<EOF\n%s\n%s\n!%s/golang.org/toolchain@*\nEOF\n' "$(go env GOCACHE)" "$modules" "$modules" >> "$GITHUB_OUTPUT"
-        sum="$(cat go.sum server/go.sum examples/go.sum | sha256sum | cut -c1-16)"
         # cgo objects differ between runner images, and so does everything built on them.
         family="go-v4-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-$FAMILY-"
         prefix="$family$(go env GOVERSION)-"

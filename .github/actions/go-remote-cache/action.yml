@@ -1,0 +1,21 @@
+name: Remote Go build cache
+description: >-
+  Before go-cache (which then keeps only modules): Go's build cache in the shared R2 bucket, through
+  GOCACHEPROG and -trimpath (scripts/go-remote-cache.sh). Pushes to rc/** and
+  master write to it; pull requests, merge groups and dispatches read it. A run
+  without credentials (a fork's pull request), an unreachable bucket or a failed
+  setup keeps Go's own cache. To turn it off, delete the GO_REMOTE_CACHE_RW and
+  GO_REMOTE_CACHE_RO secrets.
+
+inputs:
+  credentials:
+    description: The GO_REMOTE_CACHE_RW or GO_REMOTE_CACHE_RO secret; empty turns it off.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Use the remote Go build cache
+      shell: bash
+      env:
+        GO_REMOTE_CACHE_CREDENTIALS: ${{ inputs.credentials }}
+      run: bash scripts/go-remote-cache.sh ci

@@ -69,6 +69,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: critical
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       - name: Build the driver
         working-directory: scripts/load
         run: GOWORK=off go build -o "$RUNNER_TEMP/load" .
