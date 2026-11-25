@@ -42,6 +42,7 @@ migration 0046_mrr_keyed_reads.up.sql sha256:3d48a85fc96faea77697c4e71260216ae3d
 migration 0047_usage_receivable.up.sql sha256:e03ef2a943130a26447ce0f63a55724a77e2f2d282441be4664a12aa628a9ee2
 migration 0048_checkout_analytics.up.sql sha256:dcacd14f32148717d7be07654f4ce8d7f989a7a113b39ec4508cfdd86f76f38b
 migration 0049_merchant_controls.up.sql sha256:05e5d9df346d3db1f9c796c5b1bda6896847821f50342bead3d5b6d0836213d1
+migration 0050_price_quantity_identity.up.sql sha256:12cd85f601f043351b66f219a45f266826a6ce46fb42c7fc8e2003c1948bc65c
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -2528,7 +2529,7 @@ table billing.prices
   constraint prices_key_nonempty_check CHECK ((btrim(key) <> ''::text))
   constraint prices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint prices_pkey PRIMARY KEY (merchant_id, id)
-  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default)
+  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default, quantity)
   constraint prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
   constraint prices_product_key_revision_key UNIQUE (merchant_id, product_id, key, revision)
   constraint prices_provider_access_default_check CHECK (((NOT provider_access_default) OR (provider_owned AND (access_duration_hours IS NULL))))
@@ -2546,7 +2547,7 @@ table billing.prices
   index CREATE UNIQUE INDEX prices_id_product_id_key ON billing.prices USING btree (merchant_id, id, product_id)
   index CREATE UNIQUE INDEX prices_key_key ON billing.prices USING btree (merchant_id, product_id, key) WHERE (NOT archived)
   index CREATE UNIQUE INDEX prices_pkey ON billing.prices USING btree (merchant_id, id)
-  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default) NULLS NOT DISTINCT
+  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, billing_interval_months, provider_access_default, quantity) NULLS NOT DISTINCT
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
   index CREATE INDEX prices_public_id_idx ON billing.prices USING btree (merchant_id, sha256((public_id)::bytea))
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
