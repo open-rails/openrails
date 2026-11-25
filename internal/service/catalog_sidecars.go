@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -14,11 +15,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 type CatalogMeterSpec struct {
@@ -207,6 +210,9 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 			continue
 		}
 		replacement := catalogrules.Meter{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit, GroupBy: m.GroupBy}
+		if err := checkCatalogMeterLimitCounts(ctx, gen.New(tx), merchantID, replacement); err != nil {
+			return err
+		}
 		if err := money.CheckCatalogMeterChange(ctx, tx, merchantID, m.Key, &replacement); err != nil {
 			return err
 		}
@@ -237,6 +243,20 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 		if err := money.CheckCatalogRateCardContracts(ctx, tx, merchantID, effective, c.Filter, price); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func checkCatalogMeterLimitCounts(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, meter catalogrules.Meter) error {
+	if catalogrules.BillingSupported(meter.Aggregation) {
+		return nil
+	}
+	counted, err := q.ListCatalogLimitsUsingMeters(ctx, gen.ListCatalogLimitsUsingMetersParams{MerchantID: merchantID, MeterKeys: []string{meter.Key}})
+	if err != nil {
+		return err
+	}
+	if len(counted) > 0 {
+		return apperr.New(http.StatusConflict, billing.CodeMeterInUse, fmt.Sprintf("limit %q counts meter %q; its aggregation must remain sum or count", counted[0], meter.Key))
 	}
 	return nil
 }

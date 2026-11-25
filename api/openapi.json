@@ -1645,6 +1645,7 @@
           "catalog_revision_conflict",
           "currency_unsupported",
           "event_store_required",
+          "meter_in_use",
           "price_not_sellable",
           "product_not_found",
           "product_tier_group_conflict",

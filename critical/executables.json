@@ -103,6 +103,9 @@
     "OR-J05-S15": [
       "TestPublicCatalog/OR-J05-S15/product-creates-retry-by-content-including-concurrently"
     ],
+    "OR-J05-S16": [
+      "TestPublicCatalog/OR-J05-S16/quantity-only-price-versions-and-document-apply"
+    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],
