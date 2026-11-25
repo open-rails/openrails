@@ -36,6 +36,49 @@ func TestReportingMRR(t *testing.T) {
 	t.Run("OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions", mrrOnRollups)
 	t.Run("OR-J42-S31/an-archive-from-before-the-reporting-rollups-restores-them-rebuilt-from-its-movements", rollupsRebuiltOnRestore)
 	t.Run("OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles", mrrLeaves)
+	t.Run("OR-J42-S33/a-refund-that-revokes-access-finalizes-and-takes-the-customer-out-once", mrrRefunded)
+}
+
+// distinctCustomers is the merchant's customers with MRR, as their totals
+// row has it, which agrees with their flows summed.
+func distinctCustomers(t *testing.T, w *world) int64 {
+	t.Helper()
+	mid := w.alpha.MerchantID().UUID()
+	var n int64
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE((SELECT customers FROM "+booksTable(w, "mrr_customer_totals")+" WHERE merchant_id = $1), 0)",
+		mid).Scan(&n))
+	var flows int64
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(logos), 0)::bigint FROM "+booksTable(w, "mrr_customer_flows")+" WHERE merchant_id = $1",
+		mid).Scan(&flows))
+	require.Equal(t, n, flows, "the distinct customers are their flows summed")
+	return n
+}
+
+// A full refund that revokes access ends a subscription whose MRR counted
+// its customer: the refund finalizes, its replay returns it, and the
+// customer leaves the distinct customers once, as one churn.
+func mrrRefunded(t *testing.T) {
+	a, _, sub := purchasedMembershipWith(t, 7*24)
+	require.EqualValues(t, 1, distinctCustomers(t, a.world))
+	a.clock.Advance(time.Hour)
+	paid, err := a.alpha.ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: sub.ID})
+	require.NoError(t, err)
+	require.Len(t, paid.Items, 1)
+	params := billing.RefundPaymentParams{Full: true, RevokeAccess: true, Reason: "Refund and end"}
+	refund, err := a.alpha.RefundPayment(t.Context(), "refund-and-leave", paid.Items[0].ID, params)
+	require.NoError(t, err)
+	require.Equal(t, billing.PaymentSucceeded, refund.Status, "the refund finalizes")
+	subscriptionState(t, a, sub.ID, "canceled")
+	replay, err := a.alpha.RefundPayment(t.Context(), "refund-and-leave", paid.Items[0].ID, params)
+	require.NoError(t, err)
+	require.Equal(t, refund.ID, replay.ID)
+	require.Equal(t, billing.PaymentSucceeded, replay.Status)
+
+	require.EqualValues(t, 0, distinctCustomers(t, a.world), "the customer left once")
+	moves := mrrMoves(t, a.world, a.alpha, customerOf(a.alice))
+	require.Equal(t, []string{mrrKind("USD", "new", weeklyTenMRR), mrrKind("USD", "churn", -weeklyTenMRR)}, mrrKinds(moves), "one churn")
+	require.Equal(t, -1, moves[1].Logo)
+	require.Equal(t, [3]int64{0, 0, 0}, mrrTotals(t, a.world, a.alpha, "USD"))
 }
 
 // MRR leaving a product, a currency and a customer settles, each fall moving
@@ -54,17 +97,7 @@ func mrrLeaves(t *testing.T) {
 	eur := buyAs(t, a, p, a.aliceToken, euro, 120_000_000, "s32-eur")
 	bob := buyAs(t, a, p, a.bobToken, year, 120_000_000, "s32-bob")
 	mid := a.alpha.MerchantID().UUID()
-	customers := func() int64 {
-		t.Helper()
-		var n int64
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE((SELECT customers FROM "+booksTable(a.world, "mrr_customer_totals")+" WHERE merchant_id = $1), 0)",
-			mid).Scan(&n))
-		var flows int64
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT COALESCE(sum(logos), 0)::bigint FROM "+booksTable(a.world, "mrr_customer_flows")+" WHERE merchant_id = $1",
-			mid).Scan(&flows))
-		require.Equal(t, n, flows, "the distinct customers are their flows summed")
-		return n
-	}
+	customers := func() int64 { return distinctCustomers(t, a.world) }
 	products := func() map[string]int64 {
 		t.Helper()
 		rows, err := a.pool.Query(t.Context(), "SELECT currency || ' ' || mrr::text || ' ' || subscribers::text FROM "+booksTable(a.world, "mrr_product_totals")+

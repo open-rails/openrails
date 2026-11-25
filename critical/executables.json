@@ -727,6 +727,9 @@
       "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts/refuses-a-card-counts-cannot-express",
       "TestLimitCountsMigration/OR-J31-S16/stored-limit-rate-cards-become-counts"
     ],
+    "OR-J31-S17": [
+      "TestCancellationsMigration/OR-J31-S17/an-upgrade-through-the-reporting-rollups-adopts-cancel-decisions-of-every-kind"
+    ],
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
     ],
@@ -1575,6 +1578,9 @@
     ],
     "OR-J42-S32": [
       "TestReportingMRR/OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles"
+    ],
+    "OR-J42-S33": [
+      "TestReportingMRR/OR-J42-S33/a-refund-that-revokes-access-finalizes-and-takes-the-customer-out-once"
     ],
     "OR-J28-S09": [
       "TestProviderTime/OR-J28-S09/an-nmi-nonce-signs-a-delivery-and-its-event-applies-once"
