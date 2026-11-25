@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
@@ -103,6 +108,57 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	}
 
 	return snap, nil
+}
+
+// ccbillTransactionKey ignores leading zeros: a CCBill id is a number.
+func ccbillTransactionKey(id string) string { return strings.TrimLeft(strings.TrimSpace(id), "0") }
+
+// listedCCBillRebills is the keys of the rebills a snapshot lists.
+func listedCCBillRebills(snap *RemoteSnapshot) map[string]bool {
+	out := map[string]bool{}
+	for _, t := range snap.Transactions {
+		if t.Type == TransactionTypeSale && t.TransactionID != "" {
+			out[ccbillTransactionKey(t.TransactionID)] = true
+		}
+	}
+	return out
+}
+
+// unconfirmedCCBillRebills reports callback rebills in [since, until) that DataLink does not list.
+func unconfirmedCCBillRebills(ctx context.Context, q *gen.Queries, merchantID, pspID uuid.UUID, since, until time.Time, listed map[string]bool) ([]Finding, error) {
+	rows, err := q.ReconcileListCallbackRebills(ctx, gen.ReconcileListCallbackRebillsParams{MerchantID: merchantID, PspID: pspID, Since: since, Until: until})
+	if err != nil {
+		return nil, err
+	}
+	var out []Finding
+	for _, p := range rows {
+		if listed[ccbillTransactionKey(p.TransactionID)] {
+			continue
+		}
+		local := map[string]any{"payment_id": p.ID.String(), "customer_id": p.CustomerID.String(), "transaction_id": p.TransactionID,
+			"amount": strconv.FormatInt(p.Amount, 10), "currency": p.Currency, "received_at": p.PurchasedAt.UTC()}
+		if p.SubscriptionID != nil {
+			local["subscription_id"] = p.SubscriptionID.String()
+		}
+		out = append(out, Finding{
+			Provider:          ProviderCCBill,
+			Type:              FindingChargeUnconfirmed,
+			SubjectKey:        p.TransactionID,
+			Severity:          SeverityCritical,
+			Status:            FindingStatusRequiresReview,
+			RequiresAdmin:     true,
+			RecommendedAction: "CCBill's DataLink does not list this rebill, recorded from an unsigned callback; check the transaction in CCBill's admin before trusting the payment and the period it paid for",
+			LocalEvidence:     local,
+			RemoteEvidence:    map[string]any{"source": "ccbill_datalink_export", "window_since": since.UTC(), "window_until": until.UTC()},
+		})
+	}
+	return out, nil
+}
+
+// ccbillAccessEndedWhileListed reports a CCBill lapse that already ended access.
+func ccbillAccessEndedWhileListed(provider Provider, s *LocalSubscription, now time.Time) bool {
+	return provider == ProviderCCBill && s.Status == string(models.StatusCanceled) && s.CancelType == string(models.CancelTypeExpired) &&
+		s.EndedAt != nil && !s.EndedAt.After(now)
 }
 
 // CCBillRemoteSubscription is one ACTIVEMEMBERS row as a pull reads it.

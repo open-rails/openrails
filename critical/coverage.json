@@ -3912,6 +3912,31 @@
       "id": "OR-J47-S12",
       "journey": "J47",
       "name": "A customer's erasure clears every attribution field of its checkouts; the checkouts stand"
+    },
+    {
+      "id": "OR-J38-S86",
+      "journey": "J38",
+      "name": "A CCBill rebill callback whose transaction the DataLink read of its window does not list raises one critical pull.charge.unconfirmed finding with its payment's evidence; access and money are not changed, and later reads do not duplicate it"
+    },
+    {
+      "id": "OR-J38-S87",
+      "journey": "J38",
+      "name": "A CCBill rebill callback whose transaction DataLink lists in the read window raises no finding"
+    },
+    {
+      "id": "OR-J38-S88",
+      "journey": "J38",
+      "name": "An unconfirmed CCBill rebill is resolved by a later read that lists its transaction, also spelled without the leading zero"
+    },
+    {
+      "id": "OR-J38-S89",
+      "journey": "J38",
+      "name": "A CCBill rebill callback outside the read window (inside the refresh's safety lag) is not checked"
+    },
+    {
+      "id": "OR-J38-S90",
+      "journey": "J38",
+      "name": "A CCBill cancel callback that ended access while the DataLink roster lists the member active raises pull.subscription.mismatch at critical and restores nothing"
     }
   ]
 }

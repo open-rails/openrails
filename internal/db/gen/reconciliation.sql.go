@@ -2412,6 +2412,70 @@ func (q *Queries) ReconcileExecutingOperations(ctx context.Context, arg Reconcil
 	return items, nil
 }
 
+const reconcileListCallbackRebills = `-- name: ReconcileListCallbackRebills :many
+SELECT p.id, p.customer_id, p.subscription_id, p.transaction_id, p.amount, p.currency, p.purchased_at
+FROM billing.payments p
+JOIN billing.payment_attempts a ON a.merchant_id = p.merchant_id AND a.psp_id = p.psp_id AND a.transaction_id = p.transaction_id
+WHERE p.merchant_id = $1::uuid AND p.psp_id = $2::uuid
+  AND p.purchased_at >= $3::timestamptz AND p.purchased_at < $4::timestamptz
+  AND p.deleted_at IS NULL AND p.amount > 0 AND p.money_movement = 'rail'
+  AND p.status IN ('succeeded', 'refunded') AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
+  AND a.observed_via = 'webhook' AND a.kind = 'rebill' AND a.outcome = 'approved'
+ORDER BY p.purchased_at, p.id
+`
+
+type ReconcileListCallbackRebillsParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Since      time.Time
+	Until      time.Time
+}
+
+type ReconcileListCallbackRebillsRow struct {
+	ID             uuid.UUID
+	CustomerID     uuid.UUID
+	SubscriptionID *uuid.UUID
+	TransactionID  string
+	Amount         int64
+	Currency       string
+	PurchasedAt    time.Time
+}
+
+// The PSP's rebills recorded from its own callbacks (the attempt observed via
+// webhook) received in [since, until): positive rail charges, no reversals.
+func (q *Queries) ReconcileListCallbackRebills(ctx context.Context, arg ReconcileListCallbackRebillsParams) ([]ReconcileListCallbackRebillsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListCallbackRebills,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Since,
+		arg.Until,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReconcileListCallbackRebillsRow
+	for rows.Next() {
+		var i ReconcileListCallbackRebillsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.SubscriptionID,
+			&i.TransactionID,
+			&i.Amount,
+			&i.Currency,
+			&i.PurchasedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
 SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, card_last4,
        card_exp_month, card_exp_year,

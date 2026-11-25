@@ -440,6 +440,19 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (s
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;
 
+-- name: ReconcileListCallbackRebills :many
+-- The PSP's rebills recorded from its own callbacks (the attempt observed via
+-- webhook) received in [since, until): positive rail charges, no reversals.
+SELECT p.id, p.customer_id, p.subscription_id, p.transaction_id, p.amount, p.currency, p.purchased_at
+FROM billing.payments p
+JOIN billing.payment_attempts a ON a.merchant_id = p.merchant_id AND a.psp_id = p.psp_id AND a.transaction_id = p.transaction_id
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id)::uuid
+  AND p.purchased_at >= sqlc.arg(since)::timestamptz AND p.purchased_at < sqlc.arg(until)::timestamptz
+  AND p.deleted_at IS NULL AND p.amount > 0 AND p.money_movement = 'rail'
+  AND p.status IN ('succeeded', 'refunded') AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
+  AND a.observed_via = 'webhook' AND a.kind = 'rebill' AND a.outcome = 'approved'
+ORDER BY p.purchased_at, p.id;
+
 -- name: ReconcilePSPHasExecutingOperations :one
 -- Whether one of the PSP's provider operations is executing: claimed, its
 -- lease live at now.

@@ -32,6 +32,11 @@ const (
 	// local payment record. Enforce: backfill billing.payments (+ entitlements
 	// when the charge's subscription period is current).
 	FindingChargeMissingLocal FindingType = "pull.charge.missing"
+	// FindingChargeUnconfirmed: a CCBill rebill recorded from a callback,
+	// which CCBill does not sign, that the DataLink read of its window does
+	// not list. CRITICAL; requires_review, nothing is changed. A later read
+	// that lists the transaction resolves it.
+	FindingChargeUnconfirmed FindingType = "pull.charge.unconfirmed"
 	// FindingRefundUnrecorded (PS-5): a rail refund is not recorded
 	// locally. Enforce: record the refund; any entitlement-revocation
 	// recommendation goes to the admin queue.

@@ -2529,6 +2529,21 @@
     ],
     "OR-J47-S12": [
       "TestCheckoutFunnel/OR-J47-S12/an-erasure-clears-a-checkouts-attribution"
+    ],
+    "OR-J38-S86": [
+      "TestCCBillCallbackEvidence/OR-J38-S86/a-rebill-callback-datalink-never-lists-is-raised-once-and-changes-nothing"
+    ],
+    "OR-J38-S87": [
+      "TestCCBillCallbackEvidence/OR-J38-S87/a-rebill-callback-datalink-lists-raises-nothing"
+    ],
+    "OR-J38-S88": [
+      "TestCCBillCallbackEvidence/OR-J38-S88/a-later-read-that-lists-the-rebill-resolves-it"
+    ],
+    "OR-J38-S89": [
+      "TestCCBillCallbackEvidence/OR-J38-S89/a-rebill-callback-outside-the-read-window-is-not-checked"
+    ],
+    "OR-J38-S90": [
+      "TestCCBillCallbackEvidence/OR-J38-S90/a-cancel-callback-of-a-member-the-roster-lists-active-is-critical"
     ]
   }
 }

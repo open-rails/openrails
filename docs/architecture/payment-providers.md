@@ -83,6 +83,21 @@ Money-moving types include `nmi_sale`, `subscription_collection`,
   `openrails.provider_object_observe`. CCBill callbacks are not read back (its
   DataLink status read serves cancels and probes), so its payload goes through
   the lifecycle machine, one event at a time on the locked row.
+- Because a CCBill callback is unsigned and applied as sent, the provider
+  refresh checks it afterwards and only reports; it never changes access or
+  money. Each DataLink read of a window `[since, until)` (the full read and a
+  paced account's day) lists the rebills OpenRails recorded from CCBill
+  callbacks in that window (the payment's attempt is `observed_via` `webhook`,
+  `kind` `rebill`; positive `rail` charges, no reversals). One whose
+  transaction id, leading zeros ignored, is not among the window's `REBILL`
+  rows raises `pull.charge.unconfirmed` (critical, `requires_review`, one per
+  PSP and transaction, with the payment, subscription, customer, amount and
+  window as evidence); a later read that lists the transaction resolves it.
+  The check makes no DataLink request of its own. Initial sales are not
+  checked: the fetcher reads no `NEW` export.
+- A CCBill cancel or expire callback that ended access (`cancel_type`
+  `expired`) of a member the ACTIVEMEMBERS roster still lists as active raises
+  `pull.subscription.mismatch` at critical. Nothing is restored.
 
 ### Staying in sync
 
