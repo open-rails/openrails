@@ -1,6 +1,6 @@
 name: Remote Go build cache
 description: >-
-  After go-cache: Go's build cache in the shared R2 bucket, through
+  Before go-cache (which then keeps only modules): Go's build cache in the shared R2 bucket, through
   GOCACHEPROG and -trimpath (scripts/go-remote-cache.sh). Pushes to rc/** and
   master write to it; pull requests, merge groups and dispatches read it. A run
   without credentials (a fork's pull request), an unreachable bucket or a failed
