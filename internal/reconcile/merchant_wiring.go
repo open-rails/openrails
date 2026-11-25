@@ -73,8 +73,8 @@ type MerchantFetcherBuilder struct {
 	// pulls; may target archived accounts for drain).
 	AccountIDs map[Provider]string
 
-	// NMIClients is the runtime's shared NMI client factory; its transport
-	// (the fake-provider seam) carries over to pull clients.
+	// NMIClients is the runtime's shared NMI client factory; its gateway and
+	// transport (the fake-provider seams) carry over to pull clients.
 	NMIClients *railresolve.NMIFactory
 	// DataLinkPacing paces live CCBill accounts' DataLink requests.
 	DataLinkPacing ccbill.Pacing
@@ -256,9 +256,9 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Gateway: b.Endpoints.NMIGatewayURL, Postures: writeposture.View{DB: b.DB}, Log: b.Log}
+	factory := &railresolve.NMIFactory{Postures: writeposture.View{DB: b.DB}, Log: b.Log}
 	if b.NMIClients != nil {
-		factory.Transport = b.NMIClients.Transport
+		factory.Gateway, factory.Transport = b.NMIClients.Gateway, b.NMIClients.Transport
 	}
 	client, err := factory.Client(ctx, b.Merchants.Secrets(), mid, scope)
 	if err != nil {

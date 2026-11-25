@@ -120,7 +120,7 @@ func liveDataLink(dl *ccbill.DataLinkClient) { dl.DevMode = false }
 func liveCCBillRefresh(t *testing.T, w *world) (uuid.UUID, func() error, func() error) {
 	t.Helper()
 	rt := embedded.Graph(w.engine).Runtime
-	refresh := &riverjobs.ProviderRefreshWorker{DB: rt.DB, Config: rt.Config, Clock: w.clock, Merchants: rt.Merchants, Contacts: rt.Contacts,
+	refresh := &riverjobs.ProviderRefreshWorker{DB: rt.DB, Config: rt.Config, Endpoints: rt.ProviderEndpoints, Clock: w.clock, Merchants: rt.Merchants, Contacts: rt.Contacts,
 		StripeClients: rt.StripeClients, NMIClients: rt.NMIClients, DataLinkPacing: rt.DataLinkPacing(), WireDataLink: liveDataLink, Log: slog.Default()}
 	psps, err := w.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 	require.NoError(t, err)
