@@ -69,7 +69,7 @@ type Options struct {
 // route bound to one is mounted where the assembly supplies it.
 type External struct {
 	// Meta: the process surface.
-	Live, Ready http.Handler
+	Summary, Live, Ready http.Handler
 }
 
 // Env is one assembly mounting routes: its options and the gates built from
@@ -183,6 +183,11 @@ func (e *Env) mount(rr *router.Router, base string, selected func(Route) bool) {
 		path, ok := strings.CutPrefix(route.Path, base)
 		if !ok {
 			panic("routes: " + route.Key() + " is not under " + base)
+		}
+		// A ServeMux pattern ending in a slash takes its whole subtree; a
+		// route serves its path alone.
+		if strings.HasSuffix(path, "/") {
+			path += "{$}"
 		}
 		rr.Handle(route.Method, path, handler, e.gates(route)...)
 	}

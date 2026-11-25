@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 792,
+  "scenario_count": 796,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -512,6 +512,21 @@
       "id": "OR-J17-S12",
       "journey": "J17",
       "name": "Stripe cancels and resumes are ordered by commit, not transaction start: a resume whose transaction began before the cancel it resumes waits for that cancel and reaches Stripe last"
+    },
+    {
+      "id": "OR-J17-S13",
+      "journey": "J17",
+      "name": "A customer's own cancel of an NMI or CCBill schedule on a merchant whose destructive actions are disarmed stops the provider's billing, and the subscription ends at period end"
+    },
+    {
+      "id": "OR-J17-S14",
+      "journey": "J17",
+      "name": "A staff cancel of an NMI schedule on a disarmed merchant is still refused provider_cancel_held and changes nothing; the customer's own cancel of it goes through"
+    },
+    {
+      "id": "OR-J17-S15",
+      "journey": "J17",
+      "name": "Over the merchant's customer cancellation budget, a customer's own cancel of an NMI or CCBill schedule is refused 429, queues nothing and reaches no provider, and the subscription stays live; the accepted cancels before it reach the provider"
     },
     {
       "id": "OR-J18-S01",
@@ -1361,7 +1376,7 @@
     {
       "id": "OR-J01-S32",
       "journey": "J01",
-      "name": "The console's sign-in offers the server's own accounts alone until root trusts an issuer, never a merchant's app, and then a button per root issuer whose sign-in a probe shows works: discovery naming it exactly, authorization, token and key endpoints, the code flow with PKCE S256 and published keys; a mismatched, unreachable, keyless or PKCE-less issuer is hidden and reported with why among the configuration's refusals"
+      "name": "The console signs staff in only with the server's own accounts: its config names no issuer even when root trusts applications, and none is probed or reported among the configuration's refusals"
     },
     {
       "id": "OR-J22-S05",
@@ -3692,6 +3707,11 @@
       "id": "OR-J06-S85",
       "journey": "J06",
       "name": "A server whose staff cannot enroll a second factor, a public issuer with no totp.key, is not ready and logs the key to mount; with it mounted the server is ready"
+    },
+    {
+      "id": "OR-J06-S86",
+      "journey": "J06",
+      "name": "GET / answers the service, the binary's version, whether /health/ready says ready (not_ready while draining, still 200) and the paths of the API, its configuration, the console and health, naming no host; HEAD / answers too, and every other unknown path is still not found"
     },
     {
       "id": "OR-J07-S10",

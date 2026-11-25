@@ -84,7 +84,7 @@ var subscriptionsRoutes = []Route{
 		Doc:       "CancelPriceMigration cancels the migration's still-scheduled moves.",
 		Responses: []Reply{{200, billing.PriceMigrationCancel{}}}, Errors: codes("invalid_param", "price_migration_not_found", "rebill_terms_committed"), Handler: h(handlers.CancelPriceMigration)},
 	{Method: POST, Path: "/v1/me/subscriptions/{id}/cancel", Group: Customer, Auth: AuthCustomer,
-		Request: handlers.CustomerCancelSubscriptionParams{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "cancel_unsupported_on_rail", "invalid_param", "payment_in_progress", "provider_cancel_held", "service_unavailable", "solana_rpc_unavailable", "solana_transaction_refused", "subscription_not_active", "subscription_not_found"), Handler: h(handlers.CancelSubscription)},
+		Request: handlers.CustomerCancelSubscriptionParams{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "cancel_unsupported_on_rail", "invalid_param", "payment_in_progress", "service_unavailable", "solana_rpc_unavailable", "solana_transaction_refused", "subscription_not_active", "subscription_not_found"), Handler: h(handlers.CancelSubscription)},
 	{Method: POST, Path: "/v1/me/subscriptions/{id}/resume", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("authentication_required", "default_payment_method_required", "invalid_param", "payment_method_stale", "provider_writes_disabled", "service_unavailable", "solana_rpc_unavailable", "subscription_not_found"), Handler: h(handlers.ResumeSubscription)},
 	{Method: PUT, Path: "/v1/me/subscriptions/{id}/payment-method", Group: Customer, Auth: AuthCustomer,
