@@ -6318,7 +6318,6 @@ CREATE TABLE billing.mrr_movements (
     cohort_at timestamptz NOT NULL,
     cause text NOT NULL CHECK (cause IN ('subscribed', 'resumed', 'renewed', 'price_change', 'seat_change', 'canceled', 'merchant_canceled', 'expired', 'chargeback', 'upgrade', 'import', 'prune', 'undo')),
     voluntary boolean,
-    backfilled boolean NOT NULL,
     occurred_at timestamptz NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (merchant_id, id),
@@ -6329,7 +6328,6 @@ CREATE TABLE billing.mrr_movements (
 COMMENT ON TABLE billing.mrr_movements IS 'One change of a customer''s MRR in one currency, written once at the commit of the transaction that made it: new (first MRR), reactivation (MRR again after none), expansion, contraction, churn (to none; voluntary for a customer''s or merchant''s cancel), opening (an import adopting subscriptions) or correction (a prune or an undo). Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.mrr_movements.logo_delta IS '1 when the customer gains MRR from none, -1 when it loses all, 0 otherwise.';
 COMMENT ON COLUMN billing.mrr_movements.cohort_at IS 'The customer''s first_active_at in the currency: its cohort.';
-COMMENT ON COLUMN billing.mrr_movements.backfilled IS 'Written by a backfill from current state, not when the change happened.';
 COMMENT ON COLUMN billing.mrr_movements.occurred_at IS 'The business instant of the change: its writer''s, or the end a scheduled churn took effect at.';
 
 CREATE INDEX mrr_movements_customer_id_idx ON billing.mrr_movements (merchant_id, customer_id, currency, occurred_at);
@@ -6521,7 +6519,6 @@ CREATE TABLE billing.mrr_risk_cases (
     outcome text CHECK (outcome IN ('recovered', 'churned', 'superseded')),
     mrr_at_exit bigint CHECK (mrr_at_exit >= 0),
     voluntary boolean,
-    backfilled boolean NOT NULL,
     PRIMARY KEY (merchant_id, id),
     CONSTRAINT mrr_risk_cases_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions (merchant_id, customer_id, id) ON DELETE RESTRICT,
     CONSTRAINT mrr_risk_cases_closed_check CHECK ((closed_at IS NULL) = (outcome IS NULL) AND (closed_at IS NULL) = (mrr_at_exit IS NULL) AND (closed_at IS NULL OR closed_at >= opened_at)),
@@ -6529,7 +6526,6 @@ CREATE TABLE billing.mrr_risk_cases (
 );
 COMMENT ON TABLE billing.mrr_risk_cases IS 'One stretch of a subscription''s MRR at risk, from its first reason to its last: opened by its entry_reason, chaining reasons (mrr_risk_episodes), and closed recovered (healthy again while adding MRR), churned (its MRR ended while the case was open; voluntary for a customer''s or merchant''s cancel) or superseded (a prune, an upgrade or a change of currency). A cancel at period end keeps the case open until the MRR ends; a resume continues it. The recovery rate is recovered MRR over recovered and churned. Retention: permanent, never pruned.';
 COMMENT ON COLUMN billing.mrr_risk_cases.mrr_at_exit IS 'The MRR recovered, or the MRR at risk when it churned.';
-COMMENT ON COLUMN billing.mrr_risk_cases.backfilled IS 'Opened from current state by a backfill: opened_at is when its delinquency or unverified state began where the book records it, else the backfill.';
 
 CREATE UNIQUE INDEX mrr_risk_cases_subscription_id_key ON billing.mrr_risk_cases (merchant_id, subscription_id)
     WHERE closed_at IS NULL;
@@ -6929,10 +6925,10 @@ BEGIN
                 END IF;
             END IF;
             INSERT INTO billing.mrr_movements (merchant_id, customer_id, currency, kind, delta, mrr_before, mrr_after, logo_delta,
-                cohort_at, cause, voluntary, backfilled, occurred_at)
+                cohort_at, cause, voluntary, occurred_at)
             VALUES (p_merchant, v_pair.customer_id, v_pair.currency, v_kind, v_total, v_customer.mrr, v_after, v_logo,
                 v_first, v_cause, CASE WHEN v_kind = 'churn' THEN v_cause IN ('canceled', 'merchant_canceled') END,
-                false, v_at)
+                v_at)
             RETURNING id INTO v_movement;
             v_movements := array_append(v_movements, v_movement);
             INSERT INTO billing.mrr_movement_lines (merchant_id, movement_id, subscription_id, product_id, price_id, delta, mrr_before, mrr_after,
@@ -7105,8 +7101,8 @@ BEGIN
         IF v_row.risk <> '{}' THEN
             -- A case opens with the subscription's first reason.
             IF v_case.id IS NULL THEN
-                INSERT INTO billing.mrr_risk_cases (merchant_id, subscription_id, customer_id, currency, entry_reason, opened_at, mrr_at_entry, backfilled)
-                SELECT p_merchant, v_row.subscription_id, v_row.customer_id, v_row.currency, v_row.risk[1], v_at, v_row.mrr, false
+                INSERT INTO billing.mrr_risk_cases (merchant_id, subscription_id, customer_id, currency, entry_reason, opened_at, mrr_at_entry)
+                SELECT p_merchant, v_row.subscription_id, v_row.customer_id, v_row.currency, v_row.risk[1], v_at, v_row.mrr
                 RETURNING * INTO v_case;
             END IF;
             INSERT INTO billing.mrr_risk_episodes (merchant_id, case_id, subscription_id, currency, reason, entered_at, mrr_at_entry, overdue_amount)

@@ -1175,8 +1175,6 @@ type BillingMrrMovement struct {
 	CohortAt  time.Time
 	Cause     string
 	Voluntary *bool
-	// Written by a backfill from current state, not when the change happened.
-	Backfilled bool
 	// The business instant of the change: its writer's, or the end a scheduled churn took effect at.
 	OccurredAt time.Time
 	CreatedAt  time.Time
@@ -1231,8 +1229,6 @@ type BillingMrrRiskCase struct {
 	// The MRR recovered, or the MRR at risk when it churned.
 	MrrAtExit *int64
 	Voluntary *bool
-	// Opened from current state by a backfill: opened_at is when its delinquency or unverified state began where the book records it, else the backfill.
-	Backfilled bool
 }
 
 // Changes outside a subscription row that may change the risk of its customer's subscriptions: a card, a default card, a provider's decline or delinquency. Each change appends its own row, so no writer waits on another's; the MRR risk worker claims rows no other worker holds, deletes them and re-evaluates each customer's subscriptions, locking them in id order. changed_at dates the change; a claimed row is deleted.
