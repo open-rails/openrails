@@ -57,7 +57,7 @@ func (im *Importer) Apply(ctx context.Context, id billing.PSPImportID, approvalA
 		return err
 	}
 	if len(customers) > 0 {
-		if err := im.propose(ctx, row, scope, customers, false); err != nil {
+		if err := im.propose(ctx, row, scope, customers, false, nil); err != nil {
 			return err
 		}
 	}

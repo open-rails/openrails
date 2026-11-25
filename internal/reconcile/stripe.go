@@ -570,6 +570,12 @@ func normalizeStripeRefund(obj json.RawMessage) RemoteTransaction {
 	return txn
 }
 
+// StripeChargeback is a Stripe dispute's chargeback transaction; false for an
+// inquiry or a prevented dispute, which moved no money back.
+func StripeChargeback(obj json.RawMessage) (RemoteTransaction, bool) {
+	return normalizeStripeDispute(obj)
+}
+
 // normalizeStripeDispute is a chargeback's transaction; an inquiry or a
 // prevented dispute moved no money back and is not one (false).
 func normalizeStripeDispute(obj json.RawMessage) (RemoteTransaction, bool) {

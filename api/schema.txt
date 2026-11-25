@@ -43,6 +43,7 @@ migration 0047_usage_receivable.up.sql sha256:e03ef2a943130a26447ce0f63a55724a77
 migration 0048_checkout_analytics.up.sql sha256:dcacd14f32148717d7be07654f4ce8d7f989a7a113b39ec4508cfdd86f76f38b
 migration 0049_merchant_controls.up.sql sha256:05e5d9df346d3db1f9c796c5b1bda6896847821f50342bead3d5b6d0836213d1
 migration 0050_nmi_history_due.up.sql sha256:65cc5e10e5243b68bdbab9a8a0b525baab182978afcab2934d991664651a38b1
+migration 0051_dispute_findings_name_psp.up.sql sha256:dc6003d7c325f95975103f40b746c05ddb86326ef7d5628645e31f9e22de4ed4
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3102,7 +3103,7 @@ table billing.reconciliation_findings
   constraint reconciliation_findings_pull_id_fkey FOREIGN KEY (merchant_id, pull_id) REFERENCES billing.psp_imports(merchant_id, id) ON DELETE SET NULL (pull_id)
   constraint reconciliation_findings_resolution_check CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text, 'approved'::text, 'dismissed'::text, 'superseded'::text, 'foreign'::text]))))
   constraint reconciliation_findings_resolved_fields_check CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL))))
-  constraint reconciliation_findings_scope_check CHECK ((((finding_type = ANY (ARRAY['catalog.price.unmapped'::text, 'life.subscription.unattributed'::text])) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL)) OR ((finding_type !~~ 'catalog.%'::text) AND (finding_type <> 'life.subscription.unattributed'::text) AND (((rail IS NULL) AND (psp_id IS NULL)) OR ((finding_type ~~ 'pull.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL))))))
+  constraint reconciliation_findings_scope_check CHECK ((((finding_type = ANY (ARRAY['catalog.price.unmapped'::text, 'life.subscription.unattributed'::text])) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL)) OR ((finding_type !~~ 'catalog.%'::text) AND (finding_type <> 'life.subscription.unattributed'::text) AND (((rail IS NULL) AND (psp_id IS NULL)) OR ((finding_type ~~ 'pull.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL)) OR ((finding_type ~~ 'life.disputes.%'::text) AND (rail IS NOT NULL) AND (psp_id IS NOT NULL))))))
   constraint reconciliation_findings_severity_check CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text])))
   constraint reconciliation_findings_source_check CHECK ((((finding_type ~~ 'pull.%'::text) = (source IS NOT NULL)) AND ((source IS NULL) OR (source = ANY (ARRAY['pull'::text, 'verification'::text])))))
   constraint reconciliation_findings_status_check CHECK ((status = ANY (ARRAY['auto_fixed'::text, 'reconcile_required'::text, 'requires_review'::text, 'fixed'::text, 'ignored'::text])))

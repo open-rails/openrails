@@ -598,7 +598,12 @@ func (s *sales) dispute(t *testing.T, payment billing.PaymentID, event, kind, id
 // by reason. A card merchant's overview carries the programs widget, whose
 // read answers.
 func disputeMetrics(t *testing.T) {
-	s := newSales(t)
+	// The fraud report is recorded as it arrives, not refunded later.
+	s := newSales(t, func(w *world) {
+		declaration := cfgMerchant(w.cfg, "alpha")
+		declaration.FraudWarningRefund = ptr(billing.FraudWarningRecord)
+		setCfgMerchant(&w.cfg, "alpha", declaration)
+	})
 	var paid []billing.Payment
 	for i := range 4 {
 		paid = append(paid, s.buy(t, fmt.Sprintf("metrics-sale-%d", i)))
@@ -642,7 +647,7 @@ func disputeMetrics(t *testing.T) {
 		lines[m.Name] = len(m.Thresholds)
 	}
 	require.Zero(t, lines["chargeback_rate"], "a chargeback rate is no program's ratio")
-	require.Equal(t, 2, lines["vamp_ratio"], "Visa's warning and excessive levels")
+	require.Equal(t, 3, lines["vamp_ratio"], "Visa's warning, and its excessive level before and from 1 April 2026")
 	require.Equal(t, 3, lines["ecm_ratio"], "Mastercard's warning, excessive and high excessive levels")
 	board, err := s.a.alpha.GetDashboard(t.Context())
 	require.NoError(t, err)
@@ -691,6 +696,8 @@ func notifiedAt(t *testing.T, a *authorityWorld, id billing.FindingID) string {
 // them resolve it. The minimums are actual counts, never projected ones.
 func disputeMonitor(t *testing.T) {
 	s := newSales(t, func(w *world) {
+		// Thirty sales in a minute: the purchase limit is not under test.
+		w.cfg.RateLimits.Purchase = &billing.RateLimit{RequestsPerMinute: 100}
 		declaration := cfgMerchant(w.cfg, "alpha")
 		psp := declaration.PSPs["stripe"]
 		psp.Settings["dispute_ratio_limit"] = "60%"
@@ -855,8 +862,11 @@ func disputeBlockedCard(t *testing.T) {
 	m.a.clock.Advance(current.CurrentPeriodEndsAt.Sub(m.a.clock.Now()))
 	runRegistered(t, fleet, "openrails.billing_pass", 2)
 	subscriptionState(t, m.a, onA, "awaiting_method")
-	renewed := subscriptionState(t, m.a, onB, "active")
-	require.True(t, renewed.CurrentPeriodEndsAt.After(*current.CurrentPeriodEndsAt), "the other card renews")
+	// The renewal's charge runs after the pass, on the provider worker.
+	require.Eventually(t, func() bool {
+		renewed, err := m.a.alpha.GetSubscription(t.Context(), onB)
+		return err == nil && string(renewed.Status) == "active" && renewed.CurrentPeriodEndsAt != nil && renewed.CurrentPeriodEndsAt.After(*current.CurrentPeriodEndsAt)
+	}, 20*time.Second, 20*time.Millisecond, "the other card renews")
 	require.Len(t, m.p.effects(t), charges+1, "only card B is charged")
 }
 

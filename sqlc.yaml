@@ -45,6 +45,7 @@ sql:
       - "internal/migrate/postgres/0048_checkout_analytics.up.sql"
       - "internal/migrate/postgres/0049_merchant_controls.up.sql"
       - "internal/migrate/postgres/0050_nmi_history_due.up.sql"
+      - "internal/migrate/postgres/0051_dispute_findings_name_psp.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

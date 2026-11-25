@@ -161,11 +161,14 @@ type Window struct {
 
 // WindowFor is the evaluation window of the month containing now (or of an
 // ended month): the month so far from the 7th day, and before it the last 30
-// days, scaled to the month. days are the PSP's daily activity of one network
-// from the start of the month before last.
+// days, scaled to the month. So far takes in now's own day. days are the
+// PSP's daily activity of one network from the start of the month before
+// last.
 func WindowFor(month, now time.Time, days map[time.Time]Activity) Window {
 	month = time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
 	next := month.AddDate(0, 1, 0)
+	now = now.UTC()
+	dayEnd := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
 	sum := func(from, to time.Time) Activity {
 		var a Activity
 		for day, act := range days {
@@ -181,10 +184,10 @@ func WindowFor(month, now time.Time, days map[time.Time]Activity) Window {
 	case !now.Before(next):
 		w.SoFar, w.Factor, w.Prior = sum(month, next), 1, sum(month.AddDate(0, -1, 0), month)
 	case elapsed >= 7:
-		w.SoFar, w.Factor, w.Prior = sum(month, now), monthDays/elapsed, sum(month.AddDate(0, -1, 0), month)
+		w.SoFar, w.Factor, w.Prior = sum(month, dayEnd), monthDays/elapsed, sum(month.AddDate(0, -1, 0), month)
 	default:
-		start := now.AddDate(0, 0, -30)
-		w.SoFar, w.Factor, w.Prior = sum(start, now), monthDays/30, sum(start.AddDate(0, 0, -30), start)
+		start := dayEnd.AddDate(0, 0, -30)
+		w.SoFar, w.Factor, w.Prior = sum(start, dayEnd), monthDays/30, sum(start.AddDate(0, 0, -30), start)
 	}
 	return w
 }

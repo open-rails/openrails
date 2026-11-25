@@ -24,9 +24,13 @@ func (r *Runtime) PSPImporter() *pspimport.Importer {
 	if r == nil || r.DB == nil {
 		return nil
 	}
-	return &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, Objects: r.ProviderObjects(),
+	im := &pspimport.Importer{DB: r.DB, Merchants: r.Merchants, NMI: r.NMIClients, Stripe: r.StripeClients, Objects: r.ProviderObjects(),
 		CCBillDataLinkURL: r.ProviderEndpoints.CCBillDataLinkURL, DataLinkPacing: r.DataLinkPacing(), Directory: r.Contacts,
 		Proposals: proposals.New(r.DB, r.Config, r.Clock, r.DestructiveAdmissions), Clock: r.Clock, Log: r.Log}
+	if r.Disputes != nil {
+		im.Disputes = r.Disputes
+	}
+	return im
 }
 
 // DataLinkPacing keeps live CCBill accounts' DataLink slots in the abuse

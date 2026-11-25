@@ -183,3 +183,14 @@ func TestProgramLines(t *testing.T) {
 		t.Errorf("ECM lines %v", got)
 	}
 }
+
+// A day's activity is so far from the day's first instant: at midnight the
+// chargeback just filed counts.
+func TestWindowCountsNowsDay(t *testing.T) {
+	month := time.Date(2026, time.November, 1, 0, 0, 0, 0, time.UTC)
+	for _, now := range []time.Time{month.AddDate(0, 0, 2), month.AddDate(0, 0, 10)} {
+		if w := WindowFor(month, now, map[time.Time]Activity{now: {Chargebacks: 1}}); w.SoFar.Chargebacks != 1 {
+			t.Errorf("at %s the day's chargeback is not counted: %+v", now, w.SoFar)
+		}
+	}
+}

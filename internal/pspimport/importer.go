@@ -59,8 +59,10 @@ type Importer struct {
 	Directory    identity.Directory
 	// Proposals approves an applied import's corrections.
 	Proposals *proposals.Executor
-	Clock     clockwork.Clock
-	Log       *slog.Logger
+	// Disputes records the disputes a pull reads, as their webhooks would.
+	Disputes reconcile.DisputeRecorder
+	Clock    clockwork.Clock
+	Log      *slog.Logger
 }
 
 // ErrNotFound is an import or record the merchant does not have.

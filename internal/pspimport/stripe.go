@@ -272,6 +272,27 @@ func (s *stripeSource) history(ctx context.Context, since, until time.Time, _ bo
 
 // readBills reads every subscription's invoices and indexes them by the
 // charges that paid them.
+func (s *stripeSource) disputes(ctx context.Context, since, until time.Time) ([]json.RawMessage, []reconcile.RemoteTransaction, error) {
+	cases, err := s.fetcher.StripeList(ctx, "/v1/disputes", since, until, "", nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("stripe disputes: %w", err)
+	}
+	var chargebacks []reconcile.RemoteTransaction
+	for _, raw := range cases {
+		t, ok := reconcile.StripeChargeback(raw)
+		if !ok {
+			continue
+		}
+		var d struct{ Charge string }
+		_ = json.Unmarshal(raw, &d)
+		if bill, ok := s.billOf[d.Charge]; ok {
+			t.SubscriptionID = bill.SubscriptionID
+		}
+		chargebacks = append(chargebacks, t)
+	}
+	return cases, chargebacks, nil
+}
+
 func (s *stripeSource) readBills(ctx context.Context) error {
 	s.billOf = map[string]subscriptions.StripeBill{}
 	subs, _, err := s.fetcher.StripeRoster(ctx)

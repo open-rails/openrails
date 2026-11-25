@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -208,6 +210,7 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 	if w, ok := src.(interface{ window() time.Duration }); ok {
 		window = w.window()
 	}
+	chargebacks := map[string]reconcile.RemoteTransaction{}
 	for through := *row.HistoryThrough; through.Before(*row.PulledAt); {
 		until := through.Add(window)
 		if until.After(*row.PulledAt) {
@@ -222,6 +225,9 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		}
 		if err := im.stage(ctx, row, recs); err != nil {
 			return err
+		}
+		for _, t := range im.recordDisputes(ctx, src, scope, through, until) {
+			chargebacks[t.TransactionID] = t
 		}
 		if err := q.SetPSPImportHistoryThrough(ctx, gen.SetPSPImportHistoryThroughParams{MerchantID: row.MerchantID, ID: row.ID, HistoryThrough: until}); err != nil {
 			return err
@@ -240,11 +246,37 @@ func (im *Importer) pull(ctx context.Context, row gen.BillingPspImport, scope me
 		}
 	}
 	// Only a read of the roster resolves what it no longer raises.
-	if err := im.propose(ctx, row, scope, nil, !relink); err != nil {
+	if err := im.propose(ctx, row, scope, nil, !relink, slices.Collect(maps.Values(chargebacks))); err != nil {
 		return err
 	}
 	_, err = q.SetPSPImportStatus(ctx, gen.SetPSPImportStatusParams{MerchantID: row.MerchantID, ID: row.ID, Status: string(billing.PSPImportPulled)})
 	return err
+}
+
+// disputeSource is a source that reads the PSP's disputes: each case, and the
+// chargebacks among them as transactions of the subscriptions they charge
+// back.
+type disputeSource interface {
+	disputes(ctx context.Context, since, until time.Time) ([]json.RawMessage, []reconcile.RemoteTransaction, error)
+}
+
+// recordDisputes records the disputes filed in [since, until] as their
+// webhooks would have: a case whose webhook was missed is the pull's. It
+// answers their chargebacks, which the pull proposes. A failure is the next
+// pull's to record.
+func (im *Importer) recordDisputes(ctx context.Context, src source, scope merchants.PSPScope, since, until time.Time) []reconcile.RemoteTransaction {
+	read, ok := src.(disputeSource)
+	if !ok || im.Disputes == nil {
+		return nil
+	}
+	cases, chargebacks, err := read.disputes(ctx, since, until)
+	if err == nil && len(cases) > 0 {
+		err = im.Disputes.RecordPulledDisputes(ctx, scope.ID, reconcile.Provider(scope.Rail), cases)
+	}
+	if err != nil {
+		im.Log.WarnContext(ctx, "psp import: recording pulled disputes failed; the next pull records them", logx.Err(err), "psp_id", scope.ID)
+	}
+	return chargebacks
 }
 
 // catalogPull is a pull's read of the PSP's catalog: what its lists held,

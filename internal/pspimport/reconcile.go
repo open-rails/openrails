@@ -209,8 +209,10 @@ func uuidOf(id *uuid.UUID) uuid.UUID {
 // OpenRails holds and what OpenRails records as the import's proposals, one
 // page of customers at a time. customers bounds it to their book; nil runs
 // over the PSP's whole book and its held records and, with resolve, resolves
-// the earlier proposals the roster no longer raises.
-func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope, customers []uuid.UUID, resolve bool) error {
+// the earlier proposals the roster no longer raises. chargebacks are the
+// chargebacks the pull read, proposed against the subscriptions they charge
+// back.
+func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope merchants.PSPScope, customers []uuid.UUID, resolve bool, chargebacks []reconcile.RemoteTransaction) error {
 	q := im.DB.Gen(ctx)
 	provider := reconcile.Provider(scope.Rail)
 	counts, err := q.CountPSPImportRecords(ctx, gen.CountPSPImportRecordsParams{MerchantID: row.MerchantID, ImportID: row.ID})
@@ -245,6 +247,9 @@ func (im *Importer) propose(ctx context.Context, row gen.BillingPspImport, scope
 		snap, excluded, err := im.snapshotOf(ctx, row, provider, recs, exhaustive)
 		if err != nil {
 			return err
+		}
+		if len(chargebacks) > 0 {
+			snap.Transactions, snap.Capabilities.Chargebacks = append(snap.Transactions, chargebacks...), true
 		}
 		res, err := reconcile.Propose(ctx, im.DB, reconcile.ProposeParams{Binding: binding, Snapshot: snap, Coverage: reconcile.PSPCoverage{Declared: 1, Pulled: 1, Binding: binding},
 			Basis: basis, Customers: ids, Excluded: excluded, PullID: row.ID, RunID: run, Contacts: im.Directory, Now: im.now()})

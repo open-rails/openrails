@@ -104,6 +104,7 @@ func (s *Service) RecordPulledDisputes(ctx context.Context, psp uuid.UUID, provi
 	if s == nil || provider != reconcile.ProviderStripe {
 		return nil
 	}
+	ctx = db.WithPSPID(ctx, psp)
 	var errs []error
 	for _, raw := range cases {
 		var d StripeDispute
