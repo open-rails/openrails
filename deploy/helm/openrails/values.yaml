@@ -21,7 +21,7 @@ args: [run-server]
 
 # config.yaml, rendered as is (config.example.yaml lists every key). Keep
 # secrets out: they come from `secrets`, as environment variables or files
-# named like them (database.url is DATABASE_URL). host, port and private_port are the
+# named like them (database.url is DATABASE_URL). host, port and metrics_port are the
 # chart's (ports.http, metrics.port).
 config:
   # public_billing_base_url: https://billing.example.com
@@ -87,8 +87,11 @@ envFrom: []
 ports:
   http: 3053
 
-# The private listener: GET /metrics, on its own ClusterIP Service
-# (<fullname>-metrics), never routed by the ingress.
+# The metrics listener (config's metrics_port): the operator's Prometheus
+# GET /metrics (dependency up/down, abuse-state fallbacks, per-job-kind
+# health), on its own ClusterIP Service (<fullname>-metrics) so it is never
+# public; the ingress never routes it. Not the merchant dashboard's business
+# metrics, which are the /v1/metrics API on ports.http.
 metrics:
   enabled: true
   port: 9090

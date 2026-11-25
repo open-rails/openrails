@@ -338,7 +338,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 
 // Handler returns the full public HTTP surface: health + user + self/customer
 // + merchant + webhooks + API-key-authenticated server-to-server service routes
-// (issue #222). There is no separate private/service handler — embedded hosts use
+// (issue #222). Service routes have no separate handler — embedded hosts use
 // the in-process internal/service facade (Embedded.Service()) or this same public
 // surface. It is designed to be mounted at a path prefix via http.StripPrefix.
 func (s *Server) Handler() http.Handler { return s.publicHandler }

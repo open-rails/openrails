@@ -194,7 +194,7 @@ run a server on this machine against the repository's Compose dependencies
 (`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
 signing keys; none relaxes a protection, and a deployment that leaves one unset
 fails to connect or refuses to boot. The top-level
-keys: `host`, `port`, `private_port`, `logger`, `engine_admission_hold`,
+keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`,
 `event_retention`, `webhook_secret_overlap`,
 `merchant_manifest_overlays`, `route_groups`, `public_billing_base_url`,
 `checkout_origin`, `return_origins`, `trusted_proxies`,
@@ -209,7 +209,7 @@ keys: `host`, `port`, `private_port`, `logger`, `engine_admission_hold`,
 | Key | Default | Meaning |
 |---|---|---|
 | `host`, `port` | `0.0.0.0`, `3053` | the public listener: API, console, payment page, webhooks |
-| `private_port` | unset | the private listener for `/metrics`; unset serves none |
+| `metrics_port` | unset | the metrics listener: the operator's Prometheus `GET /metrics` (dependency up/down, abuse-state fallbacks, per-job-kind health), on its own port so it is never public; unset serves none, and the chart sets 9090. Not the merchant dashboard's business metrics, which are the `/v1/metrics` API on `port` |
 | `logger.level` | `info` | `debug`, `info`, `warn` or `error` |
 | `logger.format` | `json` | `json` or `text`; logs go to stderr |
 
@@ -850,7 +850,7 @@ with the command ([provider refresh](#provider-refresh)).
 |---|---|
 | `GET /health/live` | the process serves HTTP; only after PostgreSQL answers and migrations finish, so allow a long startup probe |
 | `GET /health/ready` | PostgreSQL, the merchants service, the River producer and a local River consumer. Redis, Vault, PSP posture and refused configuration are degraded, never failing. Public and detail-free: a failure is logged and answers 503 |
-| `GET /metrics` on `private_port` | `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Never route it publicly; `Server.PrivateHandler` mounts it in your own binary |
+| `GET /metrics` on `metrics_port` | the operator's Prometheus telemetry, on its own listener so it is never public (unset serves none; the chart enables it on 9090 with its own ClusterIP Service): `openrails_dependency_up{dependency,class}`, `openrails_abuse_state_fallbacks_total` and, per job kind, `openrails_job_overrunning`, `openrails_job_retryable`, `openrails_job_discarded` and `openrails_job_last_completed_timestamp_seconds`. Not the merchant dashboard's business metrics, which are the `/v1/metrics` API on `port`. `Server.MetricsHandler` mounts it in your own binary |
 | probes | `openrails_psp_posture`, `openrails_configuration` (what is not served and why), `openrails_solana_crankers` and `openrails_job_progress` |
 | `openrails workers [--json]` | each job kind as River holds it: overrunning, retrying and discarded jobs, last completion and the newest error |
 | logs | structured (`logger.format`), to stderr, at `logger.level`. Secrets, card data and SQL arguments are never logged |
@@ -1325,12 +1325,12 @@ ingress:
 | `image` | `repository`, `tag` (default the chart's `vX.Y.Z`; required to render a checkout, whose appVersion is `latest`), `digest` (pins over the tag), `pullPolicy` |
 | `imagePullSecrets` | for a private registry |
 | `args` | the command, `[run-server]`; the chart appends `--config=/etc/openrails/config.yaml` |
-| `config` | `config.yaml`, rendered as written; no secrets. `host`, `port` and `private_port` are the chart's and refused here |
+| `config` | `config.yaml`, rendered as written; no secrets. `host`, `port` and `metrics_port` are the chart's and refused here |
 | `files` | more files in `/etc/openrails`: `merchants.yaml` (read at every boot), `bootstrap.yaml` (first run), `catalog.yaml` (for `openrails catalog apply`) |
 | `secrets` | `env` (one variable per Secret key), `files` (Secrets whose keys are variable names, mounted at `/vault/secrets`), `authKeys` (`keys.json` and `totp.key` at `/vault/auth`, reloaded on change), `merchantOverlays` (`{name, key}` overlays added to `merchant_manifest_overlays`) |
 | `env`, `envFrom` | further environment |
 | `ports` | `http`, default 3053 |
-| `metrics` | the private `/metrics` listener (`enabled`, `port` 9090), served by its own ClusterIP Service `<fullname>-metrics` whatever `service.type` is, and an optional Prometheus Operator `serviceMonitor` |
+| `metrics` | the metrics listener, the operator's Prometheus `GET /metrics` (`enabled`, default true; `port` 9090, rendered as `metrics_port`), served by its own ClusterIP Service `<fullname>-metrics` whatever `service.type` is so it is never public, and an optional Prometheus Operator `serviceMonitor`. Not the `/v1/metrics` business metrics API |
 | `service` | `type`, `port` (80), `annotations` |
 | `ingress` | `enabled`, `className`, `annotations`, `hosts` (every path to the server), `tls` |
 | `resources` | requests 100m and 256Mi, limits one CPU and 768Mi |

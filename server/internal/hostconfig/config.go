@@ -353,8 +353,8 @@ func Validate(cfg *Config) error {
 	if s.Port < 1 || s.Port > 65535 {
 		return fmt.Errorf("invalid port %d: must be 1-65535", s.Port)
 	}
-	if s.PrivatePort < 0 || s.PrivatePort > 65535 || (s.PrivatePort != 0 && s.PrivatePort == s.Port) {
-		return fmt.Errorf("invalid private_port %d: must be 1-65535 and not port", s.PrivatePort)
+	if s.MetricsPort < 0 || s.MetricsPort > 65535 || (s.MetricsPort != 0 && s.MetricsPort == s.Port) {
+		return fmt.Errorf("invalid metrics_port %d: must be 1-65535 and not port", s.MetricsPort)
 	}
 	return config.Validate(&s.Engine)
 }

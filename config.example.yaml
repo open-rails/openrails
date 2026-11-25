@@ -18,7 +18,11 @@ event_retention: 2160h
 
 host: 0.0.0.0
 port: 3053
-# private_port: 9090 # the operator's /metrics, apart from the public port; unset serves none
+# The metrics listener: the operator's Prometheus GET /metrics (dependency
+# up/down, abuse-state fallbacks, per-job-kind health), on its own port so it
+# is never public. Unset serves none; the Helm chart sets 9090. Not the
+# merchant dashboard's business metrics, which are the /v1/metrics API on port.
+# metrics_port: 9090
 # On SIGTERM readiness fails at once, serving continues for 5s, then in-flight
 # requests and workers finish within 20s.
 public_billing_base_url: http://localhost:3053 # default http://localhost:<port>

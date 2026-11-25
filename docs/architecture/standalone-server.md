@@ -87,7 +87,8 @@ AuthKit's routes, `/admin`, and the payment page on `CheckoutOrigin` by Host. Ev
 native route passes `wrapHandler`: recovery, request log, security headers, CORS for
 browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing
 credentials (`billingauth.ExplicitCredentials`) and the engine's `RateLimitHTTP`.
-`PrivateHandler` serves `/metrics` on `PrivateAddr`.
+
+`MetricsHandler` is the metrics listener on `MetricsPort`: the operator's Prometheus `GET /metrics` (dependency up/down, abuse-state fallbacks, per-job-kind health), apart from the public handler so it is never public; zero serves none, and the chart sets 9090 with its own ClusterIP Service. It is not the merchant dashboard's business metrics, the `/v1/metrics` route group on the public handler.
 
 `Server.Run` binds job producers (`InitRiver`) before listening on `:3053`, starts the
 workers, and on stop fails `/health/ready` (`Drain`) and keeps serving for
@@ -121,11 +122,11 @@ credential's permissions reach. The SPA calls `/v1` with the staff token.
 ## Interfaces
 
 - Go: `server.New`, `Run`, `Serve`, `Start`, `Handler`, `Routes`, `RiverJobs`,
-  `PrivateHandler`, `Engine`, `AuthKit`, and the control-plane methods
+  `MetricsHandler`, `Engine`, `AuthKit`, and the control-plane methods
   ([server package](../standalone.md)), including `ListOpenDestructiveHolds`;
   `admin.FS`.
 - HTTP: the engine's catalog ([routes](../api/routes.md)), AuthKit's routes under its
-  issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` privately.
+  issuer path, `/admin`, `/health/live`, `/health/ready`; `/metrics` on the metrics port.
 - Configuration: `config.yaml` keys ([configuration](../standalone.md#configuration-reference)), the
   manifest and `merchant_manifest_overlays`, and the chart's `values.yaml`.
 
