@@ -677,10 +677,25 @@ func ValidatePublicURL(raw string, allowLoopback, originOnly bool) error {
 	return nil
 }
 
-// ValidateDatabase refuses a schema that is not a safe identifier.
+// MaxRiverSchema is the longest River schema: a Postgres name is at most 63
+// bytes (NAMEDATALEN 64) and River's names in it, such as the
+// <schema>.river_leadership channel, add 17.
+const MaxRiverSchema = 63 - len(".river_leadership")
+
+// ValidateDatabase refuses a schema that is not a safe identifier, and one
+// whose derived River schema, the schema plus _river, is too long for River.
 func ValidateDatabase(d billing.DatabaseConfig) error {
 	// The schema is interpolated into SQL and must be a safe identifier (#165).
-	return validateSchema(d.Schema)
+	if err := validateSchema(d.Schema); err != nil {
+		return err
+	}
+	if strings.TrimSpace(d.RiverSchema) == "" {
+		river := RiverSchemaName(&billing.Config{Database: d})
+		if len(river) > MaxRiverSchema {
+			return fmt.Errorf("database.schema %q is too long: its River schema %q is %d characters, and River's is at most %d (Postgres names are 63 bytes, less River's .river_leadership); use at most %d", d.Schema, river, len(river), MaxRiverSchema, MaxRiverSchema-len("_river"))
+		}
+	}
+	return nil
 }
 
 // defaults are the engine's defaults, for settings read without New.
