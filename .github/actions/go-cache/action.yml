@@ -23,21 +23,28 @@ runs:
       shell: bash
       env:
         FAMILY: ${{ inputs.family }}
+        SAVE: ${{ inputs.save }}
       run: |
         modules="$(go env GOMODCACHE)"
         sum="$(cat go.sum server/go.sum examples/go.sum | sha256sum | cut -c1-16)"
-        # setup-go installs go.mod's go line; its own go env then downloads the
-        # toolchain line's release into the module cache. Restoring that over
-        # itself fails, so the toolchain stays out of the cache.
+        # setup-go installs go.mod's go line, and its own go env downloads the
+        # toolchain line's release into the module cache. The cache holds that
+        # release too, and tar cannot write over its read-only files, so it goes
+        # first: the restore brings it back, or the next go command downloads it.
+        if [[ "$SAVE" != true ]]; then
+          for toolchain in "$modules"/golang.org/toolchain@*; do
+            if [[ -e "$toolchain" ]]; then chmod -R u+w "$toolchain"; rm -rf "$toolchain"; fi
+          done
+        fi
         if [[ -n "${GOCACHEPROG:-}" ]]; then
-          printf 'paths<<EOF\n%s\n!%s/golang.org/toolchain@*\nEOF\n' "$modules" "$modules" >> "$GITHUB_OUTPUT"
-          family="go-v4-${RUNNER_OS}-modules-"
+          printf 'paths<<EOF\n%s\nEOF\n' "$modules" >> "$GITHUB_OUTPUT"
+          family="go-v5-${RUNNER_OS}-modules-"
           printf 'family=%s\nprefix=%s\nsum=%s\nkey=%s\n' "$family" "$family" "$family" "$family$sum" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        printf 'paths<<EOF\n%s\n%s\n!%s/golang.org/toolchain@*\nEOF\n' "$(go env GOCACHE)" "$modules" "$modules" >> "$GITHUB_OUTPUT"
+        printf 'paths<<EOF\n%s\n%s\nEOF\n' "$(go env GOCACHE)" "$modules" >> "$GITHUB_OUTPUT"
         # cgo objects differ between runner images, and so does everything built on them.
-        family="go-v4-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-$FAMILY-"
+        family="go-v5-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-$FAMILY-"
         prefix="$family$(go env GOVERSION)-"
         printf 'family=%s\nprefix=%s\nsum=%s\nkey=%s\n' "$family" "$prefix" "$prefix$sum-" "$prefix$sum-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
     - name: Restore Go caches
