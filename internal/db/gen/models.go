@@ -163,14 +163,6 @@ type BillingCatalogRateCard struct {
 	UpdatedAt   time.Time
 }
 
-// Local catalog snapshot restore receipts; one completed atomic restore per merchant. Identical artifact retries are no-ops even after later catalog edits. Excluded from exported snapshots. Retention: permanent, never pruned.
-type BillingCatalogRestoreReceipt struct {
-	MerchantID uuid.UUID
-	Digest     string
-	Rows       int64
-	RestoredAt time.Time
-}
-
 // Configuration history: each change to a catalog object (product, price, meter, limit) or a configuration document (merchant, messages, psp, custodian), who made it and how. A catalog entry commits with its change; a configuration entry is written when OpenRails writes the document, or when a load finds a change made outside it. Credentials are never recorded. Nothing on a billing path reads it. Retention: permanent, never pruned.
 type BillingChangeLog struct {
 	MerchantID uuid.UUID
@@ -1870,8 +1862,7 @@ type BillingProductEntitlement struct {
 	// When the key stopped being granted; equal to added_at for a key added and removed at the same instant.
 	RemovedAt *time.Time
 	// Who added the key: a catalog application id (sha256:...), an operator, or migration.
-	AddedBy   string
-	RemovedBy *string
+	AddedBy string
 }
 
 // Scoped immutable provider bill identity and accepted invoice snapshot. Multiple verified aliases can name one invoice. Settlement proof never executes collection. Retention: permanent with the financial invoice.
@@ -1904,7 +1895,6 @@ type BillingProviderCatalogObject struct {
 	Currency              *string
 	BillingIntervalHours  *int32
 	BillingIntervalMonths *int32
-	Evidence              []byte
 	ObservedAt            time.Time
 	ObservedVia           string
 	CreatedAt             time.Time

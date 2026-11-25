@@ -19,7 +19,7 @@ type catalogKeyRename struct{ product, from, to string }
 
 // catalogHistory is what one catalog mutation changed, as history entries:
 // for each object its create, update, archive, unarchive or delete, a
-// product's key changes and a price key's move as entries of their own, each
+// product's key changes and a price key's move without other changes, each
 // with the object's revision after: revisions' where the mutation stepped
 // it, else after's.
 func catalogHistory(before, after catalogState, revisions map[catalogObject]int64, renames []catalogKeyRename, applicationID string) ([]history.Entry, error) {
@@ -72,7 +72,13 @@ func catalogHistory(before, after catalogState, revisions map[catalogObject]int6
 			}
 			revision = &r
 		}
-		entry.Changes = history.Fields{Version: history.Version, Revision: revision, ApplicationID: applicationID, Fields: fields}
+		changed := len(fields) > 0 || b == nil || a == nil
+		move, moved := priceMove(obj, before, after)
+		payload := history.Fields{Version: history.Version, Revision: revision, ApplicationID: applicationID, Fields: fields}
+		if changed && moved {
+			payload.Move = &move
+		}
+		entry.Changes = payload
 		keys, err := catalogKeyHistory(obj, b, a, revision, renames)
 		if err != nil {
 			return nil, err
@@ -80,14 +86,14 @@ func catalogHistory(before, after catalogState, revisions map[catalogObject]int6
 		if a == nil {
 			out = append(out, keys...)
 		}
-		if len(fields) > 0 || b == nil || a == nil {
+		if changed {
 			out = append(out, entry)
 		}
 		if a != nil {
 			out = append(out, keys...)
 		}
-		if move, moved := priceMove(obj, before, after, revision); moved {
-			out = append(out, move)
+		if moved && !changed {
+			out = append(out, history.PriceMoved(obj.key, obj.priceKey, revision, move.PriceID, move.Archived))
 		}
 	}
 	return out, nil
@@ -97,9 +103,9 @@ func catalogHistory(before, after catalogState, revisions map[catalogObject]int6
 // its versions, to one after naming none, or to none after naming one, which
 // the move names. A key names its current version unless that version or its
 // product is archived, or the version is deleted.
-func priceMove(obj catalogObject, before, after catalogState, revision *int64) (history.Entry, bool) {
+func priceMove(obj catalogObject, before, after catalogState) (history.Move, bool) {
 	if obj.kind != billing.CatalogObjectPrice {
-		return history.Entry{}, false
+		return history.Move{}, false
 	}
 	named := func(state catalogState) *catalogObjectState {
 		s, product := state[obj], state[productObject(obj.key)]
@@ -111,11 +117,11 @@ func priceMove(obj catalogObject, before, after catalogState, revision *int64) (
 	was, is := named(before), named(after)
 	switch {
 	case is != nil && (was == nil || was.priceID != is.priceID):
-		return history.PriceMoved(obj.key, obj.priceKey, revision, is.publicID, false), true
+		return history.Move{PriceID: is.publicID}, true
 	case is == nil && was != nil:
-		return history.PriceMoved(obj.key, obj.priceKey, revision, was.publicID, true), true
+		return history.Move{PriceID: was.publicID, Archived: true}, true
 	}
-	return history.Entry{}, false
+	return history.Move{}, false
 }
 
 // catalogHistoryFields are the fields an object's entries carry: its owned

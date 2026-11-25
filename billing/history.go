@@ -108,7 +108,10 @@ const (
 // "revision", and a credential field reads "changed"; key_add and key_remove
 // carry {"version":1,"keys":[…]}, key_rename {"version":1,"from":…,"to":…},
 // and a price's move {"version":1,"price_id":…,"archived":…} with its
-// revision.
+// revision. A price change that also moves its key adds
+// "move":{"price_id":…, "archived":…} to its fields payload instead of
+// recording a separate move entry. A move without other price changes keeps
+// its standalone entry.
 type LogEntry struct {
 	ID          LogEntryID      `json:"id"`
 	OccurredAt  time.Time       `json:"occurred_at"`

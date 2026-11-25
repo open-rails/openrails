@@ -1,21 +1,5 @@
--- The CCBill rebills each DataLink read listed, per PSP: a rebill a CCBill
--- callback recorded is confirmed by a read that lists its transaction under
--- its subscription.
-CREATE TABLE billing.provider_listed_rebills (
-    merchant_id uuid NOT NULL,
-    psp_id uuid NOT NULL,
-    transaction_key text NOT NULL CHECK (octet_length(transaction_key) BETWEEN 1 AND 128),
-    subscription_key text NOT NULL CHECK (octet_length(subscription_key) BETWEEN 1 AND 128),
-    amount text CHECK (octet_length(amount) BETWEEN 1 AND 64),
-    listed_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (merchant_id, psp_id, transaction_key),
-    CONSTRAINT provider_listed_rebills_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps (merchant_id, id) ON DELETE RESTRICT
-);
-COMMENT ON TABLE billing.provider_listed_rebills IS 'Provider observations: each rebill a CCBill DataLink read listed, first listed at listed_at: its transaction id and subscription id without leading zeros, and the amount as DataLink states it. A callback-recorded rebill no read lists under its subscription is raised as pull.charge.unconfirmed. Retention: rows are deleted 90 days after listed_at.';
+DROP TABLE billing.catalog_restore_receipts;
 
-CREATE INDEX provider_listed_rebills_listed_at_idx ON billing.provider_listed_rebills (merchant_id, listed_at);
-
--- A restore lands on a destination that no read has listed rebills for.
 CREATE OR REPLACE FUNCTION billing.guard_billing_restore_receipt() RETURNS trigger
 LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'billing', 'pg_temp' AS $_$
 DECLARE item record; occupied boolean;
@@ -54,7 +38,6 @@ BEGIN
                   'catalog_meters',
                   'catalog_product_limits',
                   'catalog_rate_cards',
-                  'catalog_restore_receipts',
                   'credit_grant_events',
                   'credit_grants',
                   'credit_reversal_shares',
@@ -131,7 +114,6 @@ BEGIN
                   'provider_charge_attributions',
                   'provider_cycle_receipts',
                   'provider_intents',
-                  'provider_listed_rebills',
                   'provider_schedules',
                   'psp_customers',
                   'psp_refresh_watermarks',
