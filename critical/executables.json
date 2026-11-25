@@ -585,7 +585,7 @@
       "TestLeaseVersions/OR-J24-S33/usage-without-a-grant-opens-no-window-and-a-lapsed-grants-windows-keep-counting"
     ],
     "OR-J24-S34": [
-      "TestLeaseVersions/OR-J24-S34/a-full-sync-across-a-thousand-customers-settles-whole"
+      "TestLeaseVersions/OR-J24-S34/a-full-backlog-across-a-thousand-customers-settles-whole-across-syncs"
     ],
     "OR-J24-S36": [
       "TestUsageContracts/OR-J24-S36/a-meter-correction-holds-only-its-own-merchants-usage"
@@ -2463,6 +2463,9 @@
     ],
     "OR-J24-S69": [
       "TestEventStore/OR-J24-S69/the-servers-default-clickhouse-is-optional-and-a-named-one-is-waited-for"
+    ],
+    "OR-J24-S70": [
+      "TestLeaseVersions/OR-J24-S70/a-sync-out-of-time-settles-a-prefix-and-the-next-continues-where-it-stopped"
     ],
     "OR-J40-S20": [
       "TestUsageReceivable/OR-J40-S20/usage-beyond-the-balance-is-receivable-collected-by-card-and-by-remittance/card",

@@ -37,6 +37,49 @@ func (q *Queries) GetCustomerPeriodAnchor(ctx context.Context, arg GetCustomerPe
 	return period_anchor, err
 }
 
+const listCustomerPeriodAnchors = `-- name: ListCustomerPeriodAnchors :many
+SELECT c.customer_id::uuid AS customer_id, LEAST(
+    (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
+     WHERE lt.merchant_id = $1::uuid AND lt.customer_id = c.customer_id
+       AND lt.currency = $2::text AND lt.book = 'units'),
+    (SELECT a.created_at FROM billing.ledger_accounts a
+     WHERE a.merchant_id = $1::uuid AND a.customer_id = c.customer_id
+       AND a.currency = $2::text AND a.account_type = 'customer_units'))::timestamptz AS period_anchor
+FROM unnest($3::uuid[]) AS c(customer_id)
+`
+
+type ListCustomerPeriodAnchorsParams struct {
+	MerchantID  uuid.UUID
+	Currency    string
+	CustomerIds []uuid.UUID
+}
+
+type ListCustomerPeriodAnchorsRow struct {
+	CustomerID   uuid.UUID
+	PeriodAnchor time.Time
+}
+
+// GetCustomerPeriodAnchor for many customers in one currency.
+func (q *Queries) ListCustomerPeriodAnchors(ctx context.Context, arg ListCustomerPeriodAnchorsParams) ([]ListCustomerPeriodAnchorsRow, error) {
+	rows, err := q.db.Query(ctx, listCustomerPeriodAnchors, arg.MerchantID, arg.Currency, arg.CustomerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCustomerPeriodAnchorsRow
+	for rows.Next() {
+		var i ListCustomerPeriodAnchorsRow
+		if err := rows.Scan(&i.CustomerID, &i.PeriodAnchor); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsageRatingCards = `-- name: ListUsageRatingCards :many
 
 SELECT cm.key AS meter_key,

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/modules/leases"
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/stretchr/testify/require"
@@ -565,7 +568,7 @@ func TestLeaseVersions(t *testing.T) {
 		require.Nil(t, visit.WindowStartsAt)
 	})
 
-	t.Run("OR-J24-S34/a-full-sync-across-a-thousand-customers-settles-whole", func(t *testing.T) {
+	t.Run("OR-J24-S34/a-full-backlog-across-a-thousand-customers-settles-whole-across-syncs", func(t *testing.T) {
 		w := newWorld(t)
 		usageMeter(t, w.alpha, 1)
 		items := make([]billing.LeaseUsage, billing.MaxSyncUsageItems)
@@ -574,17 +577,78 @@ func TestLeaseVersions(t *testing.T) {
 		}
 		items = numbered(1, items...)
 		lease := newLease()
-		// A sync settles all it carries, or refuses an item: a gate reports
-		// none of it in flight.
-		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
-		require.Empty(t, out.Usage.Refused)
-		require.EqualValues(t, len(items), out.Usage.ThroughN, "one sync settles its thousand customers' usage")
-		// A resend of the whole sync answers it as settled and charges
+		// Each sync settles a prefix, at least a chunk, within its time, and
+		// the next carries the rest, as a gate sends it.
+		through, syncs := int64(0), 0
+		for through < int64(len(items)) {
+			require.Less(t, syncs, len(items)/leases.UsageChunkCustomers, "every sync settles at least a chunk")
+			out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items[through:]})
+			syncs++
+			require.Empty(t, out.Usage.Refused)
+			require.Greater(t, out.Usage.ThroughN, through, "the sync made progress")
+			through = out.Usage.ThroughN
+		}
+		// A resend of the whole backlog answers it as settled and charges
 		// nothing again.
-		out = syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
 		require.Empty(t, out.Usage.Refused)
 		require.EqualValues(t, len(items), out.Usage.ThroughN)
 		require.EqualValues(t, len(items), storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"), "every item settled exactly once")
+	})
+
+	t.Run("OR-J24-S70/a-sync-out-of-time-settles-a-prefix-and-the-next-continues-where-it-stopped", func(t *testing.T) {
+		w := newWorld(t)
+		usageMeter(t, w.alpha, 1)
+		lease := newLease()
+		// Two chunks' customers, an item of the second refused alone, and one
+		// past a gap.
+		chunk := leases.UsageChunkCustomers
+		items := make([]billing.LeaseUsage, chunk+chunk/2)
+		for i := range items {
+			items[i] = usageInput(billing.CustomerID(uuid.New()), fmt.Sprintf("prefix-%d", i), 1)
+		}
+		bad := int64(chunk + 11)
+		items[bad-1] = usageInput(billing.CustomerID{}, "no-customer", 1)
+		items = numbered(1, items...)
+		gap := int64(len(items) + 2)
+		sent := append(slices.Clone(items), numbered(gap, usageInput(billing.CustomerID(uuid.New()), "past-a-gap", 1))...)
+		events := func() uint64 {
+			return storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}")
+		}
+		// The first chunk ends past the sync's usage budget, as under load.
+		var slow sync.Once
+		t.Cleanup(failpoint.Set(func(_ context.Context, site failpoint.Site) error {
+			if site.Point == failpoint.AfterChunk && site.Kind == leases.FailpointKind && site.Operation == lease.UUID() {
+				slow.Do(func() { time.Sleep(leases.UsageBudget) })
+			}
+			return nil
+		}))
+		out := syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: sent})
+		require.EqualValues(t, chunk, out.Usage.ThroughN, "the sync settled its first chunk and started no other")
+		require.Empty(t, out.Usage.Refused, "an item it left is neither settled nor refused, nor is the gap past it")
+		require.EqualValues(t, chunk, events())
+
+		// The next sync continues where it stopped: the rest settles, the
+		// item refused alone, and the gap is refused once all before it settled.
+		out = syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: sent[chunk:]})
+		require.EqualValues(t, len(items), out.Usage.ThroughN)
+		require.Len(t, out.Usage.Refused, 2)
+		require.Equal(t, bad, out.Usage.Refused[0].N)
+		require.Equal(t, http.StatusBadRequest, out.Usage.Refused[0].Status)
+		require.Equal(t, billing.CodeInvalidParam, out.Usage.Refused[0].Error.Code)
+		require.Equal(t, gap, out.Usage.Refused[1].N)
+		require.Equal(t, http.StatusConflict, out.Usage.Refused[1].Status)
+		require.Equal(t, billing.CodeUsageOutOfOrder, out.Usage.Refused[1].Error.Code)
+		require.EqualValues(t, len(items)-1, events(), "each settled item once")
+
+		// A resend of all of it answers each settlement from its receipt and
+		// charges nothing again.
+		out = syncLease(t, w.alpha, billing.SyncLeasesParams{LeaseID: lease, Usage: items})
+		require.EqualValues(t, len(items), out.Usage.ThroughN)
+		require.Len(t, out.Usage.Refused, 1)
+		require.Equal(t, bad, out.Usage.Refused[0].N)
+		require.Equal(t, billing.CodeInvalidParam, out.Usage.Refused[0].Error.Code)
+		require.EqualValues(t, len(items)-1, events())
 	})
 
 }

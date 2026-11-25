@@ -32,23 +32,6 @@ func (q *Queries) FindAssignedBillingPolicyOutside(ctx context.Context, arg Find
 	return billing_policy, err
 }
 
-const getCustomerBillingPolicy = `-- name: GetCustomerBillingPolicy :one
-SELECT billing_policy FROM billing.customers
-WHERE merchant_id = $1 AND id = $2
-`
-
-type GetCustomerBillingPolicyParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-func (q *Queries) GetCustomerBillingPolicy(ctx context.Context, arg GetCustomerBillingPolicyParams) (*string, error) {
-	row := q.db.QueryRow(ctx, getCustomerBillingPolicy, arg.MerchantID, arg.CustomerID)
-	var billing_policy *string
-	err := row.Scan(&billing_policy)
-	return billing_policy, err
-}
-
 const listCustomerBillingPolicyAssignments = `-- name: ListCustomerBillingPolicyAssignments :many
 SELECT id AS customer_id, billing_policy::text AS policy_name FROM billing.customers
 WHERE merchant_id = $1 AND id = ANY($2::uuid[]) AND billing_policy IS NOT NULL
