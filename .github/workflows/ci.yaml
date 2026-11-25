@@ -657,7 +657,9 @@ jobs:
   gate:
     name: ${{ github.event_name == 'push' && 'Push check' || (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
     needs: [source, scope, injection-scan, guards, go, lint, chart, sql, browser, critical, critical-coverage, critical-cache, security, artifact-release, artifact-image]
-    if: ${{ always() && needs.scope.outputs.tier != 'focused' && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
+    # Not when the run itself was cancelled (a newer push or PR update): a
+    # superseded check reports cancelled, not red.
+    if: ${{ !cancelled() && needs.scope.outputs.tier != 'focused' && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
