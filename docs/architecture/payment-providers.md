@@ -16,7 +16,7 @@ provider and what the provider's answer proves.
 - **Merchant controls**: `writes` (`full`, `limited`: no system-origin writes, or `readonly`), the rebill brake on system-origin charges, and destructive arming (`internal/controls`).
 - **Provider posture**: a PSP credential's proven environment; any other verdict disarms it.
 - **Wake job**: a debounced River job that reads one provider object after a callback.
-- **Finding**: a `reconciliation_findings` row; a `pull.*` finding carries a proposed change (a proposal).
+- **Finding**: a `reconciliation_findings` row; a `pull.*` finding carries a proposed change (a proposal); the queue is [findings and alerts](findings.md).
 - **Park**: a live provider subscription converge cannot land (`parked_provider_subscriptions`).
 
 ## How it works
@@ -31,7 +31,7 @@ Each write type is a `Handler` (`Execute`, `Verify`, `CheckRelevance`,
    to `psps` with `rail`), origin, and an `idempotency_key` unique per merchant.
    Its `openrails.provider_operation` wake commits in the same transaction.
 2. The `Runner` claims it (`in_flight`, a lease, `attempts` bumped as a fencing token) and checks the handler, `CheckRelevance`, `GateExecution`, the merchant's destructive arming and the `VolumeBreaker`; a charge also checks `RebillHold`. A refusal parks it, refunding the attempt, for `ParkRetryInterval` (5 minutes); one that must wait (`WaitUntil`) stays pending until then with no attempt and no `operation_log` entry; one no longer relevant is superseded, and a collection held by write posture goes unknown and is read back.
-3. A destructive type's breaker admission sets `provider_intents.sent_attempt` under its lock, for the claim's own attempt only; a park clears it. The `attempting` entry goes to `operation_log` ahead, on its own statement, and `Execute` runs; its result is written ahead too, and a hold commits with the intent's transition. An entry over the log's bounds keeps the start of its reason and evidence and says `truncated`. A charge first calls `Store.RequireClaim` on its own connection: the claim must still hold a lease beyond `ProviderCallHold` (30 s).
+3. A destructive type's breaker admission sets `provider_intents.sent_attempt` under its lock, for the claim's own attempt only; a park clears it. The `attempting` entry goes to `operation_log` ([history](history.md)) ahead, on its own statement, and `Execute` runs; its result is written ahead too, and a hold commits with the intent's transition. An entry over the log's bounds keeps the start of its reason and evidence and says `truncated`. A charge first calls `Store.RequireClaim` on its own connection: the claim must still hold a lease beyond `ProviderCallHold` (30 s).
 4. The outcome is written on a detached context (`LedgerWriteContext`):
    `succeeded`, `failed_retryable` (provably not executed), `unknown_needs_verify`,
    `failed_terminal`, or parked. A lapsed lease becomes unknown, never a
@@ -138,9 +138,7 @@ Other tables: `provider_bills`, `provider_charge_attributions`, `webhook_health`
 - **CLI**: `openrails intents resolve`, `openrails provider-refresh`,
   `openrails book arm`, `openrails merchant controls|writes|rebills|destructive`, `openrails undo-run`,
   `openrails solana-pay resolve`.
-- **Configuration**: `ccbill_webhook_ip_allowlist`, `solana.crankers`, each PSP's `environment`;
-  probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs:
-  [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
+- **Configuration**: `solana.crankers`, each PSP's `environment`; test seam `Deps.ProviderEndpoints` (`CCBillWebhookSources`); probes `openrails_psp_posture`, `openrails_solana_crankers`. Docs: [rails](../client.md#merchant-configuration-and-psps), [PSP environments](../client.md#merchant-configuration-and-psps).
 
 ## Guarantees
 
@@ -223,7 +221,7 @@ Checks:
 
 ### 6. Data lifecycle
 
-In `internal/retention/tables.go`, instruction-only operations (`OutboxIntentTypes`) and `operation_log` entries go after 25 months; `webhook_events` and released parks after 90 days; resolved findings after 12 months; money-moving operations and provider bills, schedules and receipts are permanent. None is partitioned.
+In `internal/retention` (`tables.go`; `OutboxIntentTypes` in `retention.go`), instruction-only operations and `operation_log` entries go after 25 months; `webhook_events` and released parks after 90 days; resolved findings after 12 months; money-moving operations and provider bills, schedules and receipts are permanent. None is partitioned.
 
 Checks:
 - Each table comment's `Retention:` sentence matches its `tables.go` rule (`State` tables carry none).
@@ -241,18 +239,12 @@ Checks:
 
 ### 8. Abuse protection
 
-Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail
-body caps (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) before parsing. Unsigned,
-mis-signed and stale deliveries are refused and counted in
-`webhook_health_daily`. CCBill is accepted from its published ranges, or from
-`ccbill_webhook_ip_allowlist` only for an account proven non-live. Customer
-declines from charge operations feed the card-testing ledger
-(`Runner.recordOrderCardDecline`).
+Webhooks share the `webhook` rate-limit bucket (1200 a minute) and per-rail body caps (CCBill 16 KiB, NMI 64 KiB, Stripe 256 KiB) before parsing. Unsigned, mis-signed and stale deliveries are refused and counted in `webhook_health_daily`. CCBill is accepted from its published ranges, or from `Deps.ProviderEndpoints.CCBillWebhookSources`, a test seam, only for an account proven non-live. Customer declines from charge operations feed the card-testing ledger (`Runner.recordOrderCardDecline`).
 
 Checks:
 - `readLimitedWebhookBody` wraps every body in `http.MaxBytesReader` and answers 413.
 - Stripe's public path checks its signed time within 5 minutes; only the queued re-verification skips it. NMI's signed `t` is a nonce (`sigverify.VerifyNMI`): no window, and a replay is its `event_id`, applied once (`DeduplicationService.ProcessWebhook`).
-- `webhookauth.CCBillIPAllowed` refuses an allowlisted source when the account's money class is unknown; `internal/config` refuses a `/0` entry.
+- `webhookauth.CCBillIPAllowed` refuses an allowlisted source when the account's money class is unknown; `internal/config` drops a `/0` entry and reports it.
 
 ### 9. Destructive-action safeguards
 
@@ -285,8 +277,7 @@ Critical scenarios:
 - J37: OR-J37-S01 to S05, S63 (`TestSolanaContracts`), S07, S09, S60 to S62 (`TestSolanaPulls`), S64 to S68 (`TestSolanaPlanChanges`), S06 (`TestBackgroundJobs`), S10 (`TestFXRates`), S70 (`TestOrderExpiryClock`).
 - Elsewhere: OR-J09-S05, S06 (lost and partial NMI sales), OR-J16-S04, OR-J20-S03, S70, OR-J26-S55, OR-J31-S03, S04 (copied book, export with open work), OR-J34-S05, OR-J04-S43.
 
-Provider fakes: `nmimock`, `stripemock`, `ccbillmock`, `solanafake`. The only
-package test here is `internal/reconcile/solana_discovery_test.go`.
+Provider fakes: `nmimock`, `stripemock`, `ccbillmock`, `solanafake`. The only package tests here are `internal/reconcile/solana_discovery_test.go` and the fake's own `openrailstest/nmimock/nmimock_test.go`.
 
 Gaps:
 

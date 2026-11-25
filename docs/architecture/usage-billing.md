@@ -1,11 +1,6 @@
 # Usage billing
 
-Usage billing decides what usage costs and bills it in arrears. Usage lives in
-the event store (ClickHouse); OpenRails prices each period on its total and posts
-it to the ledger at each month's end and before balance movements; with
-automatic usage billing, usage orders bill what is owed, and running charges
-bill a rate per hour. How much a customer may use, and the gate that enforces
-it, are [entitlements and limits](entitlements.md).
+Usage billing decides what usage costs and bills it in arrears. Usage lives in the event store (ClickHouse); OpenRails prices each period on its total and posts it to [Books](books.md) at each month's end and before balance movements; usage orders bill what is owed, and running charges bill a rate per hour. How much a customer may use, and the gate that enforces it, are [entitlements and limits](entitlements.md).
 
 ## Concepts
 
@@ -74,7 +69,7 @@ that names it, else left out (OR-J24-S64). Until then the balance holds what is
 unposted (`unpostedUsage`). A merchant's own unit is never owed: a posting in
 one takes what the lots hold and forgives the rest (`usage_postings.forgiven`),
 and a reversal takes forgiveness back before it credits
-([prepaid credits](prepaid-credits.md)).
+([credits](credits.md)).
 
 **Billing.** The usage pass (`UsageOrderWorker`), on every deployment, with or
 without an event store, bills each account whose `money_settings.usage_due_at` has come (its bill date, or

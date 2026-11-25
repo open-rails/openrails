@@ -36,7 +36,7 @@ the file out of version control. Per-rail fields:
 slug: onlydemo # your merchant's name: lowercase letters, digits and hyphens
 display_name: OnlyDemo
 psps:
-  mobius: # your name for this account; any key you like
+  nmi-main: # your name for this account; any key you like
     rail: nmi # the gateway kind: nmi, stripe, ccbill or solana
     environment: sandbox # live (real money; the default), test (an NMI account in test mode) or sandbox (a sandbox.nmi.com account)
     gateway_id: "000000" # the NMI dashboard's Gateway ID
@@ -143,9 +143,7 @@ products:
         billing_interval: 365 days
 ```
 
-Applying is an operator step, like a deploy: run your app's own command, which
-prints what changed. Applying the same file again changes nothing, and an older
-file never rolls anything back.
+Applying is an operator step, like a deploy: run your app's own command, which prints what changed. Reapplying a file that applied whole, even an older one, replays its receipt and changes nothing.
 
 ```go guide:catalog-apply
 products, err := catalog.ReadFile(path)
@@ -312,3 +310,4 @@ is the delivery log, kept two years and with no body. Embedded,
 - Generated references: [routes](api/routes.md), [error codes](api/error-codes.md),
   [`api/openapi.json`](../api/openapi.json).
 - Runnable examples: [`examples/`](../examples/README.md).
+- [Architecture](architecture/README.md): how each system works and keeps its guarantees, for people changing or reviewing OpenRails.

@@ -101,7 +101,7 @@ Its transfer types are `cash_received`, `cash_applied`, `cash_returned`, `revenu
 | A lot's payment reversed | `deferred_revenue_credit`, `refunds` or `chargebacks`, `usage_receivable` → the payment's cash account | `refund_*`, `chargeback_*`, `usage_reopened` (`purchased_credit_refund`) | `books.Books.ReverseCredit` |
 | A won dispute | the cash account, `promotional_credit` → `deferred_revenue_credit`, `usage_receivable` (owed still outstanding), `refunds` or `chargebacks` | `dispute_won` (`purchased_credit_refund`) | `books.Books.RecoverCredit` |
 
-A credit lot's money is described in [prepaid credits](prepaid-credits.md).
+A credit lot's money is described in [credits](credits.md).
 
 A spend releases what the lot holds less what its units left are worth (`CreditLot.Worth`), so a fully deferred lot releases in proportion to the units spent, rounded cumulatively. A partly deferred lot, whose payment applied less than its price (`books.credit.unapplied`), takes its shortfall from its first spends: they release nothing until its units left are worth less than it holds, and the spend that crosses that point releases only the difference.
 
@@ -138,7 +138,7 @@ The units book's movements funnel through `Ledger.ApplyIdempotent` (`internal/mo
 3. `trg_ledger_transfers_book_rules` (before insert) refuses a transfer whose accounts are in another book (`ledger_cross_book`) or currency (`ledger_cross_currency`), or that moves a customer's account in a transfer not attributed to that customer (`ledger_customer_mismatch`).
 4. `trg_ledger_transfers_apply_counters` locks the accounts that keep counters (every units-book account and the general ledger's customer accounts) in id order, checks their sign rules and bumps the counters. A units-book breach is refused (relaxed for a debit by `allow_debit_negative_up_to`; `ledger_insufficient_funds` surfaces as `ledger.ErrInsufficientFunds`); a general-ledger customer account's raises `books.sign_breach` for that customer and commits. It never locks a merchant-wide general-ledger account, so no posting holds one until it commits. `LedgerAccountBalance` reads no row for a merchant-wide general-ledger account.
 5. `trg_ledger_transfers_rollups` queues the transfer in `ledger_rollup_pending`. At commit, the deferred `ledger_rollups_settle` folds the queued transfers into `ledger_type_totals` and `ledger_daily` (`settle_ledger_rollups`), so no two writers wait on each other's rollups mid-transaction. A merchant-wide account's type total, locked there, is checked against the account's sign rule. A breach never refuses the commit (before the books are rebuilt from history, a refund of money received earlier can draw `deferred_revenue` or `unapplied_cash` below zero): it raises `books.sign_breach`, one per type, currency and (for a customer's account) customer, reopened by a later breach once resolved, and `ledger-audit` fails on it. A writer cannot read such a balance mid-transaction, so the general ledger's writers bound a draw by their own facts (a draw on `unapplied_cash` by the per-payment cash it applies), never by a balance read.
-6. A units-book transfer that names a customer calls `WatchChange` in the same transaction, which queues a balance look when the change crosses a line or the watch looks at every change (see [prepaid credits](prepaid-credits.md)).
+6. A units-book transfer that names a customer calls `WatchChange` in the same transaction, which queues a balance look when the change crosses a line or the watch looks at every change (see [credits](credits.md)).
 
 Merchant-wide general-ledger accounts are opened where a currency or PSP becomes sellable, outside any business transaction, so no first posting in it waits on another's uncommitted account: `books.Open` makes the merchant's general ledger whole in a short transaction of its own (`db.Pool.CommittedMerchantTx`, refused inside a caller's transaction), giving every currency its catalog prices in, every currency named and every currency already open each merchant-wide account and each PSP's cash clearing, and only reads once whole. `books.Prepare` runs it, at public entry points only and never inside a caller's transaction (where it does nothing), and never fails the operation: after a catalog apply, a price or provider price created, a configuration sync that declares or arms a PSP (at start-up too), before a billing import, once the batch is validated, with its transactions' currencies, and before a PSP import's apply with its records'. Bookkeeping never blocks a money movement: a posting that meets an account nothing opened creates it in its own transaction, as any first writer would, and raises the finding `books.account.opened_late` (`books.OpenedLateFindingType`, low severity) once per account so the gap is closed.
 
@@ -146,7 +146,7 @@ Locks are taken in one order. During its statements a writer locks the customer 
 
 1. the ledger rollups of every merchant the transaction posted for, merchants in id order: `ledger_type_totals`, then `ledger_daily`, each in key order (`settle_ledger_rollups`);
 2. MRR of every merchant with a changed subscription, in id order (`settle_mrr`: `customer_mrr`, the movements, the flow rollups and `mrr_totals`; see [subscriptions](subscriptions.md));
-3. the event streams (`flush_event_log`: each `eventlog_streams` row in (source, scope) order, then the events; see [notifications](notifications.md)).
+3. the event streams (`flush_event_log`: each `eventlog_streams` row in (source, scope) order, then the events; see [events](events.md)).
 
 Steps 1 and 2 repeat until neither queue holds work, then step 3 runs. Ledger or MRR work queued once step 3 has begun, in that run or a later one in the transaction (`openrails.event_log_flushed`), would take its rows out of order and is refused.
 
@@ -162,13 +162,13 @@ Integrity is checked on demand. `ledger.CheckIntegrity` runs conservation (each 
 
 ## Interfaces
 
-- Go: `Client.GetBalance` (`billing.Balance`: balance, held, accrued, available, owed) and `Client.ListBalanceTransactions` (`billing.BalanceTransaction`; a usage deduction carries `Usage`) read the units book. `billing.Currencies` and `billing.LookupCurrency` read the registry. The general ledger and its schedules have no public reader.
+- Go: `Client.GetBalance` (`billing.Balance`: balance, held, accrued, available, owed) and `Client.ListBalanceTransactions` (`billing.BalanceTransaction`; a usage deduction carries `Usage`) read the units book. `catalog.Currencies` and `catalog.ParseCurrency` read the registry. The general ledger and its schedules have no public reader.
 - Jobs: the `openrails.revenue_recognition` scan of `openrails.billing_pass` ([River jobs](../river-jobs.md)).
 - HTTP: `GET /v1/admin/customers/{customer_id}/balance` and `GET /v1/admin/customers/{customer_id}/balance/transactions` (`merchant:customer:read`); the customer's `GET /v1/me` and `GET /v1/me/balance/transactions`; `GET /v1/config` lists `currencies`.
 - Configuration: `accounting.timezone` ([merchant configuration](merchant-configuration.md)).
 - Error codes: `currency_unsupported`, `invalid_cursor`, `invalid_customer_id`.
 - CLI: `openrails ledger-audit [--merchant=…] [--format=table|json]`.
-- Docs: [glossary](../guide.md), [prepaid credits](../client.md#credits), [usage billing](../client.md#usage-and-running-charges).
+- Docs: [glossary](../guide.md), [credits](../client.md#credits), [usage billing](../client.md#usage-and-running-charges).
 
 ## Guarantees
 

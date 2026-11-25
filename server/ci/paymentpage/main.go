@@ -1,7 +1,7 @@
 //go:build e2e && integration
 
-// Command paymentpage runs the standalone server with its payment page for
-// web/pay's Playwright suite: one merchant on the loopback NMI gateway
+// Command paymentpage runs the standalone server with its payment page, a
+// fixture nothing runs: one merchant on the loopback NMI gateway
 // and the fake Stripe, a Turnstile captcha account, the test's clock, the API
 // on one origin and the payment page on another. Test-only: /__test/* on the API
 // origin makes merchant orders with a pay URL (as a backend does through

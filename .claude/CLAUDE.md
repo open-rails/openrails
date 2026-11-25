@@ -15,8 +15,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   implementation themselves. There is no separate contract module or version.
 - `server/` is its own module, `github.com/open-rails/openrails/server`: package `server`,
   the binary `server/cmd/openrails`, everything AuthKit-backed under `server/internal/`
-  (controlplane, operator, hostconfig, …) and `server/ci/paymentpage`, the fixture server
-  for web/pay's Playwright suite. It may
+  (controlplane, operator, hostconfig, …) and `server/ci/paymentpage`, a payment-page
+  fixture server nothing runs. It may
   import the root's `internal/` packages; the root never imports it. In the repo it builds
   against the root's source (`replace … => ../`).
 - `web/` is the browser code, in the root module: `web/billing-ui` (the npm library

@@ -9,8 +9,7 @@ Who a merchant's customers are: their email, name and username. OpenRails bills 
 - **Contact**: `identity.Contact`: email, name, username; `Active` and `SyncedAt`
   only for the kept copy. The API shape is `billing.CustomerContact`.
 - **Directory**: `identity.Directory`, what every reader calls: `Contacts(ctx, merchantID, ids)`, `Search(ctx, merchantID, query, limit)` (people the directory holds, customers or not) and `SearchCustomers` (only the merchant's customers). A customer without a contact is absent, never an error.
-- **Live directory**: `identity.Live` over `Deps.UserInfo` (`openrails.UserInfo`,
-  AuthKit's `userinfo.Lookup`). Nothing is copied.
+- **Live directory**: `identity.Live` over `Deps.UserInfo` (AuthKit's `userinfo.Lookup`). Nothing is copied.
 - **Kept copy**: `identity.Kept` over `billing.customer_contacts`, written by SCIM and by the customer gate from a verified credential's claims (`Kept.Record`).
 - **Provisioning token**: a merchant's SCIM bearer secret (`orscim_…`), kept as its
   SHA-256 in `billing.provisioning_tokens`.

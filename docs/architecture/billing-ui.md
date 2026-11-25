@@ -20,16 +20,7 @@ npm with provenance. Guides: [frontend](../client.md#orders-and-checkout),
 
 ## How it works
 
-**Customer client.** `createBillingClient({ baseUrl, fetch | getToken })` gives one
-method per customer route and public config. Responses are parsed by zod schemas
-(`src/client/types.ts`) typed against `generated/wire.ts`; an amount must be an
-int64 string (`isAmount`). Only a GET is retried: once, on a network error, a 502,
-503 or 504, or a 429 naming its wait, within `RETRY_BUDGET_MS` (2 s). A write is
-sent again only after `401 credential_expired`, which the gate answers before the
-route runs. `tokenSource` keeps the token in memory, fetches the next one `skew`
-seconds (60) before expiry once for every waiting call, and drives that single
-resend. Payments and card saves carry the caller's `Idempotency-Key`. Failures
-become `BillingError` with a registry code (`OpenRailsErrorCode`).
+**Customer client.** `createBillingClient({ baseUrl, fetch | getToken })` gives one method per customer route and public config. Responses are parsed by zod schemas (`src/client/types.ts`) typed against `generated/wire.ts`; an amount must be an int64 string (`isAmount`). Only a GET is retried: once, on a network error, a 502, 503 or 504, or a 429 naming its wait, within `RETRY_BUDGET_MS` (2 s). A write is sent again only after `401 credential_expired`, which the gate answers before the route runs. `tokenSource` keeps the token in memory, fetches the next one `skew` seconds (60) before expiry once for every waiting call, and drives that single resend. Payments and card saves carry the caller's `Idempotency-Key`. Failures become `BillingError` with the server's registry code or a local one (`network_error`, …).
 
 **Customer components.** `BuyButton`, `ProductList`, `OrderPayment`,
 `EmbeddedPayment` and `Cart` buy through orders (`BuyButton`, `ProductList` and `Cart` pass the host's `attribution` to the order, and requests carry the provider's `locale` as `Accept-Language`); `AccountBilling` shows
@@ -60,13 +51,7 @@ refreshed every 30 seconds. Destructive acts use `TypedConfirmDialog` or a
 counted, typed confirmation. `AdminConsole` adds AuthKit's account administration
 (optional peer `@openrails/auth-ui`) around `BillingAdmin`.
 
-**Consumers in this repository.** `web/console` composes `BillingAdmin`
-with AuthKit's members, roles, API keys and account panels into the `/admin`
-console; `task admin-build` builds it into `web/console/dist`, which the
-binary embeds. `web/pay` (`@openrails/payment-page`) wraps `OrderPayment` in the
-hosted pay page; its build in `web/pay/dist` is embedded by `web/pay/embed.go` and
-served by `Engine.CheckoutPage`. Its `captchaFetch` resends a pay refused
-`403 captcha_required` once with the solved token.
+**Consumers in this repository.** `web/console` composes `BillingAdmin` with AuthKit's members, roles, API keys and account panels into the `/admin` console; `task admin-build` builds it into `web/console/dist`, which the binary embeds. `web/pay` (`@openrails/payment-page`) wraps `OrderPayment` in the hosted pay page; its build in `web/pay/dist` is embedded by `web/pay/embed.go` (`pay.FS`) and served by `Engine.CheckoutPage` from `Deps.CheckoutAssets`. Its `captchaFetch` resends a pay refused `403 captcha_required` once with the solved token.
 
 **Build checks.** `pnpm build` runs `tooling/check-admin-entry.mjs`, which fails
 when the customer entry pulls in admin modules or styles.
@@ -107,7 +92,7 @@ Checks:
 - `formatAmount` and `amountUnits` in `src/lib/money.ts` never convert an amount to `Number`.
 - The zod `amount` schema refines `isAmount`.
 - `src/order-payment.tsx` sends `expectedTotal: order.total` and offers no wallet when `amountToMinorUnits` returns null.
-- `currencies.ts` is generated from `billing.Currencies`.
+- `currencies.ts` is generated from `catalog.Currencies`.
 
 ### 4. Access control and tenant isolation
 Customer methods call `/v1/me` routes that name no customer; the token decides who.
@@ -171,7 +156,4 @@ Checks:
   repository's `critical/customer_binding_sdk.mjs`.
 - Static: `pnpm critical:static` (typecheck, lint, `check-package.mjs`), the
   admin-entry check in `pnpm build`, and `pnpm contract:check`.
-- Gaps: billing-ui has no unit tests. `web/pay` has no Playwright suite of its own,
-  and nothing in the repository runs `server/ci/paymentpage`. No browser scenario
-  opens the catalog, payments, reports or alert settings pages, edits a dashboard,
-  or checks the locale bundles.
+- Gaps: billing-ui has no unit tests. `web/pay` has no Playwright suite of its own, and nothing in the repository runs `server/ci/paymentpage`. No browser scenario opens the catalog beyond a price's Verify, or the payments, reports or alert settings pages, edits a dashboard, or checks the locale bundles.

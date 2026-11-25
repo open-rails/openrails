@@ -152,8 +152,7 @@ Checks:
 `lifecycle.RenewalDeclined` ignores a decline for a canceled row or another period. The completion handlers also require an unchanged failure count. A provider-run subscription is mirrored, not retried. Converge, the pull, the unknown cohort and NMI verification judge a provider-declared failure against the subscription's own window (`Policy.Window` of its cycle): its case policy's where OpenRails duns it, the built-in one where the provider retries. A row past its window is never charged: an NMI row parks `unverified`, a provider-billed row is asked by id, and an engine renewal whose period elapsed is refused (`life.due_pass.refused`).
 
 Checks:
-- `manual_rebill_completion.go` and `subscription_collection_intent.go` check
-  the period end and `FailureCount`. Scenarios: OR-J16-S04, S30, S70 and S71.
+- `internal/intents/manual_rebill_completion.go` and `internal/modules/money/subscription_collection_intent.go` check the period end and `FailureCount`. Scenarios: OR-J16-S04, S30, S70 and S71.
 
 ### 3. Exact money
 A retry charges its payload's frozen renewal terms through

@@ -63,7 +63,7 @@ type PaymentMethod struct {
 	// Mandates are the agreements the card carries, newest first: on the
 	// admin read every one, ended included (evidence for disputes); on the
 	// customer's own, those that can still authorize a charge. One that
-	// requires reconsent waits for POST /v1/me/payment-methods/{id}/verify.
+	// requires reconsent waits for the customer's fresh consent.
 	Mandates []Mandate `json:"mandates"`
 	// Subscriptions are the subscriptions the card pays: as their own card,
 	// or as the default they follow.

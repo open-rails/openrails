@@ -1,12 +1,6 @@
 # Refunds and disputes
 
-This system reverses charges: a staff refund OpenRails sends to the provider, a
-refund made at the provider, a chargeback, and a won dispute that returns the
-money. Each reversal is a `payments` row linked to its charge, and posts to the
-[books](books.md): the general ledger and, for a payment that bought credit,
-its share to the units book. It also
-records external payments: money a merchant received outside OpenRails, booked
-against an order with no provider call.
+This system reverses charges: a staff refund OpenRails sends to the provider, a refund made at the provider, a chargeback, and a won dispute that returns the money. Each reversal is a `payments` row linked to its charge, and posts to the [books](books.md): the general ledger and, for a payment that bought credit, its share to the units book. It also records external payments: money a merchant received outside OpenRails, booked against an order with no provider call.
 
 ## Concepts
 
@@ -21,8 +15,7 @@ against an order with no provider call.
   `stripe_refund` carrying `intents.RefundPayload`, keyed by
   `intents.RefundIdempotencyKey`.
 - **Refundable** (`PaymentService.ValidateRefund`): a succeeded charge with `money_movement = 'rail'` whose non-failed reversals plus this amount stay within it. A usage order's payment (`ledger_transfer_id`) is refundable and can be charged back: a refund leaves its owed settled, a chargeback owes it again (`owed.SyncUsageReversals`, [books](books.md)).
-- **Credit line**: the order line that bought a credit lot; reversals return its
-  money first ([prepaid credits](prepaid-credits.md)).
+- **Credit line**: the order line that bought a credit lot; reversals return its money first ([credits](credits.md)).
 - **External payment**: a `payments` row with `channel = 'manual'`.
 - **Dispute**: a `disputes` row per provider case (`disputes.Service.Record`):
   `kind` `inquiry` (nothing withdrawn), `chargeback`, or `prevented` (an RDR

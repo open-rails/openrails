@@ -9,12 +9,9 @@ OpenRails is a billing engine you add to an existing application. It keeps a mer
 | SaaS, with the Go SDK | on the hosted platform at [openrails.dev](https://openrails.dev) | [Client guide](docs/client.md#credentials) |
 | HTTP only | any of the three, from any language | [Without the Go client](docs/client.md#without-the-go-client) |
 
-[The integration guide](docs/guide.md) is the overview and the shortest working
-integration. [The client guide](docs/client.md) covers everything the Go client
-does, on every path. The browser SDK is
-[`@openrails/billing-ui`](web/billing-ui/README.md). Generated references:
-[routes](docs/api/routes.md), [error codes](docs/api/error-codes.md),
-[OpenAPI](api/openapi.json).
+[The integration guide](docs/guide.md) is the overview and the shortest working integration. [The client guide](docs/client.md) covers everything the Go client does, on every path. The browser SDK is [`@openrails/billing-ui`](web/billing-ui/README.md). Generated references: [routes](docs/api/routes.md), [error codes](docs/api/error-codes.md), [OpenAPI](api/openapi.json).
+
+[The architecture docs](docs/architecture/README.md) describe each system and how it keeps OpenRails' guarantees, for people changing or reviewing it.
 
 ## License
 

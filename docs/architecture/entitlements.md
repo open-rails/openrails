@@ -11,9 +11,7 @@ usage costs is [usage billing](usage-billing.md).
 
 ## Concepts
 
-- **Entitlement key**: a plain string of at most 256 bytes
-  (`catalog.MaxEntitlementKeyBytes`), granted by products, at most 10,000 live per
-  product (`catalog.MaxProductEntitlements`).
+- **Entitlement key**: a plain string of at most 256 bytes (`syntax.MaxEntitlementKeyBytes`, in `internal/catalogrules/syntax`), granted by products, at most 10,000 live per product (`syntax.MaxProductEntitlements`).
 - **Key history**: `product_entitlements` keeps each key of a product for
   `[added_at, removed_at)`; a removal closes the row.
 - **Access window**: a customer's `[starts_at, ends_at)` of one product
@@ -69,17 +67,7 @@ past `at` reads the keys a product had then. A current exact-key check with
 `evaluated_at` and `valid_until`, the earliest start or end among the spans that
 grant a requested key.
 
-**SDK cache.** A remote handle with a static `APIKey` caches `CheckEntitlements`
-by default (`entitlementCheckCache`): a bounded 8 MiB in-process LRU, or Redis
-when `EntitlementCheckCacheOptions.Redis` is set. Only current exact-key checks
-use it; an `Uncached` handle always asks. It stores each allowed key's answer,
-never a denial, and answers from the cache only when every requested key is
-allowed there; otherwise it asks OpenRails for the whole set, with `include_validity`.
-An entry lives `min(MaxAge, valid_until − evaluated_at)`, timed from before the
-request was sent; a response naming no merchant (`OpenRails-Bound-Merchant`) is
-refused, never stored. `CheckEntitlementsLive` always asks; its answer replaces
-allowed entries, drops denied ones and, when it denies a key, advances the
-scope's generation, so a fill begun before it cannot restore a dropped entry.
+**SDK cache.** A remote handle with a static `APIKey` caches `CheckEntitlements` by default (`entitlementCheckCache`): a bounded 8 MiB in-process LRU, or Redis when `EntitlementCheckCacheOptions.Redis` is set. Only current exact-key checks use it. It stores each allowed key's answer, never a denial, and answers from the cache only when every requested key is allowed there; otherwise it asks OpenRails for the whole set, with `include_validity`. An entry lives `min(MaxAge, valid_until − evaluated_at)`, timed from before the request was sent; a response naming no merchant (`OpenRails-Bound-Merchant`) is refused, never stored. A check through an `Uncached` handle always asks; its answer replaces allowed entries, drops denied ones and, when it denies a key, advances the scope's generation, so a fill begun before it cannot restore a dropped entry.
 
 **Lease sync.** A gate settles usage and asks for views on a lease sync
 (`POST /v1/app/leases/sync`, `leases.Syncer.Sync`): one transaction, bounded by
@@ -101,17 +89,9 @@ Views read usage only through `leases.UsageReader`.
 
 ## Interfaces
 
-- **Check**: `Client.CheckEntitlements`, `CheckEntitlementsLive`
-  (`POST /v1/app/entitlements/check`, `merchant:entitlements:read`): up to 100
-  keys (`billing.MaxEntitlementChecks`) and 10 prefixes at one instant. Cache:
-  `EntitlementCheckCacheOptions{MaxAge, Disabled, Redis}` on `RemoteOptions`,
-  `DefaultEntitlementCheckMaxAge` (2 minutes); see [backend](../client.md#caching).
-- **Gate**: `openrails.NewGate(client, GateDeps{Outbox})`; `Gate.Admit`,
-  `Consume`, `Record`, `ListCustomerLimits`, `Flush`, `Close`; `Ticket.Capture`, `Release`,
-  `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../client.md#limits-and-the-gate)).
-- **Limits** (`merchant:usage:manage`, reads `merchant:usage:read`):
-  `SyncLeases` (`POST /v1/app/leases/sync`); `ListCustomerLimits`
-  (`GET /v1/app/limits`).
+- **Check**: `Client.CheckEntitlements`, past the cache through `Client.Uncached` (`POST /v1/app/entitlements/check`, `merchant:entitlements:read`): up to 100 keys (`billing.MaxEntitlementChecks`) and 10 prefixes at one instant. Cache: `EntitlementCheckCacheOptions{MaxAge, Disabled, Redis}` on `RemoteOptions`, `DefaultEntitlementCheckMaxAge` (2 minutes); see [backend](../client.md#caching).
+- **Gate**: `openrails.NewGate(client, GateDeps{Outbox})`; `Gate.Admit`, `Consume`, `Record`, `ListCustomerLimits`, `Flush`, `Close`; `Ticket.Capture`, `Release`, `Refusal`; `UsageOutbox`; `ErrUnavailable` ([the gate](../client.md#limits-and-the-gate)).
+- **Limits** (`merchant:usage:manage`, reads `merchant:usage:read`): `SyncLeases` (`POST /v1/app/leases/sync`); `ListCustomerLimits` (`GET /v1/app/limits`).
 - **Staff** (`merchant:customer:read`, `merchant:customer:manage`):
   `ListEntitlements` (`GET /v1/admin/entitlements`), `ListProductAccess`,
   `CreateProductAccess` (`GET`/`POST /v1/admin/product-access`),
@@ -150,11 +130,7 @@ Checks:
   chargeback and uncertain state.
 
 ### 3. Exact money
-Access windows and keys carry no amounts; credit lots (`credit_grants`) belong to
-[prepaid credits](prepaid-credits.md). In-flight reports and limit windows are `int64` native
-units of one currency each. The one FX use converts a spend window's cap declared
-in another currency to the request's (`SpendgatePolicyLoader.convert`): a cap,
-never a ledger amount.
+Access windows and keys carry no amounts; credit lots (`credit_grants`) belong to [Credits](credits.md). In-flight reports and limit windows are `int64` native units of one currency each. The one FX use converts a spend window's cap declared in another currency to the request's (`SpendgatePolicyLoader.convert`): a cap, never a ledger amount.
 Checks:
 - No `fx` import in `internal/modules/leases` or `internal/modules/limits`.
 
@@ -173,9 +149,8 @@ merchant, API key, customer and `MaxAge`, so another key, merchant or stricter
 Checks:
 - `CheckEntitlements` in `internal/http/routes/entitlements.go` declares
   `Permission: needEntitlements`; the handler calls `commerceCustomer`.
-- Each `/v1/app` route in `internal/http/routes/limits.go` and `metering.go` has a
-  `Permission` pair; `AdjustCustomerLimit` is `Group: Admin, Level: LevelUpdate`.
-- `syncRun.usageItem`, `syncRun.report` and `syncRun.checkView` apply `Syncer.Allows`.
+- Each `/v1/app` route in `internal/http/routes/limits.go` and `metering.go` has a `Permission` pair; `AdjustCustomerLimit` is `Group: Admin, Level: LevelUpdate`.
+- `syncRun.checkItem`, `checkView` and `report` apply `Syncer.Allows`.
 - `entitlementCacheScopeOf` (`entitlement_check_cache.go`) and `newRemoteHandle`
   (`remote.go`), which enables the cache only for an `APIKey`.
 - Every query in `internal/db/queries/entitlement_checks.sql`, `product_access.sql`, `limits.sql` and `leases.sql`, advisory locks aside, filters on `merchant_id`.
@@ -186,17 +161,7 @@ Checks:
   `evaluated_at` is not cached, and one naming no merchant is refused.
 
 ### 5. Contracts match the code
-Their types are in `api/go.txt`, the routes in the route catalog and
-`api/openapi.json`, the tables in `api/schema.txt`. `include_validity` was added
-to the request; a server older than the SDK refuses it with `unknown_field`, so
-the server is deployed first. The in-process `Client` has no entitlement cache
-and always answers live; a remote client answers alike except that a revocation
-or seat change can show up to `MaxAge` late, unless `CheckEntitlementsLive` is
-used. `NewGate` takes any `*Client`: the in-process client reaches the same
-handlers through an in-process transport, and the gate prices named units with
-the server's own `limits` code. Before v1.0.0 a release may still break them:
-`0003_usage_limits` dropped `admission_operations`, and `0044_drop_request_holds`
-the request-hold API with `limit_holds` and `limit_hold_parts`.
+Their types are in `api/go.txt`, the routes in the route catalog and `api/openapi.json`, the tables in `api/schema.txt`. `include_validity` was added to the request; a server older than the SDK refuses it with `unknown_field`, so the server is deployed first. The in-process `Client` has no entitlement cache and always answers live; a remote client answers alike except that a revocation or seat change can show up to `MaxAge` late, unless the check goes through an `Uncached` handle. `NewGate` takes a remote or in-process `*Client`, never one made with `ActingFor`: the in-process client reaches the same handlers through an in-process transport, and the gate prices named units with the server's own `limits` code. Before v1.0.0 a release may still break them: `0003_usage_limits` dropped `admission_operations`, and `0044_drop_request_holds` the request-hold API with `limit_holds` and `limit_hold_parts`.
 Checks:
 - `go run ./scripts/contracts` leaves the snapshots unchanged.
 - `cacheableEntitlementKeys` sends checks with `at`, prefixes or invalid keys to
@@ -227,10 +192,7 @@ Checks:
 ### 8. Abuse protection
 Limits are themselves the consumption limit: views bound spend and units before work starts; a delegated invoker cannot spend (`delegated_spend_not_allowed`) and is cut off past its wasted-spend limit (`failure_rate_limited`). The check and sync routes take application credentials and bound each request (100 keys, 10 prefixes and `prefix_limit` up to 10,000; `billing.MaxSyncUsageItems`, `MaxSyncViews`). `middleware.AdminOperationGrant` meters each invoker by item: one full batch (`billing.MaxBatchItems`, 100 grants) a minute, shared by `UpdateCustomer`, `AdjustCustomerLimit`, `CreateCreditGrants` and `CreateProductAccess`; going over locks the invoker out for an hour. An application acting as itself is not metered. `/v1/me/entitlements` and `/v1/me/limits` take no OpenRails rate limit; the proxy owns a generic ceiling ([limits](../standalone.md#abuse-limits)). SDK Redis calls wait at most 25 ms (lookups and fills) or 250 ms (a live denial's eviction), at most 64 outstanding each, so a slow Redis falls back to OpenRails.
 Checks:
-- `ValidateCheck` (`internal/modules/entitlements/resource_checks.go`) refuses an
-  oversize or malformed check before any read; `validate`
-  (`internal/modules/leases/sync.go`) and `Client.SyncLeases` an oversize sync
-  before any I/O.
+- `ValidateCheck` (`internal/modules/entitlements/resource_checks.go`) refuses an oversize or malformed check before any read; `validate` (`internal/modules/leases/sync.go`) an oversize sync before any I/O.
 - The `CreateProductAccess` and `AdjustCustomerLimit` routes set
   `Limit: middleware.AdminOperationGrant`.
 - `TestEntitlementRedisBudgetLimitsOutstandingWork` bounds outstanding Redis work.
@@ -273,6 +235,6 @@ Gaps:
 - No scenario covers a product key edit or `entitlement_replacements` reaching current holders.
 - No scenario reads keys through `ListEntitlements` or `GET /v1/me/entitlements`;
   OR-J01-S02 only checks that they refuse a missing credential.
-- `CheckEntitlementsLive` with `at` or prefixes leaves cached entries as they were.
+- An `Uncached` check with `at` or prefixes leaves cached entries as they were.
 - No test reaches an `outstanding_cap` cap, or declares a spend window in another currency than its policy's.
 - `TestTablesMatchSchema` holds `retention.Tables` to the schema.

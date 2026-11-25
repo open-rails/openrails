@@ -85,15 +85,14 @@ verifies, then executes. Only on the provider's confirmation is the row
 
 ### Card-number firewall
 
-`cardguard.ContainsPAN` is the one detector: 13 to 19 digits in a plausible grouping, Luhn-valid and in an issued range, except one unseparated run of at most 15 digits right after a `+` (an E.164 phone number). Unknown request fields are refused, and every field of a card save, edit or confirmation and of an order create or payment is scanned before anything else (`refuseCardNumber`, `cardguard.PANField`; `400 invalid_param` naming the field), as are idempotency keys, external transaction ids and declared books; an unknown field named by a card number is refused without echoing it. The typed `card` field (`cardguard.Card`), the one field a card number belongs in, is admitted only on a `card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last four and expiry are kept.
+`cardguard.ContainsPAN` is the one detector: 13 to 19 digits in a plausible grouping, Luhn-valid and in an issued range, except one unseparated run of at most 15 digits right after a `+` (an E.164 phone number). Unknown request fields are refused, and every field of a card save, edit or confirmation and of an order create or payment is scanned before anything else (`refuseCardNumber`, `cardguard.PANField`; `400 invalid_param` naming the field), as are idempotency keys, external transaction ids and declared books; an unknown field named by a card number is refused without echoing it. The typed `card` field (`billing.Card`), the one field a card number belongs in, is admitted only on a `card_entry: server` PSP (`ErrCardEntryNotEnabled`), over HTTPS unless the merchant has no live card PSP (`cardFieldAdmitted`); it prints as `[card]`, is read only by `Unseal`, is wiped by `Zero` once NMI has it, and only brand, last four and expiry are kept.
 
 Tables owned: `payment_methods`, `payment_method_versions`, `mandates`,
 `custodians`, `psp_customers`, `stored_card_checks`.
 
 ## Interfaces
 
-- **Go** (`*Client`): `ListPaymentMethods`, `DeletePaymentMethod`,
-  `SetSubscriptionPaymentMethod`, `ListCustodians`, `PutCustodian`.
+- **Go** (`*Client`): `ListPaymentMethods`, `DeletePaymentMethod`, `SetSubscriptionPaymentMethod`, `ListCustodians`, `SetCustodian`.
 - **HTTP**: `/v1/me/payment-methods` (GET, POST), `/v1/me/payment-methods/{id}`
   (PATCH, DELETE), `POST /v1/me/payment-methods/{id}/confirm`,
   `PUT /v1/me/default-payment-methods/{currency}`, `GET /v1/me/agreements`,
@@ -201,7 +200,7 @@ is attributed by `origin` and `actor`, and a user-origin removal must be the
 signed-in customer's (`validatePaymentMethodDeleteAuthority`).
 
 Checks:
-- OR-J12-S07: in `readonly` provider-write mode a removal sends nothing.
+- OR-J12-S07: under a `readonly` write posture a removal sends nothing.
 - OR-J12-S06: removal is refused while a subscription uses the card.
 - `requestedPaymentMethodDelete` (`internal/intents/payment_method_delete_authority.go`) is the only path past the merchant's destructive arming.
 
@@ -211,7 +210,7 @@ Checks:
 - Custody and imports: OR-J06-S06 (`TestMerchantCustodyConfiguration`), OR-J38-S36 (`TestCardGuard`).
 - Agreements: OR-J14-S06 (`TestRenewalAgreements`), OR-J17-S04 (`TestCancellationRecoveryContracts`), OR-J26-S58 (`TestUsageBillingContracts`), OR-J16-S02 (`TestDunning`: a healthy card does not revive a terminal decline).
 
-The only package test is `internal/integrations/basistheory/accountupdater_test.go`.
+The only package tests are `internal/integrations/basistheory/accountupdater_test.go` and `billing/card_test.go` (the card's redaction).
 
 Gaps:
 

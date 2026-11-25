@@ -79,7 +79,7 @@ The browser never reads the catalog: your server reads the products it sells
   bank's challenge, in the page). In the EEA and UK a new card is kept only with
   `reusable: true`, the customer's own opt-in.
 - `fallbacks` keeps a PSP back until the PSPs it stands in for fail
-  (`{ ccbill: { for: ["mobius"], afterFailures: 2 } }`), then offers it under
+  (`{ ccbill: { for: ["nmi-main"], afterFailures: 2 } }`), then offers it under
   "Card payment isn't working?". `BuyButton`, `ProductList`, `Cart`,
   `OrderPayment` and `EmbeddedPayment` take it.
 - A `customer_amount` price takes the buyer's `amount`: parse it with

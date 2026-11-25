@@ -54,7 +54,7 @@ if err != nil {
 
 `New` does, in order: validate `Config`; migrate the billing and River schemas
 under an advisory lock (one replica at a time; a failed migration fails `New`);
-create this month's partitions; provision every declared merchant; start
+provision every declared merchant; start
 checking PSP credentials in the background. It starts no workers and never
 changes the catalog. Then:
 
@@ -72,15 +72,11 @@ if err := bill.Start(ctx); err != nil {
 | Call | Does |
 |---|---|
 | `Engine.Start(ctx, opts...)` | runs OpenRails' River workers, or binds them to your fleet (`WithRiverClient`, [below](#river)). A second `Start` is refused. |
-| `Engine.Ready(ctx)` | nil once PostgreSQL, the merchants and a local River consumer serve. Register it as your readiness check. |
+| `Engine.Ready(ctx)` | nil once PostgreSQL, the merchant directory and River (OpenRails' own after `Start`, or your fleet bound with `WithRiverClient`) serve. Register it as your readiness check. |
 | `Engine.Probes()` | named checks of the optional parts, for your supervisor: `openrails_psp_posture`, `openrails_configuration`, `openrails_solana_crankers`, `openrails_job_progress` |
 | `Engine.Close(ctx)` | stops what `Start` started. Close the engine before your pool; OpenRails never closes `Deps.Postgres`. |
 
-`New` fails only on what it cannot serve without: PostgreSQL and its migrations,
-an invalid River schema, a test seam beside a live PSP. Anything else is refused alone and the rest serves: an optional setting is
-turned off, a merchant whose document is invalid is not provisioned, a PSP that
-does not check is not armed. `openrails_configuration` names what is not served
-and why; Vault, PSP posture and Redis reconnect in the background.
+`New` fails only on what it cannot serve without: PostgreSQL and its migrations, an invalid River schema, a test seam beside a live PSP. Anything else is refused alone and the rest serves: an optional setting is turned off, a merchant whose document is invalid is not provisioned, a PSP that does not check is not armed. `openrails_configuration` names what is not served and why; Vault, PSP posture and Redis reconnect in the background.
 
 ### Health
 
@@ -148,7 +144,7 @@ and closes none.
 | `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo`, else from SCIM or the verified email its credential claims. |
 | `MessageRenderer` | Renders customer messages in your code: content it returns true for is sent instead of the merchant's templates, and an error is retried. Nil renders every message from the templates. |
 | `Logger` | A `*slog.Logger`; nil is `slog.Default()`, read once in `New`. OpenRails never changes your logger or the default, and never logs secrets, card data or SQL arguments. |
-| `UserInfo` | Your directory, for customer contacts and staff search: `ak.UserInfo()`, or your own `Get` and `Search`. Without it the SCIM routes mount instead ([customers](client.md#customers)). |
+| `UserInfo` | Your directory, for customer contacts and staff search: `ak.UserInfo()`, or your own `Get` and `Search`. Without it, SCIM pushes fill a copy instead, through the `Programmatic` group ([customers](client.md#customers)). |
 | `Notifications` | An account-inbox channel for selected customer notices ([account inbox](#account-inbox)). |
 | `MerchantGroups` | Live group metadata for tenant-bound merchants ([merchants](#merchants)). |
 | `CheckoutAssets` | The built payment page (`web/pay`) as an `fs.FS`. |
@@ -161,14 +157,14 @@ and closes none.
 
 Usage needs an event store on ClickHouse: `Deps.ClickHouse`, with `Config.ClickHouse.Database` naming its database. Money stays in PostgreSQL. Whether `Deps.ClickHouse` is set decides what is served; no setting does.
 
-- **With ClickHouse:** usage reporting (`SyncLeases`, admissions, the `Gate`), meters, limits, usage rate cards, spend windows, failed-usage grace and cutoffs, the accrual-rate cap, usage history and usage metrics.
+- **With ClickHouse:** usage reporting (`SyncLeases` and the `Gate`), meters, limits, usage rate cards, spend windows, failed-usage grace and cutoffs, the accrual-rate cap, usage history and usage metrics.
 - **With PostgreSQL only:** subscriptions, one-time purchases, carts and checkout, entitlements, credit packs and balances, running charges, usage orders (billing what running charges leave owed), customer messages and the books.
 
 Without ClickHouse every usage route stays mounted and answers 409 `event_store_required` once its caller is authenticated, and the `Client`'s methods return the same error (`billing.ErrEventStoreRequired`). `ApplyCatalog` refuses a document declaring meters, limits, a product's `limits` or `rate_cards`, and `UpdateMerchantConfiguration` refuses the settings only usage reads. `NewGate` over the engine returns `billing.ErrEventStoreRequired`. Meters and limits already stored stay dormant: `New` names them in one log line and a `consistency.dormant_usage` finding, and the next document `ApplyCatalog` applies removes them. `GET /v1/config` reports `usage: false`.
 
 `New` creates or upgrades the ClickHouse database as it does PostgreSQL's schemas, and records the store's identity in PostgreSQL when one first attaches. It refuses a ClickHouse with another identity, an empty or different one, under a database that has used one, and refuses to start without ClickHouse while PostgreSQL holds usage the ledger has not taken (`billing.ErrEventStoreRequired`, naming the merchants): only the store can post it. You open and close the connection.
 
-Usage posts to the ledger at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass, and before any other movement of a customer's balance ([usage](client.md#usage-and-running-charges)), so up to a month of usage lives only in ClickHouse: back it up nightly as you back up PostgreSQL ([backups](standalone.md#backup-and-restore)). While ClickHouse is out of reach, syncs and admissions answer 503 `service_unavailable` and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
+Usage posts to the ledger at each month's end in the merchant's `accounting.timezone` (UTC by default), in the billing pass, and before any other movement of a customer's balance ([usage](client.md#usage-and-running-charges)), so up to a month of usage lives only in ClickHouse: back it up nightly as you back up PostgreSQL ([backups](standalone.md#backup-and-restore)). While ClickHouse is out of reach, lease syncs answer 503 `service_unavailable` and the balances of customers with unposted usage cannot be read or moved; others are unaffected.
 
 ## Merchants
 
@@ -176,12 +172,7 @@ Usage posts to the ledger at each month's end in the merchant's `accounting.time
 `billing.MerchantDeclaration`: the merchant's document, the `Issuer` whose
 sign-ins are its customers and staff, and an optional tenant `Binding`.
 
-- **The document** holds the slug, display name, settings, PSPs, custodians,
-  alert webhooks and secrets, in the format [client: merchant
-  configuration](client.md#merchant-configuration-and-psps) describes.
-  `ParseMerchantDocument` reads one from YAML or JSON strictly: unknown or
-  duplicate fields, aliases, anchors and several documents are refused. Keep
-  secret values out of the committed file.
+- **The document** holds the slug, display name, settings, PSPs, custodians, alert webhooks and secrets, in the format [client: merchant configuration](client.md#merchant-configuration-and-psps) describes. `ParseMerchantDocument` reads one from YAML or JSON, refusing unknown or duplicate fields. Keep secret values out of the committed file.
 - **Slugs** are unique per engine; a duplicate is refused and reported. Each
   declared merchant is created on first boot and keeps its UUID;
   `Engine.DeclaredMerchant(slug)` returns it.
@@ -194,11 +185,7 @@ sign-ins are its customers and staff, and an optional tenant `Binding`.
   then names the slug, `Issuer` and `Binding` only, and a document beside Vault
   is refused. Without it the document is read at startup and the edit routes
   are not mounted.
-- **Tenant binding.** The `adapters/authkit` module's `BindMerchant` associates
-  an existing merchant with one AuthKit tenant, once and immutably; declare the
-  result as `Binding` and pass `MerchantGroups` (`MerchantGroups(authClient)`
-  from the same module). Customer routes then also require the user's tenant
-  (`customer_tenant_mismatch` otherwise). Billing archives carry the binding.
+- **Tenant binding.** The `adapters/authkit` module's `BindMerchant` associates an existing merchant with one AuthKit tenant, once and immutably; declare the same `billing.MerchantBinding` as `Binding` and pass `MerchantGroups` (`MerchantGroups(authClient)` from the same module). Customer routes then also require the user's tenant (`customer_tenant_mismatch` otherwise). Billing archives carry the binding.
 
 The catalog has its own lifecycle: `New` never applies one ([catalog](client.md#catalog)).
 
@@ -211,8 +198,7 @@ one instance migrates, the rest wait. To migrate as a deploy step instead, run
 - An older build boots on a schema a newer one migrated (it leaves unknown
   migrations alone), so rolling upgrades work in both directions within v1.
 - A database that recorded a migration with other content is compared with a
-  fresh build of its recorded migrations, whichever monthly partitions exist:
-  equal is re-stamped, different is refused with the difference.
+  fresh build of its recorded migrations: equal is re-stamped, different is refused with the difference.
 - Only OpenRails' objects may live in its schemas. Before v1 a release may break
   the schema in one step; its notes say so, and hosts sharing it upgrade together.
 
@@ -240,13 +226,7 @@ if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil {
 }
 ```
 
-`RiverJobs` adds the `billing`, `psp_import` (2 workers), `provider_refresh`
-(4 workers) and `nmi_history` (1 worker) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes
-when unset; each worker declares its own timeout. The fleet must be in
-`DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop.
-`Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused.
-AuthKit joins the same fleet when its River schema matches. Every kind, queue
-and schedule: [River jobs](river-jobs.md).
+`RiverJobs` adds the `billing` (20 workers), `psp_import` (2), `provider_refresh` (4) and `nmi_history` (1) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes, or the fleet's `JobTimeout` if longer, when unset; each worker declares its own timeout. The fleet must be in `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop. `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused. AuthKit joins the same fleet when its River schema matches. Every kind, queue and schedule: [River jobs](river-jobs.md).
 
 Replacing a fleet that ran an older release's scheduled provider refresh: stop
 the old workers first; the new fleet cancels the retired refresh jobs in that
@@ -268,8 +248,7 @@ and no sticky session.
 - **Background work** runs on every instance with workers, each job on one.
   River's leader schedules periodic work; a crashed leader is replaced within
   about 20 seconds.
-- **Caches.** An edit through OpenRails reaches every instance at once
-  (`NOTIFY`); an edit made in Vault directly within 30 seconds.
+- **Caches.** A configuration edit through OpenRails reaches every instance at once (`NOTIFY`); one made in Vault directly is reloaded, in the background, by the first use of that merchant 30 seconds or more after its last load, or on restart. A handle's cached catalog reads show another instance's edit within a minute ([caching](client.md#caching)).
 - **Several hosts, one database.** Hosts embedding OpenRails on one schema
   declare the same merchants, each with its own `RiverSchema`, share one Redis
   and clocks within five minutes, and share periodic passes through leases in
@@ -496,10 +475,7 @@ pay URLs.
 
 ## Testing
 
-- `openrailstest/nmimock` and `openrailstest/stripemock` are provider fakes
-  behind `Deps.NMITransport` and `Deps.StripeTransport`, or on loopback behind
-  `Deps.ProviderEndpoints`; `openrailstest.UserInfo`
-  is an in-memory directory. Test seams are refused beside a live PSP.
+- `openrailstest/nmimock` and `openrailstest/stripemock` are provider fakes behind `Deps.NMITransport` and `Deps.StripeTransport`, or on loopback behind `Deps.ProviderEndpoints`; `openrailstest.UserInfo` is an in-memory directory. Test seams are refused beside a live PSP.
 - `openrailstest.CheckAuth` checks your `Authenticator`.
 - Run your tests against a real PostgreSQL 18: `New` migrates a fresh schema in
   seconds.

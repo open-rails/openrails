@@ -12,8 +12,7 @@ points at; routes callbacks to their PSP; and moves a book between deployments. 
 - **Merchant**: a `billing.merchants` row: `id` (the identity), `slug` (a renamable
   name), `status` (`active`, `deleted`), optional `permission_group_id` (its AuthKit
   group, equal to `id`) and `tenant_id`. Global by design.
-- **Declaration**: `openrails.MerchantDeclaration`, an entry of `Config.Merchants` or
-  of the standalone manifest.
+- **Declaration**: `billing.MerchantDeclaration`, an entry of `Config.Merchants` or of the standalone manifest.
 - **Documents**: `merchantdocs.Merchant`, `merchantdocs.PSP`, `merchantdocs.Custodian`;
   a `merchantdocs.Set` is one merchant's, with revisions and those it does not serve
   (`Rejected`).
@@ -68,7 +67,7 @@ points at; routes callbacks to their PSP; and moves a book between deployments. 
   one, and fingerprint credentials (`CredentialFingerprinter`) to catch one gateway
   account declared twice. A refused document keeps its previous version serving
   (`keepServed`) and opens `consistency.merchant_config.not_served`.
-- **Currencies.** `merchantconfig.NormalizeCurrencies` checks `settings.currencies` (`currency.Unit`) into the merchant's `currency.Registry` (`merchantconfig.Settings.Currencies`): OpenRails' registry and the merchant's own units. `Registry.Money` refuses a unit where money is taken; `refuseUnits` refuses one in a money setting with `merchant_unit_unsupported`. Balances, lots, admissions, prices, credit grants and rate cards take the merchant's units ([prepaid credits](prepaid-credits.md)); a unit the merchant does not declare is `currency_unsupported` there (`balanceCurrency`, `ownUnit`, `checkCatalogUnits`). The units book records each unit, with the scale its document in the file or Vault declares then, when a catalog write first names it or a deposit first holds it, under the lock every catalog write and settings edit takes, taken before any customer lock (`ledger_units`, `Ledger.CountUnits`, `ledger.UnitsLock`). An edit that removes or rescales a unit something counts (`UnitsInUse`) is refused; a document loaded from a file or Vault that does so, at start-up too, keeps serving the unit at its recorded scale, or else its previous declaration, with a finding (`KeepCountedUnits`). Configuration is authored in a file or Vault, never Postgres, but a unit's scale is what its stored amounts mean: the ledger supplies it, and a unit the document dropped keeps serving at it, named by its code.
+- **Currencies.** `merchantconfig.NormalizeCurrencies` checks `settings.currencies` (`currency.Unit`) into the merchant's `currency.Registry` (`merchantconfig.Settings.Currencies`): OpenRails' registry and the merchant's own units. `Registry.Money` refuses a unit where money is taken; `refuseUnits` refuses one in a money setting with `merchant_unit_unsupported`. Balances, lots, lease syncs, prices, credit grants and rate cards take the merchant's units ([credits](credits.md)); a unit the merchant does not declare is `currency_unsupported` there (`balanceCurrency`, `ownUnit`, `checkCatalogUnits`). The units book records each unit, with the scale its document in the file or Vault declares then, when a catalog write first names it or a deposit first holds it, under the lock every catalog write and settings edit takes, taken before any customer lock (`ledger_units`, `Ledger.CountUnits`, `ledger.UnitsLock`). An edit that removes or rescales a unit something counts (`UnitsInUse`) is refused; a document loaded from a file or Vault that does so, at start-up too, keeps serving the unit at its recorded scale, or else its previous declaration, with a finding (`KeepCountedUnits`). Configuration is authored in a file or Vault, never Postgres, but a unit's scale is what its stored amounts mean: the ledger supplies it, and a unit the document dropped keeps serving at it, named by its code.
 - **Follow-ups.** `syncMerchantConfig` normalizes settings (`merchantconfig.Normalize`)
   and applies `secrets.scim_token` (`scim.Declare`); `followPSPPosture`,
   `followStripeWebhooks` and others react to the change.
@@ -80,7 +79,7 @@ points at; routes callbacks to their PSP; and moves a book between deployments. 
 
 ### History
 
-Every change to a merchant, messages, PSP or custodian document is appended to `change_log` (`internal/merchants/config_history.go`), one entry per document, with each changed field before and after and the document's revision (its Vault version; 0 from a file). A credential (`secrets.<name>`, an alert webhook's URL) is never recorded: its field reads `"changed"`, and the document's `secrets` field lists the names it holds.
+Every change to a merchant, messages, PSP or custodian document is appended to `change_log` ([history](history.md), `internal/merchants/config_history.go`), one entry per document, with each changed field before and after and the document's revision (its Vault version; 0 from a file). A credential (`secrets.<name>`, an alert webhook's URL) is never recorded: its field reads `"changed"`, and the document's `secrets` field lists the names it holds.
 
 - **Through OpenRails.** `Cache.PutMerchant`, `PutPSP` and `PutCustodian` write through `RecordConfigWrite`, which takes the merchant's history lock (`LockConfigurationHistory`), writes the document and records it as the route gate's invoker (`staff:<id>`, source `console` or `api`), or `system` and `job` for OpenRails' own writes. A load waits for the lock, so it never records that write first. If recording fails, the write stands and a later load records it.
 - **Outside OpenRails.** Each load (`RecordConfigLoad`, after reconciliation) compares what it serves with what the history last recorded of each document, folded from `change_log` and compared as JSON values, and records the difference with source `reload` and actor `vault` or `file`. A Vault document is recorded once per new version; a version older than the recorded one is a load that started first and is skipped; a missing document is read from Vault again under the lock before it is recorded deleted. A file's document is recorded when its fields differ. Several replicas loading one change record it once. A credential changed outside OpenRails is marked `"changed"` only when the replica held the version the history last recorded; one changed in a file while no process ran is not seen, since nothing outside the file keeps its value.
@@ -130,9 +129,7 @@ answers `503`, so the provider retries.
 
 ## Interfaces
 
-- Go: `Client.GetMerchantConfiguration`, `UpdateMerchantConfiguration`, the alert
-  webhook, PSP and custodian methods, `ExportBillingArchive`, `ImportBillingArchive`;
-  `openrails.MerchantDeclaration`, `openrails.PSPConfig`, `billing.MerchantBinding`.
+- Go: `Client.GetMerchantConfiguration`, `UpdateMerchantConfiguration`, the alert webhook, PSP and custodian methods, `ExportBillingArchive`, `ImportBillingArchive`; `billing.MerchantDeclaration`, `billing.PSPConfig`, `billing.MerchantBinding`.
 - HTTP (`RouteGroups.MerchantConfig`): `/v1/merchant/configuration`,
   `/v1/merchant/alert-webhooks`, `/v1/merchant/psps`, `/v1/merchant/custodians`,
   `/v1/merchant/billing-archive`. No route creates or deletes a merchant.
@@ -205,8 +202,7 @@ Checks:
 
 ### 6. Data lifecycle
 The directory, alias, controls, book, PSP and custodian tables are `State`;
-`maintenance_runs` (inventories, purges, restore receipts) is `Permanent`. Restore
-creates partitions before its transaction (`retention.EnsureRetainedPartitions`). The
+`maintenance_runs` (inventories, purges, restore receipts) is `Permanent`. The
 archive refuses an OpenRails table or column without a reviewed decision.
 
 `change_log` is `Permanent` and append-only: a purge keeps it, the archive moves it, and a restore adds the archive's entries to the destination's own, once per merchant (the restore receipt makes a replay a no-op). It is not in the restore guard: the destination records history as soon as its configuration loads.
@@ -262,7 +258,7 @@ Checks:
   target refused atomically; S03 no charge before arming; S04 unresolved work refuses
   export; S06, S09 NMI and Stripe state verbatim; S08, S11 older archives; S10 restored
   Solana pull; S12, S13 baseline adoption; S14 limit windows; S40 notification export.
-- **J05** (merchant units): OR-J05-S06 units served with their scale; S07 invalid or colliding units refused at load and on edit, and a counted unit neither removed nor rescaled; S08 never owed, never a pack's price, and unknown when undeclared; S09 invisible to another merchant; S10 a restart on a file that rescales a counted unit keeps its recorded scale; S11 a catalog that names a unit counts it; S12 a first count reads the declaration where it is stored. J48 buys and spends them ([prepaid credits](prepaid-credits.md)).
+- **J05** (merchant units): OR-J05-S06 units served with their scale; S07 invalid or colliding units refused at load and on edit, and a counted unit neither removed nor rescaled; S08 never owed, never a pack's price, and unknown when undeclared; S09 invisible to another merchant; S10 a restart on a file that rescales a counted unit keeps its recorded scale; S11 a catalog that names a unit counts it; S12 a first count reads the declaration where it is stored. J48 buys and spends them ([credits](credits.md)).
 - **J43** (configuration history): OR-J43-S03 an API change is recorded with its actor and a credential only as "changed"; S04 a Vault document written outside OpenRails is recorded once with several replicas loading, and a file change once on restart.
 - **J06** (PSP configuration): OR-J06-S01 to S06 and S08; S07 is in
   [imports](imports.md); S30, S31 and S60 to S65 are in

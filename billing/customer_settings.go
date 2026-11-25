@@ -85,7 +85,8 @@ type TrustLevel struct {
 
 // UpdateCustomerParams changes the settings it names for one customer; an
 // omitted field is unchanged. CreditLimits, TrustLevels and LowBalanceLines
-// merge by currency: amount 0 or an empty level clears that currency's, and a
+// merge by currency: a credit limit's inherit clears that currency's and
+// amount 0 allows no arrears, an empty level clears that currency's, and a
 // low-balance line replaces that currency's (nulls inherit the merchant's).
 // Limits merge by limit: an override replaces what the customer's products
 // give, and inherit clears it. A null BillingPolicy or InvoiceProfile clears
