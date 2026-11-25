@@ -404,6 +404,9 @@ func (f *fleet) totals() live {
 		t.Lagged += l.Lagged
 		t.Syncs += l.Syncs
 		t.HotP99 = max(t.HotP99, l.HotP99)
+		t.MissP99 = max(t.MissP99, l.MissP99)
+		t.Hot += l.Hot
+		t.Missed += l.Missed
 		t.SyncP99 = max(t.SyncP99, l.SyncP99)
 		for k, v := range l.Captured {
 			t.Captured[k] += v

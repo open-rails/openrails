@@ -6,8 +6,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/open-rails/authkit"
@@ -70,6 +72,14 @@ func serveCmd(ctx context.Context, args []string) error {
 		defer rdb.Close()
 	}
 	url := "http://" + spec.Addr
+	host, portText, err := net.SplitHostPort(spec.Addr)
+	if err != nil {
+		return fmt.Errorf("addr %q: %w", spec.Addr, err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return fmt.Errorf("addr %q: %w", spec.Addr, err)
+	}
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
@@ -80,8 +90,8 @@ func serveCmd(ctx context.Context, args []string) error {
 	}
 	scopes := map[string][]string{billing.ScopeSelf: {"merchant:*"}}
 	srv, err := server.New(ctx, server.Config{
-		Engine: openrails.Config{Database: openrails.DatabaseConfig{Schema: spec.Schema, RiverSchema: spec.Schema}, ClickHouse: openrails.ClickHouseConfig{Database: spec.CHDatabase},
-			PublicBillingBaseURL: url, ProviderWriteMode: openrails.ProviderWritesReadOnly, RateLimits: openrails.RateLimitsConfig{}},
+		Engine: openrails.Config{Database: billing.DatabaseConfig{Schema: spec.Schema, RiverSchema: spec.Schema}, ClickHouse: billing.ClickHouseConfig{Database: spec.CHDatabase},
+			PublicBillingBaseURL: url, RateLimits: billing.RateLimitsConfig{}},
 		Auth: authkit.Config{
 			DefaultTenantID: iam.NewTenantID(), Database: authkit.DatabaseConfig{Schema: spec.Schema + "_auth", RiverSchema: spec.Schema},
 			Token: authkit.TokenConfig{Issuer: url, AllowPrivateNetworkJWKS: true}, Resource: authkit.ResourceConfig{ID: url, PublicURL: url, Scopes: scopes},
@@ -90,9 +100,9 @@ func serveCmd(ctx context.Context, args []string) error {
 			Registration: authkit.RegistrationConfig{AllowMissingSenders: true}, TwoFactor: authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 			HTTP: &authkit.HTTPConfig{DirectPeerIP: true},
 		},
-		LocalSignIn: true, AdminConsole: &server.AdminConsole{Disabled: true},
+		LocalSignIn: true, AdminConsole: server.AdminConsole{Disabled: true},
 		RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true},
-		Addr:        spec.Addr, ShutdownTimeout: 20 * time.Second,
+		Host:        host, Port: port,
 	}, server.Deps{
 		Engine: openrails.Deps{Postgres: pool, Redis: rdb, ClickHouse: ch, FXTransport: fxWire{}, Logger: quietLogger(os.Stderr)},
 		Auth:   authkit.Deps{Postgres: pool, KeySource: keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}},
