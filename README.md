@@ -24,7 +24,7 @@ docker compose up -d
 task dev
 ```
 
-The merchant-dashboard (frontend) is now on localhost:5174, hosted by Vite for fast reloads. The API server is now on localhost:3054, with an Air server for fast reloads.
+The merchant dashboard is on localhost:3054/admin/, served by Vite for fast reloads. The API server is on localhost:3053, rebuilt by Air on every change.
 
 Login to the dashboard with the provided username and password.
 
