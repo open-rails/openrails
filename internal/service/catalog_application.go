@@ -209,7 +209,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err != nil {
 			return nil, err
 		}
-		changes, err := scoped.recordCatalogApply(ctx, q, mid.UUID(), scoped.catalogBefore, after, plan, receipt.ApplicationID)
+		changes, ownersChanged, err := scoped.recordCatalogApply(ctx, q, mid.UUID(), scoped.catalogBefore, after, plan, receipt.ApplicationID)
 		if err != nil {
 			return nil, err
 		}
@@ -223,9 +223,10 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 				receipt.PricesChanged++
 			}
 		}
-		recorded := len(plan.conflicts) == 0 && len(prepared.warnings) == 0
+		changed := len(changes) > 0 || ownersChanged
+		recorded := changed && len(plan.conflicts) == 0 && len(prepared.warnings) == 0
 		receipt.AppliedRevision = revision
-		if recorded || len(changes) > 0 {
+		if changed {
 			if receipt.AppliedRevision, err = q.AdvanceCatalogRevision(ctx, mid.UUID()); err != nil {
 				return nil, err
 			}

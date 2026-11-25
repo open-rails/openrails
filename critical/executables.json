@@ -106,6 +106,9 @@
     "OR-J05-S16": [
       "TestPublicCatalog/OR-J05-S16/quantity-only-price-versions-and-document-apply"
     ],
+    "OR-J05-S17": [
+      "TestPublicCatalog/OR-J05-S17/catalog-writes-only-changed-state-and-ownership"
+    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],

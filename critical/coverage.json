@@ -194,6 +194,11 @@
       "name": "Quantity-only price changes create a new version and archive the old one through POST and catalog apply; the document receipt lists the price change and an unrelated product rename applies with it"
     },
     {
+      "id": "OR-J05-S17",
+      "journey": "J05",
+      "name": "Catalog reapply preserves unchanged field owners; equal-state documents store no receipt or revision, no-op edits write no rows, product edits advance once per merchant and transaction, and unchanged conflicts only refresh the finding"
+    },
+    {
       "id": "OR-J06-S01",
       "journey": "J06",
       "name": "Valid PSP routing binds the intended account environment and currency"

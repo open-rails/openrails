@@ -660,7 +660,20 @@ func otherManager(manager string) string {
 	return catalogManagerApply
 }
 
-func (w catalogOwnerWrites) write(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, manager, actor string, at time.Time) error {
+func (w *catalogOwnerWrites) write(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, owners catalogOwners, changed catalogDiff, manager, actor string, at time.Time) error {
+	w.take = slices.DeleteFunc(w.take, func(r catalogFieldRef) bool {
+		owner, held := owners[r.obj][r.field][manager]
+		return held && owner.actor == actor && !slices.Contains(changed.changed[r.obj], r.field)
+	})
+	w.release = slices.DeleteFunc(w.release, func(r catalogFieldRef) bool {
+		_, held := owners[r.obj][r.field][otherManager(manager)]
+		return !held
+	})
+	w.drop = slices.DeleteFunc(w.drop, func(r catalogFieldRef) bool {
+		_, held := owners[r.obj][r.field][manager]
+		return !held
+	})
+	w.gone = slices.DeleteFunc(w.gone, func(obj catalogObject) bool { return len(owners[obj]) == 0 })
 	if len(w.take) > 0 {
 		objects, keys, priceKeys, fields := fieldArrays(w.take)
 		if err := q.UpsertCatalogFieldOwners(ctx, gen.UpsertCatalogFieldOwnersParams{MerchantID: merchantID, Manager: manager, Actor: actor, SetAt: at, Objects: objects, Keys: keys, PriceKeys: priceKeys, Fields: fields}); err != nil {
@@ -762,12 +775,16 @@ func (s *Service) recordCatalogEdit(ctx context.Context, q *gen.Queries, merchan
 			w.take = append(w.take, catalogFieldRef{obj, field})
 		}
 	}
-	w.release, w.gone = w.take, d.gone
+	w.release, w.gone = slices.Clone(w.take), d.gone
+	owners, err := readCatalogOwners(ctx, q, merchantID)
+	if err != nil {
+		return nil, err
+	}
 	revisions, err := stepUnmovedRevisions(ctx, q, merchantID, before, after, d)
 	if err != nil {
 		return nil, err
 	}
-	return revisions, w.write(ctx, q, merchantID, catalogManagerEdit, editActor(ctx), s.now().UTC())
+	return revisions, w.write(ctx, q, merchantID, owners, d, catalogManagerEdit, editActor(ctx), s.now().UTC())
 }
 
 // errRevisionMismatch refuses an edit whose object moved past the revision

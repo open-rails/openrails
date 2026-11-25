@@ -48,6 +48,7 @@ migration 0052_invoices.up.sql sha256:159aa7a2042a4aad8677057e7c0f5f38c18f547b43
 migration 0053_price_quantity_identity.up.sql sha256:12cd85f601f043351b66f219a45f266826a6ce46fb42c7fc8e2003c1948bc65c
 migration 0054_drop_catalog_restore_receipts.up.sql sha256:3cc444004e0c5b6ca9f721d535fd68c15523687ee8eb50d84463d7630c130a38
 migration 0055_drop_unread_catalog_columns.up.sql sha256:aae9d3f1bc88b08487f259ddff75fa2349fd1d7952d6dd90d73694919380374c
+migration 0056_catalog_revision_transaction.up.sql sha256:35f97fb6d15772a87d148263807ea07e45363bf99234a1d2cecdef256ba91dcf
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -3960,13 +3961,15 @@ function billing.catalog_authored_entitlements()
   DECLARE mid uuid;
   BEGIN
       FOR mid IN SELECT DISTINCT merchant_id FROM changed LOOP
-          IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text THEN
+          IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text
+          AND NOT (mid::text = ANY(string_to_array(COALESCE(current_setting('openrails.catalog_revision_merchant_ids',true),''),','))) THEN
               BEGIN
                   PERFORM id FROM billing.merchants WHERE id=mid FOR NO KEY UPDATE NOWAIT;
               EXCEPTION WHEN lock_not_available THEN
                   RAISE EXCEPTION 'concurrent catalog authoring; retry the transaction' USING ERRCODE='40001';
               END;
               UPDATE billing.merchants SET catalog_revision=catalog_revision+1 WHERE id=mid;
+              PERFORM set_config('openrails.catalog_revision_merchant_ids',concat_ws(',',NULLIF(current_setting('openrails.catalog_revision_merchant_ids',true),''),mid::text),true);
           END IF;
       END LOOP;
       RETURN NULL;
@@ -3981,7 +3984,8 @@ function billing.catalog_authored_write()
   BEGIN
       IF TG_OP='UPDATE' AND NEW IS NOT DISTINCT FROM OLD THEN RETURN NEW; END IF;
       IF TG_OP='DELETE' THEN mid := OLD.merchant_id; ELSE mid := NEW.merchant_id; END IF;
-      IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text THEN
+      IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text
+          AND NOT (mid::text = ANY(string_to_array(COALESCE(current_setting('openrails.catalog_revision_merchant_ids',true),''),','))) THEN
           -- A legacy raw writer may already hold a child-row lock. Do not wait
           -- behind a merchant-first transaction while holding that child: refuse
           -- with a retryable serialization conflict instead of deadlocking.
@@ -3991,6 +3995,7 @@ function billing.catalog_authored_write()
               RAISE EXCEPTION 'concurrent catalog authoring; retry the transaction' USING ERRCODE='40001';
           END;
           UPDATE billing.merchants SET catalog_revision=catalog_revision+1 WHERE id=mid;
+          PERFORM set_config('openrails.catalog_revision_merchant_ids',concat_ws(',',NULLIF(current_setting('openrails.catalog_revision_merchant_ids',true),''),mid::text),true);
       END IF;
       IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
   END $function$
