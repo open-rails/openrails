@@ -433,7 +433,7 @@ func TestBackgroundJobs(t *testing.T) {
 			}
 			// The pass's NMI history read names no sale or schedule; the probe does.
 			_ = r.ParseForm()
-			if r.Form.Get("invoice_id") == "" && r.Form.Get("subscription_id") == "" {
+			if r.Form.Get("order_id") == "" && r.Form.Get("subscription_id") == "" {
 				return false
 			}
 			probes.Add(1)

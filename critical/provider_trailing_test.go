@@ -623,7 +623,7 @@ func TestProviderTrailing(t *testing.T) {
 		require.NotNil(t, tw.findings(t, "catalog.price.unmapped")["bronze"].ResolvedAt)
 
 		// (e) An invoice id is no subscription: dropped.
-		nmiNotice(t, tw.server.URL, "evt_invoice", "transaction.sale.success", map[string]any{"transaction_id": "t9", "invoice_id": "one-off-invoice-9"})
+		nmiNotice(t, tw.server.URL, "evt_order", "transaction.sale.success", map[string]any{"transaction_id": "t9", "order_id": "one-off-order-9"})
 		completedOnce(t, tw.fleet, kindConverge)
 		require.Len(t, tw.parks(t, billing.ParkedSubscriptionListParams{}), 3, "the import-owned, the unowned vault and the held product stay parked")
 	})

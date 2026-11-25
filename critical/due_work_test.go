@@ -164,7 +164,7 @@ func TestDueWork(t *testing.T) {
 				return false
 			}
 			_ = r.ParseForm()
-			return r.Form.Get("invoice_id") == sub.ID.UUID().String()
+			return r.Form.Get("order_id") == sub.ID.UUID().String()
 		}, nmimock.HoldRequest)
 		defer hold.Release()
 		a.clock.Advance(sub.CurrentPeriodEndsAt.Add(49 * time.Hour).Sub(a.clock.Now()))
