@@ -195,6 +195,8 @@ func TestServerFixture(t *testing.T) {
 	alice := authtest.SignIn(t, ak, users["alice"])
 	bob := authtest.SignIn(t, ak, users["bob"])
 	as := authtest.Attach(t, ak, httpServer)
+	// grants are the keys of the user grants "authorize" got, by token.
+	grants := map[string]*authtest.DPoPKey{}
 	out := ready{DirectoryURL: httpServer.URL + "/directory/scim/v2", URL: httpServer.URL, ControlURL: httpServer.URL + controlPath, AliceID: users["alice"].ID, BobID: users["bob"].ID, AliceToken: alice.AccessToken, BobToken: bob.AccessToken, Merchants: map[string]merchant{}}
 	clients := map[string]*openrails.Client{}
 	issuerKeys := map[string]ed25519.PrivateKey{}
@@ -275,11 +277,15 @@ func TestServerFixture(t *testing.T) {
 			case "dpop":
 				// The parent presents a session SignIn bound here: this
 				// process holds its key, as a browser keeps its own.
-				var in struct{ Method, URL, Token string }
+				var in struct{ Method, URL, Token, Nonce string }
 				require.NoError(t, json.Unmarshal(cmd.Body, &in))
 				r, err := http.NewRequest(in.Method, in.URL, nil)
 				require.NoError(t, err)
-				authtest.Authorize(t, ak, r, in.Token)
+				if key := grants[in.Token]; key != nil {
+					key.Authorize(t, r, in.Token, in.Nonce)
+				} else {
+					authtest.Authorize(t, ak, r, in.Token)
+				}
 				result.Result = map[string]string{"Authorization": r.Header.Get("Authorization"), "DPoP": r.Header.Get("DPoP")}
 			case "customer-policy":
 				denyNative.Store(cmd.ID != "allow")
@@ -316,7 +322,7 @@ func TestServerFixture(t *testing.T) {
 				tokens := as.Authorize(t, user, authtest.CodeFlow{ClientID: shop.OAuth.ClientID, ClientSecret: *shop.OAuth.ClientSecret, RedirectURI: "https://" + cmd.Merchant + ".critical.invalid/callback", Resource: httpServer.URL, Scopes: scopes, Nonce: cmd.Nonce, Consent: true})
 				// A user grant is DPoP-bound: "dpop" presents it with its key.
 				if tokens.DPoP != nil {
-					tokens.DPoP.Holds(tokens.AccessToken)
+					grants[tokens.AccessToken] = tokens.DPoP
 				}
 				result.Result = tokens
 			case "stale-sign-in":
