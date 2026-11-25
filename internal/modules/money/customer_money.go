@@ -128,7 +128,7 @@ func (s *MoneyService) BalanceLimits(ctx context.Context, q *gen.Queries, custom
 			continue
 		}
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{MerchantID: mid.UUID(), CustomerID: customer, Currency: a.Currency,
-			AsOf: now, HeldSince: limits.HeldSince(now), LeaseLiveSince: limits.LeaseLiveSince(now)})
+			AsOf: now, LeaseLiveSince: limits.LeaseLiveSince(now)})
 		if err != nil {
 			return nil, err
 		}

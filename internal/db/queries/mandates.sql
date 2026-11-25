@@ -37,6 +37,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(s
   AND kind = 'recurring' AND status IN ('active', 'requires_reconsent')
 FOR SHARE;
 
+-- name: GetLiveUnscheduledMandate :one
+-- The customer's collection agreement in one currency, read without a lock
+-- (a capacity read, in a read-only snapshot).
+SELECT * FROM billing.mandates
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text
+  AND kind = 'unscheduled' AND status IN ('active', 'requires_reconsent');
+
 -- name: GetLiveUnscheduledMandateForShare :one
 -- The customer's collection agreement in one currency.
 SELECT * FROM billing.mandates

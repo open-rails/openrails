@@ -319,12 +319,16 @@ func (p MerchantProfile) NotificationURL(kind string) string {
 	return link
 }
 
-// MerchantCheckoutSettings are the merchant's embedded checkout settings.
+// MerchantCheckoutSettings are the merchant's checkout settings.
 type MerchantCheckoutSettings struct {
 	// EmbedOrigins are the origins that may frame the merchant's embedded
 	// pay URLs: exact https origins (http on loopback), at most 10, no
 	// wildcards.
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
+	// BillingFields are the billing details a new card's form asks for and
+	// OpenRails requires; absent, country always and the postal code in the
+	// US.
+	BillingFields *BillingFieldSettings `json:"billing_fields,omitempty"`
 }
 
 // BalanceNoticeSettings are a merchant's default low-balance lines: a
@@ -402,7 +406,8 @@ type MerchantSettings struct {
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
-	// Checkout is the embedded checkout's settings; a patch replaces it whole.
+	// Checkout is the checkout's settings (embed origins, billing fields); a
+	// patch replaces it whole.
 	Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.

@@ -72,3 +72,31 @@ const (
 	// FraudWarningRecord records the report only.
 	FraudWarningRecord FraudWarningRefund = "record"
 )
+
+// BillingFieldMode is whether a new card's form asks for a billing detail and
+// whether OpenRails requires it.
+type BillingFieldMode string
+
+const (
+	BillingFieldRequired BillingFieldMode = "required"
+	// BillingFieldOptional is asked for and may be left blank.
+	BillingFieldOptional BillingFieldMode = "optional"
+	// BillingFieldHidden is never asked for; one sent is dropped.
+	BillingFieldHidden BillingFieldMode = "hidden"
+	// BillingFieldAuto (postal_code only) is asked for, and required, when
+	// the billing country is the US; elsewhere it is not asked for, and one
+	// sent is kept.
+	BillingFieldAuto BillingFieldMode = "auto"
+)
+
+// BillingFieldSettings are the billing details a new card's form asks for, as
+// Stripe collects them. They apply to the card fields OpenRails draws (NMI and
+// the platform vault); Stripe's Payment Element collects a Stripe card's
+// address by Stripe's own rules.
+type BillingFieldSettings struct {
+	// Country is required (default), optional or hidden.
+	Country BillingFieldMode `json:"country,omitempty"`
+	// PostalCode is auto (default: asked for, and required, in the US only),
+	// required, optional or hidden.
+	PostalCode BillingFieldMode `json:"postal_code,omitempty"`
+}

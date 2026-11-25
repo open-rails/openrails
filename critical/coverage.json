@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 743,
+  "scenario_count": 739,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -596,7 +596,7 @@
     {
       "id": "OR-J22-S01",
       "journey": "J22",
-      "name": "Grant 1000 reserve 600 capture 450 release 150 leaves 550 available units"
+      "name": "Usage a gate has in flight, then settles, conserves native units"
     },
     {
       "id": "OR-J22-S02",
@@ -606,7 +606,7 @@
     {
       "id": "OR-J22-S03",
       "journey": "J22",
-      "name": "Expiry ignores already spent or still-authorized reserved quantities"
+      "name": "Expiry preserves spent value and what a live gate has in flight"
     },
     {
       "id": "OR-J22-S04",
@@ -614,29 +614,14 @@
       "name": "Credit ledger and financial event roll back together"
     },
     {
-      "id": "OR-J23-S01",
-      "journey": "J23",
-      "name": "Batch admit capture release and extend report accurate per-item results"
-    },
-    {
-      "id": "OR-J23-S02",
-      "journey": "J23",
-      "name": "Concurrent terminal actions resolve one reservation once"
-    },
-    {
-      "id": "OR-J23-S03",
-      "journey": "J23",
-      "name": "Same request ID with changed payload is refused"
-    },
-    {
       "id": "OR-J23-S04",
       "journey": "J23",
-      "name": "Local Tx commit persists host and admission outcome together"
+      "name": "A host transaction's commit persists the host's work and a running charge's start together"
     },
     {
       "id": "OR-J23-S05",
       "journey": "J23",
-      "name": "Local Tx rollback leaves no reservation charge or event"
+      "name": "A host transaction's rollback leaves no running charge or event"
     },
     {
       "id": "OR-J24-S01",
@@ -671,7 +656,7 @@
     {
       "id": "OR-J24-S07",
       "journey": "J24",
-      "name": "A dead lease's outbox resend with close settles each item once and releases its request hold"
+      "name": "A dead lease's outbox resend with close settles each item once and clears its in-flight report"
     },
     {
       "id": "OR-J24-S08",
@@ -686,7 +671,7 @@
     {
       "id": "OR-J24-S10",
       "journey": "J24",
-      "name": "Pricing periods are priced apart; a lease's request hold captures at its pinned cards and other usage at the cards in force"
+      "name": "Pricing periods are priced apart"
     },
     {
       "id": "OR-J24-S11",
@@ -701,17 +686,17 @@
     {
       "id": "OR-J24-S16",
       "journey": "J24",
-      "name": "A sync with close settles its usage, releases the lease's request holds and clears its report; a closed lease owns no new hold and its usage still settles"
+      "name": "A closed lease settles and clears its report"
     },
     {
       "id": "OR-J24-S18",
       "journey": "J24",
-      "name": "A lapsed lease's in-flight report and request holds count nowhere until it syncs again"
+      "name": "A lapsed lease's report counts nowhere until it syncs again"
     },
     {
       "id": "OR-J24-S19",
       "journey": "J24",
-      "name": "Lease ids are UUIDv7: another version is invalid_param, an id older than the replay horizon with no lease is lease_not_found, and a usage-only close ends an earlier lease, which then owns no hold"
+      "name": "Lease ids are UUIDv7: another version is invalid_param, an id older than the replay horizon with no lease is lease_not_found, and a usage-only close ends an earlier lease"
     },
     {
       "id": "OR-J24-S20",
@@ -751,17 +736,12 @@
     {
       "id": "OR-J24-S27",
       "journey": "J24",
-      "name": "admit_while_positive: the server admits the request that crosses the limit once and refuses the next"
-    },
-    {
-      "id": "OR-J24-S28",
-      "journey": "J24",
-      "name": "No hold holds past the 30-day hold lifetime, an abandoned admission in a long window included"
+      "name": "Admit-while-positive admits the crossing request once"
     },
     {
       "id": "OR-J24-S29",
       "journey": "J24",
-      "name": "Concurrent syncs (usage, reports, views) and lease admissions on the same customers never deadlock and settle every report once"
+      "name": "Concurrent syncs on the same customers never deadlock"
     },
     {
       "id": "OR-J24-S31",
@@ -781,7 +761,7 @@
     {
       "id": "OR-J24-S34",
       "journey": "J24",
-      "name": "A sync settles a bounded prefix of its usage, the items of at most 100 customers in one insert, and leaves the rest neither settled nor refused, so a backlog across a thousand customers drains over several syncs and settles each item once"
+      "name": "A sync settles all the usage it carries, a thousand customers' in one insert, refusing an item only on its own, and a resend settles each item once"
     },
     {
       "id": "OR-J24-S36",
@@ -816,7 +796,7 @@
     {
       "id": "OR-J24-S42",
       "journey": "J24",
-      "name": "A view request no admission would take, or whose customer's policy cannot be resolved, is refused alone: the sync settles its usage (in no spend window for that customer) and answers its other views"
+      "name": "A view request no gate could decide on, or whose customer's policy cannot be resolved, is refused alone: the sync settles its usage (in no spend window for that customer) and answers its other views"
     },
     {
       "id": "OR-J24-S43",
@@ -824,19 +804,9 @@
       "name": "Usage counts in the spend window current at its admission to the millisecond: items admitted either side of a window's end in one second count apart"
     },
     {
-      "id": "OR-J24-S44",
-      "journey": "J24",
-      "name": "A request hold a lapsed lease makes counts at once for every other admission, and stops when the lease never syncs again"
-    },
-    {
       "id": "OR-J24-S45",
       "journey": "J24",
       "name": "A sync whose in-flight report first names a customer another transaction holds the spend lock of commits without waiting for it"
-    },
-    {
-      "id": "OR-J24-S46",
-      "journey": "J24",
-      "name": "The view of a sync that captures a lease's request hold settles what the capture moved past the hold's estimate"
     },
     {
       "id": "OR-J24-S47",
@@ -896,7 +866,7 @@
     {
       "id": "OR-J24-S58",
       "journey": "J24",
-      "name": "A capture retried after a commit that was lost, and a lease item that names no occurred_at resent after one, each find the event the first attempt inserted and charge once"
+      "name": "A lease item that names no occurred_at resent after a commit that was lost finds the event the first attempt inserted and charges once"
     },
     {
       "id": "OR-J24-S59",
@@ -1101,7 +1071,7 @@
     {
       "id": "OR-J31-S04",
       "journey": "J31",
-      "name": "Unresolved operation refuses export without changing custody or source write posture"
+      "name": "A live gate's in-flight report refuses export without changing custody or source write posture"
     },
     {
       "id": "OR-J31-S06",
@@ -1151,7 +1121,7 @@
     {
       "id": "OR-J31-S12",
       "journey": "J31",
-      "name": "A database whose months differ from a fresh build and whose baseline record carries other content is accepted and re-stamped by the migration step with its rows intact"
+      "name": "A database whose baseline record carries other content is accepted and re-stamped by the migration step with its rows intact"
     },
     {
       "id": "OR-J31-S13",
@@ -1436,27 +1406,22 @@
     {
       "id": "OR-J23-S13",
       "journey": "J23",
-      "name": "A five-hour session and a weekly cap in weighted tokens: first use opens the session, a hold keeps its window, the crossing request finishes and the next is refused limit_reached"
+      "name": "A session cap lets the crossing request finish and refuses the next until it resets"
     },
     {
       "id": "OR-J23-S14",
       "journey": "J23",
-      "name": "Balance and a monthly spend cap: one request holds and settles both or neither"
-    },
-    {
-      "id": "OR-J23-S15",
-      "journey": "J23",
-      "name": "Four replicas racing for a limit's last units admit exactly its capacity"
+      "name": "A request past the balance or a monthly spend cap takes from neither"
     },
     {
       "id": "OR-J23-S16",
       "journey": "J23",
-      "name": "An overrun settles past capacity unclamped, refuses holds until a refill, and records reached_at once"
+      "name": "An overrun settles past capacity unclamped, refuses requests until a refill, and records reached_at once"
     },
     {
       "id": "OR-J23-S17",
       "journey": "J23",
-      "name": "A delegated invoker is refused as before and holds no money and no limit"
+      "name": "A delegated invoker is refused and takes nothing"
     },
     {
       "id": "OR-J23-S18",
@@ -1486,17 +1451,12 @@
     {
       "id": "OR-J23-S24",
       "journey": "J23",
-      "name": "Gate refusals are verdicts (limit_reached with its reset); near the limit the server decides as a request hold of the lease; OpenRails down is ErrUnavailable for a cold customer"
-    },
-    {
-      "id": "OR-J23-S26",
-      "journey": "J23",
-      "name": "A gate's in-flight report counts as held for admissions (Admit and AdmitTx, limits and balance) while its lease lives; an empty report clears it"
+      "name": "Gate refusals are verdicts (limit_reached with its reset); what still fits is decided on the gate's view; OpenRails down is ErrUnavailable for a cold customer"
     },
     {
       "id": "OR-J23-S27",
       "journey": "J23",
-      "name": "Closing a gate settles its usage, releases its request holds and clears its in-flight report before its lease would lapse"
+      "name": "Closing a gate settles its usage and clears its in-flight report before its lease would lapse"
     },
     {
       "id": "OR-J23-S33",
@@ -1511,7 +1471,7 @@
     {
       "id": "OR-J23-S35",
       "journey": "J23",
-      "name": "A limit counting two meters by weight (output four times input, a large model's output six more) admits and refuses at the weighted total in Admit and in a gate, and settles each count rounded half up"
+      "name": "A limit counting two meters by weight (output four times input, a large model's output six more) admits and refuses at the weighted total, and settles each count rounded half up"
     },
     {
       "id": "OR-J23-S36",
@@ -1521,17 +1481,12 @@
     {
       "id": "OR-J23-S37",
       "journey": "J23",
-      "name": "Four gates racing a small balance with steady traffic overshoot at most one request each, and every admitted request settles once"
+      "name": "Four gates racing a small balance with steady traffic overshoot at most the bound (what the others admit in four sync intervals, plus one request a gate), and every admitted request settles once"
     },
     {
       "id": "OR-J23-S38",
       "journey": "J23",
-      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share"
-    },
-    {
-      "id": "OR-J23-S39",
-      "journey": "J23",
-      "name": "Near zero every request is decided on the server, one at a time: two gates racing for the last unit admit exactly one"
+      "name": "Two gates and an unreachable OpenRails keep deciding on their views and together spend at most what was left, each its share; what a flush resends is settled and never also reported in flight"
     },
     {
       "id": "OR-J23-S40",
@@ -2041,7 +1996,7 @@
     {
       "id": "OR-J26-S30",
       "journey": "J26",
-      "name": "Admission refuses under the customer's own delinquency policy"
+      "name": "A view applies the customer's own delinquency policy"
     },
     {
       "id": "OR-J12-S30",
@@ -2074,6 +2029,21 @@
       "name": "Legitimate phone numbers, UUIDs, Solana addresses and numeric order ids pass the firewall on every card route, which refuses a card number; a card number as a field name is not echoed and no test header is stored"
     },
     {
+      "id": "OR-J12-S17",
+      "journey": "J12",
+      "name": "By default a new card's billing country is required and a US one needs its postal code: a card save, a one-call buy or an order payment missing either is refused with billing_details_required before NMI sees it, and with them the card reaches NMI as entered"
+    },
+    {
+      "id": "OR-J12-S18",
+      "journey": "J12",
+      "name": "A card billed outside the US is saved and pays without a postal code, and a postal code sent for one still reaches NMI"
+    },
+    {
+      "id": "OR-J12-S19",
+      "journey": "J12",
+      "name": "A merchant whose billing fields hide country and postal code saves and charges a card without either, and drops either one sent before NMI or storage sees it"
+    },
+    {
       "id": "OR-J06-S30",
       "journey": "J06",
       "name": "A declared or changed Stripe PSP registers its webhook endpoint at once"
@@ -2104,11 +2074,6 @@
       "name": "Retention cleanup continues past a full batch of merchants in a new job and reaches every merchant"
     },
     {
-      "id": "OR-J29-S41",
-      "journey": "J29",
-      "name": "Partition retention drops a month of holds and the month of their parts in one pass once it is past the replay horizon, and keeps the current month"
-    },
-    {
       "id": "OR-J26-S50",
       "journey": "J26",
       "name": "Paying, waiving or writing off a usage order clears its customer's delinquency in the same change"
@@ -2131,7 +2096,7 @@
     {
       "id": "OR-J22-S50",
       "journey": "J22",
-      "name": "Admission refuses credit that lapsed before its balance watch expired it"
+      "name": "A view offers no credit that lapsed before its watch looks"
     },
     {
       "id": "OR-J26-S54",
@@ -2416,7 +2381,7 @@
     {
       "id": "OR-J04-S44",
       "journey": "J04",
-      "name": "A credit lot lapsing at 00:00 UTC is never spent past it and is booked by that hour's billing pass"
+      "name": "A credit lot lapsing at 00:00 UTC is never offered past it and is booked by that hour's billing pass"
     },
     {
       "id": "OR-J04-S45",
@@ -2446,12 +2411,12 @@
     {
       "id": "OR-J25-S40",
       "journey": "J25",
-      "name": "A hold, a revocation or a lapse that takes a balance to its line commits the balance's look and its notice lands within seconds"
+      "name": "Usage, a revocation or a lapse that takes a balance to its line queues the balance's look and its notice lands within seconds"
     },
     {
       "id": "OR-J25-S41",
       "journey": "J25",
-      "name": "A hold or a capture that leaves a balance above its line queues no look"
+      "name": "Usage that leaves a balance above its line queues no look"
     },
     {
       "id": "OR-J25-S42",
@@ -3046,7 +3011,7 @@
     {
       "id": "OR-J48-S08",
       "journey": "J48",
-      "name": "Admission holds a unit balance: a request beyond what is left, or one that holds nothing once it is all held, is refused, and a dollar failed-usage limit binds no unit; a capture prices its overrun in full, its posting takes what the lots hold and records the rest forgiven (usage_postings.forgiven, usage_charged charge: forgiven), never owed, and the customer reads its usage in the unit"
+      "name": "A gate decides on the unit balance and an overrun is forgiven usage"
     },
     {
       "id": "OR-J48-S09",
@@ -3061,7 +3026,7 @@
     {
       "id": "OR-J48-S11",
       "journey": "J48",
-      "name": "A lease sync's usage in a merchant's unit is refused currency_unsupported and moves nothing: usage in a unit arrives through an admission's capture"
+      "name": "A lease sync takes usage in a declared unit only"
     },
     {
       "id": "OR-J48-S12",
@@ -3687,6 +3652,21 @@
       "id": "OR-J07-S11",
       "journey": "J07",
       "name": "A kept customer search lists the contact whose username is the query first, then the newest customers, and the list keeps that order"
+    },
+    {
+      "id": "OR-J07-S12",
+      "journey": "J07",
+      "name": "A customer's verified email in the token it presents is its kept contact, and its receipt is sent there"
+    },
+    {
+      "id": "OR-J07-S13",
+      "journey": "J07",
+      "name": "Token claims keep no unverified email, replace only undated claims, and never undo a directory's dated push or an erasure"
+    },
+    {
+      "id": "OR-J07-S14",
+      "journey": "J07",
+      "name": "On a standalone server, the verified email a merchant's backend asserts for its own customer is that customer's contact"
     },
     {
       "id": "OR-J38-S82",

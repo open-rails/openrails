@@ -233,6 +233,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "already_owned",
+          "billing_details_required",
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
@@ -543,6 +544,7 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
+          "billing_details_required",
           "card_attempts_blocked",
           "card_declined",
           "customer_action_required",
@@ -6562,446 +6564,6 @@
         ]
       }
     },
-    "/v1/app/admissions/{request_id}": {
-      "get": {
-        "tags": [
-          "app"
-        ],
-        "operationId": "GetAdmission",
-        "description": "GetAdmission reads an admitted request and its current hold state without replaying admission. Denied or no-longer-retained requests are not found.",
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Admission"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:read",
-          "root": "root:usage:read"
-        },
-        "x-openrails-errors": [
-          "admission_not_found",
-          "invalid_param",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application"
-        ]
-      }
-    },
-    "/v1/app/admissions": {
-      "get": {
-        "tags": [
-          "app"
-        ],
-        "operationId": "ListAdmissions",
-        "description": "ListAdmissions reads a page of retained admitted requests, newest first.",
-        "parameters": [
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "state",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "captured",
-                "expired",
-                "open",
-                "released"
-              ]
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Admission"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:read",
-          "root": "root:usage:read"
-        },
-        "x-openrails-errors": [
-          "currency_unsupported",
-          "invalid_cursor",
-          "invalid_query"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request"
-        ]
-      },
-      "post": {
-        "tags": [
-          "app"
-        ],
-        "operationId": "Admit",
-        "description": "Admit decides admissions, one verdict per request in order. A refused request is a verdict, not an error.",
-        "parameters": [
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdmitBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdmitBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
-        },
-        "x-openrails-event-store": true,
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request",
-          "event_store"
-        ]
-      }
-    },
-    "/v1/app/admissions/capture": {
-      "post": {
-        "tags": [
-          "app"
-        ],
-        "operationId": "CaptureAdmissions",
-        "description": "CaptureAdmissions settles 1 to billing.MaxAdmissionBatchItems admitted requests, one result per item in order: each is captured or refused on its own. A capture that names its usage is priced by the admission's pinned rate cards; above the hold the rest is owed. An exact retry answers the first receipt; changed terms are billing.ErrIdempotencyKeyReused.",
-        "parameters": [
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CaptureAdmissionBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CaptureBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
-        },
-        "x-openrails-event-store": true,
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request",
-          "event_store"
-        ]
-      }
-    },
-    "/v1/app/admissions/release": {
-      "post": {
-        "tags": [
-          "app"
-        ],
-        "operationId": "ReleaseAdmissions",
-        "description": "ReleaseAdmissions frees the holds of 1 to billing.MaxAdmissionBatchItems admissions whose work failed, one result per request id in order: each is released or refused on its own. Releasing a released admission answers it.",
-        "parameters": [
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReleaseAdmissionBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdmissionBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
-        },
-        "x-openrails-event-store": true,
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request",
-          "event_store"
-        ]
-      }
-    },
-    "/v1/app/admissions/extend": {
-      "post": {
-        "tags": [
-          "app"
-        ],
-        "operationId": "ExtendAdmissions",
-        "description": "ExtendAdmissions moves 1 to billing.MaxAdmissionBatchItems open holds' deadlines later, one result per item in order. An item refused with hold_not_found was captured, released or lapsed. New work needs a new request ID; replaying the old request never reopens its hold.",
-        "parameters": [
-          {
-            "name": "OpenRails-Expected-Merchant",
-            "in": "header",
-            "description": "Optional precondition: refuse a different credential-bound merchant before execution. Does not select or authorize a merchant.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExtendAdmissionBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdmissionBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "application",
-        "x-openrails-permission": {
-          "merchant": "merchant:usage:manage",
-          "root": "root:usage:manage"
-        },
-        "x-openrails-event-store": true,
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:application",
-          "request",
-          "event_store"
-        ]
-      }
-    },
     "/v1/me/usage": {
       "get": {
         "tags": [
@@ -7758,7 +7320,7 @@
           "app"
         ],
         "operationId": "SyncLeases",
-        "description": "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the lease's usage, numbered within the lease, what its gate has had in flight across a sync, the request holds of the lease it releases and the customers whose views it asks for; it answers how far the usage settled (a resend is matched by lease and number), each view (where the customer stands on its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate costs requests with, and how many of the merchant's leases are live. The first sync under a new LeaseID creates the lease; a lease answers resends for 61 days after its last sync. Settled usage posts to the ledger at each month's end in the merchant's accounting zone and before any other movement of the customer's balance.",
+        "description": "SyncLeases syncs one lease, the protocol under Gate (hosts call NewGate). A sync carries the lease's usage, numbered within the lease, what its gate has had in flight across a sync and the customers whose views it asks for; it settles all the usage it carries and answers how far the usage settled (a resend is matched by lease and number), each view (where the customer stands on its limits, reserving nothing), the limit set of each invoker's attributes, the pricing a gate costs requests with, and how many of the merchant's leases are live. The first sync under a new LeaseID creates the lease; a lease answers resends for 61 days after its last sync. Settled usage posts to the ledger at each month's end in the merchant's accounting zone and before any other movement of the customer's balance.",
         "parameters": [
           {
             "name": "OpenRails-Expected-Merchant",
@@ -7806,7 +7368,6 @@
         },
         "x-openrails-event-store": true,
         "x-openrails-errors": [
-          "admission_not_found",
           "currency_unsupported",
           "idempotency_key_reused",
           "invalid_param",
@@ -9658,6 +9219,7 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
+          "billing_details_required",
           "card_attempts_blocked",
           "card_declined",
           "card_not_saved",
@@ -14045,319 +13607,6 @@
           "catalog_drafting"
         ]
       },
-      "Admission": {
-        "type": "object",
-        "properties": {
-          "request_id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "allowed": {
-            "type": "boolean"
-          },
-          "blocked_by": {
-            "oneOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "abuse",
-                  "budget",
-                  "limit",
-                  "money"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "deny_code": {
-            "oneOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "accrual_rate_cap_reached",
-                  "budget_exceeded",
-                  "delegated_spend_not_allowed",
-                  "delinquent_unpaid_order",
-                  "failure_rate_limited",
-                  "insufficient_balance",
-                  "insufficient_credit",
-                  "limit_reached",
-                  "outstanding_cap_reached"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "retry_after_seconds": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "limit": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "resets_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "currency": {
-            "type": "string"
-          },
-          "estimated_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "start_capacity_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "state": {
-            "oneOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "captured",
-                  "expired",
-                  "open",
-                  "released"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "expires_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "captured_amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "request_id",
-          "customer_id",
-          "allowed",
-          "blocked_by",
-          "deny_code",
-          "retry_after_seconds",
-          "limit",
-          "resets_at",
-          "currency",
-          "estimated_amount",
-          "start_capacity_amount",
-          "state",
-          "expires_at",
-          "captured_amount",
-          "replayed"
-        ]
-      },
-      "AdmissionBatchResult": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdmissionResult"
-            }
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "AdmissionResult": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "integer"
-          },
-          "admission": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Admission"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ErrorDetails"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "status",
-          "admission",
-          "error"
-        ]
-      },
-      "AdmissionVerdict": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "integer"
-          },
-          "admission": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Admission"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ErrorDetails"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "status",
-          "admission",
-          "error"
-        ]
-      },
-      "AdmitBatchParams": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdmitParams"
-            }
-          }
-        }
-      },
-      "AdmitBatchResult": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdmissionVerdict"
-            }
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "AdmitParams": {
-        "type": "object",
-        "properties": {
-          "request_id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "invoker_type": {
-            "type": "string",
-            "enum": [
-              "customer",
-              "delegated"
-            ]
-          },
-          "trust_level": {
-            "type": "string"
-          },
-          "resource": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "estimated_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "usage": {
-            "$ref": "#/components/schemas/UsageEstimate"
-          },
-          "accrual_rate_delta_per_hour": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "source": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "roles": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "lease_id": {
-            "type": "string"
-          }
-        }
-      },
       "Agreement": {
         "type": "object",
         "properties": {
@@ -15532,6 +14781,29 @@
           "address"
         ]
       },
+      "BillingFieldSettings": {
+        "type": "object",
+        "properties": {
+          "country": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "hidden",
+              "optional",
+              "required"
+            ]
+          },
+          "postal_code": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "hidden",
+              "optional",
+              "required"
+            ]
+          }
+        }
+      },
       "BillingImportResult": {
         "type": "object",
         "properties": {
@@ -15756,160 +15028,6 @@
           "action",
           "token_header"
         ]
-      },
-      "CaptureAdmissionBatchParams": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CaptureAdmissionParams"
-            }
-          }
-        }
-      },
-      "CaptureAdmissionParams": {
-        "type": "object",
-        "properties": {
-          "request_id": {
-            "type": "string"
-          },
-          "usage": {
-            "$ref": "#/components/schemas/CaptureUsage"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "usage"
-        ]
-      },
-      "CaptureBatchResult": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CaptureResult"
-            }
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "CaptureReceipt": {
-        "type": "object",
-        "properties": {
-          "request_id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "estimated_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "charges": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UsageCharge"
-            }
-          },
-          "balance_transaction_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "request_id",
-          "customer_id",
-          "currency",
-          "estimated_amount",
-          "amount",
-          "charges",
-          "balance_transaction_id",
-          "replayed"
-        ]
-      },
-      "CaptureResult": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "integer"
-          },
-          "receipt": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/CaptureReceipt"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ErrorDetails"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "status",
-          "receipt",
-          "error"
-        ]
-      },
-      "CaptureUsage": {
-        "type": "object",
-        "properties": {
-          "event_type": {
-            "type": "string"
-          },
-          "resource": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "dimensions": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "integer"
-            }
-          }
-        }
       },
       "CardDetails": {
         "type": "object",
@@ -19280,8 +18398,6 @@
           "code": {
             "type": "string",
             "enum": [
-              "admission_captured",
-              "admission_not_found",
               "alert_email_required",
               "already_owned",
               "application_required",
@@ -19296,6 +18412,7 @@
               "billing_archive_platform_cards",
               "billing_archive_unavailable",
               "billing_archive_unsupported_state",
+              "billing_details_required",
               "billing_policy_not_found",
               "cancel_unsupported_on_rail",
               "captcha_invalid",
@@ -19337,7 +18454,6 @@
               "finding_action_failed",
               "finding_not_actionable",
               "finding_requires_merchant_config",
-              "hold_not_found",
               "host_event_not_found",
               "host_principal_invalid",
               "idempotency_key_in_use",
@@ -19356,7 +18472,6 @@
               "invalid_settlement_status_request",
               "invoker_scoped_principal",
               "lease_not_found",
-              "lease_not_held",
               "limit_not_found",
               "merchant_config_read_only",
               "merchant_mismatch",
@@ -19600,29 +18715,6 @@
           "type",
           "id"
         ]
-      },
-      "ExtendAdmissionBatchParams": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExtendAdmissionParams"
-            }
-          }
-        }
-      },
-      "ExtendAdmissionParams": {
-        "type": "object",
-        "properties": {
-          "request_id": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
       },
       "Finding": {
         "type": "object",
@@ -20193,16 +19285,6 @@
               {
                 "type": "string",
                 "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "request_id": {
-            "oneOf": [
-              {
-                "type": "string"
               },
               {
                 "type": "null"
@@ -20901,6 +19983,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "billing_fields": {
+            "$ref": "#/components/schemas/BillingFieldSettings"
           }
         }
       },
@@ -24022,6 +23107,9 @@
               "$ref": "#/components/schemas/PSPPaymentConfig"
             }
           },
+          "billing_fields": {
+            "$ref": "#/components/schemas/BillingFieldSettings"
+          },
           "solana": {
             "oneOf": [
               {
@@ -24035,6 +23123,7 @@
         },
         "required": [
           "psps",
+          "billing_fields",
           "solana"
         ]
       },
@@ -25414,8 +24503,6 @@
           "code": {
             "type": "string",
             "enum": [
-              "admission_captured",
-              "admission_not_found",
               "alert_email_required",
               "already_owned",
               "application_required",
@@ -25430,6 +24517,7 @@
               "billing_archive_platform_cards",
               "billing_archive_unavailable",
               "billing_archive_unsupported_state",
+              "billing_details_required",
               "billing_policy_not_found",
               "cancel_unsupported_on_rail",
               "captcha_invalid",
@@ -25471,7 +24559,6 @@
               "finding_action_failed",
               "finding_not_actionable",
               "finding_requires_merchant_config",
-              "hold_not_found",
               "host_event_not_found",
               "host_principal_invalid",
               "idempotency_key_in_use",
@@ -25490,7 +24577,6 @@
               "invalid_settlement_status_request",
               "invoker_scoped_principal",
               "lease_not_found",
-              "lease_not_held",
               "limit_not_found",
               "merchant_config_read_only",
               "merchant_mismatch",
@@ -26388,17 +25474,6 @@
         "properties": {
           "reason": {
             "type": "string"
-          }
-        }
-      },
-      "ReleaseAdmissionBatchParams": {
-        "type": "object",
-        "properties": {
-          "request_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           }
         }
       },
@@ -28060,12 +27135,6 @@
               "$ref": "#/components/schemas/ViewParams"
             }
           },
-          "releases": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "close": {
             "type": "boolean"
           }
@@ -28768,48 +27837,6 @@
           "currencies"
         ]
       },
-      "UsageCharge": {
-        "type": "object",
-        "properties": {
-          "meter_key": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string",
-            "enum": [
-              "dynamic",
-              "flat",
-              "package",
-              "per_unit",
-              "tiered"
-            ]
-          },
-          "cell": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "quantity": {
-            "type": "integer"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "meter_key",
-          "model",
-          "cell",
-          "quantity",
-          "amount"
-        ]
-      },
       "UsageDeduction": {
         "type": "object",
         "properties": {
@@ -28878,28 +27905,6 @@
           "quantity",
           "amount"
         ]
-      },
-      "UsageEstimate": {
-        "type": "object",
-        "properties": {
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "event_type": {
-            "type": "string"
-          },
-          "dimensions": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "integer"
-            }
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {}
-          }
-        }
       },
       "UsageRow": {
         "type": "object",
@@ -29132,14 +28137,6 @@
           "drain_per_hour": {
             "type": "string",
             "description": "A number as a decimal string."
-          },
-          "settled": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "recent": {
-            "type": "string",
-            "description": "A number as a decimal string."
           }
         },
         "required": [
@@ -29155,9 +28152,7 @@
           "window_ends_at",
           "resets_at",
           "next",
-          "drain_per_hour",
-          "settled",
-          "recent"
+          "drain_per_hour"
         ]
       },
       "ViewParams": {
@@ -29578,16 +28573,6 @@
     ]
   },
   "x-openrails-error-codes": {
-    "admission_captured": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The admission was captured; it can no longer be released."
-    },
-    "admission_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "No admission was made under this request id."
-    },
     "alert_email_required": {
       "status": 409,
       "type": "invalid_request_error",
@@ -29657,6 +28642,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The merchant has state that cannot safely be moved."
+    },
+    "billing_details_required": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "A billing detail the merchant's checkout.billing_fields require of a new card is missing; param names it."
     },
     "billing_policy_not_found": {
       "status": 404,
@@ -29846,7 +28836,7 @@
     "event_store_required": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The deployment has no event store (ClickHouse): usage reporting, admissions, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."
+      "meaning": "The deployment has no event store (ClickHouse): usage reporting, meters, limits, usage rate cards, spend windows, failed-usage windows, the accrual-rate cap and usage history are off."
     },
     "finding_action_failed": {
       "status": 502,
@@ -29862,11 +28852,6 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The finding is a pull.* proposal: it is approved or dismissed as a proposal, with merchant config."
-    },
-    "hold_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The admission holds nothing open: it was captured, released or lapsed."
     },
     "host_event_not_found": {
       "status": 404,
@@ -29957,11 +28942,6 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No lease of the merchant has this id, which is older than the replay horizon; start a new lease."
-    },
-    "lease_not_held": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The admission names a lease that is closed or never synced, so it cannot own the hold."
     },
     "limit_not_found": {
       "status": 404,

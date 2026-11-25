@@ -43,7 +43,7 @@ func TestRequestIdempotency(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, psps.Items, 1)
 		key := map[string]string{"Idempotency-Key": "save-once"}
-		save := billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"})}
+		save := billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Exp: "1235"}), BillingDetails: billedTo("US", "10001")}
 		var saved []billing.PaymentMethod
 		for range 2 {
 			status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, save, key)
@@ -53,7 +53,7 @@ func TestRequestIdempotency(t *testing.T) {
 			saved = append(saved, method)
 		}
 		require.Equal(t, saved[0].ID, saved[1].ID, "the retry answers the first saved card")
-		other := billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "1111", Exp: "1236"})}
+		other := billing.CreatePaymentMethodParams{PSPID: psps.Items[0].ID, Token: journal.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "1111", Exp: "1236"}), BillingDetails: billedTo("US", "10001")}
 		status, raw := a.request(t, http.MethodPost, "/v1/me/payment-methods", a.aliceToken, other, key)
 		require.Equal(t, http.StatusUnprocessableEntity, status, string(raw))
 		require.Contains(t, string(raw), `"code":"idempotency_key_reused"`)

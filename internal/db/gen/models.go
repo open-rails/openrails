@@ -703,7 +703,7 @@ type BillingIdempotencyKey struct {
 	UpdatedAt      time.Time
 }
 
-// One gate's lease, or a batch job's usage stream: its numbered usage, its in-flight report and the request holds its gate admitted. It is live while it is not closed and synced within the lease lifetime; a later sync makes it live again. Retention: rows are deleted 61 days after last_sync_at.
+// One gate's lease, or a batch job's usage stream: its numbered usage and its in-flight report. It is live while it is not closed and synced within the lease lifetime; a later sync makes it live again. Retention: rows are deleted 61 days after last_sync_at.
 type BillingLease struct {
 	MerchantID uuid.UUID
 	// The UUID the client chose; lse_ on the wire.
@@ -712,7 +712,7 @@ type BillingLease struct {
 	LastSyncAt time.Time
 	// The highest usage item number settled. Items are numbered once per lease and settle in order.
 	SettledThroughN int64
-	// When a sync with close ended the lease, released its request holds and cleared its in-flight report. Usage against it still settles.
+	// When a sync with close ended the lease and cleared its in-flight report. Usage against it still settles.
 	ClosedAt *time.Time
 	// The receipts of the lease's latest settlements, oldest first: each one's from_n, through_n, the digest of its items and the numbers and codes of the items it refused.
 	Receipts []byte
@@ -840,54 +840,6 @@ type BillingLimitAdjustment struct {
 	Amount         int64
 	WindowStartsAt time.Time
 	CreatedAt      time.Time
-}
-
-// Capacity set aside for one admitted request of one customer, in one currency, until it is captured, released or reaches expires_at; a gate's hold (lease_id) has no deadline and counts while its lease is live. What it holds of each limit is in limit_hold_parts. Retention: monthly partitions on created_at, dropped once older than the 61-day replay horizon.
-type BillingLimitHold struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	// When the hold was issued; the partition key. A hold row is live at most 30 days past it. request_id is unique per merchant among retained holds: admission serializes on it, because a partitioned key must carry created_at.
-	CreatedAt  time.Time
-	CustomerID uuid.UUID
-	Currency   string
-	// The gate lease that admitted the request near its limit: the hold counts while the lease is live, is captured by the lease's usage and released by its sync or close.
-	LeaseID   *uuid.UUID
-	RequestID string
-	// A request's hold: its money estimate, the host's or what its usage estimate was priced at.
-	EstimatedAmount int64
-	// A request's hold: what the customer could spend when it was admitted, before the hold.
-	AvailableAmount int64
-	// The admission terms: {invoker, invoker_type, trust_level, roles, resource, source, accrual_rate_delta_per_hour}.
-	Terms []byte
-	// The estimated usage ({event_type, dimensions, metadata, amount}); dynamic cards charge its optional amount. Null for a host-stated hold.
-	EstimateUsage []byte
-	// The rate cards that priced the money estimate, pinned: the capture is priced by them, whatever the catalog says later.
-	RateCards          []byte
-	RequestedExpiresAt *time.Time
-	// A request's deadline: past it the hold reserves no money and no end-less limit, and still counts in its windows until it is captured or released.
-	ExpiresAt      *time.Time
-	State          string
-	CaptureTerms   []byte
-	CapturedAmount *int64
-	CapturedAt     *time.Time
-	ReleasedAt     *time.Time
-	UpdatedAt      time.Time
-	// What each meter charged a captured request: [{meter_key, model, cell, quantity, amount}].
-	CapturedCharges []byte
-}
-
-// What one hold sets aside of one limit: the window it was issued in, which its capture settles into, and the units held there. balance has the Unix epoch and no end. A window's held units are its live holds' parts. It has no foreign key to limit_holds, because PostgreSQL cannot drop a partition a foreign key references: every reader joins the part to its hold, so a part whose hold is gone counts nowhere. Retention: monthly partitions on hold_created_at, dropped with their hold's, each month before its month of holds.
-type BillingLimitHoldPart struct {
-	MerchantID uuid.UUID
-	HoldID     uuid.UUID
-	// The hold's created_at: the partition key, shared with the hold so both drop together.
-	HoldCreatedAt  time.Time
-	CustomerID     uuid.UUID
-	LimitKey       string
-	Unit           string
-	WindowStartsAt time.Time
-	WindowEndsAt   *time.Time
-	Held           int64
 }
 
 // One customer's window of one limit, identified by the server clock: a session or first-use window a use opened, a window staff adjusted, or one whose usage reached capacity; a rolling limit's bucket, a rate or lifetime limit's one row, or a billing policy's spend window (spend:<identity>). What usage took of it is in the event store (limit_usage). Retention: rows are deleted 61 days after window_ends_at; a row without an end stays while its customer does.

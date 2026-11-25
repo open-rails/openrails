@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -248,6 +249,9 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 				r.ErrorCode(billing.CodeServiceUnavailable, "card capture unavailable")
 				return
 			}
+			if !admitBillingDetails(r, &req) {
+				return
+			}
 			ctx, cancel := r.Budget(createPaymentMethodTimeout)
 			defer cancel()
 			saved, err := r.State.PurchaseService.SaveBasisTheoryCard(db.WithCustodianID(ctx, platform.ID), req, user)
@@ -289,6 +293,9 @@ func savePaymentMethod(r *httprequest.Request, user *payment.UserIdentity, req b
 			return
 		}
 		saveStripeCard(r, user, pspID, req.Token)
+		return
+	}
+	if !admitBillingDetails(r, &req) {
 		return
 	}
 
@@ -722,6 +729,24 @@ func paymentMethodHealth(card models.Card, charge *models.PaymentMethodCharge, n
 		h.LastChargedAt, h.LastChargeOutcome = &at, &outcome
 	}
 	return h
+}
+
+// admitBillingDetails applies the merchant's billing fields to the card's
+// billing details (merchantconfig.AdmitBillingDetails); false: the refusal is
+// written.
+func admitBillingDetails(r *httprequest.Request, req *billing.CreatePaymentMethodParams) bool {
+	fields, err := merchantconfig.NewStore(r.State.DB).BillingFields(r.Request.Context())
+	if err != nil {
+		r.ErrorCode(billing.CodeServiceUnavailable, "merchant configuration is unavailable")
+		return false
+	}
+	details, err := merchantconfig.AdmitBillingDetails(fields, req.BillingDetails, "billing_details")
+	if err != nil {
+		writeRefusal(r, err, "billing details")
+		return false
+	}
+	req.BillingDetails = details
+	return true
 }
 
 // billingInput is billing details as the provider takes them.

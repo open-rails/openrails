@@ -157,7 +157,7 @@ and closes none.
 | `Redis` | Abuse state (rate limits, lockouts, captcha, card-testing declines, spent DPoP proofs) shared across instances. Without it each process counts alone: right for one instance. No money path needs Redis. |
 | `Vault` | A logged-in `*vaultapi.Client` (`helpers/vault`'s session); you keep it logged in, and `Config.Vault` names its mounts. |
 | `ClickHouse` | The event store usage needs, a `driver.Conn` from `github.com/ClickHouse/clickhouse-go/v2` (native protocol). Nil turns usage off ([event store](#event-store)). |
-| `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo` or SCIM. |
+| `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo`, else from SCIM or the verified email its credential claims. |
 | `MessageRenderer` | Renders customer messages in your code: content it returns true for is sent instead of the merchant's templates, and an error is retried. Nil renders every message from the templates. |
 | `Logger` | A `*slog.Logger`; nil is `slog.Default()`, read once in `New`. OpenRails never changes your logger or the default, and never logs secrets, card data or SQL arguments. |
 | `UserInfo` | Your directory, for customer contacts and staff search: `ak.UserInfo()`, or your own `Get` and `Search`. Without it the SCIM routes mount instead ([customers](client.md#customers)). |
@@ -401,11 +401,10 @@ once and a deleted one is `merchant_unresolved`.
 - `Client.Uncached()` returns a handle that reads catalog, configuration and
   entitlements live.
 - `NewGate(client, deps)` admits usage in process over the same handle
-  ([the Gate](client.md#limits-admissions-and-the-gate)).
+  ([the Gate](client.md#limits-and-the-gate)).
 
 `Engine.LocalMerchant(id)` returns a `*LocalClient` for what only the engine in
-your process can do: commit with your own rows. `AdmitTx`,
-`CaptureAdmissionsTx`, `ReleaseAdmissionsTx`, `StartRunningChargeTx` and
+your process can do: commit with your own rows. `StartRunningChargeTx` and
 `StopRunningChargeTx` take a `pgx.Tx` from your pool, so a crash leaves both
 your row and the billing change, or neither:
 
@@ -419,16 +418,10 @@ if err != nil {
 	return err
 }
 defer func() { _ = tx.Rollback(ctx) }()
-verdicts, err := local.AdmitTx(ctx, tx, []billing.AdmitParams{{
-	RequestID: jobID, CustomerID: customer, Invoker: customer.String(), Currency: "USD",
-	Usage:     &billing.UsageEstimate{EventType: "render", Dimensions: map[string]int64{"frames": 1200}},
-	ExpiresAt: new(time.Now().Add(time.Hour)),
-}})
-if err != nil {
+if _, err := local.StartRunningChargeTx(ctx, tx, billing.StartRunningChargeParams{
+	Reference: jobID, CustomerID: customer, Currency: "USD", RatePerHour: 3_600_000,
+}); err != nil {
 	return err
-}
-if !verdicts[0].Allowed() {
-	return errors.New("refused") // verdicts[0] says why
 }
 if _, err := tx.Exec(ctx, `INSERT INTO app.jobs (id, customer_id) VALUES ($1, $2)`, jobID, customer); err != nil {
 	return err

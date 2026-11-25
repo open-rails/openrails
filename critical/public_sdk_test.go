@@ -252,13 +252,8 @@ func TestPublicSDK(t *testing.T) {
 		// What the client once refused itself the server now answers, in
 		// process and over HTTP alike.
 		for _, client := range []*openrails.Client{a.alpha, a.alphaRemote} {
-			_, err := client.Admit(t.Context(), nil)
 			var refused *billing.StatusError
-			require.ErrorAs(t, err, &refused)
-			require.Equal(t, billing.CodeInvalidParam, refused.Code)
-			require.NotNil(t, refused.Param)
-			require.Equal(t, "items", *refused.Param)
-			_, err = client.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{Amount: 1, Currency: "usd", Source: "probe", SourceID: "probe"}})
+			_, err := client.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{Amount: 1, Currency: "usd", Source: "probe", SourceID: "probe"}})
 			require.ErrorAs(t, err, &refused)
 			require.Equal(t, billing.CodeInvalidParam, refused.Code)
 			// No URL carries an empty path segment: refused before any I/O.

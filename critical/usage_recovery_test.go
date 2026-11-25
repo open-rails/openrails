@@ -112,38 +112,6 @@ func (c *failingConn) Exec(ctx context.Context, query string, args ...any) error
 
 func TestUsageRecovery(t *testing.T) {
 	t.Run("OR-J24-S58/an-event-keeps-its-identity-across-attempts", func(t *testing.T) {
-		t.Run("a-capture-retried-after-a-lost-commit-charges-once", func(t *testing.T) {
-			w := newWorld(t, earlyInMonth)
-			meterForCapture(t, w)
-			customer, _ := fundedCustomer(t, w)
-			admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "retried", 300)})
-			require.NoError(t, err)
-			require.True(t, admitted[0].Allowed())
-			captured, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("retried", 250)})
-			require.NoError(t, err)
-			require.NoError(t, captured[0].Err())
-			// Fixture: the capture's event reached the store, its transaction
-			// never committed.
-			holds, unposted := pgx.Identifier{w.schema, "limit_holds"}.Sanitize(), pgx.Identifier{w.schema, "usage_unposted"}.Sanitize()
-			_, err = w.pool.Exec(t.Context(), "UPDATE "+holds+" SET state = 'open', capture_terms = NULL, captured_amount = NULL, captured_charges = NULL, captured_at = NULL "+
-				"WHERE merchant_id = $1 AND request_id = $2", w.alpha.MerchantID().UUID(), "retried")
-			require.NoError(t, err)
-			_, err = w.pool.Exec(t.Context(), "DELETE FROM "+unposted+" WHERE merchant_id = $1", w.alpha.MerchantID().UUID())
-			require.NoError(t, err)
-
-			// The host retries the exact capture a minute later.
-			w.clock.Advance(time.Minute)
-			retried, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("retried", 250)})
-			require.NoError(t, err)
-			require.NoError(t, retried[0].Err())
-			require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events WHERE merchant_id = {m}"), "the retry inserts nothing")
-			require.EqualValues(t, 1, storeCount(t, w, "SELECT count() FROM {db}.usage_events FINAL WHERE merchant_id = {m}"))
-			balance(t, w.alpha, customer, 750, 250, 1000)
-			fleet := startFleet(t, w)
-			nextMonth(w)
-			closeMonths(t, fleet)
-			balance(t, w.alpha, customer, 750, 0, 750)
-		})
 		t.Run("a-lease-item-without-occurred-at-resent-after-a-lost-commit-charges-once", func(t *testing.T) {
 			w := newWorld(t, earlyInMonth)
 			usageMeter(t, w.alpha, 100)

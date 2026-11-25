@@ -57,59 +57,30 @@ func TestBaselineAdoption(t *testing.T) {
 		w := newWorld(t, riverApart(t))
 		meterForCapture(t, w)
 		customer, _ := fundedCustomer(t, w)
-		admitted, err := w.alpha.Admit(t.Context(), []billing.AdmitParams{reservation(w, customer, "spent", 400), reservation(w, customer, "held", 100)})
-		require.NoError(t, err)
-		require.True(t, admitted[0].Allowed())
-		require.True(t, admitted[1].Allowed())
-		spent, err := w.alpha.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("spent", 400)})
-		require.NoError(t, err)
-		require.NoError(t, spent[0].Err())
-		balance(t, w.alpha, customer, 500, 500, 1000)
+		spend(t, w.alpha, customer, "spent", 400)
+		balance(t, w.alpha, customer, 600, 400, 1000)
 		require.NoError(t, w.engine.Close(t.Context()))
-
-		// A database a few months old: it holds a month no fresh build makes
-		// and lacks one a fresh build does.
-		schema := pgx.Identifier{w.schema}.Sanitize()
-		var made int
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT "+schema+".ensure_month_partitions('limit_holds', now() - interval '6 months', now() - interval '6 months')").Scan(&made))
-		require.Equal(t, 1, made)
-		var old, ahead string
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT m.partition::text FROM "+schema+".month_partitions('limit_holds') m ORDER BY m.range_from LIMIT 1").Scan(&old))
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT m.partition::text FROM "+schema+".month_partitions('limit_holds') m ORDER BY m.range_from DESC LIMIT 1").Scan(&ahead))
-		_, err = w.pool.Exec(t.Context(), "DROP TABLE "+pgx.Identifier{w.schema, ahead}.Sanitize())
-		require.NoError(t, err)
 
 		built := baselineRecord(t, w)
 		other := editBaselineRecord(t, w)
-		require.NoError(t, openrails.Migrate(t.Context(), w.pool, w.cfg.Database), "a schema equal to a fresh build is accepted whichever months it holds")
+		require.NoError(t, openrails.Migrate(t.Context(), w.pool, w.cfg.Database), "a schema equal to a fresh build is accepted")
 		require.Equal(t, built, baselineRecord(t, w), "the record is this build's again")
 		var audited int
 		require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT count(*) FROM public.migration_repairs
 			WHERE app = 'openrails' AND database = 'postgres' AND schema = $1 AND sequence = 1 AND verb = 'verify-content' AND old_digest = $2 AND new_digest = $3`,
 			w.schema, other[0], built[0]).Scan(&audited))
 		require.Equal(t, 1, audited, "the re-stamp is on the record")
-		var kept, remade bool
-		require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT to_regclass($1) IS NOT NULL, to_regclass($2) IS NOT NULL",
-			pgx.Identifier{w.schema, old}.Sanitize(), pgx.Identifier{w.schema, ahead}.Sanitize()).Scan(&kept, &remade))
-		require.True(t, kept, "the migration step drops no month")
-		require.True(t, remade, "and makes the months rows are written into now")
 
 		reopened, err := openrails.New(t.Context(), w.cfg, w.deps)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, reopened.Close(context.Background())) })
 		client, err := reopened.Merchant(w.alpha.MerchantID())
 		require.NoError(t, err)
-		balance(t, client, customer, 500, 500, 1000)
-		captured, err := client.GetAdmission(t.Context(), "spent")
-		require.NoError(t, err)
-		require.NotNil(t, captured.CapturedAmount)
-		require.EqualValues(t, 400, *captured.CapturedAmount)
+		balance(t, client, customer, 600, 400, 1000)
 		ledger, err := client.ListBalanceTransactions(t.Context(), customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
-		require.Len(t, ledger.Items, 1, "the capture's accrual is held until its day posts")
-		held, err := client.CaptureAdmissions(t.Context(), []billing.CaptureAdmissionParams{capture("held", 100)})
-		require.NoError(t, err)
-		require.NoError(t, held[0].Err(), "the hold admitted before the migration step is still open")
+		require.Len(t, ledger.Items, 1, "the usage is held until its day posts")
+		spend(t, client, customer, "after", 100)
 		balance(t, client, customer, 500, 500, 1000)
 	})
 

@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules/syntax"
+	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -76,17 +77,8 @@ type UsageItem struct {
 	Amount     *int64
 	Failed     bool
 	OccurredAt time.Time
-	// Cards are the money rate cards that price the item, pinned by its
-	// hold; nil prices it by the cards in force.
-	Cards []byte
-	// RequireCards refuses an item no card prices: a capture settles money.
-	RequireCards bool
-	// Hold is the request hold the item captures: it counts in the hold's
-	// windows, and its capture is recorded with the item (Capture).
-	Hold    *SettleHold
-	Capture *CaptureOf
-	// AdmittedAt places an item with no hold in the windows current when its
-	// request was admitted; nil, in those current at intake.
+	// AdmittedAt places an item in the windows current when its request was
+	// admitted; nil, in those current at intake.
 	AdmittedAt *time.Time
 	// Spend are the billing policy's spend windows the item counts toward.
 	Spend []limits.Claim
@@ -95,30 +87,6 @@ type UsageItem struct {
 	FailedWindows []FailedUsageWindow
 	// FailedKey is where a charged failure posts.
 	FailedKey IdempotencyKey
-}
-
-// SettleHold is the request hold an item captures: its parts' windows.
-type SettleHold struct {
-	ID        uuid.UUID
-	CreatedAt time.Time
-	Parts     []HoldPart
-}
-
-// HoldPart is what a hold set aside of one limit, in the window it was
-// issued in.
-type HoldPart struct {
-	Key            string
-	Unit           string
-	WindowStartsAt time.Time
-	WindowEndsAt   *time.Time
-	Held           int64
-}
-
-// CaptureOf is the request hold row an item captures and the terms the
-// capture fixes.
-type CaptureOf struct {
-	Row   gen.BillingLimitHold
-	Terms []byte
 }
 
 // UsageResult is what taking in one item did. Err refuses the item, which
@@ -202,6 +170,7 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 		events: make([]*eventstore.UsageEvent, len(items)), prints: map[string]ratingCard{}, opens: map[uuid.UUID][]limitOpening{}, opened: map[uuid.UUID]bool{}, now: now}
 	from, to := now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 	var eventTypes []string
+	currencies := s.UsageCurrencies()
 	for i := range items {
 		it := &items[i]
 		it.EventType = strings.TrimSpace(it.EventType)
@@ -218,9 +187,7 @@ func (s *MoneyService) PrepareUsageTx(ctx context.Context, q *gen.Queries, store
 			b.Results[i].Err = apperr.Invalidf("customer_id required").WithParam("customer_id")
 		case it.EventType == "" || len(it.EventType) > 255:
 			b.Results[i].Err = apperr.Invalidf("event_type must contain 1 to 255 bytes").WithParam("event_type")
-		// Usage in a merchant's unit arrives only through the capture of an
-		// admission, which checked the merchant declares the unit.
-		case moneyutil.ValidateCurrency(it.Currency) != nil && (it.Capture == nil || moneyutil.ValidateBalanceCurrency(it.Currency) != nil):
+		case !currencies.Supported(ctx, it.Currency):
 			b.Results[i].Err = apperr.New(400, billing.CodeCurrencyUnsupported, "currency is not supported").WithParam("currency")
 		case it.Amount != nil && *it.Amount < 0:
 			b.Results[i].Err = apperr.Invalidf("amount must be nonnegative").WithParam("amount")
@@ -411,30 +378,19 @@ func (s *MoneyService) priceItems(ctx context.Context, q *gen.Queries, b *UsageI
 		if b.Results[i].Err != nil {
 			continue
 		}
-		var cards []ratingCard
-		if len(it.Cards) > 0 {
-			if err := json.Unmarshal(it.Cards, &cards); err != nil {
-				return nil, fmt.Errorf("decode pinned rate cards: %w", err)
-			}
-		} else {
-			key := it.EventType + "\x00" + it.Currency
-			if _, ok := current[key]; !ok && cardErr[key] == nil {
-				current[key], cardErr[key] = usageCards(ctx, q, b.merchant, it.EventType, it.Currency)
-			}
-			if cardErr[key] != nil {
-				var coded *apperr.Error
-				if !errors.As(cardErr[key], &coded) {
-					return nil, cardErr[key]
-				}
-				b.Results[i].Err = cardErr[key]
-				continue
-			}
-			cards = current[key]
+		key := it.EventType + "\x00" + it.Currency
+		if _, ok := current[key]; !ok && cardErr[key] == nil {
+			current[key], cardErr[key] = usageCards(ctx, q, b.merchant, it.EventType, it.Currency)
 		}
-		if it.RequireCards && len(cards) == 0 {
-			b.Results[i].Err = usageNotPriced("event_type", "no rate card prices event type %q", it.EventType)
+		if cardErr[key] != nil {
+			var coded *apperr.Error
+			if !errors.As(cardErr[key], &coded) {
+				return nil, cardErr[key]
+			}
+			b.Results[i].Err = cardErr[key]
 			continue
 		}
+		cards := current[key]
 		quantities, err := usageQuantities(cards, eventFields{Dimensions: it.Dimensions, Metadata: it.Metadata, Amount: it.Amount})
 		if err != nil {
 			b.Results[i].Err = settleRefusal(err)
@@ -651,27 +607,8 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 			p.limits = append(p.limits, eventstore.UsageLimit{Key: key, WindowStartsAt: w.StartsAt.UTC(), WindowEndsAt: w.EndsAt, Units: units})
 			res.Units[key] = addSat(res.Units[key], units)
 		}
-		held := map[string]bool{}
-		if it.Hold != nil {
-			for _, part := range it.Hold.Parts {
-				held[part.Key] = true
-				w := limits.Window{StartsAt: part.WindowStartsAt.UTC(), EndsAt: part.WindowEndsAt, Open: true}
-				switch def, declared := findDef(defs, part.Key); {
-				case part.Key == catalog.BalanceLimit:
-				case strings.HasPrefix(part.Key, limits.SpendKeyPrefix):
-					add(part.Key, w, amount)
-				case declared:
-					units := amount
-					if def.Unit != it.Currency {
-						units = p.units[def.Key]
-					}
-					add(def.Key, bucketed(def.Reset, w, at), units)
-				}
-			}
-		} else {
-			for _, c := range it.Spend {
-				add(c.Key, c.Window, amount)
-			}
+		for _, c := range it.Spend {
+			add(c.Key, c.Window, amount)
 		}
 		if len(defs) == 0 {
 			continue
@@ -696,11 +633,11 @@ func (s *MoneyService) locateItems(ctx context.Context, q *gen.Queries, b *Usage
 			}
 			windows[k] = current
 		}
-		// A limit the hold does not name takes the usage in its window: a
-		// granted one's, or an ungranted one's row that exists.
+		// Every limit takes the usage in its window: a granted one's, or an
+		// ungranted one's row that exists.
 		for _, def := range defs {
 			c, ok := current[def.Key]
-			if held[def.Key] || !ok {
+			if !ok {
 				continue
 			}
 			units, counts := p.units[def.Key]
@@ -886,7 +823,7 @@ func (b *UsageIntake) event(i int, it UsageItem, p pricedItem) *eventstore.Usage
 // CommitUsageTx inserts the batch's events the store does not hold and waits
 // until they read back, then, in the caller's transaction: marks the
 // customers' usage unposted, records the card prints, opens the session and
-// first-use windows, posts what failed items charge and records captures.
+// first-use windows and posts what failed items charge.
 // Should the transaction not commit, a resend finds the events and redoes
 // only this side, which is idempotent. Changed names the balances the usage
 // moved, for the caller to watch (watchUsageTx, WatchUsage).
@@ -990,21 +927,6 @@ func (s *MoneyService) CommitUsageTx(ctx context.Context, q *gen.Queries, b *Usa
 			return err
 		}
 	}
-	for i, it := range b.items {
-		if it.Capture == nil || b.Results[i].Err != nil {
-			continue
-		}
-		r := b.Results[i]
-		charges, err := json.Marshal(r.Charges)
-		if err != nil {
-			return err
-		}
-		row := it.Capture.Row
-		if _, err := q.CaptureRequestHold(ctx, gen.CaptureRequestHoldParams{MerchantID: row.MerchantID, ID: row.ID, CreatedAt: row.CreatedAt,
-			Amount: r.Amount, CapturedCharges: charges, AsOf: b.now, CaptureTerms: it.Capture.Terms}); err != nil {
-			return err
-		}
-	}
 	b.changed = b.changed[:0]
 	for _, a := range accounts {
 		if marks[a].amount > 0 {
@@ -1103,15 +1025,6 @@ func cardPrint(card ratingCard) (string, error) {
 	return hex.EncodeToString(sum[:8]), nil
 }
 
-func findDef(defs []limits.Definition, key string) (limits.Definition, bool) {
-	for _, d := range defs {
-		if d.Key == key {
-			return d, true
-		}
-	}
-	return limits.Definition{}, false
-}
-
 func compareUUID(a, b uuid.UUID) int { return strings.Compare(string(a[:]), string(b[:])) }
 
 func addSat(a, b int64) int64 {
@@ -1178,4 +1091,32 @@ func (s *MoneyService) periodAnchorFor(ctx context.Context, q *gen.Queries, merc
 		}
 	}
 	return periodAnchor{anchor: anchor, boundary: boundary}, nil
+}
+
+// UsageCurrencies answers what usage may be priced and spent in: a
+// currency, or one of the units the merchant declares, read once.
+type UsageCurrencies struct {
+	s     *MoneyService
+	units *currency.Registry
+}
+
+func (s *MoneyService) UsageCurrencies() *UsageCurrencies { return &UsageCurrencies{s: s} }
+
+// Supported reports whether usage may be in code.
+func (u *UsageCurrencies) Supported(ctx context.Context, code string) bool {
+	if moneyutil.ValidateCurrency(code) == nil {
+		return true
+	}
+	if moneyutil.ValidateBalanceCurrency(code) != nil {
+		return false
+	}
+	if u.units == nil {
+		reg, err := merchantconfig.NewStore(u.s.db).Registry(ctx)
+		if err != nil {
+			return false
+		}
+		u.units = &reg
+	}
+	_, ok := u.units.Unit(code)
+	return ok
 }

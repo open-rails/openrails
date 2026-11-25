@@ -4,12 +4,14 @@ import { CardBillingFields } from "./components/billing-fields"
 import { CardFields } from "./components/card-fields"
 import { PayButton, TrustLine } from "./components/pay-button"
 import {
+  billingSchema,
   emptyNMIBilling,
   initialCountry,
-  nmiBillingSchema,
   reuseNeedsOptIn,
+  type BillingFields,
 } from "./lib/billing"
 import { collectCardDisplay, useCollectJS } from "./lib/collect"
+import { useBillingFields } from "./react/config"
 import { cn } from "cn"
 import { useScopeProps } from "./scope-context"
 
@@ -18,7 +20,8 @@ import { useScopeProps } from "./scope-context"
 export interface TokenizedCardData {
   payment_token: string
   name_on_card: string
-  country: string
+  /** Absent when the merchant's billing fields hide it or it was left blank. */
+  country?: string
   zip?: string
   /** Display metadata from the gateway: last four, brand, MM/YY. */
   last_four?: string
@@ -39,6 +42,12 @@ export interface TokenizedCardFormProps {
   disabled?: boolean
   /** Billing country to preselect; default: the browser locale's region. */
   defaultCountry?: string
+  /**
+   * The billing details to ask for; default: the merchant's
+   * (`GET /me/config`) inside a `BillingProvider`, else the country always
+   * and the postal code in the US.
+   */
+  billingFields?: BillingFields
   /**
    * The merchant the card would be kept with, for a one-off purchase: where
    * keeping it needs an opt-in (EEA, UK) the form asks, unticked.
@@ -61,12 +70,15 @@ export function TokenizedCardForm({
   submitLabel = "Save card",
   disabled = false,
   defaultCountry,
+  billingFields,
   saveOptInMerchant,
   terms,
   statementDescriptor,
   appearance,
   className,
 }: TokenizedCardFormProps) {
+  const fields = useBillingFields(billingFields)
+  const schema = React.useMemo(() => billingSchema(fields), [fields])
   // Without its own appearance the form takes the provider's: the card
   // fields' colors are read from this scope.
   const scope = useScopeProps(appearance)
@@ -113,13 +125,15 @@ export function TokenizedCardForm({
     },
   })
   // The button stays off until every required billing field is filled.
-  const billingComplete = nmiBillingSchema.safeParse(billing).success
+  const billingComplete = schema.safeParse(billing).success
   const asksToKeep =
-    saveOptInMerchant !== undefined && reuseNeedsOptIn(billing.country)
+    saveOptInMerchant !== undefined &&
+    fields.country !== "hidden" &&
+    reuseNeedsOptIn(billing.country)
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (disabled || busy || submitted) return
-    const parsed = nmiBillingSchema.safeParse(billing)
+    const parsed = schema.safeParse(billing)
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Check the billing details")
       return
@@ -174,6 +188,7 @@ export function TokenizedCardForm({
           idPrefix={`orck-save-${uid}`}
           value={billing}
           onChange={setBilling}
+          fields={fields}
           disabled={disabled || busy || submitted}
         >
           <CardFields

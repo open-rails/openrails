@@ -121,9 +121,20 @@ func ForSubscription(ctx context.Context, q *gen.Queries, merchantID, customerID
 }
 
 // ForCollection is the active unscheduled mandate a collection in currency on
-// this card, through psp, charges under.
+// this card, through psp, charges under, read under a shared lock.
 func ForCollection(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, methodID, pspID uuid.UUID) (*charge.Mandate, error) {
 	m, err := q.GetLiveUnscheduledMandateForShare(ctx, gen.GetLiveUnscheduledMandateForShareParams{MerchantID: merchantID, CustomerID: customerID, Currency: strings.ToUpper(strings.TrimSpace(currency))})
+	return forCollection(m, err, customerID, methodID, pspID)
+}
+
+// ReadForCollection is ForCollection without the lock: whether a collection
+// could charge, as a read-only snapshot asks it.
+func ReadForCollection(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string, methodID, pspID uuid.UUID) (*charge.Mandate, error) {
+	m, err := q.GetLiveUnscheduledMandate(ctx, gen.GetLiveUnscheduledMandateParams{MerchantID: merchantID, CustomerID: customerID, Currency: strings.ToUpper(strings.TrimSpace(currency))})
+	return forCollection(m, err, customerID, methodID, pspID)
+}
+
+func forCollection(m gen.BillingMandate, err error, customerID, methodID, pspID uuid.UUID) (*charge.Mandate, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrMissing
 	}

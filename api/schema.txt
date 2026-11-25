@@ -37,6 +37,7 @@ migration 0038_write_posture_comments.up.sql sha256:4e52a41d97043af3c86dffd550e7
 migration 0039_lease_in_flight_off_customers.up.sql sha256:c0290a0816eb44a2edef247a2116743b5ddfa57a2f4114056cf4b63b77d82edc
 migration 0040_migration_cohort_order.up.sql sha256:72f4a45e6f1533ec1dca16b01d24db219b14490cd071402e8fe61d02964e702a
 migration 0041_mrr_totals_settle.up.sql sha256:88d0cea1c62392fc13958c7e9b917d6b4c7c7f109ba392dbd60ea90c24c55c6e
+migration 0044_drop_request_holds.up.sql sha256:f7ab167c764da9a5b518fe6984c20e48a413311864bbfefea75f1ae8da8ed31d
 
 table billing.balance_watches
   column merchant_id uuid NOT NULL
@@ -1175,73 +1176,6 @@ table billing.limit_adjustments
   index CREATE INDEX limit_adjustments_created_at_idx ON billing.limit_adjustments USING btree (merchant_id, created_at)
   index CREATE INDEX limit_adjustments_limit_key_idx ON billing.limit_adjustments USING btree (merchant_id, limit_key)
   index CREATE UNIQUE INDEX limit_adjustments_pkey ON billing.limit_adjustments USING btree (merchant_id, customer_id, source_id)
-
-table billing.limit_hold_parts PARTITION BY RANGE (hold_created_at)
-  column merchant_id uuid NOT NULL
-  column hold_id uuid NOT NULL
-  column hold_created_at timestamp with time zone NOT NULL
-  column customer_id uuid NOT NULL
-  column limit_key text NOT NULL
-  column unit text NOT NULL
-  column window_starts_at timestamp with time zone NOT NULL
-  column window_ends_at timestamp with time zone
-  column held bigint NOT NULL
-  constraint limit_hold_parts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint limit_hold_parts_held_check CHECK ((held >= 0))
-  constraint limit_hold_parts_limit_key_check CHECK (((limit_key ~ '^[a-z][a-z0-9_-]{0,63}$'::text) OR (limit_key ~ '^spend:[0-9a-f]{64}$'::text)))
-  constraint limit_hold_parts_pkey PRIMARY KEY (merchant_id, hold_id, limit_key, hold_created_at)
-  constraint limit_hold_parts_unit_check CHECK (((unit ~ '^[a-z][a-z0-9_]{0,63}$'::text) OR (unit ~ '^[A-Z0-9]{3,12}$'::text)))
-  constraint limit_hold_parts_window_check CHECK (((window_ends_at IS NULL) OR (window_ends_at > window_starts_at)))
-  index CREATE UNIQUE INDEX limit_hold_parts_pkey ON ONLY billing.limit_hold_parts USING btree (merchant_id, hold_id, limit_key, hold_created_at)
-  index CREATE INDEX limit_hold_parts_window_idx ON ONLY billing.limit_hold_parts USING btree (merchant_id, customer_id, limit_key, window_starts_at)
-
-table billing.limit_holds PARTITION BY RANGE (created_at)
-  column merchant_id uuid NOT NULL
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column customer_id uuid NOT NULL
-  column currency text NOT NULL
-  column lease_id uuid
-  column request_id text NOT NULL
-  column estimated_amount bigint NOT NULL
-  column available_amount bigint NOT NULL
-  column terms jsonb NOT NULL
-  column estimate_usage jsonb
-  column rate_cards jsonb
-  column requested_expires_at timestamp with time zone
-  column expires_at timestamp with time zone
-  column state text NOT NULL
-  column capture_terms jsonb
-  column captured_amount bigint
-  column captured_at timestamp with time zone
-  column released_at timestamp with time zone
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  column captured_charges jsonb
-  constraint limit_holds_available_amount_check CHECK ((available_amount >= 0))
-  constraint limit_holds_capture_terms_check CHECK (((jsonb_typeof(capture_terms) = 'object'::text) AND (octet_length((capture_terms)::text) <= 65536)))
-  constraint limit_holds_captured_charges_check CHECK (((captured_charges IS NULL) OR ((state = 'captured'::text) AND (jsonb_typeof(captured_charges) = 'array'::text))))
-  constraint limit_holds_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint limit_holds_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint limit_holds_estimate_usage_check CHECK ((((estimate_usage IS NULL) OR ((jsonb_typeof(estimate_usage) = 'object'::text) AND (octet_length((estimate_usage)::text) <= 65536))) AND ((rate_cards IS NULL) OR ((jsonb_typeof(rate_cards) = 'array'::text) AND (octet_length((rate_cards)::text) <= 262144)))))
-  constraint limit_holds_estimated_amount_check CHECK ((estimated_amount >= 0))
-  constraint limit_holds_expires_at_check CHECK (((requested_expires_at IS NULL) OR ((expires_at IS NOT NULL) AND (expires_at >= requested_expires_at))))
-  constraint limit_holds_hold_lifetime_check CHECK (((expires_at IS NULL) OR (expires_at <= (created_at + '720:00:00'::interval))))
-  constraint limit_holds_lease_id_check CHECK (((lease_id IS NULL) OR ((requested_expires_at IS NULL) AND (expires_at IS NULL))))
-  constraint limit_holds_pkey PRIMARY KEY (merchant_id, id, created_at)
-  constraint limit_holds_rate_cards_check CHECK (((estimate_usage IS NULL) = (rate_cards IS NULL)))
-  constraint limit_holds_request_id_check CHECK (((octet_length(request_id) >= 1) AND (octet_length(request_id) <= 255)))
-  constraint limit_holds_requested_expires_at_check CHECK ((((requested_expires_at IS NULL) OR (requested_expires_at > created_at)) AND ((lease_id IS NOT NULL) OR (estimated_amount = 0) OR (requested_expires_at IS NOT NULL))))
-  constraint limit_holds_state_check CHECK ((state = ANY (ARRAY['open'::text, 'released'::text, 'captured'::text])))
-  constraint limit_holds_state_fields_check CHECK ((((state = 'open'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NULL)) OR ((state = 'released'::text) AND (capture_terms IS NULL) AND (captured_amount IS NULL) AND (captured_at IS NULL) AND (released_at IS NOT NULL)) OR ((state = 'captured'::text) AND (capture_terms IS NOT NULL) AND (captured_amount IS NOT NULL) AND (captured_amount >= 0) AND (captured_at IS NOT NULL))))
-  constraint limit_holds_terms_check CHECK (((jsonb_typeof(terms) = 'object'::text) AND (octet_length((terms)::text) <= 65536)))
-  index CREATE INDEX limit_holds_created_at_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, created_at DESC, request_id COLLATE "C" DESC) WHERE (request_id IS NOT NULL)
-  index CREATE INDEX limit_holds_customer_created_at_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id, created_at DESC, request_id COLLATE "C" DESC) WHERE (request_id IS NOT NULL)
-  index CREATE INDEX limit_holds_customer_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id)
-  index CREATE INDEX limit_holds_lease_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, lease_id) WHERE ((lease_id IS NOT NULL) AND (state = 'open'::text))
-  index CREATE INDEX limit_holds_open_idx ON ONLY billing.limit_holds USING btree (merchant_id, customer_id, currency) WHERE (state = 'open'::text)
-  index CREATE UNIQUE INDEX limit_holds_pkey ON ONLY billing.limit_holds USING btree (merchant_id, id, created_at)
-  index CREATE INDEX limit_holds_request_id_idx ON ONLY billing.limit_holds USING btree (merchant_id, request_id, created_at DESC) WHERE (request_id IS NOT NULL)
-  trigger CREATE TRIGGER immutable_request_hold_facts BEFORE DELETE OR UPDATE ON billing.limit_holds FOR EACH ROW WHEN ((old.request_id IS NOT NULL)) EXECUTE FUNCTION billing.guard_billing_fact_columns('expires_at', 'state', 'capture_terms', 'captured_amount', 'captured_at', 'captured_charges', 'released_at', 'updated_at')
 
 table billing.limit_windows
   column merchant_id uuid NOT NULL
@@ -4375,33 +4309,6 @@ function billing.dispute_network_activity()
   END;
   $function$
 
-function billing.drop_month_partitions(name,timestamp with time zone)
-  CREATE OR REPLACE FUNCTION billing.drop_month_partitions(p_table name, p_before timestamp with time zone)
-   RETURNS integer
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-   SET lock_timeout TO '2s'
-  AS $function$
-  DECLARE
-      parent regclass := to_regclass(quote_ident(p_table));
-      parent_schema name;
-      child record;
-      dropped integer := 0;
-  BEGIN
-      SELECT n.nspname INTO parent_schema
-        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE c.oid = parent AND c.relkind = 'p';
-      IF NOT FOUND THEN
-          RAISE EXCEPTION '% is not a partitioned table', p_table USING ERRCODE='42809';
-      END IF;
-      FOR child IN SELECT m.partition FROM billing.month_partitions(p_table) m WHERE m.range_to <= p_before LOOP
-          EXECUTE format('DROP TABLE IF EXISTS %I.%I', parent_schema, child.partition);
-          dropped := dropped + 1;
-      END LOOP;
-      RETURN dropped;
-  END;
-  $function$
-
 function billing.effect_due_mrr(uuid,uuid,timestamp with time zone)
   CREATE OR REPLACE FUNCTION billing.effect_due_mrr(p_merchant uuid, p_subscription uuid, p_at timestamp with time zone)
    RETURNS boolean
@@ -4536,46 +4443,6 @@ function billing.enqueue_payment_settlement_event()
           ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
       END IF;
       RETURN NEW;
-  END;
-  $function$
-
-function billing.ensure_month_partitions(name,timestamp with time zone,timestamp with time zone)
-  CREATE OR REPLACE FUNCTION billing.ensure_month_partitions(p_table name, p_from timestamp with time zone, p_through timestamp with time zone)
-   RETURNS integer
-   LANGUAGE plpgsql
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-   SET "TimeZone" TO 'UTC'
-   SET lock_timeout TO '2s'
-  AS $function$
-  DECLARE
-      parent regclass := to_regclass(quote_ident(p_table));
-      parent_schema name;
-      month_start timestamptz := date_trunc('month', p_from);
-      partition name;
-      created integer := 0;
-  BEGIN
-      SELECT n.nspname INTO parent_schema
-        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE c.oid = parent AND c.relkind = 'p';
-      IF NOT FOUND THEN
-          RAISE EXCEPTION '% is not a partitioned table', p_table USING ERRCODE='42809';
-      END IF;
-      WHILE month_start <= p_through LOOP
-          partition := p_table || to_char(month_start, '"_y"YYYY"m"MM');
-          IF to_regclass(format('%I.%I', parent_schema, partition)) IS NULL THEN
-              BEGIN
-                  EXECUTE format('CREATE TABLE %I.%I (LIKE %I.%I INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES INCLUDING GENERATED INCLUDING STORAGE)',
-                      parent_schema, partition, parent_schema, p_table);
-                  EXECUTE format('ALTER TABLE %I.%I ATTACH PARTITION %I.%I FOR VALUES FROM (%L) TO (%L)',
-                      parent_schema, p_table, parent_schema, partition, month_start, month_start + interval '1 month');
-                  created := created + 1;
-              EXCEPTION WHEN duplicate_table OR duplicate_object OR unique_violation THEN
-                  NULL; -- another session created it first
-              END;
-          END IF;
-          month_start := month_start + interval '1 month';
-      END LOOP;
-      RETURN created;
   END;
   $function$
 
@@ -4833,8 +4700,6 @@ function billing.guard_billing_restore_receipt()
                     'ledger_type_totals',
                     'ledger_units',
                     'limit_adjustments',
-                    'limit_hold_parts',
-                    'limit_holds',
                     'limit_windows',
                     'maintenance_runs',
                     'mandates',
@@ -5453,22 +5318,6 @@ function billing.money_settings_track_mrr_risk()
       END IF;
       RETURN NULL;
   END;
-  $function$
-
-function billing.month_partitions(name)
-  CREATE OR REPLACE FUNCTION billing.month_partitions(p_table name)
-   RETURNS TABLE(partition name, range_from timestamp with time zone, range_to timestamp with time zone)
-   LANGUAGE sql
-   STABLE
-   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
-  AS $function$
-      SELECT c.relname,
-             (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'FROM \(''([^'']+)''\)'))[1]::timestamptz,
-             (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \(''([^'']+)''\)'))[1]::timestamptz
-        FROM pg_inherits i
-        JOIN pg_class c ON c.oid = i.inhrelid
-       WHERE i.inhparent = to_regclass(quote_ident(p_table))
-       ORDER BY 2
   $function$
 
 function billing.monthly_normalized_amount(bigint,integer)

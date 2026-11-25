@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/limits"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // A view is where one customer stands on every limit its requests in one
@@ -75,6 +74,13 @@ type viewing struct {
 func (r *syncRun) views(ctx context.Context) error {
 	if len(r.p.Views) == 0 {
 		return nil
+	}
+	// What the views may be asked in is read before the snapshot.
+	currencies := r.Money.UsageCurrencies()
+	r.viewable = map[string]bool{}
+	for _, vp := range r.p.Views {
+		code := money.NormalizeCurrency(string(vp.Currency))
+		r.viewable[code] = currencies.Supported(ctx, code)
 	}
 	var reached []reachedWindow
 	err := r.DB.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -213,8 +219,8 @@ func (v *viewing) loadRates(keys []viewKey) error {
 	return nil
 }
 
-// checkView refuses a view request no admission of its attributes would
-// take.
+// checkView refuses a view request no request of its attributes could be
+// decided on: a currency, or a unit the merchant declares.
 func (r *syncRun) checkView(vp billing.ViewParams) error {
 	switch {
 	case vp.CustomerID.IsZero():
@@ -223,7 +229,7 @@ func (r *syncRun) checkView(vp billing.ViewParams) error {
 		return apperr.New(http.StatusForbidden, billing.CodeServiceCredentialCustomerScopeDenied, "the credential's customer scope does not include the customer").WithParam("customer_id")
 	case vp.InvokerType != "" && vp.InvokerType != billing.InvokerTypeCustomer && vp.InvokerType != billing.InvokerTypeDelegated:
 		return invalid("invoker_type", `invoker_type must be "customer" or "delegated"`)
-	case moneyutil.ValidateCurrency(money.NormalizeCurrency(string(vp.Currency))) != nil:
+	case !r.viewable[money.NormalizeCurrency(string(vp.Currency))]:
 		return apperr.New(http.StatusBadRequest, billing.CodeCurrencyUnsupported, "currency is not supported").WithParam("currency")
 	}
 	return nil
@@ -240,14 +246,10 @@ func (v *viewing) build(k viewKey) (*viewBuild, error) {
 	if err != nil {
 		return nil, err
 	}
-	recent, err := v.usage.RecentSpend(ctx, k.customer, k.currency)
-	if err != nil {
-		return nil, err
-	}
 	b := &viewBuild{key: k, cap: capacity, lines: map[string]bool{}, view: billing.View{CustomerID: billing.CustomerID(k.customer),
 		Currency: catalog.Currency(k.currency), AsOf: r.now, Limits: []billing.ViewLimit{{Limit: catalog.BalanceLimit, Unit: k.currency,
 			Overrun: catalog.OverrunRequireEstimate, Capacity: capacity.Balance, Held: capacity.Held, Remaining: admission.Available(capacity),
-			DrainPerHour: v.rates[k], Settled: r.settled[settledKey{k.customer, balanceKey(k.currency)}], Recent: recent}}}}
+			DrainPerHour: v.rates[k]}}}}
 	b.lines[catalog.BalanceLimit] = true
 	if len(v.defs) > 0 {
 		reader := limits.Customer{Q: v.q, Events: r.DB.EventStore(), MerchantID: r.merchant, CustomerID: k.customer, Now: r.now, ExceptLease: &r.lease.ID,
@@ -270,7 +272,7 @@ func (v *viewing) build(k viewKey) (*viewBuild, error) {
 			if c.Opens {
 				next = nil
 			}
-			line, err := v.line(k.customer, c, next, recent)
+			line, err := v.line(k.customer, c, next)
 			if err != nil {
 				return nil, err
 			}
@@ -284,19 +286,14 @@ func (v *viewing) build(k viewKey) (*viewBuild, error) {
 }
 
 // line is where one claim's limit stands, as a view line.
-func (v *viewing) line(customer uuid.UUID, c limits.Claim, next *limits.Window, recent int64) (billing.ViewLimit, error) {
-	r := v.run
+func (v *viewing) line(customer uuid.UUID, c limits.Claim, next *limits.Window) (billing.ViewLimit, error) {
 	s, resets, err := v.usage.Limit(v.ctx, customer, c)
 	if err != nil {
 		return billing.ViewLimit{}, err
 	}
 	reset := c.Reset
 	out := billing.ViewLimit{Limit: c.Key, Unit: c.Unit, Reset: &reset, Overrun: cmp.Or(c.Overrun, catalog.OverrunRequireEstimate),
-		Capacity: s.Capacity, Used: s.Settled, Held: s.Held, Remaining: s.Remaining(), ResetsAt: resets,
-		Settled: r.settled[settledKey{customer, c.Key}]}
-	if syntax.LimitUnitCurrency(c.Unit) {
-		out.Recent = recent
-	}
+		Capacity: s.Capacity, Used: s.Settled, Held: s.Held, Remaining: s.Remaining(), ResetsAt: resets}
 	// A window that ends is the gate's to switch at its end; one that never
 	// ends, or a session not yet open, has none.
 	if c.Window.EndsAt != nil && !c.Opens && c.Reset.Kind != catalog.ResetRolling {
@@ -334,12 +331,11 @@ func (v *viewing) limitSet(b *viewBuild, vp billing.ViewParams, eventType string
 		return out, nil
 	}
 	out.CreditLine, out.BalanceDenyCode = set.CreditLine, set.BalanceRefusal()
-	recent := b.view.Limits[0].Recent
 	for _, c := range set.Spend {
 		if !b.lines[c.Key] {
 			end := *c.Window.EndsAt
 			next := limits.Window{StartsAt: end, EndsAt: new(end.Add(end.Sub(c.Window.StartsAt)))}
-			line, err := v.line(b.key.customer, c, &next, recent)
+			line, err := v.line(b.key.customer, c, &next)
 			if err != nil {
 				return nil, err
 			}
@@ -361,7 +357,7 @@ func (v *viewing) limitSet(b *viewBuild, vp billing.ViewParams, eventType string
 // named-unit limit counts it, and the money cards in force with their price
 // bounds.
 func (v *viewing) pricing(currency, eventType string) (billing.ViewPricing, error) {
-	pinned, err := v.money.PinnedCards(v.ctx, v.q, eventType, currency)
+	pinned, err := v.money.CardsInForce(v.ctx, v.q, eventType, currency)
 	if err != nil {
 		return billing.ViewPricing{}, err
 	}
