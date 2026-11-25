@@ -7,7 +7,7 @@
 # no version and no integrity check. Measured on ubuntu-latest: `task` 61s,
 # `gosec` 47s; this path is ~2s.
 #
-#   scripts/ci-install-tool.sh <gosec|sqlc|helm> [dest-dir]   # default: bin/
+#   scripts/ci-install-tool.sh <gosec|sqlc|helm|cacheprog> [dest-dir]   # default: bin/
 #
 # Prints the absolute path of the installed binary on stdout; everything else
 # goes to stderr, so:  HELM="$(scripts/ci-install-tool.sh helm)"
@@ -25,7 +25,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-tool="${1:?usage: ci-install-tool.sh <gosec|sqlc|helm> [dest-dir]}"
+tool="${1:?usage: ci-install-tool.sh <gosec|sqlc|helm|cacheprog> [dest-dir]}"
 dest="${2:-bin}"
 
 case "$(uname -s)-$(uname -m)" in
@@ -56,6 +56,14 @@ case "$tool" in
         # upstream helm-v3.19.0-linux-amd64.tar.gz.sha256sum
         sha256="a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496"
         member="linux-amd64/helm"
+        ;;
+    cacheprog)
+        # The GOCACHEPROG program of scripts/go-remote-cache.sh.
+        version="1.3.2"
+        url="https://github.com/platacard/cacheprog/releases/download/v${version}/cacheprog_v${version}_linux_amd64.tar.gz"
+        # upstream checksums.txt
+        sha256="f0d3f77ccd39fc7e3dbc6d6493baecfb29248224423657ab84a717887572f2bf"
+        member="cacheprog"
         ;;
     *)
         echo "ci-install-tool: unknown tool '$tool'" >&2

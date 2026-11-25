@@ -157,6 +157,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: plain
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       - run: python3 scripts/check-ci-policy.py
       - run: bash scripts/check.sh guards
       - run: bash scripts/scan-injected-code.sh --self-test
@@ -191,6 +194,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: plain
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       # The package tests compile every untagged package; linking every binary
       # is left to pushes and the full tier.
       - name: Build and link every module
@@ -226,6 +232,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: plain
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       - name: Read pinned lint version
         id: tool_versions
         shell: bash
@@ -295,6 +304,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: plain
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       - name: PostgreSQL and ClickHouse are ready
         run: bash scripts/ci-services.sh ready
       - name: Generated SQL bindings match the queries
@@ -376,6 +388,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: plain
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/billing-ui/package.json
@@ -424,6 +439,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: critical
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/billing-ui/package.json
@@ -528,6 +546,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: critical
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       - name: Build the critical package, its fixture and the CLI as the shards do
         run: |
           go test -tags=integration -race -c -o "$RUNNER_TEMP/critical.test" ./critical
@@ -560,6 +581,9 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: plain
+      - uses: ./.github/actions/go-remote-cache
+        with:
+          credentials: ${{ github.event_name == 'push' && secrets.GO_REMOTE_CACHE_RW || secrets.GO_REMOTE_CACHE_RO }}
       # gosec takes about ten minutes; it runs before every release (full).
       # The root module's ./... excludes each nested Go module.
       - name: Go SAST
