@@ -420,7 +420,7 @@ func TestPublicCatalog(t *testing.T) {
 		}
 		identity, meterCreated := cardIdentity(), read.CreatedAt
 		params.RateCard.Value.Price.PerUnit.UnitAmount = 2
-		read, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
+		_, err = a.alphaRemote.SetMeter(t.Context(), "Mixed Case", params)
 		require.NoError(t, err)
 		require.Equal(t, identity, cardIdentity())
 		declared, err := catalog.ParseApplicationJSON([]byte(`{
