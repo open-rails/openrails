@@ -1220,3 +1220,43 @@ func TestGateAnswersAFirstViewInASyncWithoutUsage(t *testing.T) {
 		}
 	})
 }
+
+func TestGateCarriesAFullBatchInAFirstViewSync(t *testing.T) {
+	f := newFakeViews(map[string]fakeLimit{"quota": {capacity: 1_000_000}})
+	f.pool(t, 1)
+	synctest.Test(t, func(t *testing.T) {
+		g := newTestGate(t, f, GateDeps{})
+		defer closeGate(t, g)
+		busy := billing.CustomerID(uuid.New())
+		warm(t, g, busy)
+		// Answers take a second, so the backlog is still queued when a new
+		// customer's first request comes.
+		f.set(func(f *fakeViews) { f.slow = time.Second })
+		for i := range 2 * billing.MaxSyncUsageItems {
+			u := billing.UsageParams{CustomerID: busy, Invoker: busy.String(), Currency: "USD", EventType: "work",
+				Dimensions: map[string]int64{"units": 1}, Source: "test", SourceID: fmt.Sprintf("backlog-%d", i)}
+			if err := g.Record(t.Context(), u); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.mu.Lock()
+		before := len(f.syncs)
+		f.mu.Unlock()
+		cold := billing.CustomerID(uuid.New())
+		mustAdmit(t, g, work(cold, "first", 1)).Release(t.Context())
+		f.mu.Lock()
+		syncs := slices.Clone(f.syncs[before:])
+		f.mu.Unlock()
+		for _, p := range syncs {
+			for _, v := range p.Views {
+				if v.CustomerID == cold {
+					if len(p.Usage) != billing.MaxSyncUsageItems {
+						t.Fatalf("the sync answering the first view carried %d items of a backlog, want %d", len(p.Usage), billing.MaxSyncUsageItems)
+					}
+					return
+				}
+			}
+		}
+		t.Fatal("no sync answered the first view")
+	})
+}
