@@ -107,7 +107,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   policies are unchanged.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
-  come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `oat_`, …).
+  come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `in_`, …).
 - Customer messages: OpenRails holds each customer's contact (read live from the host's directory, or the SCIM copy in `customer_contacts`) and emails customers their billing messages (`internal/modules/messages`, through `Deps.Email`); the merchant's `messages` document turns each event type on or off. In-app notices go to AuthKit's inbox (`Deps.Notifications`); OpenRails keeps no inbox. Removing customer email is the owner's call, never a side effect of other work.
 - Vocabulary: customer (not payer or user); subject (the native account acted as), invoker (the party actually acting, may be foreign), credential (how it was proven); `canceled`.
 
@@ -219,10 +219,16 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Every table has a retention class (`internal/retention`: permanent, rows, state),
   stated in its table comment; the `retention` package doc lists the periods.
 - External writes are `provider_intents` and their write-ahead `operation_log`; per-PSP state is
-  `psp_customers` and `psp_refresh_watermarks`. Every bill is an `orders` row (`ord_`)
-  with its `order_lines`, provider-run renewals included (`billing.Order`'s doc);
-  an `order_attempts` row (`oat_`) is a provider attempt; a host
+  `psp_customers` and `psp_refresh_watermarks`. Every bill is an `invoices` row (`in_`)
+  with its `invoice_lines` (`il_`), provider-run renewals included (`billing.Invoice`'s doc);
+  an `invoice_attempts` row (`iat_`) is a provider attempt; a host
   charges its own metered price with a `running_charges` row.
+- Spellings matched against stored or provider records still say "order": NMI's `orderid`
+  and order references, Stripe metadata `order_id`/`order_attempt_id`, intent payload keys,
+  River kinds (`openrails.order_expiry`, `openrails.usage_orders`), inbox issue keys, the
+  `waive_order` destructive kind, idempotency and derived-id namespaces, ledger and books
+  sources (`order`, `order_line`). Never rename them. Immutable history (notification
+  events, the event log) keeps its earlier types; readers rename them (`models.NotificationType`).
 - A new table also goes in the merchant archive's `ownedTables` and the restore guard.
 - Usage events live in ClickHouse (`Deps.ClickHouse`, `internal/eventstore`, its own embedded
   migrations); money stays in PostgreSQL. Usage posts to the ledger at each month's end in
