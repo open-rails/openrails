@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 783,
+  "scenario_count": 785,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3917,6 +3917,16 @@
       "id": "OR-J47-S12",
       "journey": "J47",
       "name": "A customer's erasure clears every attribution field of its checkouts; the checkouts stand"
+    },
+    {
+      "id": "OR-J38-S86",
+      "journey": "J38",
+      "name": "A customer cannot cancel a usage invoice or one the merchant created: both answer 409 invoice_not_cancelable and stay open, the usage stays owed to that invoice, and the merchant cancels its invoice"
+    },
+    {
+      "id": "OR-J38-S87",
+      "journey": "J38",
+      "name": "Buying a consumable product again raises no duplicate-ownership finding; a second live purchase of a non-consumable still does"
     }
   ]
 }

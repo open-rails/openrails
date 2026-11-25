@@ -309,7 +309,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   pay_url_not_found: { status: 404, type: "invalid_request_error", meaning: "The pay URL is unknown or no longer valid." },
   pay_url_unavailable: { status: 400, type: "invalid_request_error", meaning: "This deployment serves no checkout origin, or the invoice cannot take a pay URL." },
   payment_duplicate_refused: { status: 409, type: "invalid_request_error", meaning: "The provider refused an identical charge it had just made; retry after its duplicate window." },
-  payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "The recorded payment exceeds what the usage invoice has due, or is not the invoice's total." },
+  payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "A recorded payment must equal the invoice's total; a usage payment must not exceed the amount due." },
   payment_failed: { status: 402, type: "card_error", meaning: "The payment was not made." },
   payment_idempotency_conflict: { status: 409, type: "invalid_request_error", meaning: "The idempotency key belongs to another payment request." },
   payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment is already unresolved; read the resource before retrying." },

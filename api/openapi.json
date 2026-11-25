@@ -29042,7 +29042,7 @@
     "payment_exceeds_due": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The recorded payment exceeds what the usage invoice has due, or is not the invoice's total."
+      "meaning": "A recorded payment must equal the invoice's total; a usage payment must not exceed the amount due."
     },
     "payment_failed": {
       "status": 402,

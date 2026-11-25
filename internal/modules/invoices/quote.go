@@ -302,7 +302,9 @@ func lineQuantity(price *models.Price, ownership catalog.Ownership, asked *int) 
 	switch {
 	case asked == nil:
 		return &one, nil
-	case *asked > MaxQuantity || *asked > 1 && ownership != catalog.OwnershipConsumable:
+	case *asked > MaxQuantity:
+		return asked, refusal(RefusalQuantityInvalid, fmt.Sprintf("The maximum quantity is %d.", MaxQuantity))
+	case *asked > 1 && ownership != catalog.OwnershipConsumable:
 		return asked, refusal(RefusalQuantityInvalid, "Only a consumable line takes a quantity above 1.")
 	}
 	return asked, nil

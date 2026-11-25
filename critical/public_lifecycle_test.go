@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	openrailsfiber "github.com/open-rails/openrails/adapters/fiber"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
@@ -25,6 +26,31 @@ import (
 )
 
 func TestPublicLifecycle(t *testing.T) {
+	t.Run("OR-J38-S86/customer-cancel-preserves-usage-and-merchant-invoices", func(t *testing.T) {
+		a, customer, usage := openUsageInvoice(t)
+		_, price := publicSale(t, a, "merchant-cancel", 5_000_000, nil)
+		created, err := a.alphaRemote.CreateInvoice(t.Context(), "merchant-cancel", billing.CreateInvoiceParams{CustomerID: customer, Lines: []billing.InvoiceLineParams{{PriceID: price.ID}}})
+		require.NoError(t, err)
+		require.Equal(t, billing.InvoiceOriginMerchant, created.Origin)
+		for _, id := range []billing.InvoiceID{usage, created.ID} {
+			status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/"+id.String()+"/cancel", a.aliceToken, nil)
+			require.Equal(t, http.StatusConflict, status, string(raw))
+			require.Contains(t, string(raw), `"code":"invoice_not_cancelable"`)
+			invoice, err := a.alphaRemote.GetInvoice(t.Context(), id)
+			require.NoError(t, err)
+			require.Equal(t, billing.InvoiceOpen, invoice.Status)
+		}
+		var count int
+		var owed int64
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*), COALESCE(sum(amount), 0)::bigint FROM "+pgx.Identifier{a.schema, "owed_items"}.Sanitize()+" WHERE merchant_id=$1 AND customer_id=$2 AND invoice_id=$3 AND status='billed'", a.alpha.MerchantID().UUID(), customer.UUID(), usage.UUID()).Scan(&count, &owed))
+		require.Positive(t, count)
+		require.EqualValues(t, 30_000_000, owed)
+		owedIsReceivable(t, a, customer, owed)
+		canceled, err := a.alphaRemote.CancelInvoice(t.Context(), created.ID)
+		require.NoError(t, err)
+		require.Equal(t, billing.InvoiceCanceled, canceled.Status)
+	})
+
 	t.Run("OR-J04-S02/cached-catalog-and-credentials-remain-merchant-bound", func(t *testing.T) {
 		a := newAuthorityWorld(t)
 		alpha, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "shared-key", DisplayName: "Alpha original"})

@@ -2532,6 +2532,12 @@
     ],
     "OR-J47-S12": [
       "TestCheckoutFunnel/OR-J47-S12/an-erasure-clears-a-checkouts-attribution"
+    ],
+    "OR-J38-S86": [
+      "TestPublicLifecycle/OR-J38-S86/customer-cancel-preserves-usage-and-merchant-invoices"
+    ],
+    "OR-J38-S87": [
+      "TestPublicEntitlements/OR-J38-S87/consumable-purchases-do-not-report-duplicate-ownership"
     ]
   }
 }

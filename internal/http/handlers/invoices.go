@@ -209,10 +209,19 @@ func CreateMyInvoice(r *httprequest.Request) {
 
 // PayMyInvoice handles POST /v1/me/invoices/{id}/pay.
 func PayMyInvoice(r *httprequest.Request) {
-	var body billing.PayInvoiceParams
-	if !r.BindJSON(&body) || refuseCardNumber(r, body) {
+	var input struct {
+		billing.PayInvoiceParams
+		ExpectedTotal *int64 `json:"expected_total,string"`
+	}
+	if !r.BindJSON(&input) || refuseCardNumber(r, input) {
 		return
 	}
+	if input.ExpectedTotal == nil {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "expected_total is required with a payment").WithParam("expected_total"))
+		return
+	}
+	body := input.PayInvoiceParams
+	body.ExpectedTotal = *input.ExpectedTotal
 	if !payURLPayment(r, body) {
 		return
 	}

@@ -135,6 +135,7 @@ FROM live_ownership lo
 JOIN billing.products prod ON prod.id = lo.product_id
 
 WHERE prod.merchant_id = $1::uuid
+  AND prod.ownership IS DISTINCT FROM 'consumable'
 GROUP BY lo.customer_id, lo.product_id, prod.key
 HAVING COUNT(*) > 1
 ORDER BY lo.customer_id, lo.product_id
@@ -193,7 +194,7 @@ func (q *Queries) ConDuplicateOwnershipGrants(ctx context.Context, arg ConDuplic
 }
 
 const conOrphanAccessPaymentSource = `-- name: ConOrphanAccessPaymentSource :many
-SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
+SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id, pa.payment_id
 FROM billing.product_access pa
 LEFT JOIN billing.payments purch ON purch.merchant_id = $1::uuid AND purch.id = pa.payment_id AND purch.deleted_at IS NULL
 WHERE pa.merchant_id = $1::uuid AND pa.source_type = 'purchase'
@@ -216,6 +217,7 @@ type ConOrphanAccessPaymentSourceRow struct {
 	ProductID  uuid.UUID
 	SourceType string
 	SourceID   string
+	PaymentID  *uuid.UUID
 }
 
 func (q *Queries) ConOrphanAccessPaymentSource(ctx context.Context, arg ConOrphanAccessPaymentSourceParams) ([]ConOrphanAccessPaymentSourceRow, error) {
@@ -233,6 +235,7 @@ func (q *Queries) ConOrphanAccessPaymentSource(ctx context.Context, arg ConOrpha
 			&i.ProductID,
 			&i.SourceType,
 			&i.SourceID,
+			&i.PaymentID,
 		); err != nil {
 			return nil, err
 		}
@@ -246,7 +249,7 @@ func (q *Queries) ConOrphanAccessPaymentSource(ctx context.Context, arg ConOrpha
 
 const conOrphanAccessSubscriptionSource = `-- name: ConOrphanAccessSubscriptionSource :many
 
-SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
+SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id, pa.payment_id
 FROM billing.product_access pa
 LEFT JOIN billing.subscriptions sub ON sub.merchant_id = $1::uuid AND pa.source_id = sub.id::text AND sub.deleted_at IS NULL
 WHERE pa.merchant_id = $1::uuid AND pa.source_type = 'subscription'
@@ -273,6 +276,7 @@ type ConOrphanAccessSubscriptionSourceRow struct {
 	ProductID  uuid.UUID
 	SourceType string
 	SourceID   string
+	PaymentID  *uuid.UUID
 }
 
 // CON plane (conPass) queries, all merchant-scoped. A non-NULL customer_id
@@ -299,6 +303,7 @@ func (q *Queries) ConOrphanAccessSubscriptionSource(ctx context.Context, arg Con
 			&i.ProductID,
 			&i.SourceType,
 			&i.SourceID,
+			&i.PaymentID,
 		); err != nil {
 			return nil, err
 		}

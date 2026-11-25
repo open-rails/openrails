@@ -1345,7 +1345,7 @@ const listRecentlyClosedLastAccessWindows = `-- name: ListRecentlyClosedLastAcce
 SELECT DISTINCT ON (e.customer_id)
        e.id, e.customer_id, e.product_id,
        LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
-       e.source_type, e.source_id
+       e.source_type, e.source_id, e.payment_id
 FROM billing.product_access e
 WHERE e.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR e.customer_id = $2::uuid)
@@ -1389,6 +1389,7 @@ type ListRecentlyClosedLastAccessWindowsRow struct {
 	ClosedAt   *time.Time
 	SourceType string
 	SourceID   string
+	PaymentID  *uuid.UUID
 }
 
 // notify.access_ended: customers whose last window of a product closed
@@ -1416,6 +1417,7 @@ func (q *Queries) ListRecentlyClosedLastAccessWindows(ctx context.Context, arg L
 			&i.ClosedAt,
 			&i.SourceType,
 			&i.SourceID,
+			&i.PaymentID,
 		); err != nil {
 			return nil, err
 		}

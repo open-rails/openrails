@@ -571,10 +571,13 @@ func (s *Service) CancelMerchantInvoice(ctx context.Context, id uuid.UUID) (*Inv
 	if invoice.Origin != string(billing.InvoiceOriginMerchant) {
 		return nil, ErrNotCancelable
 	}
-	return s.Cancel(ctx, invoice.CustomerID, id)
+	if err := s.close(ctx, uuid.Nil, id, billing.InvoiceCanceled); err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, id)
 }
 
-// Cancel closes customer's open invoice or one awaiting their action, and
+// Cancel closes the customer's own open invoice or one awaiting their action, and
 // releases its claims. A canceled invoice that is paid late revives (Paid).
 func (s *Service) Cancel(ctx context.Context, customerID, id uuid.UUID) (*Invoice, error) {
 	if err := s.close(ctx, customerID, id, billing.InvoiceCanceled); err != nil {
@@ -597,7 +600,7 @@ func (s *Service) ExpireIfDue(ctx context.Context, invoice *Invoice) (*Invoice, 
 }
 
 // close moves a live invoice to canceled or expired. A zero customerID is the
-// system (expiry).
+// system (expiry) or the merchant.
 func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status billing.InvoiceStatus) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -625,6 +628,9 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 				return nil
 			}
 			return ErrRenewalCancel
+		}
+		if status == billing.InvoiceCanceled && customerID != uuid.Nil && invoice.Origin != string(billing.InvoiceOriginCustomer) {
+			return ErrNotCancelable
 		}
 		if invoice.Status != string(billing.InvoiceOpen) {
 			if status == billing.InvoiceExpired {

@@ -4,7 +4,7 @@
 -- A live window with a dangling subscription source is derive.access.unjustified's;
 -- this reports only non-live dangling references (revoked/expired rows).
 -- name: ConOrphanAccessSubscriptionSource :many
-SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
+SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id, pa.payment_id
 FROM billing.product_access pa
 LEFT JOIN billing.subscriptions sub ON sub.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_id = sub.id::text AND sub.deleted_at IS NULL
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'subscription'
@@ -18,7 +18,7 @@ ORDER BY pa.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ConOrphanAccessPaymentSource :many
-SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
+SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id, pa.payment_id
 FROM billing.product_access pa
 LEFT JOIN billing.payments purch ON purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.id = pa.payment_id AND purch.deleted_at IS NULL
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'purchase'
@@ -71,6 +71,7 @@ FROM live_ownership lo
 JOIN billing.products prod ON prod.id = lo.product_id
 
 WHERE prod.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND prod.ownership IS DISTINCT FROM 'consumable'
 GROUP BY lo.customer_id, lo.product_id, prod.key
 HAVING COUNT(*) > 1
 ORDER BY lo.customer_id, lo.product_id

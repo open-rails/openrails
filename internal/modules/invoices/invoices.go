@@ -50,7 +50,7 @@ var (
 	ErrTotalChanged    = apperr.New(http.StatusConflict, billing.CodeInvoiceTotalChanged, "The invoice's total is not expected_total.")
 	ErrOptionMissing   = apperr.New(http.StatusUnprocessableEntity, billing.CodePaymentOptionUnavailable, "No PSP that can take these lines accepts this payment.")
 	ErrRecurringLine   = apperr.New(http.StatusConflict, billing.CodeInvoiceHasRecurringLine, "An invoice with a recurring line is paid by its customer; it cannot be recorded as paid.")
-	ErrAmountNotTotal  = apperr.New(http.StatusConflict, billing.CodePaymentExceedsDue, "A recorded payment must be the invoice's total.")
+	ErrAmountNotTotal  = apperr.New(http.StatusConflict, billing.CodePaymentExceedsDue, "A recorded payment must equal the invoice's total.")
 	errLateApprovalDup = errors.New("invoice payment contradicts the recorded one")
 )
 
