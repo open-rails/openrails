@@ -26,13 +26,13 @@ type Admissions struct {
 	db        *db.DB
 	clock     clockwork.Clock
 	project   HoldProjector
-	policy    config.DestructiveActionLimitsConfig
+	policy    billing.DestructiveActionLimitsConfig
 	policyErr error
 }
 
 // NewAdmissions admits under the deployment's limits; zero fields keep the
 // defaults.
-func NewAdmissions(database *db.DB, clock clockwork.Clock, project HoldProjector, limits config.DestructiveActionLimitsConfig) *Admissions {
+func NewAdmissions(database *db.DB, clock clockwork.Clock, project HoldProjector, limits billing.DestructiveActionLimitsConfig) *Admissions {
 	if clock == nil {
 		clock = clockwork.NewRealClock()
 	}

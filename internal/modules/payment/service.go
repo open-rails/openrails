@@ -19,7 +19,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -72,7 +71,7 @@ type PurchaseService struct {
 	Intents   *intents.Runner
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	clock     clockwork.Clock
-	Config    *config.Config
+	Config    *billing.Config
 	// Posture gates provider writes per merchant; nil parks them.
 	Posture intents.ModeView
 	Rails   railresolve.Source
@@ -118,7 +117,7 @@ func NewPurchaseService(logger *slog.Logger,
 	paymentMethodService *paymentmethods.PaymentMethodService,
 	railPMService *paymentmethods.RailPaymentMethodService,
 	railCustomerService *payments.RailCustomerService,
-	cfg *config.Config,
+	cfg *billing.Config,
 	railSet railresolve.Source,
 	clocks ...clockwork.Clock,
 ) *PurchaseService {

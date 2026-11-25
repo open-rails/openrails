@@ -97,7 +97,7 @@ type Service struct {
 	fingerprints *CredentialFingerprinter
 	// platformVault is the operator's card vault; nil refuses platform
 	// card custody.
-	platformVault  *config.CardVaultConfig
+	platformVault  *billing.CardVaultConfig
 	platformKV     *vault.KVv2Adapter
 	platformPrefix string
 	Log            *slog.Logger
@@ -114,7 +114,7 @@ func (s *Service) WithDestructivePolicy(p *destructive.Gate) *Service {
 
 // NewService builds the lifecycle service over the merchants' configuration,
 // with the platform vault and fake providers cfg names.
-func NewService(logger *slog.Logger, pool *db.Pool, configuration *merchantdocs.Cache, cfg *config.Config) (*Service, error) {
+func NewService(logger *slog.Logger, pool *db.Pool, configuration *merchantdocs.Cache, cfg *billing.Config) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
@@ -131,10 +131,10 @@ func NewService(logger *slog.Logger, pool *db.Pool, configuration *merchantdocs.
 	service.config = configuration
 	service.fakeProviders = config.FakeProviders(cfg)
 	service.dataLinkURL = config.SandboxCCBillDataLinkURL(cfg)
-	service.platformVault = cfg.CardVault
-	if cfg.Vault != nil {
-		service.platformPrefix = cfg.Vault.ScopePrefix
+	if v := cfg.CardVault; v != (billing.CardVaultConfig{}) {
+		service.platformVault = &v
 	}
+	service.platformPrefix = cfg.Vault.ScopePrefix
 	return service, nil
 }
 

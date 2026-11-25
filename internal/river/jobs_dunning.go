@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -81,7 +80,7 @@ const (
 // each operation's own job charges.
 type DunningWorker struct {
 	DB     *db.DB
-	Config *config.Config
+	Config *billing.Config
 	Clock  clockwork.Clock
 	// NMIResolver arms store-scoped NMI clients per merchant. Consulted at the
 	// charge gate; the rebill handler re-resolves at charge time.

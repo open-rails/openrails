@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -68,7 +68,7 @@ func acceptedNMIDeleteTarget(in gen.BillingProviderIntent) (NMIDeletePayload, er
 //     final).
 type NMIDeleteHandler struct {
 	DB     *db.DB
-	Config *config.Config
+	Config *billing.Config
 	// Resolver arms the intent merchant's NMI client from the armed rail
 	// state at drain time.
 	Resolver railresolve.NMIClientResolver
@@ -76,7 +76,7 @@ type NMIDeleteHandler struct {
 	Policy   BackoffPolicy
 }
 
-func NewNMIDeleteHandler(d *db.DB, cfg *config.Config, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *NMIDeleteHandler {
+func NewNMIDeleteHandler(d *db.DB, cfg *billing.Config, resolver railresolve.NMIClientResolver, clock clockwork.Clock) *NMIDeleteHandler {
 	return &NMIDeleteHandler{DB: d, Config: cfg, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 

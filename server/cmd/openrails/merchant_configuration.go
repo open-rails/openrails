@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -56,11 +55,11 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 				return fmt.Errorf("--token-file requires --server-url")
 			}
 			path, _ := cmd.Flags().GetString("config")
-			cfg, err := hostconfig.LoadDatabase(path)
+			cfg, err := hostconfig.Load(path)
 			if err != nil {
 				return err
 			}
-			cmd.SetContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config))
+			cmd.SetContext(hostconfig.NewContext(cmd.Context(), cfg))
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -96,7 +95,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 					defer release()
 				}
 			} else {
-				cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+				cfg := hostconfig.Engine(cmd.Context())
 				var cleanup func()
 				client, cleanup, err = localMerchantConfigurationClient(cmd.Context(), cfg, slug)
 				if cleanup != nil {
@@ -130,7 +129,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 // Local administration needs the database and the merchant's configuration
 // (Vault, or the manifest at its conventional path), not payment-provider
 // clients, workers, or standalone authentication infrastructure.
-func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, slug string) (*openrails.Client, func(), error) {
+func localMerchantConfigurationClient(ctx context.Context, cfg *billing.Config, slug string) (*openrails.Client, func(), error) {
 	database, err := openCLIDB(ctx)
 	if err != nil {
 		return nil, nil, err

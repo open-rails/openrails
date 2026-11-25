@@ -16,8 +16,8 @@ import (
 // before granting SDK or PSP access. An archive does not itself revoke an
 // existing obligation's custody.
 // It writes nothing when readOnly: the owner's write posture is readonly.
-func HyperSwitchClient(cfg *config.Config, owner billing.MerchantID, custodian merchants.CustodianScope, readOnly bool) (*hyperswitch.Client, error) {
-	if cfg == nil || cfg.HyperSwitch == nil || owner.IsZero() || custodian.ID == uuid.Nil || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment == config.ClassLive && cfg.HyperSwitch.AllowLoopbackHTTP {
+func HyperSwitchClient(cfg *billing.Config, owner billing.MerchantID, custodian merchants.CustodianScope, readOnly bool) (*hyperswitch.Client, error) {
+	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) || owner.IsZero() || custodian.ID == uuid.Nil || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment == config.ClassLive && cfg.HyperSwitch.AllowLoopbackHTTP {
 		return nil, hyperswitch.ErrBinding
 	}
 	parsed, err := custodians.ParseSettings(custodian.Kind, custodian.Settings)

@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -20,7 +19,7 @@ import (
 
 // PruneListOptions mirrors `openrails prune list`.
 type PruneListOptions struct {
-	Config     *config.Config
+	Config     *billing.Config
 	PGXPool    *pgxpool.Pool
 	MerchantID billing.MerchantID
 	Limit      int

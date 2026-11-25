@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 var errMigrationStatusDrift = errors.New("openrails migration status is not exact")
@@ -21,7 +22,7 @@ func newMigrateStatusCmd() *cobra.Command {
 		Long:  "Reports applied and pending migrations and every ledger discrepancy; exits non-zero unless the ledger matches the embedded chain exactly.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+			cfg := hostconfig.Engine(cmd.Context())
 			pool, err := cliPool(cmd.Context())
 			if err != nil {
 				return err

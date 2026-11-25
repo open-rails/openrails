@@ -3,9 +3,10 @@ package app
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/openrails/internal/logx"
 	"runtime/debug"
 	"sync"
+
+	"github.com/open-rails/openrails/internal/logx"
 )
 
 type backgroundTasks struct {

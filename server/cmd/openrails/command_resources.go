@@ -37,10 +37,10 @@ func (c *commandControlPlane) close() {
 
 func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error) {
 	h := hostconfig.FromContext(ctx)
-	if h.Config == nil {
+	if h == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
-	if err := controlplane.RequireDefaultTenant(h.Auth); err != nil {
+	if err := controlplane.RequireDefaultTenant(h.Server.Auth); err != nil {
 		return nil, err
 	}
 	c := &commandControlPlane{}
@@ -58,11 +58,11 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 	if err != nil {
 		return nil, err
 	}
-	opts := controlplane.Options{LocalSignIn: h.LocalSignIn, Naming: h.Naming}
-	if h.LocalSignIn && (h.AdminConsole == nil || !h.AdminConsole.Disabled) {
+	opts := controlplane.Options{LocalSignIn: h.Server.LocalSignIn, Naming: h.Server.Naming}
+	if h.Server.LocalSignIn && !h.Server.AdminConsole.Disabled {
 		opts.ConsoleClientID = server.ConsoleClientID
 	}
-	akCfg, err := controlplane.AuthKit(h.Config, h.Auth, opts)
+	akCfg, err := controlplane.AuthKit(&h.Server.Engine, h.Server.Auth, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 		return nil, err
 	}
 	c.cleanups = append(c.cleanups, func() { _ = ak.Close(context.WithoutCancel(ctx)) })
-	c.cp, err = controlplane.New(slog.Default(), ak, h.Config, akCfg, pool, opts)
+	c.cp, err = controlplane.New(slog.Default(), ak, &h.Server.Engine, akCfg, pool, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -101,16 +101,16 @@ func openCLIControlPlane(ctx context.Context) (_ *commandControlPlane, err error
 }
 
 func (c *commandControlPlane) loadMerchants(ctx context.Context) error {
-	h := hostconfig.FromContext(ctx)
+	cfg := hostconfig.Engine(ctx)
 	vault, err := cliVault(ctx)
 	if err != nil {
 		return err
 	}
-	opened, err := merchantbootstrap.OpenMerchants(ctx, h.Config, c.db, vault)
+	opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, c.db, vault)
 	if err != nil {
 		return err
 	}
-	overlap, err := config.WebhookSecretOverlapDuration(h.Config)
+	overlap, err := config.WebhookSecretOverlapDuration(cfg)
 	if err != nil {
 		opened.Close()
 		return err
@@ -149,7 +149,7 @@ func (c *commandControlPlane) RestoreMerchant(ctx context.Context, id billing.Me
 // Directory reads retain config-backed display names, but need no AuthKit.
 func withCLIDirectory(cmd *cobra.Command, run func(context.Context, *db.DB, *merchants.Service) error) error {
 	return withCLIDB(cmd, func(ctx context.Context, database *db.DB) error {
-		cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+		cfg := hostconfig.Engine(ctx)
 		vault, err := cliVault(ctx)
 		if err != nil {
 			return err

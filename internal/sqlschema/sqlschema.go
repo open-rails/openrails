@@ -1,5 +1,5 @@
-// Package sqlschema relocates OpenRails SQL, authored in config.DefaultSchema,
-// to the configured schema. One token-aware rewrite moves schema references
+// Package sqlschema relocates OpenRails SQL, authored in Authored, to the
+// configured schema. One token-aware rewrite moves schema references
 // only (qualifiers, SCHEMA names, search_path values, reg* literals); every
 // other literal and comment stays byte-identical, so a lock key hashes the
 // same in queries and triggers.
@@ -8,17 +8,19 @@ package sqlschema
 import (
 	"sync"
 	"sync/atomic"
-
-	"github.com/open-rails/openrails/internal/config"
 )
+
+// Authored is the schema OpenRails SQL is written in, and the default
+// schema (billing.DefaultConfig), where it runs verbatim.
+const Authored = "billing"
 
 // Rewrite relocates authored SQL to schema ("" means the default). The schema
 // must already be a validated identifier (config validates db.schema).
 func Rewrite(sql, schema string) (string, error) {
-	if schema == "" || schema == config.DefaultSchema {
+	if schema == "" || schema == Authored {
 		return sql, nil
 	}
-	return relocate(sql, config.DefaultSchema, schema)
+	return relocate(sql, Authored, schema)
 }
 
 // maxCached bounds the cache; the statement set is fixed (sqlc queries plus
@@ -39,9 +41,9 @@ type result struct {
 }
 
 // New returns the relocator for schema, or nil for the default schema ("" or
-// config.DefaultSchema), where SQL runs verbatim.
+// Authored), where SQL runs verbatim.
 func New(schema string) *Relocator {
-	if schema == "" || schema == config.DefaultSchema {
+	if schema == "" || schema == Authored {
 		return nil
 	}
 	return &Relocator{schema: schema}
@@ -50,7 +52,7 @@ func New(schema string) *Relocator {
 // Schema is the target schema.
 func (r *Relocator) Schema() string {
 	if r == nil {
-		return config.DefaultSchema
+		return Authored
 	}
 	return r.schema
 }
@@ -64,7 +66,7 @@ func (r *Relocator) SQL(sql string) (string, error) {
 		res := v.(result)
 		return res.sql, res.err
 	}
-	out, err := relocate(sql, config.DefaultSchema, r.schema)
+	out, err := relocate(sql, Authored, r.schema)
 	if r.cached.Load() < maxCached {
 		if _, loaded := r.cache.LoadOrStore(sql, result{out, err}); !loaded {
 			r.cached.Add(1)

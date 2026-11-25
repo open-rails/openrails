@@ -8,7 +8,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/convergejob"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -24,7 +23,7 @@ import (
 type CustomerConvergeWorker struct {
 	WorkerDefaults[convergejob.Args]
 	DB     *db.DB
-	Config *config.Config
+	Config *billing.Config
 	Clock  clockwork.Clock
 	// Alerts sends requires_review findings to the operator. nil = none.
 	Alerts *alerting.Service

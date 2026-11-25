@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	vaultapi "github.com/hashicorp/vault/api"
 	"io"
 	"log/slog"
 	"os"
@@ -17,11 +16,12 @@ import (
 	"strings"
 	"time"
 
+	vaultapi "github.com/hashicorp/vault/api"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -30,7 +30,7 @@ import (
 
 // PruneOptions mirrors `openrails prune`.
 type PruneOptions struct {
-	Config     *config.Config
+	Config     *billing.Config
 	PGXPool    *pgxpool.Pool
 	Vault      *vaultapi.Client
 	MerchantID billing.MerchantID

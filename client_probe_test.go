@@ -35,7 +35,7 @@ func TestClientProbe(t *testing.T) {
 	remote, err := NewRemote("https://probe.test", RemoteOptions{
 		Credentials: map[billing.MerchantID]RemoteCredential{merchant: {APIKey: "probe"}},
 		HTTPClient:  &http.Client{Transport: rec},
-		ReadCache:   ReadCache{ReadCatalog: {}, ReadMeters: {}, ReadPublicConfig: {}, ReadMerchantConfiguration: {}},
+		ReadCache:   billing.ReadCache{billing.ReadCatalog: {}, billing.ReadMeters: {}, billing.ReadPublicConfig: {}, billing.ReadMerchantConfiguration: {}},
 	})
 	if err != nil {
 		t.Fatal(err)

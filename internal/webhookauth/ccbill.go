@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/logx"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -28,7 +29,7 @@ type LiveRailProbe func(ctx context.Context) (merchants.LiveRailPresence, error)
 //     the database proves the account the webhook names moves no money.
 //
 // Anything unproven (no probe, probe error, LiveRailUnknown) refuses.
-func CCBillIPAllowed(ctx context.Context, logger *slog.Logger, cfg *config.Config, probe LiveRailProbe, clientIP string) bool {
+func CCBillIPAllowed(ctx context.Context, logger *slog.Logger, cfg *billing.Config, probe LiveRailProbe, clientIP string) bool {
 	if iputil.IsValidCCBillIP(logger, clientIP) {
 		return true
 	}

@@ -18,7 +18,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -92,7 +91,7 @@ type SubscriptionConvergeWorker struct {
 	StripeClients *stripeapi.Factory
 	WorkerDefaults[SubscriptionConvergeArgs]
 	DB     *db.DB
-	Config *config.Config
+	Config *billing.Config
 	Rails  railresolve.Source
 	Clock  clockwork.Clock
 

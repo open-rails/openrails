@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -43,13 +43,13 @@ const stripeDomainDenialMaxAttempts = 3
 // is not registered again, and one whose Apple Pay is inactive is validated
 // once. A domain the merchant disabled at Stripe stays disabled.
 type StripePaymentMethodDomainHandler struct {
-	Config  *config.Config
+	Config  *billing.Config
 	Rails   railresolve.Source
 	Clients *stripeapi.Factory
 	Policy  BackoffPolicy
 }
 
-func NewStripePaymentMethodDomainHandler(cfg *config.Config, rails railresolve.Source, clients *stripeapi.Factory) *StripePaymentMethodDomainHandler {
+func NewStripePaymentMethodDomainHandler(cfg *billing.Config, rails railresolve.Source, clients *stripeapi.Factory) *StripePaymentMethodDomainHandler {
 	return &StripePaymentMethodDomainHandler{Config: cfg, Rails: rails, Clients: clients, Policy: DefaultBackoff}
 }
 

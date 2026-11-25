@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -66,7 +65,7 @@ type OrderAttemptService struct {
 	solanaMints solanamodule.MintDecimalsSource
 	// solanaMintInfo reads a mint's transfer hook at quote time.
 	solanaMintInfo solanamodule.MintInfoSource
-	config         *config.Config
+	config         *billing.Config
 	rails          railresolve.Source
 	clock          clockwork.Clock
 	// cardFailures is the durable card-testing ledger (SEC-30).
@@ -117,7 +116,7 @@ func NewOrderAttemptService(
 	solanaTransactionService *solanamodule.SolanaTransactionService,
 	fxProvider *fx.Rates,
 	priceProvider solanamodule.TokenPriceProvider,
-	cfg *config.Config,
+	cfg *billing.Config,
 	rails railresolve.Source,
 	clocks ...clockwork.Clock,
 ) *OrderAttemptService {

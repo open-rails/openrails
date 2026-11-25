@@ -5,20 +5,12 @@ import (
 	"net"
 	"net/url"
 	"strings"
+
+	"github.com/open-rails/openrails/billing"
 )
 
-// HyperSwitchConfig identifies the one trusted custody deployment and its
-// vendor-owned browser assets. Merchant settings cannot change either target.
-// The SDK is a separate server in the vendor product, hence its explicit URL.
-type HyperSwitchConfig struct {
-	// AllowLoopbackHTTP admits an http loopback fixture; refused beside a live PSP.
-	AllowLoopbackHTTP bool
-	APIBaseURL        string
-	SDKURL            string
-}
-
-func validateHyperSwitch(cfg *Config) error {
-	if cfg == nil || cfg.HyperSwitch == nil {
+func validateHyperSwitch(cfg *billing.Config) error {
+	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) {
 		return nil
 	}
 	for key, raw := range map[string]string{"api_base_url": cfg.HyperSwitch.APIBaseURL, "sdk_url": cfg.HyperSwitch.SDKURL} {

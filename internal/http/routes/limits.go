@@ -2,7 +2,6 @@ package routes
 
 import (
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 )
@@ -16,12 +15,12 @@ var limitErrors = []billing.ErrorCode{billing.CodeLimitNotFound, "catalog_revisi
 // products, or an override set with UpdateCustomer.
 var limitsRoutes = []Route{
 	{Method: GET, Path: "/v1/catalog/limits", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListLimits", Level: LevelRead,
-		Cache: config.ReadMeters,
+		Cache: billing.ReadMeters,
 		Doc:   "ListLimits returns one page of the merchant's limits, by key.",
 		Query: billing.PageRequest{}, Responses: []Reply{{200, billing.ListPage[billing.Limit]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.ListLimits)},
 	{Method: GET, Path: "/v1/catalog/limits/{key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetLimit", Level: LevelRead,
 		Args:      []any{""},
-		Cache:     config.ReadMeters,
+		Cache:     billing.ReadMeters,
 		Doc:       "GetLimit reads one limit with the products that give it capacity.",
 		Responses: []Reply{{200, billing.Limit{}}}, Errors: codes(billing.CodeLimitNotFound), Handler: h(handlers.GetLimit)},
 	{Method: PUT, Path: "/v1/catalog/limits/{key}", EventStore: true, Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetLimit", Level: LevelUpdate,

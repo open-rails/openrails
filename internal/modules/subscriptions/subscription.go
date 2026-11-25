@@ -157,6 +157,11 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 		}
 	}
 
+	// A new row's change is dated by the service clock, as an update's is:
+	// its MRR and risk take their instant from updated_at.
+	if subscription.UpdatedAt.IsZero() {
+		subscription.UpdatedAt = s.now().UTC()
+	}
 	if err := s.subscriptionRepo.Create(ctx, subscription); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "subscriptions_customer_id_product_id_key" {

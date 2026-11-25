@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
+
 	solanago "github.com/gagliardetto/solana-go"
 )
 
@@ -65,30 +67,8 @@ const (
 	CrankerLocalKeypair = "local_keypair"
 )
 
-// SolanaConfig is the deployment's Solana configuration.
-type SolanaConfig struct {
-	// Crankers sign Solana rebilling, in order: the first publishes new plans,
-	// and each pulls the renewals of the plans it owns, whose owner is fixed
-	// on-chain. A plan no listed cranker owns cannot be pulled. Empty turns
-	// Solana rebilling off; one-time payments still work.
-	Crankers []SolanaCrankerConfig
-}
-
-// SolanaCrankerConfig is one cranker: a key that publishes and pulls plans and
-// pays their fees, on whichever network each Solana PSP names (it needs SOL
-// there). It never receives money: a plan pays only its merchant's treasury.
-type SolanaCrankerConfig struct {
-	// Mode is vault_transit (the key never leaves Vault Transit) or
-	// local_keypair.
-	Mode string
-	// Key names the Vault Transit key (vault_transit).
-	Key string
-	// PrivateKey is the base58 keypair (local_keypair). A secret.
-	PrivateKey string
-}
-
 // SolanaCrankerName names a cranker without its secret: its pin's key.
-func SolanaCrankerName(c SolanaCrankerConfig) string {
+func SolanaCrankerName(c billing.SolanaCrankerConfig) string {
 	if strings.TrimSpace(c.Mode) == CrankerVaultTransit {
 		return CrankerVaultTransit + ":" + strings.TrimSpace(c.Key)
 	}
@@ -99,7 +79,7 @@ func SolanaCrankerName(c SolanaCrankerConfig) string {
 }
 
 // SolanaTransitSigns reports whether a listed cranker signs in Vault Transit.
-func SolanaTransitSigns(cfg *Config) bool {
+func SolanaTransitSigns(cfg *billing.Config) bool {
 	for _, c := range SolanaCrankers(cfg) {
 		if strings.TrimSpace(c.Mode) == CrankerVaultTransit {
 			return true
@@ -109,8 +89,8 @@ func SolanaTransitSigns(cfg *Config) bool {
 }
 
 // SolanaCrankers are cfg's crankers in order; none when it declares none.
-func SolanaCrankers(cfg *Config) []SolanaCrankerConfig {
-	if cfg == nil || cfg.Solana == nil {
+func SolanaCrankers(cfg *billing.Config) []billing.SolanaCrankerConfig {
+	if cfg == nil {
 		return nil
 	}
 	return cfg.Solana.Crankers
@@ -118,7 +98,7 @@ func SolanaCrankers(cfg *Config) []SolanaCrankerConfig {
 
 // validateSolanaCranker refuses a cranker that cannot sign, or one listed
 // before.
-func validateSolanaCranker(cfg *Config, listed []SolanaCrankerConfig, c SolanaCrankerConfig) error {
+func validateSolanaCranker(cfg *billing.Config, listed []billing.SolanaCrankerConfig, c billing.SolanaCrankerConfig) error {
 	switch strings.TrimSpace(c.Mode) {
 	case CrankerVaultTransit:
 		if strings.TrimSpace(c.Key) == "" || c.PrivateKey != "" {

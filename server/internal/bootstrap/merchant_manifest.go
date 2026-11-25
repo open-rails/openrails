@@ -122,7 +122,7 @@ type ProvisionMerchantParams struct {
 	// MerchantID is an already resolved, explicit host binding. The outer name
 	// boundary must verify the supplied name before passing this immutable scope.
 	MerchantID   billing.MerchantID
-	Config       *config.Config
+	Config       *billing.Config
 	ControlPlane *controlplane.ControlPlane
 	Database     *db.DB
 	Merchants    *merchants.Service
@@ -140,7 +140,7 @@ type ProvisionMerchantParams struct {
 // manifest names merchants only (slug, remote_application) and is
 // refused when it declares more. Issuer registration is declarative and does
 // not fetch the JWKS.
-func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
+func ReconcileMerchantManifestData(ctx context.Context, logger *slog.Logger, cfg *billing.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return fmt.Errorf("merchant bootstrap manifest configured but control plane is not enabled")
 	}

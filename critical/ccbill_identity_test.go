@@ -45,7 +45,7 @@ const (
 func ccbillWebhookWorld(t *testing.T, configure ...func(*world)) *authorityWorld {
 	t.Helper()
 	return newAuthorityWorld(t, func(w *world) {
-		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
+		w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 		m := cfgMerchant(w.cfg, "alpha")
 		m.PSPs = billing.PSPs{"ccbill": openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: billing.EnvironmentSandbox,
 			Salt: "critical-ccbill-salt"}.PSPConfig()}
@@ -602,7 +602,7 @@ func TestCCBillIdentity(t *testing.T) {
 		// A payment is never recorded in the database's future.
 		a, provider := newPaymentWorld(t, func(w *world) {
 			w.clock.Advance(-30 * 24 * time.Hour)
-			w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
+			w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{CCBillWebhookSources: []string{"127.0.0.1/32"}}
 			m := cfgMerchant(w.cfg, "alpha")
 			m.PSPs["ccbill"] = openrails.CCBillPSP{ClientAccnum: "999999", ClientSubacc: "0000", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}.PSPConfig()
 			setCfgMerchant(&w.cfg, "alpha", m)

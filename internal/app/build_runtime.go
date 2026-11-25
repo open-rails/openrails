@@ -154,7 +154,7 @@ func createPythPriceProvider(logger *slog.Logger, network func(context.Context) 
 	return devnetParityPriceProvider{inner: client, network: network, Log: logger}, nil
 }
 
-func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, overrides *runtimeOverrides) (_ *Runtime, buildErr error) {
+func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrides *runtimeOverrides) (_ *Runtime, buildErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -167,12 +167,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		redisClient redis.UniversalClient
 		err         error
 	)
-	leaseConns := int32(config.DefaultLeaseConns)
-	if cfg.Database.LeaseConns > 0 {
-		leaseConns, err = safecast.Convert[int32](cfg.Database.LeaseConns)
-		if err != nil {
-			return nil, fmt.Errorf("database.lease_conns %d exceeds the pool connection range: %w", cfg.Database.LeaseConns, err)
-		}
+	leaseConns, err := safecast.Convert[int32](cfg.Database.LeaseConns)
+	if err != nil {
+		return nil, fmt.Errorf("database.lease_conns %d exceeds the pool connection range: %w", cfg.Database.LeaseConns, err)
 	}
 	var chain fs.FS
 	if overrides != nil {
@@ -607,7 +604,7 @@ type servicesInstances struct {
 	RailCustomerService *payments.RailCustomerService
 }
 
-func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver *identity.Customers, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
+func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver *identity.Customers, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// Domain services record immutable notification facts; customer messages and applications read them.
@@ -620,7 +617,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	moneyService.EngineAdmissionHold = cfg.EngineAdmissionHold
 	moneyService.UsageBillingEnabled = cfg.UsageBillingEnabled
 	var hyperSwitchErr error
-	if cfg.HyperSwitch != nil {
+	if cfg.HyperSwitch != (billing.HyperSwitchConfig{}) {
 		if err := moneyService.SetHyperSwitchDeployment(cfg.HyperSwitch.APIBaseURL); err != nil {
 			hyperSwitchErr = fmt.Errorf("%w; HyperSwitch collection is off", err)
 		}
@@ -682,8 +679,8 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		Subs:     subscriptionService,
 		Reprices: priceMigrationService,
 		LLM:      catalogLLM,
-		Enabled:  cfg.LLM != nil && cfg.LLM.CatalogCopilotEnabled,
-		Drafting: cfg.LLM != nil && cfg.LLM.CatalogDraftingEnabled,
+		Enabled:  cfg.LLM.CatalogCopilotEnabled,
+		Drafting: cfg.LLM.CatalogDraftingEnabled,
 		Clock:    clock,
 	})
 

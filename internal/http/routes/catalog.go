@@ -3,7 +3,6 @@ package routes
 import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/handlers"
 )
 
@@ -34,12 +33,12 @@ var catalogRoutes = []Route{
 		Request: &catalog.Application{}, Query: billing.ApplyCatalogParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]billing.ErrorCode{"catalog_revision_conflict", "currency_unsupported", "event_store_required", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 
 	{Method: GET, Path: "/v1/catalog/meters", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListMeters", Level: LevelRead,
-		Cache: config.ReadMeters,
+		Cache: billing.ReadMeters,
 		Doc:   "ListMeters returns one page of the merchant's meters, by key.",
 		Query: billing.PageRequest{}, Responses: []Reply{{200, billing.ListPage[billing.Meter]{}}}, Handler: h(handlers.ListMeters)},
 	{Method: GET, Path: "/v1/catalog/meters/{key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetMeter", Level: LevelRead,
 		Args:      []any{""},
-		Cache:     config.ReadMeters,
+		Cache:     billing.ReadMeters,
 		Doc:       "GetMeter reads one meter with its rate card.",
 		Responses: []Reply{{200, billing.Meter{}}}, Errors: codes(meterErrors...), Handler: h(handlers.GetMeter)},
 	{Method: PUT, Path: "/v1/catalog/meters/{key}", EventStore: true, Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetMeter", Level: LevelUpdate,
@@ -58,14 +57,14 @@ var catalogRoutes = []Route{
 		Doc:     "CreateProduct creates a product.",
 		Request: billing.CreateProductParams{}, Responses: []Reply{{201, billing.Product{}}}, Errors: codes(append([]billing.ErrorCode{"currency_unsupported"}, productErrors...)...), Handler: h(handlers.CreateProduct)},
 	{Method: GET, Path: "/v1/catalog/products", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListProducts", Level: LevelRead,
-		Cache:  config.ReadCatalog,
+		Cache:  billing.ReadCatalog,
 		Client: HandWritten,
 		Doc: "ListProducts returns one page of products, newest first, each with its current prices. params.Keys " +
 			"reads products by key.",
 		Query: billing.ProductListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes(productErrors...), Handler: h(handlers.ListProducts)},
 	{Method: GET, Path: "/v1/catalog/products/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetProduct", Level: LevelRead,
 		Args:      []any{billing.ProductID{}},
-		Cache:     config.ReadCatalog,
+		Cache:     billing.ReadCatalog,
 		Doc:       "GetProduct reads a product with its current prices.",
 		Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.GetProduct)},
 	{Method: PATCH, Path: "/v1/catalog/products/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "UpdateProduct", Level: LevelUpdate,
@@ -90,13 +89,13 @@ var catalogRoutes = []Route{
 			"written to the provider.",
 		Request: billing.CreateProviderPriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(append([]billing.ErrorCode{"provider_price_unreadable"}, priceErrors...)...), Handler: h(handlers.CreateProviderPrice)},
 	{Method: GET, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPrices", Level: LevelRead,
-		Cache: config.ReadCatalog,
+		Cache: billing.ReadCatalog,
 		Doc: "ListPrices returns one page of prices, newest first. params.ProductKey and params.Key read prices by " +
 			"key: a key's current price is its one not archived.",
 		Query: billing.PriceListParams{}, Responses: []Reply{{200, billing.ListPage[billing.Price]{}}}, Errors: codes(priceErrors...), Handler: h(handlers.ListPrices)},
 	{Method: GET, Path: "/v1/catalog/prices/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetPrice", Level: LevelRead,
 		Args:      []any{billing.PriceID("")},
-		Cache:     config.ReadCatalog,
+		Cache:     billing.ReadCatalog,
 		Doc:       "GetPrice reads a price.",
 		Responses: []Reply{{200, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.GetPrice)},
 	{Method: GET, Path: "/v1/catalog/prices/{id}/verification", Group: CatalogAdmin, Auth: AuthMerchant, Name: "VerifyPrice", Level: LevelRead,

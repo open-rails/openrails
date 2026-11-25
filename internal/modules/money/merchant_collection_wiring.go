@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -38,7 +37,7 @@ import (
 type MerchantCollectionAdapterBuilder struct {
 	BasisTheoryTransport http.RoundTripper
 	StripeClients        *stripeapi.Factory
-	Config               *config.Config
+	Config               *billing.Config
 	DB                   *db.DB
 	MerchantsFn          func() *merchants.Service
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds

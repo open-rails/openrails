@@ -44,11 +44,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	r.Vault = conn
 	var source merchantdocs.Source = merchantdocs.NewFileSource()
 	if conn.KV != nil {
-		prefix := ""
-		if r.Config.Vault != nil {
-			prefix = r.Config.Vault.ScopePrefix
-		}
-		if source, err = merchantdocs.NewVaultSource(r.Log, conn.KV, prefix); err != nil {
+		if source, err = merchantdocs.NewVaultSource(r.Log, conn.KV, r.Config.Vault.ScopePrefix); err != nil {
 			// vault.scope_prefix is malformed, so Vault is unusable
 			// (vaultconn.Open): the default prefix is never read.
 			source, _ = merchantdocs.NewVaultSource(r.Log, conn.KV, "")
@@ -67,7 +63,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	svc.WithDestructivePolicy(destructive.New(r.DB)).WithJobs(r.DB)
 	overlap, err := config.WebhookSecretOverlapDuration(r.Config)
 	if err != nil {
-		overlap = config.DefaultWebhookSecretOverlap
+		overlap = billing.DefaultConfig().WebhookSecretOverlap
 	}
 	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap).WithDataLinkPacing(r.DataLinkPacing())
 	if r.NMIClients != nil {

@@ -98,8 +98,8 @@ type RateLimitDecision struct {
 // RateLimitDeps is the engine's collaborator set. State and ChallengeStore
 // are required; Verifier may be nil (no captcha).
 type RateLimitDeps struct {
-	Limits         config.RateLimitsConfig
-	Captcha        *config.CaptchaConfig
+	Limits         billing.RateLimitsConfig
+	Captcha        billing.CaptchaAccount
 	State          *abusestate.Store
 	ChallengeStore *captcha.ChallengeStore
 	Verifier       *captcha.Verifier
@@ -253,7 +253,7 @@ func evaluateCaptchaVerify(logger *slog.Logger, r *http.Request, deps RateLimitD
 // client is limited rather than the load balancer; nil or empty uses the
 // socket peer. state is the process's abuse state; nil counts in memory of
 // this middleware's own.
-func RateLimitHTTP(logger *slog.Logger, limits config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, state *abusestate.Store, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
+func RateLimitHTTP(logger *slog.Logger, limits billing.RateLimitsConfig, captchaCfg billing.CaptchaAccount, state *abusestate.Store, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
 	if len(limits) == 0 {
 		return func(next http.Handler) http.Handler { return next }
 	}
@@ -281,7 +281,7 @@ func RateLimitHTTP(logger *slog.Logger, limits config.RateLimitsConfig, captchaC
 
 // applyRateLimitDecisionHTTP writes the net/http response for a decision (or calls
 // next on allow, pinning the subject keys for downstream abuse tracking).
-func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next http.Handler, decision RateLimitDecision, captchaCfg *config.CaptchaConfig) {
+func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next http.Handler, decision RateLimitDecision, captchaCfg billing.CaptchaAccount) {
 	for k, v := range decision.Headers {
 		w.Header().Set(k, v)
 	}
@@ -329,12 +329,7 @@ func writeJSONResponse(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func captchaSiteKey(cfg *config.CaptchaConfig) string {
-	if cfg == nil {
-		return ""
-	}
-	return cfg.SiteKey
-}
+func captchaSiteKey(cfg billing.CaptchaAccount) string { return cfg.SiteKey }
 
 // rateLimitSubjectsHTTP derives the ip: subject from the resolver's client IP
 // (nil resolver: the socket peer).
@@ -439,7 +434,7 @@ func bucketKeys(subjectKeys []string, buckets []string) []string {
 	return keys
 }
 
-func resolveRateLimitPolicy(cfg config.RateLimitsConfig, req *http.Request) (*config.RateLimit, string) {
+func resolveRateLimitPolicy(cfg billing.RateLimitsConfig, req *http.Request) (*billing.RateLimit, string) {
 	if len(cfg) == 0 || req == nil {
 		return nil, ""
 	}
@@ -536,7 +531,7 @@ func cardAttackCaptcha(deps RateLimitDeps) router.Middleware {
 	}
 }
 
-func effectiveLimit(limit *config.RateLimit) int {
+func effectiveLimit(limit *billing.RateLimit) int {
 	if limit == nil {
 		return 0
 	}
