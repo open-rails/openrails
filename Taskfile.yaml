@@ -66,7 +66,7 @@ tasks:
       - pnpm --dir ../billing-ui install --frozen-lockfile --prefer-offline
       - pnpm --dir ../billing-ui --config.verify-deps-before-run=false run build
       - pnpm install --frozen-lockfile --prefer-offline
-      - pnpm dev
+      - pnpm --config.verify-deps-before-run=false dev
 
   dev:billing-ui:
     desc: Rebuild billing-ui on every change, so the running console picks up edits to its admin components
