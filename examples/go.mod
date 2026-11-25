@@ -10,7 +10,7 @@ require (
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/open-rails/authkit v1.54.0
 	github.com/open-rails/helpers v1.22.0
-	github.com/open-rails/openrails v0.266.0
+	github.com/open-rails/openrails v0.283.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/riverqueue/river v0.49.0
 	golang.org/x/oauth2 v0.38.0

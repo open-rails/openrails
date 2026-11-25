@@ -5,8 +5,8 @@
 #   scripts/release prepare vX.Y.Z [rc/X.Y.Z]   # opens the release PR
 #   scripts/release publish vX.Y.Z ["note"]     # once that PR is green
 #
-# prepare pins the server, AuthKit adapter and standalone test fixture to vX.Y.Z
-# (replaces keep in-repository builds on local source) on origin/master, or on the
+# prepare pins every module requiring the root or server to vX.Y.Z (replaces
+# keep in-repository builds on local source) on origin/master, or on the
 # open release candidate so one full run qualifies the candidate and its release,
 # commits that to chore/release-vX.Y.Z and opens its PR into master. publish
 # fast-forwards master to the green PR head and pushes it with the signed,
@@ -56,19 +56,27 @@ Path(sys.argv[1]).write_text(json.dumps({
 PY
   git -C "$work" config user.name 'Paul Fidika'
   git -C "$work" config user.email 'paul@fidika.com'
-  for manifest in server/go.mod adapters/authkit/go.mod; do
-    (cd "$work/${manifest%/go.mod}" && go mod edit -require="github.com/open-rails/openrails@$version" && go build -o /dev/null ./...)
+  # Every module that requires the root or the server gets $version, or its
+  # requirements fall behind the server's and go asks for go mod tidy.
+  pinned=()
+  while IFS= read -r manifest; do
+    dir="$work/${manifest%/go.mod}"
+    requires="$(cd "$dir" && go mod edit -json | jq -r '.Require[]?.Path')"
+    pins=()
+    for mod in github.com/open-rails/openrails github.com/open-rails/openrails/server; do
+      if grep -qxF "$mod" <<<"$requires"; then pins+=("-require=$mod@$version"); fi
+    done
+    ((${#pins[@]})) || continue
+    (cd "$dir" && go mod edit "${pins[@]}")
+    pinned+=("$dir")
+  done < <(git -C "$work" ls-files '*/go.mod')
+  for dir in "${pinned[@]}"; do
+    (cd "$dir" && go build -o /dev/null ./... && go list -mod=readonly -tags integration -test -deps ./... >/dev/null)
   done
-  # The real standalone fixture replaces both modules with this checkout.
-  # Its requirements must still agree with the server's newly selected root;
-  # otherwise release qualification asks for go mod tidy before tests can run.
-  (cd "$work/critical/server-fixture" &&
-    go mod edit -require="github.com/open-rails/openrails@$version" -require="github.com/open-rails/openrails/server@$version" &&
-    go test -mod=readonly -tags integration -c -p 2 -o "$admin/server-fixture.test" .)
-  git -C "$work" commit --quiet -S -am "Release $version: pin server, adapter and test fixture to the paired root"
+  git -C "$work" commit --quiet -S -am "Release $version: pin every module requiring the root or server to the paired root"
   git -C "$work" push --quiet origin "HEAD:refs/heads/$branch"
   gh pr create --base master --head "$branch" --title "Release $version" \
-    --body "Pins server and AuthKit adapter to the paired root. When its checks pass: \`scripts/release publish $version\`."
+    --body "Pins every module requiring the root or server to the paired root. When its checks pass: \`scripts/release publish $version\`."
   ;;
 publish)
   git fetch --quiet origin "$branch"
