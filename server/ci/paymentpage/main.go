@@ -30,7 +30,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
@@ -117,11 +116,10 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 				}}}},
 		},
 		Auth: authkit.Config{
-			DefaultTenantID: iam.TenantID(uuid.MustParse("baf3907f-2a73-4e8c-8221-82e9c930e8ed")),
-			Token:           authkit.TokenConfig{Issuer: api},
-			Keys:            authkit.KeysConfig{Path: keys, AllowEphemeralDevKeys: true},
-			Registration:    authkit.RegistrationConfig{AllowMissingSenders: true},
-			HTTP:            &authkit.HTTPConfig{DirectPeerIP: true},
+			Token:        authkit.TokenConfig{Issuer: api},
+			Keys:         authkit.KeysConfig{Path: keys}, // a loopback issuer's development keys
+			Registration: authkit.RegistrationConfig{AllowMissingSenders: true},
+			HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 		},
 		RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
 	}, server.Deps{Engine: openrails.Deps{Postgres: pool, Clock: h.clock, CheckoutAssets: os.DirFS(assets)}})

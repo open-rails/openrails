@@ -91,8 +91,10 @@ func usageRequest(u billing.LeaseUsage) request {
 	return request{usage: &limits.Usage{EventType: u.EventType, Dimensions: u.Dimensions, Metadata: u.Metadata}, stated: u.Amount}
 }
 
-// errUnpriced: the gate cannot price the request; the server can.
-var errUnpriced = errors.New("openrails: gate: the view cannot price this request")
+// errUnpriced: no rate card in force prices the request's event type, or
+// none bounds the price of its cell.
+var errUnpriced = &billing.StatusError{Status: http.StatusUnprocessableEntity, ErrorDetails: billing.ErrorDetails{Type: billing.ErrorTypeInvalidRequest,
+	Code: billing.CodeUsageNotPriced, Message: "no rate card prices the request's usage"}}
 
 // costs is what r takes from each limit of a view, by key: a money limit the
 // request's money cost, a named-unit limit the units its counts make of r's
@@ -134,7 +136,6 @@ func (p *pricing) moneyCost(r request) (int64, error) {
 		return r.amount, nil
 	}
 	if p == nil || len(p.money) == 0 {
-		// No card prices the event type: the server answers it, as Admit.
 		return 0, errUnpriced
 	}
 	var total int64

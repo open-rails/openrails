@@ -15,9 +15,12 @@ import (
 // AUTHKIT_PUBLIC_KEYS, a JSON object {kid: PEM} of further keys trusted for
 // verification, such as the previous one during a rotation).
 type SigningKey struct {
-	ActiveKeyID         string `yaml:"active_key_id"`
+	// ActiveKeyID is the signing key's kid.
+	ActiveKeyID string `yaml:"active_key_id"`
+	// ActivePrivateKeyPEM is the signing key, PEM.
 	ActivePrivateKeyPEM string `yaml:"active_private_key_pem"`
-	PublicKeysJSON      string `yaml:"public_keys"`
+	// PublicKeysJSON is a JSON object {kid: PEM} of further keys trusted for verification.
+	PublicKeysJSON string `yaml:"public_keys"`
 }
 
 // Source is the key as AuthKit's Deps.KeySource; nil without one, when

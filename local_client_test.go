@@ -13,9 +13,6 @@ func TestZeroLocalClientRefuses(t *testing.T) {
 		calls := map[string]error{}
 		_, calls["StartRunningChargeTx"] = c.StartRunningChargeTx(t.Context(), nil, billing.StartRunningChargeParams{})
 		_, calls["StopRunningChargeTx"] = c.StopRunningChargeTx(t.Context(), nil, "reference", billing.StopRunningChargeParams{})
-		_, calls["AdmitTx"] = c.AdmitTx(t.Context(), nil, []billing.AdmitParams{{}})
-		_, calls["CaptureAdmissionsTx"] = c.CaptureAdmissionsTx(t.Context(), nil, []billing.CaptureAdmissionParams{{}})
-		_, calls["ReleaseAdmissionsTx"] = c.ReleaseAdmissionsTx(t.Context(), nil, []string{"request"})
 		_, calls["ExportNotificationAdoption"] = c.ExportNotificationAdoption(t.Context())
 		calls["RestoreNotificationOrdering"] = c.RestoreNotificationOrdering(t.Context(), billing.NotificationAdoption{})
 		for name, err := range calls {

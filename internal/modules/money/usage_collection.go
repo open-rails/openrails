@@ -157,7 +157,10 @@ func scheduledUsageCollectionEligible(order gen.BillingOrder, now time.Time) boo
 }
 
 type usageCollectionEnqueue struct {
-	initiator       charge.Initiator
+	initiator charge.Initiator
+	// read resolves the method without locks: whether a collection could
+	// charge, as a read-only snapshot asks it.
+	read            bool
 	manual          bool
 	paymentMethodID *uuid.UUID
 	operationKey    string
@@ -354,7 +357,8 @@ func (s *MoneyService) enqueueUsageCollection(ctx context.Context, payer identit
 // charges: the explicitly bound one (a retry or the customer's payment) or
 // the customer's default for the currency. The account that vaulted the
 // instrument takes the money. The row is read under a shared lock so the
-// instrument the operation freezes cannot be remapped before it commits.
+// instrument the operation freezes cannot be remapped before it commits;
+// a read (opts.read) takes none.
 func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, merchantID, payerID uuid.UUID, currency string, opts usageCollectionEnqueue) (*gen.BillingPaymentMethod, error) {
 	id := opts.paymentMethodID
 	if id == nil {
@@ -376,7 +380,13 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 			return nil, nil
 		}
 	}
-	method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: merchantID, ID: *id})
+	var method gen.BillingPaymentMethod
+	var err error
+	if opts.read {
+		method, err = q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: *id})
+	} else {
+		method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: merchantID, ID: *id})
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrDefaultPaymentMethodInvalid
@@ -393,7 +403,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 		return nil, ErrCustomerPaymentUnsupported
 	}
 	if opts.initiator == charge.InitiatorMerchant {
-		if err := requireCollectionAgreement(ctx, q, charge.CustodyOf(s.db), method, currency); err != nil {
+		if err := requireCollectionAgreement(ctx, q, charge.CustodyOf(s.db), method, currency, opts.read); err != nil {
 			if opts.manual && errors.Is(err, charge.ErrAgreementRequired) {
 				return nil, fmt.Errorf("%w: %w", ErrDefaultPaymentMethodInvalid, err)
 			}
@@ -407,12 +417,16 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 // currency on a card without the customer's active unscheduled mandate for it
 // on the account that charges it: never given, or waiting for consent after
 // the card was reissued under another brand.
-func requireCollectionAgreement(ctx context.Context, q *gen.Queries, custody *merchants.Service, method gen.BillingPaymentMethod, currency string) error {
+func requireCollectionAgreement(ctx context.Context, q *gen.Queries, custody *merchants.Service, method gen.BillingPaymentMethod, currency string, read bool) error {
 	psp, err := charge.RoutePSP(ctx, custody, method)
 	if err != nil {
 		return err
 	}
-	_, err = mandates.ForCollection(ctx, q, method.MerchantID, method.CustomerID, currency, method.ID, psp)
+	if read {
+		_, err = mandates.ReadForCollection(ctx, q, method.MerchantID, method.CustomerID, currency, method.ID, psp)
+	} else {
+		_, err = mandates.ForCollection(ctx, q, method.MerchantID, method.CustomerID, currency, method.ID, psp)
+	}
 	return err
 }
 

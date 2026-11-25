@@ -6,7 +6,8 @@ package billing
 type MerchantDocument struct {
 	// Slug is the merchant's name. A manifest entry's is its key, and it
 	// refuses the field.
-	Slug        string `yaml:"slug,omitempty"`
+	Slug string `yaml:"slug,omitempty"`
+	// DisplayName is the merchant's name as its customers see it.
 	DisplayName string `yaml:"display_name"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius).
@@ -54,8 +55,10 @@ type MerchantDeclaration struct {
 // AlertWebhookConfig is one destination for the merchant's operational
 // alerts. Its URL is a credential.
 type AlertWebhookConfig struct {
+	// Name labels the webhook in the merchant's configuration.
 	Name string `yaml:"name,omitempty"`
-	URL  string `yaml:"url"`
+	// URL is where alerts are posted; it is a credential.
+	URL string `yaml:"url"`
 	// Format is generic (the default), discord or slack.
 	Format AlertWebhookFormat `yaml:"format,omitempty"`
 	// Enabled defaults to true.
@@ -108,7 +111,7 @@ type Custodians map[string]CustodianConfig
 // CustodianConfig is one declared custodian: the merchant's account with a
 // card custodian.
 type CustodianConfig struct {
-	// Kind is the vendor: basis_theory.
+	// Kind is the vendor: basis_theory or hyperswitch.
 	Kind CardVaultKind `yaml:"kind"`
 	// Environment is the tenant's money class: live (the default) or test.
 	Environment Environment `yaml:"environment,omitempty"`

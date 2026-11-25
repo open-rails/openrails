@@ -27,8 +27,8 @@ func TestTablesMatchSchema(t *testing.T) {
 	for lines.Scan() {
 		if name, ok := strings.CutPrefix(lines.Text(), "table billing."); ok {
 			name, partitioned, _ := strings.Cut(name, " ")
-			if partitioned != "" && retention.Tables[name].Class != retention.PartitionedMonthly {
-				t.Errorf("partitioned table %s is not classified partitioned", name)
+			if partitioned != "" {
+				t.Errorf("table %s is partitioned: nothing creates or drops partitions", name)
 			}
 			schema = append(schema, name)
 		}

@@ -65,19 +65,12 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 	if err != nil {
 		return nil, err
 	}
-	// A deployment keeps this directory ID across every restart.
-	tenant, err := iam.ParseTenantID(cmp.Or(os.Getenv("AUTH_DEFAULT_TENANT_ID"), "8c67667c-8837-439a-a485-2c9a385c64c3"))
-	if err != nil {
-		return nil, err
-	}
 	return authkit.New(ctx, authkit.Config{
-		DefaultTenantID: tenant,
-		Database:        authkit.DatabaseConfig{Schema: "profiles"},
-		Token:           authkit.TokenConfig{Issuer: s.PublicURL, IssuedAudiences: []string{"onlydemo"}},
-		Keys:            authkit.KeysConfig{AllowEphemeralDevKeys: true},
-		HTTP:            &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true},
-		Registration:    authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
-		TwoFactor:       authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		Database:     authkit.DatabaseConfig{Schema: "profiles"},
+		Token:        authkit.TokenConfig{Issuer: s.PublicURL, IssuedAudiences: []string{"onlydemo"}},
+		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true},
+		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired},
+		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 	}, authkit.Deps{Postgres: db, Email: email})
 }
 

@@ -54,8 +54,6 @@ var ownedTables = []string{
 	"ledger_type_totals",
 	"ledger_units",
 	"limit_adjustments",
-	"limit_hold_parts",
-	"limit_holds",
 	"limit_windows",
 	"maintenance_runs",
 	"mandates",

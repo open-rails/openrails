@@ -29,7 +29,7 @@ const MaxAccrualRateWindowSeconds int64 = 86400
 // MaxSpendWindowSeconds is the longest spend window a policy or a spend
 // delegation may declare. Admitted requests are kept for this long plus 30
 // days, so a longer window would count requests already dropped.
-const MaxSpendWindowSeconds = int64(retention.AdmissionMaxWindow / time.Second)
+const MaxSpendWindowSeconds = int64(retention.MaxSpendWindow / time.Second)
 
 // MaxBillingPolicyNameLength bounds a policy name. Names are merchant-chosen
 // identifiers that travel in manifests, bindings and API payloads, not prose.

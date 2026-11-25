@@ -190,9 +190,8 @@ The source scan found 498 named SQL statements in 91 files with an explicit qual
 | [grants.sql](../internal/db/queries/grants.sql) | 3 | `grants` |
 | [host_lifecycle_events.sql](../internal/db/queries/host_lifecycle_events.sql) | 2 | `host_outbox` |
 | [idempotency_keys.sql](../internal/db/queries/idempotency_keys.sql) | 6 | `idempotency_keys` |
-| [leases.sql](../internal/db/queries/leases.sql) | 11 | `leases`, `limit_hold_parts`, `limit_holds` |
+| [leases.sql](../internal/db/queries/leases.sql) | 15 | `lease_in_flight`, `leases` |
 | [ledger.sql](../internal/db/queries/ledger.sql) | 3 | `ledger_accounts`, `ledger_transfers`, `ledger_units` |
-| [limit_holds.sql](../internal/db/queries/limit_holds.sql) | 5 | `limit_hold_parts`, `limit_holds` |
 | [limits.sql](../internal/db/queries/limits.sql) | 9 | `catalog_limits`, `catalog_product_limits`, `customer_limit_overrides`, `limit_adjustments`, `limit_windows` |
 | [mandates.sql](../internal/db/queries/mandates.sql) | 8 | `host_outbox`, `mandates` |
 | [merchant_archive.sql](../internal/db/queries/merchant_archive.sql) | 1 | `merchants` |
@@ -266,7 +265,7 @@ The migrations declare these 138 billing tables; usage events live in the event 
 - `customers`, `dashboard_configs`, `destructive_action_switch`, `destructive_actions`, `destructive_holds`, `destructive_run_before_images`, `disputes`
 - `event_store`, `eventlog_events`, `eventlog_migrations`, `eventlog_pending`, `eventlog_streams`, `fraud_reports`, `grants`
 - `host_outbox`, `idempotency_keys`, `lease_in_flight`, `leases`, `ledger_accounts`, `ledger_daily`, `ledger_rollup_pending`
-- `ledger_transfers`, `ledger_type_totals`, `ledger_units`, `limit_adjustments`, `limit_hold_parts`, `limit_holds`, `limit_windows`
+- `ledger_transfers`, `ledger_type_totals`, `ledger_units`, `limit_adjustments`, `limit_windows`
 - `maintenance_runs`, `mandates`, `merchant_destructive_policy`, `merchant_leases`, `merchant_slug_aliases`, `merchant_write_posture`, `merchants`
 - `money_settings`, `mrr_cohort_flows`, `mrr_customer_flows`, `mrr_customer_totals`, `mrr_flows`, `mrr_movement_lines`, `mrr_movements`
 - `mrr_product_flows`, `mrr_product_totals`, `mrr_risk_cases`, `mrr_risk_due`, `mrr_risk_episodes`, `mrr_risk_flows`, `mrr_risk_totals`

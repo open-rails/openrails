@@ -110,10 +110,8 @@ type DatabaseConfig struct {
 	// Start with WithRiverClient must use the same schema.
 	RiverSchema string `yaml:"river_schema"`
 	// SkipMigrations makes New validate existing schemas without applying
-	// migrations or preparing startup partitions: a migration that is missing,
-	// or was applied with other content, is ErrMigrationsRequired. Call
-	// openrails.Migrate first. Normal request-time and scheduled partition
-	// maintenance is unchanged.
+	// migrations: a migration that is missing, or was applied with other
+	// content, is ErrMigrationsRequired. Call openrails.Migrate first.
 	SkipMigrations bool `yaml:"skip_migrations"`
 	// LeaseConns caps the separate pool, copied from Deps.Postgres's
 	// configuration, that renews leases: idempotency claims, the billing pass
@@ -150,8 +148,10 @@ type RateLimit struct {
 // what a browser is told about it.
 type CaptchaAccount struct {
 	// Provider is "turnstile", "recaptcha-v3" or "hcaptcha".
-	Provider  string `yaml:"provider"`
-	SiteKey   string `yaml:"site_key"`
+	Provider string `yaml:"provider"`
+	// SiteKey is the account's public key, which the browser's widget loads.
+	SiteKey string `yaml:"site_key"`
+	// SecretKey is the account's secret, which verifies a solved challenge.
 	SecretKey string `yaml:"secret_key"`
 }
 
@@ -164,10 +164,14 @@ type CaptchaAccount struct {
 // opens no hold. Renewals, expiry and provider-side cancellation spend
 // nothing.
 type UserActionRateLimitConfig struct {
-	MinimumCustomersPerHour        int64 `yaml:"minimum_customers_per_hour"`
+	// MinimumCustomersPerHour is the hourly budget's floor, in customers.
+	MinimumCustomersPerHour int64 `yaml:"minimum_customers_per_hour"`
+	// PaidCustomersPerHourlyCustomer raises the hourly budget by one per this many paying customers.
 	PaidCustomersPerHourlyCustomer int64 `yaml:"paid_customers_per_hourly_customer"`
-	MinimumCustomersPerDay         int64 `yaml:"minimum_customers_per_day"`
-	PaidCustomersPerDailyCustomer  int64 `yaml:"paid_customers_per_daily_customer"`
+	// MinimumCustomersPerDay is the daily budget's floor, in customers.
+	MinimumCustomersPerDay int64 `yaml:"minimum_customers_per_day"`
+	// PaidCustomersPerDailyCustomer raises the daily budget by one per this many paying customers.
+	PaidCustomersPerDailyCustomer int64 `yaml:"paid_customers_per_daily_customer"`
 }
 
 // DestructiveActionLimitsConfig is how many destructive actions staff may
@@ -186,14 +190,22 @@ type UserActionRateLimitConfig struct {
 // and no hold stops it. A breach answers 429 and opens a hold that persists
 // until a person clears it (openrails destructive-holds).
 type DestructiveActionLimitsConfig struct {
-	ActorPerHour      int64 `yaml:"actor_per_hour"`
-	ActorPerDay       int64 `yaml:"actor_per_day"`
-	MerchantPerHour   int64 `yaml:"merchant_per_hour"`
-	MerchantPerDay    int64 `yaml:"merchant_per_day"`
+	// ActorPerHour is one actor's destructive actions an hour.
+	ActorPerHour int64 `yaml:"actor_per_hour"`
+	// ActorPerDay is one actor's destructive actions a day.
+	ActorPerDay int64 `yaml:"actor_per_day"`
+	// MerchantPerHour is one merchant's floor an hour, rising with its active customers.
+	MerchantPerHour int64 `yaml:"merchant_per_hour"`
+	// MerchantPerDay is one merchant's floor a day, rising with its active customers.
+	MerchantPerDay int64 `yaml:"merchant_per_day"`
+	// DeploymentPerHour is the deployment's floor an hour, rising with active customers.
 	DeploymentPerHour int64 `yaml:"deployment_per_hour"`
-	DeploymentPerDay  int64 `yaml:"deployment_per_day"`
-	ErasurePerHour    int64 `yaml:"erasure_per_hour"`
-	ErasurePerDay     int64 `yaml:"erasure_per_day"`
+	// DeploymentPerDay is the deployment's floor a day, rising with active customers.
+	DeploymentPerDay int64 `yaml:"deployment_per_day"`
+	// ErasurePerHour is a merchant's contact erasures an hour, rising with its directory.
+	ErasurePerHour int64 `yaml:"erasure_per_hour"`
+	// ErasurePerDay is a merchant's contact erasures a day, rising with its directory.
+	ErasurePerDay int64 `yaml:"erasure_per_day"`
 }
 
 // VaultConfig names the mounts OpenRails uses on Deps.Vault. A KV mount
@@ -229,9 +241,11 @@ type CardVaultConfig struct {
 // The SDK is a separate server in the vendor product, hence its explicit URL.
 type HyperSwitchConfig struct {
 	// AllowLoopbackHTTP admits an http loopback fixture; refused beside a live PSP.
-	AllowLoopbackHTTP bool   `yaml:"allow_loopback_http"`
-	APIBaseURL        string `yaml:"api_base_url"`
-	SDKURL            string `yaml:"sdk_url"`
+	AllowLoopbackHTTP bool `yaml:"allow_loopback_http"`
+	// APIBaseURL is the deployment's HyperSwitch API.
+	APIBaseURL string `yaml:"api_base_url"`
+	// SDKURL is the HyperSwitch browser SDK the payment page loads.
+	SDKURL string `yaml:"sdk_url"`
 }
 
 // SolanaConfig is the deployment's Solana configuration.

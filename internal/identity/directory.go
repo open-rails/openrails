@@ -1,7 +1,8 @@
 // Package identity is who a merchant's customers are: their contacts, read
 // from the host's directory in process (Deps.UserInfo), else from the copy
-// OpenRails keeps of what the merchant's directory pushed over SCIM and
-// verified access tokens claimed. Which one is decided at construction.
+// OpenRails keeps (Kept): what the merchant's directory pushed over SCIM, and
+// what the access tokens of the customers it admits claimed (Kept.Record).
+// Which one is decided at construction.
 package identity
 
 import (
@@ -474,14 +475,51 @@ func deref(s *string) string {
 	return *s
 }
 
-// Claims are the contact claims of a verified access token: OIDC's email
-// (when verified), name, preferred_username and updated_at. An empty one is
-// absent and keeps the recorded value.
+// Claims are the contact claims of a verified access token (OpenID Connect
+// Core §5.1): email with email_verified, name, preferred_username and
+// updated_at. An empty or oversized one is absent and keeps the recorded
+// value; an email counts only when verified.
 type Claims struct {
-	Email     string
-	Name      string
-	Username  string
-	UpdatedAt *time.Time
+	Email         string
+	EmailVerified bool
+	Name          string
+	Username      string
+	UpdatedAt     *time.Time
+}
+
+// Record keeps the contact a verified token claims for customer: a new
+// contact at once, a kept one only when the claims are dated no earlier than
+// it and differ, so a repeated token writes nothing. Undated claims replace
+// only an undated contact: never a directory's dated push, nor an erasure. A
+// username another provisioned contact holds is left out.
+func (k Kept) Record(ctx context.Context, merchantID billing.MerchantID, customer uuid.UUID, c Claims) error {
+	params := gen.RecordCustomerContactClaimsParams{
+		MerchantID: merchantID.UUID(), CustomerID: customer,
+		DisplayName: bounded(c.Name, 256), UserName: bounded(c.Username, 256), ClaimsUpdatedAt: c.UpdatedAt,
+	}
+	if email := bounded(c.Email, 320); c.EmailVerified && email != nil && strings.Contains(*email, "@") {
+		params.Email = email
+	}
+	for {
+		if params.Email == nil && params.DisplayName == nil && params.UserName == nil {
+			return nil
+		}
+		err := k.DB.Gen(ctx).RecordCustomerContactClaims(ctx, params)
+		if params.UserName == nil || !db.IsUniqueViolation(err) {
+			return err
+		}
+		params.UserName = nil
+	}
+}
+
+// bounded is a claim the kept copy can hold: trimmed, nil when empty or
+// longer than limit bytes.
+func bounded(v string, limit int) *string {
+	v = strings.TrimSpace(v)
+	if v == "" || len(v) > limit {
+		return nil
+	}
+	return &v
 }
 
 // ErrUsernameUnknown is a username no contact holds, or more than one does.

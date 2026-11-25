@@ -4,8 +4,8 @@ Usage billing decides what usage costs and bills it in arrears. Usage lives in
 the event store (ClickHouse); OpenRails prices each period on its total and posts
 it to the ledger at each month's end and before balance movements; with
 automatic usage billing, usage orders bill what is owed, and running charges
-bill a rate per hour. How much a customer may use, and the holds and gate that
-enforce it, are [entitlements and limits](entitlements.md).
+bill a rate per hour. How much a customer may use, and the gate that enforces
+it, are [entitlements and limits](entitlements.md).
 
 ## Concepts
 
@@ -25,12 +25,12 @@ enforce it, are [entitlements and limits](entitlements.md).
 
 ## How it works
 
-**Intake.** Usage arrives on a lease sync (`POST /v1/app/leases/sync`) or an
-admission's capture (`MoneyService.CaptureAdmission`); both are
-[entitlements and limits](entitlements.md). Items are numbered per lease: a resend
+**Intake.** Usage arrives on a lease sync (`POST /v1/app/leases/sync`,
+[entitlements and limits](entitlements.md)). Items are numbered per lease: a resend
 answers from the sync's receipts, a changed item is `idempotency_key_reused`, a
-gap `usage_out_of_order`. A sync settles a bounded prefix (100 customers) in one insert;
-the gate sends the rest again. While ClickHouse is out of reach a sync answers 503
+gap `usage_out_of_order`. A sync settles every new item it carries, up to a gap, in
+one insert (at most `billing.MaxSyncUsageItems`), so a gate never reports what it
+sends in flight (OR-J24-S34). While ClickHouse is out of reach a sync answers 503
 and settles nothing (OR-J24-S48).
 
 **Pricing.** `MoneyService.PrepareUsageTx` validates, prices and locates, taking a
@@ -39,19 +39,17 @@ item (and locating that customer's items again under it): each group sharing a
 period, meter cell and card print
 (`cardPrint`) is priced provisionally at the period position the store holds,
 `R(Q+q) − R(Q)` never below zero (`marginalPrice`), shared by quantity; a
-`dynamic` card charges each item its stated amount. A capture of a request hold
-is priced by the cards it pinned. Limits are located at `admitted_at`
+`dynamic` card charges each item its stated amount. Limits are located at `admitted_at`
 (`locateItems`); a failed item's grace is read from its windows' `limit_usage`
 and what it leaves is charged with its own ledger legs. `CommitUsageTx` skips
 events an earlier attempt inserted (`ExistingUsage`, by customer and event id at
 any `occurred_at`), inserts the rest and waits, then writes the card prints,
-opened session and first-use windows and captures, in the caller's transaction.
+opened session and first-use windows, in the caller's transaction.
 A `usage_unposted` mark that already covers the usage is only held by key share
 (`ShareUsageUnposted`): a posting, which locks it for update, waits for the
 intake or has read its events, and intakes never wait on each other. Concurrent
 intakes of one customer may price from the same period position: postings price
-the period's total, so only provisional amounts differ. An event's identity never depends on a clock read per attempt: a
-capture occurred when its request was admitted, an item an earlier attempt
+the period's total, so only provisional amounts differ. An event's identity never depends on a clock read per attempt: an item an earlier attempt
 inserted keeps that attempt's `occurred_at`, `admitted_at` and pricing period
 (so its session and first-use windows), and an insert whose caller gave up still
 finishes before the intake lets go of its locks (OR-J24-S58 to S60).
@@ -86,7 +84,7 @@ items of its window; its period starts where their charges began (a posting's
 pricing period, a running charge's last posting) and ends at its close. The threshold is its currency's
 `usage_billing` `collection_threshold`, else its credit limit; a billing policy's
 outstanding cap and `collection_threshold_amount` bind only an account in the
-policy's `policy_currency`, as they do in admission (OR-J26-S61). A running charge's accrual is
+policy's `policy_currency`, as they do in a gate's views (OR-J26-S61). A running charge's accrual is
 computed on read and posts at its stop, at 00:00 UTC and before other balance
 movements (`postRunningChargesThrough`).
 
@@ -94,8 +92,7 @@ movements (`postRunningChargesThrough`).
 
 ## Interfaces
 
-- **Intake**: `SyncLeases` and `CaptureAdmissions`
-  ([entitlements and limits](entitlements.md)).
+- **Intake**: `SyncLeases` ([entitlements and limits](entitlements.md)).
 - **Running charges** (`merchant:usage:manage`, reads `merchant:usage:read`):
   `StartRunningCharge` (`POST /v1/app/running-charges`), `StopRunningCharge`,
   `GetRunningCharge`, `ListRunningCharges`; `GetBalance`
@@ -195,7 +192,7 @@ Checks:
 - OR-J26-S40 and OR-J26-S52 bound the usage pass.
 
 ### 8. Abuse protection
-Does not apply: usage enters through syncs and admissions, bounded in [entitlements and limits](entitlements.md); `/v1/me/usage` takes no OpenRails rate limit, and the proxy owns a generic ceiling ([limits](../standalone.md#abuse-limits)).
+Does not apply: usage enters through syncs, bounded in [entitlements and limits](entitlements.md); `/v1/me/usage` takes no OpenRails rate limit, and the proxy owns a generic ceiling ([limits](../standalone.md#abuse-limits)).
 
 ### 9. Destructive-action safeguards
 Waiving or writing off a usage order is a `waive_order` or `mark_uncollectible`

@@ -439,6 +439,7 @@ test("OR-UI-07: supported card deletion removes actual NMI custody", async ({
     const saved = await client.addPaymentMethod({
       psp_id: f.nmiPSP,
       token: f.nmiCardToken,
+      billing_details: { address: { country: "US", postal_code: "10001" } },
     })
     const before = await client.listPaymentMethods()
     await client.removePaymentMethod(saved.id)

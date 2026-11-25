@@ -273,17 +273,24 @@ type Balance struct {
 // BudgetWindow caps spend at Limit per WindowSeconds, in Currency (the
 // request's currency when empty). A spend window is at most 31 days.
 type BudgetWindow struct {
-	Key           string           `json:"key"`
-	WindowSeconds int64            `json:"window_seconds"`
-	Limit         int64            `json:"limit,string"`
-	Currency      catalog.Currency `json:"currency,omitempty"`
+	// Key names the window.
+	Key string `json:"key"`
+	// WindowSeconds is the rolling window, at most 31 days.
+	WindowSeconds int64 `json:"window_seconds"`
+	// Limit is the spend allowed per window, in Currency's units.
+	Limit int64 `json:"limit,string"`
+	// Currency is the window's; empty is the request's.
+	Currency catalog.Currency `json:"currency,omitempty"`
 }
 
 // MerchantProfile is the merchant's public and communication metadata; its
 // name is the merchant's display_name.
 type MerchantProfile struct {
-	LogoURL    string `json:"logo_url,omitempty"`
-	FromEmail  string `json:"from_email,omitempty"`
+	// LogoURL is the merchant's logo, an https URL.
+	LogoURL string `json:"logo_url,omitempty"`
+	// FromEmail is the mailbox the merchant's billing mail is sent from.
+	FromEmail string `json:"from_email,omitempty"`
+	// SupportURL is where customers get help.
 	SupportURL string `json:"support_url,omitempty"`
 	// SubscribeURL is where new customers, and those whose access ended,
 	// buy a subscription.
@@ -291,7 +298,9 @@ type MerchantProfile struct {
 	// BillingURL is where customers manage and cancel their subscriptions
 	// and payment agreements.
 	BillingURL string `json:"billing_url,omitempty"`
-	TermsURL   string `json:"terms_url,omitempty"`
+	// TermsURL is the merchant's terms of service.
+	TermsURL string `json:"terms_url,omitempty"`
+	// PrivacyURL is the merchant's privacy policy.
 	PrivacyURL string `json:"privacy_url,omitempty"`
 	// StatementDescriptor is the name card charges carry on statements, shown
 	// under the pay button.
@@ -313,12 +322,16 @@ func (p MerchantProfile) NotificationURL(kind string) string {
 	return link
 }
 
-// MerchantCheckoutSettings are the merchant's embedded checkout settings.
+// MerchantCheckoutSettings are the merchant's checkout settings.
 type MerchantCheckoutSettings struct {
 	// EmbedOrigins are the origins that may frame the merchant's embedded
 	// pay URLs: exact https origins (http on loopback), at most 10, no
 	// wildcards.
 	EmbedOrigins []string `json:"embed_origins,omitempty"`
+	// BillingFields are the billing details a new card's form asks for and
+	// OpenRails requires; absent, country always and the postal code in the
+	// US.
+	BillingFields *BillingFieldSettings `json:"billing_fields,omitempty"`
 }
 
 // BalanceNoticeSettings are a merchant's default low-balance lines: a
@@ -327,14 +340,18 @@ type MerchantCheckoutSettings struct {
 // amount lines per currency, none for a currency not listed. 0 turns a line
 // off. balance.depleted cannot be turned off.
 type BalanceNoticeSettings struct {
-	RunwayHours *int                  `json:"runway_hours,omitempty"`
-	LowAmounts  []BalanceNoticeAmount `json:"low_amounts,omitempty"`
+	// RunwayHours is the line in hours of spend at the customer's burn rate: 24 when unset, 0 off.
+	RunwayHours *int `json:"runway_hours,omitempty"`
+	// LowAmounts are amount lines per currency; none for a currency not listed.
+	LowAmounts []BalanceNoticeAmount `json:"low_amounts,omitempty"`
 }
 
 // BalanceNoticeAmount is an amount line in one currency.
 type BalanceNoticeAmount struct {
+	// Currency is the balance's currency.
 	Currency catalog.Currency `json:"currency"`
-	Amount   int64            `json:"amount,string"`
+	// Amount is the line, in the currency's units; 0 turns it off.
+	Amount int64 `json:"amount,string"`
 }
 
 // CardVaultPlatform is the card_vault holding new cards in the deployment's
@@ -367,11 +384,16 @@ const CardVaultPlatform = "platform"
 // RepriceNoticeWindowDays is the notice before a price migration takes
 // effect. PSPRouting chooses the PSP for a new charge.
 type MerchantSettings struct {
-	UsageBilling            *UsageBillingSettings `json:"usage_billing,omitempty"`
-	Profile                 *MerchantProfile      `json:"profile,omitempty"`
-	BillingPeriodBoundary   string                `json:"billing_period_boundary,omitempty"`
-	AlertEmail              *string               `json:"alert_email,omitempty"`
-	RepriceNoticeWindowDays *int                  `json:"reprice_notice_window_days,omitempty"`
+	// UsageBilling is automatic usage billing on credit, per currency.
+	UsageBilling *UsageBillingSettings `json:"usage_billing,omitempty"`
+	// Profile is what customers see of the merchant: its links, mailbox, logo and statement name.
+	Profile *MerchantProfile `json:"profile,omitempty"`
+	// BillingPeriodBoundary cuts usage statement periods: fixed_interval (default), calendar_month or anniversary.
+	BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
+	// AlertEmail is the one mailbox critical alerts and test messages go to.
+	AlertEmail *string `json:"alert_email,omitempty"`
+	// RepriceNoticeWindowDays is how close to a renewal a price migration may not raise a price unacknowledged.
+	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 	// ProviderRefundAccess decides what a refund made in the provider's own
 	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
 	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
@@ -380,12 +402,15 @@ type MerchantSettings struct {
 	// FraudWarningRefund decides what an actionable early fraud warning does:
 	// FraudWarningRefundCharge (default) or FraudWarningRecord.
 	FraudWarningRefund *FraudWarningRefund `json:"fraud_warning_refund,omitempty"`
-	ArrearsGraceDays   *int                `json:"arrears_grace_days,omitempty"`
-	PSPRouting         *[]PSPRoutingRule   `json:"psp_routing,omitempty"`
+	// ArrearsGraceDays is how long an unpaid usage order may be overdue before the customer is delinquent.
+	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
+	// PSPRouting are ordered rules that pick one PSP before a purchase is attempted.
+	PSPRouting *[]PSPRoutingRule `json:"psp_routing,omitempty"`
 	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
 	// stored policy; the built-in one applies until a merchant declares one.
 	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
-	// Checkout is the embedded checkout's settings; a patch replaces it whole.
+	// Checkout is the checkout's settings (embed origins, billing fields); a
+	// patch replaces it whole.
 	Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 	// BalanceNotices are the default low-balance lines of the merchant's
 	// customers; a patch replaces it whole.
@@ -402,10 +427,13 @@ type MerchantSettings struct {
 	// each must charge cards from CardVault. Absent: every armed card PSP
 	// that can, the CardVault PSP alone when it is a PSP. OpenRails-run
 	// renewals stay on the PSP their subscription was sold through.
-	ChargePSPs                        []string               `json:"charge_psps,omitempty"`
-	BillingPolicies                   []BillingPolicy        `json:"billing_policies,omitempty"`
-	BillingPolicyBindings             []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
-	DelegatedInvokerWastedSpendLimits []BudgetWindow         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
+	ChargePSPs []string `json:"charge_psps,omitempty"`
+	// BillingPolicies are named spend limits: an outstanding cap, a window spend cap or an accrual rate cap.
+	BillingPolicies []BillingPolicy `json:"billing_policies,omitempty"`
+	// BillingPolicyBindings choose the merchant default policy and each trust tier's.
+	BillingPolicyBindings []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
+	// DelegatedInvokerWastedSpendLimits bound the wasted spend a delegated invoker is forgiven per window.
+	DelegatedInvokerWastedSpendLimits []BudgetWindow `json:"delegated_invoker_wasted_spend_limits,omitempty"`
 	// Currencies are the merchant's own units (MerchantCurrency), at most 32.
 	// They join the currency registry for this merchant alone: balances,
 	// credit lots, prices, credit grants and rate cards may count them; the
@@ -426,6 +454,7 @@ type AccountingSettings struct {
 // BillingPolicy declares one named billing policy (or#897). The policy says
 // WHICH quantity is capped; the binding says who it applies to.
 type BillingPolicy struct {
+	// Name is the policy's, which bindings name.
 	Name string `json:"name"`
 	// Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit
 	// line on debt, refused with outstanding_cap_reached), "window_spend_cap"
@@ -441,7 +470,8 @@ type BillingPolicy struct {
 	// AccrualRateCapPerHour (kind=accrual_rate_cap) caps the measured accrual
 	// rate in micros PER HOUR — the cloud quota. AccrualRateWindowSeconds is the
 	// measurement lookback (default 3600).
-	AccrualRateCapPerHour    int64 `json:"accrual_rate_cap_per_hour,omitempty,string"`
+	AccrualRateCapPerHour int64 `json:"accrual_rate_cap_per_hour,omitempty,string"`
+	// AccrualRateWindowSeconds is the accrual rate's measurement lookback (default 3600).
 	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
 	// override the merchant-wide invoice policy for payers bound here; nil defers
@@ -469,8 +499,10 @@ type BillingPolicy struct {
 // BillingPolicyBinding declares a merchant-default or per-tier policy.
 // Customer assignments are runtime state managed by SetCustomerBillingPolicy.
 type BillingPolicyBinding struct {
+	// PolicyName is the billing policy bound.
 	PolicyName string `json:"policy"`
-	Tier       string `json:"tier,omitempty"`
+	// Tier is the trust tier it applies to; empty makes it the merchant default.
+	Tier string `json:"tier,omitempty"`
 }
 
 // DunningPolicy is a merchant's retry schedule for declined renewals. A
@@ -513,8 +545,10 @@ type BillingPolicyBinding struct {
 // period is read from NMI (life.rebill.missed); OpenRails charges the period
 // itself only when NMI holds no transaction and moved on (provider_skipped).
 type DunningPolicy struct {
-	Tiers                 []DunningTier `json:"tiers"`
-	TransientRetryMinutes *[]int        `json:"transient_retry_minutes,omitempty"`
+	// Tiers are the retry schedules by billing cycle length.
+	Tiers []DunningTier `json:"tiers"`
+	// TransientRetryMinutes are the quick retries after a transient decline, in minutes.
+	TransientRetryMinutes *[]int `json:"transient_retry_minutes,omitempty"`
 	// CustomerRetries is how many declined attempts of the customer's own
 	// (retry-now, or paying the renewal order) one renewal takes on one card
 	// before only another card is charged. Nil is 3; 0 refuses any retry of a
@@ -543,6 +577,8 @@ const (
 
 // DunningTier is the retry schedule for cycles shorter than MaxCycleHours.
 type DunningTier struct {
-	MaxCycleHours   int   `json:"max_cycle_hours,omitempty"`
+	// MaxCycleHours bounds the cycles this tier schedules; 0 is every longer one.
+	MaxCycleHours int `json:"max_cycle_hours,omitempty"`
+	// RetryAfterHours are the retries after a declined renewal, in hours from the first attempt.
 	RetryAfterHours []int `json:"retry_after_hours,omitempty"`
 }

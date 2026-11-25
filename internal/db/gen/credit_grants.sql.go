@@ -956,6 +956,55 @@ func (q *Queries) ListLapsedCreditLots(ctx context.Context, arg ListLapsedCredit
 	return items, nil
 }
 
+const listLapsedRemaining = `-- name: ListLapsedRemaining :many
+SELECT customer_id, sum(units_credited - units_debited)::bigint AS remaining
+FROM billing.credit_grants
+WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+  AND unit = $3::text AND revoked_at IS NULL AND units_credited > units_debited
+  AND units_reserved = 0 AND expires_at IS NOT NULL AND expires_at <= $4::timestamptz
+GROUP BY customer_id
+`
+
+type ListLapsedRemainingParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	Currency    string
+	AsOf        time.Time
+}
+
+type ListLapsedRemainingRow struct {
+	CustomerID uuid.UUID
+	Remaining  int64
+}
+
+// What many customers' lots that lapsed and were not yet expired still hold
+// in a currency, beside what pending refunds reserve of them (a capacity
+// read counts those apart): a view offers none of it.
+func (q *Queries) ListLapsedRemaining(ctx context.Context, arg ListLapsedRemainingParams) ([]ListLapsedRemainingRow, error) {
+	rows, err := q.db.Query(ctx, listLapsedRemaining,
+		arg.MerchantID,
+		arg.CustomerIds,
+		arg.Currency,
+		arg.AsOf,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLapsedRemainingRow
+	for rows.Next() {
+		var i ListLapsedRemainingRow
+		if err := rows.Scan(&i.CustomerID, &i.Remaining); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRevokedCreditLotsWithUnits = `-- name: ListRevokedCreditLotsWithUnits :many
 SELECT merchant_id, id, customer_id, account_id, unit, units, funding_source, paid_amount, paid_currency, source, source_id, invoker, product_id, order_line_id, payment_id, description, starts_at, expires_at, revoked_at, units_credited, units_debited, units_reserved, created_at, deferred_credited, deferred_debited FROM billing.credit_grants
 WHERE merchant_id = $1::uuid

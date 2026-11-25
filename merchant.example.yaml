@@ -1,0 +1,352 @@
+# One merchant's document, with every key: a reference, read by nothing.
+# Generated from billing.MerchantDocument; regenerate with
+# `go run ./internal/examplegen -write` in server/. A key left out keeps
+# its default, which its description names; values here are empty. A file
+# document names its slug; a merchant manifest keys each document by it under
+# merchants.<slug>, and with vault.kv_mount Vault holds them. Secrets belong
+# in a manifest overlay or Vault. A list shows one element, a map one <key>.
+# Slug is the merchant's name.
+slug: ""
+# DisplayName is the merchant's name as its customers see it.
+display_name: ""
+# PSPs is the operator-declared PSP catalog: the merchant's payment service providers, keyed by PSP key (e.g. mobius).
+psps:
+  nmi:
+    # The rail this PSP is on.
+    rail: nmi
+    # GatewayID is the NMI dashboard's Gateway ID: the PSP's account.
+    gateway_id: ""
+    # Environment is live (the default), test (a gateway account in test mode) or sandbox (a sandbox.nmi.com account).
+    environment: ""
+    # Archived drains the PSP: its subscriptions stay, it takes no new work.
+    archived: false
+    # Custodian is the key of a declared custodian holding this PSP's cards; "" means NMI's customer vault holds them.
+    custodian: ""
+    # WebhookOverlapExpiresAt ends the previous secret's verification, RFC 3339.
+    webhook_overlap_expires_at: ""
+    # TokenizationKey is the public Collect.js key the browser's card fields use.
+    tokenization_key: ""
+    # TokenizationURL overrides the Collect.js script URL.
+    tokenization_url: ""
+    # CardEntry is browser (the default) or server, where the payment page posts the card to OpenRails, which vaults it.
+    card_entry: ""
+    # DisputeRatioLimit is the acquirer's limit on chargebacks over settled sales in a month, as a percentage ("0.9%"): monitored like a card network's program.
+    dispute_ratio_limit: ""
+    # Its credentials.
+    secrets:
+      # SecurityKey is the gateway's private API key. Required.
+      security_key: ""
+      # WebhookSigningSecret verifies NMI's webhooks. Required.
+      webhook_signing_secret: ""
+      # WebhookSigningSecretPrevious is the rotated-out secret.
+      webhook_signing_secret_previous: ""
+  stripe:
+    # The rail this PSP is on.
+    rail: stripe
+    # AccountID is the Stripe account, acct_….
+    account_id: ""
+    # Environment is live (the default) or test, as the secret key's prefix says.
+    environment: ""
+    # Archived drains the PSP: its subscriptions stay, it takes no new work.
+    archived: false
+    # WebhookOverlapExpiresAt ends the previous secret's verification, RFC 3339.
+    webhook_overlap_expires_at: ""
+    # PublishableKey (pk_…) enables embedded Elements; without it purchase redirects to Stripe Checkout.
+    publishable_key: ""
+    # DisputeRatioLimit is the acquirer's limit on chargebacks over settled sales in a month, as a percentage ("0.9%"): monitored like a card network's program.
+    dispute_ratio_limit: ""
+    # Its credentials.
+    secrets:
+      # SecretKey is the account's secret or restricted key. Required.
+      secret_key: ""
+      # WebhookSigningSecret verifies the webhook endpoint's events. Required.
+      webhook_signing_secret: ""
+      # WebhookSigningSecretThin verifies the thin-event endpoint.
+      webhook_signing_secret_thin: ""
+      # WebhookSigningSecretPrevious is the rotated-out secret.
+      webhook_signing_secret_previous: ""
+  ccbill:
+    # The rail this PSP is on.
+    rail: ccbill
+    # ClientAccnum and ClientSubacc are the CCBill account and subaccount numbers, like 945280 and 0000: the PSP's account.
+    client_accnum: ""
+    # ClientAccnum and ClientSubacc are the CCBill account and subaccount numbers, like 945280 and 0000: the PSP's account.
+    client_subacc: ""
+    # Environment is live (the default) or sandbox (CCBill's sandbox).
+    environment: ""
+    # Archived drains the PSP: its subscriptions stay, it takes no new work.
+    archived: false
+    # DisputeRatioLimit is the acquirer's limit on chargebacks over settled sales in a month, as a percentage ("0.9%"): monitored like a card network's program.
+    dispute_ratio_limit: ""
+    # Its credentials.
+    secrets:
+      # Salt signs FlexForm links and verifies their callbacks. Required.
+      salt: ""
+      # DatalinkUsername is the DataLink user OpenRails reads transactions as.
+      datalink_username: ""
+      # DatalinkPassword is the DataLink user's password.
+      datalink_password: ""
+  solana:
+    # The rail this PSP is on.
+    rail: solana
+    # Environment is mainnet (the default), devnet or testnet.
+    environment: ""
+    # Archived drains the PSP: its subscriptions stay, it takes no new work.
+    archived: false
+    # Treasury is the Solana address every payment to the merchant lands in: the PSP's identity.
+    treasury: ""
+    # Its credentials.
+    secrets:
+      # RPCURL is the PSP's own Solana JSON-RPC endpoint, tried before the network's public one.
+      rpc_url: ""
+# Custodians is the operator-declared custodian catalog, keyed by custodian key.
+custodians:
+  basis_theory:
+    # Kind is the vendor: basis_theory or hyperswitch.
+    kind: basis_theory
+    # Environment is the tenant's money class: live (the default) or test.
+    environment: ""
+    # AccountID is the custodian-native tenant identity (Basis Theory: the tenant id).
+    account_id: ""
+    # Archived drains the custodian: instruments it holds stay chargeable, no new arrangement may reference it.
+    archived: false
+    # Settings are the declared NON-secret knobs, validated against the kind's registry: public_api_key, network_tokens.
+    settings:
+      public_api_key: ""
+      network_tokens: false
+      account_updater: false
+      account_updater_lookahead_days: 0
+    # Secrets are the kind's credential slots (Basis Theory: api_key, the private application key), named in-process custodians/<kind>/<environment>/<account_id>/<key>.
+    secrets:
+      # Required.
+      api_key: ""
+  hyperswitch:
+    # Kind is the vendor: basis_theory or hyperswitch.
+    kind: hyperswitch
+    # Environment is the tenant's money class: live (the default) or test.
+    environment: ""
+    # AccountID is the custodian-native tenant identity (Basis Theory: the tenant id).
+    account_id: ""
+    # Archived drains the custodian: instruments it holds stay chargeable, no new arrangement may reference it.
+    archived: false
+    # Settings are the declared NON-secret knobs, validated against the kind's registry: public_api_key, network_tokens.
+    settings:
+      public_api_key: ""
+      profile_id: ""
+    # Secrets are the kind's credential slots (Basis Theory: api_key, the private application key), named in-process custodians/<kind>/<environment>/<account_id>/<key>.
+    secrets:
+      # Required.
+      api_key: ""
+# UsageBilling is automatic usage billing on credit, per currency.
+usage_billing:
+  # BillingDay is the day of the month usage is invoiced.
+  billing_day: 0
+  # Currencies are the currencies usage is billed in, each with its credit.
+  currencies:
+      # Currency is the currency these amounts are in.
+    - currency: ""
+      # CreditLimit is the unpaid usage a customer may run up, in the currency's units.
+      credit_limit: "0"
+      # MinimumInvoiceAmount is the smallest usage order invoiced.
+      minimum_invoice_amount: "0"
+      # CollectionThreshold invoices arrears in the currency once they reach it, before the credit limit: nil is the credit limit.
+      collection_threshold: "0"
+      # DelinquencyFloor is the smallest overdue balance in the currency that can make a customer delinquent: nil is one unit of the currency, 0 delinquent once anything is overdue.
+      delinquency_floor: "0"
+# Profile is what customers see of the merchant: its links, mailbox, logo and statement name.
+profile:
+  # LogoURL is the merchant's logo, an https URL.
+  logo_url: ""
+  # FromEmail is the mailbox the merchant's billing mail is sent from.
+  from_email: ""
+  # SupportURL is where customers get help.
+  support_url: ""
+  # SubscribeURL is where new customers, and those whose access ended, buy a subscription.
+  subscribe_url: ""
+  # BillingURL is where customers manage and cancel their subscriptions and payment agreements.
+  billing_url: ""
+  # TermsURL is the merchant's terms of service.
+  terms_url: ""
+  # PrivacyURL is the merchant's privacy policy.
+  privacy_url: ""
+  # StatementDescriptor is the name card charges carry on statements, shown under the pay button.
+  statement_descriptor: ""
+# BillingPeriodBoundary cuts usage statement periods: fixed_interval (default), calendar_month or anniversary.
+billing_period_boundary: ""
+# AlertEmail is the one mailbox critical alerts and test messages go to.
+alert_email: ""
+# RepriceNoticeWindowDays is how close to a renewal a price migration may not raise a price unacknowledged.
+reprice_notice_window_days: 0
+# ProviderRefundAccess decides what a refund made in the provider's own dashboard does to access, on every rail: ProviderRefundRevokeOnFull (default), ProviderRefundRevokeOnAny or ProviderRefundKeep.
+provider_refund_access: ""
+# FraudWarningRefund decides what an actionable early fraud warning does: FraudWarningRefundCharge (default) or FraudWarningRecord.
+fraud_warning_refund: ""
+# ArrearsGraceDays is how long an unpaid usage order may be overdue before the customer is delinquent.
+arrears_grace_days: 0
+# PSPRouting are ordered rules that pick one PSP before a purchase is attempted.
+psp_routing:
+    # Match is the purchases the rule applies to; empty matches every one.
+  - match:
+      # Registered currency code, uppercase (matched case-insensitively).
+      currency: ""
+      # product key.
+      product: ""
+      # price key.
+      price: ""
+      # one_off | subscription.
+      mode: ""
+      # unsupported; nonempty values are rejected.
+      country: ""
+    # Prefer are purchase selectors in preference order: PSP keys ("mobius"), or a rail kind, which resolves to that rail's one armed PSP.
+    prefer: []
+# DunningPolicy replaces the built-in dunning schedule.
+dunning_policy:
+  # Tiers are the retry schedules by billing cycle length.
+  tiers:
+      # MaxCycleHours bounds the cycles this tier schedules; 0 is every longer one.
+    - max_cycle_hours: 0
+      # RetryAfterHours are the retries after a declined renewal, in hours from the first attempt.
+      retry_after_hours: []
+  # TransientRetryMinutes are the quick retries after a transient decline, in minutes.
+  transient_retry_minutes: []
+  # CustomerRetries is how many declined attempts of the customer's own (retry-now, or paying the renewal order) one renewal takes on one card before only another card is charged.
+  customer_retries: 0
+  # AccessDuringDunning is DunningAccessKeep (default: members keep access until a confirmed outcome ends it) or DunningAccessSuspend (access ends with the paid period while a declined renewal is retried).
+  access_during_dunning: ""
+  # AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no outcome because collection is stopped keeps access until it is attempted) or DunningAccessSuspend (access ends at the renewal allowance, min(24h, max(2h, period/10)) past the paid period).
+  access_while_renewal_held: ""
+# Checkout is the checkout's settings (embed origins, billing fields); a patch replaces it whole.
+checkout:
+  # EmbedOrigins are the origins that may frame the merchant's embedded pay URLs: exact https origins (http on loopback), at most 10, no wildcards.
+  embed_origins: []
+  # BillingFields are the billing details a new card's form asks for and OpenRails requires; absent, country always and the postal code in the US.
+  billing_fields:
+    # Country is required (default), optional or hidden.
+    country: ""
+    # PostalCode is auto (default: asked for, and required, in the US only), required, optional or hidden.
+    postal_code: ""
+# BalanceNotices are the default low-balance lines of the merchant's customers; a patch replaces it whole.
+balance_notices:
+  # RunwayHours is the line in hours of spend at the customer's burn rate: 24 when unset, 0 off.
+  runway_hours: 0
+  # LowAmounts are amount lines per currency; none for a currency not listed.
+  low_amounts:
+      # Currency is the balance's currency.
+    - currency: ""
+      # Amount is the line, in the currency's units; 0 turns it off.
+      amount: "0"
+# Accounting is how the merchant's books are dated; a patch replaces it whole.
+accounting:
+  # Timezone is the IANA zone (Europe/Berlin) whose days and months the metrics, MRR reports and usage history group in, and at whose month ends usage posts; empty is UTC.
+  timezone: ""
+# CardVault is where new cards are saved: a card PSP's key, whose own vault (or the custodian it names) holds them, or CardVaultPlatform.
+card_vault: ""
+# ChargePSPs are the card PSPs, in order, that new card charges go to: each must charge cards from CardVault.
+charge_psps: []
+# BillingPolicies are named spend limits: an outstanding cap, a window spend cap or an accrual rate cap.
+billing_policies:
+    # Name is the policy's, which bindings name.
+  - name: ""
+    # Kind is "outstanding_cap" (cap LEDGER-measured unpaid arrears — a credit line on debt, refused with outstanding_cap_reached), "window_spend_cap" (cap NEW spend per rolling window; prior debt drives delinquency, not admission), or "accrual_rate_cap" (cap the measured accrual RATE in micros/hour — the cloud quota, refused with accrual_rate_cap_reached).
+    kind: ""
+    # OutstandingCapAmount (micros) is the credit line for kind=outstanding_cap.
+    outstanding_cap_amount: "0"
+    # SpendWindows are the rolling NEW-spend ceilings for kind=window_spend_cap.
+    spend_windows:
+        # Key names the window.
+      - key: ""
+        # WindowSeconds is the rolling window, at most 31 days.
+        window_seconds: 0
+        # Limit is the spend allowed per window, in Currency's units.
+        limit: "0"
+        # Currency is the window's; empty is the request's.
+        currency: ""
+    # AccrualRateCapPerHour (kind=accrual_rate_cap) caps the measured accrual rate in micros PER HOUR — the cloud quota.
+    accrual_rate_cap_per_hour: "0"
+    # AccrualRateWindowSeconds is the accrual rate's measurement lookback (default 3600).
+    accrual_rate_window_seconds: 0
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    collection_threshold_amount: "0"
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    delinquency_grace_days: 0
+    # CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor override the merchant-wide invoice policy for payers bound here; nil defers to it.
+    delinquency_amount_floor: "0"
+    # CollectionCycleBoundary is declarable and REFUSED: statement periods must tile a payer's lifetime, and rebinding is a live lever, so the boundary stays merchant-wide.
+    collection_cycle_boundary: ""
+    # BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace windows: at most Limit of host-reported wasted spend is forgiven per window; direct-payer overage is charged.
+    bad_spend_windows:
+        # Key names the window.
+      - key: ""
+        # WindowSeconds is the rolling window, at most 31 days.
+        window_seconds: 0
+        # Limit is the spend allowed per window, in Currency's units.
+        limit: "0"
+        # Currency is the window's; empty is the request's.
+        currency: ""
+    # PolicyCurrency is the currency of the policy's amounts and of a spend or bad-spend window that names none; absent, the request's.
+    policy_currency: ""
+# BillingPolicyBindings choose the merchant default policy and each trust tier's.
+billing_policy_bindings:
+    # PolicyName is the billing policy bound.
+  - policy: ""
+    # Tier is the trust tier it applies to; empty makes it the merchant default.
+    tier: ""
+# DelegatedInvokerWastedSpendLimits bound the wasted spend a delegated invoker is forgiven per window.
+delegated_invoker_wasted_spend_limits:
+    # Key names the window.
+  - key: ""
+    # WindowSeconds is the rolling window, at most 31 days.
+    window_seconds: 0
+    # Limit is the spend allowed per window, in Currency's units.
+    limit: "0"
+    # Currency is the window's; empty is the request's.
+    currency: ""
+# Currencies are the merchant's own units (MerchantCurrency), at most 32.
+currencies:
+    # Code is the unit's code: up to twelve upper-case letters or digits, starting with a letter.
+  - code: ""
+    # Name is how it reads ("Gold coins").
+    name: ""
+    # Symbol is its display mark; the code when omitted.
+    symbol: ""
+    # Scale is its decimal places: 0 counts whole units, at most 6.
+    scale: 0
+# AlertWebhooks are where the merchant's operational alerts are posted.
+alert_webhooks:
+    # Name labels the webhook in the merchant's configuration.
+  - name: ""
+    # URL is where alerts are posted; it is a credential.
+    url: ""
+    # Format is generic (the default), discord or slack.
+    format: ""
+    # Enabled defaults to true.
+    enabled: false
+# Messages is the merchant's messages document: which event types send its customers a message, and its own templates.
+messages:
+  # DefaultLanguage is the language messages are written in, a BCP 47 tag; empty is en.
+  default_language: ""
+  # Events are the settings of each event type, by event type.
+  events:
+    <key>:
+      # Enabled sends the event type's message; nil keeps its default.
+      enabled: false
+      # Templates replace the built-in message, by language.
+      templates:
+        <key>:
+          # Subject is the subject line's template.
+          subject: ""
+          # HTML is the HTML body's template.
+          html: ""
+          # Text is the plain-text body's template.
+          text: ""
+  # Layouts wrap every message's body, by language.
+  layouts:
+    <key>:
+      # HTML is the HTML layout template.
+      html: ""
+      # Text is the plain-text layout template.
+      text: ""
+# Secrets are the merchant's own credentials.
+secrets:
+  # SCIMToken is a provisioning token (at least 32 characters) the merchant's directory presents at /scim/v2.
+  scim_token: ""

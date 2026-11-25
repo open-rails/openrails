@@ -888,7 +888,7 @@ func nmiEngineMembership(t *testing.T) (*authorityWorld, *nmiJournal, *billing.S
 	price, err := a.alpha.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "nmi-engine-weekly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: ptr(7 * 24)})
 	require.NoError(t, err)
 	token := p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"})
-	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token}}
+	input := billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price.ID}}, ExpectedTotal: ptr(int64(10_000_000)), Reusable: ptr(true), Payment: &billing.OrderPaymentParams{Token: token, BillingDetails: billedTo("US", "10001")}}
 	status, raw := a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, input, map[string]string{"Idempotency-Key": "nmi-engine-membership"})
 	require.Equal(t, http.StatusCreated, status, string(raw))
 	var order billing.Order

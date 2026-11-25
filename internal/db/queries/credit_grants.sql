@@ -274,3 +274,14 @@ SELECT COALESCE(sum(amount) FILTER (WHERE transfer_type = 'cash_received' OR tra
 FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND book = 'general' AND source = 'payment'
   AND source_id = sqlc.arg(payment_id)::text AND transfer_type IN ('cash_received', 'cash_applied', 'usage_collected', 'dispute_won');
+
+-- name: ListLapsedRemaining :many
+-- What many customers' lots that lapsed and were not yet expired still hold
+-- in a currency, beside what pending refunds reserve of them (a capacity
+-- read counts those apart): a view offers none of it.
+SELECT customer_id, sum(units_credited - units_debited)::bigint AS remaining
+FROM billing.credit_grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+  AND unit = sqlc.arg(currency)::text AND revoked_at IS NULL AND units_credited > units_debited
+  AND units_reserved = 0 AND expires_at IS NOT NULL AND expires_at <= sqlc.arg(as_of)::timestamptz
+GROUP BY customer_id;

@@ -2,7 +2,7 @@
 // GetMeter reads one meter with its rate card.
 func (c *Client) GetMeter(ctx context.Context, key string) (*billing.Meter, error) {
 	var out billing.Meter
-	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: config.ReadMeters}, &out); err != nil {
+	if err := c.send(ctx, routeCall{method: http.MethodGet, path: "/v1/catalog/meters/{key}", args: []string{key}, cache: billing.ReadMeters}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -28,13 +28,13 @@ func (c *Client) RefundPayment(ctx context.Context, idempotencyKey string, id bi
 	return &out, nil
 }
 
-// ReleaseAdmissions frees the holds of admissions whose work failed.
-func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string) ([]billing.AdmissionResult, error) {
-	var out billing.AdmissionBatchResult
-	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/admissions/release", body: billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}}, &out); err != nil {
+// SyncLeases settles a lease's usage and answers its views.
+func (c *Client) SyncLeases(ctx context.Context, params billing.SyncLeasesParams) (*billing.SyncLeasesResult, error) {
+	var out billing.SyncLeasesResult
+	if err := c.send(ctx, routeCall{method: http.MethodPost, path: "/v1/app/leases/sync", body: params}, &out); err != nil {
 		return nil, err
 	}
-	return out.Items, nil
+	return &out, nil
 }
 
 // ApplyCatalog applies a catalog document; params.Force overwrites edits.

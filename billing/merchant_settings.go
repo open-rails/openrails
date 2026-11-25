@@ -8,6 +8,7 @@ import "github.com/open-rails/openrails/catalog"
 // winning rule does not name is not eligible, so a rule can constrain a
 // product to one rail.
 type PSPRoutingRule struct {
+	// Match is the purchases the rule applies to; empty matches every one.
 	Match PSPRoutingMatch `json:"match,omitempty"`
 	// Prefer are purchase selectors in preference order: PSP keys ("mobius"),
 	// or a rail kind, which resolves to that rail's one armed PSP.
@@ -49,10 +50,14 @@ const (
 // 10^-Scale units: Scale 0 (the default) counts whole units, at most 6.
 // Each merchant's units are its own: another merchant does not know them.
 type MerchantCurrency struct {
-	Code   catalog.Currency `json:"code"`
-	Name   string           `json:"name"`
-	Symbol string           `json:"symbol,omitempty"`
-	Scale  int              `json:"scale"`
+	// Code is the unit's code: up to twelve upper-case letters or digits, starting with a letter.
+	Code catalog.Currency `json:"code"`
+	// Name is how it reads ("Gold coins").
+	Name string `json:"name"`
+	// Symbol is its display mark; the code when omitted.
+	Symbol string `json:"symbol,omitempty"`
+	// Scale is its decimal places: 0 counts whole units, at most 6.
+	Scale int `json:"scale"`
 }
 
 // FraudWarningRefund is what an actionable early fraud warning (an issuer's
@@ -67,3 +72,31 @@ const (
 	// FraudWarningRecord records the report only.
 	FraudWarningRecord FraudWarningRefund = "record"
 )
+
+// BillingFieldMode is whether a new card's form asks for a billing detail and
+// whether OpenRails requires it.
+type BillingFieldMode string
+
+const (
+	BillingFieldRequired BillingFieldMode = "required"
+	// BillingFieldOptional is asked for and may be left blank.
+	BillingFieldOptional BillingFieldMode = "optional"
+	// BillingFieldHidden is never asked for; one sent is dropped.
+	BillingFieldHidden BillingFieldMode = "hidden"
+	// BillingFieldAuto (postal_code only) is asked for, and required, when
+	// the billing country is the US; elsewhere it is not asked for, and one
+	// sent is kept.
+	BillingFieldAuto BillingFieldMode = "auto"
+)
+
+// BillingFieldSettings are the billing details a new card's form asks for, as
+// Stripe collects them. They apply to the card fields OpenRails draws (NMI and
+// the platform vault); Stripe's Payment Element collects a Stripe card's
+// address by Stripe's own rules.
+type BillingFieldSettings struct {
+	// Country is required (default), optional or hidden.
+	Country BillingFieldMode `json:"country,omitempty"`
+	// PostalCode is auto (default: asked for, and required, in the US only),
+	// required, optional or hidden.
+	PostalCode BillingFieldMode `json:"postal_code,omitempty"`
+}
