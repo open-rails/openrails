@@ -61,10 +61,11 @@ Per rail ([provider uncertainty](../standalone.md#provider-intents) has the full
   confirmed included, counts as landed.
 - **Solana subscription receipts settle at finalized.** A first payment, a plan
   change and a renewal pull are booked, and access extended, only from a
-  transaction read at finalized commitment (`ChainReader.GetFinalizedTransaction`);
-  the cranker watches its own pull to finalized. A transaction that is only
-  confirmed is landed with its settlement pending: its operation waits and
-  reads again, and is never failed, re-signed or canceled for it. One-off
+  transaction read at finalized commitment (`ChainReader.GetFinalizedTransaction`),
+  and a pull's revert is classified only from a finalized read. A transaction
+  that is only confirmed is landed with its settlement pending: its operation
+  waits for the verifier to read again, and is never failed, re-signed or
+  canceled for it. One-off
   purchases read references at finalized too.
 
 Money-moving types include `nmi_sale`, `subscription_collection`,

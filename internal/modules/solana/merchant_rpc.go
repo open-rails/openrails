@@ -189,6 +189,14 @@ func (r *MerchantChainReader) GetFinalizedTransaction(ctx context.Context, signa
 	return client.GetFinalizedTransaction(ctx, signature)
 }
 
+func (r *MerchantChainReader) SignatureCommitment(ctx context.Context, signature solanago.Signature) (rpc.ConfirmationStatusType, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return "", err
+	}
+	return client.SignatureCommitment(ctx, signature)
+}
+
 func (r *MerchantChainReader) NeverLanded(ctx context.Context, signature solanago.Signature, terminal solanarpc.ChainTerminal) (bool, error) {
 	client, err := r.client(ctx)
 	if err != nil {

@@ -397,6 +397,9 @@ func (h *Handler) expiredUnseen(ctx context.Context, intent gen.BillingProviderI
 // RenewMembership (idempotent on the signature) + AdvanceAfterPull.
 func (h *Handler) repairFromSignature(ctx context.Context, repo *solanasubs.SolanaSubscriptionRepo, agreement *Agreement, intent gen.BillingProviderIntent, sig string) intents.Outcome {
 	receipt, err := recurring.VerifyPullReceipt(ctx, h.Chain, &agreement.Row, sig, agreement.TokenAmount, agreement.PeriodHours, agreement.TokenDecimals, intent.ID)
+	if errors.Is(err, recurring.ErrPaymentNotLanded) {
+		return intents.Ambiguous("pull landed; its settlement awaits finality")
+	}
 	if err != nil {
 		return intents.Ambiguous("pull receipt does not qualify its accepted agreement: " + err.Error())
 	}

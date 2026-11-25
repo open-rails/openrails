@@ -26,6 +26,9 @@ type ChainReader interface {
 	// GetFinalizedTransaction reads a transaction at finalized commitment;
 	// nil while it is only confirmed.
 	GetFinalizedTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
+	// SignatureCommitment is the commitment the signature reached; "" when
+	// the node does not know it.
+	SignatureCommitment(ctx context.Context, signature solanago.Signature) (rpc.ConfirmationStatusType, error)
 	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal ChainTerminal) (*TransactionOutcome, error)
 	// NeverLanded reports whether the signature provably never landed and
 	// never will.

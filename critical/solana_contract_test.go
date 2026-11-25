@@ -150,6 +150,12 @@ func newSolanaWire(t *testing.T, node *solanafake.Node) *solanaWire {
 	return w
 }
 
+func (w *solanaWire) readCount(signature string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.reads[signature]
+}
+
 func (w *solanaWire) read(signature string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()

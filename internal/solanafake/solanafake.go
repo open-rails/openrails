@@ -103,13 +103,14 @@ type landed struct {
 	meta      map[string]any
 	blockTime time.Time
 	slot      uint64
-	// before is the node's token accounts and account data before it landed.
+	// before holds the accounts it names as they were before it landed; nil
+	// for one that did not exist.
 	before snapshot
 }
 
 type snapshot struct {
-	tokens   map[string]tokenAccount
-	accounts map[string][]byte
+	tokens   map[string]*tokenAccount
+	accounts map[string]*account
 }
 
 // Transfer is one synthesized payment a test lands with Pay.
@@ -389,6 +390,19 @@ func (n *Node) land(tx *solanago.Transaction, blockTime time.Time, finalized boo
 		return solanago.Signature{}, errors.New("solanafake: refused: already processed")
 	}
 	pre := n.tokenBalances(tx)
+	before := snapshot{tokens: map[string]*tokenAccount{}, accounts: map[string]*account{}}
+	for _, key := range tx.Message.AccountKeys {
+		addr := key.String()
+		before.tokens[addr], before.accounts[addr] = nil, nil
+		if acct := n.tokens[addr]; acct != nil {
+			saved := *acct
+			before.tokens[addr] = &saved
+		}
+		if acct, ok := n.accounts[addr]; ok {
+			acct.data = append([]byte(nil), acct.data...)
+			before.accounts[addr] = &acct
+		}
+	}
 	saved := map[string]tokenAccount{}
 	for addr, acct := range n.tokens {
 		saved[addr] = *acct
@@ -436,7 +450,7 @@ func (n *Node) land(tx *solanago.Transaction, blockTime time.Time, finalized boo
 	n.height++
 	n.txs[sig.String()] = &landed{
 		slot: n.height, blockTime: blockTime, raw: raw, v0: tx.Message.IsVersioned(), failure: failure, finalized: finalized,
-		before: snapshot{tokens: saved, accounts: savedData},
+		before: before,
 		meta: map[string]any{
 			"err": failure, "preBalances": []any{}, "postBalances": []any{},
 			"preTokenBalances": pre, "postTokenBalances": n.tokenBalances(tx),
@@ -465,8 +479,9 @@ func (n *Node) WithholdFinality(count int) {
 }
 
 // Abandon drops a transaction that never finalized with the fork that held it:
-// no read knows it any more, and the node's accounts return to what they were
-// before it landed, later transactions' effects included.
+// no read knows it any more, and the accounts it names are as before it
+// landed. It panics when a later transaction landed, whose effects it cannot
+// tell apart.
 func (n *Node) Abandon(sig string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -474,19 +489,26 @@ func (n *Node) Abandon(sig string) {
 	if !ok || tx.finalized {
 		return
 	}
-	for addr, acct := range n.tokens {
-		if saved, ok := tx.before.tokens[addr]; ok {
-			*acct = saved
-		} else {
-			delete(n.tokens, addr)
+	for other, later := range n.txs {
+		if other != sig && later.slot > tx.slot {
+			panic("solanafake: Abandon after a later transaction landed")
 		}
 	}
-	for addr, acct := range n.accounts {
-		if data, ok := tx.before.accounts[addr]; ok {
-			acct.data = append([]byte(nil), data...)
-			n.accounts[addr] = acct
+	for addr, saved := range tx.before.tokens {
+		if saved == nil {
+			delete(n.tokens, addr)
+		} else if acct := n.tokens[addr]; acct != nil {
+			*acct = *saved
 		} else {
+			restored := *saved
+			n.tokens[addr] = &restored
+		}
+	}
+	for addr, saved := range tx.before.accounts {
+		if saved == nil {
 			delete(n.accounts, addr)
+		} else {
+			n.accounts[addr] = *saved
 		}
 	}
 	delete(n.txs, sig)

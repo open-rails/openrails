@@ -50,6 +50,9 @@ func fetchLanded(ctx context.Context, chain solanaint.ChainReader, signature str
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid signature", ErrPaymentUnverified)
 	}
+	if status, err := chain.SignatureCommitment(ctx, sig); err == nil && status != "" && status != rpc.ConfirmationStatusFinalized {
+		return nil, fmt.Errorf("%w: %s is %s, its settlement awaits finality", ErrPaymentNotLanded, sig, status)
+	}
 	result, err := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{},
 		func(ctx context.Context) (*rpc.GetTransactionResult, error) {
 			return chain.GetFinalizedTransaction(ctx, sig)
