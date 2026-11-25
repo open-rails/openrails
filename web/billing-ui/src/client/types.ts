@@ -95,10 +95,10 @@ export const priceProviderSchema = z.object({
 export const priceSchema = z.object({
   id: z.string(),
   key: z.string(),
-  /** The price key's revision: every change to any of its versions; absent on older servers. */
-  revision: z.number().int().nonnegative().optional(),
-  /** This price's terms within its key, from zero; absent on older servers. */
-  version: z.number().int().nonnegative().optional(),
+  /** The price key's revision: every change to any of its versions. */
+  revision: z.number().int().nonnegative(),
+  /** This price's terms within its key, from one. */
+  version: z.number().int().nonnegative(),
   product_id: z.string(),
   archived: z.boolean(),
   unit_amount: amount,
@@ -520,8 +520,8 @@ export type InvoicePaymentInput =
 export const productSchema = z.object({
   id: z.string(),
   key: z.string(),
-  /** Current mutation counter; absent on older servers. */
-  revision: z.number().int().nonnegative().optional(),
+  /** Current mutation counter. */
+  revision: z.number().int().nonnegative(),
   display_name: z.string(),
   description: z.string(),
   /** Opaque entitlement keys granted by the product. */

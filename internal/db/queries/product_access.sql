@@ -76,17 +76,6 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg
 ORDER BY pa.ends_at DESC
 LIMIT 1;
 
--- name: ProductAccessCoverage :one
--- Across the customer's live windows of a product at at: whether one is
--- indefinite, else the latest end.
-SELECT COALESCE(bool_or(pa.ends_at IS NULL), false)::boolean AS indefinite,
-       COALESCE(max(pa.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
-FROM billing.product_access pa
-WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
-  AND pa.product_id = ANY(sqlc.arg(product_ids)::uuid[])
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at)::timestamptz);
-
 -- name: EndActiveProductAccessBySubscription :exec
 -- Bounds a subscription's live windows to a proven end. Future-start windows are
 -- removed by SoftDeleteFutureProductAccessBySubscription.

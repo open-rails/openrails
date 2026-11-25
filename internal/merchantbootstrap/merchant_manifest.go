@@ -91,11 +91,10 @@ func parseManifest[M any](raw []byte, check func(slug string, entry M) error) (*
 	return &manifest, nil
 }
 
-// RejectMisplacedMerchantConfigKeys fails a manifest entry that sets a
-// retired key (config.RetiredDeclarationKey), or that names its own slug:
-// the entry's key is the slug, so the two can never disagree. The strict
-// parser would reject these as unknown fields anyway, but "unknown field"
-// reads like a typo: each deserves a pointer.
+// RejectMisplacedMerchantConfigKeys fails a manifest entry that names its own
+// slug: the entry's key is the slug, so the two can never disagree. The
+// strict parser would reject it as an unknown field anyway, but "unknown
+// field" reads like a typo.
 func RejectMisplacedMerchantConfigKeys(raw []byte) error {
 	var probe struct {
 		Merchants map[string]map[string]any `yaml:"merchants"`
@@ -111,9 +110,6 @@ func RejectMisplacedMerchantConfigKeys(raw []byte) error {
 	for _, slug := range slugs {
 		if _, ok := probe.Merchants[slug]["slug"]; ok {
 			return fmt.Errorf("merchants.%s.slug is not accepted: the entry's key is its slug", slug)
-		}
-		if retired, ok := config.RetiredDeclarationKey(probe.Merchants[slug]); ok {
-			return fmt.Errorf("merchants.%s.%s", slug, retired)
 		}
 	}
 	return nil

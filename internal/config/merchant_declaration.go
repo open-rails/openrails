@@ -115,39 +115,12 @@ func ValidatePSPKeys(psp string, p billing.PSPConfig) error {
 	return fmt.Errorf("psps.%s.secrets: unknown %s %s (%s takes %s)", psp, field, strings.Join(unknown, ", "), d.Rail, takes)
 }
 
-// retiredDeclarationKeys are the keys a merchant declaration no longer takes
-// and what became of each.
-var retiredDeclarationKeys = []struct{ key, fate string }{
-	{"rail_merchant_accounts", "was renamed to psps"},
-	{"provider_accounts", "was renamed to psps"},
-	{"api_host", "was removed: a request names its merchant by its credential, never by its host"},
-	{"arrears_delinquency_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
-	{"monthly_floor", "was replaced by usage_billing.currencies[].delinquency_floor, one per currency"},
-	{"collection_threshold", "was replaced by usage_billing.currencies[].collection_threshold, one per currency"},
-	{"usage_gate_safe_spend", "was removed: while OpenRails is unreachable a gate spends its share of each view's remaining"},
-}
-
-// RetiredDeclarationKey is the first retired key doc sets, with what became
-// of it. The strict parser would refuse it as an unknown field, which reads
-// like a typo.
-func RetiredDeclarationKey(doc map[string]any) (string, bool) {
-	for _, retired := range retiredDeclarationKeys {
-		if _, ok := doc[retired.key]; ok {
-			return retired.key + " " + retired.fate, true
-		}
-	}
-	return "", false
-}
-
 // ParseMerchantDocument parses one merchant YAML document, which names its
 // merchant with a required slug. Unknown fields are refused, so a typo fails
 // loudly instead of declaring a merchant with no PSPs.
 func ParseMerchantDocument(raw []byte) (billing.MerchantDocument, error) {
 	var probe map[string]any
 	if yaml.Unmarshal(raw, &probe) == nil {
-		if retired, ok := RetiredDeclarationKey(probe); ok {
-			return billing.MerchantDocument{}, fmt.Errorf("parse merchant document: %s", retired)
-		}
 		if _, ok := probe["issuer"]; ok {
 			return billing.MerchantDocument{}, fmt.Errorf("parse merchant document: issuer is not a document's: each host sets MerchantDeclaration.Issuer in its own code")
 		}

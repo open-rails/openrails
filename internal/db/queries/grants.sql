@@ -295,14 +295,6 @@ SELECT EXISTS (
       AND g.ends_at IS NOT DISTINCT FROM sqlc.narg(ends_at)::timestamptz
 ) AS exists;
 
--- name: ListOriginalPurchaseGrants :many
--- Original immutable events, including later-revoked sources. Accepted purchase
--- replay validates the original windows without reopening revoked projections.
-SELECT * FROM billing.grants
-WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='purchase'
-  AND source_id=sqlc.arg(payment_id)::uuid::text AND event='grant'
-ORDER BY id LIMIT sqlc.arg(row_limit)::int;
-
 -- name: ListInitialMembershipGrants :many
 -- Original source events before the accepted initial period ends; later renewal
 -- events and later revocations do not rewrite this initial history.

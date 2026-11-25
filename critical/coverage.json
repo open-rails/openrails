@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 789,
+  "scenario_count": 786,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1129,11 +1129,6 @@
       "name": "A Solana pull scheduled ahead and restored with its merchant runs on the destination at its due time"
     },
     {
-      "id": "OR-J31-S40",
-      "journey": "J31",
-      "name": "A merchant's notification adoption export holds back no other merchant and its own producers commit after its snapshot"
-    },
-    {
       "id": "OR-J31-S15",
       "journey": "J31",
       "name": "Credit lots move out of grants with their ids and the remainders and pending-refund shares the old formulas gave (the reservation net of reversals already settled), old data the move cannot place refuses it with nothing moved, and a migrated purchase deposit replays"
@@ -1531,7 +1526,7 @@
     {
       "id": "OR-J23-S36",
       "journey": "J23",
-      "name": "A catalog naming a limit's rate_cards is refused with their rename to counts, as YAML and over HTTP, and applies nothing; the one-to-one count applies"
+      "name": "A catalog naming a field a limit does not take (rate_cards) is refused, as YAML and over HTTP, and applies nothing; the one-to-one count applies"
     },
     {
       "id": "OR-J23-S37",
@@ -1821,7 +1816,7 @@
     {
       "id": "OR-J38-S72",
       "journey": "J38",
-      "name": "Upgrade retires scheduled provider refreshes and the operator command coalesces requests and retries the same job"
+      "name": "Starting the workers queues no provider refresh; the operator command coalesces requests and retries the same job"
     },
     {
       "id": "OR-J38-S76",
@@ -2556,7 +2551,7 @@
     {
       "id": "OR-J04-S77",
       "journey": "J04",
-      "name": "A Vault merchant document naming a retired key is refused with what replaced it, as a manifest is"
+      "name": "A Vault merchant document naming an unknown key is refused, as a manifest is"
     },
     {
       "id": "OR-J25-S37",
@@ -3121,7 +3116,7 @@
     {
       "id": "OR-J53-S01",
       "journey": "J53",
-      "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a removed measure is refused naming its replacement"
+      "name": "Cash, payments, attempts, purchases and rebills by outcome or kind equal the measures they replace on one merchant's real sales, refund, won dispute, declines and missed renewal, and a measure or dimension the registry does not serve is refused"
     },
     {
       "id": "OR-J53-S02",
@@ -3331,7 +3326,7 @@
     {
       "id": "OR-J45-S07",
       "journey": "J45",
-      "name": "Authorization rate, issuer-discretion decline rate and first-try rebill approval read the stored outcomes and causes: refusals and errors are in neither, missed renewals in neither; the decline mix and Visa categories, and cuts by kind, card brand, BIN, token type and whether the storing transaction's id was sent; the dimensions decline_cause renamed are refused with their new names; the overview shows them as tiles and in Payment health"
+      "name": "Authorization rate, issuer-discretion decline rate and first-try rebill approval read the stored outcomes and causes: refusals and errors are in neither, missed renewals in neither; the decline mix and Visa categories, and cuts by kind, card brand, BIN, token type and whether the storing transaction's id was sent; the overview shows them as tiles and in Payment health"
     },
     {
       "id": "OR-J45-S08",
@@ -3649,16 +3644,6 @@
       "name": "A pull that runs past one lease period keeps its lease and others still skip; a dead holder's lease lapses on its own and the next pull takes it"
     },
     {
-      "id": "OR-J06-S72",
-      "journey": "J06",
-      "name": "Retired provider write mode, engine admission hold and drain settings refuse boot and name their replacement"
-    },
-    {
-      "id": "OR-J06-S73",
-      "journey": "J06",
-      "name": "A provider_sandbox section or PROVIDER_SANDBOX_* variable refuses boot and names its replacement: no setting redirects a provider"
-    },
-    {
       "id": "OR-J06-S74",
       "journey": "J06",
       "name": "A signup under a rebill hold charges and creates its subscription; its first renewal waits with access kept and charges once after the release"
@@ -3711,7 +3696,7 @@
     {
       "id": "OR-J06-S84",
       "journey": "J06",
-      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot from the file or the environment and name what is refused; the key path alone loads"
+      "name": "Every auth setting but auth.keys.path, and local_sign_in and admin_console.issuers, refuse boot as unknown keys from the file or the environment; the key path alone loads"
     },
     {
       "id": "OR-J06-S85",
@@ -3936,7 +3921,7 @@
     {
       "id": "OR-J47-S10",
       "journey": "J47",
-      "name": "A checkout's customer type is new on a first purchase, returning after one or while subscribed, reactivated once a subscription ended; sales and cash split by it, and subscriber_type is refused with it"
+      "name": "A checkout's customer type is new on a first purchase, returning after one or while subscribed, reactivated once a subscription ended; sales and cash split by it"
     },
     {
       "id": "OR-J47-S11",

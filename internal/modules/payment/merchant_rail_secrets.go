@@ -269,12 +269,6 @@ func (s *PurchaseService) railSource() railresolve.Source {
 	return s.Rails
 }
 
-// stampPSP pins the resolved account into ctx so the payment, subscription and
-// payment-method writes downstream of this checkout stamp psp_id.
-func (s *PurchaseService) stampPSP(ctx context.Context, name string) context.Context {
-	return db.WithPSPID(ctx, s.ResolvePSPID(ctx, name))
-}
-
 // resolveNMIClient arms the ctx merchant's NMI client for the given provider
 // name (account key or bare rail): the resolved account's security_key. Fail
 // closed — a missing scope/secret errors; there is no boot-config fallback.

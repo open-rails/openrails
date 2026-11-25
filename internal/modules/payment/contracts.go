@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/db/models"
 )
 
 type UserIdentity struct {
@@ -42,29 +41,4 @@ type PurchaseResponse struct {
 	TransactionID  string     `json:"transaction_id,omitempty"`
 	RedirectURL    string     `json:"redirect_url,omitempty"`
 	DelayedStart   *time.Time `json:"delayed_start,omitempty"`
-}
-
-type CoverageInfo struct {
-	HasCoverage  bool
-	IsIndefinite bool
-	EndDate      *time.Time
-	SourceType   string
-	SourceID     *uuid.UUID
-}
-
-type EligibilityStatus string
-
-const (
-	EligibilityAllowed   EligibilityStatus = "allowed"
-	EligibilityBlocked   EligibilityStatus = "blocked"
-	EligibilityUpgrade   EligibilityStatus = "upgrade"
-	EligibilityDowngrade EligibilityStatus = "downgrade"
-)
-
-type EligibilityResult struct {
-	Status               EligibilityStatus
-	Reason               string
-	Coverage             *CoverageInfo
-	ExistingSubscription *models.Subscription
-	ExistingProduct      *models.Product
 }

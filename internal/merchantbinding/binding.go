@@ -104,8 +104,7 @@ func Bind(ctx context.Context, pool *pgxpool.Pool, database billing.DatabaseConf
 	return tx.Commit(ctx)
 }
 
-// A recorded tenant always requires its exact merchant group, even if legacy
-// data was written before the database constraint existed.
+// A recorded tenant always requires its exact merchant group.
 func conflictingBinding(binding billing.MerchantBinding, group *string, tenant *uuid.UUID) bool {
 	return group != nil && *group != binding.ID.String() ||
 		tenant != nil && (group == nil || tenant.String() != binding.TenantID)

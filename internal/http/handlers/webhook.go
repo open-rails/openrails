@@ -65,10 +65,7 @@ func readLimitedWebhookBody(r *httprequest.Request, maxBytes int64) ([]byte, boo
 }
 
 func Webhook(r *httprequest.Request) {
-	provider, ok := canonicalWebhookRail(r)
-	if !ok {
-		return
-	}
+	provider := webhookutil.CanonicalRail(r.Param("rail"))
 	clientIP := r.ClientIP()
 	r.Log.DebugContext(r.Request.Context(), "Received webhook", "provider", provider, "client_ip", clientIP)
 	if r.State == nil || r.State.Config == nil {
@@ -737,18 +734,6 @@ func ccbillWebhookAccountID(body []byte) string {
 	// The composite CCBill identity is dash-joined (clientAccnum-clientSubacc),
 	// CCBill's own convention and the declared account_id format.
 	return clientAccnum + "-" + clientSubacc
-}
-
-// canonicalWebhookRail resolves the URL's rail segment, writing a 400 with the
-// rename when the segment is a retired alias. The rail segment is the gateway
-// kind; a PSP is named by :account_id or the payload's account identity.
-func canonicalWebhookRail(r *httprequest.Request) (string, bool) {
-	provider, err := webhookutil.CanonicalRail(r.Param("rail"))
-	if err != nil {
-		r.ErrorCode(billing.CodeInvalidParam, err.Error())
-		return "", false
-	}
-	return provider, true
 }
 
 func readRequestBody(body io.ReadCloser) ([]byte, error) {

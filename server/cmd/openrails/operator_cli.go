@@ -28,10 +28,8 @@ import (
 // The operator's commands over the server's Go API: the merchant directory,
 // worker health and administrator lockouts. None has an HTTP route.
 
-type operatorSession = commandControlPlane
-
 // withOperator runs an operator action using only the account and merchant stores.
-func withOperator(cmd *cobra.Command, fn func(context.Context, operatorSession) error) error {
+func withOperator(cmd *cobra.Command, fn func(context.Context, commandControlPlane) error) error {
 	ctx := cmd.Context()
 	srv, err := openCLIControlPlane(ctx)
 	if err != nil {
@@ -146,7 +144,7 @@ func newMerchantsCreateCmd() *cobra.Command {
 		Short: "Create a merchant claiming a name, or report the one that holds it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withOperator(cmd, func(ctx context.Context, srv operatorSession) error {
+			return withOperator(cmd, func(ctx context.Context, srv commandControlPlane) error {
 				res, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: args[0], DisplayName: displayName, OwnerUserID: owner})
 				if err != nil {
 					return err
@@ -173,7 +171,7 @@ func newMerchantsRenameCmd() *cobra.Command {
 		Short: "Rename a merchant; its former name forwards under naming",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withOperator(cmd, func(ctx context.Context, srv operatorSession) error {
+			return withOperator(cmd, func(ctx context.Context, srv commandControlPlane) error {
 				id, err := merchantArg(ctx, srv.db, args[0])
 				if err != nil {
 					return err
@@ -198,7 +196,7 @@ func newMerchantsLifecycleCmd(use, short string, op func(*commandControlPlane, c
 			if err != nil {
 				return fmt.Errorf("a merchant id: %w", err)
 			}
-			return withOperator(cmd, func(ctx context.Context, srv operatorSession) error {
+			return withOperator(cmd, func(ctx context.Context, srv commandControlPlane) error {
 				m, err := op(&srv, ctx, billing.MerchantID(id))
 				if err != nil {
 					return err

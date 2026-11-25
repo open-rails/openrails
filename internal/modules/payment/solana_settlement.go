@@ -110,7 +110,7 @@ func (s *InvoiceAttemptService) creditSolanaTransfer(ctx context.Context, d *db.
 		// Under the reference lock, the transfer's payment or purchase
 		// transaction id already taken means it settled something else.
 		var pgErr *pgconn.PgError
-		if errors.Is(err, ErrPaymentTransactionTaken) || errors.As(err, &pgErr) && pgErr.Code == "23505" && transactionIDConstraints[pgErr.ConstraintName] {
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && transactionIDConstraints[pgErr.ConstraintName] {
 			return solanamodule.ErrSignatureClaimed
 		}
 		if err != nil {

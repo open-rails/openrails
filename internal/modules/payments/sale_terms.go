@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -25,42 +24,28 @@ const TypeNMISale = "nmi_sale"
 // saleRails are the rails whose one-time sale charges a saved PSP card.
 var saleRails = map[string]bool{"nmi": true, "stripe": true}
 
-// NMISalePayload is the accepted one-time purchase, including the instrument
-// and benefits. Recovery never reloads a current catalog or extends these
-// windows from the time a delayed provider receipt becomes visible.
+// NMISalePayload is an invoice's accepted card sale: its money, instrument
+// and binding. Paying settles the invoice's own frozen lines.
 type NMISalePayload struct {
 	// InvoiceCaptchaSubjects preserves the initiating HTTP address for worker completion.
 	InvoiceCaptchaSubjects []string `json:"order_captcha_subjects,omitempty"`
 
-	LegacyEntitlements map[string]*int             `json:"legacy_entitlements,omitzero"`
-	InvoiceAttemptID   uuid.UUID                   `json:"order_attempt_id,omitempty"`
-	RequestFingerprint string                      `json:"request_fingerprint"`
-	Provider           string                      `json:"provider"`
-	PSP                string                      `json:"psp"`
-	Amount             int64                       `json:"amount,string"`
-	Currency           string                      `json:"currency"`
-	Description        string                      `json:"description"`
-	UserID             string                      `json:"user_id"`
-	PriceID            uuid.UUID                   `json:"price_id"`
-	E2ERunID           string                      `json:"e2e_run_id,omitempty"`
-	PaymentMethodID    uuid.UUID                   `json:"payment_method_id"`
-	Instrument         charge.FrozenInstrument     `json:"instrument"`
-	PaymentID          uuid.UUID                   `json:"payment_id"`
-	ProductID          uuid.UUID                   `json:"product_id"`
-	ListAmount         int64                       `json:"list_amount,string"`
-	AcceptedAt         time.Time                   `json:"accepted_at"`
-	CreditGrant        *models.CreditGrantSnapshot `json:"credit_grant"`
-	// Entitlements is the keys a sale admitted before product access, kept
-	// only as accepted evidence. Access follows ProductID.
-	Entitlements        json.RawMessage `json:"entitlements,omitempty"`
-	AccessDurationHours *int            `json:"access_duration_hours"`
-	EntitlementStart    time.Time       `json:"entitlement_start"`
-	OwnershipStart      time.Time       `json:"ownership_start"`
-	OwnershipEnd        *time.Time      `json:"ownership_end"`
-	Eligibility         string          `json:"eligibility"`
+	InvoiceAttemptID   uuid.UUID               `json:"order_attempt_id,omitempty"`
+	RequestFingerprint string                  `json:"request_fingerprint"`
+	Provider           string                  `json:"provider"`
+	PSP                string                  `json:"psp"`
+	Amount             int64                   `json:"amount,string"`
+	Currency           string                  `json:"currency"`
+	Description        string                  `json:"description"`
+	UserID             string                  `json:"user_id"`
+	E2ERunID           string                  `json:"e2e_run_id,omitempty"`
+	PaymentMethodID    uuid.UUID               `json:"payment_method_id"`
+	Instrument         charge.FrozenInstrument `json:"instrument"`
+	PaymentID          uuid.UUID               `json:"payment_id"`
+	ListAmount         int64                   `json:"list_amount,string"`
+	AcceptedAt         time.Time               `json:"accepted_at"`
 	// InvoiceID is the invoice the sale pays, through its invoice attempt
-	// InvoiceAttemptID. An invoice sale carries no price, product or benefit:
-	// paying settles the invoice's own frozen lines.
+	// InvoiceAttemptID.
 	InvoiceID uuid.UUID `json:"order_id,omitzero"`
 	// Recurring: the invoice has a recurring line, so the charge stores the
 	// card for a recurring agreement.
@@ -121,7 +106,7 @@ func (p NMISalePayload) Agreement() charge.Agreement {
 
 // SavesCard reports a new card the invoice's charge stores.
 func (p NMISalePayload) SavesCard() bool {
-	return p.InvoiceID != uuid.Nil && p.NewCard && !p.PurchaseScoped
+	return p.NewCard && !p.PurchaseScoped
 }
 
 func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) {
@@ -133,55 +118,13 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 		return p, err
 	}
 	customer, err := uuid.Parse(p.UserID)
-	if p.InvoiceID != uuid.Nil {
-		return p, validateInvoiceSale(in, p, customer, err)
-	}
-	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() {
-		return p, errors.New("sale operation contradicts its accepted purchase")
-	}
-	for _, instant := range []time.Time{p.AcceptedAt, p.EntitlementStart, p.OwnershipStart} {
-		if !instant.Equal(instant.Truncate(time.Microsecond)) {
-			return p, errors.New("accepted purchase instants require database precision")
-		}
-	}
-	digest, err := hex.DecodeString(p.RequestFingerprint)
-	if err != nil || len(digest) != 32 || p.RequestFingerprint != strings.ToLower(p.RequestFingerprint) {
-		return p, errors.New("sale has no canonical request binding")
-	}
-	if p.Eligibility != "allowed" {
-		return p, errors.New("sale was not eligible at acceptance")
-	}
-	if p.AccessDurationHours == nil && p.OwnershipEnd != nil {
-		return p, errors.New("indefinite sale has a finite ownership window")
-	}
-	if p.AccessDurationHours != nil {
-		if *p.AccessDurationHours <= 0 || p.OwnershipEnd == nil || !p.OwnershipEnd.Equal(p.AcceptedAt.Add(time.Duration(*p.AccessDurationHours)*time.Hour)) {
-			return p, errors.New("sale ownership does not match accepted duration")
-		}
-	}
-	if err := p.Instrument.Validate(); err != nil {
-		return p, err
-	}
-	if p.Instrument.CustodianHeld() || p.Provider != in.Rail || p.Instrument.RailCustomerRef == "" || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" {
-		return p, errors.New("sale instrument contradicts its accepted purchase")
-	}
-	if p.AccessDurationHours != nil && *p.AccessDurationHours <= 0 || p.OwnershipEnd != nil && !p.OwnershipEnd.After(p.OwnershipStart) || p.EntitlementStart.Before(p.AcceptedAt) || !p.OwnershipStart.Equal(p.AcceptedAt) {
-		return p, errors.New("sale access window is invalid")
-	}
-	if _, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount); err != nil {
-		return p, err
-	}
-	if err := p.CreditGrant.Validate(); err != nil {
-		return p, err
-	}
-	return p, nil
+	return p, validateInvoiceSale(in, p, customer, err)
 }
 
-// validateInvoiceSale checks an invoice sale: money, instrument and binding, and
-// none of a price sale's benefits.
+// validateInvoiceSale checks an invoice sale: money, instrument and binding.
 func validateInvoiceSale(in gen.BillingProviderIntent, p NMISalePayload, customer uuid.UUID, parseErr error) error {
 	if parseErr != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || invalidInvoiceCustodianAddress(in, p.Instrument) || in.PriceID != nil ||
-		p.InvoiceAttemptID == uuid.Nil || p.PriceID != uuid.Nil || p.ProductID != uuid.Nil || p.CreditGrant != nil || p.AccessDurationHours != nil || p.OwnershipEnd != nil || len(p.Entitlements) > 0 ||
+		p.InvoiceID == uuid.Nil || p.InvoiceAttemptID == uuid.Nil ||
 		p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount != p.Amount || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || !p.AcceptedAt.Equal(p.AcceptedAt.Truncate(time.Microsecond)) {
 		return errors.New("invoice sale contradicts its invoice")
 	}
@@ -235,19 +178,6 @@ func NMISaleOrderReference(id uuid.UUID, runID string) string {
 		return fmt.Sprintf("%s_e2e_%x", id, sum[:4])
 	}
 	return id.String()
-}
-
-func (p *NMISalePayload) UnmarshalJSON(data []byte) error {
-	type plain NMISalePayload
-	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	if _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {
-		return err
-	}
-	*p = NMISalePayload(decoded)
-	return nil
 }
 
 // Platform custody is independent of the PSP: accepted invoices must retain its

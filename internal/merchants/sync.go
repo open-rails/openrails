@@ -408,9 +408,6 @@ func validatePSPDocument(key string, p merchantdocs.PSP, set merchantdocs.Set) e
 		Custodian: p.Custodian, Settings: p.Settings, Secrets: p.Secrets}); err != nil {
 		return err
 	}
-	if err := config.RejectRetiredCustodySettings(p.Settings); err != nil {
-		return err
-	}
 	custodian := strings.ToLower(strings.TrimSpace(p.Custodian))
 	if _, err := config.CardEntry(rail, p.Settings, custodian != ""); err != nil {
 		return err

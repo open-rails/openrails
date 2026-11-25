@@ -1165,59 +1165,6 @@ func (q *Queries) GetUnresolvedManualRebill(ctx context.Context, arg GetUnresolv
 	return i, err
 }
 
-const getUnresolvedSaleForCustomerProduct = `-- name: GetUnresolvedSaleForCustomerProduct :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id, sent_attempt FROM billing.provider_intents
-WHERE merchant_id=$1::uuid AND intent_type='nmi_sale'
-  AND payload->>'user_id'=$2::text
-  AND payload->>'product_id'=$3::text
-  AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
-ORDER BY created_at LIMIT 1
-`
-
-type GetUnresolvedSaleForCustomerProductParams struct {
-	MerchantID uuid.UUID
-	CustomerID string
-	ProductID  string
-}
-
-func (q *Queries) GetUnresolvedSaleForCustomerProduct(ctx context.Context, arg GetUnresolvedSaleForCustomerProductParams) (BillingProviderIntent, error) {
-	row := q.db.QueryRow(ctx, getUnresolvedSaleForCustomerProduct, arg.MerchantID, arg.CustomerID, arg.ProductID)
-	var i BillingProviderIntent
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Rail,
-		&i.IntentType,
-		&i.SubscriptionID,
-		&i.PaymentID,
-		&i.PriceID,
-		&i.Payload,
-		&i.IdempotencyKey,
-		&i.Status,
-		&i.Attempts,
-		&i.NextAttemptAt,
-		&i.LeaseExpiresAt,
-		&i.Origin,
-		&i.OriginReason,
-		&i.Actor,
-		&i.LastFailureReason,
-		&i.ExpiresAt,
-		&i.ResultEvidence,
-		&i.CreatedAt,
-		&i.ExecutedAt,
-		&i.UpdatedAt,
-		&i.PspID,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.CustodianID,
-		&i.Subject,
-		&i.Credential,
-		&i.DestructiveActionID,
-		&i.SentAttempt,
-	)
-	return i, err
-}
-
 const getUnresolvedSubscriptionCollection = `-- name: GetUnresolvedSubscriptionCollection :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, lease_expires_at, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id, subject, credential, destructive_action_id, sent_attempt FROM billing.provider_intents
 WHERE merchant_id = $1::uuid

@@ -2,6 +2,7 @@ package messages
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/mail"
 	"net/textproto"
@@ -64,7 +65,7 @@ func (s *Service) send(ctx context.Context, m gen.GetCustomerMessageRow, last bo
 		return err
 	}
 	var data billing.NotificationData
-	unreadable := m.Data != nil && models.DecodeNotificationData(m.Data, &data) != nil
+	unreadable := m.Data != nil && json.Unmarshal(m.Data, &data) != nil
 	if !Enabled(settings, m.EventType, data) {
 		return end(statusDisabled, "")
 	}

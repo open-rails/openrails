@@ -328,12 +328,6 @@ func (s *PaymentService) GetByPSPTransactionID(ctx context.Context, rail models.
 	return s.getByTransactionID(ctx, models.ChannelRail, rail, transactionID)
 }
 
-// GetManualByTransactionID reads a manual payment by the reference the
-// merchant recorded it under.
-func (s *PaymentService) GetManualByTransactionID(ctx context.Context, transactionID string) (*models.Payment, error) {
-	return s.getByTransactionID(ctx, models.ChannelManual, "", transactionID)
-}
-
 func (s *PaymentService) getByTransactionID(ctx context.Context, channel models.Channel, rail models.Rail, transactionID string) (*models.Payment, error) {
 	transactionID = strings.TrimSpace(transactionID)
 	if transactionID == "" {

@@ -36,7 +36,7 @@ SELECT EXISTS(SELECT 1 FROM billing.notification_events WHERE merchant_id=sqlc.a
 AND customer_id=sqlc.arg(customer_id)::uuid AND event_type='premium_ended' AND created_at>=sqlc.arg(since)::timestamptz)::boolean AS found;
 
 -- One merchant's account-notification ordering. Producers share it until they
--- commit; an adoption export or ordering restore holds it alone.
+-- commit; an ordering export or restore holds it alone.
 -- name: ShareNotificationOrdering :exec
 SELECT pg_advisory_xact_lock_shared(hashtextextended('openrails.notification_ordering:' || sqlc.arg(merchant_id)::uuid::text, 0));
 

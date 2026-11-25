@@ -678,13 +678,6 @@ func TestCheckoutFunnel(t *testing.T) {
 		require.Equal(t, map[string]int64{"new": 1, "returning": 1, "reactivated": 1}, byType("sales", nil))
 		require.Equal(t, map[string]int64{"new": 10_000_000, "returning": 5_000_000, "reactivated": 6_000_000},
 			byType("cash", map[string][]string{"currency": {"USD"}, "cash_kind": {"payment"}}))
-		_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"sales"}, By: []string{"subscriber_type"}, Range: window})
-		require.Equal(t, "customer_type", metricRefusals(t, err)["by[0]"]["did_you_mean"])
-		// A measure without a customer type names no replacement.
-		_, err = a.alpha.QueryMetrics(t.Context(), billing.QueryMetricsParams{Measures: []string{"mrr"}, By: []string{"subscriber_type"}, Range: window})
-		removed := metricRefusals(t, err)["by[0]"]
-		require.Nil(t, removed["did_you_mean"])
-		require.Contains(t, removed["message"], "was removed")
 	})
 	t.Run("OR-J47-S11/spending-a-merchants-units-is-not-a-checkout", func(t *testing.T) {
 		s, _ := unitPaymentWorld(t, 0)

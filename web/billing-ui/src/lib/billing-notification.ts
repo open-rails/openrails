@@ -18,13 +18,6 @@ export function dataOf(item: BillingNotificationItem): Record<string, unknown> {
     : {}
 }
 
-/** An item's kind; one posted before invoices were named says order_collection_stopped. */
-export function kindOf(item: BillingNotificationItem): string {
-  return item.kind === "order_collection_stopped"
-    ? "invoice_collection_stopped"
-    : item.kind
-}
-
 /** The selected billing lifecycle outcomes, rather than signup/cancel confirmations. */
 export function isPaymentFailure(kind: string): boolean {
   return [
@@ -32,7 +25,6 @@ export function isPaymentFailure(kind: string): boolean {
     "payment_method_update_required",
     "payment_authentication_required",
     "invoice_collection_stopped",
-    "order_collection_stopped",
   ].includes(kind)
 }
 

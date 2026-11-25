@@ -40,7 +40,7 @@ func Schema() SchemaDoc {
 			`(Nd|Nw|Nm|Ny, e.g. "7d" = past 7 days incl. today — prefer it for recurring/saved queries so they stay current). ` +
 			`grain "auto" is day up to 45 days, week up to 26 weeks, then month. ` +
 			`A funnel measure (attempts, purchases, rebills, payments) splits by its outcome or kind dimension; its rates are ratio measures over it. ` +
-			`Unknown keys/names are 400s with corrective errors; a removed measure's error names its replacement. ` +
+			`Unknown keys/names are 400s with corrective errors. ` +
 			`Response: {columns, rows, grain, range, compare_rows?}; time series zero-fill every bucket.`,
 	}
 	for i := range Measures {
