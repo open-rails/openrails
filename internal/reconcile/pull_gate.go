@@ -13,9 +13,9 @@ import (
 
 // OverwriteHeld is the merchant's gate on a pull's overwrite class, for the
 // scheduled pull and the operator's alike. held says why local state may not
-// be overwritten: the destructive switch is off (instance or merchant) or the
-// merchant's writes are readonly; empty when neither holds it. armed reports
-// the first-enforce arming, which each caller weighs itself. ctx must be
+// be overwritten: the merchant's destructive actions are disarmed or its
+// writes are readonly; empty when neither holds it. armed reports the
+// destructive arming, which each caller weighs itself. ctx must be
 // merchant-scoped.
 func OverwriteHeld(ctx context.Context, database *db.DB, cfg *billing.Config, merchantID uuid.UUID) (held string, armed bool) {
 	verdict := destructive.New(database).Check(ctx, merchantID)
