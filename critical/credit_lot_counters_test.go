@@ -294,7 +294,7 @@ func lapsedLotsExpireWhatTheyHold(t *testing.T) {
 // A usage order whose total is not a whole cent is charged the next cent up.
 // The order is paid, and the change is a lot bought at face.
 func usageOrderChangeIsBought(t *testing.T) {
-	a, p, customer := usageBillingWorld(t, true, false)
+	a, p, customer := usageBillingWorld(t, false)
 	product, err := a.alpha.CreateProduct(t.Context(), billing.CreateProductParams{Key: "fractional-compute", DisplayName: "Fractional compute"})
 	require.NoError(t, err)
 	_, err = a.alpha.SetMeter(t.Context(), "fraction", billing.SetMeterParams{EventType: "fraction", ValueProperty: "units", Aggregation: catalog.AggregationSum,

@@ -16,8 +16,6 @@ import (
 type Config struct {
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool `yaml:"engine_admission_hold"`
-	// UsageBillingEnabled opts this host into automatic usage invoices and collection.
-	UsageBillingEnabled bool `yaml:"usage_billing_enabled"`
 
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig `yaml:"database"`

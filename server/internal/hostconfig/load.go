@@ -490,6 +490,7 @@ var retiredSettings = []struct{ key, env, now string }{
 	{"provider_write_mode", "PROVIDER_WRITE_MODE", WritePostureHint},
 	{"drain_delay", "DRAIN_DELAY", "on SIGTERM the server drains for 5s, then stops within 20s"},
 	{"shutdown_timeout", "SHUTDOWN_TIMEOUT", "on SIGTERM the server drains for 5s, then stops within 20s"},
+	{"usage_billing_enabled", "USAGE_BILLING_ENABLED", "a merchant with usage_billing terms bills its usage; one without has none"},
 }
 
 // retiredAuthKeys are the server's former auth keys and their replacements.

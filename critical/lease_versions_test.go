@@ -216,7 +216,7 @@ func TestLeaseVersions(t *testing.T) {
 		balance(t, w.alpha, customer, 700, 300, 1000)
 	})
 	t.Run("OR-J24-S21/what-a-days-usage-leaves-owed-is-dated-on-its-day", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true)
+		a, _, customer := usageBillingWorld(t, true)
 		oneUsage(t, a.alpha, usageInput(customer, "late-in-the-day", 3))
 		fleet := startFleet(t, a.world)
 		// The month's close posts it, before the usage-billing check: what it

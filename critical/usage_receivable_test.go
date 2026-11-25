@@ -98,7 +98,7 @@ func TestUsageReceivable(t *testing.T) {
 	})
 	t.Run("OR-J40-S22/units-owed-equal-the-receivable-after-every-path", func(t *testing.T) {
 		t.Run("invoiced", func(t *testing.T) {
-			a, _, customer := usageBillingWorld(t, true, true)
+			a, _, customer := usageBillingWorld(t, true)
 			w := a.world
 			oneUsage(t, a.alpha, usageInput(customer, "every-path", 1))
 			a.clock.Advance(time.Second)
@@ -163,7 +163,6 @@ func TestUsageReceivable(t *testing.T) {
 			alpha.UsageBilling = &billing.UsageBillingSettings{BillingDay: 25, Currencies: []billing.UsageBillingCurrency{{Currency: "EUR", CreditLimit: 30_000_000, MinimumInvoiceAmount: 1_000_000}}}
 			setCfgMerchant(&w.cfg, "alpha", alpha)
 			usage := money.NewMoneyService(configuredDB(t, w), w.clock)
-			usage.UsageBillingEnabled = true
 			billed, err := usage.BillDueUsageAccount(ctx, customer.UUID(), "USD", w.clock.Now())
 			require.NoError(t, err)
 			require.True(t, billed, "the reopened debt is billed without usage terms")
@@ -174,7 +173,7 @@ func TestUsageReceivable(t *testing.T) {
 		})
 	})
 	t.Run("OR-J40-S27/owed-from-before-the-books-is-collected-as-revenue-beside-running-charges", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, true)
+		a, _, customer := usageBillingWorld(t, true)
 		w := a.world
 		// $2.00 owed before the books, billed with the next order.
 		owedBeforeTheBooks(t, w, customer, 2_000_000, "unbooked-usage")
@@ -350,7 +349,7 @@ func TestUsageReceivable(t *testing.T) {
 // and collected by her saved card.
 func cardCollectedUsage(t *testing.T) (*authorityWorld, billing.CustomerID, billing.PaymentID, *river.Client[pgx.Tx]) {
 	t.Helper()
-	a, _, customer := usageBillingWorld(t, true, false)
+	a, _, customer := usageBillingWorld(t, false)
 	oneUsage(t, a.alpha, usageInput(customer, "card-collected", 3))
 	a.clock.Advance(time.Second)
 	fleet := quietFleet(t, a.world)
@@ -369,7 +368,7 @@ func cardCollectedUsage(t *testing.T) (*authorityWorld, billing.CustomerID, bill
 // change is a credit lot of $0.009.
 func surplusCollectedUsage(t *testing.T) (*authorityWorld, billing.CustomerID, billing.PaymentID, *river.Client[pgx.Tx]) {
 	t.Helper()
-	a, p, customer := usageBillingWorld(t, true, false)
+	a, p, customer := usageBillingWorld(t, false)
 	oneUsage(t, a.alpha, usageInput(customer, "surplus", 1))
 	a.clock.Advance(time.Second)
 	_, err := a.alpha.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{Reference: "surplus", CustomerID: customer, Currency: "USD", RatePerHour: 360_000})
@@ -392,7 +391,7 @@ func surplusCollectedUsage(t *testing.T) (*authorityWorld, billing.CustomerID, b
 // usage order she pays by invoice.
 func openUsageOrder(t *testing.T) (*authorityWorld, billing.CustomerID, billing.OrderID) {
 	t.Helper()
-	a, _, customer := usageBillingWorld(t, true, true)
+	a, _, customer := usageBillingWorld(t, true)
 	oneUsage(t, a.alpha, usageInput(customer, "invoiced", 3))
 	fleet := quietFleet(t, a.world)
 	postUsageMonth(t, a.world, fleet)

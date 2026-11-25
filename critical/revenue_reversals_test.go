@@ -253,7 +253,7 @@ func TestRevenueReversals(t *testing.T) {
 	})
 
 	t.Run("OR-J41-S24/a-usage-orders-refund-is-contra-and-its-chargeback-reopens-the-owed", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, false)
+		a, _, customer := usageBillingWorld(t, false)
 		oneUsage(t, a.alpha, usageInput(customer, "refunded-work", 3))
 		a.clock.Advance(time.Second)
 		fleet := startFleet(t, a.world)
@@ -612,7 +612,7 @@ func TestRevenueReversals(t *testing.T) {
 	})
 
 	t.Run("OR-J41-S33/a-usage-payment-starts-the-books", func(t *testing.T) {
-		a, _, customer := usageBillingWorld(t, true, false)
+		a, _, customer := usageBillingWorld(t, false)
 		oneUsage(t, a.alpha, usageInput(customer, "first-receipt", 3))
 		a.clock.Advance(time.Second)
 		fleet := startFleet(t, a.world)

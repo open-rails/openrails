@@ -28,7 +28,7 @@ func TestNMICollectionRefusal(t *testing.T) {
 				name = "interrupted-completion"
 			}
 			t.Run(name, func(t *testing.T) {
-				a, p, customer := usageBillingWorld(t, true, false)
+				a, p, customer := usageBillingWorld(t, false)
 				psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 				require.NoError(t, err)
 				require.Len(t, psps.Items, 1)

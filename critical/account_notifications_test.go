@@ -410,7 +410,7 @@ func TestOrderNotificationRecovery(t *testing.T) {
 	for _, disposition := range []string{"partial-then-paid", "waived", "uncollectible", "funded-credit"} {
 		t.Run(disposition, func(t *testing.T) {
 			var inbox *notifypg.Store
-			a, p, customer := usageBillingWorld(t, true, false, accountInbox(t, &inbox))
+			a, p, customer := usageBillingWorld(t, false, accountInbox(t, &inbox))
 			p.core.SetDecline("4242", "202")
 			oneUsage(t, a.alpha, usageInput(customer, "declined-usage", 3))
 			// The day's usage posts as its threshold order is billed: the
