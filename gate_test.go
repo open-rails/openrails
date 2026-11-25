@@ -626,6 +626,9 @@ func TestGateDecidesOneRequestOnAStaleView(t *testing.T) {
 		if idle != 0 {
 			t.Fatalf("an idle gate synced %d times", idle)
 		}
+		// Answers take a second, so a sync the probe starts cannot land
+		// before it is counted.
+		f.set(func(f *fakeViews) { f.slow = time.Second })
 		mustAdmit(t, g, work(customer, "probe", 1))
 		f.mu.Lock()
 		after := len(f.syncs)
