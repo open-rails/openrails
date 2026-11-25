@@ -458,7 +458,7 @@ func TestRevenueRecognition(t *testing.T) {
 	t.Run("OR-J41-S09/a-usage-orders-payment-books-its-cash-and-leaves-it-for-the-receivable", func(t *testing.T) {
 		for _, collection := range []string{"card", "remittance"} {
 			t.Run(collection, func(t *testing.T) {
-				a, _, customer := usageBillingWorld(t, true, collection == "remittance")
+				a, _, customer := usageBillingWorld(t, collection == "remittance")
 				oneUsage(t, a.alpha, usageInput(customer, "billed-work", 3))
 				// The pass posts usage taken in before its instant.
 				a.clock.Advance(time.Second)
@@ -588,7 +588,7 @@ func TestRevenueRecognition(t *testing.T) {
 		// Alice opens the CCBill page and leaves; the order expires and she
 		// buys the membership by card in another.
 		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
-			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: "https://critical.invalid/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
+			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var abandoned billing.Order
 		require.NoError(t, json.Unmarshal(raw, &abandoned))

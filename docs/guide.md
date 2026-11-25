@@ -11,6 +11,8 @@ OpenRails is a billing engine you add to an existing application. It holds a mer
 | SaaS | on the hosted platform | the same `*openrails.Client` over HTTP, with a console API key | [Client: credentials](client.md#credentials) |
 | HTTP only | any of the three | JSON over HTTP from any language | [Without the Go client](client.md#without-the-go-client) |
 
+Your customers never sign in to OpenRails; who presents which credential, in each path, is [authentication](authentication.md).
+
 Every path serves the same HTTP API and the same browser SDK,
 [`@openrails/billing-ui`](../web/billing-ui/README.md). The [client guide](client.md)
 covers everything the client does; the rest of this page is the shortest
@@ -304,6 +306,7 @@ is the delivery log, kept two years and with no body. Embedded,
   routes and auth, the checkout page, transactions with your own rows.
 - [Standalone](standalone.md): hosting the server: configuration, Helm, Vault,
   trust, upgrades, backups, monitoring and every operator command.
+- [Authentication](authentication.md): who signs in, and with what, as a customer, a backend or staff, in each path.
 - [Client](client.md): every method by capability (catalog, checkout,
   subscriptions, credits, usage limits and the Gate, events, imports), SaaS and
   customer credentials, errors, idempotency, and the HTTP API without Go.

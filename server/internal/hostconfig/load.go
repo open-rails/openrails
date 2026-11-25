@@ -102,6 +102,21 @@ var envNames = map[string]string{
 	"authkit_public_keys":            "signing_key.public_keys",
 }
 
+// fileOnlySections are policy, set in config.yaml alone: the environment
+// holds secrets and per-environment facts. A variable naming one refuses
+// boot.
+var fileOnlySections = []string{"rate_limits", "user_action_rate_limit", "destructive_action_limits", "auth.http.rate_limits"}
+
+// fileOnlySection is the file-only section key is in, "" for none.
+func fileOnlySection(key string) string {
+	for _, section := range fileOnlySections {
+		if key == section || strings.HasPrefix(key, section+".") {
+			return section
+		}
+	}
+	return ""
+}
+
 // envKeyToConfigKey maps an environment variable's name to its key:
 // PUBLIC_BILLING_BASE_URL is public_billing_base_url, DATABASE_URL
 // database.url. A name that routes to no section is "" and never loaded (the
@@ -157,6 +172,7 @@ func Load(configPath string) (*Config, error) {
 		return nil, err
 	}
 
+	var fileOnly []string
 	envCallbackWithValue := func(key string, value string) (string, interface{}) {
 		upperKey := strings.ToUpper(key)
 		if serviceLink(upperKey, strings.TrimSpace(value)) {
@@ -174,6 +190,10 @@ func Load(configPath string) (*Config, error) {
 
 		mapped := envKeyToConfigKey(key)
 		if mapped == "" {
+			return "", nil
+		}
+		if section := fileOnlySection(mapped); section != "" && !slices.ContainsFunc(retiredSettings, func(r retiredSetting) bool { return r.env == upperKey }) {
+			fileOnly = append(fileOnly, fmt.Sprintf("%s is set in config.yaml, not the environment: unset %s", section, upperKey))
 			return "", nil
 		}
 
@@ -222,6 +242,10 @@ func Load(configPath string) (*Config, error) {
 
 	if err := k.Load(env.ProviderWithValue("", ".", envCallbackWithValue), nil); err != nil {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
+	}
+	if len(fileOnly) > 0 {
+		slices.Sort(fileOnly)
+		return nil, errors.New(strings.Join(fileOnly, "; "))
 	}
 
 	// Merchant configuration authority is broader than provider secrets. Retired
@@ -488,14 +512,22 @@ var retiredDBEnv = []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_U
 
 // retiredSettings are former settings: a key, its environment variable (a
 // section's ends in "_*") and what replaced it.
+type retiredSetting struct{ key, env, now string }
+
 var retiredSettings = []retiredSetting{
 	{"provider_write_mode", "PROVIDER_WRITE_MODE", WritePostureHint},
 	{"drain_delay", "DRAIN_DELAY", "on SIGTERM the server drains for 5s, then stops within 20s"},
 	{"shutdown_timeout", "SHUTDOWN_TIMEOUT", "on SIGTERM the server drains for 5s, then stops within 20s"},
+	{"usage_billing_enabled", "USAGE_BILLING_ENABLED", "a merchant with usage_billing terms bills its usage; one without has none"},
+	{"private_port", "PRIVATE_PORT", "set metrics_port (METRICS_PORT), the operator's Prometheus /metrics listener"},
+	{"cloudflare_proxies", "CLOUDFLARE_PROXIES", "Cloudflare's published ranges are built in; list only your own proxies in trusted_proxies"},
+	{"rate_limits_disabled", "RATE_LIMITS_DISABLED", "set each rate_limits bucket's requests_per_minute to 0 to leave it unlimited; captcha is on only with its keys"},
+	{"merchant_manifest_overlays", "MERCHANT_MANIFEST_OVERLAYS", "the merchant manifest is one file: keep PSP secrets in it and mount it from a Secret, or in Vault (vault.kv_mount)"},
+	{"webhook_secret_overlap", "WEBHOOK_SECRET_OVERLAP", "a rotated-out webhook signing secret keeps verifying for 24 hours; retire_webhook_overlap ends it early"},
+	{"return_origins", "RETURN_ORIGINS", "return URLs may name the billing origin, the merchant's issuer and its checkout.embed_origins"},
+	{"event_retention", "EVENT_RETENTION", "the event log keeps 90 days"},
 	{"provider_sandbox", "PROVIDER_SANDBOX_*", "no setting redirects a provider: a PSP's environment (test or sandbox) and its test credentials reach the provider's own test system; tests wire fakes in Go (Deps.ProviderEndpoints)"},
 }
-
-type retiredSetting struct{ key, env, now string }
 
 // names reports whether an environment variable or secret file is the
 // setting's.

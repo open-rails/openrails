@@ -69,7 +69,7 @@ func hostPageRequest(t *testing.T, server *httptest.Server, method, path, token 
 func hostPayOrder(t *testing.T, a *authorityWorld, key string, embedded bool) (*billing.Order, string) {
 	t.Helper()
 	price := hostProduct(t, a.alpha, key)
-	order, err := a.alpha.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: &billing.OrderPayURLParams{SuccessURL: "https://critical.invalid/done?order={ORDER_ID}", Embedded: embedded}})
+	order, err := a.alpha.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID)), Lines: []billing.OrderLineParams{{PriceID: price.ID}}, PayURL: &billing.OrderPayURLParams{SuccessURL: alphaSite + "/done?order={ORDER_ID}", Embedded: embedded}})
 	require.NoError(t, err)
 	require.NotNil(t, order.PayURL)
 	address, err := url.Parse(*order.PayURL)
@@ -149,6 +149,52 @@ func TestHostedCheckout(t *testing.T) {
 		require.Contains(t, csp, "frame-ancestors https://merchant.critical.invalid")
 		require.NotContains(t, csp, "evil.critical.invalid")
 		require.Empty(t, headers.Get("Access-Control-Allow-Origin"))
+	})
+	t.Run("OR-J03-S06/return-urls-name-only-the-merchants-own-sites", func(t *testing.T) {
+		const alphaShop, betaShop = "https://shop.alpha.critical.invalid", "https://shop.beta.critical.invalid"
+		a, p := newPaymentWorld(t, func(w *world) {
+			for slug, site := range map[string]string{"alpha": alphaShop, "beta": betaShop} {
+				declaration := cfgMerchant(w.cfg, slug)
+				declaration.Checkout = &billing.MerchantCheckoutSettings{EmbedOrigins: []string{site}}
+				setCfgMerchant(&w.cfg, slug, declaration)
+			}
+			declareCheckoutPage(t, &w.cfg, &w.deps)
+		})
+		price := hostProduct(t, a.alpha, "returns")
+		customer := billing.CustomerID(uuid.MustParse(a.alice.ID))
+		payURL := func(key, success string, cancel *string) error {
+			_, err := a.alphaRemote.CreateOrder(t.Context(), key, billing.CreateOrderParams{CustomerID: customer, Lines: []billing.OrderLineParams{{PriceID: price.ID}},
+				PayURL: &billing.OrderPayURLParams{SuccessURL: success, CancelURL: cancel}})
+			return err
+		}
+		refused := func(err error, param string) {
+			t.Helper()
+			var apiErr *billing.StatusError
+			require.ErrorAs(t, err, &apiErr)
+			require.Equal(t, http.StatusBadRequest, apiErr.Status)
+			require.Equal(t, billing.CodeInvalidParam, apiErr.Code)
+			require.Equal(t, ptr(param), apiErr.Param)
+		}
+		refused(payURL("beta-success", betaShop+"/done", nil), "pay_url.success_url")
+		refused(payURL("beta-cancel", alphaShop+"/done", ptr(betaShop+"/cart")), "pay_url.cancel_url")
+		refused(payURL("unlisted", "https://critical.invalid/done", nil), "pay_url.success_url")
+		require.NoError(t, payURL("issuer", alphaSite+"/done?order={ORDER_ID}", ptr(alphaSite+"/cart")), "the merchant's issuer origin is its own")
+		require.NoError(t, payURL("embed", alphaShop+"/done?order={ORDER_ID}", ptr(alphaShop+"/cart")), "a registered embed origin is its own")
+
+		sale := saleInput(t, a, p)
+		hosted := func(key, returnURL string) (int, []byte) {
+			return a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: sale.Lines, ExpectedTotal: sale.ExpectedTotal,
+				Payment: &billing.OrderPaymentParams{ReturnURL: returnURL}}, map[string]string{"Idempotency-Key": key})
+		}
+		status, raw := hosted("hosted-beta", betaShop+"/paid")
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		require.Contains(t, string(raw), `"code":"invalid_param"`)
+		status, raw = hosted("hosted-embed", alphaShop+"/paid")
+		require.Equal(t, http.StatusCreated, status, string(raw))
+		var order billing.Order
+		require.NoError(t, json.Unmarshal(raw, &order))
+		require.NotNil(t, order.Payment.NextAction)
+		require.Equal(t, "redirect_to_url", order.Payment.NextAction.Type)
 	})
 	t.Run("OR-J03-S05/real-assets-and-config-redact-private-state", func(t *testing.T) {
 		var page *httptest.Server

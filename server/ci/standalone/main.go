@@ -71,7 +71,7 @@ func run(configPath, manifest string, lifetime time.Duration) error {
 	}
 	graph, cp := operator.Of(srv)
 	opened.Report(context.WithoutCancel(ctx), graph.Runtime)
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifest, cfg.MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifest); err != nil {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		return errors.Join(err, srv.Close(closeCtx))

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/logx"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/server/internal/bootstrap"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
@@ -171,8 +172,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Provision the manifest's merchants; without Vault the manifest is their
 	// configuration. The conventional file is optional; an explicit manifest
 	// path must exist.
-	listener := hostconfig.FromContext(cmd.Context())
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath); err != nil {
 		return closeOnError(err)
 	}
 	// HTTP never serves webhook and async billing APIs when the workers
@@ -215,7 +215,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 			slog.Default().ErrorContext(ctx, "Application shutdown encountered issues", logx.Err(err))
 		}
 	}()
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath); err != nil {
 		return err
 	}
 	// Background workers only (no HTTP server); fail fast if River cannot start.
@@ -248,7 +248,8 @@ func applyStandaloneMigrations(ctx context.Context, host *hostconfig.Config) err
 			return err
 		}
 		defer conn.Close()
-		if err := eventstore.Migrate(ctx, conn, config.ClickHouseDatabase(&host.Server.Engine), slog.Default()); err != nil {
+		chdb := config.ClickHouseDatabase(&host.Server.Engine)
+		if err := eventstore.Migrate(ctx, conn, chdb, eventstore.Options{Logger: slog.Default(), Serialize: migrate.ClickHouseLock(database.Pool(), chdb)}); err != nil {
 			return err
 		}
 	}

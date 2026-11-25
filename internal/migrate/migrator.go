@@ -134,6 +134,16 @@ func applyRiver(ctx context.Context, logger *slog.Logger, pool *pgxpool.Pool, sc
 	})
 }
 
+// ClickHouseLock serializes the event store's migration of a ClickHouse
+// database across every process migrating it with this PostgreSQL database,
+// as the PostgreSQL and River migrations are: replicas starting together
+// take turns.
+func ClickHouseLock(pool *pgxpool.Pool, database string) func(context.Context, func() error) error {
+	return func(ctx context.Context, fn func() error) error {
+		return locked(ctx, pool, "openrails-clickhouse-migrations:"+database, fn)
+	}
+}
+
 // locked runs fn holding key's advisory lock on a session of its own, so the
 // lock never pins a connection of the caller's pool.
 func locked(ctx context.Context, pool *pgxpool.Pool, key string, fn func() error) error {

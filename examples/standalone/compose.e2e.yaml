@@ -11,10 +11,8 @@ services:
   openrails: # the server/ci/standalone fixture: run-server with an in-process NMI fake
     build: { args: { MAIN: ./ci/standalone } }
     image: openrails-example-e2e-server
-    command: [--config, /etc/openrails/config.yaml, --merchant-manifest, /etc/openrails/merchant.yaml, --max-lifetime, 1h]
+    command: [--config, /etc/openrails/config.e2e.yaml, --merchant-manifest, /etc/openrails/merchant.yaml, --max-lifetime, 1h]
     ports: !reset []
-    environment:
-      RATE_LIMITS_DISABLED: "true" # every purchase comes from one browser
 
   mailpit:
     ports: !reset []

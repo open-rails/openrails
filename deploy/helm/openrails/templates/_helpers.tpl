@@ -50,10 +50,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 {{- end }}
 
-{{/* config.yaml: values.config plus the listener the chart owns and the overlay paths it mounts. */}}
+{{/* config.yaml: values.config plus the listeners the chart owns. */}}
 {{- define "openrails.config" -}}
 {{- $cfg := deepCopy (default dict .Values.config) }}
-{{- range list "host" "port" "private_port" }}
+{{- range list "host" "port" "metrics_port" }}
 {{- if hasKey $cfg . }}
 {{- fail (printf "config.%s is set by the chart: use ports.http and metrics.port" .) }}
 {{- end }}
@@ -61,14 +61,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $_ := set $cfg "host" "0.0.0.0" }}
 {{- $_ := set $cfg "port" (int .Values.ports.http) }}
 {{- if .Values.metrics.enabled }}
-{{- $_ := set $cfg "private_port" (int .Values.metrics.port) }}
-{{- end }}
-{{- $overlays := default list (get $cfg "merchant_manifest_overlays") }}
-{{- range .Values.secrets.merchantOverlays }}
-{{- $overlays = append $overlays (printf "/vault/overlays/%s/%s" .name .key) }}
-{{- end }}
-{{- if $overlays }}
-{{- $_ := set $cfg "merchant_manifest_overlays" $overlays }}
+{{- $_ := set $cfg "metrics_port" (int .Values.metrics.port) }}
 {{- end }}
 {{- toYaml $cfg }}
 {{- end }}

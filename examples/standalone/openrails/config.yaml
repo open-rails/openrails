@@ -1,7 +1,7 @@
 # The OpenRails server's configuration: `openrails run-server --config
-# config.yaml`. Every key also reads from the environment, its path
-# upper-cased and joined by "_" (database.url is DATABASE_URL); the environment
-# wins. This file is the local stack in ../compose.yaml; README.md says what
+# config.yaml`. Every key but a policy section (rate_limits and the action
+# limits) also reads from the environment, its path upper-cased and joined by
+# "_" (database.url is DATABASE_URL); the environment wins. This file is the local stack in ../compose.yaml; README.md says what
 # production changes.
 
 # guide:standalone-config

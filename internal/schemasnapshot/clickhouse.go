@@ -98,7 +98,7 @@ func CaptureClickHouse(ctx context.Context, addr string) ([]byte, error) {
 		defer cancel()
 		_ = conn.Exec(ctx, "DROP DATABASE IF EXISTS `"+database+"` SYNC")
 	}()
-	if err := eventstore.Migrate(ctx, conn, database, slog.New(slog.DiscardHandler)); err != nil {
+	if err := eventstore.Migrate(ctx, conn, database, eventstore.Options{Logger: slog.New(slog.DiscardHandler)}); err != nil {
 		return nil, fmt.Errorf("clickhouse snapshot: %w", err)
 	}
 	list, err := dumpClickHouse(ctx, conn, database)

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // isolate points the loader at an empty secrets directory and a config path
@@ -61,15 +60,15 @@ func TestOneDatabaseSection(t *testing.T) {
 		}
 		return configPath
 	}
-	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\n  lease_conns: 2\nevent_retention: 48h\nroute_groups:\n  merchant_config: true\n"))
+	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\n  lease_conns: 2\nroute_groups:\n  merchant_config: true\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !cfg.Server.RouteGroups.MerchantConfig {
 		t.Error("route_groups.merchant_config is read")
 	}
-	if e := cfg.Server.Engine; cfg.Database.URL != "postgres://u:p@db.internal:5432/x" || e.Database.Schema != "shop" || e.Database.RiverSchema != "shop_river" || e.Database.LeaseConns != 2 || e.EventRetention != 48*time.Hour {
-		t.Fatalf("connection %+v, engine %+v, retention %s", cfg.Database, e.Database, e.EventRetention)
+	if e := cfg.Server.Engine; cfg.Database.URL != "postgres://u:p@db.internal:5432/x" || e.Database.Schema != "shop" || e.Database.RiverSchema != "shop_river" || e.Database.LeaseConns != 2 {
+		t.Fatalf("connection %+v, engine %+v", cfg.Database, e.Database)
 	}
 	for yaml, want := range map[string]string{
 		"database:\n  urll: x\n":        "unknown configuration keys refuse boot: database.urll",
@@ -88,5 +87,36 @@ func TestOneDatabaseSection(t *testing.T) {
 	t.Setenv("DB_URL", "postgres://u:p@db.internal:5432/x")
 	if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), "db was merged into database") {
 		t.Errorf("DB_URL: %v", err)
+	}
+}
+
+// Policy sections are set in config.yaml alone: a rate-limit bucket at 0
+// there is unlimited, and a variable naming one refuses the load.
+func TestPolicySectionsAreFileOnly(t *testing.T) {
+	configPath, _ := isolate(t)
+	if err := os.WriteFile(configPath, []byte("rate_limits:\n  payment:\n    requests_per_minute: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limits := cfg.Server.Engine.RateLimits; limits.Payment.RequestsPerMinute != 0 || limits.Purchase.RequestsPerMinute != 10 {
+		t.Fatalf("payment %+v, purchase %+v", limits.Payment, limits.Purchase)
+	}
+	for env, section := range map[string]string{
+		"RATE_LIMITS_PAYMENT_REQUESTS_PER_MINUTE":          "rate_limits",
+		"DESTRUCTIVE_ACTION_LIMITS_ACTOR_PER_HOUR":         "destructive_action_limits",
+		"USER_ACTION_RATE_LIMIT_MINIMUM_CUSTOMERS_PER_DAY": "user_action_rate_limit",
+		"AUTH_HTTP_RATE_LIMITS":                            "auth.http.rate_limits",
+	} {
+		t.Run(env, func(t *testing.T) {
+			configPath, _ := isolate(t)
+			t.Setenv(env, "1")
+			want := section + " is set in config.yaml, not the environment: unset " + env
+			if _, err := Load(configPath); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("load: %v, want %q", err, want)
+			}
+		})
 	}
 }

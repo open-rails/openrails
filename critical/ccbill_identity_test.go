@@ -248,13 +248,13 @@ func TestCCBillIdentity(t *testing.T) {
 			pending := authtest.SignIn(t, a.auth, authtest.User{User: unverified, Password: authtest.Password}).AccessToken
 			require.Equal(t, []string{"verified_email"}, requires(pending))
 			status, raw := a.request(t, http.MethodPost, "/v1/me/orders", pending, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
-				Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}},
+				Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}},
 				map[string]string{"Idempotency-Key": "ccbill-unverified-order"})
 			require.Equal(t, http.StatusBadRequest, status, string(raw))
 			require.Contains(t, string(raw), "customer_email_required")
 			require.Contains(t, string(raw), "Verify your email and set a username to pay with CCBill.")
 			status, raw = a.request(t, http.MethodPost, "/v1/me/orders", token, billing.CreateMyOrderParams{Lines: []billing.OrderLineParams{{PriceID: price}}, ExpectedTotal: ptr(int64(10_000_000)),
-				Payment: &billing.OrderPaymentParams{ReturnURL: "https://critical.invalid/paid"}},
+				Payment: &billing.OrderPaymentParams{ReturnURL: alphaSite + "/paid"}},
 				map[string]string{"Idempotency-Key": "ccbill-card-order"})
 			require.Equal(t, http.StatusCreated, status, string(raw))
 			var order billing.Order
@@ -630,7 +630,7 @@ func TestCCBillIdentity(t *testing.T) {
 
 		// Alice opens the CCBill page and leaves; once it lapses she pays by card.
 		status, raw = a.request(t, http.MethodPost, "/v1/me/orders", a.aliceToken, billing.CreateMyOrderParams{Lines: lines, ExpectedTotal: ptr(int64(10_000_000)),
-			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: "https://critical.invalid/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
+			Payment: &billing.OrderPaymentParams{PSPID: &page, ReturnURL: alphaSite + "/paid"}}, map[string]string{"Idempotency-Key": "ccbill-page"})
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		var order billing.Order
 		require.NoError(t, json.Unmarshal(raw, &order))

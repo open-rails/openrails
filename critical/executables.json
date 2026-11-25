@@ -46,6 +46,9 @@
     "OR-J03-S05": [
       "TestHostedCheckout/OR-J03-S05/real-assets-and-config-redact-private-state"
     ],
+    "OR-J03-S06": [
+      "TestHostedCheckout/OR-J03-S06/return-urls-name-only-the-merchants-own-sites"
+    ],
     "OR-J04-S01": [
       "TestPublicSDK/OR-J04-S01/built-client-and-real-HTTP-preserve-domain-outcomes"
     ],
@@ -598,7 +601,7 @@
       "TestUsageBillingContracts/OR-J26-S01"
     ],
     "OR-J26-S02": [
-      "TestUsageBillingContracts/OR-J26-S02/disabled-host-does-not-collect-automatic-wakeups"
+      "TestUsageBillingContracts/OR-J26-S02/a-merchant-without-usage-terms-bills-no-usage"
     ],
     "OR-J26-S03": [
       "TestUsageBillingContracts/OR-J26-S03/paid",
@@ -1106,7 +1109,7 @@
       "TestUsageBillingContracts/OR-J26-S50"
     ],
     "OR-J26-S51": [
-      "TestUsageBillingContracts/OR-J26-S51/an-overdue-order-is-told-without-automatic-usage-billing"
+      "TestUsageBillingContracts/OR-J26-S51/an-overdue-order-is-told-once-by-the-billing-pass"
     ],
     "OR-J26-S52": [
       "TestUsageBillingContracts/OR-J26-S52/an-account-billed-in-full-waits-for-its-next-spend"
@@ -1949,7 +1952,7 @@
       "TestUsageStore/OR-J24-S51/every-limit-kind-reads-its-use-from-the-event-store"
     ],
     "OR-J24-S52": [
-      "TestUsageStore/OR-J24-S52/new-refuses-a-database-with-unposted-usage-without-its-store"
+      "TestUsageStore/OR-J24-S52/a-database-with-unposted-usage-starts-without-its-store-and-opens-a-finding"
     ],
     "OR-J24-S53": [
       "TestUsageStore/OR-J24-S53/erasure-clears-invoker-and-metadata-and-keeps-quantities-and-money"
@@ -2364,6 +2367,15 @@
     "OR-J07-S11": [
       "TestCustomerDirectory/OR-J07-S11/a-kept-search-lists-the-exact-match-first-then-the-newest"
     ],
+    "OR-J07-S12": [
+      "TestCustomerDirectory/OR-J07-S12/a-customer-tokens-verified-email-is-its-kept-contact-and-its-receipts-address"
+    ],
+    "OR-J07-S13": [
+      "TestCustomerDirectory/OR-J07-S13/token-claims-never-undo-a-directory-push-or-an-erasure"
+    ],
+    "OR-J07-S14": [
+      "TestCustomerDirectory/OR-J07-S14/an-asserted-customers-verified-email-is-its-contact-on-a-standalone-server"
+    ],
     "OR-J38-S82": [
       "TestCCBillIdentity/OR-J38-S82/a-postback-names-its-customer-by-a-username-many-others-contain"
     ],
@@ -2383,6 +2395,12 @@
     ],
     "OR-J19-S19": [
       "TestPriceMigrationScale/OR-J19-S19/an-identical-create-while-the-first-records-is-refused-at-once-and-stalls-no-admission"
+    ],
+    "OR-J26-S64": [
+      "TestUsageBillingContracts/OR-J26-S64/running-charges-bill-on-the-merchants-usage-terms-without-clickhouse"
+    ],
+    "OR-J24-S66": [
+      "TestEventStore/OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start"
     ]
   }
 }

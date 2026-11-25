@@ -115,15 +115,13 @@ an optional section is on once set.
 | Field | Meaning |
 |---|---|
 | `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
-| `UsageBillingEnabled` | Bills owed usage automatically ([usage](client.md#usage-and-running-charges)). Deploy every worker first. |
 | `Database` | `billing.DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
 | `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)); code only. |
 | `PublicBillingBaseURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
-| `ReturnOrigins` | Origins a buyer may return to after a redirect step (`returnUrl`). |
-| `TrustedProxies` | Load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
-| `CheckoutOrigin` | The payment page's origin ([checkout page](#checkout-page)). |
-| `RateLimits` | Per-minute buckets on customer routes (`purchase`, `subscribe`, `payment`, `webhook`, `catalog-ask`): nil is the built-in set, empty is none. |
+| `TrustedProxies` | Your own load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Cloudflare's published ranges are built in and trusted too, and only their peers are believed for `CF-IPCountry`. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
+| `CheckoutOrigin` | Needed only to serve OpenRails' own hosted pay page: its separate origin ([checkout page](#checkout-page)). Leave it empty with the embedded checkout or your own card form; pay URLs then answer `pay_url_unavailable`. |
+| `RateLimits` | `billing.RateLimitsConfig`, one `*billing.RateLimit` per bucket: `Purchase` (10 a minute), `Payment` (40), `Subscribe` (20), `Webhook` (1200). Nil takes the default; `&billing.RateLimit{}` (`RequestsPerMinute` 0) leaves the bucket unlimited, so a host fronting billing with its own limiter sets every bucket to it. |
 | `Captcha` | `billing.CaptchaAccount`: `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`); both keys turn it on. It challenges a subject at 3× a bucket's limit. |
 | `UserActionRateLimit` | The merchant-wide budget for customer cancellations and card removals. |
 | `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)), and each merchant's own budget for SCIM contact erasures (`ErasurePerHour`, `ErasurePerDay`). |
@@ -132,17 +130,15 @@ an optional section is on once set.
 | `Solana` | The deployment's crankers: they publish plans and pull renewals. Without one, Solana rebilling is off. |
 | `LLM` | The model behind the console's catalog Q&A and drafting. |
 | `ReadCache` | Overrides how long a handle serves catalog and configuration reads from memory ([caching](client.md#caching)); code only. |
-| `EventRetention` | A `time.Duration`: how long the event log keeps facts (default 90 days). |
-| `WebhookSecretOverlap` | A `time.Duration`: how long a rotated webhook secret still verifies (default 24 h, at most 168 h). |
 
 How much OpenRails writes to a merchant's providers is the merchant's write
 posture, kept in the database: `openrails merchant hold` and
 `openrails merchant arm`, run with the engine's database and schema, change it
 ([write safety](standalone.md#write-safety-and-the-kill-switch)).
 
-Several instances must agree on the schemas, `Merchants`,
-`RateLimits`, `Captcha`, `TrustedProxies`, `ReturnOrigins` and the mounted
-`Routes` (a route some instances lack answers 404 there).
+A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicBillingBaseURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours.
+
+Several instances must agree on the schemas, `Merchants`, `RateLimits`, `Captcha`, `TrustedProxies` and the mounted `Routes` (a route some instances lack answers 404 there).
 
 ## Deps
 
@@ -156,7 +152,7 @@ and closes none.
 | `Redis` | Abuse state (rate limits, lockouts, captcha, card-testing declines, spent DPoP proofs) shared across instances. Without it each process counts alone: right for one instance. No money path needs Redis. |
 | `Vault` | A logged-in `*vaultapi.Client` (`helpers/vault`'s session); you keep it logged in, and `Config.Vault` names its mounts. |
 | `ClickHouse` | The event store usage needs, a `driver.Conn` from `github.com/ClickHouse/clickhouse-go/v2` (native protocol). Nil turns usage off ([event store](#event-store)). |
-| `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo` or SCIM. |
+| `Email` | Your `EmailSender` for [customer messages](guide.md#customer-messages) and operator alerts; `smtpmail.EmailSender(s)` (package `adapters/smtpmail`) wraps a `helpers/smtp` sender, whose `From` is the default sender. nil sends none. Messages go to the customer's address from `UserInfo`, else from SCIM or the verified email its credential claims. |
 | `MessageRenderer` | Renders customer messages in your code: content it returns true for is sent instead of the merchant's templates, and an error is retried. Nil renders every message from the templates. |
 | `Logger` | A `*slog.Logger`; nil is `slog.Default()`, read once in `New`. OpenRails never changes your logger or the default, and never logs secrets, card data or SQL arguments. |
 | `UserInfo` | Your directory, for customer contacts and staff search: `ak.UserInfo()`, or your own `Get` and `Search`. Without it the SCIM routes mount instead ([customers](client.md#customers)). |
@@ -219,7 +215,7 @@ The catalog has its own lifecycle: `New` never applies one ([catalog](client.md#
 one instance migrates, the rest wait. To migrate as a deploy step instead, run
 `openrails.Migrate(ctx, pool, cfg.Database)` (or `openrails migrate up`) and set
 `DatabaseConfig.SkipMigrations` on the servers, which then only check the ledger.
-With an event store, also run `openrails.MigrateClickHouse(ctx, conn, cfg.ClickHouse)`; `SkipMigrations` checks its migrations too.
+With an event store, also run `openrails.MigrateClickHouse(ctx, pool, conn, cfg.ClickHouse)`, which takes its own advisory lock on `pool`; `SkipMigrations` checks its migrations too.
 
 - An older build boots on a schema a newer one migrated (it leaves unknown
   migrations alone), so rolling upgrades work in both directions within v1.
@@ -340,6 +336,8 @@ calls pass through none of this and count against no rate limit. Point each
 PSP's webhooks at `{Prefix}/v1/webhooks/{rail}/{account_id}`.
 
 ## Auth
+
+Embedded, your app's own sign-in is the only one: customers, staff and operators present your app's credential to your mount, and there is no second token and no OpenRails login ([authentication](authentication.md)).
 
 `Routes.Auth` is an `authkit/auth` `Authenticator`: it says who a request is and
 whether they hold a permission in a scope; OpenRails decides what to admit and

@@ -52,9 +52,6 @@ const (
 
 // CleanupConfig defines retention periods for various data types
 type CleanupConfig struct {
-	// EventRetention bounds retained facts independently of reader progress.
-	EventRetention time.Duration
-
 	// WebhookEventRetention is how long completed webhook dedup marks
 	// (webhook_events) are kept. Default: 90 days.
 	WebhookEventRetention time.Duration
@@ -80,7 +77,6 @@ func clampInt32(v int) int32 {
 // zero retention fails loudly instead of mass-deleting.
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
-		EventRetention:        retention.EventLog,
 		WebhookEventRetention: webhooks.WebhookEventRetention,
 
 		PaymentAttemptRetention: retention.PaymentAttempts,
@@ -88,7 +84,7 @@ func DefaultCleanupConfig() CleanupConfig {
 }
 
 func (c CleanupConfig) validate() error {
-	if c.EventRetention <= 0 || c.WebhookEventRetention <= 0 ||
+	if c.WebhookEventRetention <= 0 ||
 		c.PaymentAttemptRetention <= 0 {
 		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
 	}
@@ -206,7 +202,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListRetentionWorkMerchants(ctx, gen.ListRetentionWorkMerchantsParams{
 			WebhookCutoff:       now.Add(-config.WebhookEventRetention),
-			OutboxCutoff:        now.Add(-max(retention.EventLog, config.EventRetention)),
+			OutboxCutoff:        now.Add(-retention.EventLog),
 			AttemptCutoff:       now.Add(-config.PaymentAttemptRetention),
 			TransitionCutoff:    now.Add(-retention.SubscriptionTransitions),
 			OrderAttemptCutoff:  now.Add(-retention.ExpiredOrderAttempts),
@@ -256,7 +252,7 @@ func (w CleanupExpiredDataWorker) sweep(ctx context.Context, after *uuid.UUID) (
 func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.Time, config CleanupConfig, result *CleanupResult, cleanupErr *error) {
 	logger := w.Log.With("worker", KindCleanupExpiredData)
 	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
-		n, err := eventlog.Prune(ctx, w.DB, now, config.EventRetention, cleanupDeleteBatch)
+		n, err := eventlog.Prune(ctx, w.DB, now, cleanupDeleteBatch)
 		if err != nil {
 			*cleanupErr = errors.Join(*cleanupErr, err)
 			break
@@ -268,7 +264,7 @@ func (w CleanupExpiredDataWorker) sweepDeployment(ctx context.Context, now time.
 	}
 
 	for batch := 0; batch < cleanupIndexedMaxBatches; batch++ {
-		n, err := w.DB.GenDirectory().PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: cleanupDeleteBatch})
+		n, err := w.DB.GenDirectory().PruneNotificationJournal(ctx, gen.PruneNotificationJournalParams{Cutoff: now.Add(-retention.EventLog), RowLimit: cleanupDeleteBatch})
 		if err != nil {
 			*cleanupErr = errors.Join(*cleanupErr, err)
 			break
@@ -381,7 +377,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	// The host outbox dedupe journal, retained from ingestion.
 	sweep("delete host outbox", &result.HostOutbox, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteHostOutboxBefore(ctx, gen.DeleteHostOutboxBeforeParams{
-			MerchantID: mid, Cutoff: now.Add(-max(retention.EventLog, config.EventRetention)), RowLimit: limit,
+			MerchantID: mid, Cutoff: now.Add(-retention.EventLog), RowLimit: limit,
 		})
 	})
 

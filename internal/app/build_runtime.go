@@ -199,8 +199,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 			return nil, err
 		}
 		database.SetEventStore(events)
-	} else if err := refuseUnpostedUsage(ctx, database); err != nil {
-		return nil, err
 	}
 	if overrides != nil && overrides.Notifications != nil {
 		if overrides.Notifications.Sink == nil || overrides.Notifications.Recipient == nil {
@@ -342,8 +340,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 		Clock:         clock,
 
 		ProviderEndpoints: endpoints,
-		// #746: one proxy-aware client-IP resolver, built once from config;
-		// empty yields a resolver that trusts nothing.
+		// #746: one proxy-aware client-IP resolver, built once from config
+		// and Cloudflare's ranges.
 		TrustedProxies: iputil.ParseTrustedProxies(cfg.TrustedProxies),
 		RailConfigs:    railConfigs,
 
@@ -403,6 +401,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	runtime.Disputes.Lifecycle = runtime.SubscriptionLifecycleService
 	// Redirect PSPs and bank challenges come back to the payment page itself.
 	serviceInstances.OrderAttemptService.SetCheckoutOrigin(runtime.CheckoutOrigin)
+	serviceInstances.OrderAttemptService.SetReturnOrigins(runtime.ReturnOrigins)
 	runtime.AdminSubscriptionService.SetDestructiveAdmissions(runtime.DestructiveAdmissions)
 	runtime.AdminSubscriptionService.SetRequestedCancellationLimiter(func(ctx context.Context, sub *models.Subscription) error {
 		return destructive.NewUserActionLimiter(runtime.DB, runtime.Config.UserActionRateLimit).Reserve(ctx, destructive.CancelSubscription, fmt.Sprintf("cancel:%s:%d", sub.ID, sub.LifecycleRev), sub.CustomerID)
@@ -622,7 +621,6 @@ func createServices(database, leaseDB *db.DB, cfg *billing.Config, railConfigs r
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
 	moneyService.EngineAdmissionHold = cfg.EngineAdmissionHold
-	moneyService.UsageBillingEnabled = cfg.UsageBillingEnabled
 	var hyperSwitchErr error
 	if cfg.HyperSwitch != (billing.HyperSwitchConfig{}) {
 		if err := moneyService.SetHyperSwitchDeployment(cfg.HyperSwitch.APIBaseURL); err != nil {

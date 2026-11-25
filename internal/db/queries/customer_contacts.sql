@@ -67,6 +67,31 @@ UPDATE billing.customer_contacts SET
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
 RETURNING *;
 
+-- name: RecordCustomerContactClaims :exec
+-- A verified token's contact claims: a new contact's at once; a kept one's
+-- only when dated no earlier than it (undated claims replace only undated
+-- ones) and different, so a repeated token writes nothing. An absent claim
+-- keeps the kept value.
+WITH kept AS (
+  UPDATE billing.customer_contacts c SET
+    email = COALESCE(sqlc.narg(email)::text, c.email),
+    display_name = COALESCE(sqlc.narg(display_name)::text, c.display_name),
+    user_name = COALESCE(sqlc.narg(user_name)::text, c.user_name),
+    directory_updated_at = sqlc.narg(claims_updated_at)::timestamptz,
+    updated_at = now()
+  WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.customer_id = sqlc.arg(customer_id)::uuid
+    AND (c.directory_updated_at IS NULL OR c.directory_updated_at <= sqlc.narg(claims_updated_at)::timestamptz)
+    AND ROW(c.email, c.display_name, c.user_name) IS DISTINCT FROM ROW(
+      COALESCE(sqlc.narg(email)::text, c.email), COALESCE(sqlc.narg(display_name)::text, c.display_name),
+      COALESCE(sqlc.narg(user_name)::text, c.user_name))
+  RETURNING c.customer_id
+)
+INSERT INTO billing.customer_contacts (merchant_id, customer_id, email, display_name, user_name, directory_updated_at)
+SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.narg(email)::text, sqlc.narg(display_name)::text,
+  sqlc.narg(user_name)::text, sqlc.narg(claims_updated_at)::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM kept)
+ON CONFLICT (merchant_id, customer_id) DO NOTHING;
+
 -- Only read enough to decide an erasure ceiling.
 -- name: ProvisionedContactsAtLeast :one
 SELECT count(*)::bigint AS contacts FROM (

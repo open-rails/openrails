@@ -9,15 +9,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/messages"
 )
 
-// Gate is when a periodic pass is declared.
-type Gate int
-
-const (
-	Always Gate = iota
-	// WithUsageBilling: on hosts that enable usage billing.
-	WithUsageBilling
-)
-
 // Periodic is one recurring pass, queued by its Args' InsertOpts. Its kind is
 // River's periodic id and the name of its lease.
 type Periodic struct {
@@ -26,7 +17,6 @@ type Periodic struct {
 	// Hourly runs the pass at the top of each UTC hour instead of Every after
 	// the last one.
 	Hourly bool
-	Gate   Gate
 }
 
 // Periodics are OpenRails' recurring passes.
