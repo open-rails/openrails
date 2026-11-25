@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -58,10 +59,10 @@ func (p PayURL) Show(o *billing.Order, url *string) {
 }
 
 // Plan resolves a merchant's pay URL request for a new order: its expiry
-// (orderExpiry, when the order has its own, bounds it) and return URLs with
-// the order id filled in. A request that cannot be honoured is invalid_param
-// naming its field.
-func Plan(p billing.OrderPayURLParams, order billing.OrderID, now time.Time, orderExpiry *time.Time) (PayURL, error) {
+// (orderExpiry, when the order has its own, bounds it) and return URLs, on
+// the merchant's return origins (allowed), with the order id filled in. A
+// request that cannot be honoured is invalid_param naming its field.
+func Plan(p billing.OrderPayURLParams, order billing.OrderID, now time.Time, orderExpiry *time.Time, allowed []string) (PayURL, error) {
 	expires := now.Add(DefaultLifetime)
 	if p.ExpiresAt != nil {
 		expires = p.ExpiresAt.UTC()
@@ -75,13 +76,13 @@ func Plan(p billing.OrderPayURLParams, order billing.OrderID, now time.Time, ord
 	case orderExpiry != nil && expires.After(*orderExpiry):
 		return PayURL{}, apperr.Invalidf("pay_url.expires_at is after the order's expires_at").WithParam("pay_url.expires_at")
 	}
-	success, err := returnURL("pay_url.success_url", p.SuccessURL, order)
+	success, err := returnURL("pay_url.success_url", p.SuccessURL, order, allowed)
 	if err != nil {
 		return PayURL{}, err
 	}
 	out := PayURL{OrderID: order, Embedded: p.Embedded, ExpiresAt: expires, SuccessURL: &success, SavedPaymentMethods: p.SavedPaymentMethods}
 	if p.CancelURL != nil {
-		cancel, err := returnURL("pay_url.cancel_url", *p.CancelURL, order)
+		cancel, err := returnURL("pay_url.cancel_url", *p.CancelURL, order, allowed)
 		if err != nil {
 			return PayURL{}, err
 		}
@@ -90,10 +91,9 @@ func Plan(p billing.OrderPayURLParams, order billing.OrderID, now time.Time, ord
 	return out, nil
 }
 
-// returnURL checks one return URL and fills in the order id. Any site may
-// be named (Stripe): only the merchant's own backend sets it. It is https,
-// or http on a loopback host.
-func returnURL(field, raw string, order billing.OrderID) (string, error) {
+// returnURL checks one return URL and fills in the order id. It is https, or
+// http on a loopback host, on one of the merchant's return origins.
+func returnURL(field, raw string, order billing.OrderID, allowed []string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > maxReturnURLBytes {
 		return "", apperr.Invalidf("%s is required, at most %d bytes", field, maxReturnURLBytes).WithParam(field)
@@ -102,6 +102,9 @@ func returnURL(field, raw string, order billing.OrderID) (string, error) {
 	u, err := url.Parse(filled)
 	if err != nil || u.User != nil || u.Opaque != "" || u.Host == "" || !(u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname())) {
 		return "", apperr.Invalidf("%s must be an absolute https URL (http on loopback) without credentials", field).WithParam(field)
+	}
+	if !config.ReturnURLAllowed(allowed, filled) {
+		return "", apperr.Invalidf("%s must be on the billing origin, the merchant's issuer or one of its checkout.embed_origins", field).WithParam(field)
 	}
 	return filled, nil
 }

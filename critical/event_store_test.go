@@ -5,11 +5,15 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -61,6 +65,7 @@ func TestEventStore(t *testing.T) {
 		t.Run("usage-orders", noStoreUsageOrders)
 	})
 	t.Run("OR-J24-S40/new-migrates-clickhouse-idempotently-and-refuses-another-store", storeMigrationsAndIdentity)
+	t.Run("OR-J24-S66/two-engines-migrating-one-fresh-clickhouse-database-together-both-start", concurrentStoreMigrations)
 	t.Run("OR-J24-S41/public-config-reports-whether-usage-is-served", func(t *testing.T) {
 		require.True(t, usageFlag(t, newAuthorityWorld(t)))
 		require.False(t, usageFlag(t, newAuthorityWorld(t, withoutEventStore)))
@@ -190,7 +195,7 @@ func noStorePurchases(t *testing.T) {
 // A running charge leaves owed what the balance does not cover, and a usage
 // order bills it: neither needs the event store.
 func noStoreUsageOrders(t *testing.T) {
-	a, p, customer := usageBillingAccount(t, true, false, withoutEventStore)
+	a, p, customer := usageBillingAccount(t, false, withoutEventStore)
 	ctx := t.Context()
 	charge := billing.StartRunningChargeParams{Reference: "owed", CustomerID: customer, Currency: "USD", RatePerHour: 10_000_000}
 	_, err := a.alpha.StartRunningCharge(ctx, charge)
@@ -249,7 +254,7 @@ func storeMigrationsAndIdentity(t *testing.T) {
 	skipping := w.cfg
 	skipping.Database.SkipMigrations = true
 	require.NoError(t, reopen(skipping, w.deps))
-	require.NoError(t, openrails.MigrateClickHouse(ctx, conn, w.cfg.ClickHouse))
+	require.NoError(t, openrails.MigrateClickHouse(ctx, w.pool, conn, w.cfg.ClickHouse))
 	require.Equal(t, installed, tables())
 	var applied uint64
 	require.NoError(t, conn.QueryRow(ctx, "SELECT count() FROM `"+w.schema+"`.schema_migrations FINAL").Scan(&applied))
@@ -260,7 +265,7 @@ func storeMigrationsAndIdentity(t *testing.T) {
 	require.NoError(t, conn.Exec(ctx, "DROP DATABASE `"+w.schema+"` SYNC"))
 	err := reopen(skipping, w.deps)
 	require.ErrorIs(t, err, billing.ErrMigrationsRequired)
-	require.NoError(t, openrails.MigrateClickHouse(ctx, conn, w.cfg.ClickHouse))
+	require.NoError(t, openrails.MigrateClickHouse(ctx, w.pool, conn, w.cfg.ClickHouse))
 	err = openrailsNewErr(ctx, w.cfg, w.deps)
 	require.ErrorContains(t, err, "empty or different ClickHouse")
 
@@ -283,4 +288,53 @@ func openrailsNewErr(ctx context.Context, cfg openrails.Config, deps openrails.D
 		_ = engine.Close(context.Background())
 	}
 	return err
+}
+
+// concurrentStoreMigrations starts two engines together on a fresh schema and
+// a fresh ClickHouse database, as replicas of a new deployment do: they take
+// turns migrating, so each migration is recorded once and both serve usage.
+func concurrentStoreMigrations(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	fresh := "critical_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	cfg := w.cfg
+	cfg.Database.Schema, cfg.Database.RiverSchema, cfg.ClickHouse.Database = fresh, fresh, fresh
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = w.deps.ClickHouse.Exec(cleanup, "DROP DATABASE IF EXISTS `"+fresh+"` SYNC")
+		_, _ = w.pool.Exec(cleanup, "DROP SCHEMA IF EXISTS "+pgx.Identifier{fresh}.Sanitize()+" CASCADE")
+	})
+	var engines [2]*openrails.Engine
+	var errs [2]error
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range engines {
+		wg.Go(func() {
+			<-start
+			engines[i], errs[i] = openrails.New(ctx, cfg, w.deps)
+		})
+	}
+	close(start)
+	wg.Wait()
+	for i, engine := range engines {
+		require.NoError(t, errs[i], "engine %d", i)
+		t.Cleanup(func() { require.NoError(t, engine.Close(context.Background())) })
+	}
+	var recorded, stores uint64
+	require.NoError(t, w.deps.ClickHouse.QueryRow(ctx, "SELECT count() FROM `"+fresh+"`.schema_migrations").Scan(&recorded))
+	require.EqualValues(t, 1, recorded, "the one migration ran and was recorded once")
+	require.NoError(t, w.deps.ClickHouse.QueryRow(ctx, "SELECT count() FROM `"+fresh+"`.store").Scan(&stores))
+	require.EqualValues(t, 1, stores, "one store identity")
+	first, err := declaredMerchant(engines[0], "alpha")
+	require.NoError(t, err)
+	usageMeter(t, first, 100)
+	for i, engine := range engines {
+		client, err := declaredMerchant(engine, "alpha")
+		require.NoError(t, err)
+		customer := billing.CustomerID(uuid.New())
+		fund(t, client, customer, "funded", 1000)
+		settleUsage(t, client, newLease(), numbered(1, usageInput(customer, fmt.Sprintf("after-the-race-%d", i), 1))...)
+		balance(t, client, customer, 900, 100, 1000)
+	}
 }

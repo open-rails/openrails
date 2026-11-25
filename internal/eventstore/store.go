@@ -114,6 +114,9 @@ type Options struct {
 	// (Config.Database.SkipMigrations).
 	Validate bool
 	Logger   *slog.Logger
+	// Serialize runs the migration holding a lock every process migrating
+	// the database takes (migrate.ClickHouseLock); nil runs it unlocked.
+	Serialize func(ctx context.Context, migrate func() error) error
 }
 
 // Open creates or upgrades database on conn (with opts.Validate, checks it)
@@ -128,9 +131,12 @@ func Open(ctx context.Context, conn driver.Conn, database string, opts Options) 
 		logger = slog.New(slog.DiscardHandler)
 	}
 	var err error
-	if opts.Validate {
+	switch {
+	case opts.Validate:
 		err = s.validate(ctx)
-	} else {
+	case opts.Serialize != nil:
+		err = opts.Serialize(ctx, func() error { return s.migrate(ctx, logger) })
+	default:
 		err = s.migrate(ctx, logger)
 	}
 	if err != nil {
@@ -143,8 +149,9 @@ func Open(ctx context.Context, conn driver.Conn, database string, opts Options) 
 }
 
 // Migrate creates or upgrades database on conn: openrails.MigrateClickHouse.
-func Migrate(ctx context.Context, conn driver.Conn, database string, logger *slog.Logger) error {
-	_, err := Open(ctx, conn, database, Options{Logger: logger})
+func Migrate(ctx context.Context, conn driver.Conn, database string, opts Options) error {
+	opts.Validate = false
+	_, err := Open(ctx, conn, database, opts)
 	return err
 }
 
@@ -158,6 +165,13 @@ func (s *Store) ID() uuid.UUID { return s.id }
 const (
 	DormantFindingType    = "consistency.dormant_usage"
 	DormantFindingSubject = "usage_catalog"
+)
+
+// The finding a merchant's unposted usage opens on a deployment without an
+// event store: its customers' balances wait for the store.
+const (
+	UnpostedFindingType    = "consistency.unposted_usage"
+	UnpostedFindingSubject = "event_store"
 )
 
 // Required is the refusal of what needs the event store, on a deployment

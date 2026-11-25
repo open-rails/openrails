@@ -68,7 +68,6 @@ type MoneyService struct {
 	destructiveAdmissions *destructive.Admissions
 	// EngineAdmissionHold is fixed during runtime wiring; accepted work still reconciles.
 	EngineAdmissionHold   bool
-	UsageBillingEnabled   bool
 	hyperSwitchDeployment string
 	usageRecoveryResolver railresolve.NMIClientResolver
 	db                    *db.DB

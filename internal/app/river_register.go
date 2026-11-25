@@ -66,11 +66,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		return fmt.Errorf("add paced provider refresh worker: %w", err)
 	}
 	cleanupConfig := riverjobs.DefaultCleanupConfig()
-	eventRetention, err := config.EventRetentionDuration(r.Config)
-	if err != nil {
-		return err
-	}
-	cleanupConfig.EventRetention = eventRetention
 	if err := addWorker(workers, &riverjobs.CleanupExpiredDataWorker{
 		DB:     r.DB,
 		Clock:  clock,
@@ -235,10 +230,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, registry *riv
 		{Kind: riverjobs.KindOrderExpiry, Run: expiry.Pass, DueBy: expiry.DueBy},
 		{Kind: riverjobs.KindRevenueRecognition, Run: recognition.Pass, DueBy: recognition.DueBy},
 	}
-	if r.declares(riverjobs.WithUsageBilling) {
-		scans = append(scans, riverjobs.Scan{Kind: money.KindUsageOrders, Run: usage.Pass, DueBy: usage.DueBy})
-	}
 	scans = append(scans,
+		riverjobs.Scan{Kind: money.KindUsageOrders, Run: usage.Pass, DueBy: usage.DueBy},
 		riverjobs.Scan{Kind: riverjobs.KindRebillWatch, Run: rebills.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindNMIHistory, Run: nmiHistory.Pass},
 		riverjobs.Scan{Kind: riverjobs.KindConfigRealerts, Run: realerts.Pass},
@@ -450,19 +443,9 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 func (r *Runtime) buildRiverPeriodicJobs(cfg *river.Config) []*river.PeriodicJob {
 	var jobs []*river.PeriodicJob
 	for _, p := range riverjobs.Periodics {
-		if r.declares(p.Gate) {
-			jobs = append(jobs, r.periodicJob(cfg, p))
-		}
+		jobs = append(jobs, r.periodicJob(cfg, p))
 	}
 	return jobs
-}
-
-func (r *Runtime) declares(gate riverjobs.Gate) bool {
-	switch gate {
-	case riverjobs.WithUsageBilling:
-		return r.Config != nil && r.Config.UsageBillingEnabled
-	}
-	return true
 }
 
 // findingNotifier is the alert service as a finding notifier; nil when none.

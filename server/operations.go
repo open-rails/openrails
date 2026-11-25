@@ -12,7 +12,7 @@ import (
 
 // ListWorkerHealth is each background job kind as River's tables hold it,
 // with the verbatim error text, which can name any merchant's records. The
-// private listener's /metrics carries the same as gauges.
+// metrics listener's /metrics carries the same as gauges.
 func (s *Server) ListWorkerHealth(ctx context.Context) ([]billing.WorkerHealth, error) {
 	return s.graph.Runtime.ListWorkerHealth(ctx)
 }
@@ -24,7 +24,6 @@ func (s *Server) UnlockAdminLockout(ctx context.Context, userID string) error {
 	return s.surface.UnlockAdminLockout(ctx, userID, "operator")
 }
 
-// PrivateHandler is the operator's private surface (GET /metrics), which Run
-// and Serve listen on at Config.PrivatePort. Never mount it on a public
-// listener.
-func (s *Server) PrivateHandler() http.Handler { return s.surface.PrivateHandler() }
+// MetricsHandler is the operator's Prometheus GET /metrics, which Run and
+// Serve listen on at Config.MetricsPort. Never mount it on a public listener.
+func (s *Server) MetricsHandler() http.Handler { return s.surface.MetricsHandler() }

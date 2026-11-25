@@ -97,7 +97,7 @@ func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billin
 	if !cache.Writable() {
 		return nil, merchants.ErrConfigReadOnly
 	}
-	if s.rt.Config.UsageBillingEnabled && params.MerchantSettings != nil && (params.MerchantSettings.UsageBilling != nil || params.MerchantSettings.BillingPolicies != nil || params.MerchantSettings.BillingPolicyBindings != nil) {
+	if params.MerchantSettings != nil && (params.MerchantSettings.UsageBilling != nil || params.MerchantSettings.BillingPolicies != nil || params.MerchantSettings.BillingPolicyBindings != nil) {
 		unlock, err := s.rt.DB.LockUsagePolicy(ctx, mid)
 		if err != nil {
 			return nil, err

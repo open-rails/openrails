@@ -85,12 +85,19 @@ type OrderAttemptService struct {
 	// checkoutOrigin is the payment page's origin, "" without one: its
 	// pages are return URLs too.
 	checkoutOrigin func() string
-	Log            *slog.Logger
+	// returnOrigins are the origins a merchant's return URLs may name.
+	returnOrigins func(context.Context, billing.MerchantID) ([]string, error)
+	Log           *slog.Logger
 }
 
 // SetCheckoutOrigin wires the payment page's origin, set once it is served.
 func (s *OrderAttemptService) SetCheckoutOrigin(origin func() string) {
 	s.checkoutOrigin = origin
+}
+
+// SetReturnOrigins wires the origins a merchant's return URLs may name.
+func (s *OrderAttemptService) SetReturnOrigins(origins func(context.Context, billing.MerchantID) ([]string, error)) {
+	s.returnOrigins = origins
 }
 
 // SetPSPPosture wires the verdict purchase consults before offering a PSP.
