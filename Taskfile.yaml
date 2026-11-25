@@ -48,8 +48,12 @@ tasks:
       - ./{{.BIN_DIR}}/{{.BINARY_NAME}} run-server
 
   dev:
-    desc: "Hot reload: the API under Air on :3053 and the merchant console under Vite (http://localhost:5173/admin/); Ctrl+C stops both"
-    deps: [dev:api, dev:console]
+    desc: "Hot reload: the API under Air on :3053 and the merchant console under Vite at http://localhost:3054/admin/; Ctrl+C stops both"
+    deps:
+      # The browser's origin is Vite's, which proxies the API: it is the public URL sign-in checks.
+      - task: dev:api
+        vars: { PUBLIC_URL: "http://localhost:3054" }
+      - dev:console
 
   dev:api:
     desc: The API server under Air, rebuilt on every Go change
@@ -60,7 +64,7 @@ tasks:
       - air -c .air.toml
 
   dev:console:
-    desc: The merchant console's Vite dev server, proxying the API on :3053 (builds billing-ui first; `task dev:billing-ui` rebuilds it live)
+    desc: The merchant console's Vite dev server on :3054, proxying the API on :3053 (builds billing-ui first; `task dev:billing-ui` rebuilds it live)
     dir: web/console
     cmds:
       - pnpm --dir ../billing-ui install --frozen-lockfile --prefer-offline

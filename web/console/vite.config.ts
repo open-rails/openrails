@@ -24,12 +24,20 @@ export default defineConfig(({ command }) => ({
     ],
   },
   build: { outDir: "dist", emptyOutDir: true },
+  // `task dev` makes this origin the API's public URL, so the port is fixed.
   server: {
-    proxy: {
-      "/v1": "http://localhost:3053",
-      "/auth": "http://localhost:3053",
-      "/admin/config.json": "http://localhost:3053",
-      "/admin/merchants": "http://localhost:3053",
-    },
+    port: 3054,
+    strictPort: true,
+    proxy: Object.fromEntries(
+      [
+        "/v1",
+        "/auth",
+        "/oauth2",
+        "/.well-known",
+        "/health",
+        "/admin/config.json",
+        "/admin/merchants",
+      ].map((p) => [p, "http://localhost:3053"])
+    ),
   },
 }))
