@@ -339,13 +339,13 @@ func (s *Server) Engine() *openrails.Engine { return s.engine }
 // AuthKit is the server's own AuthKit client.
 func (s *Server) AuthKit() *authkit.Client { return s.cp.Core() }
 
-// Handler is the whole public surface: health, the engine's routes gated by
-// the server's Auth, AuthKit's and the admin console. The operator's
-// /metrics is MetricsHandler.
+// Handler is the whole public surface: the summary at /, health, the
+// engine's routes gated by the server's Auth, AuthKit's and the admin
+// console. The operator's /metrics is MetricsHandler.
 func (s *Server) Handler() http.Handler { return s.surface.Handler() }
 
-// Routes is the standalone surface without the health routes, for a host's
-// own root router (the adapters' MountRoutes).
+// Routes is the standalone surface without the summary and health routes,
+// for a host's own root router (the adapters' MountRoutes).
 func (s *Server) Routes() ([]openrails.Route, error) {
 	table := s.surface.HTTPRoutes()
 	if err := embedhttp.ValidateRouteTable(table); err != nil {
