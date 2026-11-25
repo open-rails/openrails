@@ -835,8 +835,9 @@ func TestDeclineCauses(t *testing.T) {
 			at = at.Add(time.Minute)
 		}
 		require.NoError(t, p.persist(t.Context()))
-		fleet := startFleet(t, a.world)
-		runRegistered(t, fleet, "openrails.billing_pass", 1)
+		awaitHistoryQueued(t, a)
+		fleet := quietFleet(t, a.world)
+		runRegistered(t, fleet, "openrails.nmi_history", 1)
 		rows := metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"nmi_history_authorizations"},
 			By: []string{"outcome", "decline_cause", "reason"}, Range: &billing.MetricsRange{Last: "90d"}})
 		got := map[string]int64{}

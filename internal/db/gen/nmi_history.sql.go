@@ -88,48 +88,59 @@ func (q *Queries) InsertNMIHistoryMonths(ctx context.Context, arg InsertNMIHisto
 	return err
 }
 
-const listNMIHistoryDuePSPs = `-- name: ListNMIHistoryDuePSPs :many
-
-SELECT p.id, r.read_at
-FROM billing.psps p
-LEFT JOIN billing.nmi_history_reads r ON r.merchant_id = p.merchant_id AND r.psp_id = p.id
-WHERE p.merchant_id = $1::uuid
-  AND p.rail = 'nmi' AND p.id = ANY($2::uuid[])
-  AND (r.read_at IS NULL OR r.read_at < $3::timestamptz)
-ORDER BY r.read_at NULLS FIRST, p.id
-LIMIT $4::int
+const listDueNMIHistoryReads = `-- name: ListDueNMIHistoryReads :many
+SELECT r.merchant_id, r.psp_id, r.read_at, r.due_at,
+       (p.superseded_at IS NULL AND m.deleted_at IS NULL)::bool AS live
+FROM billing.nmi_history_reads r
+JOIN billing.psps p ON p.merchant_id = r.merchant_id AND p.id = r.psp_id
+JOIN billing.merchants m ON m.id = r.merchant_id
+WHERE r.due_at <= $1::timestamptz
+  AND (r.due_at, r.merchant_id, r.psp_id) > ($2::timestamptz, $3::uuid, $4::uuid)
+ORDER BY r.due_at, r.merchant_id, r.psp_id
+LIMIT $5::int
 `
 
-type ListNMIHistoryDuePSPsParams struct {
+type ListDueNMIHistoryReadsParams struct {
+	DueBy           time.Time
+	AfterDueAt      time.Time
+	AfterMerchantID uuid.UUID
+	AfterPspID      uuid.UUID
+	RowLimit        int32
+}
+
+type ListDueNMIHistoryReadsRow struct {
 	MerchantID uuid.UUID
-	PspIds     []uuid.UUID
-	DueBefore  time.Time
-	RowLimit   int32
+	PspID      uuid.UUID
+	ReadAt     *time.Time
+	DueAt      time.Time
+	Live       bool
 }
 
-type ListNMIHistoryDuePSPsRow struct {
-	ID     uuid.UUID
-	ReadAt *time.Time
-}
-
-// #1120: NMI's own authorization history, monthly per NMI PSP.
-// Of the merchant's live NMI PSPs (psp_ids), those never read, or last read
-// before due_before, with that read; the stalest first.
-func (q *Queries) ListNMIHistoryDuePSPs(ctx context.Context, arg ListNMIHistoryDuePSPsParams) ([]ListNMIHistoryDuePSPsRow, error) {
-	rows, err := q.db.Query(ctx, listNMIHistoryDuePSPs,
-		arg.MerchantID,
-		arg.PspIds,
-		arg.DueBefore,
+// CROSS-MERCHANT: a page of the NMI history reads due by due_by, by due time,
+// after the cursor: the hourly job's due work, read by its index. live is
+// false for a superseded PSP or a deleted merchant.
+func (q *Queries) ListDueNMIHistoryReads(ctx context.Context, arg ListDueNMIHistoryReadsParams) ([]ListDueNMIHistoryReadsRow, error) {
+	rows, err := q.db.Query(ctx, listDueNMIHistoryReads,
+		arg.DueBy,
+		arg.AfterDueAt,
+		arg.AfterMerchantID,
+		arg.AfterPspID,
 		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListNMIHistoryDuePSPsRow
+	var items []ListDueNMIHistoryReadsRow
 	for rows.Next() {
-		var i ListNMIHistoryDuePSPsRow
-		if err := rows.Scan(&i.ID, &i.ReadAt); err != nil {
+		var i ListDueNMIHistoryReadsRow
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.PspID,
+			&i.ReadAt,
+			&i.DueAt,
+			&i.Live,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -140,19 +151,85 @@ func (q *Queries) ListNMIHistoryDuePSPs(ctx context.Context, arg ListNMIHistoryD
 	return items, nil
 }
 
-const recordNMIHistoryRead = `-- name: RecordNMIHistoryRead :exec
-INSERT INTO billing.nmi_history_reads (merchant_id, psp_id, read_at)
+const parkNMIHistoryRead = `-- name: ParkNMIHistoryRead :exec
+UPDATE billing.nmi_history_reads SET due_at = 'infinity'
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+`
+
+type ParkNMIHistoryReadParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+// A PSP that is not live waits until its configuration declares it again.
+func (q *Queries) ParkNMIHistoryRead(ctx context.Context, arg ParkNMIHistoryReadParams) error {
+	_, err := q.db.Exec(ctx, parkNMIHistoryRead, arg.MerchantID, arg.PspID)
+	return err
+}
+
+const queueNMIHistoryRead = `-- name: QueueNMIHistoryRead :exec
+
+INSERT INTO billing.nmi_history_reads AS r (merchant_id, psp_id, due_at)
 VALUES ($1::uuid, $2::uuid, $3::timestamptz)
-ON CONFLICT (merchant_id, psp_id) DO UPDATE SET read_at = EXCLUDED.read_at
+ON CONFLICT (merchant_id, psp_id) DO UPDATE SET due_at = EXCLUDED.due_at
+WHERE r.due_at = 'infinity'
+`
+
+type QueueNMIHistoryReadParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	DueAt      time.Time
+}
+
+// #1120: NMI's own authorization history, monthly per NMI PSP.
+// A declared, unarchived NMI PSP's history is due from due_at when none is
+// queued; one parked while it was not is due again. A queued read keeps its
+// time.
+func (q *Queries) QueueNMIHistoryRead(ctx context.Context, arg QueueNMIHistoryReadParams) error {
+	_, err := q.db.Exec(ctx, queueNMIHistoryRead, arg.MerchantID, arg.PspID, arg.DueAt)
+	return err
+}
+
+const queueRestoredNMIHistory = `-- name: QueueRestoredNMIHistory :exec
+INSERT INTO billing.nmi_history_reads (merchant_id, psp_id, due_at)
+SELECT p.merchant_id, p.id, $1::timestamptz
+FROM billing.psps p
+WHERE p.merchant_id = $2::uuid AND p.rail = 'nmi' AND p.superseded_at IS NULL
+ON CONFLICT (merchant_id, psp_id) DO NOTHING
+`
+
+type QueueRestoredNMIHistoryParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+}
+
+// A restored merchant's current NMI PSPs are due at once: the source's read
+// progress stays there, so each backfills its own.
+func (q *Queries) QueueRestoredNMIHistory(ctx context.Context, arg QueueRestoredNMIHistoryParams) error {
+	_, err := q.db.Exec(ctx, queueRestoredNMIHistory, arg.Now, arg.MerchantID)
+	return err
+}
+
+const recordNMIHistoryRead = `-- name: RecordNMIHistoryRead :exec
+INSERT INTO billing.nmi_history_reads (merchant_id, psp_id, read_at, due_at)
+VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4::timestamptz)
+ON CONFLICT (merchant_id, psp_id) DO UPDATE SET read_at = EXCLUDED.read_at, due_at = EXCLUDED.due_at
 `
 
 type RecordNMIHistoryReadParams struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
 	ReadAt     time.Time
+	DueAt      time.Time
 }
 
+// A read that completed, and when the next is due.
 func (q *Queries) RecordNMIHistoryRead(ctx context.Context, arg RecordNMIHistoryReadParams) error {
-	_, err := q.db.Exec(ctx, recordNMIHistoryRead, arg.MerchantID, arg.PspID, arg.ReadAt)
+	_, err := q.db.Exec(ctx, recordNMIHistoryRead,
+		arg.MerchantID,
+		arg.PspID,
+		arg.ReadAt,
+		arg.DueAt,
+	)
 	return err
 }

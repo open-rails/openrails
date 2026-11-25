@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -22,94 +23,159 @@ import (
 )
 
 const (
-	// KindNMIHistory names the scan in the billing pass.
 	KindNMIHistory = "openrails.nmi_history"
+	// QueueNMIHistory keeps provider reporting reads off billing workers.
+	QueueNMIHistory    = "nmi_history"
+	NMIHistoryInterval = time.Hour
 
-	// nmiHistoryEvery: a PSP is read once a day, by the first billing pass
-	// past it; a failed read is tried again at the next pass.
-	nmiHistoryEvery = 24*time.Hour - BillingPassInterval
+	// A completed read is due again a day later, less the hour a job may
+	// start past it; a failed read stays due for the next hourly job.
+	nmiHistoryEvery = 24*time.Hour - NMIHistoryInterval
 	// NMIHistoryMonths is how far a PSP's first read reaches back, this
 	// month included: the attempt retention.
 	NMIHistoryMonths = 25
 
-	nmiHistoryMerchantBatch = 200
-	nmiHistoryPSPBatch      = 100
+	nmiHistoryPage = 100
 	// nmiHistoryReadBudget bounds one PSP's read, so a slow account cannot
-	// spend the whole scan's budget and starve the rest.
+	// spend the whole job's budget and starve the rest.
 	nmiHistoryReadBudget = 30 * time.Minute
 )
 
+// NMIHistoryArgs is one hourly run over the NMI PSPs whose history is due.
+type NMIHistoryArgs struct{}
+
+func (NMIHistoryArgs) Kind() string { return KindNMIHistory }
+
+func (NMIHistoryArgs) InsertOpts() river.InsertOpts {
+	opts := periodPass(NMIHistoryInterval)
+	opts.Queue = QueueNMIHistory
+	return opts
+}
+
 // NMIHistoryWorker keeps each NMI PSP's authorization history as monthly
-// aggregates: the decline report's numbers, through the same read. A PSP's
-// first read backfills NMIHistoryMonths; later ones, daily, re-read from the
-// month before the last read's. A read replaces the months it covers in one
+// aggregates: the decline report's numbers, through the same read. It reads
+// only the PSPs nmi_history_reads holds due, by its due_at index. A PSP's
+// first read backfills NMIHistoryMonths; later ones re-read from the month
+// before the last read's. A read replaces the months it covers in one
 // transaction, so a rerun is idempotent and a failed read leaves the stored
 // months as they were. The checkpoint is the PSP, not the month: the Query
 // API selects by last change, so a month's count is exact only from one read
-// that runs through to now. It only reads NMI.
+// that runs through to now. It only reads NMI. A job that starts while
+// another still reads, on any fleet, exits.
 type NMIHistoryWorker struct {
-	DB          *db.DB
+	WorkerDefaults[NMIHistoryArgs]
+	DB *db.DB
+	// Leases renews the job's lease, on connections the reads cannot take;
+	// nil is DB.
+	Leases      *db.DB
 	Clock       clockwork.Clock
 	NMIResolver railresolve.NMIClientResolver
 	Log         *slog.Logger
 }
 
-func (w *NMIHistoryWorker) Pass(ctx context.Context) error {
+func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs]) error {
 	if w.NMIResolver == nil {
 		return errors.New("nmi history: nmi resolver not wired")
 	}
-	now := w.Clock.Now().UTC()
-	var after *uuid.UUID
-	var workErr error
-	for {
-		merchantIDs, err := w.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
-			Rails: []string{string(models.RailNMI)}, MerchantLimit: nmiHistoryMerchantBatch, AfterMerchantID: after,
-		})
+	leases := w.Leases
+	if leases == nil {
+		leases = w.DB
+	}
+	lease, err := leases.TryPassLease(ctx, KindNMIHistory, db.RunLeaseTTL)
+	if err != nil {
+		return fmt.Errorf("nmi history: lease: %w", err)
+	}
+	if lease == nil {
+		w.Log.WarnContext(ctx, "nmi history: the previous job is still reading; this one exits")
+		return nil
+	}
+	defer lease.Release()
+	ctx = lease.Context()
+	now := workerNow(w.Clock)
+	cursor := gen.ListDueNMIHistoryReadsParams{DueBy: now, RowLimit: nmiHistoryPage}
+	var errs error
+	for ctx.Err() == nil {
+		due, err := w.DB.GenDirectory().ListDueNMIHistoryReads(ctx, cursor)
 		if err != nil {
-			return errors.Join(workErr, fmt.Errorf("nmi history: list merchants: %w", err))
+			return errors.Join(errs, fmt.Errorf("nmi history: list due reads: %w", err))
 		}
-		for _, mid := range merchantIDs {
-			after = &mid
+		for _, merchantDue := range byMerchant(due) {
+			mid := merchantDue[0].MerchantID
 			err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(mid), "nmi history", func(ctx context.Context) error {
-				return w.readMerchant(ctx, mid, now)
+				return w.readMerchant(ctx, mid, merchantDue, now)
 			})
 			if err != nil {
-				workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", mid, err))
+				errs = errors.Join(errs, fmt.Errorf("merchant %s: %w", mid, err))
 			}
 		}
-		if len(merchantIDs) < nmiHistoryMerchantBatch {
-			return workErr
+		if len(due) < nmiHistoryPage {
+			return errs
 		}
+		last := due[len(due)-1]
+		cursor.AfterDueAt, cursor.AfterMerchantID, cursor.AfterPspID = last.DueAt, last.MerchantID, last.PspID
 	}
+	return errors.Join(errs, fmt.Errorf("nmi history: not finished: %w", context.Cause(ctx)))
 }
 
-func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, now time.Time) error {
+// byMerchant groups a page's due reads by merchant, in the page's order.
+func byMerchant(due []gen.ListDueNMIHistoryReadsRow) [][]gen.ListDueNMIHistoryReadsRow {
+	var out [][]gen.ListDueNMIHistoryReadsRow
+	at := map[uuid.UUID]int{}
+	for _, d := range due {
+		i, ok := at[d.MerchantID]
+		if !ok {
+			i = len(out)
+			at[d.MerchantID] = i
+			out = append(out, nil)
+		}
+		out[i] = append(out[i], d)
+	}
+	return out
+}
+
+// readMerchant reads the merchant's due PSPs that are live in its
+// configuration and parks the rest until it declares them again.
+func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, due []gen.ListDueNMIHistoryReadsRow, now time.Time) error {
+	var errs error
+	park := func(psp uuid.UUID) {
+		if err := w.DB.Gen(ctx).ParkNMIHistoryRead(ctx, gen.ParkNMIHistoryReadParams{MerchantID: mid, PspID: psp}); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("psp %s: park: %w", psp, err))
+		}
+	}
+	var current []gen.ListDueNMIHistoryReadsRow
+	for _, psp := range due {
+		if psp.Live {
+			current = append(current, psp)
+		} else {
+			park(psp.PspID)
+		}
+	}
+	if len(current) == 0 {
+		return errs
+	}
 	configuration := merchants.Of(w.DB)
 	if configuration == nil {
-		return errors.New("merchant configuration not wired")
+		return errors.Join(errs, errors.New("merchant configuration not wired"))
 	}
 	live, err := configuration.ActivePSPScopesForRail(ctx, billing.MerchantID(mid), string(models.RailNMI))
-	if err != nil || len(live) == 0 {
-		return err
-	}
-	ids := make([]uuid.UUID, len(live))
-	for i, p := range live {
-		ids[i] = p.ID
-	}
-	due, err := w.DB.Gen(ctx).ListNMIHistoryDuePSPs(ctx, gen.ListNMIHistoryDuePSPsParams{
-		MerchantID: mid, PspIds: ids, DueBefore: now.Add(-nmiHistoryEvery), RowLimit: nmiHistoryPSPBatch,
-	})
 	if err != nil {
-		return err
+		return errors.Join(errs, err)
 	}
-	var errs error
-	for _, psp := range due {
+	active := map[uuid.UUID]bool{}
+	for _, p := range live {
+		active[p.ID] = true
+	}
+	for _, psp := range current {
+		if !active[psp.PspID] {
+			park(psp.PspID)
+			continue
+		}
 		rctx, cancel := context.WithTimeout(ctx, nmiHistoryReadBudget)
-		err := w.read(rctx, mid, psp.ID, psp.ReadAt, now)
+		err := w.read(rctx, mid, psp.PspID, psp.ReadAt, now)
 		cancel()
 		if err != nil {
-			w.Log.WarnContext(ctx, "nmi history: read failed; the stored months stand and the next pass tries again", logx.Err(err), "merchant_id", mid, "psp_id", psp.ID)
-			errs = errors.Join(errs, fmt.Errorf("psp %s: %w", psp.ID, err))
+			w.Log.WarnContext(ctx, "nmi history: read failed; the stored months stand and the next job tries again", logx.Err(err), "merchant_id", mid, "psp_id", psp.PspID)
+			errs = errors.Join(errs, fmt.Errorf("psp %s: %w", psp.PspID, err))
 		}
 	}
 	return errs
@@ -149,6 +215,6 @@ func (w *NMIHistoryWorker) read(ctx context.Context, mid, psp uuid.UUID, last *t
 		}); err != nil {
 			return err
 		}
-		return q.RecordNMIHistoryRead(ctx, gen.RecordNMIHistoryReadParams{MerchantID: mid, PspID: psp, ReadAt: now})
+		return q.RecordNMIHistoryRead(ctx, gen.RecordNMIHistoryReadParams{MerchantID: mid, PspID: psp, ReadAt: now, DueAt: now.Add(nmiHistoryEvery)})
 	})
 }

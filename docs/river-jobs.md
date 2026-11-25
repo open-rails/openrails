@@ -1,6 +1,6 @@
 # OpenRails River jobs
 
-OpenRails registers 26 core River job kinds. Five have recurring schedules.
+OpenRails registers 27 core River job kinds. Seven have recurring schedules.
 A kind identifies the worker that handles a job, and
 a queue controls which workers can take it. A shared River fleet can also
 contain AuthKit or host application jobs. [Worker registrations](../internal/app/river_register.go) ·
@@ -10,7 +10,7 @@ The [operations inventory](operations-inventory.md) lists the provider calls and
 
 ## Recurring jobs
 
-River attempts startup catch-up for all five declarations. Shared database
+River attempts startup catch-up for all seven declarations. Shared database
 leases coordinate them. [Periodic declarations](../internal/river/periodic.go) ·
 [Startup and leases](../internal/app/river_periodic.go)
 
@@ -21,6 +21,7 @@ leases coordinate them. [Periodic declarations](../internal/river/periodic.go) �
 | `openrails.customer_messages_dispatch` | `billing` | Every 5 minutes | Queues the send job of each pending customer message a dispatcher's database notification missed. [Worker](../internal/river/jobs_customer_messages.go) · [Dispatch](../internal/modules/messages/dispatch.go) |
 | `openrails.mrr_risk` | `billing` | Every 30 seconds | Drains the MRR risk changes in `mrr_risk_due` that no drain woken by their database notification took. [Worker](../internal/river/jobs_mrr_risk.go) · [Drain](../internal/modules/subscriptions/mrr_risk.go) |
 | `openrails.merchant_health` | `billing` | Every hour | Evaluates payment and recovery health, held renewals, stuck provider operations, and timed access lapses. [Worker](../internal/river/jobs_merchant_health.go) |
+| `openrails.nmi_history` | `nmi_history` | At the top of each UTC hour | Reads the NMI history due in `nmi_history_reads` (indexed on `due_at`) into monthly reporting aggregates: 25 months the first time, then from the month before the last read. A completed read is due again a day later; a failed one stays due for the next hour. Archived or superseded PSPs wait until their configuration declares them again. Its own queue keeps a slow provider report off billing workers; a job that starts while another reads, on any fleet, exits. [Worker](../internal/river/jobs_nmi_history.go) |
 | `openrails.stripe_webhook_reconcile` | `billing` | Every 24 hours. Per-PSP jobs also run on configuration changes, at boot when configuration differs, and at endpoint retirement. | Queues checks for active Stripe PSPs and registers, updates, or retires their managed webhook endpoints. [Worker](../internal/river/jobs_stripe_webhooks.go) · [Configuration trigger](../internal/app/stripe_webhook_follow.go) |
 
 ## Jobs queued as work arrives
@@ -65,7 +66,6 @@ Each `openrails.billing_pass` job runs these scans in order within its own River
 | `openrails.usage_orders` | Due usage bills and collections when usage billing is enabled. [Source](../internal/river/jobs_usage_orders.go) |
 | `openrails.rebill_watch` | Overdue provider-billed renewals that need an evidence check. [Source](../internal/river/jobs_rebill_watch.go) |
 | `openrails.subscription_verification_retry` | Flagged `unverified` subscriptions that still need a targeted provider check after a missed notification or failed read. [Source](../internal/reconcile/verify.go) |
-| `openrails.nmi_history` | NMI PSPs due for a roughly daily history read to update monthly aggregates. [Source](../internal/river/jobs_nmi_history.go) |
 | `openrails.config_realerts` | Unresolved undeclared-account findings due for another operator alert. [Source](../internal/river/jobs_config_realerts.go) |
 | `openrails.stored_card_refresh_due` | Stored cards due for account updater checks before renewal. [Source](../internal/river/jobs_stored_card_refresh.go) |
 | `openrails.operation_wakes` | Live provider operations more than an hour overdue that need another wake. [Source](../internal/river/jobs_operation_wakes.go) |

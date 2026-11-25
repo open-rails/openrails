@@ -1483,7 +1483,7 @@
       "TestRefunds/OR-J20-S06/a-won-dispute-gives-back-what-its-chargeback-took"
     ],
     "OR-J04-S71": [
-      "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-the-pass-and-the-next-reads-it"
+      "TestBillingPass/OR-J04-S71/a-failed-nmi-history-read-fails-its-own-job-and-the-next-hours-reads-it"
     ],
     "OR-J04-S72": [
       "TestHostDeps/OR-J04-S72/boots-on-a-pool-without-a-connection-string"
@@ -2294,6 +2294,9 @@
     ],
     "OR-J04-S82": [
       "TestHostDeps/OR-J04-S82/provider-endpoints-are-loopback-fakes-never-beside-a-live-psp"
+    ],
+    "OR-J04-S83": [
+      "TestBillingPass/OR-J04-S83/a-slow-nmi-history-read-holds-up-no-billing-pass-and-catches-up"
     ],
     "OR-J38-S83": [
       "TestMerchantPullLease/OR-J38-S83/one-pull-of-a-merchant-runs-the-others-skip-and-none-holds-a-session"

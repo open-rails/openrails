@@ -211,8 +211,12 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NotNil(t, health["openrails.billing_pass"].LastCompletedAt)
 		require.NotNil(t, health["openrails.billing_pass"].PeriodSeconds)
 		require.EqualValues(t, 3600, *health["openrails.billing_pass"].PeriodSeconds)
+		require.Contains(t, health, "openrails.nmi_history", "NMI history is its own periodic job, off the billing pass")
+		require.NotNil(t, health["openrails.nmi_history"].PeriodSeconds)
+		require.EqualValues(t, 3600, *health["openrails.nmi_history"].PeriodSeconds)
+		require.EqualValues(t, 3600, health["openrails.nmi_history"].TimeoutSeconds)
 		for _, scan := range []string{"openrails.usage_close", "openrails.dunning", "openrails.balance_watch", "openrails.delinquency", "openrails.order_expiry",
-			"openrails.revenue_recognition", "openrails.rebill_watch", "openrails.nmi_history", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
+			"openrails.revenue_recognition", "openrails.rebill_watch", "openrails.config_realerts", "openrails.stored_card_refresh_due"} {
 			require.NotContains(t, health, scan, "a scan runs in the billing pass; it is no job kind")
 		}
 		require.NotContains(t, health, "openrails.operation_wakes")
