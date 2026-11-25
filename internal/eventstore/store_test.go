@@ -13,8 +13,8 @@ func TestMigrationsSplitIntoDatabaseQualifiedStatements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(migrations) != 3 || migrations[0].Name != "0001_usage.sql" || migrations[1].Name != "0002_usage_intake.sql" || migrations[2].Version != 3 ||
-		migrations[2].Name != "0003_usage_history_hours.sql" {
+	if len(migrations) != 4 || migrations[0].Name != "0001_usage.sql" || migrations[1].Name != "0002_usage_intake.sql" ||
+		migrations[2].Name != "0003_usage_history_hours.sql" || migrations[3].Version != 4 || migrations[3].Name != "0004_usage_history_order.sql" {
 		t.Fatalf("migrations = %+v", migrations)
 	}
 	s := &Store{database: "critical_x"}

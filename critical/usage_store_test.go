@@ -545,7 +545,8 @@ products:
 			u.OccurredAt = at[i]
 			items = append(items, u)
 		}
-		settleUsage(t, a.alpha, newLease(), numbered(1, items...)...)
+		// A lease minted now by the world's clock, a year ahead of the real one.
+		settleUsage(t, a.alpha, leaseMintedAt(a.clock.Now()), numbered(1, items...)...)
 		w := a.world
 		require.EqualValues(t, 4, storeCount(t, w, "SELECT count() FROM {db}.usage_history WHERE merchant_id = {m} AND meter = ''"), "one row an hour")
 		require.Zero(t, storeCount(t, w, "SELECT countIf(toMinute(bucket_at) != 0) FROM {db}.usage_history WHERE merchant_id = {m}"), "buckets are whole UTC hours")
