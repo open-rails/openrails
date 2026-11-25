@@ -1,6 +1,8 @@
 packages:
   - "."
 
+pmOnFail: ignore
+
 ignoreScripts: true
 ignorePnpmfile: true
 strictDepBuilds: true

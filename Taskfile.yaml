@@ -65,13 +65,9 @@ tasks:
   dev:console:
     desc: The merchant console's Vite dev server, proxying the API on :3053
     dir: web/console
-    # The exact pnpm its packageManager pins (pmOnFail is error), whatever pnpm is installed.
-    vars:
-      PM:
-        sh: node -p "require('./package.json').packageManager"
     cmds:
-      - npx --yes {{.PM}} install --frozen-lockfile --prefer-offline
-      - npx --yes {{.PM}} dev
+      - pnpm install --frozen-lockfile --prefer-offline
+      - pnpm dev
 
   docker-up:
     desc: Start local docker compose stack (openrails + deps)

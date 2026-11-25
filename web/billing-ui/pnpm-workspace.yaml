@@ -1,6 +1,8 @@
 packages:
   - "."
 
+pmOnFail: ignore
+
 # Transitive security bump; drop it once eslint and typescript-eslint ask for
 # the fixed range themselves.
 overrides:
