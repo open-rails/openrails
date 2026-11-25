@@ -19,11 +19,10 @@ permissions:
 
 # Closing or drafting cancels the PR run. Ordinary draft updates use a separate
 # group so a delayed draft event cannot cancel a newer ready-to-review run.
-# Each merge group has its own ref. Pushes queue behind the running one, so
-# each finishes and saves the branch's caches.
+# Each merge group has its own ref. A push cancels the branch's older push check.
 concurrency:
   group: validate-${{ github.event_name == 'merge_group' && github.ref || github.event_name == 'push' && format('push-{0}', github.ref) || github.event.pull_request.draft && github.event.action != 'converted_to_draft' && github.event.action != 'closed' && format('draft-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+  cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -34,9 +33,11 @@ env:
 #   light   a PR into rc/**: the suites its changes reach, no critical journeys.
 #   queue   a merge group of rc/**'s merge queue: the light suites over the
 #           group's combined changes (and every critical journey once switched on).
-#   push    a push to rc/** or master: what the merge changed, plus gosec; it
+#   push    the push check, on every push to rc/** or master: the light suites
+#           over the pushed range, plus the linked build. It blocks nothing and
 #           saves the Go caches PRs restore.
-#   full    a PR into master or a dispatch: every suite and every critical journey.
+#   full    a PR into master or a dispatch: every suite, gosec and every
+#           critical journey.
 #   focused a dispatch naming critical journeys or scenarios: only those, and no gate.
 # Suite selection is deliberately coarse. Shared or unknown inputs fan out.
 jobs:
@@ -116,10 +117,18 @@ jobs:
               plan+=(--tier queue --base "$BASE_SHA" --head "$GITHUB_SHA")
               ;;
             push)
-              # What the merge changed; a new branch or a force push selects every suite.
+              # The pushed range; a new branch or a force push selects every suite.
               plan+=(--tier push --head "$GITHUB_SHA")
               if [[ ! "$BASE_SHA" =~ ^0+$ ]] && git merge-base --is-ancestor "$BASE_SHA" HEAD 2>/dev/null; then
                 plan+=(--base "$BASE_SHA")
+                {
+                  echo "## Push check of ${GITHUB_REF_NAME}: ${BASE_SHA:0:9}..${GITHUB_SHA:0:9}"
+                  echo '```'
+                  git log --oneline --no-decorate -n 50 "$BASE_SHA..$GITHUB_SHA"
+                  echo '```'
+                } >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "## Push check of ${GITHUB_REF_NAME} at ${GITHUB_SHA:0:9} (new branch or force push: every suite)" >> "$GITHUB_STEP_SUMMARY"
               fi
               ;;
             *)
@@ -543,11 +552,10 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           family: plain
-      # gosec takes about ten minutes; it runs after every merge (push) and
-      # before every release (full), not on each pull request or merge group.
+      # gosec takes about ten minutes; it runs before every release (full).
       # The root module's ./... excludes each nested Go module.
       - name: Go SAST
-        if: ${{ needs.scope.outputs.tier == 'push' || needs.scope.outputs.tier == 'full' }}
+        if: ${{ needs.scope.outputs.tier == 'full' }}
         run: |
           gosec_bin="$(scripts/ci-install-tool.sh gosec)"
           for module in . server adapters/authkit examples; do
@@ -606,10 +614,10 @@ jobs:
       attestations: write
 
   # Required as CI Gate on rc/** pull requests and merge groups and on master.
-  # A push reports Post-merge CI instead, so its light result never stands in
-  # for the full tier on a release head.
+  # A push reports Push check instead, so its light result never stands in for
+  # the full tier on a release head.
   gate:
-    name: ${{ github.event_name == 'push' && 'Post-merge CI' || (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
+    name: ${{ github.event_name == 'push' && 'Push check' || (github.event.pull_request.draft || github.event.action == 'closed') && 'Inactive PR (CI not requested)' || 'CI Gate' }}
     needs: [source, scope, guards, go, lint, chart, sql, browser, critical, critical-coverage, critical-cache, security, artifact-release, artifact-image]
     if: ${{ always() && needs.scope.outputs.tier != 'focused' && (github.event_name != 'pull_request' || (github.event.action != 'closed' && !github.event.pull_request.draft)) }}
     runs-on: ubuntu-latest
@@ -621,11 +629,20 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSHED_FROM: ${{ github.event.before }}
         run: |
           set -euo pipefail
           python3 - <<'CHECK'
           import json, os
           result = json.loads(os.environ['RESULTS'])
+          if os.environ['EVENT_NAME'] == 'push':
+              # Red on the RC: whoever pushed the range fixes it first.
+              failed = [f"{job}: {need['result']}" for job, need in result.items() if need['result'] not in ('success', 'skipped')]
+              pushed = f"{os.environ['PUSHED_FROM'][:9]}..{os.environ['GITHUB_SHA'][:9]}"
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  summary.write(f"## Push check of {os.environ['GITHUB_REF_NAME']} {pushed}: " + ("failed\n\n" + "\n".join(f"- {line}" for line in failed) if failed else "passed") + "\n")
+              for line in failed:
+                  print(f"::error title=Push check {pushed} is red::{line}")
           event, target = os.environ['EVENT_NAME'], os.environ['EVENT_BASE_REF']
           if result['source']['result'] == 'failure':
               raise SystemExit('master takes pull requests only from rc/X.Y.Z and chore/release-vX.Y.Z; see the Source branch job')

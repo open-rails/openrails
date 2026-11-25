@@ -29,13 +29,12 @@ through `host-four`; these are placeholders, not customer or repository names.
   master to it and pushes the `vX.Y.Z`, `server/vX.Y.Z` and `adapters/authkit/vX.Y.Z` tags with it.
 
 ## Branches
-- Feature branch → open RC → master → tag. `OPEN.md` names the one open RC, `rc/X.Y.Z` for the
-  version it becomes (cut from master, deleted once merged); branch from it and target it, never master.
-- A ready PR into `rc/**` runs the light CI tier: the suites `scripts/ci-scope.py` selects from its changed paths (a deletion or rename selects all; docs-only runs the guards alone), no `critical/` and no gosec. Draft PRs run nothing; `CI Gate` needs every selected job.
-- `rc/**` merges through GitHub's merge queue: `gh pr merge N --squash` queues a green PR (`--auto --squash` queues it once green). Each group runs the light suites over its combined changes on top of the RC and the groups ahead of it, and merges only if `CI Gate` passes, so sessions no longer coordinate merges. `--admin` skips the gate and the queue when the owner wants a change in fast; the push run then checks it on the RC.
-- Groups also run the whole critical suite once `QUEUE_RUNS_CRITICAL` in `scripts/ci-scope.py` is on. It stays off until a full run of the RC is green: while the RC is red every group would fail, the fixes included.
-- Every push to `rc/**` or master runs the suites the push changed plus gosec, reported as `Post-merge CI` (never `CI Gate`), and saves the Go caches; only pushes save them, so pull requests restore their base's and everything else master's.
-- The RC → master PR, and a `Validate` dispatch with no selection, run everything once: every suite, gosec, and the critical suite on `CRITICAL_SHARDS` runners balanced by `critical/durations.json`; `Critical coverage` proves from the shards' reports that every scenario ran once.
+- Open RC → master → tag. `OPEN.md` names the one open RC, `rc/X.Y.Z` for the version it becomes (cut from master, deleted once merged); work lands on it, never on master.
+- Push to the RC after a local build (rebase, never force). The push check runs the light tier over the pushed range (`Push check`, never `CI Gate`); it blocks nothing, and whoever's push turns it red fixes it first. A newer push cancels the older check. PRs into the RC and its merge queue are optional.
+- A ready PR into `rc/**` runs the light tier: the suites `scripts/ci-scope.py` selects from its changed paths (a deletion or rename selects all; docs-only runs the guards alone), with no `critical/` and no gosec. Draft PRs run nothing; `CI Gate` needs every selected job. `gh pr merge N --squash` (or `--auto --squash`) puts it in the merge queue, which runs the light suites over each group's combined changes on top of the RC and the groups ahead of it; `--admin` skips the gate and the queue.
+- Merge groups also run the whole critical suite once `QUEUE_RUNS_CRITICAL` in `scripts/ci-scope.py` is on. It stays off until a full run of the RC is green: while the RC is red every group would fail, the fixes included.
+- The RC → master PR, and a `Validate` dispatch with no selection, run everything once: every suite, gosec, and the critical suite on `CRITICAL_SHARDS` runners balanced by `critical/durations.json`; `Critical coverage` proves from the shards' reports that every scenario ran once. Dispatch for an RC commit on a `verify/` branch at that commit: a dispatch on the RC ref cancels other dispatches on it.
+- Only pushes (to `rc/**` and master) save the Go caches: pull requests restore their base's, everything else master's.
 - No bot opens dependency PRs: `scripts/deps` lists the advisory feed's open alerts; fixes go in one batch per RC.
 - Master takes PRs only from `rc/X.Y.Z` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
   A release is a tag on master; not every master commit is one.
