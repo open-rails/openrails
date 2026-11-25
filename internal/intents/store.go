@@ -794,13 +794,19 @@ func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason str
 	}, outcome)
 }
 
-// Park returns the intent to pending until nextAttemptAt; an empty reason
-// records no failure.
+// Park returns the intent to pending until nextAttemptAt and records the hold
+// in its operations history; an empty reason records no failure.
 func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
-	return s.park(ctx, id, nextAttemptAt, reason, nil)
+	return s.park(ctx, id, nextAttemptAt, reason, nil, true)
 }
 
-func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, recovery []byte) error {
+// Defer returns the intent to pending until it is due. A wait is neither an
+// attempt, a failure nor a hold: it writes no operation entry.
+func (s *Store) Defer(ctx context.Context, id uuid.UUID, until time.Time) error {
+	return s.park(ctx, id, until, "", nil, false)
+}
+
+func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, recovery []byte, hold bool) error {
 	if historyHold(ctx) == "" {
 		ctx = withHistoryHold(ctx, "execution_held")
 	}
@@ -818,7 +824,7 @@ func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: failure,
 			RecoveryEvidence: recovery,
 		})
-		if err == nil && rows > 0 {
+		if err == nil && rows > 0 && hold {
 			err = txs.recordHistoryHold(ctx, id)
 		}
 		if err != nil || rows != 0 {
