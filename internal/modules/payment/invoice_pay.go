@@ -1135,9 +1135,6 @@ func (h *NMISaleIntentHandler) completeInvoice(ctx context.Context, d *db.DB, in
 				if err := paymentmethods.NewPaymentMethodRepo(d).Create(ctx, saved); err != nil {
 					return err
 				}
-				if _, err := d.Gen(ctx).SetInvoicePaymentMethod(ctx, gen.SetInvoicePaymentMethodParams{MerchantID: in.MerchantID, ID: p.InvoiceID, PaymentMethodID: saved.ID, Now: now}); err != nil {
-					return err
-				}
 				method = &saved.ID
 			}
 		}
@@ -1154,6 +1151,11 @@ func (h *NMISaleIntentHandler) completeInvoice(ctx context.Context, d *db.DB, in
 		}
 		if _, err := h.Sale.Invoices.Paid(ctx, d, p.InvoiceID, paid); err != nil {
 			return err
+		}
+		if saved != nil {
+			if _, err := d.Gen(ctx).SetInvoicePaymentMethod(ctx, gen.SetInvoicePaymentMethodParams{MerchantID: in.MerchantID, ID: p.InvoiceID, PaymentMethodID: saved.ID, Now: now}); err != nil {
+				return err
+			}
 		}
 		// The payment names the subscription an invoice of one bought; so does
 		// its attempt.
@@ -1294,12 +1296,12 @@ func evidenceText(evidence map[string]any, key string) string {
 func invoiceFailure(rail string, evidence map[string]any) *billing.PaymentFailure {
 	reason := billing.DeclineProcessingError
 	switch {
-	case evidence["declined"] == true:
+	case evidence["declined"] == true || evidence["gateway_refused"] == true:
 		code := evidenceText(evidence, "localization_id")
 		if code == "" {
 			code = evidenceText(evidence, "decline_code")
 		}
-		if code == "" || code == "0" {
+		if code == "" || code == "0" || evidence["gateway_refused"] == true {
 			code = evidenceText(evidence, "response_code")
 		}
 		// The gateway's AVS and CVV letters name the field to correct.

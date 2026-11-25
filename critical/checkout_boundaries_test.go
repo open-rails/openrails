@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"io"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	embedded "github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/invoices"
 	"github.com/open-rails/openrails/internal/modules/payment"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/stretchr/testify/require"
@@ -459,12 +461,50 @@ func testNMISaleBoundaries(t *testing.T) {
 		require.Equal(t, intents.StatusFailedTerminal, row.Status)
 		var proof map[string]any
 		require.NoError(t, json.Unmarshal(row.ResultEvidence, &proof))
-		require.Equal(t, true, proof["declined"])
+		require.Equal(t, true, proof["request_refused"])
+		require.Equal(t, true, proof["gateway_refused"])
+		require.NotContains(t, proof, "declined")
 		require.EqualValues(t, 300, proof["response_code"])
 		attempts, err := a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
 		require.NoError(t, err)
-		require.Len(t, attempts.Items, 1)
+		require.Empty(t, attempts.Items)
 		require.Empty(t, p.core.Ledger(""))
+		for _, code := range []string{"410", "411", "440", "441", "460", "461"} {
+			p.core.Intercept(nmiSaleRequest, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
+				response := serve()
+				body, err := io.ReadAll(response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				fields, err := url.ParseQuery(string(body))
+				require.NoError(t, err)
+				if fields.Get("response") == "2" {
+					fields.Set("response", "3")
+				}
+				response.Body = io.NopCloser(strings.NewReader(fields.Encode()))
+				return response, nil
+			})
+			invoice := nmiCheckoutInvoice(t, a, "refusal-"+code, false, 48*time.Hour)
+			invoice = payNMICheckout(t, a, invoice, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242", Decline: code, VaultsDeclined: true}), true)
+			require.Equal(t, billing.InvoiceOpen, invoice.Status)
+			reason := billing.DeclineProcessingError
+			if code == "461" {
+				reason = billing.DeclineBrandNotAccepted.Failure().Reason
+			}
+			require.Equal(t, reason, invoice.Payment.LastPaymentError.Reason)
+			row := nmiCheckoutOperation(t, a, invoice, false)
+			require.Equal(t, intents.StatusFailedTerminal, row.Status)
+			require.NoError(t, json.Unmarshal(row.ResultEvidence, &proof))
+			require.Equal(t, true, proof["request_refused"])
+			require.Equal(t, true, proof["gateway_refused"])
+			require.NotContains(t, proof, "declined")
+			require.Equal(t, code, fmt.Sprint(proof["response_code"]))
+			require.NotEmpty(t, proof["localization_id"])
+			require.Empty(t, p.core.Vaults())
+		}
+		attempts, err = a.alpha.ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{CustomerID: billing.CustomerID(uuid.MustParse(a.alice.ID))})
+		require.NoError(t, err)
+		require.Empty(t, attempts.Items)
+		require.NotEmpty(t, archiveBytes(t, a.alpha))
 		p.money(t, 0, 0)
 	})
 	t.Run("OR-J09-S72/never-connected-sale-reopens-the-invoice", func(t *testing.T) {
@@ -551,14 +591,15 @@ func testNMISaleBoundaries(t *testing.T) {
 			require.Equal(t, true, evidence["released_unconfirmed"])
 			require.NotEmpty(t, evidence["submitted_at"])
 			require.NotContains(t, evidence, "not_executed")
+			require.NoError(t, intents.ValidateNMISaleTerminal(row))
 		}
 		current, err = a.alpha.GetInvoice(t.Context(), first.ID)
 		require.NoError(t, err)
 		require.Equal(t, billing.InvoiceOpen, current.Status)
 		require.Equal(t, billing.DeclineProcessingError, current.Payment.LastPaymentError.Reason)
-		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices/"+first.ID.String()+"/cancel", a.aliceToken, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		status, raw = a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: *first.Lines[0].PriceID}}})
+		_, err = a.alpha.CancelInvoice(t.Context(), first.ID)
+		require.NoError(t, err)
+		status, raw := a.request(t, http.MethodPost, "/v1/me/invoices", a.aliceToken, billing.CreateMyInvoiceParams{Lines: []billing.InvoiceLineParams{{PriceID: *first.Lines[0].PriceID}}})
 		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, status, string(raw))
 		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { _, err := rt.Invoices.ExpireDue(ctx, 100); return err }))
 		current, err = a.alpha.GetInvoice(t.Context(), expiring.ID)
@@ -571,6 +612,7 @@ func testNMISaleBoundaries(t *testing.T) {
 		unresolved, err := a.alpha.ListFindings(t.Context(), billing.FindingListParams{Type: payment.SaleUnresolvedFinding, Status: "fixed"})
 		require.NoError(t, err)
 		require.Len(t, unresolved.Items, 2)
+		require.NotEmpty(t, archiveBytes(t, a.alpha))
 		p.money(t, 0, 0)
 	})
 	t.Run("OR-J09-S75/operator-attests-an-empty-order-release", func(t *testing.T) {
@@ -608,6 +650,27 @@ func testNMISaleBoundaries(t *testing.T) {
 		require.Equal(t, billing.InvoiceOpen, current.Status)
 		require.True(t, errors.Is(resolve(intents.Resolution{ProviderReference: p.core.LastSale().TransactionID, Actor: "operator", Reason: "late receipt"}), intents.ErrResolutionNotUnknown))
 		p.money(t, 1, 500)
+
+		paid := nmiCheckoutInvoice(t, a, "retained", false, 48*time.Hour)
+		p.core.FailRequests(func(r *http.Request) bool {
+			return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/customers/")
+		}, http.StatusServiceUnavailable, 1)
+		paid = payNMICheckout(t, a, paid, p.core.Tokenize(nmimock.Card{Brand: "visa", Last4: "5454"}), true)
+		require.Equal(t, billing.InvoiceComplete, paid.Status)
+		row = nmiCheckoutOperation(t, a, paid, false)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		_, retained, err := intents.LoadCollectedReceipt(row)
+		require.NoError(t, err)
+		require.True(t, retained)
+		before := append([]byte(nil), row.ResultEvidence...)
+		p.core.EditSale(p.core.LastSale().TransactionID, func(s *nmimock.Sale) { s.Hidden = true })
+		require.ErrorIs(t, resolve(resolution), intents.ErrResolutionRejected)
+		row = nmiCheckoutOperation(t, a, paid, false)
+		require.JSONEq(t, string(before), string(row.ResultEvidence))
+		require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+		a.clock.Advance(6 * time.Minute)
+		require.Equal(t, intents.StatusSucceeded, nmiCheckoutOperation(t, a, paid, true).Status)
+		p.money(t, 2, 1000)
 	})
 	t.Run("OR-J09-S76/vault-read-failure-keeps-paid-access-and-retries-storage", func(t *testing.T) {
 		for _, recurring := range []bool{false, true} {
@@ -657,6 +720,25 @@ func testNMISaleBoundaries(t *testing.T) {
 			methods, err := a.alpha.ListPaymentMethods(t.Context(), customer, billing.PaymentMethodListParams{})
 			require.NoError(t, err)
 			require.Len(t, methods.Items, 1)
+			require.True(t, methods.Items[0].Reusable)
+			status, raw := a.request(t, http.MethodGet, "/v1/me/payment-methods", a.aliceToken, nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var options billing.ListPage[billing.PaymentMethod]
+			require.NoError(t, json.Unmarshal(raw, &options))
+			require.Len(t, options.Items, 1)
+			require.Equal(t, methods.Items[0].ID, options.Items[0].ID)
+			require.True(t, options.Items[0].Reusable)
+			var onFile []billing.Mandate
+			for _, mandate := range methods.Items[0].Mandates {
+				if mandate.Kind == billing.MandateCardOnFile {
+					onFile = append(onFile, mandate)
+				}
+			}
+			require.Len(t, onFile, 1)
+			require.Equal(t, billing.MandateActive, onFile[0].Status)
+			next := nmiCheckoutInvoice(t, a, "after-storage", false, 48*time.Hour)
+			require.NotEmpty(t, next.PaymentOptions)
+			require.Contains(t, next.PaymentOptions[0].Accepts, "saved_card")
 			current, err := a.alpha.GetInvoice(t.Context(), invoice.ID)
 			require.NoError(t, err)
 			require.Equal(t, &methods.Items[0].ID, current.Payment.PaymentMethodID)
@@ -671,6 +753,23 @@ func testNMISaleBoundaries(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, sub.PaymentMethodID)
 			}
+			status, raw = a.request(t, http.MethodPatch, "/v1/me/payment-methods/"+methods.Items[0].ID.String(), a.aliceToken, billing.UpdatePaymentMethodParams{Reusable: ptr(false)})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			rt := embedded.Graph(a.engine).Runtime
+			require.NoError(t, rt.DB.MerchantTx(merchant.WithID(t.Context(), a.alpha.MerchantID()), func(ctx context.Context, tx pgx.Tx) error {
+				d := rt.DB.NewWithPgxTx(tx)
+				if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: a.alpha.MerchantID().UUID(), ID: customer.UUID()}); err != nil {
+					return err
+				}
+				_, err := rt.Invoices.Paid(ctx, d, invoice.ID.UUID(), invoices.Charge{PaymentID: invoice.Payment.PaymentID.UUID(), PaymentMethodID: methods.Items[0].ID.UUID(),
+					PSPID: methods.Items[0].PSPID.UUID(), Rail: "nmi", Amount: invoice.Total, Currency: string(invoice.Currency), StoringRef: p.core.LastSale().TransactionID, Reuse: true})
+				return err
+			}))
+			methods, err = a.alpha.ListPaymentMethods(t.Context(), customer, billing.PaymentMethodListParams{})
+			require.NoError(t, err)
+			require.Len(t, methods.Items, 1)
+			require.False(t, methods.Items[0].Reusable)
+			require.Len(t, methods.Items[0].Mandates, len(options.Items[0].Mandates))
 			p.money(t, 1, 500)
 		}
 	})

@@ -152,7 +152,8 @@ Checks:
 is settled by reads (`collect`, `absentSale`). NMI's definitive decline under
 its order ends it unpaid. An empty order search keeps it `processing` with a
 high `life.sale.unresolved` finding until 24 hours after `submitted_at`, then
-releases it unpaid. An operator may release an empty order earlier with
+releases it unpaid. A retained payment receipt prevents release. An operator may
+release an empty order earlier with
 `intents resolve --not-executed`, an actor and a reason. Both releases reopen
 the invoice with a processing failure, resolve the unresolved finding and raise
 `life.sale.released_unconfirmed`: search absence is not proof that no money moved.
@@ -174,7 +175,11 @@ Checks:
 An approved new-card sale whose card cannot be read still pays the invoice and
 grants access. The intent retains its receipt and retries storage without charging
 again; `life.sale.card_not_saved` identifies the customer, invoice and any opened
-subscription until storage recovers. The subscription waits for its method.
+subscription until storage recovers. The subscription waits for its method. Late
+storage also records the accepted card-on-file agreement for a reusable card,
+including a one-time purchase, once. Gateway refusals retain `request_refused` and
+`gateway_refused` evidence and use the response code for `last_payment_error`;
+they do not count as card declines.
 
 ### 3. Exact money
 Totals and line amounts are `int64` micros (`invoices.total`, `CHECK (total >= 0)`);

@@ -26,17 +26,18 @@ func ValidateNMISaleTerminal(in gen.BillingProviderIntent) error {
 		NotExecuted    bool      `json:"not_executed"`
 		RequestRefused bool      `json:"request_refused"`
 		Submitted      bool      `json:"sale_submitted"`
+		Released       bool      `json:"released_unconfirmed"`
 	}
 	if err := json.Unmarshal(in.ResultEvidence, &evidence); err != nil {
 		return err
 	}
 	switch in.Status {
 	case StatusSucceeded:
-		if !paid || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || evidence.PaymentID == uuid.Nil || evidence.TransactionID != receipt.TransactionID() {
+		if !paid || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || evidence.Released || evidence.PaymentID == uuid.Nil || evidence.TransactionID != receipt.TransactionID() {
 			return errors.New("sale terminal result contradicts its qualified payment")
 		}
 	case StatusFailedTerminal:
-		if paid || (!evidence.Declined && !evidence.NotExecuted && !evidence.RequestRefused) || (evidence.NotExecuted && evidence.Submitted) {
+		if paid || (!evidence.Declined && !evidence.NotExecuted && !evidence.RequestRefused && !evidence.Released) || (evidence.NotExecuted && evidence.Submitted) {
 			return errors.New("sale refusal is unqualified or contradicts retained payment")
 		}
 	default:

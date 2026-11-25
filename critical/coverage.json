@@ -3931,7 +3931,7 @@
     {
       "id": "OR-J09-S71",
       "journey": "J09",
-      "name": "Definitive NMI gateway refusal reopens the invoice without a charge"
+      "name": "Definitive NMI gateway refusals reopen the invoice with the response taxonomy, without card-decline attempts or a retained new-card vault"
     },
     {
       "id": "OR-J09-S72",
@@ -3946,17 +3946,17 @@
     {
       "id": "OR-J09-S74",
       "journey": "J09",
-      "name": "An empty NMI order releases after 24 hours and the reopened invoice can cancel or expire"
+      "name": "An empty NMI order releases after 24 hours, passes sale archive validation, and the merchant can cancel the reopened invoice or let it expire"
     },
     {
       "id": "OR-J09-S75",
       "journey": "J09",
-      "name": "Operator attestation releases an empty NMI order and refuses an order containing a transaction"
+      "name": "Operator attestation releases an empty NMI order and refuses an order containing a transaction or an intent holding a paid receipt without changing its evidence"
     },
     {
       "id": "OR-J09-S76",
       "journey": "J09",
-      "name": "An approved new-card sale grants paid access while card storage retries without another charge"
+      "name": "An approved new-card sale grants paid access while card storage retries without another charge; late storage records one reusable card agreement and offers the saved card, and a paid replay preserves revoked reuse consent"
     }
   ]
 }

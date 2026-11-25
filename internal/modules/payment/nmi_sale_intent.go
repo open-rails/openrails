@@ -190,6 +190,10 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		} else if errors.As(callErr, &refusal) {
 			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
 			reason = "sale declined"
+			if errors.Is(callErr, nmi.ErrSaleRefused) {
+				evidence = map[string]any{"request_refused": true, "gateway_refused": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID}
+				reason = "provider refused the sale request"
+			}
 			// A new card is known only to NMI: its report names the card tried.
 			if p.Token != "" && refusal.TransactionID != "" {
 				if brand, last4, err := client.TransactionCard(ctx, refusal.TransactionID); err != nil {
@@ -255,6 +259,10 @@ func (h *NMISaleIntentHandler) proxyOutcome(ctx context.Context, in gen.BillingP
 		fallthrough
 	case err == nil && refusal != nil:
 		evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
+		if errors.Is(err, nmi.ErrSaleRefused) {
+			evidence = map[string]any{"request_refused": true, "gateway_refused": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID}
+			reason = "provider refused the sale request"
+		}
 		p, decodeErr := payments.DecodeNMISalePayload(in)
 		if decodeErr != nil {
 			return intents.Ambiguous(decodeErr.Error())
@@ -448,6 +456,11 @@ func (h *NMISaleIntentHandler) absentSale(ctx context.Context, in gen.BillingPro
 }
 
 func (h *NMISaleIntentHandler) releaseUnconfirmed(ctx context.Context, in gen.BillingProviderIntent, reason string) intents.Outcome {
+	if _, paid, err := intents.LoadCollectedReceipt(in); err != nil {
+		return intents.Ambiguous(err.Error())
+	} else if paid {
+		return intents.Ambiguous("paid sale cannot be released")
+	}
 	evidence := map[string]any{"released_unconfirmed": true, "release_reason": reason, "submitted_at": intents.EvidenceString(in, "submitted_at")}
 	if record := intents.OperatorResolutionRecord(ctx); record != nil {
 		evidence["operator_resolution"] = record
@@ -502,6 +515,11 @@ func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.BillingProvid
 		return intents.Outcome{}, err
 	}
 	if resolution.NotExecuted {
+		if _, paid, err := intents.LoadCollectedReceipt(in); err != nil {
+			return intents.Outcome{}, intents.RejectResolution("cannot read retained sale receipt: %v", err)
+		} else if paid {
+			return intents.Outcome{}, intents.RejectResolution("paid sale cannot be released")
+		}
 		order, err := client.ReadOrderAttempts(ctx, payments.NMISaleOrderReference(in.ID, p.E2ERunID))
 		if err != nil {
 			return intents.Outcome{}, intents.RejectResolution("NMI transaction search is unavailable: %v", err)

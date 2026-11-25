@@ -69,7 +69,7 @@ func (s *Service) restoreInvoiceCard(ctx context.Context, d *db.DB, invoice *Inv
 		}
 		restored = true
 	}
-	if restored && paid.Reuse {
+	if paid.Reuse && (restored || invoice.PaymentMethodID == nil) {
 		return mandates.RecordStored(ctx, q, mandates.Stored{MerchantID: invoice.MerchantID, CustomerID: invoice.CustomerID, PaymentMethodID: paid.PaymentMethodID, PSPID: paid.PSPID,
 			Rail: paid.Rail, Currency: invoice.Currency, Lineage: *paid.lineage(), AcceptedAt: now})
 	}
