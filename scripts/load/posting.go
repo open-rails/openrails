@@ -219,7 +219,9 @@ func (e *env) runPosting(ctx context.Context) *PostingResult {
 	e.checkLedger(ctx, w, schema, map[string]*seeded{"post": s})
 	r.Checks = append(r.Checks, w.Checks...)
 	r.Rows = e.rowStats(ctx, w, schema)
-	r.Storage = e.storage(ctx, w, schema)
+	if r.Storage, err = e.storage(ctx, schema); err != nil {
+		w.fail("storage: %v", err)
+	}
 	r.Queries = e.queryStats(ctx, w, schema)
 	r.Errors = append(r.Errors, w.Errors...)
 	return r

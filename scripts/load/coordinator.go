@@ -36,6 +36,7 @@ type Results struct {
 	Postgres map[string]string       `json:"postgres_settings"`
 	Worlds   map[string]*WorldResult `json:"worlds"`
 	Posting  *PostingResult          `json:"posting,omitempty"`
+	Storage  *StorageResult          `json:"storage,omitempty"`
 	Errors   []string                `json:"errors"`
 }
 
@@ -162,6 +163,8 @@ func coordinate(ctx context.Context, plan Plan, out string) error {
 				res.Worlds[name] = e.runEmbedded(ctx)
 			case "posting":
 				res.Posting = e.runPosting(ctx)
+			case "storage":
+				res.Storage = e.runStorage(ctx)
 			default:
 				res.Errors = append(res.Errors, "unknown world "+name)
 			}

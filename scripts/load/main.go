@@ -3,7 +3,7 @@
 // engine, on PostgreSQL, Redis and ClickHouse. It writes raw results
 // (results.json) and a summary (summary.md).
 //
-//	load run -out DIR [-plan plan.json] [-ramp 2000,4000] [-heavy-rows N] [-worlds http,embedded,posting]
+//	load run -out DIR [-plan plan.json] [-ramp 2000,4000] [-heavy-rows N] [-worlds http,embedded,posting,storage]
 //
 // run starts the server and gate processes it needs as children of the same
 // binary (load serve, load gates). It needs disposable services only: every
@@ -64,7 +64,7 @@ func runCmd(ctx context.Context, args []string) error {
 	planFile := fs.String("plan", "", "JSON plan overriding the defaults")
 	ramp := fs.String("ramp", "", "hot merchant rates to step through, events/s (comma separated)")
 	heavy := fs.Int64("heavy-rows", -1, "usage events of the heavy customer in the posting world")
-	worlds := fs.String("worlds", "", "worlds to run: http,embedded,posting")
+	worlds := fs.String("worlds", "", "worlds to run: http,embedded,posting,storage")
 	step := fs.Int("step-seconds", 0, "seconds per ramp step")
 	_ = fs.Parse(args)
 	if *out == "" {

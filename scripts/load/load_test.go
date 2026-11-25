@@ -113,9 +113,13 @@ func TestSummaryRendersAWorld(t *testing.T) {
 		Overshoot: &Overshoot{Customers: 2, Drained: 2, Max: 300_000, MaxBound: 9_000_000},
 		Storage:   []TableStorage{{Table: "usage_events", Rows: 10, Bytes: 400}}}
 	r := &Results{Plan: defaultPlan(), Host: map[string]string{"cpus": "4"}, Worlds: map[string]*WorldResult{"http": w},
-		Posting: &PostingResult{Syncs: newHist(), TopUpLight: newHist(), Close: &PassResult{State: "completed", Seconds: 12}}}
+		Posting: &PostingResult{Syncs: newHist(), TopUpLight: newHist(), Close: &PassResult{State: "completed", Seconds: 12}},
+		Storage: &StorageResult{Shape: "shape", Worlds: []*StorageWorld{{Name: "aged", Events: 4, Syncs: h,
+			Tables:  []TableStorage{{Table: "usage_events", Rows: 4, Compressed: 100, Uncompressed: 400, Bytes: 200}},
+			Columns: []ColumnStorage{{Column: "event_id", Compressed: 64, Uncompressed: 64}}, History: &HistoryRows{Rows: 8, DayRows: 2, DayRowsNoInvoker: 1}}}}}
 	out := summarize(r)
-	for _, want := range []string{"| http | stored-once/hot | yes |", "| hot | local | allowed | 1 | 50.00%", "| 2000 | 0 | 2600 | 2590 |", "Month-end close", "| usage_events | 10 |"} {
+	for _, want := range []string{"| http | stored-once/hot | yes |", "| hot | local | allowed | 1 | 50.00%", "| 2000 | 0 | 2600 | 2590 |", "Month-end close", "| usage_events | 10 |",
+		"| usage_events | 4 | 0 | 0.0 MB | 0.0 MB | 0.0 MB | 25.0 | 100.0 | 50.0 |", "| event_id | 0.0 MB | 0.0 MB | 16.00 |", "2 rows, 1 without the invoker"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary lacks %q:\n%s", want, out)
 		}

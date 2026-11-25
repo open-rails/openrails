@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 // summarize renders summary.md from the raw results.
@@ -44,6 +46,13 @@ func summarize(r *Results) string {
 	if r.Posting != nil {
 		for _, c := range r.Posting.Checks {
 			p("| posting | %s | %s | %s |", c.Name, okMark(c.OK), c.Detail)
+		}
+	}
+	if r.Storage != nil {
+		for _, w := range r.Storage.Worlds {
+			for _, c := range w.Checks {
+				p("| storage/%s | %s | %s | %s |", w.Name, c.Name, okMark(c.OK), c.Detail)
+			}
 		}
 	}
 	p("")
@@ -171,7 +180,58 @@ func summarize(r *Results) string {
 		queryTable(p, pr.Queries)
 		rowsAndDisk(p, pr.Rows, pr.Storage)
 	}
+	if st := r.Storage; st != nil {
+		storageSection(p, st)
+	}
 	return b.String()
+}
+
+// storageSection is what each storage database holds per usage event.
+func storageSection(p func(string, ...any), st *StorageResult) {
+	p("## Storage per usage event")
+	p("")
+	p("Workload: %s. Each database is measured once every TTL is applied and its parts are merged (`MATERIALIZE TTL`, `OPTIMIZE FINAL`).", st.Shape)
+	p("")
+	for _, w := range st.Worlds {
+		p("### %s: usage from %s to %s", w.Name, w.From.Format(time.DateOnly), w.To.Format(time.DateOnly))
+		p("")
+		if len(w.Errors) > 0 {
+			p("Errors: %s", strings.Join(w.Errors, "; "))
+			p("")
+		}
+		p("%d events stored, ingested at %.0f events/s (sync p50 %s ms, p99 %s ms).", w.Events, w.IngestRate, ms(w.Syncs.Q(0.5)), ms(w.Syncs.Q(0.99)))
+		p("")
+		perEvent(p, w.Tables, uint64(max(w.Events, 1)))
+		if h := w.History; h != nil {
+			p("usage_history: %d rows; one a UTC day would be %d rows, %d without the invoker.", h.Rows, h.DayRows, h.DayRowsNoInvoker)
+			p("")
+		}
+		if len(w.Columns) > 0 {
+			p("| usage_events column | compressed | uncompressed | compressed B/event |")
+			p("|---|---|---|---|")
+			for _, c := range w.Columns {
+				p("| %s | %s | %s | %.2f |", c.Column, mb(c.Compressed), mb(c.Uncompressed), float64(c.Compressed)/float64(max(w.Events, 1)))
+			}
+			p("")
+		}
+	}
+}
+
+// perEvent is each table's active parts and their bytes per stored event.
+func perEvent(p func(string, ...any), storage []TableStorage, events uint64) {
+	p("| ClickHouse table | rows | parts | compressed | uncompressed | on disk | B/event compressed | B/event uncompressed | B/event on disk |")
+	p("|---|---|---|---|---|---|---|---|---|")
+	sorted := slices.Clone(storage)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Bytes > sorted[j].Bytes })
+	var all TableStorage
+	for _, t := range sorted {
+		all.Compressed, all.Uncompressed, all.Bytes = all.Compressed+t.Compressed, all.Uncompressed+t.Uncompressed, all.Bytes+t.Bytes
+		p("| %s | %d | %d | %s | %s | %s | %.1f | %.1f | %.1f |", t.Table, t.Rows, t.Parts, mb(t.Compressed), mb(t.Uncompressed), mb(t.Bytes),
+			float64(t.Compressed)/float64(events), float64(t.Uncompressed)/float64(events), float64(t.Bytes)/float64(events))
+	}
+	p("| all | | | %s | %s | %s | %.1f | %.1f | %.1f |", mb(all.Compressed), mb(all.Uncompressed), mb(all.Bytes),
+		float64(all.Compressed)/float64(events), float64(all.Uncompressed)/float64(events), float64(all.Bytes)/float64(events))
+	p("")
 }
 
 func firstRate(p Plan) float64 {
@@ -284,21 +344,12 @@ func rowsAndDisk(p func(string, ...any), rows *RowStats, storage []TableStorage)
 		return
 	}
 	var events uint64
-	var total uint64
 	for _, t := range storage {
-		total += t.Bytes
 		if t.Table == "usage_events" {
 			events = t.Rows
 		}
 	}
-	p("| ClickHouse table | rows | parts | on disk | bytes per usage event |")
-	p("|---|---|---|---|---|")
-	sort.Slice(storage, func(i, j int) bool { return storage[i].Bytes > storage[j].Bytes })
-	for _, t := range storage {
-		p("| %s | %d | %d | %s | %.1f |", t.Table, t.Rows, t.Parts, mb(t.Bytes), float64(t.Bytes)/float64(max(events, 1)))
-	}
-	p("| all | | | %s | %.1f |", mb(total), float64(total)/float64(max(events, 1)))
-	p("")
+	perEvent(p, storage, max(events, 1))
 }
 
 func topCores(cores map[string]float64, n int) string {
