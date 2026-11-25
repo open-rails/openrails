@@ -1241,11 +1241,14 @@ type BillingNmiHistoryMonth struct {
 	DeclineCause   *string
 }
 
-// When each NMI PSP's history was last read in full. A PSP with none is backfilled 25 months; later reads start the month before this one.
+// Each current NMI PSP's history read: when it last completed and when the next is due. A PSP never read is backfilled 25 months; later reads start the month before the last.
 type BillingNmiHistoryRead struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
-	ReadAt     time.Time
+	// When the last read completed; NULL until one has.
+	ReadAt *time.Time
+	// When the hourly openrails.nmi_history job reads it next: a day after a completed read, unchanged after a failed one; infinity while the PSP is archived, superseded or its merchant deleted, until its configuration declares it again.
+	DueAt time.Time
 }
 
 // Financial archive restore blocks inbox publication until explicit notification ordering-state adoption. No implicit revision reset.

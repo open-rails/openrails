@@ -304,6 +304,10 @@ func Restore(ctx context.Context, database *db.DB, clock clockwork.Clock, id bil
 		if err := q.MarkDelinquencyDue(ctx, gen.MarkDelinquencyDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err
 		}
+		// Its NMI PSPs' history is read again from NMI.
+		if err := q.QueueRestoredNMIHistory(ctx, gen.QueueRestoredNMIHistoryParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
+			return err
+		}
 		// Usage accounts are due again at their bill dates.
 		if err := q.RebuildUsageDue(ctx, gen.RebuildUsageDueParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
 			return err

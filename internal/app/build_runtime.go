@@ -80,6 +80,9 @@ const (
 	// riverPSPImportQueueMaxWorkers bounds the PSP pulls one fleet runs at
 	// once: after an upgrade every PSP of every merchant pulls.
 	riverPSPImportQueueMaxWorkers = 2
+	// riverNMIHistoryQueueMaxWorkers: one hourly history job, which reads its
+	// due PSPs in turn.
+	riverNMIHistoryQueueMaxWorkers = 1
 	// leaseConns sizes the separate pool that renews leases, copied from
 	// Deps.Postgres's configuration: count it in max_connections.
 	leaseConns = 4
@@ -266,8 +269,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *billing.Config, overrid
 	}
 	customers := &identity.Customers{Directory: directory}
 	// Leases renew on their own connections (idempotency claims, the billing
-	// pass, merchant pulls), so a pool their holders saturate never starves a
-	// renewal.
+	// pass, NMI history, merchant pulls), so a pool their holders saturate
+	// never starves a renewal.
 	leaseDB, err := database.SeparatePool(ctx, leaseConns)
 	if err != nil {
 		return nil, fmt.Errorf("lease pool: %w", err)

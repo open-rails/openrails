@@ -24,6 +24,8 @@ var Periodics = []Periodic{
 	// Every due scan, in turn: what is due by the pass is billed, retried,
 	// lapsed or expired by it.
 	{Args: BillingPassArgs{}, Every: BillingPassInterval, Hourly: true},
+	// NMI PSPs due for their roughly daily history read, off the billing queue.
+	{Args: NMIHistoryArgs{}, Every: NMIHistoryInterval, Hourly: true},
 	// Health findings and timed access lapses, for merchants with activity.
 	{Args: MerchantHealthArgs{}, Every: MerchantHealthInterval},
 	{Args: CleanupExpiredDataArgs{}, Every: CleanupInterval},

@@ -240,8 +240,8 @@ if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil {
 }
 ```
 
-`RiverJobs` adds the `billing`, `psp_import` (2 workers) and `provider_refresh`
-(4 workers) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes
+`RiverJobs` adds the `billing`, `psp_import` (2 workers), `provider_refresh`
+(4 workers) and `nmi_history` (1 worker) queues when missing and sets `RescueStuckJobsAfter` to 10 minutes
 when unset; each worker declares its own timeout. The fleet must be in
 `DatabaseConfig.RiverSchema`, run on every replica, and is yours to start and stop.
 `Start` without `WithRiverClient` after `RiverJobs` went to a fleet is refused.
