@@ -190,7 +190,7 @@ func TestMerchantCardRemoval(t *testing.T) {
 		_, err = a.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{a.schema, "payment_methods"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2", a.alpha.MerchantID().UUID(), method.ID.UUID())
 		var refused *pgconn.PgError
 		require.ErrorAs(t, err, &refused, "a card's permanent versions refuse its deletion")
-		require.Equal(t, "23503", refused.Code, refused.Message)
+		require.Equal(t, "23001", refused.Code, "PostgreSQL 18 reports a RESTRICT refusal as restrict_violation: "+refused.Message)
 		require.Equal(t, "payment_method_versions_payment_method_id_fkey", refused.ConstraintName)
 		require.Equal(t, kept, versions())
 	})
