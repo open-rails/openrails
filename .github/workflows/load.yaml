@@ -1,0 +1,103 @@
+name: Load qualification
+
+# The usage gate and usage path under load (scripts/load): the SDK gate over
+# HTTP against the standalone server and against the embedded engine, on
+# PostgreSQL 18, Redis and ClickHouse 26.8, ramped until something saturates,
+# with the faults it must survive. Manual only; one run costs about 45 runner
+# minutes. GitHub-hosted runners are shared hardware: their latency is noisy.
+on:
+  workflow_dispatch:
+    inputs:
+      runs-on:
+        description: Runner label (a dedicated runner for comparable numbers)
+        default: ubuntu-latest
+      ramp:
+        description: Hot merchant rates to step through, events/s (comma separated; empty for the default)
+        default: ""
+      heavy_rows:
+        description: Usage events of the heavy customer in the month-end close
+        default: "26000000"
+      worlds:
+        description: Worlds to run (http, embedded, posting)
+        default: http,embedded,posting
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  load:
+    name: Load qualification
+    runs-on: ${{ inputs.runs-on || 'ubuntu-latest' }}
+    timeout-minutes: 55
+    env:
+      OPENRAILS_LOAD_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_load?sslmode=disable
+      OPENRAILS_LOAD_REDIS_URL: redis://127.0.0.1:6379/0
+      OPENRAILS_LOAD_CLICKHOUSE_ADDR: 127.0.0.1:9000
+      OPENRAILS_LOAD_CLICKHOUSE_CONTAINER: load-clickhouse
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # On disk, not tmpfs: the run measures ClickHouse's disk per event and
+      # restarts it mid-run.
+      - name: Start PostgreSQL, Redis and ClickHouse
+        run: |
+          set -euo pipefail
+          pg="$(scripts/ci-pull-image.sh postgres@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71)" # 18-alpine
+          redis="$(scripts/ci-pull-image.sh redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe)" # 7-alpine
+          ch="$(scripts/ci-pull-image.sh clickhouse/clickhouse-server@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7)" # 26.8.36.3
+          docker run -d --pull never --name load-postgres -p 127.0.0.1:5432:5432 --shm-size=1g \
+            -e POSTGRES_DB=openrails_load -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+            "$pg" -c max_connections=300 -c shared_buffers=1GB -c effective_cache_size=4GB -c work_mem=16MB \
+            -c max_wal_size=4GB -c checkpoint_timeout=5min -c max_locks_per_transaction=256
+          docker run -d --pull never --name load-redis -p 127.0.0.1:6379:6379 "$redis"
+          docker run -d --pull never --name load-clickhouse -p 127.0.0.1:9000:9000 \
+            -v load-clickhouse-data:/var/lib/clickhouse --ulimit nofile=262144:262144 \
+            -e CLICKHOUSE_SKIP_USER_SETUP=1 "$ch"
+          timeout 90 bash -c 'until docker exec load-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_load; do sleep 1; done'
+          timeout 60 bash -c 'until docker exec load-redis redis-cli ping; do sleep 1; done'
+          timeout 90 bash -c 'until docker exec load-clickhouse clickhouse-client --query "SELECT 1"; do sleep 1; done'
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: scripts/load/go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          family: critical
+      - name: Build the driver
+        working-directory: scripts/load
+        run: GOWORK=off go build -o "$RUNNER_TEMP/load" .
+      - name: Run
+        timeout-minutes: 45
+        env:
+          RAMP: ${{ inputs.ramp }}
+          HEAVY_ROWS: ${{ inputs.heavy_rows || '26000000' }}
+          WORLDS: ${{ inputs.worlds || 'http,embedded,posting' }}
+        run: |
+          set -euo pipefail
+          nproc; free -m; df -h /
+          args=(-out "$RUNNER_TEMP/load-results" -heavy-rows "$HEAVY_ROWS" -worlds "$WORLDS")
+          if [[ -n "$RAMP" ]]; then args+=(-ramp "$RAMP"); fi
+          "$RUNNER_TEMP/load" run "${args[@]}"
+      - name: Summary and service logs
+        if: ${{ always() }}
+        run: |
+          out="$RUNNER_TEMP/load-results"
+          mkdir -p "$out"
+          if [[ -f "$out/summary.md" ]]; then cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          for c in load-postgres load-redis load-clickhouse; do docker logs --tail 2000 "$c" > "$out/$c.log" 2>&1 || true; done
+          docker exec load-clickhouse clickhouse-client --query "SELECT event_time, level, logger_name, message FROM system.text_log WHERE level <= 'Warning' ORDER BY event_time DESC LIMIT 500 FORMAT TSV" > "$out/clickhouse-warnings.tsv" 2>&1 || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          name: load-results
+          path: ${{ runner.temp }}/load-results/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Tear down the services
+        if: ${{ always() }}
+        run: docker rm -f load-postgres load-redis load-clickhouse || true
