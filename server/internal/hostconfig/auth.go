@@ -1,48 +1,11 @@
 package hostconfig
 
 import (
-	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 
 	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/keys"
 )
-
-// SigningKey is AuthKit's inline signing key, read from the environment
-// (AUTHKIT_ACTIVE_KEY_ID, AUTHKIT_ACTIVE_PRIVATE_KEY_PEM and
-// AUTHKIT_PUBLIC_KEYS, a JSON object {kid: PEM} of further keys trusted for
-// verification, such as the previous one during a rotation).
-type SigningKey struct {
-	// ActiveKeyID is the signing key's kid.
-	ActiveKeyID string `yaml:"active_key_id"`
-	// ActivePrivateKeyPEM is the signing key, PEM.
-	ActivePrivateKeyPEM string `yaml:"active_private_key_pem"`
-	// PublicKeysJSON is a JSON object {kid: PEM} of further keys trusted for verification.
-	PublicKeysJSON string `yaml:"public_keys"`
-}
-
-// Source is the key as AuthKit's Deps.KeySource; nil without one, when
-// AuthKit reads auth.keys.path. An inline key is frozen for the process:
-// keys.path rotates without a restart.
-func (k SigningKey) Source() (keys.Source, error) {
-	id, pem := strings.TrimSpace(k.ActiveKeyID), strings.TrimSpace(k.ActivePrivateKeyPEM)
-	if id == "" && pem == "" {
-		return nil, nil
-	}
-	var public map[string]string
-	if raw := strings.TrimSpace(k.PublicKeysJSON); raw != "" {
-		if err := json.Unmarshal([]byte(raw), &public); err != nil {
-			return nil, fmt.Errorf("AUTHKIT_PUBLIC_KEYS is not a JSON object of PEM keys: %w", err)
-		}
-	}
-	src, err := keys.StaticFromPEM(id, pem, public)
-	if err != nil {
-		return nil, fmt.Errorf("AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM: %w", err)
-	}
-	return src, nil
-}
 
 // authPath is the auth section key an AUTH_* environment variable names:
 // its rest after AUTH_, matched against AuthKit's keys (sign_in_dpop is

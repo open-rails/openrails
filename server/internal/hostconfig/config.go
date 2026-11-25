@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -28,24 +27,20 @@ import (
 // comma-separated or a JSON array); envKeyToConfigKey holds the exceptions.
 type Config struct {
 	Server server.Config `yaml:"-"`
-	// Database is the database section's connection; its schemas and lease
-	// pool are Server.Engine.Database.
+	// Database is the database section's connection; its schema is
+	// Server.Engine.Database.
 	Database DatabaseConnection `yaml:"database"`
 	// Redis is the redis section; nil declares none.
 	Redis *RedisConfig `yaml:"redis"`
 	// ClickHouse is the clickhouse section's connection, the event store
-	// usage needs; nil declares none, and usage is off. Its database is
+	// usage needs; nil declares none, and usage is off. Its database becomes
 	// Server.Engine.ClickHouse.
-	ClickHouse *ClickHouseLogin `yaml:"clickhouse"`
+	ClickHouse *ClickHouseConnection `yaml:"clickhouse"`
 	// SMTP is the email_smtp section; nil sends no email.
 	SMTP *SMTPConfig `yaml:"email_smtp"`
 	// Vault is the vault section's login: declaring any vault key connects;
 	// nil logs in to no Vault. Its mounts are Server.Engine.Vault.
 	Vault *VaultLogin `yaml:"vault"`
-	// SigningKey is AuthKit's inline signing key (AUTHKIT_ACTIVE_KEY_ID,
-	// AUTHKIT_ACTIVE_PRIVATE_KEY_PEM, AUTHKIT_PUBLIC_KEYS); without one
-	// AuthKit reads auth.keys.path.
-	SigningKey SigningKey `yaml:"signing_key"`
 	// Logger is the binary's logger.
 	Logger LoggerConfig `yaml:"logger"`
 	// EnvFile is the .env file the load consumed; empty when none.
@@ -83,35 +78,28 @@ func Engine(ctx context.Context) *billing.Config {
 func defaults() *Config {
 	return &Config{
 		Server: server.DefaultConfig(),
-		// database.url: defaultDatabaseURL; database.sslmode: defaultSSLMode.
-		// No redis: rate limits and lockouts live in memory, for one instance.
-		// No clickhouse.addr: no event store, so usage is off.
-		ClickHouse: &ClickHouseLogin{Username: "default"},
-		Logger:     LoggerConfig{Level: "info", Format: "json"},
-		// public_billing_base_url: defaultPublicBillingBaseURL; auth: authDefaults.
+		// database.url: DSN. No redis: rate limits and lockouts live in
+		// memory, for one instance. No clickhouse: no event store, so usage
+		// is off. public_url has no default: boot refuses without it.
+		Logger: LoggerConfig{Level: "info"},
 	}
 }
 
-// defaultDatabaseURL is Compose's Postgres, used when no database connection
-// key is set. A deploy that forgets its database fails to connect; it never
-// reaches another.
+// defaultDatabaseURL is Compose's Postgres, used when neither database.url
+// nor a libpq variable names a connection. A deploy that forgets its
+// database fails to connect; it never reaches another.
 const defaultDatabaseURL = "postgres://app:app_password@localhost:5434/openrails_db?sslmode=disable"
 
-// defaultPublicBillingBaseURL is the local server: http://localhost:<port>.
-func defaultPublicBillingBaseURL(port int) string {
-	return "http://localhost:" + strconv.Itoa(port)
-}
+// libpqConnection are the libpq variables that name a connection.
+var libpqConnection = []string{"PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE"}
 
-// defaultSSLMode verifies the server's certificate and name off this
-// machine; a loopback host or a Unix socket only requires TLS.
-func defaultSSLMode(host string) string {
+// loopbackHost reports a host on this machine, or a Unix socket.
+func loopbackHost(host string) bool {
 	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
-		return "require"
+		return true
 	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return "require"
-	}
-	return "verify-full"
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // authDefaults are AuthKit's settings the binary defaults: the token issuer
@@ -125,111 +113,53 @@ func authDefaults(a *authkit.Config, publicBillingBaseURL string) {
 	a.Database.Schema = cmp.Or(a.Database.Schema, "profiles")
 }
 
-// DatabaseConnection is the database section's connection: URL, or the
-// connection string its parts assemble.
+// DatabaseConnection is the database section's connection.
 type DatabaseConnection struct {
-	// URL is the connection string; it overrides the parts below.
+	// URL is the connection string. Unset, libpq's variables name it
+	// (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD or PGPASSFILE,
+	// PGSSLMODE, PGSSLROOTCERT); with neither, Compose's local Postgres.
 	URL string `yaml:"url"`
-	// Host is the database server, when URL is unset.
-	Host string `yaml:"host"`
-	// Port is the database server's port.
-	Port string `yaml:"port"`
-	// Name is the database.
-	Name string `yaml:"name"`
-	// Username is the role the server connects, migrates and runs as.
-	Username string `yaml:"username"`
-	// Password is the role's password.
-	Password string `yaml:"password"`
-	// SSLMode is libpq's sslmode for the parts: verify-full by default,
-	// require for a loopback host or a Unix socket.
-	SSLMode string `yaml:"sslmode"`
-	// SSLRootCert is the PEM file of the CAs that verify the server's
-	// certificate; unset, the system roots.
-	SSLRootCert string `yaml:"sslrootcert"`
-	// SQLTrace logs every query at debug level.
-	SQLTrace bool `yaml:"sql_trace"`
 }
 
-// ConnectionString is URL, or the URL the parts assemble; "" when they are
-// incomplete. Credentials and the database name are percent-encoded: a
-// password with '@' or '/' must not change the host.
-func (c DatabaseConnection) ConnectionString() string {
-	if c.URL != "" {
-		return c.URL
+// DSN is the connection string the pool opens, getenv reading the process
+// environment: URL; else "" for pgx to read the libpq variables, with
+// sslmode verify-full off this machine unless PGSSLMODE names another; else
+// defaultDatabaseURL.
+func (c DatabaseConnection) DSN(getenv func(string) string) string {
+	if url := strings.TrimSpace(c.URL); url != "" {
+		return url
 	}
-	if c.Host == "" || c.Port == "" || c.Name == "" || c.Username == "" {
-		return ""
+	named := false
+	for _, v := range libpqConnection {
+		named = named || getenv(v) != ""
 	}
-	query := url.Values{"sslmode": {cmp.Or(c.SSLMode, defaultSSLMode(c.Host))}}
-	if c.SSLRootCert != "" {
-		query.Set("sslrootcert", c.SSLRootCert)
+	switch {
+	case !named:
+		return defaultDatabaseURL
+	case getenv("PGSSLMODE") == "" && !loopbackHost(cmp.Or(getenv("PGHOST"), getenv("PGHOSTADDR"), "localhost")):
+		return "sslmode=verify-full"
 	}
-	u := url.URL{
-		Scheme:   "postgresql",
-		User:     url.UserPassword(c.Username, c.Password),
-		Host:     net.JoinHostPort(c.Host, c.Port),
-		Path:     "/" + c.Name,
-		RawQuery: query.Encode(),
-	}
-	return u.String()
+	return ""
 }
 
-// databaseURL is database.url, or the URL the parts assemble, or with neither
-// defaultDatabaseURL. A missing part refuses boot: nothing stands in for it.
-func databaseURL(db DatabaseConnection) (string, error) {
-	if url := strings.TrimSpace(db.URL); url != "" {
-		return url, nil
-	}
-	var missing []string
-	for _, part := range []struct{ key, value string }{
-		{"database.host (DATABASE_HOST)", db.Host}, {"database.port (DATABASE_PORT)", db.Port},
-		{"database.name (DATABASE_NAME)", db.Name}, {"database.username (DATABASE_USERNAME)", db.Username},
-	} {
-		if strings.TrimSpace(part.value) == "" {
-			missing = append(missing, part.key)
-		}
-	}
-	switch len(missing) {
-	case 0:
-		return db.ConnectionString(), nil
-	case 4:
-		return defaultDatabaseURL, nil
-	default:
-		return "", fmt.Errorf("database: database.url (DATABASE_URL) is unset and its parts are incomplete: set %s", strings.Join(missing, ", "))
-	}
-}
-
-// RedisConfig is the redis section: Addr, or a redis:// or rediss:// URL.
+// RedisConfig is the redis section.
 type RedisConfig struct {
-	// Addr is host:port.
-	Addr string `yaml:"addr"`
 	// URL is redis://[user[:password]@]host[:port][/db], or rediss:// over
-	// TLS, in place of Addr, DB and TLS. Username and Password, when set, are
-	// used over the URL's.
+	// TLS.
 	URL string `yaml:"url"`
-	// Username is the ACL user; empty is the default user.
-	Username string `yaml:"username"`
-	// Password is the user's password.
-	Password string `yaml:"password"`
-	// DB is the database number.
-	DB int `yaml:"db"`
-	// TLS connects over TLS, verifying the server against the system roots,
-	// or against CACert, which implies TLS.
-	TLS bool `yaml:"tls"`
-	// CACert is the PEM bundle of the CA that signed the server's certificate.
+	// CACert is the PEM bundle of the CA that signed the server's
+	// certificate, for a rediss:// URL; unset, the system roots.
 	CACert string `yaml:"ca_cert"`
 }
 
-// ClickHouseLogin is how the binary connects to ClickHouse, over its native
-// protocol. The password is a secret: CLICKHOUSE_PASSWORD, from the
-// environment or a mounted secret file.
-type ClickHouseLogin struct {
-	// Addr is host:port of the native protocol, 9000 by default.
-	Addr string `yaml:"addr"`
-	// Username is the ClickHouse user.
-	Username string `yaml:"username"`
-	// Password is the user's password.
-	Password string `yaml:"password"`
+// ClickHouseConnection is how the binary connects to ClickHouse, over its
+// native protocol.
+type ClickHouseConnection struct {
+	// URL is clickhouse://[user[:password]@]host[:port][/database], port 9000
+	// by default; the path names the event store's database, openrails by
+	// default. A secret: CLICKHOUSE_URL, from the environment or a mounted
+	// secret file.
+	URL string `yaml:"url"`
 }
 
 // SMTPConfig is the email_smtp section (EMAIL_SMTP_HOST, …), the same names
@@ -284,24 +214,26 @@ type VaultLogin struct {
 // and drops the sections that declare nothing.
 func (c *Config) finish(secretsDir string) error {
 	s := &c.Server
-	s.Engine.PublicBillingBaseURL = cmp.Or(strings.TrimSpace(s.Engine.PublicBillingBaseURL), defaultPublicBillingBaseURL(cmp.Or(s.Port, server.DefaultConfig().Port)))
+	s.Engine.PublicURL = strings.TrimSpace(s.Engine.PublicURL)
 	s.Engine.CheckoutOrigin = strings.TrimSpace(s.Engine.CheckoutOrigin)
-	authDefaults(&s.Auth, s.Engine.PublicBillingBaseURL)
+	authDefaults(&s.Auth, s.Engine.PublicURL)
 	*s = s.WithDefaults()
 	if _, err := c.Logger.Handler(io.Discard); err != nil {
 		return err
 	}
-	url, err := databaseURL(c.Database)
-	if err != nil {
-		return err
-	}
-	c.Database.URL = url
-	if c.Redis != nil && *c.Redis == (RedisConfig{}) { // a blank REDIS_PASSWORD
+	if c.Redis != nil && strings.TrimSpace(c.Redis.URL) == "" && strings.TrimSpace(c.Redis.CACert) == "" { // a blank REDIS_URL
 		c.Redis = nil
 	}
+	if c.ClickHouse != nil && strings.TrimSpace(c.ClickHouse.URL) == "" {
+		c.ClickHouse = nil
+	}
 	if c.ClickHouse != nil {
-		if c.ClickHouse.Addr = strings.TrimSpace(c.ClickHouse.Addr); c.ClickHouse.Addr == "" {
-			c.ClickHouse = nil
+		u, err := url.Parse(strings.TrimSpace(c.ClickHouse.URL))
+		if err != nil || u.Scheme != "clickhouse" || u.Host == "" {
+			return fmt.Errorf("clickhouse.url (CLICKHOUSE_URL) must be clickhouse://[user[:password]@]host[:port][/database]")
+		}
+		if name := strings.Trim(u.Path, "/"); name != "" {
+			s.Engine.ClickHouse.Database = name
 		}
 	}
 	if c.SMTP != nil && strings.TrimSpace(c.SMTP.Host) == "" {
@@ -322,6 +254,9 @@ func Validate(cfg *Config) error {
 	}
 	if s.MetricsPort < 0 || s.MetricsPort > 65535 || (s.MetricsPort != 0 && s.MetricsPort == s.Port) {
 		return fmt.Errorf("invalid metrics_port %d: must be 1-65535 and not port", s.MetricsPort)
+	}
+	if s.Engine.PublicURL == "" {
+		return fmt.Errorf("public_url (PUBLIC_URL) is required: where browsers and PSPs reach this server, without /v1 (http://localhost:%d locally)", s.Port)
 	}
 	return config.Validate(&s.Engine)
 }

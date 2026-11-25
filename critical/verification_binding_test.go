@@ -355,7 +355,7 @@ func unretractedGrant(t *testing.T, a *authorityWorld) (billing.CustomerID, stri
 	_, err = a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "product_access"}.Sanitize()+" SET revoked_at=NULL, revoke_reason=NULL WHERE id=$1", uuid.UUID(granted[0].ID))
 	require.NoError(t, err)
 	// Drift no writer made: the revoke's own convergence is not left queued.
-	_, err = a.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{a.schema, "river_job"}.Sanitize()+" WHERE kind='openrails.customer_converge'")
+	_, err = a.pool.Exec(t.Context(), "DELETE FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+" WHERE kind='openrails.customer_converge'")
 	require.NoError(t, err)
 	access, err := a.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{key}})
 	require.NoError(t, err)

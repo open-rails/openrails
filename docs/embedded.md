@@ -115,16 +115,14 @@ an optional section is on once set.
 | Field | Meaning |
 |---|---|
 | `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
-| `Database` | `billing.DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
+| `Database` | `billing.DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers ([migrations](#migrations)). |
 | `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
 | `Merchants` | The merchants this engine serves ([merchants](#merchants)); code only. |
-| `PublicBillingBaseURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
+| `PublicURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
 | `TrustedProxies` | Your own load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Cloudflare's published ranges are built in and trusted too, and only their peers are believed for `CF-IPCountry`. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
 | `CheckoutOrigin` | Needed only to serve OpenRails' own hosted pay page: its separate origin ([checkout page](#checkout-page)). Leave it empty with the embedded checkout or your own card form; pay URLs then answer `pay_url_unavailable`. |
 | `RateLimits` | `billing.RateLimitsConfig`, one `*billing.RateLimit` per bucket: `Purchase` (10 a minute), `Payment` (40), `Subscribe` (20), `Webhook` (1200). Nil takes the default; `&billing.RateLimit{}` (`RequestsPerMinute` 0) leaves the bucket unlimited, so a host fronting billing with its own limiter sets every bucket to it. |
 | `Captcha` | `billing.CaptchaAccount`: `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`); both keys turn it on. It challenges a subject at 3× a bucket's limit. |
-| `UserActionRateLimit` | The merchant-wide budget for customer cancellations and card removals. |
-| `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)), and each merchant's own budget for SCIM contact erasures (`ErasurePerHour`, `ErasurePerDay`). |
 | `Vault` | `KVMount` (merchant configuration in Vault), `ScopePrefix` (default `openrails`), `TransitMount` (Solana signing, default `transit`). The client is `Deps.Vault`, which turns it on. |
 | `CardVault`, `HyperSwitch` | A platform card vault and HyperSwitch ([custody](client.md#merchant-configuration-and-psps)). |
 | `Solana` | The deployment's crankers: they publish plans and pull renewals. Without one, Solana rebilling is off. |
@@ -136,7 +134,7 @@ posture, kept in the database: `openrails merchant hold` and
 `openrails merchant arm`, run with the engine's database and schema, change it
 ([write safety](standalone.md#write-safety-and-the-kill-switch)).
 
-A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicBillingBaseURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours.
+A return URL (a pay URL's `success_url` and `cancel_url`, a hosted payment's `return_url`, the Stripe billing portal's return) may name only the origin of `PublicURL`, of the merchant's `Issuer`, or one of its `checkout.embed_origins`. The event log keeps 90 days, and a rotated-out PSP webhook signing secret verifies for 24 hours. Customers' own cancellations and card removals, and staff destructive actions, have fixed limits ([destructive holds](client.md#destructive-holds)).
 
 Several instances must agree on the schemas, `Merchants`, `RateLimits`, `Captcha`, `TrustedProxies` and the mounted `Routes` (a route some instances lack answers 404 there).
 
@@ -212,9 +210,7 @@ The catalog has its own lifecycle: `New` never applies one ([catalog](client.md#
 
 `New` migrates through your pool, under an advisory lock, before it serves:
 one instance migrates, the rest wait. To migrate as a deploy step instead, run
-`openrails.Migrate(ctx, pool, cfg.Database)` (or `openrails migrate up`) and set
-`DatabaseConfig.SkipMigrations` on the servers, which then only check the ledger.
-With an event store, also run `openrails.MigrateClickHouse(ctx, pool, conn, cfg.ClickHouse)`, which takes its own advisory lock on `pool`; `SkipMigrations` checks its migrations too.
+`openrails.Migrate(ctx, pool, cfg.Database)` (or `openrails migrate up`); `New`'s own migration is then a no-op under the same lock. With an event store, also run `openrails.MigrateClickHouse(ctx, pool, conn, cfg.ClickHouse)`, which takes its own advisory lock on `pool`.
 
 - An older build boots on a schema a newer one migrated (it leaves unknown
   migrations alone), so rolling upgrades work in both directions within v1.
@@ -283,7 +279,7 @@ and no sticky session.
   and clocks within five minutes, and share periodic passes through leases in
   `periodic_leases`.
 
-Size PostgreSQL `max_connections` for every pool, plus `DatabaseConfig.LeaseConns` per instance, plus each instance's direct sessions:
+Size PostgreSQL `max_connections` for every pool, plus the 4 connections of each instance's lease pool (idempotency claims, the billing pass, merchant pulls), plus each instance's direct sessions:
 
 - **Listeners**, held while the instance runs: five on an instance running workers (unverified subscriptions, Solana Pay, customer messages, dispute responses, MRR risk changes), and on every instance one for configuration edits with Vault configuration.
 - **Short session locks**: one while a usage policy write runs, one while a billing import lands, and `New`'s migration pool while it migrates.

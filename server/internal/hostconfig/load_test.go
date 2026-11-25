@@ -13,6 +13,7 @@ func isolate(t *testing.T) (configPath, secrets string) {
 	t.Helper()
 	dir, secrets := t.TempDir(), t.TempDir()
 	t.Setenv("VAULT_SECRETS_PATH", secrets)
+	t.Setenv("PUBLIC_URL", "http://localhost:3053")
 	return filepath.Join(dir, "config.yaml"), secrets
 }
 
@@ -55,22 +56,24 @@ func TestOneDatabaseSection(t *testing.T) {
 		}
 		return configPath
 	}
-	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\n  lease_conns: 2\nroute_groups:\n  merchant_config: true\n"))
+	cfg, err := Load(write(t, "database:\n  url: postgres://u:p@db.internal:5432/x\n  schema: Shop\nclickhouse:\n  url: clickhouse://u:p@events.internal:9000/usage\nredis:\n  url: rediss://u:p@cache.internal:6380/2\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Server.RouteGroups.MerchantConfig {
-		t.Error("route_groups.merchant_config is read")
+	if cfg.Server.Engine.ClickHouse.Database != "usage" || cfg.ClickHouse == nil || cfg.Redis == nil {
+		t.Errorf("clickhouse %+v (%q), redis %+v", cfg.ClickHouse, cfg.Server.Engine.ClickHouse.Database, cfg.Redis)
 	}
-	if e := cfg.Server.Engine; cfg.Database.URL != "postgres://u:p@db.internal:5432/x" || e.Database.Schema != "shop" || e.Database.RiverSchema != "shop_river" || e.Database.LeaseConns != 2 {
+	if e := cfg.Server.Engine; cfg.Database.URL != "postgres://u:p@db.internal:5432/x" || e.Database.Schema != "shop" || e.Database.RiverSchema != "shop_river" {
 		t.Fatalf("connection %+v, engine %+v", cfg.Database, e.Database)
 	}
 	for yaml, want := range map[string]string{
-		"database:\n  urll: x\n":        "unknown configuration keys refuse boot: database.urll",
-		"redis:\n  adr: x\n":            "unknown configuration keys refuse boot: redis.adr",
-		"auth:\n  tokn: {}\n":           "unknown configuration keys refuse boot: auth.tokn",
-		"database:\n  sqltrace: true\n": "unknown configuration keys refuse boot: database.sqltrace",
-		"db:\n  url: x\n":               "db was merged into database",
+		"database:\n  urll: x\n":                       "unknown configuration keys refuse boot: database.urll",
+		"redis:\n  adr: x\n":                           "unknown configuration keys refuse boot: redis.adr",
+		"auth:\n  tokn: {}\n":                          "unknown configuration keys refuse boot: auth.tokn",
+		"database:\n  sqltrace: true\n":                "unknown configuration keys refuse boot: database.sqltrace",
+		"clickhouse:\n  url: http://events.internal\n": "clickhouse.url (CLICKHOUSE_URL) must be clickhouse://",
+		"host: 127.0.0.1\n":                            "host was removed",
+		"db:\n  url: x\n":                              "db was merged into database",
 		"auth:\n  default_tenant_id: 51336692-ef57-4cdb-a189-a8d388465c11\n": "auth.default_tenant_id was removed",
 		"auth:\n  keys:\n    allow_ephemeral_dev_keys: true\n":               "auth.keys.allow_ephemeral_dev_keys was removed",
 	} {
@@ -100,10 +103,8 @@ func TestPolicySectionsAreFileOnly(t *testing.T) {
 		t.Fatalf("payment %+v, purchase %+v", limits.Payment, limits.Purchase)
 	}
 	for env, section := range map[string]string{
-		"RATE_LIMITS_PAYMENT_REQUESTS_PER_MINUTE":          "rate_limits",
-		"DESTRUCTIVE_ACTION_LIMITS_ACTOR_PER_HOUR":         "destructive_action_limits",
-		"USER_ACTION_RATE_LIMIT_MINIMUM_CUSTOMERS_PER_DAY": "user_action_rate_limit",
-		"AUTH_HTTP_RATE_LIMITS":                            "auth.http.rate_limits",
+		"RATE_LIMITS_PAYMENT_REQUESTS_PER_MINUTE": "rate_limits",
+		"AUTH_HTTP_RATE_LIMITS":                   "auth.http.rate_limits",
 	} {
 		t.Run(env, func(t *testing.T) {
 			configPath, _ := isolate(t)

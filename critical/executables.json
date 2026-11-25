@@ -733,9 +733,6 @@
     "OR-J31-S12": [
       "TestBaselineAdoption/OR-J31-S12/an-older-database-whose-schema-equals-the-baseline-is-accepted-and-re-stamped"
     ],
-    "OR-J31-S13": [
-      "TestBaselineAdoption/OR-J31-S13/a-start-that-skips-migrations-is-refused-on-an-edited-baseline-until-the-migration-step-runs"
-    ],
     "OR-J31-S14": [
       "TestLimitArchive/OR-J31-S14/open-limit-windows-and-staff-adjustments-move-with-the-book"
     ],
@@ -2328,6 +2325,9 @@
     ],
     "OR-J06-S72": [
       "TestRetiredRuntimeSettings/OR-J06-S72/retired-settings-refuse-boot"
+    ],
+    "OR-J06-S73": [
+      "TestFindingAlerts/OR-J06-S73/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none"
     ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"

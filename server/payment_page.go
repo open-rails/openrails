@@ -15,7 +15,7 @@ func checkCheckoutOrigin(cfg Config) error {
 	if strings.TrimSpace(cfg.Engine.CheckoutOrigin) == "" {
 		return nil
 	}
-	forbidden := []string{cfg.Engine.PublicBillingBaseURL, cfg.Auth.Token.Issuer, cfg.Auth.Frontend.BaseURL}
+	forbidden := []string{cfg.Engine.PublicURL, cfg.Auth.Token.Issuer, cfg.Auth.Frontend.BaseURL}
 	if cfg.Auth.HTTP != nil {
 		forbidden = append(forbidden, cfg.Auth.HTTP.PublicURL)
 	}

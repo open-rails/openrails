@@ -45,7 +45,7 @@ func newVaultCards(t *testing.T, platform, armed bool, configure ...func(*world)
 		w.cfg.Vault = vault.Config()
 		w.deps.Vault = vault.Client()
 		if platform {
-			w.cfg.CardVault = billing.CardVaultConfig{Kind: "basis_theory", TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
+			w.cfg.CardVault = billing.CardVaultConfig{TenantID: merchantBTTenant, KVMount: vault.Config().KVMount}
 		}
 		vendor.gateway = w.deps.NMITransport
 		target, err := url.Parse(vendor.server.URL)

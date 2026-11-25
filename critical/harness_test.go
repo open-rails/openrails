@@ -5,6 +5,8 @@ package critical_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/destructive"
+	embedded "github.com/open-rails/openrails/internal/engine"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,6 +42,25 @@ type world struct {
 	// posture is the declared merchants' write posture once the engine is
 	// up: readonly unless a scenario sets full (fullWrites) or limited.
 	posture string
+	// limits changes the destructive-action limits of every engine the world
+	// starts, so a scenario trips or clears a hold in a few actions.
+	limits func(*destructive.Limits)
+}
+
+// criticalSchema is a fresh schema name short enough for its River schema,
+// <schema>_river, to be a valid one too.
+func criticalSchema() string {
+	return "critical_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:30]
+}
+
+// applyLimits sets the world's destructive-action limits on its engine.
+func (w *world) applyLimits() {
+	if w.limits == nil {
+		return
+	}
+	l := destructive.DefaultLimits
+	w.limits(&l)
+	embedded.Graph(w.engine).Runtime.DestructiveAdmissions.SetLimits(l)
 }
 
 func newWorld(t *testing.T, configure ...func(*world)) *world {
@@ -52,16 +73,16 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	pool, err := pgxpool.NewWithConfig(t.Context(), pc)
 	require.NoError(t, err)
 	require.NoError(t, pool.Ping(t.Context()))
-	w := &world{pool: pool, schema: "critical_" + strings.ReplaceAll(uuid.NewString(), "-", ""), clock: clockwork.NewFakeClockAt(time.Now().UTC()), posture: "readonly"}
+	w := &world{pool: pool, schema: criticalSchema(), clock: clockwork.NewFakeClockAt(time.Now().UTC()), posture: "readonly"}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema}.Sanitize()+" CASCADE")
+		_, err := pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema}.Sanitize()+", "+pgx.Identifier{w.schema + "_river"}.Sanitize()+" CASCADE")
 		require.NoError(t, err)
 		pool.Close()
 	})
 	w.cfg = openrails.Config{
-		Database: billing.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
+		Database: billing.DatabaseConfig{Schema: w.schema},
 		Merchants: []billing.MerchantDeclaration{
 			{MerchantDocument: billing.MerchantDocument{Slug: "alpha", DisplayName: "Alpha"}},
 			{MerchantDocument: billing.MerchantDocument{Slug: "beta", DisplayName: "Beta"}},
@@ -74,6 +95,7 @@ func newWorld(t *testing.T, configure ...func(*world)) *world {
 	}
 	w.engine, err = openrails.New(t.Context(), w.cfg, w.deps)
 	require.NoError(t, err)
+	w.applyLimits()
 	t.Cleanup(func() { require.NoError(t, w.engine.Close(context.Background())) })
 	w.alpha, err = declaredMerchant(w.engine, "alpha")
 	require.NoError(t, err)

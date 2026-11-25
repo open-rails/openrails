@@ -18,8 +18,9 @@ type Config struct {
 
 	// Database names the Postgres schemas New creates or upgrades.
 	Database DatabaseConfig `yaml:"database"`
-	// ClickHouse names the database of the event store, Deps.ClickHouse.
-	ClickHouse ClickHouseConfig `yaml:"clickhouse"`
+	// ClickHouse names the database of the event store, Deps.ClickHouse. The
+	// standalone server takes it from clickhouse.url's path. Set in code.
+	ClickHouse ClickHouseConfig `yaml:"-"`
 	// Merchants declares the merchants an embedded engine provisions on
 	// start; none leaves that to run time (a standalone server's are
 	// provisioned through its API). A slug declared twice provisions neither
@@ -29,9 +30,10 @@ type Config struct {
 	// credential is bound to: see MerchantDeclaration.Issuer. Set in code.
 	Merchants []MerchantDeclaration `yaml:"-"`
 
-	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
-	// used only to build provider callbacks and customer billing links.
-	PublicBillingBaseURL string `yaml:"public_billing_base_url"`
+	// PublicURL is where browsers and PSPs reach billing: the external billing
+	// mount, excluding /v1. Provider callbacks and customer billing links are
+	// built on it.
+	PublicURL string `yaml:"public_url"`
 	// TrustedProxies are the CIDRs whose X-Forwarded-For is trusted when
 	// resolving a client's address. Empty trusts none: the socket peer is the
 	// client.
@@ -41,7 +43,7 @@ type Config struct {
 	// served from Deps.CheckoutAssets; leave it empty when you use the
 	// embedded checkout or your own card form, and pay URLs then answer
 	// pay_url_unavailable. It is an origin of its own, apart from
-	// PublicBillingBaseURL and every declared Issuer; one that is not is
+	// PublicURL and every declared Issuer; one that is not is
 	// refused and reported.
 	CheckoutOrigin string `yaml:"checkout_origin"`
 
@@ -50,13 +52,6 @@ type Config struct {
 	// Captcha challenges a client that keeps hitting a rate limit; it is on
 	// when both its keys are set.
 	Captcha CaptchaAccount `yaml:"captcha"`
-	// UserActionRateLimit bounds customer card deletes and soft cancellations
-	// across this merchant's users, actors and processes. Always enabled,
-	// including when the host owns ordinary HTTP rate limits.
-	UserActionRateLimit UserActionRateLimitConfig `yaml:"user_action_rate_limit"`
-	// DestructiveActionLimits are the staff limits on refunds, revokes,
-	// cancels and the other held destructive actions.
-	DestructiveActionLimits DestructiveActionLimitsConfig `yaml:"destructive_action_limits"`
 
 	// Vault names the mounts of Deps.Vault, which turns Vault on: a KV mount
 	// makes Vault hold merchant configuration.
@@ -90,24 +85,15 @@ type DatabaseConfig struct {
 	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
 	// Schema plus "_river", apart from AuthKit's and the host's River. Start
 	// runs OpenRails' own River client there, and a host fleet passed to
-	// Start with WithRiverClient must use the same schema.
-	RiverSchema string `yaml:"river_schema"`
-	// SkipMigrations makes New validate existing schemas without applying
-	// migrations: a migration that is missing, or was applied with other
-	// content, is ErrMigrationsRequired. Call openrails.Migrate first.
-	SkipMigrations bool `yaml:"skip_migrations"`
-	// LeaseConns caps the separate pool, copied from Deps.Postgres's
-	// configuration, that renews leases: idempotency claims, the billing pass
-	// and merchant pulls.
-	LeaseConns int `yaml:"lease_conns"`
+	// Start with WithRiverClient must use the same schema. Set in code.
+	RiverSchema string `yaml:"-"`
 }
 
 // ClickHouseConfig names the ClickHouse database the event store keeps its
-// tables in. New creates or upgrades it; with Database.SkipMigrations it only
-// checks it, and openrails.MigrateClickHouse prepares it.
+// tables in. New creates or upgrades it, as openrails.MigrateClickHouse does.
 type ClickHouseConfig struct {
 	// Database holds the event store's tables.
-	Database string `yaml:"database"`
+	Database string `yaml:"-"`
 }
 
 // RateLimitsConfig is each bucket's request limit. A bucket left nil takes
@@ -151,59 +137,6 @@ type CaptchaAccount struct {
 	SecretKey string `yaml:"secret_key"`
 }
 
-// UserActionRateLimitConfig bounds distinct customers affected by manual card
-// removals and cancellations in rolling hour/day windows. The budget is
-// merchant-wide across replicas and always enforced: per rolling day the
-// larger of MinimumCustomersPerDay or one per PaidCustomersPerDailyCustomer
-// customers who paid in the last 30 days, per rolling hour likewise. A
-// customer counts once a day. A refusal answers 429, records a finding and
-// opens no hold. Renewals, expiry and provider-side cancellation spend
-// nothing.
-type UserActionRateLimitConfig struct {
-	// MinimumCustomersPerHour is the hourly budget's floor, in customers.
-	MinimumCustomersPerHour int64 `yaml:"minimum_customers_per_hour"`
-	// PaidCustomersPerHourlyCustomer raises the hourly budget by one per this many paying customers.
-	PaidCustomersPerHourlyCustomer int64 `yaml:"paid_customers_per_hourly_customer"`
-	// MinimumCustomersPerDay is the daily budget's floor, in customers.
-	MinimumCustomersPerDay int64 `yaml:"minimum_customers_per_day"`
-	// PaidCustomersPerDailyCustomer raises the daily budget by one per this many paying customers.
-	PaidCustomersPerDailyCustomer int64 `yaml:"paid_customers_per_daily_customer"`
-}
-
-// DestructiveActionLimitsConfig is how many destructive actions staff may
-// take in a rolling hour and day before a hold stops them: each actor's, each
-// merchant's and the deployment's. The merchant and deployment limits are
-// floors that rise with active customers. Contact erasures keep their own
-// budget per merchant, whose floors rise with its directory; past it they
-// wait rather than fail.
-//
-// Counted actions are refunds, cancellations, payment-method removal, access
-// and credit revocation, write-offs, and changes that archive or remove an
-// existing catalog object's billable, access or routing terms; creating an
-// object spends nothing, nor do replays and proven no-ops. A batch counts its
-// targets. The actor is the verified issuer and invoker. An in-process call
-// that names no invoker is the host's own work: audited, it spends nothing
-// and no hold stops it. A breach answers 429 and opens a hold that persists
-// until a person clears it (openrails destructive-holds).
-type DestructiveActionLimitsConfig struct {
-	// ActorPerHour is one actor's destructive actions an hour.
-	ActorPerHour int64 `yaml:"actor_per_hour"`
-	// ActorPerDay is one actor's destructive actions a day.
-	ActorPerDay int64 `yaml:"actor_per_day"`
-	// MerchantPerHour is one merchant's floor an hour, rising with its active customers.
-	MerchantPerHour int64 `yaml:"merchant_per_hour"`
-	// MerchantPerDay is one merchant's floor a day, rising with its active customers.
-	MerchantPerDay int64 `yaml:"merchant_per_day"`
-	// DeploymentPerHour is the deployment's floor an hour, rising with active customers.
-	DeploymentPerHour int64 `yaml:"deployment_per_hour"`
-	// DeploymentPerDay is the deployment's floor a day, rising with active customers.
-	DeploymentPerDay int64 `yaml:"deployment_per_day"`
-	// ErasurePerHour is a merchant's contact erasures an hour, rising with its directory.
-	ErasurePerHour int64 `yaml:"erasure_per_hour"`
-	// ErasurePerDay is a merchant's contact erasures a day, rising with its directory.
-	ErasurePerDay int64 `yaml:"erasure_per_day"`
-}
-
 // VaultConfig names the mounts OpenRails uses on Deps.Vault. A KV mount
 // makes Vault hold merchant configuration; CardVault.KVMount can read card
 // credentials separately.
@@ -218,12 +151,10 @@ type VaultConfig struct {
 }
 
 // CardVaultConfig is the operator's card vault for this deployment's
-// posture: merchants with settings.card_vault platform store new cards in it,
-// each in its own partition. Its keys are in Vault, at
+// posture, a Basis Theory tenant: merchants with settings.card_vault platform
+// store new cards in it, each in its own partition. Its keys are in Vault, at
 // <kv_mount>/<scope_prefix>/platform_vault/<tenant_id>.
 type CardVaultConfig struct {
-	// Kind is the vault vendor: basis_theory.
-	Kind CardVaultKind `yaml:"kind"`
 	// TenantID is the vendor's tenant id.
 	TenantID string `yaml:"tenant_id"`
 	// KVMount holds the platform credential document. Empty uses
@@ -235,9 +166,10 @@ type CardVaultConfig struct {
 // HyperSwitchConfig identifies the one trusted custody deployment and its
 // vendor-owned browser assets. Merchant settings cannot change either target.
 // The SDK is a separate server in the vendor product, hence its explicit URL.
+//
+// Both are https, or http on a loopback IP literal: a fixture, refused
+// beside a live PSP.
 type HyperSwitchConfig struct {
-	// AllowLoopbackHTTP admits an http loopback fixture; refused beside a live PSP.
-	AllowLoopbackHTTP bool `yaml:"allow_loopback_http"`
 	// APIBaseURL is the deployment's HyperSwitch API.
 	APIBaseURL string `yaml:"api_base_url"`
 	// SDKURL is the HyperSwitch browser SDK the payment page loads.
@@ -290,7 +222,7 @@ type ProviderSandboxConfig struct {
 // zero takes. A default inside an optional section does not turn it on.
 func DefaultConfig() Config {
 	return Config{
-		Database:   DatabaseConfig{Schema: "billing", LeaseConns: 4},
+		Database:   DatabaseConfig{Schema: "billing"},
 		ClickHouse: ClickHouseConfig{Database: "openrails"},
 		RateLimits: RateLimitsConfig{
 			Purchase: &RateLimit{RequestsPerMinute: 10},
@@ -298,14 +230,6 @@ func DefaultConfig() Config {
 			Subscribe: &RateLimit{RequestsPerMinute: 20},
 			Payment:   &RateLimit{RequestsPerMinute: 40},
 			Webhook:   &RateLimit{RequestsPerMinute: 1200},
-		},
-		UserActionRateLimit: UserActionRateLimitConfig{
-			MinimumCustomersPerHour: 5, PaidCustomersPerHourlyCustomer: 400,
-			MinimumCustomersPerDay: 10, PaidCustomersPerDailyCustomer: 100,
-		},
-		DestructiveActionLimits: DestructiveActionLimitsConfig{
-			ActorPerHour: 5, ActorPerDay: 15, MerchantPerHour: 15, MerchantPerDay: 25,
-			DeploymentPerHour: 50, DeploymentPerDay: 100, ErasurePerHour: 100, ErasurePerDay: 1000,
 		},
 		Captcha: CaptchaAccount{Provider: "turnstile"},
 		Vault:   VaultConfig{ScopePrefix: "openrails", TransitMount: "transit"},

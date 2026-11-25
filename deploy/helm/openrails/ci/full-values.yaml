@@ -3,14 +3,14 @@ replicaCount: 2
 image:
   digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 config:
-  public_billing_base_url: https://billing.example.com
+  public_url: https://billing.example.com
   auth:
     token:
       issuer: https://billing.example.com
     resource:
       id: https://billing.example.com
   redis:
-    addr: redis:6379
+    url: redis://redis:6379
   trusted_proxies: [10.244.0.0/16]
   vault:
     address: https://vault.example.com:8200

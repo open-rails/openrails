@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"hash/crc32"
 	"log/slog"
 	"net/http"
@@ -119,7 +120,7 @@ func TestDestructiveSafeguards(t *testing.T) {
 		t.Run("staff", func(t *testing.T) {
 			// The merchant's budget is 50 an hour; an actor's stays 5.
 			b := newNMIBook(t, func(w *world) {
-				w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{MerchantPerHour: 50, MerchantPerDay: 100}
+				w.limits = func(l *destructive.Limits) { l.MerchantPerHour, l.MerchantPerDay = 50, 100 }
 			})
 			armDestructive(t, b.a, true)
 			asOf := b.started.Add(10 * 24 * time.Hour)

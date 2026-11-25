@@ -65,7 +65,7 @@ type ManagedStripeWebhookResult struct {
 func PublicStripeWebhookURL(cfg *billing.Config, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {
-		base = strings.TrimSpace(cfg.PublicBillingBaseURL)
+		base = strings.TrimSpace(cfg.PublicURL)
 	}
 	if base == "" {
 		return "", false, nil

@@ -11,7 +11,7 @@ import (
 // returns to the browser's origin when it is one of them, else the issuer's,
 // else the billing origin.
 func TestReturnOriginsAreTheMerchantsOwn(t *testing.T) {
-	cfg := &billing.Config{PublicBillingBaseURL: "https://billing.example.com/billing"}
+	cfg := &billing.Config{PublicURL: "https://billing.example.com/billing"}
 	alpha := ReturnOrigins(cfg, "https://alpha.example", []string{"https://shop.alpha.example"})
 	for raw, want := range map[string]bool{
 		"https://billing.example.com/account":  true,

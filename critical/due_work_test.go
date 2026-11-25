@@ -22,7 +22,7 @@ import (
 func customerConvergeJobs(t *testing.T, w *world, customer billing.CustomerID) int {
 	t.Helper()
 	var n int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{w.schema + "_river", "river_job"}.Sanitize()+
 		" WHERE kind = 'openrails.customer_converge' AND args->>'customer_id' = $1", customer.UUID().String()).Scan(&n))
 	return n
 }
@@ -189,7 +189,7 @@ func TestDueWork(t *testing.T) {
 		fleet := quietFleet(t, a.world)
 		refreshMerchant(t, fleet, a.alpha.MerchantID().UUID())
 		var queued int
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "river_job"}.Sanitize()+
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
 			" WHERE kind IN ('openrails.dunning', 'openrails.usage_orders', 'openrails.billing_pass')").Scan(&queued))
 		require.Zero(t, queued, "what falls due waits for the hourly billing pass; a refresh queues none of it")
 	})
@@ -202,7 +202,7 @@ func TestDueWork(t *testing.T) {
 			_, err := w.alpha.CreateProductAccess(t.Context(), key, []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, Hours: ptr(24), Reason: billing.GrantReasonComp}})
 			return err
 		}
-		restore := storageFault(t, w, w.schema, "river_job", "NEW.kind = 'openrails.customer_converge'")
+		restore := storageFault(t, w, w.schema+"_river", "river_job", "NEW.kind = 'openrails.customer_converge'")
 		require.Error(t, grant("refused"), "a grant whose convergence cannot be queued is not made")
 		access, err := w.alpha.CheckEntitlements(t.Context(), billing.CheckEntitlementsParams{CustomerID: customer, Entitlements: []string{"comp:reader"}})
 		require.NoError(t, err)

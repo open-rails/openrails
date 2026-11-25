@@ -427,7 +427,7 @@ func waitDisputeJobs(t *testing.T, a *authorityWorld, keep ...rivertype.JobState
 	}
 	require.Eventually(t, func() bool {
 		var n int
-		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema, "river_job"}.Sanitize()+
+		require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{a.schema + "_river", "river_job"}.Sanitize()+
 			" WHERE kind IN ('openrails.dispute_monitor', 'openrails.dispute_response') AND state::text = ANY($1)", waiting).Scan(&n))
 		return n == 0
 	}, 20*time.Second, 50*time.Millisecond, "the dispute jobs ran")

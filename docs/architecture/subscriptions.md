@@ -102,7 +102,7 @@ The due pass moves a provider-billed renewal still unpaid 48 hours
   `PUT /{id}/payment-method`, `POST` on `/{id}/cancel`, `/{id}/resume`,
   `/{id}/change`, `/{id}/confirm`, `/{id}/change/preview`, `/{id}/retry-now`.
 - Events ([events](../client.md#events)): `premium_started`, `premium_renewed`, `premium_ended`, `subscription_canceled`, `subscription_changed`, `payment_method_failed`, `payment_method_update_required`.
-- Config: `dunning_policy`, `engine_admission_hold`, `user_action_rate_limit`, `destructive_action_limits`.
+- Config: `dunning_policy`, `engine_admission_hold`; the customer-action cap and the destructive limits are fixed.
 
 ## Guarantees
 

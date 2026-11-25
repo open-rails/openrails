@@ -81,8 +81,8 @@ func FakeProviders(cfg *billing.Config) []string {
 			out = append(out, "provider_sandbox."+key)
 		}
 	}
-	if cfg.HyperSwitch.AllowLoopbackHTTP {
-		out = append(out, "hyperswitch.allow_loopback_http")
+	if HyperSwitchFixture(cfg) {
+		out = append(out, "hyperswitch.api_base_url")
 	}
 	slices.Sort(out)
 	return out

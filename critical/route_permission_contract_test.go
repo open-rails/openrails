@@ -513,7 +513,7 @@ func TestDirectoryAuthority(t *testing.T) {
 		a, _ := newPaymentWorld(t, func(w *world) {
 			w.deps.UserInfo = nil
 			w.deps.Email = mail
-			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ErasurePerHour: 1}
+			w.limits = func(l *destructive.Limits) { l.ErasurePerHour = 1 }
 		})
 		startFleet(t, a.world)
 		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})
@@ -571,7 +571,7 @@ func TestDirectoryAuthority(t *testing.T) {
 			operator = c.Roles.Root.Role("hold-operator", mustPermission(t, string(billing.RootConfigManage)), mustPermission(t, string(billing.RootAdminRateLimitsUnlock)))
 		}, func(w *world) {
 			w.deps.UserInfo = nil
-			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ErasurePerHour: 2, ActorPerHour: 2, MerchantPerHour: 2}
+			w.limits = func(l *destructive.Limits) { l.ErasurePerHour, l.ActorPerHour, l.MerchantPerHour = 2, 2, 2 }
 		})
 		fleet := quietFleet(t, a.world)
 		token, err := a.alphaRemote.CreateProvisioningToken(t.Context(), billing.CreateProvisioningTokenParams{Name: "directory"})

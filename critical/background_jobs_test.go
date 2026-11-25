@@ -109,7 +109,7 @@ func TestBackgroundJobs(t *testing.T) {
 		job, err := fleet.Insert(t.Context(), hostChore{}, &river.InsertOpts{Queue: "host"})
 		require.NoError(t, err)
 		// The host's process died while it ran the job.
-		_, err = w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema + "_river", "river_job"}.Sanitize()+
 			" SET state='running', attempt=1, attempted_at=now()-interval '10 minutes', attempted_by=ARRAY['crashed-host'] WHERE id=$1", job.Job.ID)
 		require.NoError(t, err)
 		require.NoError(t, w.engine.Start(t.Context(), openrails.WithRiverClient(fleet)))
@@ -143,7 +143,7 @@ func TestBackgroundJobs(t *testing.T) {
 		long, err := fleet.Insert(t.Context(), registeredJob{KindName: "openrails.cleanup_expired_data"}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(t, err)
 		// Their processes died eleven minutes into the runs.
-		_, err = w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+
+		_, err = w.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{w.schema + "_river", "river_job"}.Sanitize()+
 			" SET state='running', attempt=1, attempted_at=now()-interval '11 minutes', attempted_by=ARRAY['crashed'] WHERE id = ANY($1)",
 			[]int64{host.Job.ID, short.Job.ID, long.Job.ID})
 		require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestBackgroundJobs(t *testing.T) {
 		require.NotNil(t, progress)
 		require.ErrorContains(t, progress(t.Context()), "no River leader", "nothing schedules or rescues jobs before the fleet starts")
 
-		jobs := pgx.Identifier{w.schema, "river_job"}.Sanitize()
+		jobs := pgx.Identifier{w.schema + "_river", "river_job"}.Sanitize()
 		insert := func(kind, set string) {
 			job, err := fleet.Insert(t.Context(), registeredJob{KindName: kind}, &river.InsertOpts{Queue: openrails.QueueBilling})
 			require.NoError(t, err)
@@ -341,7 +341,7 @@ func TestBackgroundJobs(t *testing.T) {
 		runRegistered(t, fleet, "openrails.cleanup_expired_data", 1)
 		require.Eventually(t, func() bool { return expired() == 0 }, 30*time.Second, 50*time.Millisecond,
 			"the pass continues in a new job after its first 200 merchants")
-		rows, err := w.pool.Query(t.Context(), "SELECT max_attempts FROM "+pgx.Identifier{w.schema, "river_job"}.Sanitize()+" WHERE kind = 'openrails.cleanup_expired_data' AND args ? 'after'")
+		rows, err := w.pool.Query(t.Context(), "SELECT max_attempts FROM "+pgx.Identifier{w.schema + "_river", "river_job"}.Sanitize()+" WHERE kind = 'openrails.cleanup_expired_data' AND args ? 'after'")
 		require.NoError(t, err)
 		attempts, err := pgx.CollectRows(rows, pgx.RowTo[int])
 		require.NoError(t, err)
@@ -453,7 +453,7 @@ func TestBackgroundJobs(t *testing.T) {
 		a, _ := newNMIWorld(t)
 		// A bound producer that is never started: the pull job is queued, not run.
 		fleet := hostFleet(t, a.world)
-		restore := storageFault(t, a.world, a.world.schema, "river_job", "NEW.kind = 'openrails.psp_import'")
+		restore := storageFault(t, a.world, a.world.schema+"_river", "river_job", "NEW.kind = 'openrails.psp_import'")
 		_, err := a.alpha.CreatePSPImport(t.Context(), billing.CreatePSPImportParams{PSP: billing.PSPRef{Key: "nmi"}})
 		require.Error(t, err)
 		imports, err := a.alpha.ListPSPImports(t.Context(), billing.PSPImportListParams{})

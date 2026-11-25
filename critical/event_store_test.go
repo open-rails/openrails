@@ -249,24 +249,18 @@ func storeMigrationsAndIdentity(t *testing.T) {
 		"usage_history_events_mv", "usage_minutes", "usage_minutes_mv", "usage_quantities", "usage_quantities_mv"}
 	require.Equal(t, installed, tables())
 
-	// A restart, a checking start and an explicit migration change nothing.
+	// A restart and an explicit migration change nothing.
 	require.NoError(t, reopen(w.cfg, w.deps))
-	skipping := w.cfg
-	skipping.Database.SkipMigrations = true
-	require.NoError(t, reopen(skipping, w.deps))
 	require.NoError(t, openrails.MigrateClickHouse(ctx, w.pool, conn, w.cfg.ClickHouse))
 	require.Equal(t, installed, tables())
 	var applied uint64
 	require.NoError(t, conn.QueryRow(ctx, "SELECT count() FROM `"+w.schema+"`.schema_migrations FINAL").Scan(&applied))
 	require.EqualValues(t, 1, applied)
 
-	// An emptied ClickHouse is not the store this database's usage is in. A
-	// checking start finds it unmigrated; once migrated it is another store.
+	// An emptied ClickHouse is not the store this database's usage is in:
+	// once migrated it is another store.
 	require.NoError(t, conn.Exec(ctx, "DROP DATABASE `"+w.schema+"` SYNC"))
-	err := reopen(skipping, w.deps)
-	require.ErrorIs(t, err, billing.ErrMigrationsRequired)
-	require.NoError(t, openrails.MigrateClickHouse(ctx, w.pool, conn, w.cfg.ClickHouse))
-	err = openrailsNewErr(ctx, w.cfg, w.deps)
+	err := openrailsNewErr(ctx, w.cfg, w.deps)
 	require.ErrorContains(t, err, "empty or different ClickHouse")
 
 	// Without ClickHouse the database starts: usage is off.

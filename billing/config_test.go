@@ -18,7 +18,7 @@ func TestWithDefaults(t *testing.T) {
 		RateLimits: RateLimitsConfig{Payment: &RateLimit{}, Webhook: &RateLimit{RequestsPerMinute: 5}},
 		Vault:      VaultConfig{KVMount: "secret"},
 	}.WithDefaults()
-	if got.Database.Schema != "shop" || got.Database.RiverSchema != "shop_river" || got.Database.LeaseConns != 4 {
+	if got.Database.Schema != "shop" || got.Database.RiverSchema != "shop_river" {
 		t.Errorf("database: %+v", got.Database)
 	}
 	if got.RateLimits.Payment.RequestsPerMinute != 0 || got.RateLimits.Webhook.RequestsPerMinute != 5 || got.RateLimits.Purchase.RequestsPerMinute != 10 {

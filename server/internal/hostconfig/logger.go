@@ -4,18 +4,19 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 )
 
-// LoggerConfig is the binary's logger: logger.level and logger.format.
+// LoggerConfig is the binary's logger: logger.level. It writes text to a
+// terminal and JSON otherwise.
 type LoggerConfig struct {
 	// Level is debug, info, warn or error; unset is info.
 	Level string `yaml:"level"`
-	// Format is json or text; unset is json.
-	Format string `yaml:"format"`
 }
 
-// Handler is the handler c selects, writing to w.
+// Handler is the handler c selects, writing to w: text when w is a
+// terminal, JSON otherwise.
 func (c LoggerConfig) Handler(w io.Writer) (slog.Handler, error) {
 	var level slog.Level
 	switch l := strings.ToLower(strings.TrimSpace(c.Level)); l {
@@ -27,11 +28,17 @@ func (c LoggerConfig) Handler(w io.Writer) (slog.Handler, error) {
 		return nil, fmt.Errorf("logger.level (LOGGER_LEVEL) %q: debug, info, warn or error", c.Level)
 	}
 	opts := &slog.HandlerOptions{Level: level}
-	switch strings.ToLower(strings.TrimSpace(c.Format)) {
-	case "", "json":
-		return slog.NewJSONHandler(w, opts), nil
-	case "text":
+	if terminal(w) {
 		return slog.NewTextHandler(w, opts), nil
 	}
-	return nil, fmt.Errorf("logger.format (LOGGER_FORMAT) %q: json or text", c.Format)
+	return slog.NewJSONHandler(w, opts), nil
+}
+
+func terminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }

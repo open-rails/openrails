@@ -85,7 +85,7 @@ func (h *HyperSwitchMethodDeleteHandler) Verify(ctx context.Context, in gen.Bill
 	return Retryable("qualified native deletion permits exact retry through write gates")
 }
 func deletionBinding(row merchants.CustodianScope, cfg *billing.Config) (charge.HyperSwitchBinding, error) {
-	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) || row.Kind != models.CustodianHyperSwitch || row.Environment == config.ClassLive && cfg.HyperSwitch.AllowLoopbackHTTP {
+	if cfg == nil || cfg.HyperSwitch == (billing.HyperSwitchConfig{}) || row.Kind != models.CustodianHyperSwitch || row.Environment == config.ClassLive && config.HyperSwitchFixture(cfg) {
 		return charge.HyperSwitchBinding{}, hyperswitch.ErrBinding
 	}
 	parsed, err := custodians.ParseSettings(row.Kind, row.Settings)

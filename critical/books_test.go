@@ -973,7 +973,7 @@ func TestBooksMigration(t *testing.T) {
 		pool, err := pgxpool.New(t.Context(), dsn)
 		require.NoError(t, err)
 		t.Cleanup(pool.Close)
-		schema := "critical_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		schema := criticalSchema()
 		// Every migration before the books', whatever their numbers.
 		names, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
 		require.NoError(t, err)
@@ -1018,7 +1018,7 @@ func TestBooksMigration(t *testing.T) {
 		// The engine starts on it and migrates it to the books.
 		w := newWorld(t, func(w *world) {
 			w.schema = schema
-			w.cfg.Database = billing.DatabaseConfig{Schema: schema, RiverSchema: schema}
+			w.cfg.Database = billing.DatabaseConfig{Schema: schema}
 		})
 		require.Equal(t, mid, w.alpha.MerchantID().UUID())
 		balance(t, w.alpha, billing.CustomerID(customer), 600, 0, 600)

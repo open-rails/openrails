@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"net/http"
 	"testing"
 	"time"
@@ -115,7 +116,9 @@ func TestPriceMigrationScale(t *testing.T) {
 	t.Run("OR-J19-S10/a-migration-admits-every-subscriber-before-reading-any-and-reaches-them-a-page-at-a-time", func(t *testing.T) {
 		const members = 101
 		a := ccbillWebhookWorld(t, func(w *world) {
-			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 150, ActorPerDay: 300, MerchantPerHour: 150, MerchantPerDay: 300, DeploymentPerHour: 300, DeploymentPerDay: 600}
+			w.limits = func(l *destructive.Limits) {
+				*l = destructive.Limits{ActorPerHour: 150, ActorPerDay: 300, MerchantPerHour: 150, MerchantPerDay: 300, DeploymentPerHour: 300, DeploymentPerDay: 600, ErasurePerHour: l.ErasurePerHour, ErasurePerDay: l.ErasurePerDay}
+			}
 		})
 		source := ccbillMemberPrice(t, a.alpha)
 		price, err := a.alpha.GetPrice(t.Context(), source)
@@ -187,7 +190,7 @@ func TestPriceMigrationScale(t *testing.T) {
 		}{{"one-short", 2}, {"exactly", 3}} {
 			t.Run(c.name, func(t *testing.T) {
 				a, p, alice := purchasedMembershipWith(t, 24, func(w *world) {
-					w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: c.ceiling}
+					w.limits = func(l *destructive.Limits) { l.ActorPerHour = c.ceiling }
 				})
 				bob := membershipAtPrice(t, a, p, alice.PriceID, a.bobToken, "ceiling-bob")
 				target := migrationPrice(t, a, alice, "ceiling-target", 30_000_000)

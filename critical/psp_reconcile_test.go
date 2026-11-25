@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/destructive"
 	"io"
 	"log/slog"
 	"net/http"
@@ -668,7 +669,7 @@ func TestPSPReconcile(t *testing.T) {
 
 	t.Run("OR-J38-S71/proposal-cancel-holds-after-the-first-affected-target", func(t *testing.T) {
 		iw := bootImportWorldDeclaring(t, true, func(w *world) {
-			w.cfg.DestructiveActionLimits = billing.DestructiveActionLimitsConfig{ActorPerHour: 1}
+			w.limits = func(l *destructive.Limits) { l.ActorPerHour = 1 }
 		}, "nmi")
 		iw.fleet.PeriodicJobs().Clear()
 		iw.start(t)

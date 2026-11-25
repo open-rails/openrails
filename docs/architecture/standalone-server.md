@@ -35,11 +35,11 @@ one port, and ships as an image and a Helm chart. It adds no billing logic. Guid
    `Issuer` (a credential's merchant is its group) and a host `Engine.UserInfo`.
 2. Installs `customerDirectory` as the engine's `UserInfo`
    ([customer directory](customer-directory.md)) and calls `openrails.New`, which
-   migrates unless `SkipMigrations`.
+   migrates.
 3. Builds AuthKit, single-tenant unless `Auth.Tenancy` says otherwise (it creates or
    adopts its one account directory): `controlplane.AuthKit` fixes merchant roles, the API-key prefix,
    the resource's scopes, the console's client (`ConsoleClientID`), AuthKit's River
-   schema and mount, and `SkipMigrations`. AuthKit gets its own pool on the engine's
+   schema and mount. AuthKit gets its own pool on the engine's
    database unless one is given.
 4. `controlplane.New`, `operator.Join`, then `operator.StandaloneServer` builds the
    HTTP surface.
@@ -82,7 +82,7 @@ Without the default manifest the server boots control-plane only.
 ### HTTP
 
 `server/internal/http` builds one public handler: health and meta, the engine's route
-groups (`RouteGroups`, each off by default), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`,
+groups (all of them), `/v1/me`, `/v1/webhooks/{rail}/{account_id}`,
 AuthKit's routes, `/admin`, and the payment page on `CheckoutOrigin` by Host. Every
 native route passes `wrapHandler`: recovery, request log, security headers, CORS for
 browser-tier routes only (`BrowserTierRoutes`), `RequestLimitsHTTP`, explicit billing

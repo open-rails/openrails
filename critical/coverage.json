@@ -1129,11 +1129,6 @@
       "name": "A database whose baseline record carries other content is accepted and re-stamped by the migration step with its rows intact"
     },
     {
-      "id": "OR-J31-S13",
-      "journey": "J31",
-      "name": "A start that skips migrations is refused on a baseline record of other content until the migration step has run"
-    },
-    {
       "id": "OR-J31-S14",
       "journey": "J31",
       "name": "Open limit windows and staff adjustments move with the book: lifetime and current-window usage and adjustments survive a round trip"
@@ -3602,6 +3597,11 @@
       "id": "OR-J06-S72",
       "journey": "J06",
       "name": "Retired provider write mode and drain settings refuse boot and name their replacement"
+    },
+    {
+      "id": "OR-J06-S73",
+      "journey": "J06",
+      "name": "Customers' own cancellations past the merchant's cap wait with the time to wait; the finding names the wave and alerts staff once; staff cancellations spend none of the cap"
     },
     {
       "id": "OR-J07-S10",
