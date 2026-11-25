@@ -208,7 +208,6 @@ Checks:
 
 Checks:
 - All five, and `ledger_rollup_pending` (`State`, empty at commit), are in `ownedTables` (`internal/merchantarchive/owned_tables.go`) and in the restore guard's table list; the rollups are excluded from the archive as derived and the queue as scratch (`internal/merchantarchive/checks.go`).
-- An archive from before the books restores as the units book, and one from before revenue schedules with none (`normalizePreBooks`).
 
 ### 7. Work scales with activity
 A balance or owed read is one counter row (`LedgerAccountBalance`); an account type's total is one `ledger_type_totals` row and a period's flows are its buckets in `ledger_daily`. An insert locks at most two accounts, never a merchant-wide general-ledger account, and, for a lot's leg, its lot; its rollup rows are locked at commit, and a merchant's settlement reads only the transfers its transaction queued. A lot's remainder is its counters. No job scans the books: the month-end usage close finds its customers by `usage_unposted_due_at_idx`, balance looks are queued by crossings. `ledger-audit` reads a merchant's whole log, on demand only. Revenue schedules are found by `revenue_schedules_due_idx`, and an early end finds its subscription's or access's schedules by `revenue_schedules_subscription_id_idx` and `revenue_schedules_product_access_id_idx`.
@@ -246,7 +245,6 @@ Journeys J05 (money arithmetic), J22 (credits), J40 (books) and J41 (revenue rec
 - OR-J40-S03: a general-ledger posting late on a New York evening lands in its UTC bucket and on that day when grouped in the merchant's zone, a restore rebuilds the rollups, and `ledger-audit` catches injected rollup, counter, conservation and sign corruption, a merchant-wide general-ledger account's counters included, and warns of a revenue total on the debit side while the books stay OK (`TestBooks`).
 - OR-J40-S05: a database migrated before the books, with its ledger, migrates to them with rollups that `ledger-audit` and an export accept (`TestBooksMigration`).
 - OR-J40-S06: concurrent top-ups, one posting unposted usage first, all commit (`TestBooks`).
-- OR-J40-S07: an archive written before the books restores as the units book (`TestBooks`).
 - OR-J40-S08: two transactions, one posting and then changing a subscription's MRR, the other the reverse, the first held at commit inside the ledger step: both commit (`TestBooks`).
 - OR-J40-S09: the first two checkouts in a currency a catalog apply made sellable overlap without waiting; checkouts in a currency nothing opened still post and raise `books.account.opened_late` once per account; two checkouts' cash postings and a usage collection that locks the customer first, in opposite lock orders, all commit, and the merchant-wide accounts' counters stay 0 (`TestBooks`).
 - OR-J40-S23: two transactions, one posting and then queueing an event, the other the reverse, the first held at commit: both commit and both events are numbered; ledger work queued after the event streams flushed is refused (`TestBooks`).

@@ -1504,12 +1504,6 @@
     "OR-J04-S77": [
       "TestHostDeps/OR-J04-S77/a-vault-merchant-document-with-a-retired-key-names-its-replacement"
     ],
-    "OR-J31-S08": [
-      "TestBillingArchive/OR-J31-S08/an-archive-carrying-the-dropped-custody-migration-record-restores"
-    ],
-    "OR-J31-S11": [
-      "TestBillingArchive/OR-J31-S11/an-archive-written-before-the-unread-schema-was-dropped-restores"
-    ],
     "OR-J42-S01": [
       "TestMRR/OR-J42-S01/new-expansion-contraction-churn-reactivation-once-normalised-per-currency"
     ],
@@ -1578,9 +1572,6 @@
     ],
     "OR-J42-S30": [
       "TestReportingMRR/OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions"
-    ],
-    "OR-J42-S31": [
-      "TestReportingMRR/OR-J42-S31/an-archive-from-before-the-reporting-rollups-restores-them-rebuilt-from-its-movements"
     ],
     "OR-J42-S32": [
       "TestReportingMRR/OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles"
@@ -2110,9 +2101,6 @@
     ],
     "OR-J40-S06": [
       "TestBooks/OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit"
-    ],
-    "OR-J40-S07": [
-      "TestBooks/OR-J40-S07/an-archive-written-before-the-books-restores-as-the-units-book"
     ],
     "OR-J40-S08": [
       "TestBooks/OR-J40-S08/a-ledger-transfer-and-an-mrr-change-in-either-invoice-both-commit"

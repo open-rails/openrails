@@ -3,7 +3,6 @@
 package critical_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,9 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/disputerules"
-	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/open-rails/openrails/internal/stripemock"
@@ -34,7 +31,6 @@ func TestReportingMRR(t *testing.T) {
 	t.Run("OR-J53-S06/recurring-measures-over-four-months-equal-the-movements", recurringMeasures)
 	t.Run("OR-J53-S07/the-chargeback-ratio-tile-and-charts-carry-the-dispute-programs-levels", programLevels)
 	t.Run("OR-J42-S30/every-mrr-measure-plans-on-rollups-without-a-sequential-scan-of-movements-or-subscriptions", mrrOnRollups)
-	t.Run("OR-J42-S31/an-archive-from-before-the-reporting-rollups-restores-them-rebuilt-from-its-movements", rollupsRebuiltOnRestore)
 	t.Run("OR-J42-S32/mrr-leaving-a-product-a-currency-and-a-customer-settles", mrrLeaves)
 	t.Run("OR-J42-S33/a-refund-that-revokes-access-finalizes-and-takes-the-customer-out-once", mrrRefunded)
 }
@@ -130,108 +126,6 @@ func mrrLeaves(t *testing.T) {
 	require.Equal(t, map[string]int64{"USD 0 0": 2, "EUR 0 0": 1}, products())
 	require.EqualValues(t, 0, whole(t, only(t, metricTable(t, a.alpha, billing.QueryMetricsParams{Measures: []string{"subscribers"},
 		Range: &billing.MetricsRange{From: a.clock.Now().AddDate(0, 0, -1).Format(time.DateOnly), To: a.clock.Now().Format(time.DateOnly)}}))["subscribers"]))
-}
-
-// An archive written before the reporting rollups carries none of them, nor
-// chargeback churn in its flows: the restore rebuilds each from what it
-// derives from, row for row what the source kept at commit, and the restore
-// check proves they agree. Cancel decisions come back from the status
-// transitions.
-func rollupsRebuiltOnRestore(t *testing.T) {
-	m := newDisputedMembership(t)
-	a, p := m.a, m.p
-	euro := mrrPlan(t, a.alpha, "rebuilt-eur", billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: "EUR", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
-	buyAs(t, a, p, a.aliceToken, euro, 120_000_000, "rebuilt-eur")
-	year := mrrPlan(t, a.alpha, "rebuilt-year", billing.CreatePriceParams{UnitAmount: 120_000_000, Currency: "USD", BillingIntervalHours: ptr(8760), AccessDurationHours: ptr(8760)})
-	bob := buyAs(t, a, p, a.bobToken, year, 120_000_000, "rebuilt-year")
-	a.clock.Advance(time.Hour)
-	status, raw := a.request(t, http.MethodPost, "/v1/me/subscriptions/"+bob.ID.String()+"/cancel", a.bobToken, map[string]any{"reason": "Bob stops renewing"})
-	require.Equal(t, http.StatusOK, status, string(raw))
-	_, err := a.alpha.ResumeSubscription(t.Context(), bob.ID)
-	require.NoError(t, err)
-	a.clock.Advance(time.Hour)
-	startFleet(t, a.world)
-	m.notice(t, "evt_rebuilt_chargeback", "charge.dispute.created", m.dispute("dp_rebuilt", "needs_response", "chargeback", "fraudulent"))
-	subscriptionState(t, a, m.sub.ID, "canceled")
-	waitDisputeJobs(t, a)
-
-	mid := a.alpha.MerchantID().UUID()
-	// A row whose measures are all zero carries nothing: a settle leaves one
-	// where a fall met a rise or a product's MRR ended, a rebuild writes none.
-	carries := map[string]string{"mrr_streak_flows": "amount <> 0 OR logos <> 0", "mrr_product_totals": "mrr <> 0 OR subscribers <> 0",
-		"mrr_customer_totals": "customers <> 0", "mrr_customer_flows": "logos <> 0", "mrr_flows": "amount <> 0 OR entries <> 0 OR logos <> 0"}
-	rollup := func(w *world, table string) []string {
-		t.Helper()
-		rows, err := w.pool.Query(t.Context(), "SELECT r::text FROM "+booksTable(w, table)+" r WHERE merchant_id = $1 AND ("+carries[table]+") ORDER BY 1", mid)
-		require.NoError(t, err)
-		out, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		require.NoError(t, err)
-		return out
-	}
-	rollups := []string{"mrr_streak_flows", "mrr_product_totals", "mrr_customer_totals", "mrr_customer_flows", "mrr_flows"}
-	kept := map[string][]string{}
-	for _, table := range rollups {
-		kept[table] = rollup(a.world, table)
-		require.NotEmpty(t, kept[table], table)
-	}
-	decisions := func(w *world) []string {
-		t.Helper()
-		rows, err := w.pool.Query(t.Context(), "SELECT COALESCE(cancel_type, 'unknown') || ' ' || (reversed_at IS NOT NULL)::text FROM "+booksTable(w, "subscription_cancellations")+
-			" WHERE merchant_id = $1 ORDER BY 1", mid)
-		require.NoError(t, err)
-		out, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		require.NoError(t, err)
-		return out
-	}
-	require.Equal(t, []string{"chargeback false", "user true"}, decisions(a.world))
-
-	archive := beforeReportingRollups(t, archiveBytes(t, a.alpha))
-	target, client := archiveTarget(t, a.world)
-	_, err = client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
-	require.NoError(t, err, "the restore check passes on the rebuilt rollups")
-	for _, table := range rollups {
-		require.Equal(t, kept[table], rollup(target, table), table)
-	}
-	require.Equal(t, decisions(a.world), decisions(target))
-}
-
-// beforeReportingRollups rewrites an archive into the shape exports had
-// before the reporting rollups: without their tables or the cancel
-// decisions, and with no chargeback churn in mrr_flows.
-func beforeReportingRollups(t *testing.T, archive []byte) []byte {
-	t.Helper()
-	dropped := map[string]bool{"mrr_streak_flows": true, "mrr_product_totals": true, "mrr_customer_totals": true, "mrr_customer_flows": true,
-		"subscription_cancellations": true}
-	flows := contract.Profiles[slices.IndexFunc(contract.Profiles, func(p contract.Profile) bool { return p.Name == "mrr_flows" })]
-	measureAt := slices.IndexFunc(flows.Columns, func(c contract.Column) bool { return c.Name == "measure" })
-	var out bytes.Buffer
-	var w *archivewire.Writer
-	var table string
-	seen := map[string]bool{}
-	_, err := archivewire.Read(bytes.NewReader(archive), func(h archivewire.Header) error {
-		var err error
-		w, err = archivewire.NewWriterWithTenant(&out, h.MerchantID, h.TenantID, h.CatalogRevision)
-		return err
-	}, func(r archivewire.Record) error {
-		if r.Kind == "table" {
-			table = r.Table
-			seen[table] = true
-			if dropped[table] {
-				return nil
-			}
-			return w.Table(table)
-		}
-		if dropped[table] || table == "mrr_flows" && r.Values[measureAt] != nil && *r.Values[measureAt] == "churn_chargeback" {
-			return nil
-		}
-		return w.Row(r.Values)
-	})
-	require.NoError(t, err)
-	for name := range dropped {
-		require.True(t, seen[name], "the archive carried %s", name)
-	}
-	require.NoError(t, w.Close())
-	return out.Bytes()
 }
 
 // Alice and Bob over four calendar months, M0 to M3, five to two months back:

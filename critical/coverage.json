@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 785,
+  "scenario_count": 781,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -1097,16 +1097,6 @@
       "id": "OR-J31-S06",
       "journey": "J31",
       "name": "NMI receipts that name their card export and restore verbatim"
-    },
-    {
-      "id": "OR-J31-S11",
-      "journey": "J31",
-      "name": "An archive written before the unread tables and columns were dropped still restores"
-    },
-    {
-      "id": "OR-J31-S08",
-      "journey": "J31",
-      "name": "An archive written before the custody migration record was dropped still restores"
     },
     {
       "id": "OR-J31-S10",
@@ -2639,11 +2629,6 @@
       "name": "Concurrent top-ups, one posting unposted usage first, all commit"
     },
     {
-      "id": "OR-J40-S07",
-      "journey": "J40",
-      "name": "An archive written before the books restores as the units book"
-    },
-    {
       "id": "OR-J40-S08",
       "journey": "J40",
       "name": "A ledger transfer and an MRR change in either statement order, in two transactions held at commit, both commit"
@@ -2787,11 +2772,6 @@
       "id": "OR-J42-S30",
       "journey": "J42",
       "name": "Every MRR measure, by itself, by each dimension it declares, by two, and filtered by currency and by product, over time and not, in UTC and in a non-UTC zone, plans on indexes with sequential scans off: no relation is scanned whole, every scan's index condition names the merchant, and a rollup kept by time is read by its time"
-    },
-    {
-      "id": "OR-J42-S31",
-      "journey": "J42",
-      "name": "An archive written before the reporting rollups (no streak flows, product totals, distinct customers, cancel decisions or chargeback churn flows) restores them rebuilt from its movements, product flows, customer MRR and status transitions, row for row as the source kept them, and the restore check proves they agree"
     },
     {
       "id": "OR-J42-S32",

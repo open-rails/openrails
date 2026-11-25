@@ -27,12 +27,10 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/currency"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/migrate"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -583,29 +581,6 @@ func TestBooks(t *testing.T) {
 		require.Contains(t, output, `"rollup_drifts"`)
 		require.Contains(t, output, `"sign_breaches"`)
 		require.Contains(t, output, `"side_warnings"`)
-	})
-
-	t.Run("OR-J40-S07/an-archive-written-before-the-books-restores-as-the-units-book", func(t *testing.T) {
-		source := newWorld(t)
-		customer := billing.CustomerID(uuid.New())
-		fundBooks(t, source, customer, "USD", 1000)
-		archive := beforeBooks(t, archiveBytes(t, source.alpha))
-		target, client := archiveTarget(t, source)
-		receipt, err := client.ImportBillingArchive(t.Context(), bytes.NewReader(archive))
-		require.NoError(t, err)
-		require.False(t, receipt.AlreadyImported)
-		balance(t, client, customer, 1000, 0, 1000)
-		mid := source.alpha.MerchantID().UUID()
-		rows, err := target.pool.Query(t.Context(), "SELECT account_type || ' ' || book || ' ' || class FROM "+booksTable(target, "ledger_accounts")+" WHERE merchant_id=$1", mid)
-		require.NoError(t, err)
-		accounts, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"customer_units units held", "units_granted units issued"}, accounts, "a gift's units are granted")
-		var moved int
-		require.NoError(t, target.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+booksTable(target, "ledger_transfers")+" WHERE merchant_id=$1 AND book='units' AND effective_at=created_at", mid).Scan(&moved))
-		require.Equal(t, 1, moved, "a transfer is the units book's, effective when it posted")
-		require.Equal(t, booksRollup(t, source, "ledger_type_totals", mid), booksRollup(t, target, "ledger_type_totals", mid))
-		require.Contains(t, hostCLI(t, target, "ledger-audit", "--merchant", "id:"+source.alpha.MerchantID().String()), "Ledger integrity OK")
 	})
 
 	t.Run("OR-J40-S06/concurrent-top-ups-one-posting-unposted-usage-first-all-commit", func(t *testing.T) {
@@ -1214,62 +1189,6 @@ func booksRollup(t *testing.T, w *world, table string, merchant uuid.UUID) []str
 	require.NoError(t, err)
 	slices.Sort(out)
 	return out
-}
-
-// beforeBooks rewrites an archive into the shape exports had before the
-// books: accounts by their former names with no book, class or PSP;
-// transfers with no book, effective_at, invoice line or product.
-func beforeBooks(t *testing.T, archive []byte) []byte {
-	t.Helper()
-	former := map[string]string{}
-	for _, a := range books.Chart() {
-		if a.Book == books.Units {
-			former[string(a.Type)] = string(a.Type)
-		}
-	}
-	for old, now := range map[string]string{"customer_balance": "customer_units", "arrears_liability": "customer_owed", "processor_clearing": "units_sold",
-		"promotional_funding": "units_granted", "platform_revenue": "units_redeemed", "expired_credits": "units_expired", "revoked_credits": "units_revoked",
-		"credit_refund_clearing": "units_refund_clearing", "credit_refund_loss": "units_refund_loss"} {
-		former[now] = old
-	}
-	profile := func(name string) contract.Profile {
-		i := slices.IndexFunc(contract.Profiles, func(p contract.Profile) bool { return p.Name == name })
-		require.GreaterOrEqual(t, i, 0, name)
-		return contract.Profiles[i]
-	}
-	accounts, transfers := profile("ledger_accounts"), profile("ledger_transfers")
-	typeAt := slices.IndexFunc(accounts.Columns, func(c contract.Column) bool { return c.Name == "account_type" })
-	var out bytes.Buffer
-	var w *archivewire.Writer
-	var table string
-	_, err := archivewire.Read(bytes.NewReader(archive), func(h archivewire.Header) error {
-		var err error
-		w, err = archivewire.NewWriterWithTenant(&out, h.MerchantID, h.TenantID, h.CatalogRevision)
-		return err
-	}, func(r archivewire.Record) error {
-		if r.Kind == "table" {
-			table = r.Table
-			return w.Table(table)
-		}
-		v := r.Values
-		switch table {
-		case "ledger_accounts":
-			require.Len(t, v, len(accounts.Columns))
-			v = slices.Clone(v[:len(v)-3])
-			old := former[*v[typeAt]]
-			require.NotEmpty(t, old, *v[typeAt])
-			v[typeAt] = &old
-		case "ledger_transfers":
-			// Before the books: no book, effective_at, invoice line or product,
-			// nor the revenue schedule that came after them.
-			require.Len(t, v, len(transfers.Columns))
-			v = v[:len(v)-5]
-		}
-		return w.Row(v)
-	})
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
-	return out.Bytes()
 }
 
 func migrationNumber(t *testing.T, name string) int {

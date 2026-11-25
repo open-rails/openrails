@@ -99,11 +99,6 @@ var Profiles = []Profile{
 	{Name: "mrr_risk_totals", Columns: []Column{{"merchant_id", "uuid"}, {"currency", "text"}, {"reason", "text"}, {"mrr", "bigint"}, {"subscriptions", "bigint"}}},
 }
 
-// PriceKeyMovements is a table of an archive from before configuration
-// history: its price keys' moves, which a restore records as change_log
-// moves, with their ids.
-var PriceKeyMovements = Profile{Name: "price_key_movements", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"key", "text"}, {"price_id", "uuid"}, {"effective_at", "timestamp with time zone"}, {"created_at", "timestamp with time zone"}, {"archived", "boolean"}}}
-
 // EventStoreProfiles are the archive's event store section, after every
 // table above: the merchant's usage as each ClickHouse table holds it
 // (eventstore's archive tables), each row led by merchant_id as every

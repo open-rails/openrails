@@ -88,5 +88,4 @@ Checks:
 - OR-J42-S16–S19, S21: the risk drain and a decline for one customer both commit, the decline queued after the claim re-evaluated; a cancel at period end keeps the case open, a resume continues it, the end churns it once; a new default card puts a subscription following it at risk, never an NMI schedule; an upgrade supersedes the case; a restore carries the open case and re-evaluates every customer with MRR.
 - OR-J42-S22, S23: a customer whose evaluation fails alone is set aside with a finding while the rest drain, and a later evaluation takes its changes and closes the finding; canceled at period end, a card update clears `card_expiring` and recovers the case.
 - OR-J42-S30: every MRR measure, alone, by each dimension and filtered, in UTC and in another zone, plans on indexes.
-- OR-J42-S31: an archive from before the reporting rollups restores them rebuilt from its movements.
 - OR-J42-S32: MRR leaving a product, a currency and a customer settles, at once and at a period's end, the totals falling to none.

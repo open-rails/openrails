@@ -213,7 +213,6 @@ Does not apply: the engine is read-only, and the dashboard's only write replaces
 - OR-J42-S32 settles MRR leaving a product, a currency and a customer (at once and at a period's end through the billing pass), the product totals and distinct customers falling to none.
 - OR-J31-S17 upgrades a database holding a cancel of every kind through the reporting rollups, adopting one cancel decision of each.
 - OR-J42-S33 ends a counted customer's subscription with a full refund that revokes access: the refund and its replay finalize, and the distinct customers fall once.
-- OR-J42-S31 restores an archive written before the reporting rollups and finds each rebuilt row for row as the source kept it, and the cancel decisions back from the status transitions.
 - OR-J14-S70 (`rebills` missed), OR-J17-S01 (`mrr`, `scheduled_mrr`), OR-J23-S16 (`limits_reached`) and OR-J42-S11 to S15 (`mrr_at_risk`, `at_risk_recovery_rate`) query through the Go client over real PostgreSQL.
 - OR-J38-S85 shows credits sold in the merchant's own units at each unit's scale with its name.
 - OR-J38-S41 draws the health overview in the console (its sections, the cohort heatmap, the cash donut and the attempts table naming the PSP by key, tile labels that fit), which reads `GET /v1/metrics/dashboard`.
