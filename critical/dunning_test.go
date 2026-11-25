@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -20,15 +19,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// docs/standalone.md#write-safety-and-the-kill-switch defines this operator
-// SQL switch as deployment setup.
-// Arm only the scenario's disposable schema; lifecycle outcomes still run
-// through the actual admission gate and registered workers.
+// enableLifecycleMaintenance arms the world's merchants' destructive actions
+// as deployment setup; lifecycle outcomes still run through the actual
+// admission gate and registered workers.
 func enableLifecycleMaintenance(t *testing.T, a *authorityWorld) {
 	t.Helper()
-	result, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "destructive_action_switch"}.Sanitize()+" SET enabled=true, updated_by='critical fixture operator', reason='owned disposable lifecycle test'")
-	require.NoError(t, err)
-	require.EqualValues(t, 1, result.RowsAffected())
+	setControl(t, a.world, "destructive_armed", true, declaredMerchants(a.world)...)
 }
 
 func subscriptionState(t *testing.T, a *authorityWorld, id billing.SubscriptionID, status string) *billing.Subscription {

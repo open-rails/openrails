@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -26,7 +27,6 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/redact"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // A customer's cancel carries their reason: 4 to 500 characters.
@@ -226,7 +226,7 @@ func resume(r *httprequest.Request, sub *models.Subscription, origin intents.Ori
 // A resume Stripe could not be told of now is refused before anything
 // commits: provider writes off, or Stripe not configured for its PSP.
 func resumeStripe(ctx context.Context, r *httprequest.Request, sub *models.Subscription, origin intents.Origin) error {
-	if posture := (writeposture.View{DB: r.State.DB}).Posture(ctx, sub.MerchantID); posture.ReadOnly() {
+	if posture := (controls.View{DB: r.State.DB}).Posture(ctx, sub.MerchantID); posture.ReadOnly() {
 		return apperr.New(http.StatusServiceUnavailable, billing.CodeProviderWritesDisabled, "provider writes are off, so Stripe cannot be told of the resume: "+posture.Reason)
 	}
 	_, key, err := subscriptions.RequireStripeSecretKey(ctx, r.State.RailConfigs)

@@ -65,6 +65,13 @@ func admit(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, b Bill, no
 			return order, false, ErrConflict
 		}
 		order.CollectionOwner, order.PspID = b.Owner, &b.PSPID
+		// A subscription a checkout bought names it, whichever path
+		// recorded its first bill.
+		if b.Kind == "initial" && b.SubscriptionID != nil {
+			if _, err := q.SetSubscriptionCheckout(ctx, gen.SetSubscriptionCheckoutParams{MerchantID: merchantID, ID: *b.SubscriptionID, OrderID: order.ID}); err != nil {
+				return order, false, err
+			}
+		}
 		return order, false, nil
 	}
 	if err := db.EnsureCustomerRowQ(ctx, q, merchantID, b.CustomerID); err != nil {

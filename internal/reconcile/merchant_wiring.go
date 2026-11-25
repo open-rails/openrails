@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -19,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // The pull plane (provider refresh, unknown-cohort resolution, per-sub probes,
@@ -147,7 +147,7 @@ func (b MerchantFetcherBuilder) arm(ctx context.Context, mid billing.MerchantID,
 }
 
 func (b MerchantFetcherBuilder) readOnly(ctx context.Context, mid billing.MerchantID) bool {
-	return writeposture.View{DB: b.DB}.Posture(ctx, mid.UUID()).ReadOnly()
+	return controls.View{DB: b.DB}.Posture(ctx, mid.UUID()).ReadOnly()
 }
 
 // resolveScopeCoverage is resolveScope plus the coverage record: how many PSPs
@@ -256,7 +256,7 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 	if _, ok := b.requireSecret(ctx, mid, scope, "security_key", out); !ok {
 		return // fail closed (logged): a declared account never falls back across planes
 	}
-	factory := &railresolve.NMIFactory{Postures: writeposture.View{DB: b.DB}, Log: b.Log}
+	factory := &railresolve.NMIFactory{Postures: controls.View{DB: b.DB}, Log: b.Log}
 	if b.NMIClients != nil {
 		factory.Gateway, factory.Transport = b.NMIClients.Gateway, b.NMIClients.Transport
 	}

@@ -10,8 +10,8 @@
 
 # Whether money is real is each PSP's declared environment (live | test |
 # sandbox) in the merchant configuration, never this file's. How much OpenRails
-# writes to a merchant's providers is the merchant's write posture
-# (`openrails merchant hold` / `openrails merchant arm`).
+# writes to a merchant's providers, and whether the charges it initiates wait,
+# are the merchant's controls (`openrails merchant controls`).
 
 port: 3053 # every interface
 # The metrics listener: the operator's Prometheus GET /metrics (dependency

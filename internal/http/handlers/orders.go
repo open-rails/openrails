@@ -51,7 +51,11 @@ func orderActor(r *httprequest.Request, present bool) *billingservice.OrderActor
 		}
 		ip = addr.Unmap().String()
 	}
-	return &billingservice.OrderActor{Customer: scope.Customer(), Principal: verifiedPrincipal(r), ClientIP: ip}
+	actor := &billingservice.OrderActor{Customer: scope.Customer(), Principal: verifiedPrincipal(r), ClientIP: ip, Present: scope.Present()}
+	if actor.Present {
+		actor.Country, actor.Language = r.ClientCountry(), r.ClientLanguage()
+	}
+	return actor
 }
 
 // signedInPerson refuses, 403 customer_session_required, anyone but the

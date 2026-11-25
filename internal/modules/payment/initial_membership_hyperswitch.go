@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
@@ -15,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context, _ gen.BillingProviderIntent, p InitialMembershipPayload, gateway *nmi.NMIClient) (*hscharge.Charger, error) {
@@ -37,7 +37,7 @@ func hyperSwitchProxy(ctx context.Context, cfg *billing.Config, d *db.DB, accept
 	if err != nil {
 		return nil, err
 	}
-	if p := (writeposture.View{DB: d}).Posture(ctx, mid.UUID()); p.ReadOnly() {
+	if p := (controls.View{DB: d}).Posture(ctx, mid.UUID()); p.ReadOnly() {
 		return nil, fmt.Errorf("HyperSwitch custody is not armed: %s", p.Reason)
 	}
 	custodian, held, err := merchants.Of(d).CustodianScopeByID(ctx, mid, *instrument.CustodianID)

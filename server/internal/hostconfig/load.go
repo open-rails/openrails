@@ -113,7 +113,7 @@ func fileOnlySection(key string) string {
 }
 
 // envKeyToConfigKey maps an environment variable's name to its key:
-// PUBLIC_BILLING_BASE_URL is public_billing_base_url, DATABASE_URL
+// PUBLIC_URL is public_url, DATABASE_URL
 // database.url. A name that routes to no section is "" and never loaded (the
 // process environment is full of names that are not ours: PATH, HOME,
 // Compose's interpolation); a name inside a section that hits no key
@@ -286,7 +286,7 @@ func Load(configPath string) (*Config, error) {
 	for _, retired := range []string{"ENV", "API_URL", "NEW_SUBSCRIPTION_COLLECTION_POLICY"} {
 		_, present := os.LookupEnv(retired)
 		if present || k.Exists(strings.ToLower(retired)) {
-			return nil, fmt.Errorf("%s is retired: use explicit security settings, public_billing_base_url and default engine collection", retired)
+			return nil, fmt.Errorf("%s is retired: use explicit security settings, public_url and default engine collection", retired)
 		}
 	}
 
@@ -501,7 +501,7 @@ func hasEnvPrefix(prefix string) bool {
 }
 
 // WritePostureHint is where provider writes are held now.
-const WritePostureHint = "each merchant's write posture decides its provider writes: hold them with `openrails merchant hold --merchant NAME --mode readonly|limited --by NAME`, restore them with `openrails merchant arm`"
+const WritePostureHint = "each merchant's controls decide its provider writes: `openrails merchant writes readonly|limited|full --merchant NAME --by NAME --reason TEXT`"
 
 // retiredDBEnv are the db section's environment variables.
 var retiredDBEnv = []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "DB_SSLROOTCERT", "DB_SQL_TRACE", "DB_LEASE_CONNS"}
@@ -512,6 +512,7 @@ type retiredSetting struct{ key, env, now string }
 
 var retiredSettings = []retiredSetting{
 	{"provider_write_mode", "PROVIDER_WRITE_MODE", WritePostureHint},
+	{"engine_admission_hold", "ENGINE_ADMISSION_HOLD", "hold a merchant's rebills with `openrails merchant rebills hold --merchant NAME | --all-merchants --by NAME --reason TEXT`"},
 	{"drain_delay", "DRAIN_DELAY", "on SIGTERM the server drains for 5s, then stops within 20s"},
 	{"shutdown_timeout", "SHUTDOWN_TIMEOUT", "on SIGTERM the server drains for 5s, then stops within 20s"},
 	{"usage_billing_enabled", "USAGE_BILLING_ENABLED", "a merchant with usage_billing terms bills its usage; one without has none"},

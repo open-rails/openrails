@@ -80,8 +80,8 @@ func stripePSP(account, secret string, archived bool) billing.PSPConfig {
 		WebhookSigningSecret: "whsec_" + account, PublishableKey: "pk_test_" + account, Archived: archived}.PSPConfig()
 }
 
-// armDestructive is the documented operator SQL that enables the instance
-// switch and arms one merchant for enforcing convergence.
+// armDestructive arms (or disarms) the world's merchants' destructive
+// actions, as `openrails merchant destructive arm` would.
 func armDestructive(t *testing.T, a *authorityWorld, on bool) {
 	t.Helper()
 	armWorldDestructive(t, a.world, on)
@@ -90,12 +90,7 @@ func armDestructive(t *testing.T, a *authorityWorld, on bool) {
 // armWorldDestructive is armDestructive for w.
 func armWorldDestructive(t *testing.T, a *world, on bool) {
 	t.Helper()
-	_, err := a.pool.Exec(t.Context(), "UPDATE "+pgx.Identifier{a.schema, "destructive_action_switch"}.Sanitize()+" SET enabled=$1, updated_by='critical fixture operator', reason='owned disposable verification test'", on)
-	require.NoError(t, err)
-	_, err = a.pool.Exec(t.Context(), "INSERT INTO "+pgx.Identifier{a.schema, "merchant_destructive_policy"}.Sanitize()+
-		" (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason) VALUES ($1, true, now(), 'critical fixture operator', 'reviewed') ON CONFLICT (merchant_id) DO UPDATE SET enforce_armed_at = now(), destructive_actions_enabled = true",
-		a.alpha.MerchantID().UUID())
-	require.NoError(t, err)
+	setControl(t, a, "destructive_armed", on, declaredMerchants(a)...)
 }
 
 // stripeMembership imports a provider-owned Stripe subscription on account

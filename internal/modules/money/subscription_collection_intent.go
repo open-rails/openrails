@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -26,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 var errEngineObligationChanged = errors.New("accepted engine obligation changed before submission")
@@ -155,10 +155,10 @@ func (h *SubscriptionCollectionHandler) submissionHeld(ctx context.Context, in g
 	if h.Config == nil {
 		return "engine execution mode is not configured"
 	}
-	if h.Config.EngineAdmissionHold {
-		return "new engine payment submission is held"
+	if blocked, reason := intents.GateExecution(ctx, controls.View{DB: h.DB}, in.MerchantID, intents.Origin(in.Origin)); blocked {
+		return reason
 	}
-	if blocked, reason := intents.GateExecution(ctx, writeposture.View{DB: h.DB}, in.MerchantID, intents.Origin(in.Origin)); blocked {
+	if reason := intents.RebillHold(ctx, controls.View{DB: h.DB}, in); reason != "" {
 		return reason
 	}
 	if h.Resolver == nil {

@@ -84,6 +84,9 @@ export function BillingProvider({
     () => ({ appearance, locale, navigate }),
     [appearance, locale, navigate]
   )
+  // The language its components show is the language its requests ask
+  // for, from the first request on (effects below run first).
+  useMemo(() => client?.setLanguage(locale), [client, locale])
   return (
     <UiContext.Provider value={ui}>
       <MessagesContext.Provider value={translator}>

@@ -417,6 +417,12 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		if err != nil {
 			return err
 		}
+		// Its bills name the checkout that bought it.
+		if order.PurchaseNumber != nil {
+			if _, err := q.SetSubscriptionCheckout(ctx, gen.SetSubscriptionCheckoutParams{MerchantID: order.MerchantID, ID: sub.ID, OrderID: order.ID}); err != nil {
+				return err
+			}
+		}
 		// The engine's card agreement; a provider holds its own.
 		if charge.Enrolled == nil && charge.PaymentMethodID != uuid.Nil {
 			if _, err := mandates.Create(ctx, q, mandates.Agreement{MerchantID: order.MerchantID, CustomerID: order.CustomerID, PaymentMethodID: charge.PaymentMethodID, PSPID: charge.PSPID,

@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/logx"
@@ -22,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func catalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApplyOptions) (*app.Runtime, *service.Service, func(), error) {
@@ -53,7 +53,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 	// Mapping a provider price wakes the subscriptions parked on it.
 	bindParkWakes(ctx, cfg, database)
 	rt := &app.Runtime{DB: database, Config: cfg, EventStore: opts.EventStore, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database), Log: logger}
-	rt.StripeClients = stripeapi.NewFactory(nil, writeposture.View{DB: database})
+	rt.StripeClients = stripeapi.NewFactory(nil, controls.View{DB: database})
 	cleanup := func() {
 		cancel()
 		if err := rt.Close(context.Background()); err != nil {
@@ -78,7 +78,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 	rt.Merchants, rt.MerchantConfig = opened.Service, opened.Service.Config()
 	rt.StripeClients = rt.Merchants.StripeClients // the one its load registered Stripe posture with
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
-	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{MerchantsFn: func() *merchants.Service { return rt.Merchants }, Postures: writeposture.View{DB: database}, Log: logger}
+	rt.SolanaRPCResolver = &solanamodule.MerchantRPCBuilder{MerchantsFn: func() *merchants.Service { return rt.Merchants }, Postures: controls.View{DB: database}, Log: logger}
 	// Catalog application publishes recurring plans with the deployment's
 	// first cranker only when the merchant's write posture is full; otherwise
 	// it can resolve the crankers but never sign. It never builds a
@@ -88,7 +88,7 @@ func newCatalogRuntime(ctx context.Context, logger *slog.Logger, opts CatalogApp
 		return fail(err)
 	}
 	var submitter recurring.Submitter = recurring.NewSignerSubmitter(crankers, rt.SolanaRPCResolver.Resolve)
-	if (writeposture.View{DB: database}).Posture(ctx, selected.ID.UUID()).Limited() {
+	if (controls.View{DB: database}).Posture(ctx, selected.ID.UUID()).Limited() {
 		submitter = catalogPlanAddressReader{submitter}
 	}
 	rt.SolanaPlanService = recurring.NewPlanServiceWithReader(submitter, rt.SolanaRPCResolver.ChainReader(), rt.SolanaRPCResolver.RecurringTokens, rt.SolanaRPCResolver.Treasury)

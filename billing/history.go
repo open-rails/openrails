@@ -77,6 +77,9 @@ const (
 	LogObjectMessages  LogObjectType = "messages"
 	LogObjectPSP       LogObjectType = "psp"
 	LogObjectCustodian LogObjectType = "custodian"
+	// LogObjectControls is the merchant's operator controls: its object id is
+	// the merchant's id.
+	LogObjectControls LogObjectType = "controls"
 )
 
 // LogAction is what happened to the object.

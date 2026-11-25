@@ -15,7 +15,7 @@ import (
 func TestRetiredRuntimeSettings(t *testing.T) {
 	t.Run("OR-J06-S72/retired-settings-refuse-boot", func(t *testing.T) {
 		w := newWorld(t)
-		const posture, drain = "openrails merchant hold", "drains for 5s, then stops within 20s"
+		const posture, drain, rebills = "openrails merchant writes", "drains for 5s, then stops within 20s", "openrails merchant rebills hold"
 		for _, c := range []struct {
 			name  string
 			extra map[string]any
@@ -28,6 +28,8 @@ func TestRetiredRuntimeSettings(t *testing.T) {
 			{"flag", nil, "", []string{"--provider-write-mode", "readonly", "book", "status"}, []string{"--provider-write-mode was removed", posture}},
 			{"drain", map[string]any{"drain_delay": "5s"}, "", []string{"run-server"}, []string{"drain_delay / DRAIN_DELAY was removed", drain}},
 			{"shutdown", nil, "SHUTDOWN_TIMEOUT=20s", []string{"book", "status"}, []string{"shutdown_timeout / SHUTDOWN_TIMEOUT was removed", drain}},
+			{"admission-hold-key", map[string]any{"engine_admission_hold": true}, "", []string{"run-server"}, []string{"engine_admission_hold / ENGINE_ADMISSION_HOLD was removed", rebills}},
+			{"admission-hold-env", nil, "ENGINE_ADMISSION_HOLD=true", []string{"book", "status"}, []string{"engine_admission_hold / ENGINE_ADMISSION_HOLD was removed", rebills}},
 		} {
 			cmd := hostCLICommand(t, w, c.extra, c.args...)
 			if c.env != "" {

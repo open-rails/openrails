@@ -77,6 +77,7 @@ export type WidgetViz =
   | "donut"
   | "table"
   | "cohort"
+  | "funnel"
   | "heading"
   | "programs"
 
@@ -94,6 +95,7 @@ export const CHART_VIZ: WidgetViz[] = [
   "donut",
   "table",
   "cohort",
+  "funnel",
 ]
 
 export interface WidgetGrid {

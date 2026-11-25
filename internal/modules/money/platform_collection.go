@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // ResolveBasisTheoryNMICharge arms a saved vendor card on its accepted account.
@@ -36,7 +36,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveBasisTheoryNMICharge(ctx conte
 	if svc == nil || b.Config == nil {
 		return nil, errors.New("platform collection is unavailable")
 	}
-	if p := (writeposture.View{DB: b.DB}).Posture(ctx, mid.UUID()); p.ReadOnly() {
+	if p := (controls.View{DB: b.DB}).Posture(ctx, mid.UUID()); p.ReadOnly() {
 		return nil, fmt.Errorf("platform collection is unavailable: %s", p.Reason)
 	}
 	scope, ok, err := b.resolveScope(ctx, svc, mid, method.Rail, &psp)

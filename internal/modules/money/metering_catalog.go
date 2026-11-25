@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/catalogrules/syntax"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -93,9 +94,8 @@ func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*bil
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	meterKey = catalogrules.NormalizeKey(meterKey)
-	if meterKey == "" {
-		return nil, fmt.Errorf("meter key required")
+	if err := syntax.ValidateApplicationKey(meterKey, "meter"); err != nil {
+		return nil, err
 	}
 	tenant, err := merchant.Require(ctx)
 	if err != nil {

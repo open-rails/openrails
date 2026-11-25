@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/providerposture"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // WriteDisarmed answers what the transport would, without asking Stripe: a
@@ -19,14 +19,14 @@ import (
 // recorded verdict refuses it; one still being checked is left to the gate.
 func TestWriteDisarmedFollowsTheTransportGate(t *testing.T) {
 	ctx := context.Background()
-	fake := NewFactory(http.DefaultTransport, writeposture.Fixed(writeposture.Full))
+	fake := NewFactory(http.DefaultTransport, controls.Fixed(controls.Full))
 	if err := fake.WriteDisarmed(ctx, "sk_live_fixture"); !errors.Is(err, providerposture.ErrDisarmed) {
 		t.Fatalf("a live key to a fake provider: %v", err)
 	}
 	if err := fake.WriteDisarmed(ctx, "sk_test_fixture"); err != nil {
 		t.Fatalf("a test key to a fake provider: %v", err)
 	}
-	direct := NewFactory(nil, writeposture.Fixed(writeposture.Full))
+	direct := NewFactory(nil, controls.Fixed(controls.Full))
 	name := strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := direct.WriteDisarmed(ctx, "sk_test_undeclared"+name); !errors.Is(err, providerposture.ErrPending) {
 		t.Fatalf("a key no loaded PSP declares: %v", err)

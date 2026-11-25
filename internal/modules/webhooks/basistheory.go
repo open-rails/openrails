@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controls"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -20,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // BasisTheoryWebhookHandler folds Basis Theory custody events into instrument
@@ -121,7 +121,7 @@ func (s *basisTheoryWebhookService) btClient(ctx context.Context) (*basistheory.
 		APIKey:        cc.APIKey,
 		BaseURL:       cc.APIBaseURL,
 		WebhookKeyURL: cc.WebhookKeyURL,
-		ReadOnly:      writeposture.View{DB: s.d.DB}.Posture(ctx, mid.UUID()).ReadOnly(),
+		ReadOnly:      controls.View{DB: s.d.DB}.Posture(ctx, mid.UUID()).ReadOnly(),
 	})
 }
 

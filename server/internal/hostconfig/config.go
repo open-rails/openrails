@@ -103,7 +103,7 @@ func loopbackHost(host string) bool {
 }
 
 // authDefaults are AuthKit's settings the binary defaults: the token issuer
-// is public_billing_base_url. AuthKit's refresh sessions last 30 days and its
+// is public_url. AuthKit's refresh sessions last 30 days and its
 // tables live in "profiles". Registration stays the server's: closed, or
 // invite_only with local_sign_in. AuthKit itself creates its one account
 // directory, and a loopback issuer's development keys.

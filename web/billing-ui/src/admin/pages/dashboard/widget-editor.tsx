@@ -51,6 +51,7 @@ const VIZ_LABELS: Record<WidgetViz, string> = {
   donut: "Donut chart",
   table: "Table",
   cohort: "Cohort heatmap",
+  funnel: "Funnel (a count by ordered steps)",
   heading: "Section heading",
   programs: "Dispute programs",
 }

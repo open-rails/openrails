@@ -94,6 +94,15 @@
     "OR-J05-S09": [
       "TestMerchantCurrencies/OR-J05-S09/another-merchant-does-not-see-a-merchants-units"
     ],
+    "OR-J05-S13": [
+      "TestPublicCatalog/OR-J05-S13/prune-keeps-a-refused-price-and-its-ownership"
+    ],
+    "OR-J05-S14": [
+      "TestPublicCatalog/OR-J05-S14/meter-edits-preserve-document-keys-and-aggregations"
+    ],
+    "OR-J05-S15": [
+      "TestPublicCatalog/OR-J05-S15/product-creates-retry-by-content-including-concurrently"
+    ],
     "OR-J06-S01": [
       "TestPSPControls/OR-J06-S01/routing-binds-the-verified-account-and-currency"
     ],
@@ -1808,7 +1817,6 @@
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/unactionable-stays-so",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/record-only",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/a-held-response-waits-and-wakes",
-      "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/the-merchant-stop-holds-it",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge/nothing-to-refund-still-ends",
       "TestDisputes/OR-J46-S07/an-early-fraud-warning-refunds-its-charge"
     ],
@@ -2333,7 +2341,34 @@
       "TestRetiredRuntimeSettings/OR-J06-S73/a-provider-sandbox-setting-refuses-boot"
     ],
     "OR-J06-S74": [
-      "TestFindingAlerts/OR-J06-S74/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none"
+      "TestMerchantControls/OR-J06-S74/a-signup-under-a-rebill-hold-charges-and-its-first-renewal-waits-for-the-release"
+    ],
+    "OR-J06-S75": [
+      "TestMerchantControls/OR-J06-S75/a-dunning-retry-waits-under-a-rebill-hold-and-retries-after-the-release"
+    ],
+    "OR-J06-S76": [
+      "TestMerchantControls/OR-J06-S76/scheduled-usage-collection-waits-under-a-rebill-hold-and-collects-after-the-release"
+    ],
+    "OR-J06-S77": [
+      "TestMerchantControls/OR-J06-S77/a-rebill-hold-never-holds-what-a-person-asks-for"
+    ],
+    "OR-J06-S78": [
+      "TestMerchantControls/OR-J06-S78/all-merchants-sets-every-merchant-and-each-change-is-history"
+    ],
+    "OR-J06-S79": [
+      "TestMerchantControls/OR-J06-S79/destructive-arming-is-each-merchants-own"
+    ],
+    "OR-J06-S80": [
+      "TestMerchantControls/OR-J06-S80/export-and-restore-set-writes-readonly-and-an-armed-destination-is-refused"
+    ],
+    "OR-J06-S81": [
+      "TestMerchantControls/OR-J06-S81/unreadable-controls-deny-writes-rebills-and-destructive-actions"
+    ],
+    "OR-J06-S82": [
+      "TestMerchantControls/OR-J06-S82/the-migration-carries-postures-the-switch-and-policies-into-controls"
+    ],
+    "OR-J06-S83": [
+      "TestFindingAlerts/OR-J06-S83/customers-own-cancellations-past-the-cap-name-the-wave-and-alert-staff-and-staff-cancels-spend-none"
     ],
     "OR-J07-S10": [
       "TestCustomerDirectory/OR-J07-S10/a-search-finds-the-merchants-customers-past-people-who-are-not"
@@ -2437,6 +2472,42 @@
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-chargeback-then-won",
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled/refund-reserved-then-chargeback-then-won",
       "TestUsageReceivable/OR-J40-S29/a-voluntary-refund-of-a-usage-payment-leaves-owed-settled"
+    ],
+    "OR-J47-S01": [
+      "TestCheckoutFunnel/OR-J47-S01/steps-are-recorded-where-the-customer-takes-them"
+    ],
+    "OR-J47-S02": [
+      "TestCheckoutFunnel/OR-J47-S02/a-pay-url-is-opened-only-by-its-page"
+    ],
+    "OR-J47-S04": [
+      "TestCheckoutFunnel/OR-J47-S04/purchase-number-counts-the-customers-paid-purchases"
+    ],
+    "OR-J47-S05": [
+      "TestCheckoutFunnel/OR-J47-S05/the-country-is-the-billing-address-then-the-ip-never-the-address"
+    ],
+    "OR-J47-S06": [
+      "TestCheckoutFunnel/OR-J47-S06/the-language-is-the-first-in-person-requests"
+    ],
+    "OR-J47-S07": [
+      "TestCheckoutFunnel/OR-J47-S07/attribution-is-kept-bounded-and-never-refuses-a-sale"
+    ],
+    "OR-J47-S09": [
+      "TestCheckoutFunnel/OR-J47-S09/an-unpaid-checkout-keeps-its-facts-for-397-days"
+    ],
+    "OR-J47-S08": [
+      "TestCheckoutFunnel/OR-J47-S08/renewals-name-the-checkout-that-bought-their-subscription"
+    ],
+    "OR-J47-S03": [
+      "TestCheckoutFunnel/OR-J47-S03/checkout-measures-read-the-funnel-as-it-happened"
+    ],
+    "OR-J47-S10": [
+      "TestCheckoutFunnel/OR-J47-S10/the-customer-type-is-new-returning-or-reactivated"
+    ],
+    "OR-J47-S11": [
+      "TestCheckoutFunnel/OR-J47-S11/spending-a-merchants-units-is-not-a-checkout"
+    ],
+    "OR-J47-S12": [
+      "TestCheckoutFunnel/OR-J47-S12/an-erasure-clears-a-checkouts-attribution"
     ]
   }
 }

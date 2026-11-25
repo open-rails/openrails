@@ -7,7 +7,7 @@ import { cn } from "cn"
 
 import type { BillingAppearance } from "#orck/appearance"
 import { isBillingError, localError, toBillingError } from "#orck/client/errors"
-import type { Order, Price } from "#orck/client/types"
+import type { Order, OrderAttribution, Price } from "#orck/client/types"
 import type { PaymentFallbacks } from "#orck/fallbacks"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
@@ -35,6 +35,8 @@ export interface BuyButtonProps {
   returnUrl?: string
   /** PSPs kept back until others fail on the order; see OrderPayment. */
   fallbacks?: PaymentFallbacks
+  /** Where the host's page says the customer came from (utm_*, referrer). */
+  attribution?: OrderAttribution
   /**
    * The order is paid. A hint: the host's own gate decides access, so send
    * the buyer to the content it guards.
@@ -78,6 +80,7 @@ export function BuyButton({
   amount,
   returnUrl,
   fallbacks,
+  attribution,
   onPaid,
   onSignInRequired,
   signedIn,
@@ -112,6 +115,7 @@ export function BuyButton({
         ;({ order } = await client.createOrder({
           lines: [{ price_id: price.id, ...(amount ? { amount } : {}) }],
           ...(embedded ? { payUrl: { embedded: true } } : {}),
+          ...(attribution ? { attribution } : {}),
         }))
       } catch (err) {
         const held = heldBy(err)
