@@ -54,10 +54,20 @@ tasks:
       - ./{{.BIN_DIR}}/{{.BINARY_NAME}} run-server
 
   dev:
-    desc: Run the application in development mode with hot reload
+    desc: "Hot reload: the API under Air on :3053 and the merchant console under Vite (http://localhost:5173/admin/); Ctrl+C stops both"
+    deps: [dev:api, dev:console]
+
+  dev:api:
+    desc: The API server under Air, rebuilt on every Go change
     cmds:
-      - echo "Running in development mode with Air..."
       - air -c .air.toml
+
+  dev:console:
+    desc: The merchant console's Vite dev server, proxying the API on :3053
+    dir: web/console
+    cmds:
+      - pnpm install --frozen-lockfile --prefer-offline
+      - pnpm dev
 
   docker-up:
     desc: Start local docker compose stack (openrails + deps)
