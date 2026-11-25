@@ -27,3 +27,14 @@ SELECT LEAST(
     (SELECT a.created_at FROM billing.ledger_accounts a
      WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = sqlc.arg(customer_id)::uuid
        AND a.currency = sqlc.arg(currency)::text AND a.account_type = 'customer_units'))::timestamptz AS period_anchor;
+
+-- name: ListCustomerPeriodAnchors :many
+-- GetCustomerPeriodAnchor for many customers in one currency.
+SELECT c.customer_id::uuid AS customer_id, LEAST(
+    (SELECT MIN(lt.created_at) FROM billing.ledger_transfers lt
+     WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id = c.customer_id
+       AND lt.currency = sqlc.arg(currency)::text AND lt.book = 'units'),
+    (SELECT a.created_at FROM billing.ledger_accounts a
+     WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = c.customer_id
+       AND a.currency = sqlc.arg(currency)::text AND a.account_type = 'customer_units'))::timestamptz AS period_anchor
+FROM unnest(sqlc.arg(customer_ids)::uuid[]) AS c(customer_id);

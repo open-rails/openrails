@@ -26,10 +26,14 @@ Usage billing decides what usage costs and bills it in arrears. Usage lives in t
 **Intake.** Usage arrives on a lease sync (`POST /v1/app/leases/sync`,
 [entitlements and limits](entitlements.md)). Items are numbered per lease: a resend
 answers from the sync's receipts, a changed item is `idempotency_key_reused`, a
-gap `usage_out_of_order`. A sync settles every new item it carries, up to a gap, in
-one insert (at most `billing.MaxSyncUsageItems`), so a gate never reports what it
-sends in flight (OR-J24-S34). While ClickHouse is out of reach a sync answers 503
-and settles nothing (OR-J24-S48). An item's metadata is at most
+gap `usage_out_of_order`. A sync settles the new items it carries in order, up to a
+gap, in chunks of at most `leases.UsageChunkCustomers` customers (and 250 items), each one insert, and
+starts no chunk after the first once `leases.UsageBudget` of it has passed: `through_n`
+is the last item it settled, and the gate sends the rest again at once (OR-J24-S34,
+OR-J24-S70). A gate never reports what it carries in flight. Intake reads and writes a
+chunk's customers together: their rows, balance accounts, unposted marks, period
+anchors, trust levels and billing policies. While ClickHouse is out of reach a sync
+answers 503 and settles nothing (OR-J24-S48). An item's metadata is at most
 `billing.MaxUsageMetadataBytes` (1,024) of compact JSON; a longer one is refused
 alone (OR-J24-S68).
 

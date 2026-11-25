@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 789,
+  "scenario_count": 790,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -781,7 +781,7 @@
     {
       "id": "OR-J24-S34",
       "journey": "J24",
-      "name": "A sync settles all the usage it carries, a thousand customers' in one insert, refusing an item only on its own, and a resend settles each item once"
+      "name": "A full backlog of a thousand customers' usage settles whole across as many syncs as their time needs, each settling at least a chunk, every item once, and a resend charges nothing again"
     },
     {
       "id": "OR-J24-S36",
@@ -3857,6 +3857,11 @@
       "id": "OR-J24-S69",
       "journey": "J24",
       "name": "With no clickhouse.url and nothing on the default's port, the standalone server serves with usage off and logs one line saying so; a clickhouse.url the operator names that does not answer keeps it from serving"
+    },
+    {
+      "id": "OR-J24-S70",
+      "journey": "J24",
+      "name": "A sync past its usage budget after a chunk starts no other: it answers through_n at the chunk's end, leaves the rest neither settled nor refused (a gap past them too), and the next sync continues there, refusing an item alone and the gap once all before it settled; a resend answers both settlements from their receipts"
     },
     {
       "id": "OR-J40-S20",

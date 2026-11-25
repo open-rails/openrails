@@ -11,10 +11,6 @@
 UPDATE billing.customers SET billing_policy = sqlc.narg(policy)::text
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(customer_id);
 
--- name: GetCustomerBillingPolicy :one
-SELECT billing_policy FROM billing.customers
-WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(customer_id);
-
 -- name: ListCustomerBillingPolicyAssignments :many
 SELECT id AS customer_id, billing_policy::text AS policy_name FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = ANY(sqlc.arg(customer_ids)::uuid[]) AND billing_policy IS NOT NULL
