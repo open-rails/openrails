@@ -199,6 +199,12 @@ func (a *authorityWorld) request(t *testing.T, method, path, credential string, 
 // Concurrent callers return errors to the test goroutine; they never call
 // testing.FailNow from an application/request goroutine.
 func (a *authorityWorld) do(ctx context.Context, method, path, credential string, body any, extraHeaders ...map[string]string) (int, []byte, error) {
+	return a.doWith(ctx, a.server.Client(), method, path, credential, body, extraHeaders...)
+}
+
+// doWith is do on client, for a request a scenario holds open past the
+// shared client's timeout.
+func (a *authorityWorld) doWith(ctx context.Context, client *http.Client, method, path, credential string, body any, extraHeaders ...map[string]string) (int, []byte, error) {
 	var data []byte
 	if body != nil {
 		var err error
@@ -222,7 +228,7 @@ func (a *authorityWorld) do(ctx context.Context, method, path, credential string
 			request.Header.Set(key, value)
 		}
 	}
-	response, err := a.server.Client().Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return 0, nil, err
 	}

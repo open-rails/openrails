@@ -404,10 +404,19 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 			return nil
 		}))
 		t.Cleanup(func() { open.Do(func() { close(release) }) })
-		late := make(chan int, 1)
+		// The resume stays open until a worker sends the second cancel to
+		// Stripe: past the shared client's 5 s, which would time that worker.
+		patient := *a.server.Client()
+		patient.Timeout = time.Minute
+		type answer struct {
+			status int
+			raw    []byte
+			err    error
+		}
+		late := make(chan answer, 1)
 		go func() {
-			status, _ := a.request(t, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
-			late <- status
+			status, raw, err := a.doWith(t.Context(), &patient, http.MethodPost, path+"/resume", a.aliceToken, map[string]any{})
+			late <- answer{status, raw, err}
 		}()
 		select {
 		case <-stopped:
@@ -434,8 +443,9 @@ func TestCancellationRecoveryContracts(t *testing.T) {
 		// committed last, so it reaches Stripe last.
 		open.Do(func() { close(release) })
 		select {
-		case status := <-late:
-			require.Equal(t, http.StatusOK, status)
+		case got := <-late:
+			require.NoError(t, got.err)
+			require.Equal(t, http.StatusOK, got.status, string(got.raw))
 		case <-time.After(20 * time.Second):
 			t.Fatal("the stopped resume never finished")
 		}
