@@ -36,7 +36,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - The RC → master PR and an unselected dispatch run everything: every suite, gosec, and the critical suite on `CRITICAL_SHARDS` runners balanced by `critical/durations.json`; `Critical coverage` proves every scenario ran once. `CI Gate` needs every selected job.
 - Only pushes to `rc/**` and master save `actions/cache` entries, one per family and branch; pull requests restore their base's.
 - Go jobs share a remote build cache: `.github/actions/go-remote-cache` sets GOCACHEPROG to cacheprog over the R2 bucket `go-build-cache`, with `-trimpath` (`scripts/go-remote-cache.sh`). Pushes to `rc/**` and `master` write (`GO_REMOTE_CACHE_RW`); PRs, merge groups and dispatches read (`GO_REMOTE_CACHE_RO`); a fork's PR, an unreachable bucket or a failed setup falls back to `actions/cache`. Locally: `scripts/go-remote-cache.sh run CMD` (key from Vault `openrails-prod/kv/infra/go-build-cache/read-write`). Off: delete both secrets.
-- No bot opens dependency PRs: `scripts/deps` lists the advisory feed's open alerts; fixes go in one batch per RC.
+- No bot opens dependency PRs. Open advisories: `gh api --paginate 'repos/open-rails/openrails/dependabot/alerts?state=open&per_page=100' --jq '.[] | [.security_advisory.severity, .dependency.package.ecosystem, .dependency.package.name, .dependency.manifest_path, .security_advisory.ghsa_id] | @tsv'`; fixes go in one batch per RC.
 - Master takes PRs only from `rc/X.Y.Z` and `scripts/release`'s `chore/release-vX.Y.Z` (`Source branch` check).
   A release is a tag on master; not every master commit is one.
 
