@@ -117,7 +117,14 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			if stored, ok := currentMeters[meter.Key]; ok && reflect.DeepEqual(stored, meter) {
 				continue
 			}
-			if err := money.NewMoneyService(dbi.NewWithPgxTx(tx)).EnsureUsageMeter(ctx, catalogrules.Meter{Key: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty, Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: meter.GroupBy}, true); err != nil {
+			groupBy, err := json.Marshal(meter.GroupBy)
+			if err != nil {
+				return err
+			}
+			if err := q.UpsertUsageMeter(ctx, gen.UpsertUsageMeterParams{
+				MerchantID: merchantID, MeterKey: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty,
+				Aggregation: string(meter.Aggregation), Unit: meter.Unit, GroupBy: groupBy,
+			}); err != nil {
 				return err
 			}
 		}
@@ -152,7 +159,7 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			if stored, ok := currentCards[catalogCardKey(card)]; ok && sameCatalogCards([]CatalogRateCardSpec{stored}, []CatalogRateCardSpec{card}) {
 				continue
 			}
-			if err := s.syncRateCard(ctx, tx, merchantID, card); err != nil {
+			if err := syncRateCard(ctx, q, merchantID, card); err != nil {
 				return err
 			}
 		}
@@ -228,7 +235,7 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 			return err
 		}
 		effective := catalogrules.Meter{Key: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty, Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: meter.GroupBy}
-		if err := money.CheckCatalogRateCardContracts(ctx, tx, merchantID, effective, c.Filter, price, false); err != nil {
+		if err := money.CheckCatalogRateCardContracts(effective, c.Filter, price); err != nil {
 			return err
 		}
 	}
@@ -397,8 +404,7 @@ func sameCatalogCards(a, b []CatalogRateCardSpec) bool {
 	return bytes.Equal(left, right)
 }
 
-func (s *Service) syncRateCard(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, spec CatalogRateCardSpec) error {
-	q := gen.New(tx)
+func syncRateCard(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, spec CatalogRateCardSpec) error {
 	var productID *uuid.UUID
 	if spec.ProductKey != "" {
 		product, err := q.GetProductByKey(ctx, gen.GetProductByKeyParams{MerchantID: merchantID, Key: strings.TrimSpace(spec.ProductKey)})
@@ -407,15 +413,9 @@ func (s *Service) syncRateCard(ctx context.Context, tx pgx.Tx, merchantID uuid.U
 		}
 		productID = &product.ID
 	}
-	var price catalog.RatePrice
-	if err := json.Unmarshal(spec.Price, &price); err != nil {
+	filter, err := json.Marshal(spec.Filter)
+	if err != nil {
 		return err
-	}
-	var allowance *catalog.Allowance
-	if len(spec.Allowance) > 0 {
-		if err := json.Unmarshal(spec.Allowance, &allowance); err != nil {
-			return err
-		}
 	}
 	var id *uuid.UUID
 	var created *time.Time
@@ -423,9 +423,9 @@ func (s *Service) syncRateCard(ctx context.Context, tx pgx.Tx, merchantID uuid.U
 		id = &spec.id
 		created = &spec.createdAt
 	}
-	return money.NewMoneyService(s.catalogDatabase().NewWithPgxTx(tx)).SetUsageRateCard(ctx, money.UsageRateCardInput{
-		ProductID: productID, Ordinal: int64(spec.Ordinal), MeterKey: spec.MeterKey,
-		PaymentTerm: spec.PaymentTerm, Filter: spec.Filter, Allowance: allowance, Price: price,
+	return q.UpsertUsageRateCard(ctx, gen.UpsertUsageRateCardParams{
+		MerchantID: merchantID, ProductID: productID, Ordinal: int64(spec.Ordinal), MeterKey: spec.MeterKey,
+		PaymentTerm: spec.PaymentTerm, Filter: filter, Allowance: spec.Allowance, Price: spec.Price,
 		ID: id, CreatedAt: created,
 	})
 }

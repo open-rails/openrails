@@ -311,7 +311,6 @@ func loadUsageMeterForRateCard(
 	tx pgx.Tx,
 	merchantID uuid.UUID,
 	meterKey string,
-	validate bool,
 ) (catalogrules.Meter, error) {
 	var meter catalogrules.Meter
 	row, err := gen.New(tx).GetUsageMeterForUpdate(ctx, gen.GetUsageMeterForUpdateParams{
@@ -335,10 +334,8 @@ func loadUsageMeterForRateCard(
 	if meter.GroupBy == nil {
 		meter.GroupBy = map[string]string{}
 	}
-	if validate {
-		if err := catalogrules.ValidateMeter("usage meter", &meter); err != nil {
-			return meter, err
-		}
+	if err := catalogrules.ValidateMeter("usage meter", &meter); err != nil {
+		return meter, err
 	}
 	return meter, nil
 }

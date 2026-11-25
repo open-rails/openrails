@@ -35,12 +35,9 @@ func ValidateValues(p Profile, values []*string) error {
 	}
 	if p.Name == "catalog_applications" {
 		var receipt struct {
-			ApplicationID   string `json:"application_id"`
-			BaseRevision    int64  `json:"base_revision"`
-			AppliedRevision int64  `json:"applied_revision"`
-			Replayed        bool   `json:"replayed"`
-			ProductsChanged int    `json:"products_changed"`
-			PricesChanged   int    `json:"prices_changed"`
+			Replayed        bool `json:"replayed"`
+			ProductsChanged int  `json:"products_changed"`
+			PricesChanged   int  `json:"prices_changed"`
 		}
 		raw := value(p, values, "result")
 		id := value(p, values, "application_id")
@@ -50,17 +47,15 @@ func ValidateValues(p Profile, values []*string) error {
 		if raw == nil || id == nil || base == nil || applied == nil || digest == nil {
 			return fmt.Errorf("invalid catalog application receipt")
 		}
-		receipt.ApplicationID = *id
-		var err error
-		receipt.BaseRevision, err = strconv.ParseInt(*base, 10, 64)
+		baseRevision, err := strconv.ParseInt(*base, 10, 64)
 		if err != nil {
 			return fmt.Errorf("invalid catalog application receipt")
 		}
-		receipt.AppliedRevision, err = strconv.ParseInt(*applied, 10, 64)
+		appliedRevision, err := strconv.ParseInt(*applied, 10, 64)
 		if err != nil || json.Unmarshal([]byte(*raw), &receipt) != nil {
 			return fmt.Errorf("invalid catalog application receipt")
 		}
-		if receipt.ApplicationID != *id || strconv.FormatInt(receipt.BaseRevision, 10) != *base || strconv.FormatInt(receipt.AppliedRevision, 10) != *applied || receipt.BaseRevision < 0 || receipt.AppliedRevision != receipt.BaseRevision+1 || receipt.Replayed || receipt.ProductsChanged < 0 || receipt.PricesChanged < 0 {
+		if strconv.FormatInt(baseRevision, 10) != *base || strconv.FormatInt(appliedRevision, 10) != *applied || baseRevision < 0 || appliedRevision != baseRevision+1 || receipt.Replayed || receipt.ProductsChanged < 0 || receipt.PricesChanged < 0 {
 			return fmt.Errorf("contradictory catalog application receipt")
 		}
 		if len(*digest) != 66 || !strings.HasPrefix(*digest, `\x`) {

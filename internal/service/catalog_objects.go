@@ -660,11 +660,7 @@ func otherManager(manager string) string {
 	return catalogManagerApply
 }
 
-func (w *catalogOwnerWrites) write(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, owners catalogOwners, changed catalogDiff, manager, actor string, at time.Time) error {
-	w.take = slices.DeleteFunc(w.take, func(r catalogFieldRef) bool {
-		owner, held := owners[r.obj][r.field][manager]
-		return held && owner.actor == actor && !slices.Contains(changed.changed[r.obj], r.field)
-	})
+func (w *catalogOwnerWrites) write(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, owners catalogOwners, manager, actor string, at time.Time) error {
 	w.release = slices.DeleteFunc(w.release, func(r catalogFieldRef) bool {
 		_, held := owners[r.obj][r.field][otherManager(manager)]
 		return !held
@@ -784,7 +780,7 @@ func (s *Service) recordCatalogEdit(ctx context.Context, q *gen.Queries, merchan
 	if err != nil {
 		return nil, err
 	}
-	return revisions, w.write(ctx, q, merchantID, owners, d, catalogManagerEdit, editActor(ctx), s.now().UTC())
+	return revisions, w.write(ctx, q, merchantID, owners, catalogManagerEdit, editActor(ctx), s.now().UTC())
 }
 
 // errRevisionMismatch refuses an edit whose object moved past the revision

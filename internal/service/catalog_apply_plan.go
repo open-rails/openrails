@@ -292,7 +292,7 @@ func (s *Service) recordCatalogApply(ctx context.Context, q *gen.Queries, mercha
 	if err != nil {
 		return nil, false, err
 	}
-	if err := w.write(ctx, q, merchantID, owners, d, catalogManagerApply, actor, s.now().UTC()); err != nil {
+	if err := w.write(ctx, q, merchantID, owners, catalogManagerApply, actor, s.now().UTC()); err != nil {
 		return nil, false, err
 	}
 	changes := []billing.CatalogChange{}

@@ -30,7 +30,7 @@ func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter)
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, spec, false)
+	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, spec)
 }
 
 // SetUsageMeter declares a meter and, in the same catalog edit, its rate
