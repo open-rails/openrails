@@ -47,11 +47,14 @@ type BootstrapOptions struct {
 	// posture is still verified through it.
 	NMITransport http.RoundTripper
 	// FXTransport replaces the FX sources' wire (test seam).
-	FXTransport     http.RoundTripper
-	PGXPool         *pgxpool.Pool
-	PostgresSession *pgxpool.Config
-	Redis           redis.UniversalClient
-	Clock           clockwork.Clock
+	FXTransport http.RoundTripper
+	// ProviderEndpoints sends the provider clients to loopback fakes (test
+	// seam).
+	ProviderEndpoints config.ProviderEndpoints
+	PGXPool           *pgxpool.Pool
+	PostgresSession   *pgxpool.Config
+	Redis             redis.UniversalClient
+	Clock             clockwork.Clock
 	// EmailSender delivers OpenRails' email; nil sends none.
 	EmailSender config.EmailSender
 	// MessageRenderer is Deps.MessageRenderer.
@@ -105,6 +108,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *billing.Config, opts *Bootst
 		StripeTransport:      opts.StripeTransport,
 		NMITransport:         opts.NMITransport,
 		FXTransport:          opts.FXTransport,
+		ProviderEndpoints:    opts.ProviderEndpoints,
 		DB:                   database,
 		Vault:                opts.Vault,
 		Redis:                opts.Redis,

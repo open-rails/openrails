@@ -190,7 +190,7 @@ are Go durations (`90s`, `24h`). Every key below is read at boot. The defaults
 run a server on this machine against the repository's Compose dependencies
 (`docker compose up -d postgres garnet`) with nothing configured but AuthKit's
 signing keys; none relaxes a protection, and a deployment that leaves one unset
-fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit`, `destructive_action_limits` and `provider_sandbox`.
+fails to connect or refuses to boot. The top-level keys: `host`, `port`, `metrics_port`, `logger`, `engine_admission_hold`, `route_groups`, `public_billing_base_url`, `checkout_origin`, `trusted_proxies`, `database`, `clickhouse`, `redis`, `auth`, `signing_key`, `local_sign_in`, `naming`, `admin_console`, `email_smtp`, `vault`, `card_vault`, `solana`, `hyperswitch`, `rate_limits`, `captcha`, `user_action_rate_limit` and `destructive_action_limits`.
 
 **Listener and lifecycle**
 
@@ -360,15 +360,6 @@ user_action_rate_limit:
   minimum_customers_per_day: 10
   paid_customers_per_daily_customer: 100
 ```
-
-**Provider sandbox (tests only)**
-
-| Key | Meaning |
-|---|---|
-| `provider_sandbox.nmi_gateway_url`, `.stripe_api_url`, `.solana_rpc_url`, `.ccbill_datalink_url` | loopback fakes the rails talk to instead of the providers. The host must be a loopback IP literal and every PSP non-live; anything else refuses boot |
-| `provider_sandbox.ccbill_webhook_sources` | extra CCBill webhook source CIDRs, honored only for a webhook naming a sandbox CCBill account; `/0` is refused |
-
-`openrails sandbox nmi-gateway` serves such an NMI fake.
 
 ## The merchant manifest
 
@@ -684,8 +675,7 @@ the checkout origin. Give one public origin to `public_billing_base_url`,
   (`nmi`, `stripe`, `ccbill`, `basistheory`), never a PSP key, and the PSP's
   account id. The account resolves the merchant and its own secret verifies the
   request. NMI and Stripe sign; CCBill signs nothing and is accepted only from
-  its published ranges (plus `provider_sandbox.ccbill_webhook_sources` for
-  sandbox accounts). Stripe endpoints are registered automatically once
+  its published ranges. Stripe endpoints are registered automatically once
   `public_billing_base_url` is public https and provider writes are allowed.
   Per-rail setup: [PSPs](client.md#merchant-configuration-and-psps).
 
@@ -855,8 +845,8 @@ or CCBill charge and retry). Configuration never moves a subscription to another
 collector.
 
 Each PSP's environment decides whether money is real, and the provider must
-agree before it arms; test seams (`provider_sandbox`) are refused beside a live
-PSP, and a non-live PSP relaxes no other protection.
+agree before it arms; no setting redirects a provider, and a non-live PSP
+relaxes no other protection.
 
 **Importing a merchant with production credentials.** Hold it before its
 subscriptions arrive: imported `past_due` subscriptions are due at once.
@@ -1226,7 +1216,6 @@ the merchant the token is bound to.
 | `openrails ledger-audit [--merchant NAME] [--format json]` | check ledger conservation, account counters, credit lot counters, rollups and sign rules, and warn of a general-ledger total opposite its normal side; non-zero on a finding, not a warning. Nothing schedules it |
 | `openrails nmi decline-report --merchant NAME --since DATE [--until] [--psp]` | read-only NMI approval and refusal rates by month and reason |
 | `openrails solana-pay resolve --merchant NAME --signature SIG --resolution TEXT` | close a reviewed Solana Pay receipt |
-| `openrails sandbox nmi-gateway [--listen] [--plan] [--max-lifetime]` | serve an NMI fake for `provider_sandbox.nmi_gateway_url` in disposable test stacks |
 
 ## Kubernetes and Helm
 

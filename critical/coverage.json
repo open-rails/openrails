@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "scope": "critical-first public-contract scenarios; declarations are obligations, never passing evidence",
-  "scenario_count": 761,
+  "scenario_count": 763,
   "scenarios": [
     {
       "id": "OR-J01-S01",
@@ -3589,6 +3589,11 @@
       "name": "A billing pass whose holder died leaves a lease that lapses on its own; a pass started meanwhile exits, and the next takes what is due"
     },
     {
+      "id": "OR-J04-S82",
+      "journey": "J04",
+      "name": "Deps.ProviderEndpoints sends provider clients only to loopback fakes: a hostname, a non-loopback address, userinfo or a source matching every address refuses New, and so does any endpoint beside a live PSP"
+    },
+    {
       "id": "OR-J38-S83",
       "journey": "J38",
       "name": "Of concurrent pulls of one merchant one runs and the others skip, another merchant's pull runs beside it, and a provider refresh waits for the running pull; the pull holds a lease row, not a database session"
@@ -3602,6 +3607,11 @@
       "id": "OR-J06-S72",
       "journey": "J06",
       "name": "Retired provider write mode and drain settings refuse boot and name their replacement"
+    },
+    {
+      "id": "OR-J06-S73",
+      "journey": "J06",
+      "name": "A provider_sandbox section or PROVIDER_SANDBOX_* variable refuses boot and names its replacement: no setting redirects a provider"
     },
     {
       "id": "OR-J07-S10",

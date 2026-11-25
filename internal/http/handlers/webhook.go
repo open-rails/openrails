@@ -265,7 +265,7 @@ func ccbillWebhookIPAllowed(logger *slog.Logger, r *httprequest.Request, clientI
 	if r == nil || r.State == nil {
 		return iputil.IsValidCCBillIP(logger, clientIP)
 	}
-	return webhookauth.CCBillIPAllowed(r.Request.Context(), logger, r.State.Config, ccbillAccountProbe(r), clientIP)
+	return webhookauth.CCBillIPAllowed(r.Request.Context(), logger, r.State.ProviderEndpoints.CCBillWebhookSources, ccbillAccountProbe(r), clientIP)
 }
 
 // ccbillAccountProbe asks whether the CCBill account the webhook names moves

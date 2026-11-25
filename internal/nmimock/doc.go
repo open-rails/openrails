@@ -1,12 +1,11 @@
-// Package nmimock is a stateful, deterministic NMI gateway for tests and
-// disposable sandbox stacks. It serves the surface OpenRails uses: v5
+// Package nmimock is a stateful, deterministic NMI gateway for tests and test
+// fixtures. It serves the surface OpenRails uses: v5
 // customers, payments, plans and subscriptions; Direct Post
 // /api/transact.php; and the Query API /api/query.php.
 //
-// Serve it over loopback (New; point provider_sandbox.nmi_gateway_url at URL)
+// Serve it over loopback (New; point Deps.ProviderEndpoints.NMIGatewayURL at URL)
 // or in process (NewUnstarted, as an http.RoundTripper or http.Handler). Time
-// comes only from Options.Clock. Only tests and sandbox commands may import it
-// (guard_test.go).
+// comes only from Options.Clock. Only tests and test fixtures may import it.
 //
 // # Known differences from real NMI
 //

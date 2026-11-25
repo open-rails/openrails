@@ -60,7 +60,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	// The merchant purge answers to the kill switch and per-merchant policy
 	// that hold a mass cancellation, and queues its Vault cleanup with itself.
 	svc.WithDestructivePolicy(destructive.New(r.DB)).WithJobs(r.DB)
-	svc.WithClock(r.Clock).WithDataLinkPacing(r.DataLinkPacing())
+	svc.WithClock(r.Clock).WithDataLinkPacing(r.DataLinkPacing()).WithDataLinkURL(r.ProviderEndpoints.CCBillDataLinkURL)
 	if r.NMIClients != nil {
 		svc.WithNMIWire(r.NMIClients.Wire)
 	}

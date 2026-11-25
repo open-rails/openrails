@@ -357,12 +357,24 @@ products:
 		reader, err := a.auth.CreateAPIKey(t.Context(), iam.SystemIdentity(), a.alphaGroup, iam.NewAPIKey{Name: "customer-reader", Role: a.reader})
 		require.NoError(t, err)
 		list := "/v1/merchant/changes?" + url.Values{"object_type": {"product"}}.Encode()
+		// Alpha declares the issuer both people signed in at, which binds their
+		// sessions to alpha: alice owns it, bob holds no role there.
 		for _, check := range []struct {
 			token  string
 			status int
-		}{{"", 401}, {a.aliceToken, 403}, {reader.Secret, 403}, {a.alphaKey.Secret, 200}} {
+			code   billing.ErrorCode
+		}{
+			{"", 401, ""},
+			{a.bobToken, 403, billing.CodePermissionRequired},
+			{reader.Secret, 403, billing.CodePermissionRequired},
+			{a.aliceToken, 200, ""},
+			{a.alphaKey.Secret, 200, ""},
+		} {
 			status, raw := a.request(t, http.MethodGet, list, check.token, nil)
 			require.Equal(t, check.status, status, string(raw))
+			if check.code != "" {
+				require.Contains(t, string(raw), `"code":"`+string(check.code)+`"`)
+			}
 		}
 	})
 
