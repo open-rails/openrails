@@ -23,7 +23,7 @@
 // A pull is one operation per period, scheduled one minute after the period
 // end. Before signing it freezes the agreement; the signature and its
 // blockhash's last valid height are recorded before sending, and it is signed
-// again only once the chain provably never landed it. A confirmed pull must
+// again only once the chain provably never landed it. A finalized pull must
 // prove the program call, memo, token credit and destination; its block time
 // anchors the paid period. Missed periods are never back-billed: a resume
 // pulls once. Insufficient balance dunns; a revoked delegate cancels; RPC and
