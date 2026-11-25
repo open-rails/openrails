@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
 // newProposalsCmd is the pull.* plane of the findings queue from the CLI:
@@ -30,7 +30,7 @@ func newProposalsCmd() *cobra.Command {
 	var expect, limit int
 
 	options := func(c *cobra.Command) (hosttools.ProposalsOptions, error) {
-		cfg, _ := c.Context().Value(config.ConfigContextKey).(*config.Config)
+		cfg := hostconfig.Engine(c.Context())
 		mid, err := resolveConfiguredCLIMerchant(c.Context(), cfg, merchantSlug)
 		if err != nil {
 			return hosttools.ProposalsOptions{}, err

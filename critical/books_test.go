@@ -25,7 +25,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/archivewire"
@@ -1025,7 +1024,7 @@ func TestBooksMigration(t *testing.T) {
 		// The engine starts on it and migrates it to the books.
 		w := newWorld(t, func(w *world) {
 			w.schema = schema
-			w.cfg.Database = openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}
+			w.cfg.Database = billing.DatabaseConfig{Schema: schema, RiverSchema: schema}
 		})
 		require.Equal(t, mid, w.alpha.MerchantID().UUID())
 		balance(t, w.alpha, billing.CustomerID(customer), 600, 0, 600)

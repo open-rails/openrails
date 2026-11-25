@@ -5,25 +5,20 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // MaxWebhookSecretOverlap bounds webhook_secret_overlap (SEC-29).
 const MaxWebhookSecretOverlap = 7 * 24 * time.Hour
 
 // WebhookSecretOverlapDuration is how long a rotated-out webhook signing secret
-// keeps verifying. Empty means 24h.
-func WebhookSecretOverlapDuration(cfg *Config) (time.Duration, error) {
-	raw := ""
-	if cfg != nil {
-		raw = strings.TrimSpace(cfg.WebhookSecretOverlap)
+// keeps verifying: the configured overlap, the default when unset.
+func WebhookSecretOverlapDuration(cfg *billing.Config) (time.Duration, error) {
+	if cfg == nil || cfg.WebhookSecretOverlap == 0 {
+		return defaults.WebhookSecretOverlap, nil
 	}
-	if raw == "" {
-		return DefaultWebhookSecretOverlap, nil
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, fmt.Errorf("webhook_secret_overlap %q is not a Go duration (e.g. 24h): %w", raw, err)
-	}
+	d := cfg.WebhookSecretOverlap
 	if d < time.Minute || d > MaxWebhookSecretOverlap {
 		return 0, fmt.Errorf("webhook_secret_overlap must be between 1m and %s", MaxWebhookSecretOverlap)
 	}
@@ -33,7 +28,7 @@ func WebhookSecretOverlapDuration(cfg *Config) (time.Duration, error) {
 // AllowedReturnOrigins are the exact origins purchase success/cancel and
 // billing-portal return URLs may name (SEC-33): ReturnOrigins, else the origin
 // of PublicBillingBaseURL. Empty refuses every return URL.
-func AllowedReturnOrigins(cfg *Config) []string {
+func AllowedReturnOrigins(cfg *billing.Config) []string {
 	if cfg == nil {
 		return nil
 	}
@@ -53,7 +48,7 @@ func AllowedReturnOrigins(cfg *Config) []string {
 
 // ReturnURLAllowed reports whether raw is an absolute URL whose origin exactly
 // matches an allowed return origin.
-func ReturnURLAllowed(cfg *Config, raw string) bool {
+func ReturnURLAllowed(cfg *billing.Config, raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.User != nil || u.Opaque != "" {
 		return false

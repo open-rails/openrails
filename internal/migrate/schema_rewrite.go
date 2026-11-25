@@ -7,7 +7,7 @@ import (
 	"github.com/open-rails/openrails/internal/sqlschema"
 )
 
-// Migrations are authored in config.DefaultSchema; sqlschema relocates them
+// Migrations are authored in sqlschema.Authored; sqlschema relocates them
 // (migratekit's WithSchema rewrite is a plain word replace and would change
 // literals).
 func rewriteMigrationsSchema(migrations []migratekit.Migration, schema string) ([]migratekit.Migration, error) {

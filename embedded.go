@@ -71,7 +71,7 @@ type Engine struct {
 // or document that cannot be served is refused alone and reported by Ready
 // and the openrails_configuration probe.
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
-	inner, err := engine.New(ctx, engineConfig(cfg.withDefaults()), engineDeps(deps))
+	inner, err := engine.New(ctx, cfg.WithDefaults(), engineDeps(deps))
 	if err != nil {
 		return nil, err
 	}

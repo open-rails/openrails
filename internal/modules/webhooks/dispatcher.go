@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/disputes"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/identity"
@@ -52,7 +52,7 @@ type WebhookMessage struct {
 // WebhookDispatcher routes persisted webhook events to rail-specific handlers.
 type WebhookDispatcher struct {
 	StripeClients                *stripeapi.Factory
-	Config                       *config.Config
+	Config                       *billing.Config
 	DB                           *db.DB
 	Clock                        clockwork.Clock
 	PriceService                 *catalog.PriceService

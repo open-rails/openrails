@@ -32,7 +32,7 @@ import (
 // ProposalsOptions mirrors `openrails proposals`: which merchant, who acts,
 // and how to print.
 type ProposalsOptions struct {
-	Config     *config.Config
+	Config     *billing.Config
 	PGXPool    *pgxpool.Pool
 	MerchantID billing.MerchantID
 	// Actor is the operator, recorded as cli:<actor> on what they resolve.
@@ -79,7 +79,7 @@ func withProposals(ctx context.Context, logger *slog.Logger, opts ProposalsOptio
 	ctx = merchant.WithID(ctx, opts.MerchantID)
 	cfg := opts.Config
 	if cfg == nil {
-		cfg = &config.Config{}
+		cfg = &billing.Config{}
 	}
 	runtime := &app.Runtime{DB: database, Config: cfg, Log: logger}
 	x := proposals.New(database, opts.Config, opts.Clock, runtime.NewDestructiveAdmissions(opts.Clock))
@@ -88,7 +88,7 @@ func withProposals(ctx context.Context, logger *slog.Logger, opts ProposalsOptio
 
 // bindRiverProducer binds an insert-only River client in the configured River
 // schema, as the runtime does.
-func bindRiverProducer(ctx context.Context, cfg *config.Config, database *db.DB) error {
+func bindRiverProducer(ctx context.Context, cfg *billing.Config, database *db.DB) error {
 	schema := config.RiverSchemaName(cfg)
 	producer, err := river.NewClient(riverpgxv5.New(database.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true, Logger: database.Log})
 	if err != nil {
@@ -104,7 +104,7 @@ func bindRiverProducer(ctx context.Context, cfg *config.Config, database *db.DB)
 // bindParkWakes binds a River producer so a fix this tool makes (a mapping,
 // a customer link) wakes the subscriptions parked on it; without one, they
 // wake on their next provider event.
-func bindParkWakes(ctx context.Context, cfg *config.Config, database *db.DB) {
+func bindParkWakes(ctx context.Context, cfg *billing.Config, database *db.DB) {
 	if err := bindRiverProducer(ctx, cfg, database); err != nil {
 		database.Log.WarnContext(ctx, "no River producer: parked subscriptions wake on their next provider event", logx.Err(err))
 	}

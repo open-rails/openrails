@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -55,7 +54,7 @@ func TestCardGuard(t *testing.T) {
 		// Each refusal below is its own purchase request; the purchase limit is
 		// not under test.
 		a, journal := newNMIWorld(t, func(w *world) {
-			w.cfg.RateLimits = openrails.RateLimitsConfig{"payment": {RequestsPerMinute: 40}}
+			w.cfg.RateLimits = billing.RateLimitsConfig{"payment": {RequestsPerMinute: 40}}
 		})
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)
@@ -119,7 +118,7 @@ func TestCardGuard(t *testing.T) {
 	})
 	t.Run("OR-J12-S16/legitimate-values-pass-the-firewall-on-every-card-route", func(t *testing.T) {
 		a, journal := newNMIWorld(t, func(w *world) {
-			w.cfg.RateLimits = openrails.RateLimitsConfig{"payment": {RequestsPerMinute: 40}}
+			w.cfg.RateLimits = billing.RateLimitsConfig{"payment": {RequestsPerMinute: 40}}
 		})
 		psps, err := a.alpha.ListPSPs(t.Context(), billing.PSPListParams{})
 		require.NoError(t, err)

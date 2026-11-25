@@ -46,7 +46,7 @@ func TestPaymentMethodContracts(t *testing.T) {
 				http.Error(out, "fixture answers nothing", http.StatusServiceUnavailable)
 			}))
 			t.Cleanup(hyperswitch.Close)
-			w.cfg.HyperSwitch = &openrails.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: hyperswitch.URL, SDKURL: hyperswitch.URL + "/sdk"}
+			w.cfg.HyperSwitch = billing.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: hyperswitch.URL, SDKURL: hyperswitch.URL + "/sdk"}
 			merchant := cfgMerchant(w.cfg, "alpha")
 			merchant.Custodians = billing.Custodians{"hs": {Kind: billing.CardVaultHyperSwitch, Environment: billing.EnvironmentTest, AccountID: "merchant_critical",
 				Settings: map[string]any{"public_api_key": "pk_snd_critical", "profile_id": "pro_critical"}, Secrets: map[string]string{"api_key": "snd_critical_private"}}}

@@ -525,7 +525,7 @@ func declareCCBillAccount(w *world, accnum, dataLink string) {
 	psp := openrails.CCBillPSP{ClientAccnum: accnum, ClientSubacc: "0001", Environment: billing.EnvironmentSandbox, Salt: "critical-ccbill-salt"}
 	if dataLink != "" {
 		psp.DatalinkUsername, psp.DatalinkPassword = "critical-datalink", "critical-datalink-password"
-		w.cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{CCBillDataLinkURL: dataLink}
+		w.cfg.ProviderSandbox = billing.ProviderSandboxConfig{CCBillDataLinkURL: dataLink}
 	}
 	m.PSPs = billing.PSPs{"ccbill": psp.PSPConfig()}
 	setCfgMerchant(&w.cfg, "alpha", m)

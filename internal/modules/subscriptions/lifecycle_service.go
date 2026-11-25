@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -45,7 +44,7 @@ import (
 // including membership creation, renewal, cancellation, and expiration
 type SubscriptionLifecycleService struct {
 	DB                  *db.DB
-	Config              *config.Config
+	Config              *billing.Config
 	clock               clockwork.Clock
 	ProductService      *catalog.ProductService
 	PriceService        *catalog.PriceService
@@ -113,7 +112,7 @@ func (s *SubscriptionLifecycleService) Clock() clockwork.Clock {
 }
 
 // SetConfig sets the config for feature flag access
-func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
+func (s *SubscriptionLifecycleService) SetConfig(cfg *billing.Config) {
 	s.Config = cfg
 }
 

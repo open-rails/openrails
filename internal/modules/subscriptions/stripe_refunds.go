@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/railresolve"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -40,7 +40,7 @@ func (e *StripeAPICallError) Error() string { return e.Message }
 
 type StripeRefundService struct {
 	StripeClients *stripeapi.Factory
-	Config        *config.Config
+	Config        *billing.Config
 	Rails         railresolve.Source
 }
 

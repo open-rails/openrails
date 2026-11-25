@@ -23,7 +23,7 @@ if err != nil {
 }
 
 cfg := openrails.Config{
-	Database: openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
+	Database: billing.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 	Merchants: []billing.MerchantDeclaration{{
 		MerchantDocument: merchant,
 		Issuer:           issuer, // your users, signed in at your AuthKit, are this merchant's customers and staff
@@ -106,32 +106,35 @@ usage billing) due since before yesterday (UTC).
 
 ## Config
 
-`openrails.Config` is plain data: decode it from your own file or build it in
-Go. Libraries never read the environment.
+`openrails.Config` is `billing.Config`, plain data: build it in Go or decode it
+from your own YAML (its `yaml` tags are the standalone server's keys; durations
+are written `24h`). Libraries never read the environment. `New` gives a field
+left zero its value in `openrails.DefaultConfig()`, the one table of defaults;
+an optional section is on once set.
 
 | Field | Meaning |
 |---|---|
 | `EngineAdmissionHold` | Pauses admission and first submission of new engine payments; submitted ones are still verified. |
 | `UsageBillingEnabled` | Bills owed usage automatically ([usage](client.md#usage-and-running-charges)). Deploy every worker first. |
-| `Database` | `DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
-| `ClickHouse` | `ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
-| `Merchants` | The merchants this engine serves ([merchants](#merchants)). |
+| `Database` | `billing.DatabaseConfig`: `Schema` (default `billing`) and `RiverSchema` (default the schema plus `_river`), plain identifiers; `SkipMigrations`, check without migrating: `New` is refused with `ErrMigrationsRequired` until `Migrate` has run ([migrations](#migrations)); `LeaseConns`, the cap of the separate pool that renews leases (idempotency claims, the billing pass, merchant pulls; default 4), part of your connection budget. |
+| `ClickHouse` | `billing.ClickHouseConfig`: `Database`, the event store's ClickHouse database (default `openrails`), a plain identifier ([event store](#event-store)). |
+| `Merchants` | The merchants this engine serves ([merchants](#merchants)); code only. |
 | `PublicBillingBaseURL` | The external billing prefix without `/v1` (`https://shop.example/billing`), for provider callbacks and billing links. |
 | `ReturnOrigins` | Origins a buyer may return to after a redirect step (`returnUrl`). |
 | `TrustedProxies` | Load-balancer CIDRs; `X-Forwarded-For` is walked right to left past them. Unset, the socket peer is the client, so every client behind a proxy shares one rate-limit bucket. |
 | `CheckoutOrigin` | The payment page's origin ([checkout page](#checkout-page)). |
 | `RateLimits` | Per-minute buckets on customer routes (`purchase`, `subscribe`, `payment`, `webhook`, `catalog-ask`): nil is the built-in set, empty is none. |
-| `Captcha` | `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`): challenges a subject at 3× a bucket's limit. |
+| `Captcha` | `billing.CaptchaAccount`: `SiteKey`, `SecretKey`, `Provider` (`turnstile`, `recaptcha-v3`, `hcaptcha`); both keys turn it on. It challenges a subject at 3× a bucket's limit. |
 | `UserActionRateLimit` | The merchant-wide budget for customer cancellations and card removals. |
 | `DestructiveActionLimits` | Per-actor, per-merchant and deployment ceilings on staff destructive actions ([destructive holds](client.md#destructive-holds)), and each merchant's own budget for SCIM contact erasures (`ErasurePerHour`, `ErasurePerDay`). |
-| `Vault` | `KVMount` (merchant configuration in Vault), `ScopePrefix`, `TransitMount` (Solana signing). The client is `Deps.Vault`. |
+| `Vault` | `KVMount` (merchant configuration in Vault), `ScopePrefix` (default `openrails`), `TransitMount` (Solana signing, default `transit`). The client is `Deps.Vault`, which turns it on. |
 | `CardVault`, `HyperSwitch` | A platform card vault and HyperSwitch ([custody](client.md#merchant-configuration-and-psps)). |
 | `Solana` | The deployment's crankers: they publish plans and pull renewals. Without one, Solana rebilling is off. |
 | `LLM` | The model behind the console's catalog Q&A and drafting. |
-| `ReadCache` | Overrides how long a handle serves catalog and configuration reads from memory ([caching](client.md#caching)). |
+| `ReadCache` | Overrides how long a handle serves catalog and configuration reads from memory ([caching](client.md#caching)); code only. |
 | `ProviderSandbox` | Fake provider endpoints and CCBill webhook sources for tests; refused beside a live PSP. |
-| `EventRetention` | How long the event log keeps facts (default 90 days). |
-| `WebhookSecretOverlap` | How long a rotated webhook secret still verifies (default 24 h, at most 168 h). |
+| `EventRetention` | A `time.Duration`: how long the event log keeps facts (default 90 days). |
+| `WebhookSecretOverlap` | A `time.Duration`: how long a rotated webhook secret still verifies (default 24 h, at most 168 h). |
 
 How much OpenRails writes to a merchant's providers is the merchant's write
 posture, kept in the database: `openrails merchant hold` and

@@ -17,7 +17,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -445,13 +444,13 @@ func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.BillingProvid
 // matched on the metadata mirror of the key).
 type StripeRefundHandler struct {
 	refundReservations
-	Config *config.Config
+	Config *billing.Config
 	Rails  railresolve.Source
 	Stripe *subscriptions.StripeRefundService
 	Policy BackoffPolicy
 }
 
-func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock, clients *stripeapi.Factory) *StripeRefundHandler {
+func NewStripeRefundHandler(d *db.DB, cfg *billing.Config, rails railresolve.Source, clock clockwork.Clock, clients *stripeapi.Factory) *StripeRefundHandler {
 	return &StripeRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Config:             cfg,

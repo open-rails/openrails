@@ -3,17 +3,17 @@ package hosttools
 import (
 	"context"
 	"fmt"
-	vaultapi "github.com/hashicorp/vault/api"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 
+	vaultapi "github.com/hashicorp/vault/api"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/eventstore"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 )
@@ -21,7 +21,7 @@ import (
 // CatalogApplyOptions is local operator authority. The file never selects its
 // own merchant.
 type CatalogApplyOptions struct {
-	Config  *config.Config
+	Config  *billing.Config
 	PGXPool *pgxpool.Pool
 	Vault   *vaultapi.Client
 	App     *app.App

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -18,7 +19,7 @@ import (
 
 type StripeCatalogService struct {
 	StripeClients *stripeapi.Factory
-	Config        *config.Config
+	Config        *billing.Config
 	// Rails resolves the ctx merchant's armed Stripe account.
 	Rails railresolve.Source
 	Log   *slog.Logger

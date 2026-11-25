@@ -73,7 +73,7 @@ func captureCustomerReference(owner billing.MerchantID, customer uuid.UUID) stri
 }
 func (s *OrderAttemptService) captureBinding(owner billing.MerchantID, psp merchants.PSPScope, custodian merchants.CustodianScope) (models.CardCapture, error) {
 	var empty models.CardCapture
-	if s.config == nil || s.config.HyperSwitch == nil || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != config.EnvironmentClass(psp.Rail, psp.Environment) {
+	if s.config == nil || s.config.HyperSwitch == (billing.HyperSwitchConfig{}) || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != config.EnvironmentClass(psp.Rail, psp.Environment) {
 		return empty, ErrCardCaptureUnavailable
 	}
 	parsed, err := custodians.ParseSettings(custodian.Kind, custodian.Settings)
@@ -106,7 +106,7 @@ func (s *OrderAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUI
 	if err != nil {
 		return state, nil, nil, err
 	}
-	if s.config == nil || s.config.HyperSwitch == nil {
+	if s.config == nil || s.config.HyperSwitch == (billing.HyperSwitchConfig{}) {
 		return state, nil, nil, ErrCardCaptureUnavailable
 	}
 	psp, custodian, err := s.captureAccounts(ctx, owner, pspID)

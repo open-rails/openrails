@@ -60,7 +60,7 @@ func resolveCLIMerchant(ctx context.Context, database *db.DB, slug string) (bill
 	return selected.ID, nil
 }
 
-func resolveConfiguredCLIMerchant(ctx context.Context, cfg *config.Config, name string) (billing.MerchantID, error) {
+func resolveConfiguredCLIMerchant(ctx context.Context, cfg *billing.Config, name string) (billing.MerchantID, error) {
 	if cfg == nil {
 		return billing.MerchantID{}, fmt.Errorf("config not loaded")
 	}

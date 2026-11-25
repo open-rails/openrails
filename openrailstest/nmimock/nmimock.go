@@ -8,7 +8,7 @@
 //	gateway := nmimock.New(nmimock.Options{Clock: clock.Now})
 //	defer gateway.Close()
 //	engine, err := openrails.New(ctx, openrails.Config{
-//		ProviderSandbox: &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
+//		ProviderSandbox: billing.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
 //		Merchants: []billing.MerchantDeclaration{{MerchantDocument: billing.MerchantDocument{
 //			Slug: "shop", DisplayName: "Shop", PSPs: billing.PSPs{
 //				"nmi": openrails.NMIPSP{Environment: billing.EnvironmentSandbox, GatewayID: "test", SecurityKey: "test", WebhookSigningSecret: "test", TokenizationKey: "test"}.PSPConfig(),

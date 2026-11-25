@@ -2,6 +2,7 @@
 package adminconsole
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 )
 
@@ -58,6 +60,42 @@ type Issuer struct {
 	// console asks for.
 	Resource string `json:"resource"`
 	Scope    string `json:"scope"`
+}
+
+// Path is where the standalone server serves the console, apart from /v1.
+const Path = "/admin"
+
+// DefaultScope is what the console asks a trusted issuer for by default.
+const DefaultScope = "openid profile email openrails:merchant"
+
+// NewIssuer checks one declared sign-in choice: key names a merchant (id or
+// name) or root; url is one of AuthKit's trusted issuers, where clientID is
+// the console's public client; resource is what its tokens are for
+// (auth.resource.id). An empty name is the URL, an empty scope DefaultScope.
+func NewIssuer(key, url, clientID, name, scope, resource string) (Issuer, error) {
+	url = strings.TrimRight(strings.TrimSpace(url), "/")
+	clientID = strings.TrimSpace(clientID)
+	switch {
+	case url == "":
+		return Issuer{}, fmt.Errorf("admin console issuer: url is required")
+	case clientID == "":
+		return Issuer{}, fmt.Errorf("admin console issuer %q: client_id is required", url)
+	case strings.TrimSpace(resource) == "":
+		return Issuer{}, fmt.Errorf("admin console issuer %q: declare auth.resource.id, the resource its tokens are for", url)
+	case key == "" || key == "local":
+		return Issuer{}, fmt.Errorf("admin_console.issuers key %q must name a merchant or root", key)
+	}
+	if key != "root" {
+		if _, err := billing.ParseMerchantID(key); err != nil {
+			if err := billing.ValidateMerchantSlug(key); err != nil {
+				return Issuer{}, fmt.Errorf("admin_console.issuers[%q]: %w", key, err)
+			}
+		}
+	}
+	return Issuer{
+		Key: key, URL: url, ClientID: clientID, Name: cmp.Or(strings.TrimSpace(name), url), Resource: resource,
+		Scope: cmp.Or(strings.Join(strings.Fields(scope), " "), DefaultScope),
+	}, nil
 }
 
 // Present reports whether assets hold a servable console build: a non-nil

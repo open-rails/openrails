@@ -28,7 +28,7 @@ files:
     version: 1
 secrets:
   env:
-    DB_URL: {name: openrails-db-app, key: uri}
+    DATABASE_URL: {name: openrails-db-app, key: uri}
   files: [openrails-secrets, openrails-smtp]
   authKeys: openrails-auth-keys
   merchantOverlays:

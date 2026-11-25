@@ -21,7 +21,7 @@ args: [run-server]
 
 # config.yaml, rendered as is (config.example.yaml lists every key). Keep
 # secrets out: they come from `secrets`, as environment variables or files
-# named like them (db.url is DB_URL). host, port and private_port are the
+# named like them (database.url is DATABASE_URL). host, port and private_port are the
 # chart's (ports.http, metrics.port).
 config:
   # public_billing_base_url: https://billing.example.com
@@ -66,9 +66,9 @@ files: {}
 # Secrets come from existing Secrets; the chart creates none.
 secrets:
   # Environment variables from Secret keys, such as CloudNativePG's app Secret:
-  #   DB_URL: {name: openrails-db-app, key: uri}
+  #   DATABASE_URL: {name: openrails-db-app, key: uri}
   env: {}
-  # Secrets whose keys are environment variable names (DB_URL, REDIS_URL,
+  # Secrets whose keys are environment variable names (DATABASE_URL, REDIS_URL,
   # REDIS_PASSWORD, REDIS_CA_CERT, EMAIL_SMTP_PASSWORD, VAULT_TOKEN, …),
   # mounted as files at /vault/secrets.
   # Environment variables win over files.

@@ -9,7 +9,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
@@ -18,7 +17,7 @@ var updateGolden = flag.Bool("update", false, "rewrite testdata/goclient.golden"
 // goldenRoutes are one route of each shape the generator writes.
 var goldenRoutes = []routes.Route{
 	{Method: routes.GET, Path: "/v1/catalog/meters/{key}", Group: routes.CatalogAdmin, Auth: routes.AuthMerchant, Name: "GetMeter", Level: routes.LevelRead,
-		Args: []any{""}, Cache: config.ReadMeters, Doc: "GetMeter reads one meter with its rate card.",
+		Args: []any{""}, Cache: billing.ReadMeters, Doc: "GetMeter reads one meter with its rate card.",
 		Responses: []routes.Reply{{Status: 200, Body: billing.Meter{}}}},
 	{Method: routes.GET, Path: "/v1/admin/customers/{customer_id}/balance", Group: routes.Admin, Auth: routes.AuthMerchant, Name: "GetBalance", Level: routes.LevelRead,
 		Args: []any{billing.CustomerID{}}, Query: billing.GetBalanceParams{}, Doc: "GetBalance reads a customer's balance in params.Currency.",
